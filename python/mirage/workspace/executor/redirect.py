@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import asyncio
+import dataclasses
 import logging
 import posixpath
 from collections.abc import Awaitable, Callable
@@ -1004,6 +1005,482 @@ async def _deliver_routed(
     return stdout
 
 
+@dataclasses.dataclass
+class _Opened:
+    """A redirect list as its operators have opened it so far.
+
+    Args:
+        dispatch (DispatchFn): the op dispatcher.
+        session (SessionState): the session running the command.
+        sink (JobConsole | None): where the command's output streams.
+        stdin (ByteSource | None): the command's input.
+        inputs (dict[int, ByteSource | None | _Unreadable]): what each
+            descriptor reads.
+        outputs (dict[int, _Fd | FileDescription | Inherited]): where
+            each descriptor writes.
+        closed (set[int]): the closed descriptors.
+        files (list[FileDescription]): the files opened to write.
+        targets (tuple[PathSpec, ...]): the paths named so far.
+        read_paths (dict[int, str]): the file each descriptor reads.
+        piped (set[int]): the descriptors reading a pipe.
+        deferred (FileDescription | None): the final target, opened by
+            the write of the command's output.
+        opening_stderr (_Fd | FileDescription | Inherited): where stderr
+            pointed when the deferred target would have opened.
+        complete_output (FileDescription | None): the final target of an
+            output-only command.
+    """
+
+    dispatch: DispatchFn
+    session: SessionState
+    sink: JobConsole | None
+    stdin: ByteSource | None
+    inputs: dict[int, ByteSource | None | _Unreadable]
+    outputs: dict[int, _Fd | FileDescription | Inherited]
+    closed: set[int]
+    files: list[FileDescription] = dataclasses.field(default_factory=list)
+    targets: tuple[PathSpec, ...] = ()
+    read_paths: dict[int, str] = dataclasses.field(default_factory=dict)
+    piped: set[int] = dataclasses.field(default_factory=set)
+    deferred: FileDescription | None = None
+    opening_stderr: _Fd | FileDescription | Inherited = _TO_STDERR
+    complete_output: FileDescription | None = None
+
+    def reopen(self, fd: int) -> None:
+        """Forget what a descriptor had closed or was reading.
+
+        Args:
+            fd (int): the descriptor an operator takes over.
+        """
+        self.closed.discard(fd)
+        self.read_paths.pop(fd, None)
+
+    async def failed(
+        self,
+        result: RedirectResult,
+        failed_file: FileDescription | None = None,
+    ) -> RedirectResult:
+        """Send a refusal where stderr points by now.
+
+        Args:
+            result (RedirectResult): the refusal.
+            failed_file (FileDescription | None): the file it is about.
+        """
+        stdout, io, node = result
+        data = await io.materialize_stderr()
+        target = (
+            self.opening_stderr
+            if failed_file is not None
+            and failed_file is self.deferred
+            and not failed_file.opened
+            else self.outputs[2]
+        )
+        if target is _TO_STDERR:
+            return result
+        io.stderr = None
+        if target is _TO_STDOUT:
+            stdout = data
+        else:
+            try:
+                if isinstance(target, FileDescription):
+                    if (
+                        failed_file is None
+                        or target.scope.virtual != failed_file.scope.virtual
+                    ):
+                        await write_description(
+                            self.dispatch, self.session, target, data
+                        )
+                elif isinstance(target, Inherited):
+                    if not await deliver(
+                        self.sink, target, data, current_caller().enclosing
+                    ):
+                        if target.channel == Channel.STDOUT:
+                            stdout = data
+                        else:
+                            io.stderr = data
+            except PipeClosed:
+                raise
+            except Exception as exc:
+                if is_aborting(exc):
+                    raise
+                logger.debug("redirect error reporting failed: %s", exc)
+        return stdout, io, node
+
+
+def _unusable(r: Redirect) -> RedirectResult | None:
+    """What a target that expanded to nothing usable says, else None.
+
+    Args:
+        r (Redirect): the expanded operator.
+    """
+    if r.kind == RedirectKind.AMBIGUOUS:
+        word = (
+            r.target.raw_path
+            if isinstance(r.target, PathSpec)
+            else str(r.target)
+        )
+        return _shell_failure(
+            encode_text(f"{shell_voice()}{word}: ambiguous redirect\n")
+        )
+    if r.kind == RedirectKind.UNEXPANDED and isinstance(r.target, ExitSignal):
+        return _shell_failure(r.target.stderr, r.target.exit_code)
+    return None
+
+
+def _duplicate(opened: _Opened, r: Redirect, target: int) -> int | None:
+    """Apply ``N>&M`` or ``N>&-``.
+
+    Args:
+        opened (_Opened): the descriptors so far.
+        r (Redirect): the operator.
+        target (int): the descriptor it copies, or FD_CLOSE.
+
+    Returns:
+        The descriptor that refuses it, None when it applied.
+    """
+    inputs, outputs = opened.inputs, opened.outputs
+    if target == FD_CLOSE:
+        opened.closed.add(r.fd)
+        opened.read_paths.pop(r.fd, None)
+        inputs[r.fd], outputs[r.fd] = _Unreadable.TOKEN, _CLOSED
+    elif target != r.fd:
+        if target in opened.closed or target not in outputs:
+            return target
+        source = inputs[target]
+        if not isinstance(source, _Unreadable):
+            source = share(source if source is not None else b"")
+            inputs[target] = source
+        inputs[r.fd], outputs[r.fd] = source, outputs[target]
+        if target in opened.read_paths:
+            opened.read_paths[r.fd] = opened.read_paths[target]
+        else:
+            opened.read_paths.pop(r.fd, None)
+        opened.closed.discard(r.fd)
+    return None
+
+
+def _here_input(opened: _Opened, r: Redirect) -> None:
+    """Point a descriptor at a here-document or here-string.
+
+    Args:
+        opened (_Opened): the descriptors so far.
+        r (Redirect): the operator.
+    """
+    opened.reopen(r.fd)
+    opened.outputs[r.fd] = _CLOSED
+    data = r.target
+    if isinstance(data, str):
+        if r.kind == RedirectKind.HERESTRING:
+            if len(data) >= 2 and data[0] == data[-1] and data[0] in "\"'":
+                data = data[1:-1]
+            data += "\n"
+        data = encode_text(data)
+    opened.inputs[r.fd] = data if r.fd == 0 else SharedInput(data)
+
+
+async def _open_input(
+    opened: _Opened,
+    r: Redirect,
+    scope: PathSpec,
+    owned: list[SharedInput],
+) -> RedirectResult | None:
+    """Open ``<`` or ``<>``.
+
+    Args:
+        opened (_Opened): the descriptors so far.
+        r (Redirect): the operator.
+        scope (PathSpec): its file.
+        owned (list[SharedInput]): the inputs the line closes.
+
+    Returns:
+        The refusal, None when it opened.
+    """
+    dispatch, session = opened.dispatch, opened.session
+    inputs, outputs = opened.inputs, opened.outputs
+    try:
+        if scope.virtual == "/dev/stdin" and r.kind == RedirectKind.STDIN:
+            opened.reopen(r.fd)
+            inputs[r.fd], outputs[r.fd] = opened.stdin, _CLOSED
+            return None
+        data, _ = await dispatch("read", scope, stream=True)
+    except FileNotFoundError as exc:
+        if r.kind != RedirectKind.READWRITE:
+            return await opened.failed(_redirect_failure(scope, exc))
+        data = b""
+    except Exception as exc:
+        if is_aborting(exc):
+            raise
+        return await opened.failed(_redirect_failure(scope, exc))
+    opened.reopen(r.fd)
+    outputs[r.fd] = _CLOSED
+    if r.kind == RedirectKind.READWRITE:
+        file = FileDescription(scope, append=True, opened=True)
+        file.source = FileInput(file, data or b"")
+        owned.append(file.source)
+        try:
+            await create_file(dispatch, session, scope, b"", append=True)
+        except PipeClosed:
+            raise
+        except Exception as exc:
+            if is_aborting(exc):
+                raise
+            return await opened.failed(_redirect_failure(scope, exc))
+        opened.files.append(file)
+        inputs[r.fd], outputs[r.fd] = file.source, file
+        return None
+    opened.read_paths[r.fd] = scope.virtual
+    if isinstance(data, PipeStream):
+        opened.piped.add(r.fd)
+    reading = SharedInput(
+        data or b"", seekable=not isinstance(data, PipeStream)
+    )
+    if not isinstance(data, PipeStream):
+        owned.append(reading)
+    if (
+        not isinstance(data, PipeStream)
+        and not await reading.lines.peek()
+        and await _stat_type(dispatch, scope) == FileType.CHAR_DEVICE
+    ):
+        await reading.discard()
+        inputs[r.fd] = DeviceInput()
+        return None
+    inputs[r.fd] = reading
+    return None
+
+
+async def _open_output(
+    opened: _Opened,
+    r: Redirect,
+    scope: PathSpec,
+    last: bool,
+    command: TSNodeLike | None,
+    guard: RedirectGuard | None,
+) -> RedirectResult | None:
+    """Open ``>`` or ``>>``.
+
+    Args:
+        opened (_Opened): the descriptors so far.
+        r (Redirect): the operator.
+        scope (PathSpec): its file.
+        last (bool): the final operator of an output-only command.
+        command (TSNodeLike | None): the redirected command.
+        guard (RedirectGuard | None): the admission gate of its targets.
+
+    Returns:
+        The refusal, None when it opened.
+    """
+    file: FileDescription
+    if (
+        last
+        and not r.append
+        and not scope.virtual.startswith(DEV_PREFIX)
+        and not opened.piped
+        and not any(f.pipe for f in opened.files)
+    ):
+        file = opened.deferred = FileDescription(scope)
+        opened.opening_stderr = opened.outputs[2]
+    else:
+        token = (
+            set_redirect_paths(command.id, opened.targets)
+            if command is not None and guard is not None
+            else None
+        )
+        try:
+            pipe = await create_file(
+                opened.dispatch, opened.session, scope, b"", append=r.append
+            )
+        except PipeClosed:
+            raise
+        except Exception as exc:
+            if is_aborting(exc):
+                raise
+            return await opened.failed(_redirect_failure(scope, exc))
+        finally:
+            if token is not None:
+                reset_redirect_paths(token)
+        file = FileDescription(
+            pipe or scope,
+            append=r.append or pipe is not None,
+            opened=True,
+            pipe=pipe is not None,
+        )
+    if not r.append:
+        emptied = SharedInput(b"")
+        for fd, path in opened.read_paths.items():
+            if path == scope.virtual:
+                opened.inputs[fd] = emptied
+    if last:
+        opened.complete_output = file
+    opened.files.append(file)
+    for fd in [1, 2] if r.fd == FD_BOTH else [r.fd]:
+        opened.reopen(fd)
+        opened.inputs[fd], opened.outputs[fd] = _Unreadable.TOKEN, file
+    return None
+
+
+async def _land_output(
+    opened: _Opened,
+    recorder: PipeRecorder,
+    route: JobRoute,
+    io: IOResult,
+    redirects: list[Redirect],
+    command: TSNodeLike | None,
+    refused: bool,
+    unwound: Exception | None,
+    forked: bool,
+) -> tuple[ByteSource | None, Exception | None]:
+    """Write what the command said to the files its operators opened and
+    route the rest.
+
+    Args:
+        opened (_Opened): the descriptors the operators left.
+        recorder (PipeRecorder): what the command wrote.
+        route (JobRoute): the route its jobs write through.
+        io (IOResult): the command's result, whose status a failed write
+            sets.
+        redirects (list[Redirect]): the expanded operators.
+        command (TSNodeLike | None): the redirected command.
+        refused (bool): a policy refused the command.
+        unwound (Exception | None): the signal unwinding it.
+        forked (bool): bash forks to run it.
+
+    Returns:
+        The stdout left for the caller, and what still unwinds.
+    """
+    dispatch, session = opened.dispatch, opened.session
+    stdout: ByteSource | None = None
+    route.recorder = Recorder()
+    if recorder.failure is not None and recorder.file is not None:
+        out, error, _ = await opened.failed(
+            _redirect_failure(recorder.file.scope, recorder.failure),
+            failed_file=recorder.file,
+        )
+        if out:
+            async with aclosing(byte_chunks(out)) as source:
+                async for piece in source:
+                    await recorder.emit(Channel.STDOUT, piece)
+        diagnostic = await error.materialize_stderr()
+        if diagnostic:
+            await recorder.emit(Channel.STDERR, diagnostic)
+        io.exit_code = 1
+    try:
+        chunks = await recorder.take()
+        if refused:
+            outputs: dict[int, _Fd | FileDescription | Inherited] = {
+                0: _CLOSED,
+                1: _TO_STDOUT,
+                2: _TO_STDERR,
+            }
+            for r in redirects:
+                if isinstance(r.target, int):
+                    outputs[r.fd] = outputs.get(r.target, _CLOSED)
+            opened.outputs = outputs
+        if (
+            opened.outputs[1] is _CLOSED
+            and command is not None
+            and any(c == Channel.STDOUT for c, _ in chunks)
+        ):
+            chunks.append(
+                (Channel.STDERR, _closed_write_line(command, unwound))
+            )
+            io.exit_code = 1
+
+        def dest(
+            key: Channel | Inherited,
+        ) -> _Fd | FileDescription | Inherited:
+            if not isinstance(key, Inherited):
+                return opened.outputs[1 if key == Channel.STDOUT else 2]
+            if key.owner is not recorder:
+                return key
+            return _TO_STDOUT if key.channel == Channel.STDOUT else _TO_STDERR
+
+        routed: list[tuple[Channel | Inherited, ByteSource]] = []
+        write_token = (
+            set_redirect_paths(command.id, opened.targets)
+            if command is not None
+            else None
+        )
+
+        async def write(
+            file: FileDescription, data: ByteSource, *, replace: bool = False
+        ) -> bool:
+            nonlocal unwound
+            try:
+                await write_description(
+                    dispatch, session, file, data, replace=replace
+                )
+            except PipeClosed:
+                # The deferred open reached a pipe (a link to one): its
+                # closed reader is the writer's SIGPIPE, as an open would be.
+                if file is not opened.deferred:
+                    raise
+                if forked:
+                    io.exit_code = SIGPIPE_STATUS
+                elif unwound is None:
+                    unwound = ExitSignal(SIGPIPE_STATUS)
+                return False
+            except Exception as exc:
+                if is_aborting(exc):
+                    raise
+                out, error, _ = await opened.failed(
+                    _redirect_failure(file.scope, exc), failed_file=file
+                )
+                if out:
+                    routed.append((Channel.STDOUT, await materialize(out)))
+                diagnostic = await error.materialize_stderr()
+                if diagnostic:
+                    routed.append((Channel.STDERR, diagnostic))
+                io.exit_code = 1
+                return False
+            return True
+
+        try:
+            if (
+                opened.deferred is not None
+                and not (
+                    chunks
+                    and not refused
+                    and all(dest(key) is opened.deferred for key, _ in chunks)
+                )
+                and not await write(opened.deferred, b"")
+            ):
+                await discard_streams(*(data for _, data in chunks))
+                chunks = []
+            pending = iter(chunks)
+            chunk = next(pending, None)
+            while chunk is not None:
+                key, data = chunk
+                target = dest(key)
+                chunk = next(pending, None)
+                if isinstance(target, FileDescription):
+                    parts = [data]
+                    while chunk is not None and dest(chunk[0]) is target:
+                        parts.append(chunk[1])
+                        chunk = next(pending, None)
+                    await write(
+                        target,
+                        parts[0] if len(parts) == 1 else async_chain(parts),
+                        replace=not refused
+                        and target is opened.complete_output
+                        and len(parts) == len(chunks),
+                    )
+                elif target is _TO_STDOUT:
+                    routed.append((Channel.STDOUT, data))
+                elif target is _TO_STDERR:
+                    routed.append((Channel.STDERR, data))
+                elif isinstance(target, Inherited):
+                    routed.append((target, data))
+                else:
+                    await discard_streams(data)
+        finally:
+            if write_token is not None:
+                reset_redirect_paths(write_token)
+        stdout = await _deliver_routed(routed, opened.sink, io)
+    finally:
+        await route.release()
+    return stdout, unwound
+
+
 async def _handle_redirect(
     owned: list[SharedInput],
     execute_node: Callable[..., Awaitable[RedirectResult]],
@@ -1027,240 +1504,49 @@ async def _handle_redirect(
     if bad_fd is not None:
         return _shell_failure(bad_descriptor_line(bad_fd))
     inputs, outputs, closed = _open_descriptors(context, stdin)
-
-    deferred: FileDescription | None = None
-    opening_stderr: _Fd | FileDescription | Inherited = _TO_STDERR
-
-    async def failed(
-        result: RedirectResult,
-        failed_file: FileDescription | None = None,
-    ) -> RedirectResult:
-        stdout, io, node = result
-        data = await io.materialize_stderr()
-        target = (
-            opening_stderr
-            if failed_file is not None
-            and failed_file is deferred
-            and not failed_file.opened
-            else outputs[2]
-        )
-        if target is _TO_STDERR:
-            return result
-        io.stderr = None
-        if target is _TO_STDOUT:
-            stdout = data
-        else:
-            try:
-                if isinstance(target, FileDescription):
-                    if (
-                        failed_file is None
-                        or target.scope.virtual != failed_file.scope.virtual
-                    ):
-                        await write_description(
-                            dispatch, session, target, data
-                        )
-                elif isinstance(target, Inherited):
-                    if not await deliver(
-                        sink, target, data, current_caller().enclosing
-                    ):
-                        if target.channel == Channel.STDOUT:
-                            stdout = data
-                        else:
-                            io.stderr = data
-            except PipeClosed:
-                raise
-            except Exception as exc:
-                if is_aborting(exc):
-                    raise
-                logger.debug("redirect error reporting failed: %s", exc)
-        return stdout, io, node
-
-    files: list[FileDescription] = []
-    complete_output: FileDescription | None = None
+    opened = _Opened(dispatch, session, sink, stdin, inputs, outputs, closed)
     expanded: list[Redirect] = []
-    targets: tuple[PathSpec, ...] = ()
     admission_stdin = (
         await redirect_stdin(dispatch, redirects, context, stdin)
         if guard is not None
         else stdin
     )
-    read_paths: dict[int, str] = {}
-    piped: set[int] = set()
     for raw in redirects:
         r = await expand(raw) if expand is not None else raw
         expanded.append(r)
-        if r.kind == RedirectKind.AMBIGUOUS:
-            word = (
-                r.target.raw_path
-                if isinstance(r.target, PathSpec)
-                else str(r.target)
-            )
-            return await failed(
-                _shell_failure(
-                    encode_text(f"{shell_voice()}{word}: ambiguous redirect\n")
-                )
-            )
-        if r.kind == RedirectKind.UNEXPANDED and isinstance(
-            r.target, ExitSignal
-        ):
-            return await failed(
-                _shell_failure(r.target.stderr, r.target.exit_code)
-            )
+        unusable = _unusable(r)
+        if unusable is not None:
+            return await opened.failed(unusable)
         if isinstance(r.target, int):
-            if r.target == FD_CLOSE:
-                closed.add(r.fd)
-                read_paths.pop(r.fd, None)
-                inputs[r.fd], outputs[r.fd] = _Unreadable.TOKEN, _CLOSED
-            elif r.target != r.fd:
-                if r.target in closed or r.target not in outputs:
-                    return await failed(
-                        _shell_failure(bad_descriptor_line(r.target))
-                    )
-                source = inputs[r.target]
-                if not isinstance(source, _Unreadable):
-                    source = share(source if source is not None else b"")
-                    inputs[r.target] = source
-                inputs[r.fd], outputs[r.fd] = source, outputs[r.target]
-                if r.target in read_paths:
-                    read_paths[r.fd] = read_paths[r.target]
-                else:
-                    read_paths.pop(r.fd, None)
-                closed.discard(r.fd)
+            bad = _duplicate(opened, r, r.target)
+            if bad is not None:
+                return await opened.failed(
+                    _shell_failure(bad_descriptor_line(bad))
+                )
             continue
-        fds = [1, 2] if r.fd == FD_BOTH else [r.fd]
         if r.kind in (RedirectKind.HEREDOC, RedirectKind.HERESTRING):
-            closed.discard(r.fd)
-            read_paths.pop(r.fd, None)
-            outputs[r.fd] = _CLOSED
-            data = r.target
-            if isinstance(data, str):
-                if r.kind == RedirectKind.HERESTRING:
-                    if (
-                        len(data) >= 2
-                        and data[0] == data[-1]
-                        and data[0] in "\"'"
-                    ):
-                        data = data[1:-1]
-                    data += "\n"
-                data = encode_text(data)
-            inputs[r.fd] = data if r.fd == 0 else SharedInput(data)
+            _here_input(opened, r)
             continue
         scope = _ensure_scope(r.target)
-        targets = (*targets, scope)
+        opened.targets = (*opened.targets, scope)
         if guard is not None:
-            denied = await guard(targets, admission_stdin)
+            denied = await guard(opened.targets, admission_stdin)
             if denied is not None:
                 return denied
         refusal = await _open_refusal(dispatch, context, [r])
         if refusal is not None:
-            return await failed(refusal)
+            return await opened.failed(refusal)
         if r.kind in (RedirectKind.STDIN, RedirectKind.READWRITE):
-            try:
-                if (
-                    scope.virtual == "/dev/stdin"
-                    and r.kind == RedirectKind.STDIN
-                ):
-                    closed.discard(r.fd)
-                    read_paths.pop(r.fd, None)
-                    inputs[r.fd], outputs[r.fd] = stdin, _CLOSED
-                    continue
-                data, _ = await dispatch("read", scope, stream=True)
-            except FileNotFoundError as exc:
-                if r.kind != RedirectKind.READWRITE:
-                    return await failed(_redirect_failure(scope, exc))
-                data = b""
-            except Exception as exc:
-                if is_aborting(exc):
-                    raise
-                return await failed(_redirect_failure(scope, exc))
-            closed.discard(r.fd)
-            read_paths.pop(r.fd, None)
-            outputs[r.fd] = _CLOSED
-            if r.kind == RedirectKind.READWRITE:
-                file = FileDescription(scope, append=True, opened=True)
-                file.source = FileInput(file, data or b"")
-                owned.append(file.source)
-                try:
-                    await create_file(
-                        dispatch, session, scope, b"", append=True
-                    )
-                except PipeClosed:
-                    raise
-                except Exception as exc:
-                    if is_aborting(exc):
-                        raise
-                    return await failed(_redirect_failure(scope, exc))
-                files.append(file)
-                inputs[r.fd], outputs[r.fd] = file.source, file
-            else:
-                read_paths[r.fd] = scope.virtual
-                if isinstance(data, PipeStream):
-                    piped.add(r.fd)
-                reading = SharedInput(
-                    data or b"", seekable=not isinstance(data, PipeStream)
-                )
-                if not isinstance(data, PipeStream):
-                    owned.append(reading)
-                if (
-                    not isinstance(data, PipeStream)
-                    and not await reading.lines.peek()
-                    and await _stat_type(dispatch, scope)
-                    == FileType.CHAR_DEVICE
-                ):
-                    await reading.discard()
-                    inputs[r.fd] = DeviceInput()
-                    continue
-                inputs[r.fd] = reading
+            failure = await _open_input(opened, r, scope, owned)
         else:
             last = len(expanded) == len(redirects) and _output_only(name, args)
-            pipe = None
-            if (
-                last
-                and not r.append
-                and not scope.virtual.startswith(DEV_PREFIX)
-                and not piped
-                and not any(f.pipe for f in files)
-            ):
-                file = deferred = FileDescription(scope)
-                opening_stderr = outputs[2]
-            else:
-                token = (
-                    set_redirect_paths(command.id, targets)
-                    if command is not None and guard is not None
-                    else None
-                )
-                try:
-                    pipe = await create_file(
-                        dispatch, session, scope, b"", append=r.append
-                    )
-                except PipeClosed:
-                    raise
-                except Exception as exc:
-                    if is_aborting(exc):
-                        raise
-                    return await failed(_redirect_failure(scope, exc))
-                finally:
-                    if token is not None:
-                        reset_redirect_paths(token)
-                file = FileDescription(
-                    pipe or scope,
-                    append=r.append or pipe is not None,
-                    opened=True,
-                    pipe=pipe is not None,
-                )
-            if not r.append:
-                emptied = SharedInput(b"")
-                for fd, path in read_paths.items():
-                    if path == scope.virtual:
-                        inputs[fd] = emptied
-            if last:
-                complete_output = file
-            files.append(file)
-            for fd in fds:
-                closed.discard(fd)
-                read_paths.pop(fd, None)
-                inputs[fd], outputs[fd] = _Unreadable.TOKEN, file
+            failure = await _open_output(
+                opened, r, scope, last, command, guard
+            )
+        if failure is not None:
+            return failure
     redirects = expanded
+    files, piped, targets = opened.files, opened.piped, opened.targets
 
     recorder = _output_recorder(
         dispatch, outputs, files, piped, sink, command, follow
@@ -1401,131 +1687,17 @@ async def _handle_redirect(
         except Exception as exc:
             logger.debug("kept output not written: %s", exc)
         raise cancelled
-    stdout: ByteSource | None = None
-    route.recorder = Recorder()
-    if recorder.failure is not None and recorder.file is not None:
-        out, error, _ = await failed(
-            _redirect_failure(recorder.file.scope, recorder.failure),
-            failed_file=recorder.file,
-        )
-        if out:
-            async with aclosing(byte_chunks(out)) as source:
-                async for data in source:
-                    await recorder.emit(Channel.STDOUT, data)
-        diagnostic = await error.materialize_stderr()
-        if diagnostic:
-            await recorder.emit(Channel.STDERR, diagnostic)
-        io.exit_code = 1
-    try:
-        chunks = await recorder.take()
-        if refused:
-            outputs = {0: _CLOSED, 1: _TO_STDOUT, 2: _TO_STDERR}
-            for r in redirects:
-                if isinstance(r.target, int):
-                    outputs[r.fd] = outputs.get(r.target, _CLOSED)
-        if (
-            outputs[1] is _CLOSED
-            and command is not None
-            and any(c == Channel.STDOUT for c, _ in chunks)
-        ):
-            chunks.append(
-                (Channel.STDERR, _closed_write_line(command, unwound))
-            )
-            io.exit_code = 1
-
-        def dest(
-            key: Channel | Inherited,
-        ) -> _Fd | FileDescription | Inherited:
-            if not isinstance(key, Inherited):
-                return outputs[1 if key == Channel.STDOUT else 2]
-            if key.owner is not recorder:
-                return key
-            return _TO_STDOUT if key.channel == Channel.STDOUT else _TO_STDERR
-
-        routed: list[tuple[Channel | Inherited, ByteSource]] = []
-        write_token = (
-            set_redirect_paths(command.id, targets)
-            if command is not None
-            else None
-        )
-
-        async def write(
-            file: FileDescription, data: ByteSource, *, replace: bool = False
-        ) -> bool:
-            nonlocal unwound
-            try:
-                await write_description(
-                    dispatch, session, file, data, replace=replace
-                )
-            except PipeClosed:
-                # The deferred open reached a pipe (a link to one): its
-                # closed reader is the writer's SIGPIPE, as an open would be.
-                if file is not deferred:
-                    raise
-                if forked:
-                    io.exit_code = SIGPIPE_STATUS
-                elif unwound is None:
-                    unwound = ExitSignal(SIGPIPE_STATUS)
-                return False
-            except Exception as exc:
-                if is_aborting(exc):
-                    raise
-                out, error, _ = await failed(
-                    _redirect_failure(file.scope, exc), failed_file=file
-                )
-                if out:
-                    routed.append((Channel.STDOUT, await materialize(out)))
-                diagnostic = await error.materialize_stderr()
-                if diagnostic:
-                    routed.append((Channel.STDERR, diagnostic))
-                io.exit_code = 1
-                return False
-            return True
-
-        try:
-            if (
-                deferred is not None
-                and not (
-                    chunks
-                    and not refused
-                    and all(dest(key) is deferred for key, _ in chunks)
-                )
-                and not await write(deferred, b"")
-            ):
-                await discard_streams(*(data for _, data in chunks))
-                chunks = []
-            pending = iter(chunks)
-            chunk = next(pending, None)
-            while chunk is not None:
-                key, data = chunk
-                target = dest(key)
-                chunk = next(pending, None)
-                if isinstance(target, FileDescription):
-                    parts = [data]
-                    while chunk is not None and dest(chunk[0]) is target:
-                        parts.append(chunk[1])
-                        chunk = next(pending, None)
-                    await write(
-                        target,
-                        parts[0] if len(parts) == 1 else async_chain(parts),
-                        replace=not refused
-                        and target is complete_output
-                        and len(parts) == len(chunks),
-                    )
-                elif target is _TO_STDOUT:
-                    routed.append((Channel.STDOUT, data))
-                elif target is _TO_STDERR:
-                    routed.append((Channel.STDERR, data))
-                elif isinstance(target, Inherited):
-                    routed.append((target, data))
-                else:
-                    await discard_streams(data)
-        finally:
-            if write_token is not None:
-                reset_redirect_paths(write_token)
-        stdout = await _deliver_routed(routed, sink, io)
-    finally:
-        await route.release()
+    stdout, unwound = await _land_output(
+        opened,
+        recorder,
+        route,
+        io,
+        redirects,
+        command,
+        refused,
+        unwound,
+        forked,
+    )
     if unwound is not None:
         if (
             isinstance(unwound, ExitSignal)

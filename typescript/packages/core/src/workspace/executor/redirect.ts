@@ -800,6 +800,357 @@ async function deliverRouted(
   return stdout
 }
 
+/** A redirect list as its operators have opened it so far. Mirrors Python's _Opened. */
+class Opened {
+  readonly files: FileDescription[] = []
+  readonly targets: PathSpec[] = []
+  readonly readPaths = new Map<number, string>()
+  readonly piped = new Set<number>()
+  deferred: FileDescription | null = null
+  openingStderr: FdDest | undefined = TO_STDERR
+  completeOutput: FileDescription | null = null
+
+  constructor(
+    readonly dispatch: DispatchFn,
+    readonly session: SessionState,
+    readonly sink: JobConsole | undefined,
+    readonly stdin: ByteSource | null,
+    readonly inputs: Map<number, Input>,
+    readonly outputs: Map<number, FdDest>,
+    readonly closed: Set<number>,
+  ) {}
+
+  /** Forget what a descriptor had closed or was reading. */
+  reopen(fd: number): void {
+    this.closed.delete(fd)
+    this.readPaths.delete(fd)
+  }
+
+  /** Send a refusal where stderr points by now. */
+  async failed(
+    result: RedirectResult,
+    failedFile: FileDescription | null = null,
+  ): Promise<RedirectResult> {
+    let [stdout] = result
+    const [, io, node] = result
+    const data = await io.materializeStderr()
+    const target =
+      failedFile !== null && failedFile === this.deferred && !failedFile.opened
+        ? this.openingStderr
+        : this.outputs.get(2)
+    if (target === TO_STDERR) return result
+    io.stderr = null
+    if (target === TO_STDOUT) stdout = data
+    else {
+      try {
+        if (target instanceof FileDescription) {
+          if (target.scope.virtual !== failedFile?.scope.virtual)
+            await writeDescription(this.dispatch, this.session, target, data)
+        } else if (
+          target instanceof Inherited &&
+          !(await deliver(this.sink ?? null, target, data, currentCaller().enclosing))
+        ) {
+          if (target.channel === Channel.STDOUT) stdout = data
+          else io.stderr = data
+        }
+      } catch (error) {
+        if (error instanceof PipeClosed || isAborting(error)) throw error
+        logger.debug(`redirect error reporting failed: ${String(error)}`)
+      }
+    }
+    return [stdout, io, node]
+  }
+}
+
+/** What a target that expanded to nothing usable says, else null. Mirrors Python's _unusable. */
+function unusable(r: Redirect): RedirectResult | null {
+  if (r.kind === RedirectKind.AMBIGUOUS) {
+    const word = r.target instanceof PathSpec ? r.target.rawPath : String(r.target)
+    return shellFailure(encodeText(`${shellVoice()}${word}: ambiguous redirect\n`))
+  }
+  if (r.kind === RedirectKind.UNEXPANDED && r.target instanceof ExitSignal) {
+    return shellFailure(r.target.stderr, r.target.exitCode)
+  }
+  return null
+}
+
+/** Apply `N>&M` or `N>&-`; the descriptor that refuses it, else null. Mirrors Python's _duplicate. */
+function duplicate(opened: Opened, r: Redirect, target: number): number | null {
+  const { inputs, outputs, closed, readPaths } = opened
+  if (target === FD_CLOSE) {
+    closed.add(r.fd)
+    readPaths.delete(r.fd)
+    inputs.set(r.fd, UNREADABLE)
+    outputs.set(r.fd, CLOSED)
+  } else if (target !== r.fd) {
+    if (closed.has(target) || !outputs.has(target)) return target
+    let source = inputs.get(target) ?? null
+    if (source !== UNREADABLE) {
+      source = share(source ?? new Uint8Array())
+      inputs.set(target, source)
+    }
+    inputs.set(r.fd, source)
+    outputs.set(r.fd, outputs.get(target) ?? CLOSED)
+    const path = readPaths.get(target)
+    if (path !== undefined) readPaths.set(r.fd, path)
+    else readPaths.delete(r.fd)
+    closed.delete(r.fd)
+  }
+  return null
+}
+
+/** Point a descriptor at a here-document or here-string. Mirrors Python's _here_input. */
+function hereInput(opened: Opened, r: Redirect): void {
+  opened.reopen(r.fd)
+  opened.outputs.set(r.fd, CLOSED)
+  const data = r.target
+  if (typeof data === 'string') {
+    let text = data
+    if (r.kind === RedirectKind.HERESTRING) {
+      if (text.length >= 2 && text.at(0) === text.at(-1) && ['"', "'"].includes(text.charAt(0)))
+        text = text.slice(1, -1)
+      text += '\n'
+    }
+    opened.inputs.set(r.fd, r.fd === 0 ? encodeText(text) : new SharedInput(encodeText(text)))
+  } else opened.inputs.set(r.fd, data as ByteSource)
+}
+
+/** Open `<` or `<>`; the refusal, else null. Mirrors Python's _open_input. */
+async function openInput(
+  opened: Opened,
+  r: Redirect,
+  scope: PathSpec,
+  owned: SharedInput[],
+): Promise<RedirectResult | null> {
+  const { dispatch, session, inputs, outputs } = opened
+  let source: ByteSource | null
+  try {
+    if (scope.virtual === '/dev/stdin' && r.kind === RedirectKind.STDIN) {
+      opened.reopen(r.fd)
+      outputs.set(r.fd, CLOSED)
+      inputs.set(r.fd, opened.stdin)
+      return null
+    }
+    const read = (await dispatch('read', scope, [], { stream: true }))[0] as ByteSource | null
+    source = read ?? new Uint8Array()
+  } catch (error) {
+    if (r.kind === RedirectKind.READWRITE && isMissingPath(error)) source = new Uint8Array()
+    else {
+      if (isAborting(error)) throw error
+      return opened.failed(redirectFailure(scope, error))
+    }
+  }
+  const data = source
+  opened.reopen(r.fd)
+  outputs.set(r.fd, CLOSED)
+  if (r.kind === RedirectKind.READWRITE) {
+    const file = new FileDescription(scope, true)
+    file.opened = true
+    file.source = new FileInput(file, data)
+    owned.push(file.source)
+    try {
+      await createFile(dispatch, session, scope, new Uint8Array(), true)
+    } catch (error) {
+      if (error instanceof PipeClosed || isAborting(error)) throw error
+      return opened.failed(redirectFailure(scope, error))
+    }
+    opened.files.push(file)
+    inputs.set(r.fd, file.source)
+    outputs.set(r.fd, file)
+    return null
+  }
+  opened.readPaths.set(r.fd, scope.virtual)
+  if (data instanceof PipeStream) opened.piped.add(r.fd)
+  const reading = new SharedInput(data, null, !(data instanceof PipeStream))
+  if (!(data instanceof PipeStream)) owned.push(reading)
+  if (
+    !(data instanceof PipeStream) &&
+    !(await reading.lines.peek()) &&
+    (await statType(dispatch, scope)) === FileType.CHAR_DEVICE
+  ) {
+    await reading.discard()
+    inputs.set(r.fd, new DeviceInput())
+    return null
+  }
+  inputs.set(r.fd, reading)
+  return null
+}
+
+/** Open `>` or `>>`; the refusal, else null. Mirrors Python's _open_output. */
+async function openOutput(
+  opened: Opened,
+  r: Redirect,
+  scope: PathSpec,
+  last: boolean,
+  command: TSNodeLike | null,
+  guard: RedirectGuard | undefined,
+): Promise<RedirectResult | null> {
+  const { dispatch, session, inputs, outputs, targets } = opened
+  let file: FileDescription
+  if (
+    last &&
+    !r.append &&
+    !scope.virtual.startsWith(DEV_PREFIX) &&
+    opened.piped.size === 0 &&
+    !opened.files.some((f) => f.pipe)
+  ) {
+    file = opened.deferred = new FileDescription(scope)
+    opened.openingStderr = outputs.get(2)
+  } else {
+    let pipe: PathSpec | null
+    try {
+      const open = () => createFile(dispatch, session, scope, new Uint8Array(), r.append)
+      pipe =
+        command !== null && guard !== undefined
+          ? await runWithRedirectPaths(command, targets, open)
+          : await open()
+    } catch (error) {
+      if (error instanceof PipeClosed || isAborting(error)) throw error
+      return opened.failed(redirectFailure(scope, error))
+    }
+    file = new FileDescription(pipe ?? scope, r.append || pipe !== null, pipe !== null)
+    file.opened = true
+  }
+  if (!r.append) {
+    const emptied = new SharedInput(new Uint8Array())
+    for (const [fd, path] of opened.readPaths) if (path === scope.virtual) inputs.set(fd, emptied)
+  }
+  if (last) opened.completeOutput = file
+  opened.files.push(file)
+  for (const fd of r.fd === FD_BOTH ? [1, 2] : [r.fd]) {
+    opened.reopen(fd)
+    inputs.set(fd, UNREADABLE)
+    outputs.set(fd, file)
+  }
+  return null
+}
+
+/**
+ * Write what the command said to the files its operators opened and route
+ * the rest; the stdout left for the caller and what still unwinds. Mirrors
+ * Python's _land_output.
+ */
+async function landOutput(
+  opened: Opened,
+  recorder: PipeRecorder,
+  route: JobRoute,
+  io: IOResult,
+  redirects: readonly Redirect[],
+  command: TSNodeLike | null,
+  refused: boolean,
+  given: Unwinding | null,
+  forked: boolean,
+): Promise<readonly [ByteSource | null, Unwinding | null]> {
+  const { dispatch, session, outputs, targets } = opened
+  let unwound = given
+  let stdout: ByteSource | null = null
+  route.recorder = new Recorder()
+  if (recorder.failure !== null && recorder.file !== null) {
+    const [out, error] = await opened.failed(
+      redirectFailure(recorder.file.scope, recorder.failure),
+      recorder.file,
+    )
+    if (out !== null)
+      for await (const data of byteChunks(out)) await recorder.emit(Channel.STDOUT, data)
+    const diagnostic = await error.materializeStderr()
+    if (diagnostic.length > 0) await recorder.emit(Channel.STDERR, diagnostic)
+    io.exitCode = 1
+  }
+
+  try {
+    const chunks = await recorder.take()
+    if (refused) {
+      outputs.clear()
+      outputs.set(0, CLOSED)
+      outputs.set(1, TO_STDOUT)
+      outputs.set(2, TO_STDERR)
+      for (const r of redirects)
+        if (typeof r.target === 'number') outputs.set(r.fd, outputs.get(r.target) ?? CLOSED)
+    }
+    if (
+      outputs.get(1) === CLOSED &&
+      command !== null &&
+      chunks.some(([channel]) => channel === Channel.STDOUT)
+    ) {
+      chunks.push([Channel.STDERR, closedWriteLine(command, unwound)])
+      io.exitCode = 1
+    }
+    const dest = (key: Channel | Inherited): FdDest | undefined => {
+      if (!(key instanceof Inherited)) return outputs.get(key === Channel.STDOUT ? 1 : 2)
+      if (key.owner !== recorder.owner) return key
+      return key.channel === Channel.STDOUT ? TO_STDOUT : TO_STDERR
+    }
+    const routed: [Channel | Inherited, ByteSource][] = []
+    const writeFiles = async () => {
+      const write = async (
+        file: FileDescription,
+        data: ByteSource,
+        replace = false,
+      ): Promise<boolean> => {
+        try {
+          await writeDescription(dispatch, session, file, data, replace)
+        } catch (error) {
+          // The deferred open reached a pipe (a link to one): its closed
+          // reader is the writer's SIGPIPE, as an open would be.
+          if (error instanceof PipeClosed && file === opened.deferred) {
+            if (forked) io.exitCode = SIGPIPE_STATUS
+            else unwound ??= new ExitSignal(SIGPIPE_STATUS)
+            return false
+          }
+          if (error instanceof PipeClosed || isAborting(error)) throw error
+          const [out, refusal] = await opened.failed(redirectFailure(file.scope, error), file)
+          if (out !== null) routed.push([Channel.STDOUT, await materialize(out)])
+          const diagnostic = await materialize(refusal.stderr)
+          if (diagnostic.byteLength > 0) routed.push([Channel.STDERR, diagnostic])
+          io.exitCode = 1
+          return false
+        }
+        return true
+      }
+      if (
+        opened.deferred !== null &&
+        !(
+          chunks.length > 0 &&
+          !refused &&
+          chunks.every(([key]) => dest(key) === opened.deferred)
+        ) &&
+        !(await write(opened.deferred, new Uint8Array()))
+      ) {
+        await discardStreams(...chunks.map(([, data]) => data))
+        chunks.length = 0
+      }
+      const pending = chunks.values()
+      let chunk = pending.next()
+      while (!chunk.done) {
+        const [key, data] = chunk.value
+        const target = dest(key)
+        chunk = pending.next()
+        if (target instanceof FileDescription) {
+          const parts = [data]
+          while (!chunk.done && dest(chunk.value[0]) === target) {
+            parts.push(chunk.value[1])
+            chunk = pending.next()
+          }
+          await write(
+            target,
+            parts.length === 1 && parts[0] !== undefined ? parts[0] : asyncChain(parts),
+            !refused && target === opened.completeOutput && parts.length === chunks.length,
+          )
+        } else if (target === TO_STDOUT) routed.push([Channel.STDOUT, data])
+        else if (target === TO_STDERR) routed.push([Channel.STDERR, data])
+        else if (target instanceof Inherited) routed.push([target, data])
+        else await discardStreams(data)
+      }
+    }
+    if (command === null) await writeFiles()
+    else await runWithRedirectPaths(command, targets, writeFiles)
+    stdout = await deliverRouted(routed, opened.sink, io)
+  } finally {
+    await route.release()
+  }
+  return [stdout, unwound]
+}
+
 async function runRedirects(
   owned: SharedInput[],
   executeNode: ExecuteNodeFn,
@@ -823,97 +1174,23 @@ async function runRedirects(
   const badFd = unsupportedDescriptor(redirects)
   if (badFd !== null) return shellFailure(badDescriptorLine(badFd))
   const [inputs, outputs, closed] = openDescriptors(context, stdin)
-  let deferred: FileDescription | null = null
-  let openingStderr: FdDest | undefined = TO_STDERR
-  const failed = async (
-    result: RedirectResult,
-    failedFile: FileDescription | null = null,
-  ): Promise<RedirectResult> => {
-    let [stdout] = result
-    const [, io, node] = result
-    const data = await io.materializeStderr()
-    const target =
-      failedFile !== null && failedFile === deferred && !failedFile.opened
-        ? openingStderr
-        : outputs.get(2)
-    if (target === TO_STDERR) return result
-    io.stderr = null
-    if (target === TO_STDOUT) stdout = data
-    else {
-      try {
-        if (target instanceof FileDescription) {
-          if (target.scope.virtual !== failedFile?.scope.virtual)
-            await writeDescription(dispatch, session, target, data)
-        } else if (
-          target instanceof Inherited &&
-          !(await deliver(sink ?? null, target, data, currentCaller().enclosing))
-        ) {
-          if (target.channel === Channel.STDOUT) stdout = data
-          else io.stderr = data
-        }
-      } catch (error) {
-        if (error instanceof PipeClosed || isAborting(error)) throw error
-        logger.debug(`redirect error reporting failed: ${String(error)}`)
-      }
-    }
-    return [stdout, io, node]
-  }
-  const files: FileDescription[] = []
-  let completeOutput: FileDescription | null = null
+  const opened = new Opened(dispatch, session, sink, stdin, inputs, outputs, closed)
+  const { files, piped, targets } = opened
   const expanded: Redirect[] = []
-  const targets: PathSpec[] = []
   const admissionStdin =
     guard === undefined ? stdin : await redirectStdin(dispatch, redirects, context, stdin)
-  const readPaths = new Map<number, string>()
-  const piped = new Set<number>()
   for (const raw of redirects) {
     const r = expand === undefined ? raw : await expand(raw)
     expanded.push(r)
-    if (r.kind === RedirectKind.AMBIGUOUS) {
-      const word = r.target instanceof PathSpec ? r.target.rawPath : String(r.target)
-      return failed(shellFailure(encodeText(`${shellVoice()}${word}: ambiguous redirect\n`)))
-    }
-    if (r.kind === RedirectKind.UNEXPANDED && r.target instanceof ExitSignal) {
-      return failed(shellFailure(r.target.stderr, r.target.exitCode))
-    }
+    const refused = unusable(r)
+    if (refused !== null) return opened.failed(refused)
     if (typeof r.target === 'number') {
-      if (r.target === FD_CLOSE) {
-        closed.add(r.fd)
-        readPaths.delete(r.fd)
-        inputs.set(r.fd, UNREADABLE)
-        outputs.set(r.fd, CLOSED)
-      } else if (r.target !== r.fd) {
-        if (closed.has(r.target) || !outputs.has(r.target))
-          return failed(shellFailure(badDescriptorLine(r.target)))
-        let source = inputs.get(r.target) ?? null
-        if (source !== UNREADABLE) {
-          source = share(source ?? new Uint8Array())
-          inputs.set(r.target, source)
-        }
-        inputs.set(r.fd, source)
-        outputs.set(r.fd, outputs.get(r.target) ?? CLOSED)
-        const path = readPaths.get(r.target)
-        if (path !== undefined) readPaths.set(r.fd, path)
-        else readPaths.delete(r.fd)
-        closed.delete(r.fd)
-      }
+      const bad = duplicate(opened, r, r.target)
+      if (bad !== null) return opened.failed(shellFailure(badDescriptorLine(bad)))
       continue
     }
-    const fds = r.fd === FD_BOTH ? [1, 2] : [r.fd]
     if (r.kind === RedirectKind.HEREDOC || r.kind === RedirectKind.HERESTRING) {
-      closed.delete(r.fd)
-      readPaths.delete(r.fd)
-      outputs.set(r.fd, CLOSED)
-      const data = r.target
-      if (typeof data === 'string') {
-        let text = data
-        if (r.kind === RedirectKind.HERESTRING) {
-          if (text.length >= 2 && text.at(0) === text.at(-1) && ['"', "'"].includes(text.charAt(0)))
-            text = text.slice(1, -1)
-          text += '\n'
-        }
-        inputs.set(r.fd, r.fd === 0 ? encodeText(text) : new SharedInput(encodeText(text)))
-      } else inputs.set(r.fd, data as ByteSource)
+      hereInput(opened, r)
       continue
     }
     const scope = ensureScope(r.target)
@@ -923,100 +1200,19 @@ async function runRedirects(
       if (denied !== null) return denied
     }
     const refusal = await openRefusal(dispatch, context, [r])
-    if (refusal !== null) return failed(refusal)
-    if (r.kind === RedirectKind.STDIN || r.kind === RedirectKind.READWRITE) {
-      let source: ByteSource | null
-      try {
-        if (scope.virtual === '/dev/stdin' && r.kind === RedirectKind.STDIN) {
-          closed.delete(r.fd)
-          readPaths.delete(r.fd)
-          outputs.set(r.fd, CLOSED)
-          inputs.set(r.fd, stdin)
-          continue
-        }
-        const opened = (await dispatch('read', scope, [], { stream: true }))[0] as ByteSource | null
-        source = opened ?? new Uint8Array()
-      } catch (error) {
-        if (r.kind === RedirectKind.READWRITE && isMissingPath(error)) source = new Uint8Array()
-        else {
-          if (isAborting(error)) throw error
-          return failed(redirectFailure(scope, error))
-        }
-      }
-      const data = source
-      closed.delete(r.fd)
-      readPaths.delete(r.fd)
-      outputs.set(r.fd, CLOSED)
-      if (r.kind === RedirectKind.READWRITE) {
-        const file = new FileDescription(scope, true)
-        file.opened = true
-        file.source = new FileInput(file, data)
-        owned.push(file.source)
-        try {
-          await createFile(dispatch, session, scope, new Uint8Array(), true)
-        } catch (error) {
-          if (error instanceof PipeClosed || isAborting(error)) throw error
-          return failed(redirectFailure(scope, error))
-        }
-        files.push(file)
-        inputs.set(r.fd, file.source)
-        outputs.set(r.fd, file)
-      } else {
-        readPaths.set(r.fd, scope.virtual)
-        if (data instanceof PipeStream) piped.add(r.fd)
-        const reading = new SharedInput(data, null, !(data instanceof PipeStream))
-        if (!(data instanceof PipeStream)) owned.push(reading)
-        if (
-          !(data instanceof PipeStream) &&
-          !(await reading.lines.peek()) &&
-          (await statType(dispatch, scope)) === FileType.CHAR_DEVICE
-        ) {
-          await reading.discard()
-          inputs.set(r.fd, new DeviceInput())
-          continue
-        }
-        inputs.set(r.fd, reading)
-      }
-    } else {
-      const last = expanded.length === redirects.length && outputOnly(name, args)
-      let file: FileDescription
-      if (
-        last &&
-        !r.append &&
-        !scope.virtual.startsWith(DEV_PREFIX) &&
-        piped.size === 0 &&
-        !files.some((f) => f.pipe)
-      ) {
-        file = deferred = new FileDescription(scope)
-        openingStderr = outputs.get(2)
-      } else {
-        let pipe: PathSpec | null
-        try {
-          const open = () => createFile(dispatch, session, scope, new Uint8Array(), r.append)
-          pipe =
-            command !== null && guard !== undefined
-              ? await runWithRedirectPaths(command, targets, open)
-              : await open()
-        } catch (error) {
-          if (error instanceof PipeClosed || isAborting(error)) throw error
-          return failed(redirectFailure(scope, error))
-        }
-        file = new FileDescription(pipe ?? scope, r.append || pipe !== null, pipe !== null)
-        file.opened = true
-      }
-      if (!r.append) {
-        const emptied = new SharedInput(new Uint8Array())
-        for (const [fd, path] of readPaths) if (path === scope.virtual) inputs.set(fd, emptied)
-      }
-      if (last) completeOutput = file
-      files.push(file)
-      for (const fd of fds) {
-        closed.delete(fd)
-        readPaths.delete(fd)
-        inputs.set(fd, UNREADABLE)
-        outputs.set(fd, file)
-      }
-    }
+    if (refusal !== null) return opened.failed(refusal)
+    const failure =
+      r.kind === RedirectKind.STDIN || r.kind === RedirectKind.READWRITE
+        ? await openInput(opened, r, scope, owned)
+        : await openOutput(
+            opened,
+            r,
+            scope,
+            expanded.length === redirects.length && outputOnly(name, args),
+            command,
+            guard,
+          )
+    if (failure !== null) return failure
   }
   redirects = expanded
   const recorder = outputRecorder(dispatch, outputs, files, piped, sink, command, follow)
@@ -1136,107 +1332,18 @@ async function runRedirects(
     }
     throw cancelled
   }
-  let stdout: ByteSource | null = null
-  route.recorder = new Recorder()
-  if (recorder.failure !== null && recorder.file !== null) {
-    const [out, error] = await failed(
-      redirectFailure(recorder.file.scope, recorder.failure),
-      recorder.file,
-    )
-    if (out !== null)
-      for await (const data of byteChunks(out)) await recorder.emit(Channel.STDOUT, data)
-    const diagnostic = await error.materializeStderr()
-    if (diagnostic.length > 0) await recorder.emit(Channel.STDERR, diagnostic)
-    io.exitCode = 1
-  }
-
-  try {
-    const chunks = await recorder.take()
-    if (refused) {
-      outputs.clear()
-      outputs.set(0, CLOSED)
-      outputs.set(1, TO_STDOUT)
-      outputs.set(2, TO_STDERR)
-      for (const r of redirects)
-        if (typeof r.target === 'number') outputs.set(r.fd, outputs.get(r.target) ?? CLOSED)
-    }
-    if (
-      outputs.get(1) === CLOSED &&
-      command !== null &&
-      chunks.some(([channel]) => channel === Channel.STDOUT)
-    ) {
-      chunks.push([Channel.STDERR, closedWriteLine(command, unwound)])
-      io.exitCode = 1
-    }
-    const dest = (key: Channel | Inherited): FdDest | undefined => {
-      if (!(key instanceof Inherited)) return outputs.get(key === Channel.STDOUT ? 1 : 2)
-      if (key.owner !== recorder.owner) return key
-      return key.channel === Channel.STDOUT ? TO_STDOUT : TO_STDERR
-    }
-    const routed: [Channel | Inherited, ByteSource][] = []
-    const writeFiles = async () => {
-      const write = async (
-        file: FileDescription,
-        data: ByteSource,
-        replace = false,
-      ): Promise<boolean> => {
-        try {
-          await writeDescription(dispatch, session, file, data, replace)
-        } catch (error) {
-          // The deferred open reached a pipe (a link to one): its closed
-          // reader is the writer's SIGPIPE, as an open would be.
-          if (error instanceof PipeClosed && file === deferred) {
-            if (forked) io.exitCode = SIGPIPE_STATUS
-            else unwound ??= new ExitSignal(SIGPIPE_STATUS)
-            return false
-          }
-          if (error instanceof PipeClosed || isAborting(error)) throw error
-          const [out, refusal] = await failed(redirectFailure(file.scope, error), file)
-          if (out !== null) routed.push([Channel.STDOUT, await materialize(out)])
-          const diagnostic = await materialize(refusal.stderr)
-          if (diagnostic.byteLength > 0) routed.push([Channel.STDERR, diagnostic])
-          io.exitCode = 1
-          return false
-        }
-        return true
-      }
-      if (
-        deferred !== null &&
-        !(chunks.length > 0 && !refused && chunks.every(([key]) => dest(key) === deferred)) &&
-        !(await write(deferred, new Uint8Array()))
-      ) {
-        await discardStreams(...chunks.map(([, data]) => data))
-        chunks.length = 0
-      }
-      const pending = chunks.values()
-      let chunk = pending.next()
-      while (!chunk.done) {
-        const [key, data] = chunk.value
-        const target = dest(key)
-        chunk = pending.next()
-        if (target instanceof FileDescription) {
-          const parts = [data]
-          while (!chunk.done && dest(chunk.value[0]) === target) {
-            parts.push(chunk.value[1])
-            chunk = pending.next()
-          }
-          await write(
-            target,
-            parts.length === 1 && parts[0] !== undefined ? parts[0] : asyncChain(parts),
-            !refused && target === completeOutput && parts.length === chunks.length,
-          )
-        } else if (target === TO_STDOUT) routed.push([Channel.STDOUT, data])
-        else if (target === TO_STDERR) routed.push([Channel.STDERR, data])
-        else if (target instanceof Inherited) routed.push([target, data])
-        else await discardStreams(data)
-      }
-    }
-    if (command === null) await writeFiles()
-    else await runWithRedirectPaths(command, targets, writeFiles)
-    stdout = await deliverRouted(routed, sink, io)
-  } finally {
-    await route.release()
-  }
+  const [stdout, landed] = await landOutput(
+    opened,
+    recorder,
+    route,
+    io,
+    redirects,
+    command,
+    refused,
+    unwound,
+    forked,
+  )
+  unwound = landed
   if (unwound !== null) {
     if (unwound instanceof ExitSignal && unwound.replaced !== null && io.exitCode !== 0) {
       unwound.exitCode = io.exitCode

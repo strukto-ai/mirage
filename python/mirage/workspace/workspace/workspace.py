@@ -277,6 +277,56 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
+def _declared_sources(
+    secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None,
+    env: Mapping[str, str | EnvVar | Mapping[str, Any]] | None,
+) -> tuple[dict[str, SecretSource], dict[str, Any] | None]:
+    """A workspace's secret source declarations and its seed variables.
+
+    Args:
+        secrets (Mapping | None): the ``secrets`` block.
+        env (Mapping | None): the ``env`` block.
+    """
+    # The env block, translated once: a literal entry becomes an
+    # exported var, a managed one becomes a pointer the fill step
+    # resolves at command time. Each managed entry's source is
+    # resolved now, so a typo'd name or a missing optional
+    # dependency fails at construction, naming the known sources,
+    # rather than at the first fetch.
+    # The source table, kept as declarations: building one reads
+    # its bootstrap pointers, which is I/O, and this constructor is
+    # sync. `_secret_sources` builds them once, before the first
+    # fetch.
+    # Named for what it holds: the source *declarations*, never a
+    # secret. Spelling it `secret_blocks` made every reader (and
+    # CodeQL's name heuristic, which flagged the instance name in a
+    # log line as a credential) believe otherwise.
+    # Checked here, so every caller-supplied route is covered at
+    # once: a list arrives from an untyped REST override, and
+    # `Object.entries`/`.items()` on one yields nothing, so the
+    # declarations would silently vanish and every restored pointer
+    # would read as an unknown source.
+    if secrets is not None and not isinstance(secrets, Mapping):
+        raise SecretsError(
+            f"config `secrets` must be a mapping, got {type(secrets).__name__}"
+        )
+    sources: dict[str, SecretSource] = {
+        name: (
+            block
+            if isinstance(block, SecretSource)
+            else SecretSource.model_validate(block)
+        )
+        for name, block in (secrets or {}).items()
+    }
+    for block in sources.values():
+        source_for(block.source)
+    seed_vars = vars_from_entries(env) if env else None
+    for var in (seed_vars or {}).values():
+        if var.managed is not None and var.managed.source not in sources:
+            source_for(var.managed.source)
+    return sources, seed_vars
+
+
 class Workspace:
     """Unified virtual filesystem over heterogeneous mounts.
 
@@ -350,36 +400,8 @@ class Workspace:
         self._registry.diff = self._diff_pool
         self._registry.process_view = self._process_view
         self._registry.fill_env = self._fill_tree_env
-        check_command_limits(
-            command_limits or {}, "workspace", takes_line=True
-        )
-        self._registry.command_limits = dict(command_limits or {})
-        # What the RAM mounts store and what a command builds share the
-        # workspace's max_memory; None runs uncapped.
-        self._registry.body_limit = (
-            MAX_BODY_BYTES
-            if max_body_bytes is None
-            else parse_limit(max_body_bytes, "max_body_bytes")
-        )
-        # The host's ceilings hold what the workspace sets, a lifted
-        # bound included: max_memory and max_env here, a session's
-        # processes.max as a process starts, a line's time limit as the
-        # line starts.
-        self._registry.ceilings = ceilings or Ceilings()
-        memory = under_ceiling(
-            None
-            if max_memory is None
-            else parse_limit(max_memory, "max_memory"),
-            self._registry.ceilings.max_memory,
-        )
-        self._registry.memory = (
-            None
-            if memory is None
-            else MemoryBudget(memory, self._registry.held_in_memory)
-        )
-        self._registry.max_env = under_ceiling(
-            None if max_env is None else parse_limit(max_env, "max_env"),
-            self._registry.ceilings.max_env,
+        self._apply_limits(
+            command_limits, max_body_bytes, ceilings, max_memory, max_env
         )
         # Every connection a line or an op opens must clear the
         # workspace's network setting and the process's ceiling.
@@ -452,56 +474,9 @@ class Workspace:
             daemon=daemon_id,
         )
 
-        def trace_job(record: Job) -> None:
-            machine = next(
-                (
-                    process.machine
-                    for process in self.process_table.records()
-                    if process.pid == record.pid
-                ),
-                self.process_table.machine,
-            )
-            self.observer.trace_job(record, machine)
+        self.job_table.ended = self._trace_job
 
-        self.job_table.ended = trace_job
-
-        async def end_lost() -> None:
-            # What the daemon before this one left running ended with it,
-            # as its jobs did: hung up.
-            now = self._clock.now()
-            hangup = HANGUP_EXIT_CODE - 128
-            store = self.job_table.store
-            # Read the store first: a process or line started, or ended,
-            # while it answers is this workspace's own by the time it is
-            # checked, and keeps the record it wrote.
-            records = await store.find_processes()
-            own = {record.pid for record in self.process_table.records()}
-            for record in records:
-                if record.ended_at is None and record.pid not in own:
-                    store.note(
-                        replace(
-                            record,
-                            state=ProcessState.EXITED,
-                            ended_at=now,
-                            exit=HANGUP_EXIT_CODE,
-                            signal=hangup,
-                        )
-                    )
-            lines = await store.find_lines()
-            read = {line.id for line in self.line_table.lines()}
-            for line in lines:
-                if line.ended_at is None and line.id not in read:
-                    store.note(
-                        replace(
-                            line,
-                            state=LineState.EXITED,
-                            ended_at=now,
-                            exit=HANGUP_EXIT_CODE,
-                            signal=hangup,
-                        )
-                    )
-
-        self.job_table.taken = end_lost
+        self.job_table.taken = self._end_lost
         self.line_table = LineTable(self._clock, note=stores.execution.note)
         self._lines: dict[asyncio.Event, tuple[str | None, asyncio.Event]] = {}
         self._shell_executions: dict[ShellExecution, None] = {}
@@ -512,51 +487,11 @@ class Workspace:
         self._writes = 0
         self._writes_idle = asyncio.Event()
         self._writes_idle.set()
-        # The env block, translated once: a literal entry becomes an
-        # exported var, a managed one becomes a pointer the fill step
-        # resolves at command time. Each managed entry's source is
-        # resolved now, so a typo'd name or a missing optional
-        # dependency fails at construction, naming the known sources,
-        # rather than at the first fetch.
-        # The source table, kept as declarations: building one reads
-        # its bootstrap pointers, which is I/O, and this constructor is
-        # sync. `_secret_sources` builds them once, before the first
-        # fetch.
-        # Named for what it holds: the source *declarations*, never a
-        # secret. Spelling it `secret_blocks` made every reader (and
-        # CodeQL's name heuristic, which flagged the instance name in a
-        # log line as a credential) believe otherwise.
-        # Checked here, so every caller-supplied route is covered at
-        # once: a list arrives from an untyped REST override, and
-        # `Object.entries`/`.items()` on one yields nothing, so the
-        # declarations would silently vanish and every restored pointer
-        # would read as an unknown source.
-        if secrets is not None and not isinstance(secrets, Mapping):
-            raise SecretsError(
-                "config `secrets` must be a mapping, got "
-                f"{type(secrets).__name__}"
-            )
-        self._declared_sources: dict[str, SecretSource] = {
-            name: (
-                block
-                if isinstance(block, SecretSource)
-                else SecretSource.model_validate(block)
-            )
-            for name, block in (secrets or {}).items()
-        }
+        self._declared_sources, seed_vars = _declared_sources(secrets, env)
         self._secret_sources_built: dict[str, ResolvedSource] | None = None
         self._secret_sources_task: (
             asyncio.Task[dict[str, ResolvedSource]] | None
         ) = None
-        for block in self._declared_sources.values():
-            source_for(block.source)
-        seed_vars = vars_from_entries(env) if env else None
-        for var in (seed_vars or {}).values():
-            if (
-                var.managed is not None
-                and var.managed.source not in self._declared_sources
-            ):
-                source_for(var.managed.source)
         # The permission profiles: one per name, and the one a session
         # gets when it names none. A profile is the whole document a
         # session runs under; only `processes` has a workspace-wide
@@ -620,49 +555,10 @@ class Workspace:
             self._session_mgr, on_ask
         )
 
-        # What every method sees of its session: the one its context was
-        # built from when given (a line explain walks), else the one the
-        # call is made under when the method's is it (a call's cwd and env
-        # included), else the session the id names, the default for none;
-        # nothing for an id this workspace holds no session for. Its
-        # caller is a copy of that session's id and working directory,
-        # so nothing a method does to it reaches the session. The view
-        # holds no state of its own, so the last session's is kept.
-        kept: tuple[SessionState, Policies, SessionView] | None = None
-
-        def views(
-            session_id: str,
-            session: SessionState | None = None,
-        ) -> tuple[SessionView, Files, PolicyCaller] | None:
-            nonlocal kept
-            if session is None:
-                session = get_current_session_unless_foreign(self._session_mgr)
-            if session is None or session_id not in ("", session.session_id):
-                wanted = session_id or self._session_mgr.default_id
-                session = (
-                    self._session_mgr.get(wanted)
-                    if self._session_mgr.has(wanted)
-                    else None
-                )
-            if session is None:
-                return None
-            if (
-                kept is None
-                or kept[0] is not session
-                or kept[1] is not self.policies
-            ):
-                kept = (
-                    session,
-                    self.policies,
-                    session_view(session, read_only=True),
-                )
-            return (
-                kept[2],
-                self.vfs._for_session(session.session_id),
-                policy_caller(session, self.policies.account),
-            )
-
-        self._registry.policies.views = views
+        self._kept_view: tuple[SessionState, Policies, SessionView] | None = (
+            None
+        )
+        self._registry.policies.views = self._policy_views
         self._meta = WorkspaceMeta(
             self._workspace_id,
             self._state_store,
@@ -729,33 +625,7 @@ class Workspace:
         # store built them or the caller passed one in directly: delete
         # clears these, not only what the state store would hand out.
         self._planes = (stores.namespace, stores.observe, stores.sessions)
-        # Explicit at the construction site: the history view does not
-        # cache reads, so its policy can only ever be bounded, and keeps
-        # no listing, since it renders on every read.
-        self._registry.mount(
-            HISTORY_PREFIX,
-            HistoryViewVFS(self.observer),
-            MountMode.READ,
-            ReadSpec(),
-            write=WritePolicy.UNCONDITIONAL,
-            store=NULL_INDEX,
-        )
-        # One file per program, where PATH finds it: the same lookup
-        # which, type and command -v answer from. Each session lists its
-        # own programs, so no listing is kept.
-        self._registry.mount(
-            BIN_PREFIX,
-            BinViewVFS(
-                lambda: programs(self._call_session(), self._registry),
-                lambda name: program_note(
-                    name, self._call_session(), self._registry
-                ),
-            ),
-            MountMode.READ,
-            ReadSpec(),
-            write=WritePolicy.UNCONDITIONAL,
-            store=NULL_INDEX,
-        )
+        self._mount_views()
         # The facade delegates every op to the dispatcher, so FUSE and
         # programmatic ws.vfs walk the same pipeline as a shell command
         # and the policy gates fire exactly once, at that entry point. It runs
@@ -801,15 +671,7 @@ class Workspace:
         self.machine_table = MachineTable(
             machines, scan_host, signal_host, stop_host_run
         )
-        self.job_table.run_stopper = lambda record, signum: (
-            self.machine_table.stop(self.process_table, record, signum)
-        )
-        self.process_table.scanner = lambda: self.machine_table.scan(
-            self.process_table, self._workspace_id
-        )
-        self.process_table.sender = lambda handle, signum: (
-            self.machine_table.send(self.process_table, handle, signum)
-        )
+        self._wire_machines()
         self._runtimes = Runtimes(
             self._registry, self._runtime_binding, self.machine_table
         )
@@ -820,6 +682,211 @@ class Workspace:
                 RoutePolicy(route_policy, self._script_policy)
             )
 
+        self._start_installs(clis, specs)
+        self.machine_table.hold_handles()
+
+    def _apply_limits(
+        self,
+        command_limits: Mapping[str, Limit] | None,
+        max_body_bytes: str | int | None,
+        ceilings: Ceilings | None,
+        max_memory: str | int | None,
+        max_env: str | int | None,
+    ) -> None:
+        """Set the workspace's bounds on its registry.
+
+        Args:
+            command_limits (Mapping[str, Limit] | None): per-command limits.
+            max_body_bytes (str | int | None): the largest body.
+            ceilings (Ceilings | None): the host's ceilings.
+            max_memory (str | int | None): the workspace's memory.
+            max_env (str | int | None): the session variables' bytes.
+        """
+        check_command_limits(
+            command_limits or {}, "workspace", takes_line=True
+        )
+        self._registry.command_limits = dict(command_limits or {})
+        # What the RAM mounts store and what a command builds share the
+        # workspace's max_memory; None runs uncapped.
+        self._registry.body_limit = (
+            MAX_BODY_BYTES
+            if max_body_bytes is None
+            else parse_limit(max_body_bytes, "max_body_bytes")
+        )
+        # The host's ceilings hold what the workspace sets, a lifted
+        # bound included: max_memory and max_env here, a session's
+        # processes.max as a process starts, a line's time limit as the
+        # line starts.
+        self._registry.ceilings = ceilings or Ceilings()
+        memory = under_ceiling(
+            None
+            if max_memory is None
+            else parse_limit(max_memory, "max_memory"),
+            self._registry.ceilings.max_memory,
+        )
+        self._registry.memory = (
+            None
+            if memory is None
+            else MemoryBudget(memory, self._registry.held_in_memory)
+        )
+        self._registry.max_env = under_ceiling(
+            None if max_env is None else parse_limit(max_env, "max_env"),
+            self._registry.ceilings.max_env,
+        )
+
+    def _trace_job(self, record: Job) -> None:
+        """Tell the observer a job ended, on the machine it ran on.
+
+        Args:
+            record (Job): the job that ended.
+        """
+        machine = next(
+            (
+                process.machine
+                for process in self.process_table.records()
+                if process.pid == record.pid
+            ),
+            self.process_table.machine,
+        )
+        self.observer.trace_job(record, machine)
+
+    async def _end_lost(self) -> None:
+        """End what the daemon before this one left running, as its jobs
+        ended: hung up."""
+        now = self._clock.now()
+        hangup = HANGUP_EXIT_CODE - 128
+        store = self.job_table.store
+        # Read the store first: a process or line started, or ended,
+        # while it answers is this workspace's own by the time it is
+        # checked, and keeps the record it wrote.
+        records = await store.find_processes()
+        own = {record.pid for record in self.process_table.records()}
+        for record in records:
+            if record.ended_at is None and record.pid not in own:
+                store.note(
+                    replace(
+                        record,
+                        state=ProcessState.EXITED,
+                        ended_at=now,
+                        exit=HANGUP_EXIT_CODE,
+                        signal=hangup,
+                    )
+                )
+        lines = await store.find_lines()
+        read = {line.id for line in self.line_table.lines()}
+        for line in lines:
+            if line.ended_at is None and line.id not in read:
+                store.note(
+                    replace(
+                        line,
+                        state=LineState.EXITED,
+                        ended_at=now,
+                        exit=HANGUP_EXIT_CODE,
+                        signal=hangup,
+                    )
+                )
+
+    def _policy_views(
+        self,
+        session_id: str,
+        session: SessionState | None = None,
+    ) -> tuple[SessionView, Files, PolicyCaller] | None:
+        """What a policy method sees of its session.
+
+        Args:
+            session_id (str): the session the method's context names.
+            session (SessionState | None): the one it was built from.
+        """
+        # What every method sees of its session: the one its context was
+        # built from when given (a line explain walks), else the one the
+        # call is made under when the method's is it (a call's cwd and env
+        # included), else the session the id names, the default for none;
+        # nothing for an id this workspace holds no session for. Its
+        # caller is a copy of that session's id and working directory,
+        # so nothing a method does to it reaches the session. The view
+        # holds no state of its own, so the last session's is kept.
+        if session is None:
+            session = get_current_session_unless_foreign(self._session_mgr)
+        if session is None or session_id not in ("", session.session_id):
+            wanted = session_id or self._session_mgr.default_id
+            session = (
+                self._session_mgr.get(wanted)
+                if self._session_mgr.has(wanted)
+                else None
+            )
+        if session is None:
+            return None
+        kept = self._kept_view
+        if (
+            kept is None
+            or kept[0] is not session
+            or kept[1] is not self.policies
+        ):
+            kept = self._kept_view = (
+                session,
+                self.policies,
+                session_view(session, read_only=True),
+            )
+        return (
+            kept[2],
+            self.vfs._for_session(session.session_id),
+            policy_caller(session, self.policies.account),
+        )
+
+    def _mount_views(self) -> None:
+        """Mount the views the workspace itself serves."""
+        # Explicit at the construction site: the history view does not
+        # cache reads, so its policy can only ever be bounded, and keeps
+        # no listing, since it renders on every read.
+        self._registry.mount(
+            HISTORY_PREFIX,
+            HistoryViewVFS(self.observer),
+            MountMode.READ,
+            ReadSpec(),
+            write=WritePolicy.UNCONDITIONAL,
+            store=NULL_INDEX,
+        )
+        # One file per program, where PATH finds it: the same lookup
+        # which, type and command -v answer from. Each session lists its
+        # own programs, so no listing is kept.
+        self._registry.mount(
+            BIN_PREFIX,
+            BinViewVFS(
+                lambda: programs(self._call_session(), self._registry),
+                lambda name: program_note(
+                    name, self._call_session(), self._registry
+                ),
+            ),
+            MountMode.READ,
+            ReadSpec(),
+            write=WritePolicy.UNCONDITIONAL,
+            store=NULL_INDEX,
+        )
+
+    def _wire_machines(self) -> None:
+        """Send what the job and process tables do to a machine through
+        the machine table."""
+        self.job_table.run_stopper = lambda record, signum: (
+            self.machine_table.stop(self.process_table, record, signum)
+        )
+        self.process_table.scanner = lambda: self.machine_table.scan(
+            self.process_table, self._workspace_id
+        )
+        self.process_table.sender = lambda handle, signum: (
+            self.machine_table.send(self.process_table, handle, signum)
+        )
+
+    def _start_installs(
+        self,
+        clis: dict[str, tuple[str | CLI, dict[str, Any] | None]] | None,
+        specs: list[Any],
+    ) -> None:
+        """Install the CLIs, bind the clocks and start the kernel mounts.
+
+        Args:
+            clis (dict | None): the CLI entries by installed name.
+            specs (list[Any]): the normalized mount specs.
+        """
         # Installed CLIs, fully separate from mounts: the YAML `clis:`
         # section arrives as {head: (spec key or tree, config)}; a spec
         # key resolves against the named registry and every entry
@@ -840,7 +907,6 @@ class Workspace:
         except BaseException:
             self._registry.release_clocks()
             raise
-        self.machine_table.hold_handles()
 
     async def history(
         self,

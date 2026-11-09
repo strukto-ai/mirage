@@ -781,6 +781,57 @@ function recurse(
 }
 
 /**
+ * Record a line as it starts. A line bash's reader reads as several commands
+ * records each as it reaches it; any other is recorded as it starts, how it
+ * ended following it, as is one a postExecute policy sees whole before any of
+ * its output escapes. Mirrors Python's _open_history.
+ */
+async function openHistory(
+  env: ExecuteEnv,
+  command: string,
+  root: TSNodeLike,
+  session: SessionState,
+  sessionId: string,
+  options: ExecuteOptions,
+  typed: boolean,
+  lineSignal: AbortSignal | undefined,
+): Promise<LineHistory | null> {
+  const history =
+    typed && !(await env.registry.policies.wantsFor('postExecute', sessionId))
+      ? LineHistory.open(
+          env.observer,
+          command,
+          root,
+          sessionId,
+          session,
+          options.lineHandle?.id.value,
+          options.sink,
+        )
+      : null
+  if (history === null) {
+    await runCancellable(
+      env.observer.logCommand(command, sessionId, session.cwd, options.lineHandle?.id.value),
+      lineSignal,
+    )
+  }
+  return history
+}
+
+/** Record how a line ended, on its history or as one result. */
+function endRecord(
+  env: ExecuteEnv,
+  io: IOResult,
+  history: LineHistory | null,
+  session: SessionState,
+  sessionId: string,
+  options: ExecuteOptions,
+): Promise<void> {
+  return history !== null
+    ? history.end(io, [])
+    : env.observer.logResult(io, [], sessionId, session.cwd, options.lineHandle?.id.value)
+}
+
+/**
  * Run a line on the session it acquired, after admission is published.
  * Both paths of `runLine`, inside the managed process or not, end here.
  */
@@ -863,35 +914,18 @@ async function runPreparedLine(
             argv === undefined
               ? parser.parse(command, aliases, effectiveSession.shopts.extglob ?? false)
               : literalTree(argv)
-          // A line bash's reader reads as several commands records each as
-          // it reaches it; any other is recorded as it starts, how it ended
-          // following it, as is one a postExecute policy sees whole before
-          // any of its output escapes.
-          const history =
-            recorded &&
-            argv === undefined &&
-            !(await env.registry.policies.wantsFor('postExecute', targetSession.sessionId))
-              ? LineHistory.open(
-                  env.observer,
-                  command,
-                  root as unknown as TSNodeLike,
-                  targetSession.sessionId,
-                  effectiveSession,
-                  options.lineHandle?.id.value,
-                  options.sink,
-                )
-              : null
-          if (recorded && history === null) {
-            await runCancellable(
-              env.observer.logCommand(
+          const history = recorded
+            ? await openHistory(
+                env,
                 command,
+                root as unknown as TSNodeLike,
+                effectiveSession,
                 targetSession.sessionId,
-                effectiveSession.cwd,
-                options.lineHandle?.id.value,
-              ),
-              lineSignal,
-            )
-          }
+                options,
+                argv === undefined,
+                lineSignal,
+              )
+            : null
           // Syntax gates before policy, mirroring bash: an unparsable line exits 2
           // and the policy is never consulted about it. A refusal on a later
           // line leaves the lines before it to run first (`refusedRow`), as
@@ -994,16 +1028,14 @@ async function runPreparedLine(
             if (err instanceof RouteError) {
               if (recorded) {
                 const failed = failureResult(err)
-                const io = new IOResult({ exitCode: failed.exitCode, stderr: failed.stderr })
-                await (history !== null
-                  ? history.end(io, [])
-                  : env.observer.logResult(
-                      io,
-                      [],
-                      targetSession.sessionId,
-                      effectiveSession.cwd,
-                      options.lineHandle?.id.value,
-                    ))
+                await endRecord(
+                  env,
+                  new IOResult({ exitCode: failed.exitCode, stderr: failed.stderr }),
+                  history,
+                  effectiveSession,
+                  targetSession.sessionId,
+                  options,
+                )
               }
               throw err
             }
@@ -1113,15 +1145,7 @@ async function runPreparedLine(
               exitCode: answered.exitCode,
             })
             await runCancellable(
-              history !== null
-                ? history.end(io, [])
-                : env.observer.logResult(
-                    io,
-                    [],
-                    targetSession.sessionId,
-                    effectiveSession.cwd,
-                    options.lineHandle?.id.value,
-                  ),
+              endRecord(env, io, history, effectiveSession, targetSession.sessionId, options),
               lineSignal,
             )
           }
