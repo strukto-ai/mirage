@@ -20,7 +20,7 @@ import type { IssueRow } from './issues.ts'
 import { findWorkflowRow, runRow } from './actions.ts'
 import { createPull, pullRow, recordPullReview } from './pulls.ts'
 import type { PullRow } from './pulls.ts'
-import { allRepos, kept, metaOf, nextNumber, pullExtras, scope } from './store.ts'
+import { allRepos, kept, metaOf, nextCommentId, nextNumber, pullExtras, scope } from './store.ts'
 import type { RepoRow } from './store.ts'
 import {
   authedRoute,
@@ -66,7 +66,7 @@ function labelRow(repo: string, name: string, color: string, description: string
 
 // The fixture repository starts with the labels its issues carry: `gh` looks a
 // name up before it writes and refuses one the repository does not have.
-function labelsOf(ctx: { tenant: string; db: object }, repo: string): Map<string, LabelRow> {
+function labelsOf(ctx: { tenant: string; db: C }, repo: string): Map<string, LabelRow> {
   const rows = kept<LabelRow>(ctx, `labels\0${repo}`)
   const seeded = kept<boolean>(ctx, 'labels-seeded')
   if (repo === LABELED_REPO && seeded.get(repo) !== true) {
@@ -76,7 +76,7 @@ function labelsOf(ctx: { tenant: string; db: object }, repo: string): Map<string
   return rows
 }
 
-export function labelConnection(ctx: { tenant: string; db: object }, repo: RepoRow) {
+export function labelConnection(ctx: { tenant: string; db: C }, repo: RepoRow) {
   return ({
     first,
     after,
@@ -669,8 +669,7 @@ export function adminRoot(
     },
     addComment: async ({ input }: { input: { subjectId: string; body: string } }) => {
       const { repo, number } = await subject(ctx, input.subjectId)
-      const where = { ...scope(ctx.tenant), repo: repo.fullName }
-      const id = (await ctx.db.githubComment.count({ where })) + 1
+      const id = await nextCommentId(ctx.db, ctx.tenant, repo)
       await ctx.db.githubComment.create({
         data: {
           tenant: ctx.tenant,
@@ -817,15 +816,13 @@ export function adminRoot(
         where: { ...scope(ctx.tenant), repo: repo.fullName, issueNumber: number },
         orderBy: { seq: 'asc' },
       })) as { pk: number }[]
-      let id = await ctx.db.githubComment.count({
-        where: { ...scope(ctx.tenant), repo: destination.fullName },
-      })
+      let id = await nextCommentId(ctx.db, ctx.tenant, destination)
       for (const comment of moved) {
-        id += 1
         await ctx.db.githubComment.updateMany({
           where: { pk: comment.pk },
-          data: { repo: destination.fullName, issueNumber: made, id },
+          data: { repo: destination.fullName, issueNumber: made, id, seq: id },
         })
+        id += 1
       }
       return { issue: { url: urlOf(destination, false, made) } }
     },
@@ -862,7 +859,7 @@ async function setArchived(
   return { repository: { id } }
 }
 
-export function rulesetPage(ctx: { tenant: string; db: object }, owner: string) {
+export function rulesetPage(ctx: { tenant: string; db: C }, owner: string) {
   return ({ first, after }: PageArgs) => {
     const rows = [...kept<Record<string, JsonValue>>(ctx, `rulesets\0${owner}`).values()].map(
       (row) => ({
@@ -878,7 +875,7 @@ export function rulesetPage(ctx: { tenant: string; db: object }, owner: string) 
   }
 }
 
-export function gistPage(ctx: { tenant: string; db: object }) {
+export function gistPage(ctx: { tenant: string; db: C }) {
   return ({ first, after, privacy }: PageArgs & { privacy?: string | null }) => {
     const rows = [...kept<GistRow>(ctx, 'gists').values()]
       .filter((row) => privacy !== 'SECRET' || !row.public)

@@ -15,7 +15,7 @@
 import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts'
 import { API_PREFIXES, DEFAULT_LOGIN } from './config.ts'
 import type { C } from './config.ts'
-import { isPinned, lockReason, nextNumber, scope } from './store.ts'
+import { isPinned, lockReason, nextCommentId, nextNumber, scope } from './store.ts'
 import type { RepoRow } from './store.ts'
 import {
   authedRoute,
@@ -259,8 +259,7 @@ async function createComment(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const issue = await issueRow(ctx.db, ctx.tenant, repo, number)
   const pull = issue === null ? await pullRow(ctx.db, ctx.tenant, repo, number) : null
   if (issue === null && pull === null) return fail(404, 'Not Found')
-  const where = { ...scope(ctx.tenant), repo: repo.fullName }
-  const id = (await ctx.db.githubComment.count({ where })) + 1
+  const id = await nextCommentId(ctx.db, ctx.tenant, repo)
   const body = str(jsonBodyOf(ctx), 'body')
   await ctx.db.githubComment.create({
     data: {

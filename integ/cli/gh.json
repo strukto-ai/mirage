@@ -1462,10 +1462,10 @@
       "targets": [
         "cli-gh"
       ],
-      "command": "gh api graphql -f query='{ viewer { login } }' --jq .data.viewer.login",
+      "command": "gh api graphql -f query='{ viewer { login } }' --jq .data.viewer.login; gh api graphql --paginate -F first=1 -f query='query($first:Int!,$endCursor:String){repository(owner:\"integ\",name:\"repo-cli\"){labels(first:$first,after:$endCursor){nodes{name}pageInfo{hasNextPage endCursor}}}}' --jq '.data.repository.labels.nodes[].name'",
       "expect": {
         "exit": 0,
-        "stdout": "integ-user\n",
+        "stdout": "integ-user\nbug\ndocs\n",
         "stderr": ""
       }
     },
@@ -3208,6 +3208,19 @@
       "expect": {
         "exit": 0,
         "stdout": "Unknown JSON field: \"nosuch\"\nUnknown JSON field: \"nosuch\"\nUnknown JSON field: \"nosuch\"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_issue_transfer_keeps_comment_order_and_distinct_ids",
+      "seq": 9950065,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "d=integ-user/moved; gh repo fork integ/repo-cli --fork-name moved --clone=false --remote=false > /dev/null; a=$(gh issue create -t origin -b x | sed 's#.*/##'); gh issue comment $a -b first > /dev/null; gh issue comment $a -b second > /dev/null; b=$(gh issue create -R $d -t dest -b x | sed 's#.*/##'); gh issue comment $b -R $d -b one > /dev/null; gh issue comment $b -R $d -b two > /dev/null; gh api graphql -f query='mutation($id:ID!){deleteIssueComment(input:{id:$id}){clientMutationId}}' -f id=\"$(gh issue view $b -R $d --json comments --jq '.comments[0].id')\" > /dev/null; n=$(gh issue transfer $a $d | sed 's#.*/##'); gh issue comment $n -R $d -b third > /dev/null; gh issue view $n -R $d --json comments --jq '[.comments[].body]'; gh api graphql -f query='mutation($id:ID!){deleteIssueComment(input:{id:$id}){clientMutationId}}' -f id=\"$(gh issue view $n -R $d --json comments --jq '.comments[0].id')\" > /dev/null; gh issue view $n -R $d --json comments --jq '[.comments[].body]'; gh issue view $b -R $d --json comments --jq '[.comments[].body]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"first\",\"second\",\"third\"]\n[\"second\",\"third\"]\n[\"two\"]\n",
         "stderr": ""
       }
     }

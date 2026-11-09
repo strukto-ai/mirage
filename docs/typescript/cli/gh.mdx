@@ -223,7 +223,7 @@ gh api graphql -f query='{viewer{login}}'
 | `key[nested]`, `key[]` | Nested objects and arrays |
 | `--input FILE` | Request body from a file or `-`, sent as raw bytes; additional fields move to the query string |
 | `-H` / `--header` | Add or replace a header |
-| `--paginate` | Follow REST Link headers; array pages are joined |
+| `--paginate` | Follow REST Link headers, joining array pages, or a GraphQL query's `endCursor` |
 | `--slurp` | Wrap pages in an array; cannot be combined with `--jq` |
 | `-i` / `--include` | Print status and headers for each response, including failures |
 | `--silent` | Suppress the response body; `--include` still prints headers |

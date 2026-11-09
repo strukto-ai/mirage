@@ -489,6 +489,78 @@ fn printed(response: Response, head: String) -> Printed {
     }
 }
 
+/// A GraphQL body as gh groups one: `query` and `operationName` at the top and
+/// every other field under `variables`.
+fn graphql_body(fields: &Obj) -> Obj {
+    let mut top = Obj::new();
+    let mut variables = Obj::new();
+    for (key, item) in fields.iter() {
+        if key == "query" || key == "operationName" {
+            top.set(key.clone(), item.clone());
+        } else {
+            variables.set(key.clone(), item.clone());
+        }
+    }
+    if !variables.is_empty() {
+        top.set("variables", Json::Obj(variables));
+    }
+    top
+}
+
+/// Where a request carries its fields: the query string or a JSON body.
+fn placed(fields: &Obj, in_query: bool, graphql: bool) -> (Vec<(String, String)>, Option<Json>) {
+    if in_query {
+        let params = fields
+            .iter()
+            .map(|(key, item)| (key.clone(), query_value(item)))
+            .collect();
+        (params, None)
+    } else if fields.is_empty() {
+        (Vec::new(), None)
+    } else if graphql {
+        (Vec::new(), Some(Json::Obj(graphql_body(fields))))
+    } else {
+        (Vec::new(), Some(Json::Obj(fields.clone())))
+    }
+}
+
+/// Reads `pageInfo` objects in document order until both fields have been seen.
+fn scan_page_info(data: &Json, cursor: &mut Option<String>, more: &mut Option<bool>) {
+    match data {
+        Json::Arr(items) => {
+            for item in items {
+                scan_page_info(item, cursor, more);
+            }
+        }
+        Json::Obj(fields) => {
+            for (key, item) in fields.iter() {
+                if cursor.is_some() && more.is_some() {
+                    return;
+                }
+                match (key.as_str(), item) {
+                    ("pageInfo", Json::Obj(info)) => {
+                        if let Json::Str(text) = info.get("endCursor") {
+                            *cursor = Some(text.clone());
+                        }
+                        if let Json::Bool(next) = info.get("hasNextPage") {
+                            *more = Some(*next);
+                        }
+                    }
+                    _ => scan_page_info(item, cursor, more),
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The `endCursor` of a GraphQL answer that has another page.
+fn end_cursor(data: &Json) -> Option<String> {
+    let (mut cursor, mut more) = (None, None);
+    scan_page_info(data, &mut cursor, &mut more);
+    cursor.filter(|text| more == Some(true) && !text.is_empty())
+}
+
 /// The combinations `gh api` refuses before it reads a field.
 fn check_flags(flags: &Flags, endpoint: &str) -> Result<()> {
     let paginate = flags.gh_bool("paginate");
@@ -527,7 +599,7 @@ pub(crate) async fn api(account: &Account, flags: &Flags, texts: &[String]) -> R
         return wrong_count(1, texts);
     };
     check_flags(flags, endpoint)?;
-    let fields = fields(account, flags).await?;
+    let mut fields = fields(account, flags).await?;
     let input = input_body(account, flags).await?;
     let fallback = if !fields.is_empty() || input.is_some() {
         "POST"
@@ -545,41 +617,21 @@ pub(crate) async fn api(account: &Account, flags: &Flags, texts: &[String]) -> R
     if path != GRAPHQL_PATH && !path.starts_with('/') {
         path = format!("/{path}");
     }
-    let as_query = || -> Vec<(String, String)> {
-        fields
-            .iter()
-            .map(|(key, item)| (key.clone(), query_value(item)))
-            .collect()
-    };
-    let (params, body): (Vec<(String, String)>, Option<Json>) = if input.is_some() || upper == "GET"
-    {
-        (as_query(), None)
-    } else if fields.is_empty() {
-        (Vec::new(), None)
-    } else {
-        (Vec::new(), Some(Json::Obj(fields.clone())))
-    };
+    let graphql = path == GRAPHQL_PATH;
+    let in_query = input.is_some() || upper == "GET";
+    let (mut params, mut body) = placed(&fields, in_query, graphql);
     let include = flags.gh_bool("include");
     let headers = request_headers(flags)?;
     let mut pages: Vec<Printed> = Vec::new();
     let mut current = Some(path);
-    let mut first = true;
     while let Some(target) = current.take() {
-        let request_params: &[(String, String)] = if first { &params } else { &[] };
         let answer = match &input {
             Some(bytes) => {
-                github_request_bytes(account, wire, &target, bytes, request_params, &headers).await
+                github_request_bytes(account, wire, &target, bytes, &params, &headers).await
             }
             None => {
-                github_request_response(
-                    account,
-                    wire,
-                    &target,
-                    body.as_ref(),
-                    request_params,
-                    &headers,
-                )
-                .await
+                github_request_response(account, wire, &target, body.as_ref(), &params, &headers)
+                    .await
             }
         };
         let response = match answer {
@@ -620,10 +672,18 @@ pub(crate) async fn api(account: &Account, flags: &Flags, texts: &[String]) -> R
                 return failed(account, &pages, flags, failure, diagnostic).await;
             }
         }
+        let cursor = end_cursor(&page.data);
         pages.push(page);
-        first = false;
-        if flags.gh_bool("paginate") {
+        if !flags.gh_bool("paginate") {
+            continue;
+        }
+        if !graphql {
+            params.clear();
             current = next_path(link.as_deref(), account.base_url.as_deref());
+        } else if let Some(cursor) = cursor {
+            fields.set("endCursor", cursor);
+            (params, body) = placed(&fields, in_query, graphql);
+            current = Some(target);
         }
     }
     Ok(Out {
@@ -643,6 +703,36 @@ mod tests {
             put(&mut out, &key_parts(key).unwrap(), landed.as_ref()).unwrap();
         }
         out.dump()
+    }
+
+    #[test]
+    fn a_graphql_body_nests_its_variables() {
+        let mut fields = Obj::new();
+        fields.set("query", "q");
+        fields.set("operationName", "o");
+        fields.set("id", "x");
+        assert_eq!(
+            Json::Obj(graphql_body(&fields)).dump(),
+            r#"{"query":"q","operationName":"o","variables":{"id":"x"}}"#
+        );
+        fields = Obj::new();
+        fields.set("query", "q");
+        assert_eq!(Json::Obj(graphql_body(&fields)).dump(), r#"{"query":"q"}"#);
+    }
+
+    #[test]
+    fn a_graphql_answer_names_its_next_page() {
+        let answer = |more: &str| {
+            Json::parse(
+                format!(
+                    r#"{{"data":{{"a":[{{"pageInfo":{{"hasNextPage":{more},"endCursor":"c"}}}}]}}}}"#
+                )
+                .as_bytes(),
+            )
+            .unwrap()
+        };
+        assert_eq!(end_cursor(&answer("true")).as_deref(), Some("c"));
+        assert_eq!(end_cursor(&answer("false")), None);
     }
 
     #[test]
