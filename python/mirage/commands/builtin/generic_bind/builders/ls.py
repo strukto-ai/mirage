@@ -14,7 +14,6 @@
 
 
 from functools import partial
-from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.ls import facts, ls_generic, ls_options
@@ -22,44 +21,20 @@ from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.utils.tree import tree_walk
 from mirage.commands.config import CommandFn, Context
-from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
-# The options dir and vdir list as when nothing else is typed: columns,
-# and long, each with names quoted as -b does.
-DIR_FORMAT = "C"
-VDIR_FORMAT = "args_l"
-ESCAPED = {"QUOTING_STYLE": "escape"}
 
-
-def _parsed(
-    ctx: Context, program: str, default_format: str | None
-) -> dict[str, Any]:
-    if program == "ls":
-        return ls_options(ctx.flags, ctx.env)
-    env = {**ESCAPED, **(ctx.env or {})}
-    try:
-        return ls_options(ctx.flags, env, default_format)
-    except UsageError as exc:
-        said = (
-            str(exc)
-            .replace("ls: ", f"{program}: ", 1)
-            .replace("'ls --help'", f"'{program} --help'")
-        )
-        raise UsageError(said, exc.exit_code) from exc
-
-
-def _listing(program: str, default_format: str | None) -> CommandFn:
+def _listing(program: str) -> CommandFn:
     async def listing(
         accessor: Accessor,
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
     ) -> tuple[ByteSource | None, IOResult]:
-        options = _parsed(ctx, program, default_format)
+        options = ls_options(ctx.flags, ctx.env, program)
         files = command_files(ctx, paths)
         if not paths:
             paths = [
@@ -86,14 +61,10 @@ def _listing(program: str, default_format: str | None) -> CommandFn:
     return listing
 
 
-BUILDER = GenericCommand("ls", _listing("ls", None), facts=facts)
+BUILDER = GenericCommand("ls", _listing("ls"), facts=facts)
 DIR_BUILDER = GenericCommand(
-    "dir",
-    _listing("dir", DIR_FORMAT),
-    facts=partial(facts, default_format=DIR_FORMAT),
+    "dir", _listing("dir"), facts=partial(facts, program="dir")
 )
 VDIR_BUILDER = GenericCommand(
-    "vdir",
-    _listing("vdir", VDIR_FORMAT),
-    facts=partial(facts, default_format=VDIR_FORMAT),
+    "vdir", _listing("vdir"), facts=partial(facts, program="vdir")
 )

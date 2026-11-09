@@ -21,10 +21,8 @@ from mirage import RAMVFS, MountMode, Workspace
 async def test_yes():
     ws = Workspace({"/d": RAMVFS()}, mode=MountMode.WRITE)
     io = await ws.shell(
-        (
-            "yes | head -2; yes a b | head -2; yes -- -x | head -1; y"
-            "es --bogus | head -1"
-        )
+        "yes | head -2; yes a b | head -2; yes -- -x | head -1; "
+        "yes --bogus | head -1"
     )
     assert await io.stdout_str() == "y\ny\na b\na b\n-x\n"
     assert await io.stderr_str() == (

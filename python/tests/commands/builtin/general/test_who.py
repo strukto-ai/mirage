@@ -21,14 +21,12 @@ from mirage import RAMVFS, MountMode, Workspace
 async def test_who():
     ws = Workspace({"/d": RAMVFS()}, mode=MountMode.WRITE)
     io = await ws.shell(
-        (
-            "who; echo rc=$?; who -q; who -H; who a b; echo rc=$?; wh"
-            "o a b c; echo rc=$?"
-        )
+        "who; echo rc=$?; who -q; who -H; who a b; echo rc=$?; who "
+        "a b c; echo rc=$?"
     )
     assert await io.stdout_str() == (
-        "rc=0\n\n# users=0\nNAME     LINE         TIME         COMME"
-        "NT\nrc=0\nrc=1\n"
+        "rc=0\n\n# users=0\nNAME     LINE         TIME         "
+        "COMMENT\nrc=0\nrc=1\n"
     )
     assert await io.stderr_str() == (
         "who: extra operand 'c'\nTry 'who --help' for more information.\n"

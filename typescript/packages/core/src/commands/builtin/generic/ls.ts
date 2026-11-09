@@ -1110,14 +1110,39 @@ export function linkMode(fl: FlagView, values?: LsValues, defaultFormat?: string
 export function facts(
   fl: FlagView,
   _operands: readonly (string | PathSpec)[],
-  defaultFormat?: string,
+  program = 'ls',
 ): LineFacts {
   const recursive = fl.asBool('recursive')
   return new LineFacts({
-    follows: FOLLOWS[linkMode(fl, undefined, defaultFormat)],
+    follows: FOLLOWS[linkMode(fl, undefined, DEFAULT_FORMATS[program])],
     walks: recursive,
     readsSubtree: recursive,
   })
+}
+
+// The options dir and vdir list as when nothing else is typed: columns, and
+// long, each with names quoted as -b does.
+const DEFAULT_FORMATS: Readonly<Record<string, string>> = { dir: 'C', vdir: 'args_l' }
+const ESCAPED = { QUOTING_STYLE: 'escape' }
+
+/** `parseFlags` for the name the listing was run under: `dir` and `vdir` start
+ * from their own format and quoting, and refuse a line in their own name. */
+export function parseProgramFlags(
+  fl: FlagView,
+  env: Readonly<Record<string, string>>,
+  program: string,
+): LsFlags {
+  const defaultFormat = DEFAULT_FORMATS[program]
+  if (defaultFormat === undefined) return parseFlags(fl, env)
+  try {
+    return parseFlags(fl, { ...ESCAPED, ...env }, defaultFormat)
+  } catch (error) {
+    if (!(error instanceof UsageError)) throw error
+    const said = error.message
+      .replace('ls: ', `${program}: `)
+      .replace("'ls --help'", `'${program} --help'`)
+    throw new UsageError(said, error.exitCode)
+  }
 }
 
 // Parse the ls flag bag once into a frozen struct. The rules that are easy to

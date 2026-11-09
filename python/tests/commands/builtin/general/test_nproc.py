@@ -21,12 +21,10 @@ from mirage import RAMVFS, MountMode, Workspace
 async def test_nproc():
     ws = Workspace({"/d": RAMVFS()}, mode=MountMode.WRITE)
     io = await ws.shell(
-        (
-            "nproc; nproc --all; nproc --ignore=9; OMP_NUM_THREADS=4 "
-            "nproc; OMP_NUM_THREADS=4 OMP_THREAD_LIMIT=2 nproc; OMP_N"
-            "UM_THREADS=abc nproc; OMP_NUM_THREADS=4 nproc --all; npr"
-            "oc --ignore=x; echo rc=$?; nproc a; echo rc=$?"
-        )
+        "nproc; nproc --all; nproc --ignore=9; OMP_NUM_THREADS=4 "
+        "nproc; OMP_NUM_THREADS=4 OMP_THREAD_LIMIT=2 nproc; "
+        "OMP_NUM_THREADS=abc nproc; OMP_NUM_THREADS=4 nproc --all; "
+        "nproc --ignore=x; echo rc=$?; nproc a; echo rc=$?"
     )
     assert await io.stdout_str() == "1\n1\n1\n4\n2\n1\n1\nrc=1\nrc=1\n"
     assert await io.stderr_str() == (

@@ -165,6 +165,10 @@ _SCANNED = (
 # The environment ls reads where no option gives the value, and the name
 # the scan reads each one under.
 _ENVIRONMENT = (("QUOTING_STYLE", "quoting_env"), ("COLUMNS", "columns_env"))
+# The options dir and vdir list as when nothing else is typed: columns,
+# and long, each with names quoted as -b does.
+DEFAULT_FORMATS = {"dir": "C", "vdir": "args_l"}
+ESCAPED = {"QUOTING_STYLE": "escape"}
 # The quoting styles that leave some names bare, under which a bare name
 # in columns or a long listing takes a space to line up with quoted ones.
 _ALIGNED_STYLES = frozenset(("shell", "shell-escape", "c-maybe"))
@@ -363,7 +367,7 @@ def link_mode(
 def facts(
     fl: FlagView,
     operands: Sequence[str | PathSpec],
-    default_format: str | None = None,
+    program: str = "ls",
 ) -> LineFacts:
     """An ls line resolves the command-line links ``link_mode`` says, and
     walks, and reads, below its operands under ``-R``.
@@ -371,11 +375,13 @@ def facts(
     Args:
         fl (FlagView): spec-validated view over the raw flag kwargs.
         operands (Sequence[str | PathSpec]): the line's operands.
-        default_format (str | None): as in ``scan_values``.
+        program (str): the name the listing was run under.
     """
     recursive = fl.as_bool("recursive")
     return LineFacts(
-        follows=_FOLLOWS[link_mode(fl, default_format=default_format)],
+        follows=_FOLLOWS[
+            link_mode(fl, default_format=DEFAULT_FORMATS.get(program))
+        ],
         walks=recursive,
         reads_subtree=recursive,
     )
@@ -462,10 +468,39 @@ def parse_flags(
     )
 
 
+def parse_program_flags(
+    flags: Mapping[str, FlagValue],
+    env: Mapping[str, str] | None = None,
+    program: str = "ls",
+) -> LsFlags:
+    """``parse_flags`` for the name the listing was run under: ``dir`` and
+    ``vdir`` start from their own format and quoting, and refuse a line
+    in their own name.
+
+    Args:
+        flags (Mapping[str, FlagValue]): Flags for the shared ls spec.
+        env (Mapping[str, str] | None): the environment, for
+            ``QUOTING_STYLE`` and ``COLUMNS``.
+        program (str): the name the listing was run under.
+    """
+    default_format = DEFAULT_FORMATS.get(program)
+    if default_format is None:
+        return parse_flags(flags, env)
+    try:
+        return parse_flags(flags, {**ESCAPED, **(env or {})}, default_format)
+    except UsageError as exc:
+        said = (
+            str(exc)
+            .replace("ls: ", f"{program}: ", 1)
+            .replace("'ls --help'", f"'{program} --help'")
+        )
+        raise UsageError(said, exc.exit_code) from exc
+
+
 def ls_options(
     flags: Mapping[str, FlagValue],
     env: Mapping[str, str] | None = None,
-    default_format: str | None = None,
+    program: str = "ls",
 ) -> dict[str, Any]:
     """Parsed ls flags as the generic's own keyword arguments.
 
@@ -478,9 +513,9 @@ def ls_options(
         flags (Mapping[str, FlagValue]): Flags for the shared ls spec.
         env (Mapping[str, str] | None): the environment, for
             ``QUOTING_STYLE`` and ``COLUMNS``.
-        default_format (str | None): as in ``scan_values``.
+        program (str): the name the listing was run under.
     """
-    parsed = parse_flags(flags, env, default_format)
+    parsed = parse_program_flags(flags, env, program)
     return {f.name: getattr(parsed, f.name) for f in fields(parsed)}
 
 

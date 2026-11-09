@@ -23,7 +23,7 @@ async def test_hostid():
     io = await ws.shell("hostid; hostid x; echo rc=$?")
     assert await io.stdout_str() == "00000000\nrc=1\n"
     assert await io.stderr_str() == (
-        "hostid: extra operand 'x'\nTry 'hostid --help' for more i"
-        "nformation.\n"
+        "hostid: extra operand 'x'\nTry 'hostid --help' for more "
+        "information.\n"
     )
     assert io.exit_code == 0

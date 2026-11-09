@@ -23,7 +23,7 @@ async def test_logname():
     io = await ws.shell("logname; echo rc=$?; logname x; echo rc=$?")
     assert await io.stdout_str() == "rc=1\nrc=1\n"
     assert await io.stderr_str() == (
-        "logname: no login name\nlogname: extra operand 'x'\nTry 'l"
-        "ogname --help' for more information.\n"
+        "logname: no login name\nlogname: extra operand 'x'\nTry "
+        "'logname --help' for more information.\n"
     )
     assert io.exit_code == 0

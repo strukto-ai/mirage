@@ -21,16 +21,14 @@ from mirage import RAMVFS, MountMode, Workspace
 async def test_tty():
     ws = Workspace({"/d": RAMVFS()}, mode=MountMode.WRITE)
     io = await ws.shell(
-        (
-            "tty; echo rc=$?; tty -s; echo rc=$?; tty x; echo rc=$?; "
-            "tty --bogus; echo rc=$?; tty --silent x; echo rc=$?"
-        )
+        "tty; echo rc=$?; tty -s; echo rc=$?; tty x; echo rc=$?; "
+        "tty --bogus; echo rc=$?; tty --silent x; echo rc=$?"
     )
     assert await io.stdout_str() == "not a tty\nrc=1\nrc=1\nrc=2\nrc=2\nrc=2\n"
     assert await io.stderr_str() == (
-        "tty: extra operand 'x'\nTry 'tty --help' for more informa"
-        "tion.\ntty: unrecognized option '--bogus'\nTry 'tty --help"
-        "' for more information.\ntty: extra operand 'x'\nTry 'tty "
-        "--help' for more information.\n"
+        "tty: extra operand 'x'\nTry 'tty --help' for more "
+        "information.\ntty: unrecognized option '--bogus'\nTry 'tty "
+        "--help' for more information.\ntty: extra operand 'x'\nTry "
+        "'tty --help' for more information.\n"
     )
     assert io.exit_code == 0
