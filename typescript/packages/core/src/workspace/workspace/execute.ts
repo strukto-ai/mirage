@@ -19,6 +19,7 @@ import { runWithMemory } from '../../io/memory.ts'
 import { runWithEgress } from '../../io/gateway.ts'
 import { runWithNetwork } from '../../io/network.ts'
 import type { Runtime } from '../../runtime/base.ts'
+import type { LineExecutorMixin } from '../../runtime/mixin.ts'
 import { EvaluationContext, childContext } from '../evaluation.ts'
 import { ParseScope } from '../../shell/parse/scope.ts'
 
@@ -479,6 +480,299 @@ async function runLine(
  * Run a line on the session it acquired, after admission is published.
  * Both paths of `runLine`, inside the managed process or not, end here.
  */
+/** End a line bash cannot read, as where it was read says. Mirrors Python's `_unreadable_line`. */
+async function unreadableLine(
+  env: ExecuteEnv,
+  command: string,
+  options: ExecuteOptions,
+  targetSession: SessionState,
+  effectiveSession: SessionState,
+  io: IOResult,
+  history: LineHistory | null,
+): Promise<ExecuteResult> {
+  const callStack = options.callStack
+  if (
+    effectiveSession.shellOptions.errexit === true &&
+    !effectiveSession.errexitImmune &&
+    !effectiveSession.errexitIgnored
+  ) {
+    // Where `set -e` acts, bash prints a refusal's first line alone
+    // and ends the shell with 2.
+    const message = await materialize(io.stderr)
+    const first = message.subarray(0, message.indexOf(10) + 1)
+    if (callStack !== undefined) throw new ExitSignal(2, first)
+    return await answerLine(
+      env,
+      command,
+      options,
+      targetSession,
+      new ExecuteResult(new Uint8Array(), first, 2),
+      history,
+    )
+  }
+  // A substitution bash cannot parse ends the shell, from `eval` and
+  // `source` too: 127, or 1 out of a child.
+  if (callStack !== undefined && io.exitCode === 127) {
+    const ended = new ExitSignal(127, await materialize(io.stderr), null, 1)
+    ended.refused = true
+    throw ended
+  }
+  // An array bash cannot read discards its line: `eval` and `source`
+  // return 1, and a child shell ends there.
+  if (callStack?.subshell === true && io.exitCode === 1)
+    throw new DiscardSignal(await materialize(io.stderr))
+  return await answerLine(
+    env,
+    command,
+    options,
+    targetSession,
+    new ExecuteResult(new Uint8Array(), await materialize(io.stderr), io.exitCode),
+    history,
+  )
+}
+
+/**
+ * The entry point the executor's internal evals (`$()`, `source`, `eval`,
+ * `xargs`) run a line through. Mirrors Python's `recurse`.
+ */
+function recurse(
+  env: ExecuteEnv,
+  options: ExecuteOptions,
+  context: EvaluationContext,
+  effectiveSession: SessionState,
+  routingDecision: RouteDecision<Runtime>,
+  nested: NestedRefusal,
+  parser: ParseScope,
+  handed: HandOff,
+  deps: () => ExecuteNodeDeps,
+): ExecuteFn {
+  const executeFn: ExecuteFn = async (cmd, opts) => {
+    // The executor's internal evals ($(), eval, source, xargs) are
+    // never a typed line: they must not record a history entry or open
+    // their own recording context, so their ops flow into this line's
+    // recorder (GNU: history is appended by the line reader).
+    const innerOpts: ExecuteOptions = {
+      record: false,
+      sessionId: opts.sessionId,
+      session: opts.session ?? opts.context?.session ?? effectiveSession,
+      evaluation: opts.context ?? context,
+    }
+    // The walker already merged its signal into this one (`executeNode`),
+    // so a `timeout` bound and a background job's own abort both reach it.
+    const innerSignal = opts.signal
+    if (innerSignal !== undefined) innerOpts.signal = innerSignal
+    if (opts.lineHandle !== undefined) innerOpts.lineHandle = opts.lineHandle
+    // The agent rides with the execution: an approval a nested line
+    // raises is the typed line's agent's, not the workspace default's.
+    // Nested lines never re-route: the evaluator's inner lines keep
+    // the typed line's decision (runtime argument, policy, or bindings),
+    // the narrower one `builtin` hands its target, or the one a
+    // preCommand route gave the command running them.
+    innerOpts.routingDecision = opts.routingDecision ?? routingDecision
+    // Under the hand-off the walker bound, standing at the node whose
+    // text this is; outside a walk (no hand-off bound) the inner line
+    // is a line of its own.
+    if (opts.handed !== undefined) {
+      innerOpts.handed =
+        opts.node === undefined
+          ? { claimed: [], parent: opts.handed, origin: null }
+          : evaluatedFrom(opts.node, opts.handed, opts.span)
+    }
+    // `command NAME` re-runs the inner line and must forward the pipe
+    // stdin so `... | command cat` filters the upstream output; the same
+    // path carries `echo hi | bash -c 'cat'` into the inner line.
+    if (opts.stdin !== undefined && opts.stdin !== null) innerOpts.stdin = opts.stdin
+    // A line run in place under a sink (eval, source, a nested shell)
+    // writes its statements there as they finish.
+    if (opts.sink !== undefined) innerOpts.sink = opts.sink
+    if (opts.callStack !== undefined) innerOpts.callStack = opts.callStack
+    // A nested shell's jobs are its own: its `jobs` and `wait` see
+    // only them, and its caller's never see them.
+    const jobs = opts.jobTable ?? options.jobTable
+    if (jobs !== undefined) innerOpts.jobTable = jobs
+    let innerContext = opts.context ?? context
+    let session = opts.session ?? innerContext.session
+    if (session !== innerContext.session)
+      innerContext = new EvaluationContext(session, innerContext.frame.fork(), innerContext)
+    innerOpts.evaluation = innerContext
+    if (opts.substitution === true && opts.node?.type === NT.COMMAND_SUBSTITUTION) {
+      // A background evaluation can outlive the line that created this entry point.
+      const substitutionParser = parser.fork()
+      try {
+        const substitutionTree = substitutionParser.parse(cmd)
+        if (inputSubstitutionRedirect(substitutionTree) !== null) {
+          // The file was named in the shell expanding the substitution;
+          // the read runs on its child's copy.
+          if (opts.records !== undefined) {
+            innerContext = childContext(innerContext, opts.records)
+          }
+          // The file is the substitution's value, never what the line
+          // shows: the read runs with no sink, the line's terminal least
+          // of all.
+          const [stdout, io] = await runCommandTree(
+            withHandOff(
+              {
+                ...deps(),
+                parser: substitutionParser,
+                ...(innerSignal !== undefined ? { signal: innerSignal } : {}),
+                ...(opts.lineHandle !== undefined ? { lineHandle: opts.lineHandle } : {}),
+              },
+              innerOpts.handed ?? handed,
+            ),
+            substitutionTree,
+            innerContext,
+            null,
+            true,
+            null,
+            (await env.registry.policies.wantsFor('postExecute', session.sessionId))
+              ? env.router.context(
+                  cmd,
+                  session,
+                  await lineJudgments(
+                    substitutionTree as unknown as TSNodeLike,
+                    session,
+                    env.registry,
+                    env.namespace,
+                    innerOpts.handed ?? handed,
+                    (source) => substitutionParser.parse(source) as unknown as TSNodeLike,
+                  ),
+                )
+              : null,
+            opts.read ?? null,
+          )
+          io.stdout = stdout
+          recordStatus(session, io.exitCode, true)
+          if (io.refusal !== null) nested.latest = io.refusal
+          return io
+        }
+      } finally {
+        substitutionParser.release()
+      }
+    }
+    const substitution = opts.substitution === true
+    if (substitution) {
+      innerContext = childContext(innerContext, opts.records ?? null)
+      innerContext.frame.substitution = true
+      session = innerContext.session
+      // A backtick's body is read as it runs, so a refusal in it names
+      // the substitution, as bash's does; a `$( )` was read with its
+      // line.
+      session.parseHead = `${voiceName(session)}: command substitution: `
+      // A `$( )` or `<( )` body is read again as bash prints it, a
+      // backtick's as typed (`rereadRows`).
+      session.reread =
+        opts.node !== undefined && opts.span === undefined && !getText(opts.node).startsWith('`')
+      innerOpts.session = session
+      innerOpts.evaluation = innerContext
+    }
+    const capture = new Terminal()
+    const waits = new JobWaits(capture.jobs)
+    const rest = session.jobOutput ?? session.tty.jobs
+    if (substitution) {
+      session.terminalOutput = false
+      inheritTraps(session)
+      // bash runs a substitution without `set -e` unless
+      // `shopt -s inherit_errexit` (or POSIX mode) passes it on.
+      if (session.shopts.inherit_errexit !== true && session.shellOptions.posix !== true)
+        session.shellOptions.errexit = false
+      // A substitution reads its pipe until every writer has closed
+      // it, so what a job it started writes is part of its value,
+      // and it ends when its jobs do. They are its own jobs.
+      session.jobOutput = capture.jobs
+      session.jobWaits = waits
+      const caller = innerOpts.jobTable ?? env.jobTable
+      innerOpts.jobTable = caller.child(caller)
+      if (opts.sink !== undefined) await capture.attach(opts.sink)
+      innerOpts.sink = capture
+    }
+
+    const substitute = async (): Promise<IOResult> => {
+      let io: IOResult
+      try {
+        const res = await env.execute(cmd, innerOpts)
+        // The record rides back with the streams: a refusal the inner
+        // line earned is the outer line's to report.
+        if (res.refusal !== null) nested.latest = res.refusal
+        io = new IOResult({
+          exitCode: res.exitCode,
+          stdout: res.stdout,
+          stderr: res.stderr,
+          refusal: res.refusal,
+        })
+      } catch (err) {
+        // A substitution runs on a copy of the caller's frames, and it
+        // is a child shell: whatever unwinds out of it ends it.
+        if (!substitution || !isUnwinding(err)) throw err
+        io = ended(err)
+      }
+      if (!substitution) return io
+      // Its EXIT action runs as the substitution, which a stop ends.
+      const { node, handed: outer, lineHandle } = opts
+      const signal = innerOpts.signal
+      const shellJobs = innerOpts.jobTable
+      io = await finishShell(
+        (action, o) =>
+          executeFn(action, {
+            ...o,
+            session,
+            ...(node !== undefined ? { node } : {}),
+            ...(outer !== undefined ? { handed: outer } : {}),
+            ...(signal !== undefined ? { signal } : {}),
+            ...(lineHandle !== undefined ? { lineHandle } : {}),
+            ...(shellJobs !== undefined ? { jobTable: shellJobs } : {}),
+          }),
+        session,
+        io,
+        opts.stdin ?? null,
+        opts.callStack ?? null,
+      )
+      await capture.emit(Channel.STDOUT, await io.materializeStdout())
+      await capture.emit(Channel.STDERR, await io.materializeStderr())
+      return io
+    }
+
+    try {
+      if (!substitution) return await substitute()
+      // bash forks a substitution: a process of its own, whose
+      // `$BASHPID` a signal stops alone (`$(kill -9 $BASHPID)`).
+      const abort = new AbortController()
+      innerOpts.signal =
+        innerOpts.signal === undefined
+          ? abort.signal
+          : AbortSignal.any([innerOpts.signal, abort.signal])
+      const done: IOResult[] = []
+      const process = startShell(
+        (innerOpts.jobTable ?? env.jobTable).processes,
+        session,
+        cmd,
+        async () => {
+          const io = await substitute()
+          done.push(io)
+          return io.exitCode
+        },
+        session.processId,
+        () => {
+          abort.abort()
+        },
+        (forked) => {
+          session.processId = forked.record.id.pid
+          innerContext.frame.shell = forked
+        },
+      )
+      const code = await process.reap(opts.signal ?? null)
+      const io = done[0] ?? new IOResult({ exitCode: code })
+      await waits.join(rest)
+      const [out, err] = capture.take()
+      io.stdout = out.byteLength > 0 ? out : null
+      io.stderr = err.byteLength > 0 ? err : null
+      return io
+    } finally {
+      if (substitution) await session.closeInputs()
+    }
+  }
+  return executeFn
+}
+
 async function runPreparedLine(
   env: ExecuteEnv,
   command: string,
@@ -604,43 +898,13 @@ async function runPreparedLine(
                 )
               : null
           if (io !== null) {
-            const callStack = options.callStack
-            if (
-              effectiveSession.shellOptions.errexit === true &&
-              !effectiveSession.errexitImmune &&
-              !effectiveSession.errexitIgnored
-            ) {
-              // Where `set -e` acts, bash prints a refusal's first line alone
-              // and ends the shell with 2.
-              const message = await materialize(io.stderr)
-              const first = message.subarray(0, message.indexOf(10) + 1)
-              if (callStack !== undefined) throw new ExitSignal(2, first)
-              return await answerLine(
-                env,
-                command,
-                options,
-                targetSession,
-                new ExecuteResult(new Uint8Array(), first, 2),
-                history,
-              )
-            }
-            // A substitution bash cannot parse ends the shell, from `eval` and
-            // `source` too: 127, or 1 out of a child.
-            if (callStack !== undefined && io.exitCode === 127) {
-              const ended = new ExitSignal(127, await materialize(io.stderr), null, 1)
-              ended.refused = true
-              throw ended
-            }
-            // An array bash cannot read discards its line: `eval` and `source`
-            // return 1, and a child shell ends there.
-            if (callStack?.subshell === true && io.exitCode === 1)
-              throw new DiscardSignal(await materialize(io.stderr))
-            return await answerLine(
+            return await unreadableLine(
               env,
               command,
               options,
               targetSession,
-              new ExecuteResult(new Uint8Array(), await materialize(io.stderr), io.exitCode),
+              effectiveSession,
+              io,
               history,
             )
           }
@@ -767,232 +1031,17 @@ async function runPreparedLine(
 
           const dispatch: DispatchFn = env.dispatcher.forSession(effectiveSession).dispatch
 
-          const executeFn: ExecuteFn = async (cmd, opts) => {
-            // The executor's internal evals ($(), eval, source, xargs) are
-            // never a typed line: they must not record a history entry or open
-            // their own recording context, so their ops flow into this line's
-            // recorder (GNU: history is appended by the line reader).
-            const innerOpts: ExecuteOptions = {
-              record: false,
-              sessionId: opts.sessionId,
-              session: opts.session ?? opts.context?.session ?? effectiveSession,
-              evaluation: opts.context ?? context,
-            }
-            // The walker already merged its signal into this one (`executeNode`),
-            // so a `timeout` bound and a background job's own abort both reach it.
-            const innerSignal = opts.signal
-            if (innerSignal !== undefined) innerOpts.signal = innerSignal
-            if (opts.lineHandle !== undefined) innerOpts.lineHandle = opts.lineHandle
-            // The agent rides with the execution: an approval a nested line
-            // raises is the typed line's agent's, not the workspace default's.
-            // Nested lines never re-route: the evaluator's inner lines keep
-            // the typed line's decision (runtime argument, policy, or bindings),
-            // the narrower one `builtin` hands its target, or the one a
-            // preCommand route gave the command running them.
-            innerOpts.routingDecision = opts.routingDecision ?? routingDecision
-            // Under the hand-off the walker bound, standing at the node whose
-            // text this is; outside a walk (no hand-off bound) the inner line
-            // is a line of its own.
-            if (opts.handed !== undefined) {
-              innerOpts.handed =
-                opts.node === undefined
-                  ? { claimed: [], parent: opts.handed, origin: null }
-                  : evaluatedFrom(opts.node, opts.handed, opts.span)
-            }
-            // `command NAME` re-runs the inner line and must forward the pipe
-            // stdin so `... | command cat` filters the upstream output; the same
-            // path carries `echo hi | bash -c 'cat'` into the inner line.
-            if (opts.stdin !== undefined && opts.stdin !== null) innerOpts.stdin = opts.stdin
-            // A line run in place under a sink (eval, source, a nested shell)
-            // writes its statements there as they finish.
-            if (opts.sink !== undefined) innerOpts.sink = opts.sink
-            if (opts.callStack !== undefined) innerOpts.callStack = opts.callStack
-            // A nested shell's jobs are its own: its `jobs` and `wait` see
-            // only them, and its caller's never see them.
-            const jobs = opts.jobTable ?? options.jobTable
-            if (jobs !== undefined) innerOpts.jobTable = jobs
-            let innerContext = opts.context ?? context
-            let session = opts.session ?? innerContext.session
-            if (session !== innerContext.session)
-              innerContext = new EvaluationContext(session, innerContext.frame.fork(), innerContext)
-            innerOpts.evaluation = innerContext
-            if (opts.substitution === true && opts.node?.type === NT.COMMAND_SUBSTITUTION) {
-              // A background evaluation can outlive the line that created this entry point.
-              const substitutionParser = parser.fork()
-              try {
-                const substitutionTree = substitutionParser.parse(cmd)
-                if (inputSubstitutionRedirect(substitutionTree) !== null) {
-                  // The file was named in the shell expanding the substitution;
-                  // the read runs on its child's copy.
-                  if (opts.records !== undefined) {
-                    innerContext = childContext(innerContext, opts.records)
-                  }
-                  // The file is the substitution's value, never what the line
-                  // shows: the read runs with no sink, the line's terminal least
-                  // of all.
-                  const [stdout, io] = await runCommandTree(
-                    withHandOff(
-                      {
-                        ...lineDeps,
-                        parser: substitutionParser,
-                        ...(innerSignal !== undefined ? { signal: innerSignal } : {}),
-                        ...(opts.lineHandle !== undefined ? { lineHandle: opts.lineHandle } : {}),
-                      },
-                      innerOpts.handed ?? handed,
-                    ),
-                    substitutionTree,
-                    innerContext,
-                    null,
-                    true,
-                    null,
-                    (await env.registry.policies.wantsFor('postExecute', session.sessionId))
-                      ? env.router.context(
-                          cmd,
-                          session,
-                          await lineJudgments(
-                            substitutionTree as unknown as TSNodeLike,
-                            session,
-                            env.registry,
-                            env.namespace,
-                            innerOpts.handed ?? handed,
-                            (source) => substitutionParser.parse(source) as unknown as TSNodeLike,
-                          ),
-                        )
-                      : null,
-                    opts.read ?? null,
-                  )
-                  io.stdout = stdout
-                  recordStatus(session, io.exitCode, true)
-                  if (io.refusal !== null) nested.latest = io.refusal
-                  return io
-                }
-              } finally {
-                substitutionParser.release()
-              }
-            }
-            const substitution = opts.substitution === true
-            if (substitution) {
-              innerContext = childContext(innerContext, opts.records ?? null)
-              innerContext.frame.substitution = true
-              session = innerContext.session
-              // A backtick's body is read as it runs, so a refusal in it names
-              // the substitution, as bash's does; a `$( )` was read with its
-              // line.
-              session.parseHead = `${voiceName(session)}: command substitution: `
-              // A `$( )` or `<( )` body is read again as bash prints it, a
-              // backtick's as typed (`rereadRows`).
-              session.reread =
-                opts.node !== undefined &&
-                opts.span === undefined &&
-                !getText(opts.node).startsWith('`')
-              innerOpts.session = session
-              innerOpts.evaluation = innerContext
-            }
-            const capture = new Terminal()
-            const waits = new JobWaits(capture.jobs)
-            const rest = session.jobOutput ?? session.tty.jobs
-            if (substitution) {
-              session.terminalOutput = false
-              inheritTraps(session)
-              // bash runs a substitution without `set -e` unless
-              // `shopt -s inherit_errexit` (or POSIX mode) passes it on.
-              if (session.shopts.inherit_errexit !== true && session.shellOptions.posix !== true)
-                session.shellOptions.errexit = false
-              // A substitution reads its pipe until every writer has closed
-              // it, so what a job it started writes is part of its value,
-              // and it ends when its jobs do. They are its own jobs.
-              session.jobOutput = capture.jobs
-              session.jobWaits = waits
-              const caller = innerOpts.jobTable ?? env.jobTable
-              innerOpts.jobTable = caller.child(caller)
-              if (opts.sink !== undefined) await capture.attach(opts.sink)
-              innerOpts.sink = capture
-            }
-
-            const substitute = async (): Promise<IOResult> => {
-              let io: IOResult
-              try {
-                const res = await env.execute(cmd, innerOpts)
-                // The record rides back with the streams: a refusal the inner
-                // line earned is the outer line's to report.
-                if (res.refusal !== null) nested.latest = res.refusal
-                io = new IOResult({
-                  exitCode: res.exitCode,
-                  stdout: res.stdout,
-                  stderr: res.stderr,
-                  refusal: res.refusal,
-                })
-              } catch (err) {
-                // A substitution runs on a copy of the caller's frames, and it
-                // is a child shell: whatever unwinds out of it ends it.
-                if (!substitution || !isUnwinding(err)) throw err
-                io = ended(err)
-              }
-              if (!substitution) return io
-              // Its EXIT action runs as the substitution, which a stop ends.
-              const { node, handed: outer, lineHandle } = opts
-              const signal = innerOpts.signal
-              const shellJobs = innerOpts.jobTable
-              io = await finishShell(
-                (action, o) =>
-                  executeFn(action, {
-                    ...o,
-                    session,
-                    ...(node !== undefined ? { node } : {}),
-                    ...(outer !== undefined ? { handed: outer } : {}),
-                    ...(signal !== undefined ? { signal } : {}),
-                    ...(lineHandle !== undefined ? { lineHandle } : {}),
-                    ...(shellJobs !== undefined ? { jobTable: shellJobs } : {}),
-                  }),
-                session,
-                io,
-                opts.stdin ?? null,
-                opts.callStack ?? null,
-              )
-              await capture.emit(Channel.STDOUT, await io.materializeStdout())
-              await capture.emit(Channel.STDERR, await io.materializeStderr())
-              return io
-            }
-
-            try {
-              if (!substitution) return await substitute()
-              // bash forks a substitution: a process of its own, whose
-              // `$BASHPID` a signal stops alone (`$(kill -9 $BASHPID)`).
-              const abort = new AbortController()
-              innerOpts.signal =
-                innerOpts.signal === undefined
-                  ? abort.signal
-                  : AbortSignal.any([innerOpts.signal, abort.signal])
-              const done: IOResult[] = []
-              const process = startShell(
-                (innerOpts.jobTable ?? env.jobTable).processes,
-                session,
-                cmd,
-                async () => {
-                  const io = await substitute()
-                  done.push(io)
-                  return io.exitCode
-                },
-                session.processId,
-                () => {
-                  abort.abort()
-                },
-                (forked) => {
-                  session.processId = forked.record.id.pid
-                  innerContext.frame.shell = forked
-                },
-              )
-              const code = await process.reap(opts.signal ?? null)
-              const io = done[0] ?? new IOResult({ exitCode: code })
-              await waits.join(rest)
-              const [out, err] = capture.take()
-              io.stdout = out.byteLength > 0 ? out : null
-              io.stderr = err.byteLength > 0 ? err : null
-              return io
-            } finally {
-              if (substitution) await session.closeInputs()
-            }
-          }
+          const executeFn = recurse(
+            env,
+            options,
+            context,
+            effectiveSession,
+            routingDecision,
+            nested,
+            parser,
+            handed,
+            () => lineDeps,
+          )
 
           const lineDeps: ExecuteNodeDeps = {
             dispatch,
@@ -1105,6 +1154,262 @@ async function preflight(env: ExecuteEnv): Promise<void> {
   }
 }
 
+/**
+ * Filled only after the applicable line-tier admission (a refused
+ * line must never reach a secret store) and before expansion or the
+ * runtime's env snapshot reads the vars. The prejudge pass leaves
+ * single-command lines to the per-command gate, so the tree branch
+ * asks the same text-tier question itself (`probeText`), over the
+ * same walked set the names came from: a node already denied on its
+ * literal words never reaches a source, and a rule that asks is
+ * answered before the fetch, with the approval left for the gate to
+ * spend. A deny only the value gate can see still follows the fetch,
+ * because expansion is what consumes the values. A SecretsError
+ * folds like any failed line: the line exits 1 and never runs.
+ * Mirrors Python's `_fill_managed`.
+ */
+async function fillManaged(
+  env: ExecuteEnv,
+  targetSession: SessionState,
+  effectiveSession: SessionState,
+  decision: RouteDecision<Runtime>,
+  handed: HandOff,
+  reparse: (line: string) => TSNodeLike,
+  killed: AbortSignal | undefined,
+  nodes: TSNodeLike[],
+  whole: boolean,
+  lineCliEnvNames: ReadonlySet<string>,
+  probeText: boolean,
+): Promise<ExecuteResult | null> {
+  try {
+    let planNodes = nodes
+    let planWhole = whole
+    let planCli = lineCliEnvNames
+    let names = fillNames(effectiveSession, planNodes, planWhole, planCli)
+    if (names.size > 0 && probeText) {
+      const served = await unrefusedNodes(
+        nodes,
+        effectiveSession,
+        env.registry,
+        env.namespace,
+        handed,
+        reparse,
+        killed,
+      )
+      if (served.length !== nodes.length) {
+        planNodes = served
+        planWhole = guestBound(served, decision)
+        planCli = cliEnvNames(served, effectiveSession, env.registry)
+        names =
+          served.length === 0
+            ? new Set<string>()
+            : fillNames(effectiveSession, planNodes, planWhole, planCli)
+      }
+    }
+    // A fetched value can name another managed variable (the
+    // arithmetic chase recurses through values), and what a value
+    // spells is unknowable before its fetch, so the plan reruns
+    // over the same admitted nodes until it reaches nothing new.
+    // fillNames returns pending names only, so every pass fetches
+    // names the last one could not see and the loop settles.
+    while (names.size > 0) {
+      // Built here, not above the plan: the declarations are read
+      // only once an admitted node actually wants a value, so a line
+      // the per-command gate refuses never reaches a bootstrap
+      // source either. An unknown source name already fails at
+      // construction; what is left for this to discover is an
+      // unreadable dotenv or a config the source refuses, which is
+      // the same treatment an unreachable store gets. Memoized, so
+      // the loop's later passes cost one await.
+      const sources = await abortable(env.secretSources(), killed)
+      await fillEnv(effectiveSession, names, sources, killed)
+      names = fillNames(effectiveSession, planNodes, planWhole, planCli)
+    }
+    return null
+  } catch (err) {
+    if (isControlFlowError(err)) throw err
+    const failed = failureResult(err)
+    recordStatus(targetSession, failed.exitCode)
+    return new ExecuteResult(new Uint8Array(), failed.stderr, failed.exitCode)
+  }
+}
+
+/** Run a line a runtime takes whole, once it is admitted. Mirrors Python's `_run_on_line_runtime`. */
+async function runOnLineRuntime(
+  env: ExecuteEnv,
+  command: string,
+  options: ExecuteOptions,
+  rootNode: TSNodeLike,
+  stdin: ByteSource | null,
+  context: EvaluationContext,
+  targetSession: SessionState,
+  lineRuntime: Runtime & LineExecutorMixin,
+  decision: RouteDecision<Runtime>,
+  handed: HandOff,
+  killed: AbortSignal | undefined,
+  history: LineHistory | null,
+  judged: () => Promise<[Walked, Judged[]][]>,
+  nested: NestedRefusal,
+  deadline: { seconds: number; start: number } | null,
+  reparse: (line: string) => TSNodeLike,
+  inLine: <T>(fn: () => Promise<T>) => Promise<T>,
+  fill: (
+    nodes: TSNodeLike[],
+    whole: boolean,
+    lineCliEnvNames: ReadonlySet<string>,
+    probeText: boolean,
+  ) => Promise<ExecuteResult | null>,
+  hold: (refusal: Refusal | null) => void,
+): Promise<ExecuteResult> {
+  const effectiveSession = context.session
+  const isLine = options.record !== false
+  // A whole line is a command like any other: the same visibility and
+  // admission gate as the tree, per parsed command, before the
+  // runtime sees a byte of it. No gate follows, so the pass claims on
+  // the hand-off and the sweep below spends what it claimed, or keeps
+  // it for the retry of a line held on a question.
+  const refused = await admitLine(
+    rootNode,
+    context.session,
+    env.registry,
+    env.namespace,
+    reparse,
+    killed,
+    handed,
+    (one) => env.router.offLine(one, decision),
+  )
+  if (refused !== null) {
+    hold(refused.refusal)
+    recordStatus(targetSession, refused.exitCode)
+    if (isLine) {
+      const io = new IOResult({
+        exitCode: refused.exitCode,
+        stderr: refused.stderr,
+        refusal: refused.refusal,
+      })
+      await runCancellable(
+        history !== null
+          ? history.end(io, [])
+          : env.observer.logResult(
+              await shown(io, options.sink),
+              [],
+              targetSession.sessionId,
+              effectiveSession.cwd,
+              options.lineHandle?.id.value,
+            ),
+        killed,
+      )
+    }
+    return new ExecuteResult(new Uint8Array(), refused.stderr, refused.exitCode, refused.refusal)
+  }
+  if (env.sessions.hasManagedEnv) {
+    // A whole-line program may read any name, so the walk is not
+    // consulted, and admitLine above already ran the real gate. A
+    // store answers under the workspace's network, as the line does.
+    const filled = await runWithNetwork(env.registry.network, () =>
+      fill([rootNode], true, new Set(), false),
+    )
+    if (filled !== null) return filled
+  }
+  const route = (await env.registry.policies.wantsFor('postExecute', effectiveSession.sessionId))
+    ? env.router.context(command, effectiveSession, await judged())
+    : null
+  const runLine = (): ReturnType<typeof runWholeLine> =>
+    runWithEgress(
+      env.registry.networkOf(effectiveSession.network),
+      env.registry.policies,
+      () =>
+        runWithMemory(
+          env.registry.memory,
+          () =>
+            runWithSystemClock(env.registry.systemClock, () =>
+              runWholeLine(
+                lineRuntime,
+                decision.machine,
+                command,
+                stdin,
+                effectiveSession,
+                env.registry,
+                killed,
+                claimantFor(rootNode, handed),
+                route,
+                options.sink,
+                deadline?.seconds ?? null,
+                deadline?.start,
+              ),
+            ),
+          env.registry.bodyLimit,
+        ),
+      effectiveSession.sessionId,
+    )
+  // The runtime's file calls are the line's, recorded as a tree's are,
+  // and handed over however the run ends: a call it finished before it
+  // failed or was aborted still happened.
+  const recording: Recorder = {
+    records: [],
+    mountId: null,
+    ledger: env.records,
+    clock: env.registry.clock,
+  }
+  const lineRecords = recording.records
+  // Joined like the tree's record: a stalled store releases the caller,
+  // a fast one records before history is read.
+  const logLine = async (io: IOResult): Promise<void> => {
+    await runCancellable(
+      history !== null
+        ? history.end(io, lineRecords)
+        : env.observer.logResult(
+            await shown(io, options.sink),
+            lineRecords,
+            targetSession.sessionId,
+            effectiveSession.cwd,
+            options.lineHandle?.id.value,
+          ),
+      killed,
+    )
+  }
+  // A line a runtime runs whole is one command to it, recorded as typed.
+  if (isLine && history !== null) await runCancellable(history.typed(), killed)
+  let result: Awaited<ReturnType<typeof runWholeLine>>
+  try {
+    result = await abortable(
+      inLine(() =>
+        isLine ? runWithCaller({ ...currentCaller(), recording }, runLine) : runLine(),
+      ),
+      killed,
+    )
+  } catch (error) {
+    for (const item of lineRecords) env.records.push(item)
+    if (isLine) {
+      const aborted = killed?.aborted === true
+      const failed = failureResult(aborted ? makeAbortError(killed) : error)
+      if (aborted) failed.exitCode = INTERRUPTED_STATUS
+      await logLine(new IOResult(failed))
+    }
+    throw error
+  }
+  for (const item of lineRecords) env.records.push(item)
+  const refusal = result.refusal ?? nested.latest
+  hold(refusal)
+  recordStatus(targetSession, result.exitCode)
+  if (isLine) {
+    await logLine(
+      new IOResult({
+        exitCode: result.exitCode,
+        stdout: result.stdout,
+        refusal,
+        ...(result.stderr !== null ? { stderr: result.stderr } : {}),
+      }),
+    )
+  }
+  return new ExecuteResult(
+    result.stdout,
+    result.stderr ?? new Uint8Array(),
+    result.exitCode,
+    refusal,
+  )
+}
+
 async function runParsedLine(
   env: ExecuteEnv,
   command: string,
@@ -1169,233 +1474,53 @@ async function runParsedLine(
   // both admission passes below can put one.
   const killed = mergeSignals(deps.signal, context.frame.abortSignal)
   const lineRuntime = wholeLineRuntime(decision.bindings)
-  // Filled only after the applicable line-tier admission (a refused
-  // line must never reach a secret store) and before expansion or the
-  // runtime's env snapshot reads the vars. The prejudge pass leaves
-  // single-command lines to the per-command gate, so the tree branch
-  // asks the same text-tier question itself (`probeText`), over the
-  // same walked set the names came from: a node already denied on its
-  // literal words never reaches a source, and a rule that asks is
-  // answered before the fetch, with the approval left for the gate to
-  // spend. A deny only the value gate can see still follows the fetch,
-  // because expansion is what consumes the values. A SecretsError
-  // folds like any failed line: the line exits 1 and never runs.
-  const fillManaged = async (
+  const fill = (
     nodes: TSNodeLike[],
     whole: boolean,
     lineCliEnvNames: ReadonlySet<string>,
     probeText: boolean,
-  ): Promise<ExecuteResult | null> => {
-    try {
-      let planNodes = nodes
-      let planWhole = whole
-      let planCli = lineCliEnvNames
-      let names = fillNames(effectiveSession, planNodes, planWhole, planCli)
-      if (names.size > 0 && probeText) {
-        const served = await unrefusedNodes(
-          nodes,
-          effectiveSession,
-          env.registry,
-          env.namespace,
-          handed,
-          reparse,
-          killed,
-        )
-        if (served.length !== nodes.length) {
-          planNodes = served
-          planWhole = guestBound(served, decision)
-          planCli = cliEnvNames(served, effectiveSession, env.registry)
-          names =
-            served.length === 0
-              ? new Set<string>()
-              : fillNames(effectiveSession, planNodes, planWhole, planCli)
-        }
-      }
-      // A fetched value can name another managed variable (the
-      // arithmetic chase recurses through values), and what a value
-      // spells is unknowable before its fetch, so the plan reruns
-      // over the same admitted nodes until it reaches nothing new.
-      // fillNames returns pending names only, so every pass fetches
-      // names the last one could not see and the loop settles.
-      while (names.size > 0) {
-        // Built here, not above the plan: the declarations are read
-        // only once an admitted node actually wants a value, so a line
-        // the per-command gate refuses never reaches a bootstrap
-        // source either. An unknown source name already fails at
-        // construction; what is left for this to discover is an
-        // unreadable dotenv or a config the source refuses, which is
-        // the same treatment an unreachable store gets. Memoized, so
-        // the loop's later passes cost one await.
-        const sources = await abortable(env.secretSources(), killed)
-        await fillEnv(effectiveSession, names, sources, killed)
-        names = fillNames(effectiveSession, planNodes, planWhole, planCli)
-      }
-      return null
-    } catch (err) {
-      if (isControlFlowError(err)) throw err
-      const failed = failureResult(err)
-      recordStatus(targetSession, failed.exitCode)
-      return new ExecuteResult(new Uint8Array(), failed.stderr, failed.exitCode)
-    }
-  }
+  ): Promise<ExecuteResult | null> =>
+    fillManaged(
+      env,
+      targetSession,
+      effectiveSession,
+      decision,
+      handed,
+      reparse,
+      killed,
+      nodes,
+      whole,
+      lineCliEnvNames,
+      probeText,
+    )
   const statusBefore = snapshotStatus(targetSession)
   let held = false
   let execResult: [[ByteSource | null, IOResult, ExecutionNode], OpRecord[]]
   let executionFailure: { error: unknown } | undefined
   try {
     if (lineRuntime?.runLine !== undefined) {
-      // A whole line is a command like any other: the same visibility and
-      // admission gate as the tree, per parsed command, before the
-      // runtime sees a byte of it. No gate follows, so the pass claims on
-      // the hand-off and the sweep below spends what it claimed, or keeps
-      // it for the retry of a line held on a question.
-      const refused = await admitLine(
+      return await runOnLineRuntime(
+        env,
+        command,
+        options,
         rootNode,
-        context.session,
-        env.registry,
-        env.namespace,
-        reparse,
-        killed,
+        stdin,
+        context,
+        targetSession,
+        lineRuntime,
+        decision,
         handed,
-        (one) => env.router.offLine(one, decision),
-      )
-      if (refused !== null) {
-        held = isPending(refused.refusal)
-        recordStatus(targetSession, refused.exitCode)
-        if (isLine) {
-          const io = new IOResult({
-            exitCode: refused.exitCode,
-            stderr: refused.stderr,
-            refusal: refused.refusal,
-          })
-          await runCancellable(
-            history !== null
-              ? history.end(io, [])
-              : env.observer.logResult(
-                  await shown(io, options.sink),
-                  [],
-                  targetSession.sessionId,
-                  effectiveSession.cwd,
-                  options.lineHandle?.id.value,
-                ),
-            killed,
-          )
-        }
-        return new ExecuteResult(
-          new Uint8Array(),
-          refused.stderr,
-          refused.exitCode,
-          refused.refusal,
-        )
-      }
-      if (env.sessions.hasManagedEnv) {
-        // A whole-line program may read any name, so the walk is not
-        // consulted, and admitLine above already ran the real gate. A
-        // store answers under the workspace's network, as the line does.
-        const filled = await runWithNetwork(env.registry.network, () =>
-          fillManaged([rootNode], true, new Set(), false),
-        )
-        if (filled !== null) return filled
-      }
-      const route = (await env.registry.policies.wantsFor(
-        'postExecute',
-        effectiveSession.sessionId,
-      ))
-        ? env.router.context(command, effectiveSession, await judged())
-        : null
-      const runLine = (): ReturnType<typeof runWholeLine> =>
-        runWithEgress(
-          env.registry.networkOf(effectiveSession.network),
-          env.registry.policies,
-          () =>
-            runWithMemory(
-              env.registry.memory,
-              () =>
-                runWithSystemClock(env.registry.systemClock, () =>
-                  runWholeLine(
-                    lineRuntime,
-                    decision.machine,
-                    command,
-                    stdin,
-                    effectiveSession,
-                    env.registry,
-                    killed,
-                    claimantFor(rootNode, handed),
-                    route,
-                    options.sink,
-                    deadline?.seconds ?? null,
-                    deadline?.start,
-                  ),
-                ),
-              env.registry.bodyLimit,
-            ),
-          effectiveSession.sessionId,
-        )
-      // The runtime's file calls are the line's, recorded as a tree's are,
-      // and handed over however the run ends: a call it finished before it
-      // failed or was aborted still happened.
-      const recording: Recorder = {
-        records: [],
-        mountId: null,
-        ledger: env.records,
-        clock: env.registry.clock,
-      }
-      const lineRecords = recording.records
-      // Joined like the tree's record: a stalled store releases the caller,
-      // a fast one records before history is read.
-      const logLine = async (io: IOResult): Promise<void> => {
-        await runCancellable(
-          history !== null
-            ? history.end(io, lineRecords)
-            : env.observer.logResult(
-                await shown(io, options.sink),
-                lineRecords,
-                targetSession.sessionId,
-                effectiveSession.cwd,
-                options.lineHandle?.id.value,
-              ),
-          killed,
-        )
-      }
-      // A line a runtime runs whole is one command to it, recorded as typed.
-      if (isLine && history !== null) await runCancellable(history.typed(), killed)
-      let result: Awaited<ReturnType<typeof runWholeLine>>
-      try {
-        result = await abortable(
-          inLine(() =>
-            isLine ? runWithCaller({ ...currentCaller(), recording }, runLine) : runLine(),
-          ),
-          killed,
-        )
-      } catch (error) {
-        for (const item of lineRecords) env.records.push(item)
-        if (isLine) {
-          const aborted = killed?.aborted === true
-          const failed = failureResult(aborted ? makeAbortError(killed) : error)
-          if (aborted) failed.exitCode = INTERRUPTED_STATUS
-          await logLine(new IOResult(failed))
-        }
-        throw error
-      }
-      for (const item of lineRecords) env.records.push(item)
-      const refusal = result.refusal ?? nested.latest
-      held = isPending(refusal)
-      recordStatus(targetSession, result.exitCode)
-      if (isLine) {
-        await logLine(
-          new IOResult({
-            exitCode: result.exitCode,
-            stdout: result.stdout,
-            refusal,
-            ...(result.stderr !== null ? { stderr: result.stderr } : {}),
-          }),
-        )
-      }
-      return new ExecuteResult(
-        result.stdout,
-        result.stderr ?? new Uint8Array(),
-        result.exitCode,
-        refusal,
+        killed,
+        history,
+        judged,
+        nested,
+        deadline,
+        reparse,
+        inLine,
+        fill,
+        (refusal) => {
+          held = isPending(refusal)
+        },
       )
     }
     // The line is the unit a rule judges, so every command in it is
@@ -1436,7 +1561,7 @@ async function runParsedLine(
       // it reads.
       const nodes = lineNodes(rootNode, effectiveSession)
       const filled = await runWithNetwork(env.registry.network, () =>
-        fillManaged(
+        fill(
           nodes,
           guestBound(nodes, decision),
           cliEnvNames(nodes, effectiveSession, env.registry),

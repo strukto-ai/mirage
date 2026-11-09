@@ -109,7 +109,7 @@ import { expandRedirect } from '../expand/redirects.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { sessionEntry } from '../session/session.ts'
+import { sessionEntry, type SessionState } from '../session/session.ts'
 import { bindLastWord, positionalParams, sessionArith, sessionView } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 import { type Admitted, admitTest } from './admission.ts'
@@ -952,6 +952,330 @@ export async function executeNode(
   }
 }
 
+/** Run a `time` pipeline and report how long it took. Mirrors Python's `_run_timed`. */
+async function runTimed(
+  stream: Recurse,
+  node: TSNodeLike,
+  context: EvaluationContext,
+  stdin: ByteSource | null,
+  callStack: CallStack,
+): Promise<RedirectResult> {
+  const session = context.session
+  const started = performance.now()
+  const portable = timedBy(node)
+  const reported = (stderr: Uint8Array, timed: boolean): Uint8Array => {
+    const elapsed = (performance.now() - started) / 1000
+    const report = timingReport(elapsed, timed, session.env.TIMEFORMAT)
+    const merged = new Uint8Array(stderr.length + report.length)
+    merged.set(stderr)
+    merged.set(report, stderr.length)
+    return merged
+  }
+  const inner = node.namedChildren[0]
+  let ran: readonly [ByteSource | null, IOResult, ExecutionNode]
+  try {
+    ran =
+      inner === undefined
+        ? [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
+        : await stream(inner, context, stdin, callStack).then(
+            async ([body, out, ranNode]) =>
+              [await applyBarrier(body, out, BarrierPolicy.VALUE), out, ranNode] as const,
+          )
+  } catch (err) {
+    // bash reports the time of a pipeline that `exit`, `break`, `continue`
+    // or an error discarding the line leaves, though not of one `return`
+    // leaves.
+    if (portable !== null) {
+      if (err instanceof ExitSignal) err.stderr = reported(err.stderr, portable)
+      else if (err instanceof LoopSignal)
+        err.io.stderr = reported(await err.io.materializeStderr(), portable)
+    }
+    throw err
+  }
+  const [stdout, io, execNode] = ran
+  if (portable !== null) io.stderr = reported(await io.materializeStderr(), portable)
+  return [stdout, io, execNode]
+}
+
+/**
+ * Run a command of assignments and redirects with no command name. Mirrors
+ * Python's `_assign_then_open`.
+ */
+async function assignThenOpen(
+  recurse: Recurse,
+  redirected: (
+    command: TSNodeLike | null,
+    redirects: Redirect[],
+    to: JobConsole | undefined,
+  ) => Promise<RedirectResult>,
+  node: TSNodeLike,
+  context: EvaluationContext,
+  stdin: ByteSource | null,
+  callStack: CallStack,
+): Promise<RedirectResult> {
+  const session = context.session
+  // Assignments with redirects among them and no command name
+  // (`a=1 > f b=$a`): bash assigns in order, as an assignment statement
+  // does, then opens the redirects with no command; one that fails fails
+  // the line, the assignments standing, and else the status is the last
+  // substitution's, a redirect's included.
+  const subSeq = context.frame.cmdsubSeq
+  let mergedIo = new IOResult()
+  for (const child of node.namedChildren) {
+    if (child.type !== NT.VARIABLE_ASSIGNMENT) continue
+    const [, io] = await recurse(child, context, stdin, callStack, { ownDiagnostics: false })
+    mergedIo = await mergedIo.merge(io)
+  }
+  const runner = redirectRunnerFor(node)
+  const [, opened] =
+    runner === null
+      ? await redirected(null, commandRedirects(node), undefined)
+      : await runner(noCommand, undefined, '', [])
+  mergedIo = await mergedIo.merge(opened)
+  mergedIo.exitCode =
+    opened.exitCode !== 0 ? opened.exitCode : assignmentStatus(context.frame, subSeq)
+  bindLastWord(session, [])
+  return [
+    null,
+    mergedIo,
+    new ExecutionNode({ command: getText(node), exitCode: mergedIo.exitCode }),
+  ]
+}
+
+/** Run a subshell, its own shell, as bash forks one. Mirrors Python's `_fork_subshell`. */
+async function forkSubshell(
+  deps: ExecuteNodeDeps,
+  sink: JobConsole | undefined,
+  executeFn: ExecuteFn,
+  node: TSNodeLike,
+  context: EvaluationContext,
+  stdin: ByteSource | null,
+  callStack: CallStack,
+): Promise<RedirectResult> {
+  const session = context.session
+  const { dispatch, registry, jobTable } = deps
+  // A subshell is its own shell: background jobs started inside live
+  // in a private job table (`$!`/`wait`/`kill` in the body see them;
+  // the parent's table never does), mirroring bash's forked process.
+  const subTable = jobTable.child()
+  const abort = new AbortController()
+  const subSignal =
+    deps.signal === undefined ? abort.signal : AbortSignal.any([deps.signal, abort.signal])
+  const subDeps: ExecuteNodeDeps = { ...deps, jobTable: subTable, signal: subSignal }
+  // The opts parameter is load-bearing, not decoration: a job started
+  // inside the subshell body hands `handleBackground` its own console
+  // and abort signal through it. Dropping it (a 4-parameter closure
+  // still satisfies ExecuteNodeFn, since function parameters are
+  // bivariant) would run the nested job against the enclosing job's
+  // sink and signal instead.
+  const subRecurse = (
+    n: TSNodeLike,
+    s: EvaluationContext,
+    inp: ByteSource | null,
+    cs: CallStack | null,
+    opts?: ExecuteNodeOpts,
+  ): Promise<RedirectResult> =>
+    executeNode(
+      withOpts(subDeps, opts),
+      n,
+      s,
+      inp,
+      cs,
+      opts?.ownDiagnostics !== false,
+      opts?.endsShell === true,
+    )
+  const child = childContext(context)
+  const asProgram = isProgramInvocation(session)
+  let subshellRan: RedirectResult | undefined
+  // A body that is one nested shell (`( sh -c ... )`) is the subshell
+  // itself, as bash execs it there.
+  const statements = node.namedChildren.filter((c) => c.type !== NT.COMMENT)
+  const execs =
+    statements.length === 1 && statements[0] !== undefined && nestedShell(statements[0], session)
+  const forked = (process: ProcessHandle): void => {
+    child.session.processId = process.record.id.pid
+    child.frame.shell = execs ? null : process
+  }
+  const run = async (): Promise<number> => {
+    const body = () =>
+      handleSubshell(
+        subRecurse,
+        node.children,
+        child,
+        stdin,
+        callStack,
+        subTable,
+        dispatch,
+        deps.handed ?? null,
+        registry.decisions,
+        sink ?? null,
+        // Its EXIT action runs as the subshell, which a stop ends.
+        (cmd, opts) =>
+          executeFn(cmd, {
+            ...opts,
+            signal:
+              opts.signal === undefined ? subSignal : AbortSignal.any([opts.signal, subSignal]),
+          }),
+      )
+    try {
+      subshellRan = await runWithEvaluation(child, () =>
+        asProgram ? runAsProgram(child.session, body) : body(),
+      )
+    } finally {
+      await child.session.closeInputs()
+    }
+    return subshellRan[1].exitCode
+  }
+  const owner = currentCaller().process
+  if (context.frame.shell === null && owner !== null) {
+    // The whole of what its runner runs (`( sleep 3; echo x ) &`) is the
+    // runner itself, as bash forks a job's subshell once: it keeps the INT
+    // its job ignores.
+    forked(owner)
+    const code = await run()
+    return subshellRan ?? result(getText(node), { exitCode: code })
+  }
+  const process = startShell(
+    subTable.processes,
+    session,
+    node.text,
+    run,
+    session.processId,
+    () => {
+      abort.abort()
+    },
+    forked,
+  )
+  const code = await process.reap(mergeSignals(deps.signal, context.frame.abortSignal) ?? null)
+  reportReaped(context.frame, [[process, code, node]])
+  return subshellRan ?? result(getText(node), { exitCode: code })
+}
+
+/** Run a `((...))` command. Mirrors Python's `_run_arith`. */
+async function runArith(
+  node: TSNodeLike,
+  context: EvaluationContext,
+  executeFn: ExecuteFn,
+  callStack: CallStack,
+): Promise<RedirectResult> {
+  const session = context.session
+  const text = getText(node)
+  const expr = await expandArith(node, context, executeFn, callStack)
+  let value: bigint
+  try {
+    value = await sessionArith(session, expr, callStack)
+  } catch (err) {
+    if (err instanceof PolicyDenied) return fail(text, `${shellVoice()}${err.message}\n`)
+    if (!(err instanceof ArithError || err instanceof ReadonlyVariableError)) throw err
+    if (err.inSubscript) throw err.signal()
+    return fail(text, `${shellVoice()}${err instanceof ArithError ? '((: ' : ''}${err.message}\n`)
+  }
+  return result(text, { exitCode: value !== 0n ? 0 : 1 })
+}
+
+/** Run a `for` or `select` over its expanded words. Mirrors Python's `_run_for`. */
+async function runFor(
+  deps: ExecuteNodeDeps,
+  kind: NodeKind,
+  node: TSNodeLike,
+  run: BodyRun,
+  context: EvaluationContext,
+  stdin: ByteSource | null,
+  callStack: CallStack,
+  executeFn: ExecuteFn,
+  sink: JobConsole | undefined,
+): Promise<RedirectResult> {
+  const session = context.session
+  const registry = deps.registry
+  const [variable, values, body] = getForParts(node)
+  if (!isValidName(variable))
+    return fail(kind, `${shellVoice()}\`${variable}': not a valid identifier\n`)
+  const resolved =
+    values === null
+      ? positionalParams(session, callStack)
+      : await runInCommandScope(async () => {
+          const classified = await expandAndClassify(
+            values,
+            context,
+            executeFn,
+            registry,
+            session.cwd,
+            callStack,
+          )
+          // The loop word list is consumed by the shell (WordPolicy.SHELL):
+          // globs resolve to matches before iteration starts.
+          return resolveGlobs(
+            classified,
+            registry,
+            session.shellOptions.noglob === true,
+            deps.namespace.sessionLinks(session),
+            globOptions(session),
+          )
+        })
+  if (kind === NodeKind.SELECT) {
+    const signal = mergeSignals(deps.signal, context.frame.abortSignal)
+    return callStack.loop(() =>
+      handleSelect(run, variable, resolved, body, context, stdin, signal, sink),
+    )
+  }
+  return callStack.loop(() => handleFor(run, variable, resolved, body, context))
+}
+
+/** Store a function definition on the session. Mirrors Python's `_define_function`. */
+function defineFunction(
+  node: TSNodeLike,
+  session: SessionState,
+  handed: HandOff | null,
+): RedirectResult {
+  const name = getFunctionName(node)
+  if (session.readonlyFunctions.has(name)) {
+    // `readonly -f f` froze the body: either definition syntax refuses
+    // with `f: readonly function`, exit 1, and the old body stays,
+    // pinned on 5.2.37.
+    return fail(`function ${name}`, `${shellVoice()}${name}: readonly function\n`)
+  }
+  const source = getFunctionSource(node)
+  const held = sessionEntry(session.functions, name)
+  checkEnv(session, held === undefined ? 0 : entryBytes(name, held), entryBytes(name, source))
+  session.functions[name] = source
+  const row = session.lineNumber - 1
+  session.functionSites.set(name, {
+    source,
+    mark: aliasMark(session, node.startPosition?.row ?? 0),
+    origin: definedAt(node, handed),
+    aliases: aliasView(session, node, aliasMark(session, readRow(node))),
+    name: session.parseName ?? 'environment',
+    row,
+    lines:
+      session.lineRows === null
+        ? null
+        : siteLines(session.lineRows, row - session.lineRow, getFunctionBody(node) ?? []),
+  })
+  return result(`function ${name}`)
+}
+
+/** Run an assignment statement's assignments in order. Mirrors Python's `_assign_all`. */
+async function assignAll(
+  recurse: Recurse,
+  node: TSNodeLike,
+  context: EvaluationContext,
+  stdin: ByteSource | null,
+  callStack: CallStack,
+): Promise<RedirectResult> {
+  const subSeq = context.frame.cmdsubSeq
+  let mergedIo = new IOResult()
+  for (const child of node.namedChildren) {
+    if (child.type !== NT.VARIABLE_ASSIGNMENT) continue
+    const [, io] = await recurse(child, context, stdin, callStack, { ownDiagnostics: false })
+    mergedIo = await mergedIo.merge(io)
+  }
+  // The statement's status follows the last command substitution
+  // performed across ALL its assignments, not the last child's.
+  const code = assignmentStatus(context.frame, subSeq)
+  mergedIo.exitCode = code
+  return [null, mergedIo, new ExecutionNode({ command: getText(node), exitCode: code })]
+}
+
 /**
  * Walk one node. The scope and signal it runs under are bound into
  * `executeFn`, so a `$(...)` in a background job never dies of the caller's
@@ -1068,41 +1392,29 @@ async function executeNodeBody(
     return drained(sink, ...(await recurse(node, context, stdin, callStack, { ownDiagnostics })))
   }
 
+  const redirected = (
+    command: TSNodeLike | null,
+    redirects: Redirect[],
+    to: JobConsole | undefined,
+  ): Promise<RedirectResult> =>
+    runRedirected(
+      recurse,
+      dispatch,
+      executeFn,
+      registry,
+      deps.namespace,
+      command,
+      redirects,
+      deps.signal,
+      jobTable.processes,
+      to,
+      context,
+      stdin,
+      callStack,
+    )
+
   if (kind === NodeKind.TIMED) {
-    const started = performance.now()
-    const portable = timedBy(node)
-    const reported = (stderr: Uint8Array, timed: boolean): Uint8Array => {
-      const elapsed = (performance.now() - started) / 1000
-      const report = timingReport(elapsed, timed, session.env.TIMEFORMAT)
-      const merged = new Uint8Array(stderr.length + report.length)
-      merged.set(stderr)
-      merged.set(report, stderr.length)
-      return merged
-    }
-    const inner = node.namedChildren[0]
-    let ran: readonly [ByteSource | null, IOResult, ExecutionNode]
-    try {
-      ran =
-        inner === undefined
-          ? [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
-          : await stream(inner, context, stdin, callStack).then(
-              async ([body, out, ranNode]) =>
-                [await applyBarrier(body, out, BarrierPolicy.VALUE), out, ranNode] as const,
-            )
-    } catch (err) {
-      // bash reports the time of a pipeline that `exit`, `break`, `continue`
-      // or an error discarding the line leaves, though not of one `return`
-      // leaves.
-      if (portable !== null) {
-        if (err instanceof ExitSignal) err.stderr = reported(err.stderr, portable)
-        else if (err instanceof LoopSignal)
-          err.io.stderr = reported(await err.io.materializeStderr(), portable)
-      }
-      throw err
-    }
-    const [stdout, io, execNode] = ran
-    if (portable !== null) io.stderr = reported(await io.materializeStderr(), portable)
-    return [stdout, io, execNode]
+    return runTimed(stream, node, context, stdin, callStack)
   }
 
   if (kind === NodeKind.COMMENT) {
@@ -1114,21 +1426,7 @@ async function executeNodeBody(
     const statements = node.namedChildren.filter((child) => child.type !== NT.COMMENT)
     const last = statements.at(-1)
     if (pending.length > 0 && last === undefined) {
-      return runRedirected(
-        recurse,
-        dispatch,
-        executeFn,
-        registry,
-        deps.namespace,
-        null,
-        [...pending],
-        deps.signal,
-        jobTable.processes,
-        sink,
-        context,
-        stdin,
-        callStack,
-      )
+      return redirected(null, [...pending], sink)
     }
     const programRecurse: Recurse =
       pending.length > 0 && last !== undefined
@@ -1167,67 +1465,14 @@ async function executeNodeBody(
   }
 
   if (kind === NodeKind.COMMAND && !node.children.some((c) => c.type === NT.COMMAND_NAME)) {
-    // Assignments with redirects among them and no command name
-    // (`a=1 > f b=$a`): bash assigns in order, as an assignment statement
-    // does, then opens the redirects with no command; one that fails fails
-    // the line, the assignments standing, and else the status is the last
-    // substitution's, a redirect's included.
-    const subSeq = context.frame.cmdsubSeq
-    let mergedIo = new IOResult()
-    for (const child of node.namedChildren) {
-      if (child.type !== NT.VARIABLE_ASSIGNMENT) continue
-      const [, io] = await recurse(child, context, stdin, callStack, { ownDiagnostics: false })
-      mergedIo = await mergedIo.merge(io)
-    }
-    const runner = redirectRunnerFor(node)
-    const [, opened] =
-      runner === null
-        ? await runRedirected(
-            recurse,
-            dispatch,
-            executeFn,
-            registry,
-            deps.namespace,
-            null,
-            commandRedirects(node),
-            deps.signal,
-            jobTable.processes,
-            undefined,
-            context,
-            stdin,
-            callStack,
-          )
-        : await runner(noCommand, undefined, '', [])
-    mergedIo = await mergedIo.merge(opened)
-    mergedIo.exitCode =
-      opened.exitCode !== 0 ? opened.exitCode : assignmentStatus(context.frame, subSeq)
-    bindLastWord(session, [])
-    const ran: RedirectResult = [
-      null,
-      mergedIo,
-      new ExecutionNode({ command: getText(node), exitCode: mergedIo.exitCode }),
-    ]
+    const ran = await assignThenOpen(recurse, redirected, node, context, stdin, callStack)
     return sink === undefined ? ran : drained(sink, ...ran)
   }
 
   const own =
     kind === NodeKind.COMMAND && redirectRunnerFor(node) === null ? commandRedirects(node) : []
   if (own.length > 0) {
-    const ran = await runRedirected(
-      recurse,
-      dispatch,
-      executeFn,
-      registry,
-      deps.namespace,
-      node,
-      own,
-      deps.signal,
-      jobTable.processes,
-      sink,
-      context,
-      stdin,
-      callStack,
-    )
+    const ran = await redirected(node, own, sink)
     return sink === undefined ? ran : drained(sink, ...ran)
   }
 
@@ -1304,21 +1549,7 @@ async function executeNodeBody(
     const [command, redirects] = getRedirects(node)
     let ran: RedirectResult
     try {
-      ran = await runRedirected(
-        recurse,
-        dispatch,
-        executeFn,
-        registry,
-        deps.namespace,
-        command,
-        redirects,
-        deps.signal,
-        jobTable.processes,
-        sink,
-        context,
-        stdin,
-        callStack,
-      )
+      ran = await redirected(command, redirects, sink)
     } finally {
       // A line of redirects alone clears `$_` once they are opened, so a
       // target may still name it (`>"$_"`).
@@ -1328,116 +1559,11 @@ async function executeNodeBody(
   }
 
   if (kind === NodeKind.SUBSHELL) {
-    // A subshell is its own shell: background jobs started inside live
-    // in a private job table (`$!`/`wait`/`kill` in the body see them;
-    // the parent's table never does), mirroring bash's forked process.
-    const subTable = jobTable.child()
-    const abort = new AbortController()
-    const subSignal =
-      deps.signal === undefined ? abort.signal : AbortSignal.any([deps.signal, abort.signal])
-    const subDeps: ExecuteNodeDeps = { ...captureDeps, jobTable: subTable, signal: subSignal }
-    // The opts parameter is load-bearing, not decoration: a job started
-    // inside the subshell body hands `handleBackground` its own console
-    // and abort signal through it. Dropping it (a 4-parameter closure
-    // still satisfies ExecuteNodeFn, since function parameters are
-    // bivariant) would run the nested job against the enclosing job's
-    // sink and signal instead.
-    const subRecurse = (
-      n: TSNodeLike,
-      s: EvaluationContext,
-      inp: ByteSource | null,
-      cs: CallStack | null,
-      opts?: ExecuteNodeOpts,
-    ): Promise<RedirectResult> =>
-      executeNode(
-        withOpts(subDeps, opts),
-        n,
-        s,
-        inp,
-        cs,
-        opts?.ownDiagnostics !== false,
-        opts?.endsShell === true,
-      )
-    const child = childContext(context)
-    const asProgram = isProgramInvocation(session)
-    let subshellRan: RedirectResult | undefined
-    // A body that is one nested shell (`( sh -c ... )`) is the subshell
-    // itself, as bash execs it there.
-    const statements = node.namedChildren.filter((c) => c.type !== NT.COMMENT)
-    const execs =
-      statements.length === 1 && statements[0] !== undefined && nestedShell(statements[0], session)
-    const forked = (process: ProcessHandle): void => {
-      child.session.processId = process.record.id.pid
-      child.frame.shell = execs ? null : process
-    }
-    const run = async (): Promise<number> => {
-      const body = () =>
-        handleSubshell(
-          subRecurse,
-          node.children,
-          child,
-          stdin,
-          callStack,
-          subTable,
-          dispatch,
-          deps.handed ?? null,
-          registry.decisions,
-          sink ?? null,
-          // Its EXIT action runs as the subshell, which a stop ends.
-          (cmd, opts) =>
-            executeFn(cmd, {
-              ...opts,
-              signal:
-                opts.signal === undefined ? subSignal : AbortSignal.any([opts.signal, subSignal]),
-            }),
-        )
-      try {
-        subshellRan = await runWithEvaluation(child, () =>
-          asProgram ? runAsProgram(child.session, body) : body(),
-        )
-      } finally {
-        await child.session.closeInputs()
-      }
-      return subshellRan[1].exitCode
-    }
-    const owner = currentCaller().process
-    if (context.frame.shell === null && owner !== null) {
-      // The whole of what its runner runs (`( sleep 3; echo x ) &`) is the
-      // runner itself, as bash forks a job's subshell once: it keeps the INT
-      // its job ignores.
-      forked(owner)
-      const code = await run()
-      return subshellRan ?? result(getText(node), { exitCode: code })
-    }
-    const process = startShell(
-      subTable.processes,
-      session,
-      node.text,
-      run,
-      session.processId,
-      () => {
-        abort.abort()
-      },
-      forked,
-    )
-    const code = await process.reap(mergeSignals(deps.signal, context.frame.abortSignal) ?? null)
-    reportReaped(context.frame, [[process, code, node]])
-    return subshellRan ?? result(getText(node), { exitCode: code })
+    return forkSubshell(captureDeps, sink, executeFn, node, context, stdin, callStack)
   }
 
   if (kind === NodeKind.ARITH) {
-    const text = getText(node)
-    const expr = await expandArith(node, context, executeFn, callStack)
-    let value: bigint
-    try {
-      value = await sessionArith(session, expr, callStack)
-    } catch (err) {
-      if (err instanceof PolicyDenied) return fail(text, `${shellVoice()}${err.message}\n`)
-      if (!(err instanceof ArithError || err instanceof ReadonlyVariableError)) throw err
-      if (err.inSubscript) throw err.signal()
-      return fail(text, `${shellVoice()}${err instanceof ArithError ? '((: ' : ''}${err.message}\n`)
-    }
-    return result(text, { exitCode: value !== 0n ? 0 : 1 })
+    return runArith(node, context, executeFn, callStack)
   }
 
   const run: BodyRun = (nodes, bound) =>
@@ -1469,38 +1595,7 @@ async function executeNodeBody(
   }
 
   if (kind === NodeKind.FOR || kind === NodeKind.SELECT) {
-    const [variable, values, body] = getForParts(node)
-    if (!isValidName(variable))
-      return fail(kind, `${shellVoice()}\`${variable}': not a valid identifier\n`)
-    const resolved =
-      values === null
-        ? positionalParams(session, callStack)
-        : await runInCommandScope(async () => {
-            const classified = await expandAndClassify(
-              values,
-              context,
-              executeFn,
-              registry,
-              session.cwd,
-              callStack,
-            )
-            // The loop word list is consumed by the shell (WordPolicy.SHELL):
-            // globs resolve to matches before iteration starts.
-            return resolveGlobs(
-              classified,
-              registry,
-              session.shellOptions.noglob === true,
-              deps.namespace.sessionLinks(session),
-              globOptions(session),
-            )
-          })
-    if (kind === NodeKind.SELECT) {
-      const signal = mergeSignals(deps.signal, context.frame.abortSignal)
-      return callStack.loop(() =>
-        handleSelect(run, variable, resolved, body, context, stdin, signal, sink),
-      )
-    }
-    return callStack.loop(() => handleFor(run, variable, resolved, body, context))
+    return runFor(deps, kind, node, run, context, stdin, callStack, executeFn, sink)
   }
 
   if (kind === NodeKind.WHILE || kind === NodeKind.UNTIL) {
@@ -1516,31 +1611,7 @@ async function executeNodeBody(
   }
 
   if (kind === NodeKind.FUNCTION_DEF) {
-    const name = getFunctionName(node)
-    if (session.readonlyFunctions.has(name)) {
-      // `readonly -f f` froze the body: either definition syntax refuses
-      // with `f: readonly function`, exit 1, and the old body stays,
-      // pinned on 5.2.37.
-      return fail(`function ${name}`, `${shellVoice()}${name}: readonly function\n`)
-    }
-    const source = getFunctionSource(node)
-    const held = sessionEntry(session.functions, name)
-    checkEnv(session, held === undefined ? 0 : entryBytes(name, held), entryBytes(name, source))
-    session.functions[name] = source
-    const row = session.lineNumber - 1
-    session.functionSites.set(name, {
-      source,
-      mark: aliasMark(session, node.startPosition?.row ?? 0),
-      origin: definedAt(node, deps.handed ?? null),
-      aliases: aliasView(session, node, aliasMark(session, readRow(node))),
-      name: session.parseName ?? 'environment',
-      row,
-      lines:
-        session.lineRows === null
-          ? null
-          : siteLines(session.lineRows, row - session.lineRow, getFunctionBody(node) ?? []),
-    })
-    return result(`function ${name}`)
+    return defineFunction(node, session, deps.handed ?? null)
   }
 
   if (kind === NodeKind.DECLARATION) {
@@ -1615,18 +1686,7 @@ async function executeNodeBody(
   }
 
   if (kind === NodeKind.VAR_ASSIGNS) {
-    const subSeq = context.frame.cmdsubSeq
-    let mergedIo = new IOResult()
-    for (const child of node.namedChildren) {
-      if (child.type !== NT.VARIABLE_ASSIGNMENT) continue
-      const [, io] = await recurse(child, context, stdin, callStack, { ownDiagnostics: false })
-      mergedIo = await mergedIo.merge(io)
-    }
-    // The statement's status follows the last command substitution
-    // performed across ALL its assignments, not the last child's.
-    const code = assignmentStatus(context.frame, subSeq)
-    mergedIo.exitCode = code
-    return [null, mergedIo, new ExecutionNode({ command: getText(node), exitCode: code })]
+    return assignAll(recurse, node, context, stdin, callStack)
   }
 
   // Constructs the parser accepts but the executor cannot honor

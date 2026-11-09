@@ -82,7 +82,14 @@ import { handleJobs } from '../builtins/jobs/jobs.ts'
 import { handleKill } from '../builtins/kill/kill.ts'
 import { handlePs } from '../builtins/ps/ps.ts'
 import { handleWait } from '../builtins/wait/wait.ts'
-import { handleCli, handleMountCli, reachesService, walkLeaf, type LeafCall } from './cli.ts'
+import {
+  handleCli,
+  handleMountCli,
+  reachesService,
+  walkLeaf,
+  type CLIContext,
+  type LeafCall,
+} from './cli.ts'
 import { optionError, parseFlags } from './flags.ts'
 import { runShellFunction } from './functions.ts'
 import {
@@ -256,6 +263,384 @@ export function madeByCommand(
     dispatch(op, path, args, kwargs, report, caller ?? { ...currentCaller(), ruleGate: admission })
 }
 
+/** The result of a line that ended before anything ran. Mirrors Python's `_failed`. */
+function failed(command: string, exitCode: number, stderr: Uint8Array): RedirectResult {
+  return [
+    null,
+    new IOResult({ exitCode, stderr }),
+    new ExecutionNode({ command, exitCode, stderr }),
+  ]
+}
+
+/**
+ * Parse and bind a find line's expression. Resolves to the bound expression,
+ * or to the result that ends the line: one find refuses, a -newer reference
+ * it cannot stat, a -files0-from run, or a file -fprint cannot create.
+ * Mirrors Python's `_bound_find`.
+ */
+async function boundFind(
+  cmdStr: string,
+  parts: readonly (string | PathSpec)[],
+  context: EvaluationContext,
+  registry: MountRegistry,
+  dispatch: CallerDispatchFn,
+  namespace: Namespace | undefined,
+  executeFn: ExecuteFn | undefined,
+  view: SessionView,
+  stdin: ByteSource | null,
+): Promise<FindExpr | RedirectResult> {
+  const session = context.session
+  let findExpr: FindExpr
+  try {
+    const parsedFind = parseFind(spelledWords(parts.slice(1)))
+    // Every -newer reference is statted through the dispatcher here,
+    // once, before the expression is bound; a date GNU refuses stops the
+    // stats at the references typed before it.
+    const badDate = parsedFind.dateRefusal()
+    const refs = badDate === null ? parsedFind.newer : parsedFind.newer.slice(0, badDate[0])
+    let newerTimes: number[] = []
+    if (refs.length > 0) {
+      let refErr: Uint8Array | null
+      ;[newerTimes, refErr] = await resolveNewerRefs(
+        refs,
+        registry,
+        session.cwd,
+        (path) => pathStat(dispatch, path),
+        namespace ?? null,
+        lineFacts('find', parts, session.cwd).follows !== Follow.NONE,
+      )
+      if (refErr !== null) {
+        return failed(cmdStr, 1, refErr)
+      }
+    }
+    if (badDate !== null) throw badDate[1]
+    findExpr = parsedFind.bind(
+      newerTimes,
+      undefined,
+      envSnapshot(session),
+      identityFrom(view).profile,
+    )
+  } catch (err) {
+    if (err instanceof UsageError) {
+      const errBytes = encodeText(`${err.message}\n`)
+      return failed(cmdStr, err.exitCode, errBytes)
+    }
+    throw err
+  }
+  if (findExpr.files0From !== null && findExpr.files0From !== undefined) {
+    const listed = await runListedFind(
+      findExpr,
+      spelledWords(parts.slice(1)),
+      session.cwd,
+      dispatch,
+      executeFn ?? null,
+      session.sessionId,
+      stdin,
+    )
+    return [listed.stdout, listed, await execNode(cmdStr, listed)]
+  }
+  // The reference opens every file -fprint names while it parses, so one it cannot
+  // create ends the line before any walk.
+  const unopened = await openFindFiles(findExpr, session.cwd, dispatch)
+  if (unopened !== null) {
+    return failed(cmdStr, 1, unopened)
+  }
+  return findExpr
+}
+
+/** Run a line whose operands span mounts. Mirrors Python's `_run_cross_mount`. */
+async function runCrossMount(
+  runCtx: RunOnMountCtx,
+  cmdName: string,
+  cmdStr: string,
+  parts: readonly (string | PathSpec)[],
+  rawArgv: readonly string[],
+  pathScopes: PathSpec[],
+  files: Files,
+  view: SessionView,
+  cmdMount: MountEntry | null,
+  prepared: ParsedCommand | null,
+  findExpr: FindExpr | null,
+  stdin: ByteSource | null,
+): Promise<RedirectResult> {
+  const { registry, context, dispatch, namespace, executeFn, signal, follow } = runCtx
+  const session = context.session
+  // Parse against the shared spec so flags and text operands do not
+  // depend on the source mount: raw argv would hand flag tokens ("-c")
+  // to the generic as the search pattern. The bound single-mount runner
+  // lets the strategy runners execute each operand natively on its
+  // owning mount.
+  // Registered, not declared: the registry injects --help/--version into
+  // every spec, so parsing the declaration here made the same word mean
+  // two things by mount count -- `cat --vers=x /ram/a` was
+  // `option '--version' doesn't allow an argument` and the two-mount line
+  // was `unrecognized option '--vers=x'`.
+  const sharedSpec = SPECS[cmdName] ?? cmdMount?.specFor(cmdName) ?? undefined
+  const csParsed =
+    prepared ??
+    parseFlags(
+      parts.slice(1),
+      sharedSpec !== undefined ? registeredSpec(cmdName, sharedSpec) : null,
+      cmdName,
+      session.cwd,
+    )
+  let csFlags = csParsed.flagKwargs
+  const csTexts = findExpr !== null ? rawArgv.slice(findExpr.start) : csParsed.texts
+  const csRefusal = optionError(cmdName, csParsed)
+  if (csRefusal !== null) {
+    const [msg, code] = csRefusal
+    return failed(cmdStr, code, msg)
+  }
+  // A path option's value (sort -o, cp -t, csplit -f) routes to its owning
+  // mount but is not an input. Parsed operands preserve aliases, order, and
+  // repeated path values. find's expression is not the spec's grammar, so
+  // its start points are the words classified as paths.
+  let csScopes = findExpr !== null ? pathScopes : csParsed.paths
+  if (RELAY_COMMANDS.has(cmdName)) {
+    // STREAM and FANOUT (and a custom command's reducer) run each operand
+    // natively on its mount, which expands the operand's glob. RELAY sees every operand at once (wc's
+    // layout, cp's sources), so its glob operands must expand here; an
+    // unmatched glob stays the literal word, like bash. One operand at a
+    // time, so join's option loop sees each match where its glob was typed.
+    const groups: PathSpec[][] = []
+    for (const scope of csScopes) {
+      const expanded = await resolveGlobs(
+        [scope],
+        registry,
+        false,
+        namespace === undefined ? null : namespace.sessionLinks(session),
+        globOptions(session),
+      )
+      groups.push(expanded.filter((p): p is PathSpec => typeof p !== 'string'))
+    }
+    csScopes = groups.flat()
+    csFlags = spreadOperands(
+      csFlags,
+      groups.map((group) => group.map((p) => p.rawPath)),
+    )
+  }
+  const runSingle: RunSingle = (name, ps, ts, fk, opts) =>
+    runOnMount(runCtx, name, ps, ts, fk, {
+      ...(findExpr !== null ? { find: findExpr } : {}),
+      ...opts,
+    })
+  // A per-operand native run is single-mount by construction, so a
+  // traversal operand holding nested mounts has to fan out inside it,
+  // exactly as the same operand would on a line of its own.
+  const csStat: StatPath = (path) => pathStat(dispatch, path)
+  const runOperand = runWithFanout(
+    runSingle,
+    registry,
+    session.cwd,
+    files,
+    view,
+    mergeSignals(signal, context.frame.abortSignal),
+    dispatch,
+    follow,
+    findExpr ?? undefined,
+    parts,
+  )
+  const [csStdout0, csIo] = await handleCrossMount(
+    cmdName,
+    csScopes,
+    csTexts,
+    csFlags,
+    dispatch,
+    runOperand,
+    stdin,
+    makeStorageKey(registry),
+    files,
+    view,
+    session.cwd,
+    spelledWords(parts.slice(1)),
+    aggregateFor(cmdName, operandMounts(registry, cmdName, csScopes)),
+    makeCheckUnlink(registry, sessionAccess(session)),
+    follow,
+    registry.diff,
+    registry.ids,
+    mergeSignals(signal, context.frame.abortSignal),
+  )
+  const csExec = new ExecutionNode({
+    command: cmdStr,
+    stderr: await csIo.materializeStderr(),
+    exitCode: csIo.exitCode,
+  })
+  let csStdout = csStdout0
+  if (findExpr !== null) {
+    csStdout = await finishFind(
+      csStdout,
+      csIo,
+      findExpr,
+      registry,
+      context,
+      executeFn,
+      files,
+      csStat,
+      dispatch,
+      stdin,
+      csScopes,
+      mergeSignals(signal, context.frame.abortSignal),
+    )
+    csExec.exitCode = csIo.exitCode
+    csExec.stderr = await csIo.materializeStderr()
+  }
+  if (csParsed.warnings.length > 0) {
+    const csWarn = encodeText(csParsed.warnings.map((w) => `${cmdName}: ${w}\n`).join(''))
+    const csExisting = await materialize(csIo.stderr)
+    csIo.stderr = concat([csWarn, csExisting])
+    csExec.stderr = concat([csWarn, csExec.stderr])
+  }
+  // The native sub-runs carry their own mount's scope; the cross-mount
+  // command as a whole is bounded by the strictest cap across the
+  // operand mounts, regardless of which sub-run merged last.
+  const mounts: MountEntry[] = []
+  for (const s of pathScopes) {
+    // a scope outside any mount contributes nothing here
+    const m = registry.tryMountFor(s.virtual)
+    if (m !== null) mounts.push(m)
+  }
+  csIo.producer = {
+    command: cmdName,
+    prefixes: mounts.map((m) => m.prefix),
+    declared: null,
+  }
+  csExec.paths = pathScopes
+  return [csStdout, csIo, csExec]
+}
+
+/** Run a line on the one mount it resolved to. Mirrors Python's `_run_single_mount`. */
+async function runSingleMount(
+  runCtx: RunOnMountCtx,
+  cmdName: string,
+  cmdStr: string,
+  parts: readonly (string | PathSpec)[],
+  rawArgv: readonly string[],
+  mount: MountEntry,
+  files: Files,
+  view: SessionView,
+  routingScopes: readonly PathSpec[],
+  borrowed: boolean,
+  prepared: ParsedCommand | null,
+  findExpr: FindExpr | null,
+  stdin: ByteSource | null,
+): Promise<RedirectResult> {
+  const { registry, context, dispatch, executeFn, signal, follow } = runCtx
+  const session = context.session
+  const parsedLine =
+    prepared ?? parseFlags(parts.slice(1), mount.specFor(cmdName), cmdName, session.cwd)
+  const { paths: parsedPaths, flagKwargs, warnings: parseWarnings } = parsedLine
+  const textsRaw = parsedLine.texts
+  const refusal = optionError(cmdName, parsedLine)
+  if (refusal !== null) {
+    const [msg, code] = refusal
+    return failed(cmdStr, code, msg)
+  }
+  const texts = findExpr !== null ? rawArgv.slice(findExpr.start) : textsRaw
+  // The start points are the path words before the expression; the
+  // spec's rest slot would otherwise read an -exec word as one.
+  const paths =
+    findExpr !== null
+      ? findStartPoints(parts.slice(1), findExpr.start, mount.specFor(cmdName), session.cwd)
+      : parsedPaths
+  if (findExpr !== null) {
+    // `multiple: true` on find value-flags makes parseToKwargs emit arrays;
+    // bespoke backend wrappers read these as scalars. Migrated backends read
+    // the expression from `texts` and ignore flagKwargs.
+    for (const [key, value] of Object.entries(flagKwargs)) {
+      if (Array.isArray(value)) {
+        const last = value.at(-1)
+        if (last !== undefined) flagKwargs[key] = last
+      }
+    }
+  }
+  const warnBytes =
+    parseWarnings.length > 0
+      ? encodeText(parseWarnings.map((w) => `${cmdName}: ${w}\n`).join(''))
+      : null
+
+  const singleStat: StatPath = (path) => pathStat(dispatch, path)
+  if (!borrowed && shouldFanOut(cmdName, paths, parts, session.cwd, registry)) {
+    const [fanOut0, fanIo, fanNode] = await fanOutTraversal(
+      cmdName,
+      paths,
+      texts,
+      flagKwargs,
+      registry,
+      mount,
+      session.cwd,
+      cmdStr,
+      stdin,
+      files,
+      view,
+      mergeSignals(signal, context.frame.abortSignal),
+      dispatch,
+      (name, ps, ts, fk, opts) =>
+        runOnMount(runCtx, name, ps, ts, fk, {
+          ...(findExpr !== null ? { find: findExpr } : {}),
+          ...opts,
+          argv: spelledWords(parts.slice(1)),
+        }),
+      follow,
+      findExpr ?? undefined,
+    )
+    let fanOut = fanOut0
+    if (findExpr !== null) {
+      fanOut = await finishFind(
+        fanOut,
+        fanIo,
+        findExpr,
+        registry,
+        context,
+        executeFn,
+        files,
+        singleStat,
+        dispatch,
+        stdin,
+        paths,
+        mergeSignals(signal, context.frame.abortSignal),
+      )
+      fanNode.exitCode = fanIo.exitCode
+      fanNode.stderr = await materialize(fanIo.stderr)
+    }
+    if (warnBytes !== null) {
+      const existing = await materialize(fanIo.stderr)
+      fanIo.stderr = concat([warnBytes, existing])
+      fanNode.stderr = concat([warnBytes, fanNode.stderr])
+    }
+    return [fanOut, fanIo, fanNode]
+  }
+
+  const [rawStdout, io] = await runOnMount(runCtx, cmdName, paths, texts, flagKwargs, {
+    stdin,
+    mount,
+    resolveHint: routingScopes[0] ?? null,
+    argv: spelledWords(parts.slice(1)),
+    ...(findExpr !== null ? { find: findExpr } : {}),
+  })
+  let stdout = rawStdout
+  if (findExpr !== null) {
+    stdout = await finishFind(
+      stdout,
+      io,
+      findExpr,
+      registry,
+      context,
+      executeFn,
+      files,
+      singleStat,
+      dispatch,
+      stdin,
+      paths,
+      mergeSignals(signal, context.frame.abortSignal),
+    )
+  }
+  if (warnBytes !== null) {
+    const existing = await materialize(io.stderr)
+    io.stderr = concat([warnBytes, existing])
+  }
+  return [stdout, io, await execNode(cmdStr, io, paths)]
+}
+
 export async function handleCommand(
   executeNode: ExecuteNodeFn,
   dispatch: CallerDispatchFn,
@@ -283,13 +668,14 @@ export async function handleCommand(
   if (head === undefined) {
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
   }
+  const view = sessionView(session, context.frame.diagnostics)
   let cmdName = typeof head === 'string' ? head : head.virtual
   const cmdStr = parts.map((p) => (typeof p === 'string' ? p : p.virtual)).join(' ')
 
   if (JOB_BUILTINS.has(cmdName) && jobTable !== null) {
     const textParts = parts.map((p) => (typeof p === 'string' ? p : p.virtual))
     if (cmdName === 'ps') {
-      return handlePs(jobTable, textParts, session, sessionView(session))
+      return handlePs(jobTable, textParts, session, view)
     }
     const handler = JOB_HANDLERS[cmdName]
     if (handler !== undefined) {
@@ -297,7 +683,7 @@ export async function handleCommand(
         jobTable,
         textParts,
         session,
-        sessionView(session, context.frame.diagnostics),
+        view,
         mergeSignals(signal, context.frame.abortSignal),
         // `fg` is the one job builtin that writes before it blocks.
         sink,
@@ -334,6 +720,18 @@ export async function handleCommand(
       null,
       { follow, ledger: false },
     )
+  const cliContext = (vfs: Files): CLIContext => {
+    const cliSignal = mergeSignals(signal, context.frame.abortSignal)
+    return {
+      ...(executeFn !== undefined ? { shell: nestedShell(executeFn, session, cliSignal) } : {}),
+      ...(cliSignal !== undefined ? { signal: cliSignal } : {}),
+      commandLimits: registry.commandLimits,
+      ids: registry.ids,
+      vfs,
+      session: view,
+      ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),
+    }
+  }
 
   // Installed CLIs: dispatch by name, never by operand path. Sits
   // below functions (a user can wrap an installed CLI, bash-style)
@@ -343,7 +741,6 @@ export async function handleCommand(
   // rest never look.
   const cliInstall = registry.clis.get(cmdName)
   if (cliInstall !== null) {
-    const cliSignal = mergeSignals(signal, context.frame.abortSignal)
     // A leaf that waits on its service keeps running; the caller's abort
     // releases the invocation, as it does for `wait`.
     return abortable(
@@ -353,16 +750,8 @@ export async function handleCommand(
         session,
         stdin,
         {
-          ...(executeFn !== undefined ? { shell: nestedShell(executeFn, session, cliSignal) } : {}),
-          ...(cliSignal !== undefined ? { signal: cliSignal } : {}),
-          commandLimits: registry.commandLimits,
-          ids: registry.ids,
+          ...cliContext(commandFiles(null)),
           entries: registry.runtimeEntries,
-          vfs: commandFiles(null),
-          session: sessionView(session, context.frame.diagnostics),
-          ...(registry.processView === undefined
-            ? {}
-            : { processes: registry.processView(session) }),
           ...(context.frame.routing === undefined ? {} : { routing: context.frame.routing }),
           settle: (runtime) => registry.settle(runtime),
         },
@@ -405,11 +794,7 @@ export async function handleCommand(
   if (lookup(typed, session, registry) === Consumer.UNKNOWN) {
     const shown = session.vars.shell.shown(typed)
     const errBytes = encodeText(`${shellVoice()}${shown}: command not found\n`)
-    return [
-      null,
-      new IOResult({ exitCode: NOT_FOUND_STATUS, stderr: errBytes }),
-      new ExecutionNode({ command: cmdStr, exitCode: NOT_FOUND_STATUS, stderr: errBytes }),
-    ]
+    return failed(cmdStr, NOT_FOUND_STATUS, errBytes)
   }
 
   const runTree = async (
@@ -418,22 +803,13 @@ export async function handleCommand(
     prepared?: LeafCall,
   ): Promise<RedirectResult> => {
     await mount.ensureReady()
-    const treeSignal = mergeSignals(signal, context.frame.abortSignal)
     return handleMountCli(
       mount,
       cli,
       parts,
       session,
       stdin,
-      {
-        ...(executeFn !== undefined ? { shell: nestedShell(executeFn, session, treeSignal) } : {}),
-        ...(treeSignal !== undefined ? { signal: treeSignal } : {}),
-        commandLimits: registry.commandLimits,
-        ids: registry.ids,
-        vfs: files,
-        session: sessionView(session, context.frame.diagnostics),
-        ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),
-      },
+      cliContext(files),
       (path) => registry.tryMountFor(path),
       follow,
       prepared,
@@ -467,11 +843,7 @@ export async function handleCommand(
     } catch (err) {
       if (!(err instanceof MountCommandAmbiguous)) throw err
       const stderr = encodeText(`${err.message}\n`)
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr }),
-        new ExecutionNode({ command: cmdStr, exitCode: 1, stderr }),
-      ]
+      return failed(cmdStr, 1, stderr)
     }
     if (Array.isArray(walked)) return walked
     const selectedTree = treeMount?.cliFor(cmdName) ?? null
@@ -574,11 +946,7 @@ export async function handleCommand(
         const refusal = optionError(cmdName, prepared)
         if (refusal !== null) {
           const [msg, code] = refusal
-          return [
-            null,
-            new IOResult({ exitCode: code, stderr: msg }),
-            new ExecutionNode({ command: cmdStr, exitCode: code, stderr: msg }),
-          ]
+          return failed(cmdStr, code, msg)
         }
         const [texts, flags, remaining, error] = await prepareProgram(
           cmdName,
@@ -632,72 +1000,19 @@ export async function handleCommand(
 
   let findExpr: FindExpr | null = null
   if (!borrowed && cmdName === 'find') {
-    try {
-      const parsedFind = parseFind(spelledWords(parts.slice(1)))
-      // Every -newer reference is statted through the dispatcher here,
-      // once, before the expression is bound; a date GNU refuses stops the
-      // stats at the references typed before it.
-      const badDate = parsedFind.dateRefusal()
-      const refs = badDate === null ? parsedFind.newer : parsedFind.newer.slice(0, badDate[0])
-      let newerTimes: number[] = []
-      if (refs.length > 0) {
-        let refErr: Uint8Array | null
-        ;[newerTimes, refErr] = await resolveNewerRefs(
-          refs,
-          registry,
-          session.cwd,
-          (path) => pathStat(dispatch, path),
-          namespace ?? null,
-          lineFacts(cmdName, parts, session.cwd).follows !== Follow.NONE,
-        )
-        if (refErr !== null) {
-          return [
-            null,
-            new IOResult({ exitCode: 1, stderr: refErr }),
-            new ExecutionNode({ command: cmdStr, stderr: refErr, exitCode: 1 }),
-          ]
-        }
-      }
-      if (badDate !== null) throw badDate[1]
-      findExpr = parsedFind.bind(
-        newerTimes,
-        undefined,
-        envSnapshot(session),
-        identityFrom(sessionView(session, context.frame.diagnostics)).profile,
-      )
-    } catch (err) {
-      if (err instanceof UsageError) {
-        const errBytes = encodeText(`${err.message}\n`)
-        return [
-          null,
-          new IOResult({ exitCode: err.exitCode, stderr: errBytes }),
-          new ExecutionNode({ command: cmdStr, stderr: errBytes, exitCode: err.exitCode }),
-        ]
-      }
-      throw err
-    }
-    if (findExpr.files0From !== null && findExpr.files0From !== undefined) {
-      const listed = await runListedFind(
-        findExpr,
-        spelledWords(parts.slice(1)),
-        session.cwd,
-        dispatch,
-        executeFn ?? null,
-        session.sessionId,
-        stdin,
-      )
-      return [listed.stdout, listed, await execNode(cmdStr, listed)]
-    }
-    // The reference opens every file -fprint names while it parses, so one it cannot
-    // create ends the line before any walk.
-    const unopened = await openFindFiles(findExpr, session.cwd, dispatch)
-    if (unopened !== null) {
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: unopened }),
-        new ExecutionNode({ command: cmdStr, stderr: unopened, exitCode: 1 }),
-      ]
-    }
+    const found = await boundFind(
+      cmdStr,
+      parts,
+      context,
+      registry,
+      dispatch,
+      namespace,
+      executeFn,
+      view,
+      stdin,
+    )
+    if (Array.isArray(found)) return found
+    findExpr = found
   }
 
   // Path-valued flags count: `cp -t /other/mount/dir src` spans mounts
@@ -706,151 +1021,20 @@ export async function handleCommand(
     !borrowed &&
     isCrossMount(cmdName, operandMounts(registry, cmdName, routingScopes), flagScopes)
   ) {
-    // Parse against the shared spec so flags and text operands do not
-    // depend on the source mount: raw argv would hand flag tokens ("-c")
-    // to the generic as the search pattern. The bound single-mount runner
-    // lets the strategy runners execute each operand natively on its
-    // owning mount.
-    // Registered, not declared: the registry injects --help/--version into
-    // every spec, so parsing the declaration here made the same word mean
-    // two things by mount count -- `cat --vers=x /ram/a` was
-    // `option '--version' doesn't allow an argument` and the two-mount line
-    // was `unrecognized option '--vers=x'`.
-    const sharedSpec = SPECS[cmdName] ?? cmdMount?.specFor(cmdName) ?? undefined
-    const csParsed =
-      prepared ??
-      parseFlags(
-        parts.slice(1),
-        sharedSpec !== undefined ? registeredSpec(cmdName, sharedSpec) : null,
-        cmdName,
-        session.cwd,
-      )
-    let csFlags = csParsed.flagKwargs
-    const csTexts = findExpr !== null ? rawArgv.slice(findExpr.start) : csParsed.texts
-    const csRefusal = optionError(cmdName, csParsed)
-    if (csRefusal !== null) {
-      const [msg, code] = csRefusal
-      return [
-        null,
-        new IOResult({ exitCode: code, stderr: msg }),
-        new ExecutionNode({ command: cmdStr, exitCode: code, stderr: msg }),
-      ]
-    }
-    // A path option's value (sort -o, cp -t, csplit -f) routes to its owning
-    // mount but is not an input. Parsed operands preserve aliases, order, and
-    // repeated path values. find's expression is not the spec's grammar, so
-    // its start points are the words classified as paths.
-    let csScopes = findExpr !== null ? pathScopes : csParsed.paths
-    if (RELAY_COMMANDS.has(cmdName)) {
-      // STREAM and FANOUT (and a custom command's reducer) run each operand
-      // natively on its mount, which expands the operand's glob. RELAY sees every operand at once (wc's
-      // layout, cp's sources), so its glob operands must expand here; an
-      // unmatched glob stays the literal word, like bash. One operand at a
-      // time, so join's option loop sees each match where its glob was typed.
-      const groups: PathSpec[][] = []
-      for (const scope of csScopes) {
-        const expanded = await resolveGlobs(
-          [scope],
-          registry,
-          false,
-          namespace === undefined ? null : namespace.sessionLinks(session),
-          globOptions(session),
-        )
-        groups.push(expanded.filter((p): p is PathSpec => typeof p !== 'string'))
-      }
-      csScopes = groups.flat()
-      csFlags = spreadOperands(
-        csFlags,
-        groups.map((group) => group.map((p) => p.rawPath)),
-      )
-    }
-    const runSingle: RunSingle = (name, ps, ts, fk, opts) =>
-      runOnMount(runCtx, name, ps, ts, fk, {
-        ...(findExpr !== null ? { find: findExpr } : {}),
-        ...opts,
-      })
-    // A per-operand native run is single-mount by construction, so a
-    // traversal operand holding nested mounts has to fan out inside it,
-    // exactly as the same operand would on a line of its own.
-    const csStat: StatPath = (path) => pathStat(dispatch, path)
-    const runOperand = runWithFanout(
-      runSingle,
-      registry,
-      session.cwd,
-      files,
-      sessionView(session, context.frame.diagnostics),
-      mergeSignals(signal, context.frame.abortSignal),
-      dispatch,
-      follow,
-      findExpr ?? undefined,
-      parts,
-    )
-    const [csStdout0, csIo] = await handleCrossMount(
+    return runCrossMount(
+      runCtx,
       cmdName,
-      csScopes,
-      csTexts,
-      csFlags,
-      dispatch,
-      runOperand,
-      stdin,
-      makeStorageKey(registry),
+      cmdStr,
+      parts,
+      rawArgv,
+      pathScopes,
       files,
-      sessionView(session, context.frame.diagnostics),
-      session.cwd,
-      spelledWords(parts.slice(1)),
-      aggregateFor(cmdName, operandMounts(registry, cmdName, csScopes)),
-      makeCheckUnlink(registry, sessionAccess(session)),
-      follow,
-      registry.diff,
-      registry.ids,
-      mergeSignals(signal, context.frame.abortSignal),
+      view,
+      cmdMount,
+      prepared,
+      findExpr,
+      stdin,
     )
-    const csExec = new ExecutionNode({
-      command: cmdStr,
-      stderr: await csIo.materializeStderr(),
-      exitCode: csIo.exitCode,
-    })
-    let csStdout = csStdout0
-    if (findExpr !== null) {
-      csStdout = await finishFind(
-        csStdout,
-        csIo,
-        findExpr,
-        registry,
-        context,
-        executeFn,
-        files,
-        csStat,
-        dispatch,
-        stdin,
-        csScopes,
-        mergeSignals(signal, context.frame.abortSignal),
-      )
-      csExec.exitCode = csIo.exitCode
-      csExec.stderr = await csIo.materializeStderr()
-    }
-    if (csParsed.warnings.length > 0) {
-      const csWarn = encodeText(csParsed.warnings.map((w) => `${cmdName}: ${w}\n`).join(''))
-      const csExisting = await materialize(csIo.stderr)
-      csIo.stderr = concat([csWarn, csExisting])
-      csExec.stderr = concat([csWarn, csExec.stderr])
-    }
-    // The native sub-runs carry their own mount's scope; the cross-mount
-    // command as a whole is bounded by the strictest cap across the
-    // operand mounts, regardless of which sub-run merged last.
-    const mounts: MountEntry[] = []
-    for (const s of pathScopes) {
-      // a scope outside any mount contributes nothing here
-      const m = registry.tryMountFor(s.virtual)
-      if (m !== null) mounts.push(m)
-    }
-    csIo.producer = {
-      command: cmdName,
-      prefixes: mounts.map((m) => m.prefix),
-      declared: null,
-    }
-    csExec.paths = pathScopes
-    return [csStdout, csIo, csExec]
   }
 
   // Path-flag targets count: a command bound to one mount cannot write its
@@ -898,11 +1082,7 @@ export async function handleCommand(
   } catch (err) {
     if (err instanceof MountCommandUnsupported || err instanceof MountCommandAmbiguous) {
       const errBytes = encodeText(`${err.message}\n`)
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: errBytes }),
-        new ExecutionNode({ command: cmdStr, stderr: errBytes, exitCode: 1 }),
-      ]
+      return failed(cmdStr, 1, errBytes)
     }
     throw err
   }
@@ -916,121 +1096,19 @@ export async function handleCommand(
   }
   const selectedTree = mount.cliFor(cmdName)
   if (selectedTree !== null) return runTree(mount, selectedTree)
-  const parsedLine =
-    prepared ?? parseFlags(parts.slice(1), mount.specFor(cmdName), cmdName, session.cwd)
-  const { paths: parsedPaths, flagKwargs, warnings: parseWarnings } = parsedLine
-  const textsRaw = parsedLine.texts
-  const refusal = optionError(cmdName, parsedLine)
-  if (refusal !== null) {
-    const [msg, code] = refusal
-    return [
-      null,
-      new IOResult({ exitCode: code, stderr: msg }),
-      new ExecutionNode({ command: cmdStr, exitCode: code, stderr: msg }),
-    ]
-  }
-  const texts = findExpr !== null ? rawArgv.slice(findExpr.start) : textsRaw
-  // The start points are the path words before the expression; the
-  // spec's rest slot would otherwise read an -exec word as one.
-  const paths =
-    findExpr !== null
-      ? findStartPoints(parts.slice(1), findExpr.start, mount.specFor(cmdName), session.cwd)
-      : parsedPaths
-  if (findExpr !== null) {
-    // `multiple: true` on find value-flags makes parseToKwargs emit arrays;
-    // bespoke backend wrappers read these as scalars. Migrated backends read
-    // the expression from `texts` and ignore flagKwargs.
-    for (const [key, value] of Object.entries(flagKwargs)) {
-      if (Array.isArray(value)) {
-        const last = value.at(-1)
-        if (last !== undefined) flagKwargs[key] = last
-      }
-    }
-  }
-  const warnBytes =
-    parseWarnings.length > 0
-      ? encodeText(parseWarnings.map((w) => `${cmdName}: ${w}\n`).join(''))
-      : null
-
-  const singleStat: StatPath = (path) => pathStat(dispatch, path)
-  if (!borrowed && shouldFanOut(cmdName, paths, parts, session.cwd, registry)) {
-    const [fanOut0, fanIo, fanNode] = await fanOutTraversal(
-      cmdName,
-      paths,
-      texts,
-      flagKwargs,
-      registry,
-      mount,
-      session.cwd,
-      cmdStr,
-      stdin,
-      files,
-      sessionView(session, context.frame.diagnostics),
-      mergeSignals(signal, context.frame.abortSignal),
-      dispatch,
-      (name, ps, ts, fk, opts) =>
-        runOnMount(runCtx, name, ps, ts, fk, {
-          ...(findExpr !== null ? { find: findExpr } : {}),
-          ...opts,
-          argv: spelledWords(parts.slice(1)),
-        }),
-      follow,
-      findExpr ?? undefined,
-    )
-    let fanOut = fanOut0
-    if (findExpr !== null) {
-      fanOut = await finishFind(
-        fanOut,
-        fanIo,
-        findExpr,
-        registry,
-        context,
-        executeFn,
-        files,
-        singleStat,
-        dispatch,
-        stdin,
-        paths,
-        mergeSignals(signal, context.frame.abortSignal),
-      )
-      fanNode.exitCode = fanIo.exitCode
-      fanNode.stderr = await materialize(fanIo.stderr)
-    }
-    if (warnBytes !== null) {
-      const existing = await materialize(fanIo.stderr)
-      fanIo.stderr = concat([warnBytes, existing])
-      fanNode.stderr = concat([warnBytes, fanNode.stderr])
-    }
-    return [fanOut, fanIo, fanNode]
-  }
-
-  const [rawStdout, io] = await runOnMount(runCtx, cmdName, paths, texts, flagKwargs, {
-    stdin,
+  return runSingleMount(
+    runCtx,
+    cmdName,
+    cmdStr,
+    parts,
+    rawArgv,
     mount,
-    resolveHint: routingScopes[0] ?? null,
-    argv: spelledWords(parts.slice(1)),
-    ...(findExpr !== null ? { find: findExpr } : {}),
-  })
-  let stdout = rawStdout
-  if (findExpr !== null) {
-    stdout = await finishFind(
-      stdout,
-      io,
-      findExpr,
-      registry,
-      context,
-      executeFn,
-      files,
-      singleStat,
-      dispatch,
-      stdin,
-      paths,
-      mergeSignals(signal, context.frame.abortSignal),
-    )
-  }
-  if (warnBytes !== null) {
-    const existing = await materialize(io.stderr)
-    io.stderr = concat([warnBytes, existing])
-  }
-  return [stdout, io, await execNode(cmdStr, io, paths)]
+    files,
+    view,
+    routingScopes,
+    borrowed,
+    prepared,
+    findExpr,
+    stdin,
+  )
 }

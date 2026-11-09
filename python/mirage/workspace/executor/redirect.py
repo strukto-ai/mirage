@@ -759,28 +759,23 @@ async def handle_redirect(
         await context.session.release_inputs(owned)
 
 
-async def _handle_redirect(
-    owned: list[SharedInput],
-    execute_node: Callable[..., Awaitable[RedirectResult]],
-    dispatch: DispatchFn,
-    command: TSNodeLike | None,
-    redirects: list[Redirect],
-    context: EvaluationContext,
-    stdin: ByteSource | None = None,
-    call_stack: CallStack | None = None,
-    capture_input: bool = False,
-    sink: JobConsole | None = None,
-    expand: Callable[[Redirect], Awaitable[Redirect]] | None = None,
-    guard: RedirectGuard | None = None,
-    name: str = "",
-    args: tuple[str, ...] = (),
-    forked: bool = False,
-    follow: Callable[[str], str] | None = None,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+def _open_descriptors(
+    context: EvaluationContext, stdin: ByteSource | None
+) -> tuple[
+    dict[int, ByteSource | None | _Unreadable],
+    dict[int, _Fd | FileDescription | Inherited],
+    set[int],
+]:
+    """The descriptors a command starts from, before its redirections.
+
+    Args:
+        context (EvaluationContext): the line's evaluation context.
+        stdin (ByteSource | None): the command's input.
+
+    Returns:
+        What each descriptor reads, where each writes, and the closed ones.
+    """
     session = context.session
-    bad_fd = unsupported_descriptor(redirects)
-    if bad_fd is not None:
-        return _shell_failure(bad_descriptor_line(bad_fd))
     inputs: dict[int, ByteSource | None | _Unreadable] = {
         0: share(stdin),
         1: _Unreadable.TOKEN,
@@ -823,6 +818,206 @@ async def _handle_redirect(
         outputs[fd] = _descriptor_output(descriptor)
         if descriptor.identity == CLOSED:
             closed.add(fd)
+    return inputs, outputs, closed
+
+
+def _output_recorder(
+    dispatch: DispatchFn,
+    outputs: dict[int, _Fd | FileDescription | Inherited],
+    files: list[FileDescription],
+    piped: set[int],
+    sink: JobConsole | None,
+    command: TSNodeLike | None,
+    follow: Callable[[str], str] | None,
+) -> PipeRecorder:
+    """The recorder a command's output goes through, bound to its files.
+
+    Args:
+        dispatch (DispatchFn): the session's op dispatcher.
+        outputs (dict[int, _Fd | FileDescription | Inherited]): where each
+            descriptor writes.
+        files (list[FileDescription]): the files the redirections opened.
+        piped (set[int]): the descriptors reading a pipe.
+        sink (JobConsole | None): the enclosing console, if any.
+        command (TSNodeLike | None): the redirected command, if any.
+        follow (Callable[[str], str] | None): resolves a path's links.
+    """
+    streams: dict[Channel, PathSpec] = {}
+    forward: dict[Channel, Channel] = {}
+    for fd, channel in ((1, Channel.STDOUT), (2, Channel.STDERR)):
+        target = outputs[fd]
+        if target is _TO_STDOUT or target is _TO_STDERR:
+            forward[channel] = (
+                Channel.STDOUT if target is _TO_STDOUT else Channel.STDERR
+            )
+        elif isinstance(target, FileDescription) and target.pipe:
+            streams[channel] = target.scope
+    live = bool(streams) or bool(piped)
+    recorder = PipeRecorder(
+        dispatch, streams, forward if live else {}, sink, live
+    )
+    for file in files:
+        if file.source is None:
+            for fd, channel in ((1, Channel.STDOUT), (2, Channel.STDERR)):
+                if outputs[fd] is file:
+                    file.emit = partial(recorder.emit_level, channel)
+                    break
+    # What the command writes as it runs (a group's, a loop's, a
+    # function's statements) goes into its file as it is written, its
+    # stderr too when it shares the description (`> f 2>&1`); an op that
+    # reaches the file first commits what went in (`hold`). A stderr
+    # that opened the same file again (`> f 2> f`) keeps both waiting,
+    # so each write lands at its own description's offset.
+    target = outputs[1]
+    errs = outputs[2]
+    if (
+        isinstance(target, FileDescription)
+        and target in files
+        and target.source is None
+        and not target.pipe
+    ):
+        landed = _followed(target.scope, follow)
+        recorder.output_file = landed
+        if (
+            command is not None
+            and target.opened
+            and (
+                errs is target
+                or not isinstance(errs, FileDescription)
+                or not _one_file(errs.scope, target.scope, follow)
+            )
+        ):
+            target.landed = PathSpec.from_str_path(landed)
+            recorder.output_file = target
+            recorder.stream_to(target)
+            if errs is target:
+                recorder.stream_to(target, Channel.STDERR)
+    return recorder
+
+
+async def _before_drain(
+    recorder: PipeRecorder,
+    result: RedirectResult,
+    outputs: dict[int, _Fd | FileDescription | Inherited],
+    files: list[FileDescription],
+    name: str,
+) -> None:
+    """Settle how the command's output reaches its files as it drains.
+
+    Args:
+        recorder (PipeRecorder): the command's recorder.
+        result (RedirectResult): what the command returned.
+        outputs (dict[int, _Fd | FileDescription | Inherited]): where each
+            descriptor writes.
+        files (list[FileDescription]): the files the redirections opened.
+        name (str): the command's name.
+    """
+    refused = result[2].refused
+    errs = outputs[2]
+    target = outputs[1]
+    # A command reading the file it writes (`cat f >> f`, `grep
+    # -r x d > d/f`) would read its own output back.
+    producer = result[1].producer
+    if refused:
+        await recorder.finish_writer()
+    elif (
+        isinstance(target, FileDescription)
+        and result[0] is not None
+        and result[0] != b""
+        and not (
+            (
+                name in STREAM_OUTPUT_BUILTINS
+                or (producer is not None and producer.native)
+            )
+            and owner_prefix(
+                (p.virtual for p in result[2].paths),
+                target.scope.virtual,
+            )
+            is None
+        )
+    ):
+        await recorder.finish_writer()
+    # A program's stderr goes into its own file as it is
+    # written too.
+    if (
+        not refused
+        and producer is not None
+        and producer.native
+        and not recorder.chunks
+        and isinstance(errs, FileDescription)
+        and errs is not target
+        and errs in files
+        and errs.source is None
+        and not errs.pipe
+    ):
+        recorder.stream_to(errs, Channel.STDERR)
+
+
+async def _deliver_routed(
+    routed: list[tuple[Channel | Inherited, ByteSource]],
+    sink: JobConsole | None,
+    io: IOResult,
+) -> ByteSource | None:
+    """Hand a command's routed output to its console, or keep it.
+
+    Args:
+        routed (list[tuple[Channel | Inherited, ByteSource]]): the output
+            that left no file behind, by destination.
+        sink (JobConsole | None): the enclosing console, if any.
+        io (IOResult): where kept stderr lands.
+
+    Returns:
+        The stdout the caller still has to take.
+    """
+    stdout: ByteSource | None = None
+    io.stderr = None
+    kept: list[tuple[Channel, ByteSource]] = []
+    for key, data in routed:
+        if isinstance(key, Inherited):
+            if not await deliver(sink, key, data, current_caller().enclosing):
+                kept.append((key.channel, data))
+        elif sink is not None:
+            async with aclosing(byte_chunks(data)) as source:
+                async for part in source:
+                    await sink.emit(key, part)
+        else:
+            kept.append((key, data))
+    if sink is not None:
+        for channel, data in kept:
+            async with aclosing(byte_chunks(data)) as source:
+                async for part in source:
+                    await sink.emit(channel, part)
+    else:
+        stdout, io.stderr = await spooled_pair(
+            async_chain(d for c, d in kept if c == Channel.STDOUT),
+            async_chain(d for c, d in kept if c != Channel.STDOUT),
+        )
+    return stdout
+
+
+async def _handle_redirect(
+    owned: list[SharedInput],
+    execute_node: Callable[..., Awaitable[RedirectResult]],
+    dispatch: DispatchFn,
+    command: TSNodeLike | None,
+    redirects: list[Redirect],
+    context: EvaluationContext,
+    stdin: ByteSource | None = None,
+    call_stack: CallStack | None = None,
+    capture_input: bool = False,
+    sink: JobConsole | None = None,
+    expand: Callable[[Redirect], Awaitable[Redirect]] | None = None,
+    guard: RedirectGuard | None = None,
+    name: str = "",
+    args: tuple[str, ...] = (),
+    forked: bool = False,
+    follow: Callable[[str], str] | None = None,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    session = context.session
+    bad_fd = unsupported_descriptor(redirects)
+    if bad_fd is not None:
+        return _shell_failure(bad_descriptor_line(bad_fd))
+    inputs, outputs, closed = _open_descriptors(context, stdin)
 
     deferred: FileDescription | None = None
     opening_stderr: _Fd | FileDescription | Inherited = _TO_STDERR
@@ -1058,56 +1253,9 @@ async def _handle_redirect(
                 inputs[fd], outputs[fd] = _Unreadable.TOKEN, file
     redirects = expanded
 
-    streams: dict[Channel, PathSpec] = {}
-    forward: dict[Channel, Channel] = {}
-    for fd, channel in ((1, Channel.STDOUT), (2, Channel.STDERR)):
-        target = outputs[fd]
-        if target is _TO_STDOUT or target is _TO_STDERR:
-            forward[channel] = (
-                Channel.STDOUT if target is _TO_STDOUT else Channel.STDERR
-            )
-        elif isinstance(target, FileDescription) and target.pipe:
-            streams[channel] = target.scope
-    live = bool(streams) or bool(piped)
-    recorder = PipeRecorder(
-        dispatch, streams, forward if live else {}, sink, live
+    recorder = _output_recorder(
+        dispatch, outputs, files, piped, sink, command, follow
     )
-    for file in files:
-        if file.source is None:
-            for fd, channel in ((1, Channel.STDOUT), (2, Channel.STDERR)):
-                if outputs[fd] is file:
-                    file.emit = partial(recorder.emit_level, channel)
-                    break
-    # What the command writes as it runs (a group's, a loop's, a
-    # function's statements) goes into its file as it is written, its
-    # stderr too when it shares the description (`> f 2>&1`); an op that
-    # reaches the file first commits what went in (`hold`). A stderr
-    # that opened the same file again (`> f 2> f`) keeps both waiting,
-    # so each write lands at its own description's offset.
-    target = outputs[1]
-    errs = outputs[2]
-    if (
-        isinstance(target, FileDescription)
-        and target in files
-        and target.source is None
-        and not target.pipe
-    ):
-        landed = _followed(target.scope, follow)
-        recorder.output_file = landed
-        if (
-            command is not None
-            and target.opened
-            and (
-                errs is target
-                or not isinstance(errs, FileDescription)
-                or not _one_file(errs.scope, target.scope, follow)
-            )
-        ):
-            target.landed = PathSpec.from_str_path(landed)
-            recorder.output_file = target
-            recorder.stream_to(target)
-            if errs is target:
-                recorder.stream_to(target, Channel.STDERR)
     unwound: Exception | None = None
     refused = False
     saved = session.descriptors
@@ -1187,43 +1335,7 @@ async def _handle_redirect(
                     sink=recorder,
                 )
                 refused = result[2].refused
-                target = outputs[1]
-                # A command reading the file it writes (`cat f >> f`, `grep
-                # -r x d > d/f`) would read its own output back.
-                producer = result[1].producer
-                if refused:
-                    await recorder.finish_writer()
-                elif (
-                    isinstance(target, FileDescription)
-                    and result[0] is not None
-                    and result[0] != b""
-                    and not (
-                        (
-                            name in STREAM_OUTPUT_BUILTINS
-                            or (producer is not None and producer.native)
-                        )
-                        and owner_prefix(
-                            (p.virtual for p in result[2].paths),
-                            target.scope.virtual,
-                        )
-                        is None
-                    )
-                ):
-                    await recorder.finish_writer()
-                # A program's stderr goes into its own file as it is
-                # written too.
-                if (
-                    not refused
-                    and producer is not None
-                    and producer.native
-                    and not recorder.chunks
-                    and isinstance(errs, FileDescription)
-                    and errs is not target
-                    and errs in files
-                    and errs.source is None
-                    and not errs.pipe
-                ):
-                    recorder.stream_to(errs, Channel.STDERR)
+                await _before_drain(recorder, result, outputs, files, name)
                 _, io, exec_node = await drained(recorder, *result)
                 await recorder.finish_writer()
 
@@ -1401,30 +1513,7 @@ async def _handle_redirect(
         finally:
             if write_token is not None:
                 reset_redirect_paths(write_token)
-        io.stderr = None
-        kept: list[tuple[Channel, ByteSource]] = []
-        for key, data in routed:
-            if isinstance(key, Inherited):
-                if not await deliver(
-                    sink, key, data, current_caller().enclosing
-                ):
-                    kept.append((key.channel, data))
-            elif sink is not None:
-                async with aclosing(byte_chunks(data)) as source:
-                    async for part in source:
-                        await sink.emit(key, part)
-            else:
-                kept.append((key, data))
-        if sink is not None:
-            for channel, data in kept:
-                async with aclosing(byte_chunks(data)) as source:
-                    async for part in source:
-                        await sink.emit(channel, part)
-        else:
-            stdout, io.stderr = await spooled_pair(
-                async_chain(d for c, d in kept if c == Channel.STDOUT),
-                async_chain(d for c, d in kept if c != Channel.STDOUT),
-            )
+        stdout = await _deliver_routed(routed, sink, io)
     finally:
         await route.release()
     if unwound is not None:
