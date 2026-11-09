@@ -607,6 +607,12 @@ export async function handleBackground(
       const disarm = left === null ? undefined : atDeadline(left, expire)
       let result: [IOResult, ExecutionNode]
       try {
+        // A launch that spent the whole limit runs nothing, as Python's
+        // `run_with_timeout` refuses a budget already past.
+        if (left === 0) {
+          expire()
+          throw new CommandTimeoutError(LINE_NAME, limit ?? 0)
+        }
         result = await runWithDeadline(left, expire, takingInterrupts, true)
       } catch (err) {
         // Past its own limit, or stopped by a command's own timeout, the job

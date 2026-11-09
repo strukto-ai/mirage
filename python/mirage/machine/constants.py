@@ -427,8 +427,11 @@ JOB_END = re.compile(rb"\0mirage-job (\d+|lost)\n")
 # A mark the viewer has begun but not finished printing.
 JOB_END_PART = re.compile(rb"\0mirage-job (\d*|l|lo|los|lost)")
 
-# Whether the box can detach a job: it holds setsid.
-SETSID_PROBE = f"PATH={TOOLS_PATH}; command -v setsid"
+# Whether the box can detach a job: it holds setsid, and readlink, which
+# tells the viewer who still writes a job's output.
+SETSID_PROBE = (
+    f"PATH={TOOLS_PATH}; command -v readlink >/dev/null && command -v setsid"
+)
 
 # The wrapper a detached job runs under, in a session of its own: $1 the
 # folder, $2 the tag, $3 setsid, then the argv. The inner setsid execs in
@@ -457,7 +460,8 @@ JOB_REFUSED_STATUS = 75
 # it are the user's alone, mode 700 and no links, so none reads the job's
 # output or swaps its files.
 JOB_START = (
-    f"_mT={TOOLS_PATH}; _ms=$(PATH=$_mT; command -v setsid) || "
+    f"_mT={TOOLS_PATH}; "
+    "_ms=$(PATH=$_mT; command -v readlink >/dev/null && command -v setsid) || "
     f"exit {JOB_REFUSED_STATUS}; "
     '_md=$1; _mt=$2; shift 2; (umask 077; PATH=$_mT mkdir -p -- "$_md") '
     '&& [ ! -h "${_md%/*/*}" ] && [ ! -h "${_md%/*}" ] '
@@ -475,7 +479,8 @@ JOB_START = (
 # ``err`` already delivered. It prints the rest as it is written, each
 # read exactly up to the size measured first, and ends with ``JOB_MARK``:
 # the exit code once ``exit`` holds one and no process left in the
-# program's group holds ``out`` or ``err`` open, as an attached run ends
+# program's group holds ``out`` or ``err`` open (one whose files cannot be
+# read counts as holding them), as an attached run ends
 # once every writer closed its output; ``JOB_LOST`` once the folder or a
 # wrapper that wrote none is gone. A start the connection dropped gets as
 # long to write ``pid`` as ``JOB_START`` waits for it.
@@ -491,6 +496,7 @@ JOB_VIEW = (
     "k() { for y in /proc/[0-9]*; do x=; "
     'read -r x 2>/dev/null <"$y/stat" || continue; set -- ${x##*)}; '
     '[ "$3" = "$r" ] && [ "$1" != Z ] || continue; '
+    '[ -r "$y/fd" ] && [ -x "$y/fd" ] || return 0; '
     'for z in "$y"/fd/*; do case $(readlink "$z" 2>/dev/null) in '
     '"$d/out" | "$d/err") return 0 ;; esac; done; done; return 1; }; '
     'p() { n=$(wc -c 2>/dev/null <"$d/$1") || n=$2; n=$((n)); '

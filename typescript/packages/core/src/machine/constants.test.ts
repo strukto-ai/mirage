@@ -318,10 +318,10 @@ describe('ENCODE_OUTPUT', () => {
 // Python's constants test pins the same digests.
 describe('job scripts', () => {
   it.each([
-    ['start', JOB_START, '2afed504ed9b7356'],
-    ['view', JOB_VIEW, 'a21ff87cd2a93055'],
+    ['start', JOB_START, '86dbfd7d1b776142'],
+    ['view', JOB_VIEW, 'cb023363874c6cd2'],
     ['remove', JOB_REMOVE, '7cde63f731a3578a'],
-    ['probe', SETSID_PROBE, '16bda6f7218e7026'],
+    ['probe', SETSID_PROBE, '45361050d388f83b'],
   ])('%s matches Python', (_, script, digest) => {
     expect(createHash('sha256').update(script).digest('hex').slice(0, 16)).toBe(digest)
   })

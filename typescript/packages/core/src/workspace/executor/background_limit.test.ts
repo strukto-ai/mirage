@@ -17,6 +17,8 @@ import { Channel, JobConsole } from '../../shell/console/index.ts'
 import type * as Constants from '../../execution/job/constants.ts'
 import { Limit, MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { RAMExecutionStore } from '../../execution/ram.ts'
+import type { RecordFields } from '../../workspace/record/types.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
 vi.mock('../../execution/job/constants.ts', async (importOriginal) => ({
@@ -80,4 +82,35 @@ describe('a job past its limit', () => {
       await ws.close()
     }
   }, 10_000)
+})
+
+// A job store whose list writes take longer than a line's limit.
+class SlowLists extends RAMExecutionStore {
+  override async casSet(
+    sessionId: string,
+    fields: RecordFields,
+    expectedGeneration: number,
+  ): Promise<boolean> {
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    return super.casSet(sessionId, fields, expectedGeneration)
+  }
+}
+
+// A job's limit counts from its launch: one whose launch spent the whole
+// limit runs nothing and ends 124, however quickly it would have run.
+describe('a job whose launch spent its limit', () => {
+  it('ends 124', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, commandLimits: { '@line': new Limit({ timeoutSeconds: 0.2 }) } },
+    )
+    try {
+      ws.jobTable.store = new SlowLists()
+      await ws.shell('true &')
+      const job = await ws.jobTable.wait(1, ws.defaultSessionId)
+      expect(job.exitCode).toBe(124)
+    } finally {
+      await ws.close()
+    }
+  })
 })
