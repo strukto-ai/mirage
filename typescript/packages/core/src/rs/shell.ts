@@ -673,7 +673,16 @@ export type Ask =
     ]
   | readonly ['process', Shell, ShellTreeNode]
   | readonly ['subscript', Shell, string]
-  | readonly ['run', Shell, number, boolean, number, number | null, boolean]
+  | readonly [
+      'run',
+      Shell,
+      number,
+      boolean,
+      number,
+      number | null,
+      boolean,
+      readonly (string | Uint8Array)[],
+    ]
   | readonly ['pause', Shell]
 
 /** A C-style `for` expression: its nodes and the node whose start ends its text. */
@@ -1145,6 +1154,7 @@ export class Shell {
   runFor(
     variable: string,
     values: readonly string[],
+    head: string,
     body: number,
     statements: readonly (readonly (readonly [ShellTreeNode, number])[] | null)[],
   ): ShellTask {
@@ -1153,6 +1163,7 @@ export class Shell {
       'run_for',
       variable,
       [...values],
+      head,
       body,
       tree?.handle ?? null,
       Shell.statementItems(statements),
@@ -1428,6 +1439,7 @@ export class ShellTask {
           asked[4] as number,
           (asked[5] ?? null) as number | null,
           asked[6] as boolean,
+          asked[7] as readonly (string | Uint8Array)[],
         ]
       default:
         return ['pause', Shell.adopt(asked[1] as number)]

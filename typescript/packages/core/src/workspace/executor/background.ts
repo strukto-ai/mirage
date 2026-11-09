@@ -445,6 +445,30 @@ export function startShell(
   }
 }
 
+/**
+ * What a job answers when `exit` or `return` ends it. A job is its own shell:
+ * exit ends the job only, a simple command the top shell forked with the
+ * status that shell would exit with (`: ${U?} &` is 127, `{ : ${U?}; } &` and
+ * `( : ${U?} & )` are 1). Mirrors Python's _job_left.
+ */
+function jobLeft(
+  sig: ExitSignal | ReturnSignal,
+  left: TSNodeLike,
+  callStack: CallStack | null,
+  command: string,
+): [ByteSource | null, IOResult, ExecutionNode] {
+  const exited = sig instanceof ExitSignal
+  const status =
+    exited && (!simpleCommand(left) || sig.sourced || callStack?.subshell === true)
+      ? sig.containedCode
+      : sig.exitCode
+  return [
+    exited ? (sig.stdout ?? new Uint8Array()) : sig.stdout,
+    new IOResult({ exitCode: status, stderr: sig.stderr }),
+    new ExecutionNode({ command, stderr: sig.stderr, exitCode: status }),
+  ]
+}
+
 export async function handleBackground(
   executeNode: ExecuteNodeFn,
   left: TSNodeLike,
@@ -567,33 +591,8 @@ export async function handleBackground(
         if (jobHanded !== null) opts.handed = jobHanded
         ;[stdout, io, execNode] = await executeNode(left, childEvaluation, null, bgCallStack, opts)
       } catch (err) {
-        if (err instanceof ExitSignal) {
-          // A background job is its own shell: exit ends the job only, a
-          // simple command the top shell forked with the status that shell
-          // would exit with (`: ${U?} &` is 127, `{ : ${U?}; } &` and
-          // `( : ${U?} & )` are 1).
-          stdout = err.stdout ?? new Uint8Array()
-          const status =
-            simpleCommand(left) && !err.sourced && callStack?.subshell !== true
-              ? err.exitCode
-              : err.containedCode
-          io = new IOResult({ exitCode: status, stderr: err.stderr })
-          execNode = new ExecutionNode({
-            command: cmdStrInner,
-            stderr: err.stderr,
-            exitCode: status,
-          })
-        } else if (err instanceof ReturnSignal) {
-          stdout = err.stdout
-          io = new IOResult({ exitCode: err.exitCode, stderr: err.stderr })
-          execNode = new ExecutionNode({
-            command: cmdStrInner,
-            stderr: err.stderr,
-            exitCode: err.exitCode,
-          })
-        } else {
-          throw err
-        }
+        if (!(err instanceof ExitSignal || err instanceof ReturnSignal)) throw err
+        ;[stdout, io, execNode] = jobLeft(err, left, callStack, cmdStrInner)
       }
       // Drained inside the rebind: pumping the stream can still run
       // ops that read the ambient session.

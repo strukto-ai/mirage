@@ -12,8 +12,8 @@ use super::{Diagnostic, Signal};
 use crate::arith::{self, plain_decimal};
 use crate::integer::parse_decimal;
 use crate::vars::{
-    Assigned, Coercion, Draws, EXPORT, INTEGER, Indexed, NAMEREF, Slot, Store, Value, entry_bytes,
-    strip_key_quotes,
+    Assigned, Coercion, Draws, EXPORT, INTEGER, Indexed, NAMEREF, PIPESTATUS, Slot, Store, Value,
+    entry_bytes, strip_key_quotes,
 };
 
 /// bash's own exit when it cannot allocate.
@@ -206,6 +206,9 @@ impl<'a> Writer<'a> {
     ) -> Result<(), Fault> {
         let name = self.aim(name, follow_ref);
         self.writable(&name)?;
+        if name == PIPESTATUS && matches!(value, Value::Scalar(_)) {
+            self.store.keep_pipe_status();
+        }
         // A scalar landing on an array is its element 0, the key `0` in an
         // associative one, as bash binds `read a` or `for a in x` there.
         let value = match (

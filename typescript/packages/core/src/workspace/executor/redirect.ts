@@ -68,7 +68,7 @@ import { ownerPrefix } from '../../utils/slash.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import { DEV_PREFIX } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
-import { homeDir } from '../session/shell_dirs.ts'
+import { tildeHome } from '../session/shell_dirs.ts'
 import { ExecutionNode } from '../types.ts'
 import {
   CLOSED as EXEC_CLOSED,
@@ -1506,7 +1506,9 @@ export async function redirectStdin(
       sources.set(r.fd, new Uint8Array())
     else if (r.kind === RedirectKind.STDIN) {
       const target =
-        r.targetNode == null ? r.target : literalWord(r.targetNode as TSNodeLike, homeDir(session))
+        r.targetNode == null
+          ? r.target
+          : literalWord(r.targetNode as TSNodeLike, tildeHome(session))
       if (target === null) {
         sources.set(r.fd, new DeviceInput())
         continue

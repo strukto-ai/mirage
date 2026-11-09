@@ -821,19 +821,18 @@ async function openHistory(
 }
 
 /** Settle what a line's passes and gates claimed, however it ended. Mirrors Python's _settle_grants. */
-function settleGrants(
+async function settleGrants(
   env: ExecuteEnv,
   sessionId: string,
   handed: HandOff,
   held: boolean,
   killed?: AbortSignal,
-): Promise<void> | null {
+): Promise<void> {
   if (held) env.registry.decisions.release(sessionId, handed)
   // A nested evaluation's claims are the outer line's to keep for the
   // next evaluation from the same node and to spend at its own end.
   else if (handed.parent !== null) env.registry.decisions.handUp(sessionId, handed)
-  else return runCancellable(env.registry.decisions.revoke(sessionId, handed), killed)
-  return null
+  else await runCancellable(env.registry.decisions.revoke(sessionId, handed), killed)
 }
 
 /** Record how a line ended, on its history or as one result. */
@@ -1746,10 +1745,7 @@ async function runParsedLine(
       return new ExecuteResult(new Uint8Array(), failed.stderr, failed.exitCode)
     }
   } finally {
-    // Only a revocation waits: a kill reaching a job's line in a browser
-    // depends on the line ending without another turn.
-    const revoking = settleGrants(env, effectiveSession.sessionId, handed, held, killed)
-    if (revoking !== null) await revoking
+    await settleGrants(env, effectiveSession.sessionId, handed, held, killed)
   }
   const [[materialized, io], opRecords] = execResult
   const callerError =

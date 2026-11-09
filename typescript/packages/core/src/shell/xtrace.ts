@@ -54,6 +54,11 @@ export function traceCommand(words: readonly string[]): Uint8Array {
   return encodeText('+ ' + words.map(traceQuote).join(' ') + '\n')
 }
 
+/** Render a `set -x` trace line for a compound command's own part. */
+export function traceLine(text: string): Uint8Array {
+  return encodeText(`+ ${text}\n`)
+}
+
 /**
  * The `set -x` trace line for a scalar assignment, without its newline: an
  * assignment traces it into the shell's diagnostics, and `export` /

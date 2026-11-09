@@ -84,6 +84,24 @@ def function_text(
     return _Printer(True, aliases).definition(name, _definition_of(body), "")
 
 
+def loop_head(node: TSNodeLike) -> str:
+    """A ``for`` or ``select`` loop's first line as ``set -x`` prints it.
+
+    Args:
+        node (TSNodeLike): the loop.
+    """
+    return _Printer(False).loop_head(node)
+
+
+def case_head(node: TSNodeLike) -> str:
+    """A ``case`` statement's first line as ``set -x`` prints it.
+
+    Args:
+        node (TSNodeLike): the statement.
+    """
+    return f"case {_Printer(False).word(node.named_children[0])} in"
+
+
 def command_text(node: TSNodeLike) -> str:
     """A command as bash's report of a job names it: its own rendering,
     with redirects respelled after the words (``2> /dev/null``).
@@ -517,20 +535,22 @@ class _Printer:
         prefix += "! " if negated else ""
         return prefix + ("" if inner is None else self.command(inner, indent))
 
-    def _for(self, node: TSNodeLike, indent: str) -> str:
+    def loop_head(self, node: TSNodeLike) -> str:
         variable, values, _ = get_for_parts(node)
         words = (
             '"$@"'
             if values is None
             else " ".join(self.word(v) for v in values)
         )
-        group = loop_group(node)
+        return node.children[0].type + f" {variable} in {words}"
+
+    def _for(self, node: TSNodeLike, indent: str) -> str:
         return (
-            node.children[0].type
-            + f" {variable} in {words};\n"
+            self.loop_head(node)
+            + ";\n"
             + indent
             + "do"
-            + self._group(group, indent)
+            + self._group(loop_group(node), indent)
         )
 
     def _cfor(self, node: TSNodeLike, indent: str) -> str:

@@ -12,7 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { caseHead, loopHead } from '../../shell/printer.ts'
 import { shellVoice } from '../../shell/voice.ts'
+import { traceLine } from '../../shell/xtrace.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
 import type { RedirectResult } from '../../context/session_context.ts'
 import {
@@ -1102,6 +1104,8 @@ async function runArith(
   const session = context.session
   const text = getText(node)
   const expr = await expandArith(node, context, executeFn, callStack)
+  if (session.shellOptions.xtrace === true)
+    context.frame.diagnostics.push(traceLine(`(( ${expr} ))`))
   let value: bigint
   try {
     value = await sessionArith(session, expr, callStack)
@@ -1153,14 +1157,15 @@ async function runFor(
             globOptions(session),
           )
         })
+  const head = loopHead(node)
   if (kind === NodeKind.SELECT) {
     const signal = mergeSignals(deps.signal, context.frame.abortSignal)
     return callStack.loop(() =>
-      handleSelect(run, variable, resolved, body, context, stdin, signal, sink),
+      handleSelect(run, variable, resolved, head, body, context, stdin, signal, sink),
     )
   }
   return callStack.loop(() =>
-    handleFor(run, variable, resolved, body, context, executeFn, callStack),
+    handleFor(run, variable, resolved, head, body, context, executeFn, callStack),
   )
 }
 
@@ -1509,7 +1514,7 @@ async function executeNodeBody(
     return runArith(node, context, executeFn, callStack)
   }
 
-  const run: BodyRun = (nodes, bound) =>
+  const run: BodyRun = (nodes, bound, leading) =>
     executeBody(
       stream,
       nodes,
@@ -1522,6 +1527,7 @@ async function executeNodeBody(
       executeFn,
       sink ?? null,
       bound,
+      leading,
     )
 
   if (kind === NodeKind.COMPOUND) return run(node.namedChildren)
@@ -1548,6 +1554,8 @@ async function executeNodeBody(
   }
 
   if (kind === NodeKind.CASE) {
+    if (session.shellOptions.xtrace === true)
+      context.frame.diagnostics.push(traceLine(caseHead(node)))
     const word = await expandNode(getCaseWord(node), context, executeFn, callStack)
     return handleCase(run, word, getCaseItems(node), context, executeFn, callStack)
   }

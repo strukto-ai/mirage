@@ -100,7 +100,7 @@ from mirage.workspace.node.occurrence import (
     whole_occurrence,
 )
 from mirage.workspace.session import SessionState, env_snapshot
-from mirage.workspace.session.shell_dirs import home_dir
+from mirage.workspace.session.shell_dirs import tilde_home
 from mirage.workspace.session.state import env_is_readonly, seed_var, set_attr
 
 # How the explanation tree names a parse node that shapes a line; a node
@@ -1160,7 +1160,7 @@ def _walked_line(
     """
     if frame is None:
         frame = root_frame(ast, None)
-    yield from _walk_node(ast, session, home_dir(session), frame, lost)
+    yield from _walk_node(ast, session, tilde_home(session), frame, lost)
 
 
 async def line_judgments(

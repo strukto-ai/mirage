@@ -77,6 +77,16 @@ export function functionText(
   return new Printer(true, aliases).definition(name, definitionOf(body), '')
 }
 
+/** A `for` or `select` loop's first line as `set -x` prints it. */
+export function loopHead(node: TSNodeLike): string {
+  return new Printer(false).loopHead(node)
+}
+
+/** A `case` statement's first line as `set -x` prints it. */
+export function caseHead(node: TSNodeLike): string {
+  return `case ${new Printer(false).word(node.namedChildren[0] ?? node)} in`
+}
+
 /**
  * A command as bash's report of a job names it: its own rendering, with
  * redirects respelled after the words (`2> /dev/null`).
@@ -413,12 +423,14 @@ class Printer {
     return prefix + (inner === undefined ? '' : this.command(inner, indent))
   }
 
-  private forStatement(node: TSNodeLike, indent: string): string {
+  loopHead(node: TSNodeLike): string {
     const [variable, values] = getForParts(node)
     const words = values === null ? '"$@"' : values.map((v) => this.word(v)).join(' ')
-    const group = loopGroup(node)
-    const head = node.children[0]?.type ?? 'for'
-    return `${head} ${variable} in ${words};\n${indent}do${this.group(group, indent)}`
+    return `${node.children[0]?.type ?? 'for'} ${variable} in ${words}`
+  }
+
+  private forStatement(node: TSNodeLike, indent: string): string {
+    return `${this.loopHead(node)};\n${indent}do${this.group(loopGroup(node), indent)}`
   }
 
   private cfor(node: TSNodeLike, indent: string): string {

@@ -722,15 +722,18 @@ impl Shell {
         )
     }
 
-    /// Run `for` over `values`, a body's list each turn.
+    /// Run `for` over `values`, a body's list each turn, `head` its first
+    /// line as `set -x` prints it.
     fn run_for(
         slf: &Bound<'_, Self>,
         variable: String,
         values: Vec<Bound<'_, PyAny>>,
+        head: Bound<'_, PyAny>,
         body: usize,
         statements: ListNodes<'_>,
     ) -> PyResult<ShellTask> {
         let values = values.iter().map(bytes_of).collect::<PyResult<Vec<_>>>()?;
+        let head = bytes_of(&head)?;
         let (tree, statements) = statements_in(&statements);
         start_construct(
             slf,
@@ -738,6 +741,7 @@ impl Shell {
             Construct::For {
                 variable,
                 values,
+                head,
                 body,
             },
             statements,
@@ -1171,6 +1175,7 @@ impl ShellTask {
                 run.start,
                 run.pending,
                 run.framed,
+                py_of(py, &host::diagnostics_out(&run.said))?,
             )
                 .into_pyobject(py)?
                 .into_any(),

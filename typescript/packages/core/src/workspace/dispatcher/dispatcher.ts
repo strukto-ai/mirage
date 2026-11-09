@@ -1230,6 +1230,21 @@ export class Dispatcher {
     if (cached !== null) {
       return [cached, new IOResult()]
     }
+    const result = await this.perform(name, call, mount, vfs, scope, mode, boundary, mark)
+    return [result, new IOResult()]
+  }
+
+  /** Make the call on the backend and settle what it changed. */
+  private async perform(
+    name: string,
+    call: Call,
+    mount: MountEntry,
+    vfs: BaseVFS,
+    scope: PathSpec,
+    mode: MountMode,
+    boundary: Boundary,
+    mark: VfsCall,
+  ): Promise<unknown> {
     const settles =
       (DISPATCH_WRITE_OPS.has(name) || (call.write && !POLICY_WRITE_OPS.has(name))) &&
       !SERIAL_WRITE_OPS.has(name)
@@ -1303,7 +1318,7 @@ export class Dispatcher {
         }
       } else this.observeReads(call, mount, result instanceof Uint8Array && result.byteLength > 0)
     }
-    return [result, new IOResult()]
+    return result
   }
 
   /** Publish only this admitted read's records for its captured caller. */

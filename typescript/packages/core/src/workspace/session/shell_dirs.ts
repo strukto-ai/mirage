@@ -17,11 +17,16 @@ import { seedVar, setAttr } from './state.ts'
 import type { SessionState } from './session.ts'
 import { envGet } from './state.ts'
 
+// What a `~` names: $HOME, or `/` when it is unset, as bash answers for a
+// user with no entry in its user database, which mirage has none of.
+export function tildeHome(session: SessionState): string {
+  return envGet(session, 'HOME') ?? '/'
+}
+
 // Returns $HOME from the session env, or null when unset/empty, matching
-// GNU bash (no implicit home; `cd` errors, `~` and $HOME do not expand).
-// Read through the session view, not the raw env: this is HOME's own
-// resolution channel ($HOME, tilde expansion, bare `cd`), so a hidden
-// HOME must read as unset here too.
+// GNU bash (no implicit home; `cd` errors). Read through the session view,
+// not the raw env: this is HOME's own resolution channel, so a hidden HOME
+// must read as unset here too.
 export function homeDir(session: SessionState): string | null {
   const home = envGet(session, 'HOME')
   return home !== null && home !== '' ? home : null

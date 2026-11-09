@@ -236,6 +236,7 @@ class Shell:
         self,
         variable: str,
         values: Sequence[str],
+        head: str,
         body: int,
         statements: list[list[tuple[ShellNode, int]] | None],
     ) -> ShellTask: ...

@@ -19,7 +19,9 @@ from mirage.shell.voice import shell_voice
 from mirage.workspace.evaluation import EvaluationContext
 
 
-def diagnostic_stderr(node: TSNodeLike, context: EvaluationContext) -> bytes:
+def diagnostic_stderr(
+    node: TSNodeLike | None, context: EvaluationContext
+) -> bytes:
     """The stderr a statement's expansions left, in the order they spoke.
 
     A text diagnostic is worded as bash words it, prefixed with the
@@ -27,12 +29,13 @@ def diagnostic_stderr(node: TSNodeLike, context: EvaluationContext) -> bytes:
     substitution's own stderr) pass through verbatim.
 
     Args:
-        node (TSNodeLike): the statement the diagnostics belong to.
+        node (TSNodeLike | None): the statement the diagnostics belong
+            to, None for a compound command, which names no builtin.
         context (EvaluationContext): the evaluation holding them.
     """
     if not context.frame.diagnostics:
         return b""
-    head = get_text(node).split(None, 1)[0]
+    head = get_text(node).split(None, 1)[0] if node is not None else ""
     builtin = (
         head
         if head

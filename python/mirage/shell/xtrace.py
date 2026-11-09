@@ -64,6 +64,15 @@ def trace_command(words: Iterable[str]) -> bytes:
     return encode_text("+ " + " ".join(map(_trace_quote, words)) + "\n")
 
 
+def trace_line(text: str) -> bytes:
+    """Render a `set -x` trace line for a compound command's own part.
+
+    Args:
+        text (str): what it prints, as bash renders it.
+    """
+    return encode_text(f"+ {text}\n")
+
+
 def trace_assignment(key: str, val: str, append: bool) -> str:
     """The `set -x` trace line for a scalar assignment, without its
     newline: an assignment traces it into the shell's diagnostics, and
