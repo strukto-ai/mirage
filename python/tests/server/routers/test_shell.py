@@ -828,11 +828,12 @@ async def test_a_caller_that_hangs_up_drops_its_held_write():
             _, writer = await asyncio.open_connection(
                 "127.0.0.1", client.base_url.port
             )
-            writer.write(
+            late = (
                 f"POST {route} HTTP/1.1\r\nHost: 127.0.0.1\r\n"
                 "Content-Type: application/octet-stream\r\n"
-                "Content-Length: 4\r\n\r\nlate".encode()
+                "Content-Length: 4\r\n\r\nlate"
             )
+            writer.write(late.encode())
             await writer.drain()
             await asyncio.sleep(0.2)
             writer.close()
