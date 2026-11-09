@@ -391,14 +391,15 @@ export function signalLine(target: string | MachinePid, signum: number, group = 
 export const JOBS_DIR = '/tmp/.mirage/jobs'
 
 // What the viewer prints on stderr after a detached job's last byte: this,
-// then the exit code or `JOB_LOST`, and a newline.
+// then its view's secret, so a program printing the same bytes is not taken
+// for it, the exit code or `JOB_LOST`, and a newline.
 export const JOB_MARK = '\0mirage-job '
 export const JOB_LOST = 'lost'
 
-export const JOB_END = /^\0mirage-job (\d+|lost)\n$/
+export const JOB_END = /^\0mirage-job ([0-9a-f]+) (\d+|lost)\n$/
 // A mark the viewer has begun but not finished printing.
 
-export const JOB_END_PART = /^\0mirage-job (\d*|l|lo|los|lost)$/
+export const JOB_END_PART = /^\0mirage-job ([0-9a-f]*|[0-9a-f]+ (\d*|l|lo|los|lost))$/
 
 // Whether the box can detach a job: it holds setsid, and readlink, which
 // tells the viewer who still writes a job's output.
@@ -443,18 +444,19 @@ export const JOB_START =
   'while [ ! -s "$_md/pid" ] && [ ! -s "$_md/exit" ]; do _mi=$((_mi + 1)); ' +
   '[ $_mi -le 200 ] || exit 126; PATH=$_mT sleep 0.05; done; true'
 
-// Views a detached job: $1 the folder, $2 and $3 the bytes of `out` and
-// `err` already delivered. It prints the rest as it is written, each read
-// exactly up to the size measured first, and ends with `JOB_MARK`: the exit
-// code once `exit` holds one and no process left in the program's group
-// holds `out` or `err` open (one whose files cannot be read counts as
-// holding them), as an attached run ends once every writer
-// closed its output; `JOB_LOST` once the folder or a wrapper that wrote none
-// is gone. A start the connection dropped gets as long to write `pid` as
-// `JOB_START` waits for it.
+// Views a detached job: $1 the folder, $2 and $3 the bytes of `out` and `err`
+// already delivered, $4 the secret its mark carries. It prints the rest as it
+// is written, each read exactly up to the size measured first, and ends with
+// `JOB_MARK`, the secret and the exit code once `exit` holds one and no
+// process left in the program's group holds `out` or `err` open (one whose
+// files cannot be read counts as holding them), as an attached run ends once
+// every writer closed its output; `JOB_LOST` once the folder or a wrapper that
+// wrote none is gone. A start the connection dropped gets as long to write
+// `pid` as `JOB_START` waits for it.
 export const JOB_VIEW =
-  `PATH=${TOOLS_PATH}; d=$1; o=$2; e=$3; ` +
-  `q() { printf '\\000${JOB_MARK.slice(1)}%s\\n' "$1" >&2; exit 0; }; ` +
+  `PATH=${TOOLS_PATH}; d=$1; o=$2; e=$3; s=$4; ` +
+  `q() { printf '\\000${JOB_MARK.slice(1)}%s %s\\n' "$s" "$1" >&2; ` +
+  'exit 0; }; ' +
   `[ -d "$d" ] || q ${JOB_LOST}; r=; w=; v=; i=0; ` +
   'while [ ! -s "$d/pid" ] && [ ! -s "$d/exit" ] && [ $i -lt 100 ]; ' +
   'do i=$((i + 1)); sleep 0.1; done; ' +

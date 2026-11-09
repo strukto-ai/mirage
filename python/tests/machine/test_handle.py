@@ -15,6 +15,7 @@
 import asyncio
 import shlex
 import time
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -619,7 +620,8 @@ async def test_a_machine_is_asked_once_and_again_after_a_failed_probe():
 class JobBox(RecordingMachine):
     """A box that detaches jobs, answering each viewer from ``views``:
     the stdout and stderr chunks it prints, then how it ends (an exit
-    code, an error it raises, or an event it waits on)."""
+    code, an error it raises, or an event it waits on). A stderr chunk's
+    end mark gets the view's secret; one split across chunks does not."""
 
     detaches = True
 
@@ -645,19 +647,24 @@ class JobBox(RecordingMachine):
                 stdout=b"", stderr=None, exit_code=self.start_code
             )
         if script == JOB_VIEW:
-            self.viewed.append(argv[4:])
+            self.viewed.append(argv[4:7])
+            mark = b"mirage-job " + argv[7].encode() + b" "
             out, err, end = self.views.pop(0)
             for chunk in out:
                 await output(chunk)
             for chunk in err:
-                await errors(chunk)
+                await errors(chunk.replace(b"mirage-job ", mark))
             if isinstance(end, BaseException):
                 raise end
             if isinstance(end, asyncio.Event):
                 await end.wait()
                 end = 0
             if isinstance(end, RunResult):
-                return end
+                return replace(
+                    end,
+                    stderr=end.stderr
+                    and end.stderr.replace(b"mirage-job ", mark),
+                )
             return RunResult(stdout=b"", stderr=None, exit_code=end)
         if script == JOB_REMOVE:
             self.removed.append(argv[4])
@@ -759,7 +766,7 @@ async def test_a_detached_job_is_viewed_again_from_what_it_delivered(
 @pytest.mark.parametrize(
     "chunks,said",
     [
-        ([b"warn\n\0mira", b"ge-job 0", b"\n"], b"warn\n"),
+        ([b"warn\n\0mirage-job ", b"0", b"\n"], b"warn\n"),
         ([b"a\0b\n", b"\0", b"mirage-job 0\n"], b"a\0b\n"),
     ],
 )
@@ -769,23 +776,33 @@ async def test_the_end_mark_is_never_delivered(chunks, said):
     assert (done.exit_code, err) == (0, said)
 
 
-# A mark the program wrote itself never ends its job: only a viewer that
-# exited itself printed the mark, so one cut short is viewed again.
+# A mark the program wrote itself never ends its job, however its view
+# ends (docker's client exits 0 when only its stream was cut): it lacks the
+# view's secret, so the job is viewed again.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "end",
-    [ConnectionLostError("closed by remote host"), RuntimeError("gone"), 255],
+    [
+        ConnectionLostError("closed by remote host"),
+        RuntimeError("gone"),
+        255,
+        0,
+    ],
 )
 async def test_a_mark_the_program_wrote_is_its_output(end, no_view_wait):
-    fake = b"\0mirage-job 0\n"
+    fake = [b"\0mirage-j", b"ob 5ec4e7 0\n"]
     box = JobBox(
         [
-            ([b"step 0\n"], [fake], end),
-            ([], [fake, b"late\n", b"\0mirage-job 3\n"], 0),
+            ([b"step 0\n"], fake, end),
+            ([], [*fake, b"late\n", b"\0mirage-job 3\n"], 0),
         ]
     )
     done, out, err, _ = await _job_run(box)
-    assert (done.exit_code, out, err) == (3, b"step 0\n", fake + b"late\n")
+    assert (done.exit_code, out, err) == (
+        3,
+        b"step 0\n",
+        b"".join(fake) + b"late\n",
+    )
     assert [view[1:] for view in box.viewed] == [("0", "0"), ("7", "0")]
 
 

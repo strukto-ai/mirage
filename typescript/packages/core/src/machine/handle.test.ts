@@ -735,7 +735,8 @@ type View = [string[], string[], number | Error | Promise<void> | RunResult]
 
 // A box that detaches jobs, answering each viewer from `views`: the stdout
 // and stderr chunks it prints, then how it ends (an exit code, an error it
-// throws, or a promise it waits on).
+// throws, or a promise it waits on). A stderr chunk's end mark gets the
+// view's secret; one split across chunks does not.
 class JobBox extends RecordingMachine {
   static override readonly detaches: boolean = true
   readonly views: View[]
@@ -784,10 +785,11 @@ class JobBox extends RecordingMachine {
       return { stdout: new Uint8Array(), stderr: null, exitCode: this.startCode }
     }
     if (script === JOB_VIEW) {
-      this.viewed.push(argv.slice(4))
+      this.viewed.push(argv.slice(4, 7))
+      const mark = `mirage-job ${argv[7] ?? ''} `
       const [out, err, end] = this.views.shift() ?? [[], [], 0]
       for (const chunk of out) await output?.(ENC.encode(chunk))
-      for (const chunk of err) await errors?.(ENC.encode(chunk))
+      for (const chunk of err) await errors?.(ENC.encode(chunk.replaceAll('mirage-job ', mark)))
       if (end instanceof Error) throw end
       if (end instanceof Promise) {
         await new Promise<void>((resolve, reject) => {
@@ -802,7 +804,11 @@ class JobBox extends RecordingMachine {
         })
         return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
       }
-      if (typeof end !== 'number') return end
+      if (typeof end !== 'number') {
+        const stderr =
+          end.stderr && ENC.encode(DEC.decode(end.stderr).replaceAll('mirage-job ', mark))
+        return { ...end, stderr }
+      }
       return { stdout: new Uint8Array(), stderr: null, exitCode: end }
     }
     if (script === JOB_REMOVE) {
@@ -916,7 +922,7 @@ describe('a detached job', () => {
   // The end mark is Mirage's, never the job's: one split across reads is held
   // back, and a NUL the job wrote itself is delivered.
   it.each([
-    [['warn\n\0mira', 'ge-job 0', '\n'], 'warn\n'],
+    [['warn\n\0mirage-job ', '0', '\n'], 'warn\n'],
     [['a\0b\n', '\0', 'mirage-job 0\n'], 'a\0b\n'],
   ])('never delivers the end mark (%j)', async (chunks, said) => {
     const box = new JobBox([[[], chunks, 0]])
@@ -924,20 +930,22 @@ describe('a detached job', () => {
     expect([done?.exitCode, err]).toEqual([0, said])
   })
 
-  // A mark the program wrote itself never ends its job: only a viewer that
-  // exited itself printed the mark, so one cut short is viewed again.
+  // A mark the program wrote itself never ends its job, however its view
+  // ends (docker's client exits 0 when only its stream was cut): it lacks the
+  // view's secret, so the job is viewed again.
   it.each([
     ['a lost connection', new ConnectionLostError('closed by remote host')],
     ['an SDK error', new Error('gone')],
     ['a transport code', 255],
+    ['a clean exit', 0],
   ])('takes a mark the program wrote as its output after %s', async (_, end) => {
-    const fake = '\0mirage-job 0\n'
+    const fake = ['\0mirage-j', 'ob 5ec4e7 0\n']
     const box = new JobBox([
-      [['step 0\n'], [fake], end],
-      [[], [fake, 'late\n', '\0mirage-job 3\n'], 0],
+      [['step 0\n'], fake, end],
+      [[], [...fake, 'late\n', '\0mirage-job 3\n'], 0],
     ])
     const [done, out, err] = await jobRun(box)
-    expect([done?.exitCode, out, err]).toEqual([3, 'step 0\n', fake + 'late\n'])
+    expect([done?.exitCode, out, err]).toEqual([3, 'step 0\n', fake.join('') + 'late\n'])
     expect(box.viewed.map((view) => view.slice(1))).toEqual([
       ['0', '0'],
       ['7', '0'],

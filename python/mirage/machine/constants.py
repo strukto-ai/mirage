@@ -423,12 +423,15 @@ def signal_line(
 JOBS_DIR = "/tmp/.mirage/jobs"
 
 # What the viewer prints on stderr after a detached job's last byte: this,
-# then the exit code or ``JOB_LOST``, and a newline.
+# then its view's secret, so a program printing the same bytes is not
+# taken for it, the exit code or ``JOB_LOST``, and a newline.
 JOB_MARK = "\0mirage-job "
 JOB_LOST = "lost"
-JOB_END = re.compile(rb"\0mirage-job (\d+|lost)\n")
+JOB_END = re.compile(rb"\0mirage-job ([0-9a-f]+) (\d+|lost)\n")
 # A mark the viewer has begun but not finished printing.
-JOB_END_PART = re.compile(rb"\0mirage-job (\d*|l|lo|los|lost)")
+JOB_END_PART = re.compile(
+    rb"\0mirage-job ([0-9a-f]*|[0-9a-f]+ (\d*|l|lo|los|lost))"
+)
 
 # Whether the box can detach a job: it holds setsid, and readlink, which
 # tells the viewer who still writes a job's output.
@@ -479,17 +482,18 @@ JOB_START = (
 )
 
 # Views a detached job: $1 the folder, $2 and $3 the bytes of ``out`` and
-# ``err`` already delivered. It prints the rest as it is written, each
-# read exactly up to the size measured first, and ends with ``JOB_MARK``:
-# the exit code once ``exit`` holds one and no process left in the
-# program's group holds ``out`` or ``err`` open (one whose files cannot be
-# read counts as holding them), as an attached run ends
+# ``err`` already delivered, $4 the secret its mark carries. It prints the rest
+# as it is written, each read exactly up to the size measured first, and ends
+# with ``JOB_MARK``, the secret and the exit code once ``exit`` holds one and
+# no process left in the program's group holds ``out`` or ``err`` open (one
+# whose files cannot be read counts as holding them), as an attached run ends
 # once every writer closed its output; ``JOB_LOST`` once the folder or a
-# wrapper that wrote none is gone. A start the connection dropped gets as
-# long to write ``pid`` as ``JOB_START`` waits for it.
+# wrapper that wrote none is gone. A start the connection dropped gets as long
+# to write ``pid`` as ``JOB_START`` waits for it.
 JOB_VIEW = (
-    f"PATH={TOOLS_PATH}; d=$1; o=$2; e=$3; "
-    f"q() {{ printf '\\000{JOB_MARK[1:]}%s\\n' \"$1\" >&2; exit 0; }}; "
+    f"PATH={TOOLS_PATH}; d=$1; o=$2; e=$3; s=$4; "
+    f'q() {{ printf \'\\000{JOB_MARK[1:]}%s %s\\n\' "$s" "$1" >&2; '
+    "exit 0; }; "
     f'[ -d "$d" ] || q {JOB_LOST}; r=; w=; v=; i=0; '
     'while [ ! -s "$d/pid" ] && [ ! -s "$d/exit" ] && [ $i -lt 100 ]; '
     "do i=$((i + 1)); sleep 0.1; done; "

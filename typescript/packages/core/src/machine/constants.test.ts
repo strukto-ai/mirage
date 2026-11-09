@@ -319,7 +319,7 @@ describe('ENCODE_OUTPUT', () => {
 describe('job scripts', () => {
   it.each([
     ['start', JOB_START, '86dbfd7d1b776142'],
-    ['view', JOB_VIEW, 'cb023363874c6cd2'],
+    ['view', JOB_VIEW, 'b1159bcdc7dbf586'],
     ['remove', JOB_REMOVE, '7cde63f731a3578a'],
     ['probe', SETSID_PROBE, '45361050d388f83b'],
   ])('%s matches Python', (_, script, digest) => {
@@ -335,7 +335,7 @@ function startJob(folder: string, tag: string, ...argv: string[]) {
 }
 
 function viewJob(folder: string, out = 0, err = 0) {
-  return spawnSync('/bin/sh', ['-c', JOB_VIEW, 'sh', folder, String(out), String(err)], {
+  return spawnSync('/bin/sh', ['-c', JOB_VIEW, 'sh', folder, String(out), String(err), 's'], {
     timeout: 20_000,
   })
 }
@@ -364,7 +364,7 @@ describe.skipIf(!detaches)('a detached job in a real sh', () => {
     expect(startJob(folder, tag(), ...args).status).toBe(0)
     const viewed = viewJob(folder)
     expect(viewed.stdout.toString()).toBe('arg: a b\n')
-    expect(viewed.stderr.toString()).toBe('e1\n\0mirage-job 3\n')
+    expect(viewed.stderr.toString()).toBe('e1\n\0mirage-job s 3\n')
     expect(viewJob(folder, 5, 3).stdout.toString()).toBe('a b\n')
   })
 
@@ -390,7 +390,7 @@ describe.skipIf(!detaches)('a detached job in a real sh', () => {
     const named = tag()
     expect(startJob(folder, named, 'sh', '-c', 'sleep 30 & sleep 30').status).toBe(0)
     expect(spawnSync('/bin/sh', ['-c', signalLine(named, 15, true)]).status).toBe(0)
-    expect(viewJob(folder).stderr.toString()).toBe('\0mirage-job 143\n')
+    expect(viewJob(folder).stderr.toString()).toBe('\0mirage-job s 143\n')
   })
 
   // A group stop reaches the children a program that exited left holding
@@ -402,7 +402,7 @@ describe.skipIf(!detaches)('a detached job in a real sh', () => {
     while (!existsSync(join(folder, 'exit'))) spawnSync('sleep', ['0.05'])
     expect(spawnSync('/bin/sh', ['-c', signalLine(named, 15, true)]).status).toBe(0)
     const viewed = viewJob(folder)
-    expect([viewed.stdout.toString(), viewed.stderr.toString()]).toEqual(['', '\0mirage-job 7\n'])
+    expect([viewed.stdout.toString(), viewed.stderr.toString()]).toEqual(['', '\0mirage-job s 7\n'])
   })
 
   // A job's folder is the user's alone: none other reads its output.
@@ -420,7 +420,7 @@ describe.skipIf(!detaches)('a detached job in a real sh', () => {
     expect(startJob(folder, tag(), 'sh', '-c', program).status).toBe(0)
     const viewed = viewJob(folder)
     expect(viewed.stdout.toString()).toBe('early\nlate\n')
-    expect(viewed.stderr.toString()).toBe('\0mirage-job 7\n')
+    expect(viewed.stderr.toString()).toBe('\0mirage-job s 7\n')
   })
 
   // Folders the user made writable by others before are made the user's alone
@@ -441,7 +441,7 @@ describe.skipIf(!detaches)('a detached job in a real sh', () => {
     const program = 'sleep 30 </dev/null >/dev/null 2>&1 & exit 7'
     expect(startJob(folder, named, 'sh', '-c', program).status).toBe(0)
     const began = Date.now()
-    expect(viewJob(folder).stderr.toString()).toBe('\0mirage-job 7\n')
+    expect(viewJob(folder).stderr.toString()).toBe('\0mirage-job s 7\n')
     expect(Date.now() - began).toBeLessThan(5000)
     spawnSync('/bin/sh', ['-c', stopLine(named, 9)])
   })
@@ -453,7 +453,7 @@ describe.skipIf(!detaches)('a detached job in a real sh', () => {
     process.kill(wrapper ?? 0, 9)
     process.kill(program ?? 0, 9)
     spawnSync('sleep', ['0.3'])
-    expect(viewJob(folder).stderr.toString()).toBe('\0mirage-job lost\n')
-    expect(viewJob(join(folder, 'none')).stderr.toString()).toBe('\0mirage-job lost\n')
+    expect(viewJob(folder).stderr.toString()).toBe('\0mirage-job s lost\n')
+    expect(viewJob(join(folder, 'none')).stderr.toString()).toBe('\0mirage-job s lost\n')
   })
 })

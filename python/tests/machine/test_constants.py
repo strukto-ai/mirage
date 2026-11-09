@@ -324,7 +324,7 @@ def test_a_sandbox_without_the_encoder_runs_nothing(tmp_path):
     ("script", "digest"),
     [
         (JOB_START, "86dbfd7d1b776142"),
-        (JOB_VIEW, "cb023363874c6cd2"),
+        (JOB_VIEW, "b1159bcdc7dbf586"),
         (JOB_REMOVE, "7cde63f731a3578a"),
         (SETSID_PROBE, "45361050d388f83b"),
     ],
@@ -350,7 +350,16 @@ def _start(folder, tag, *argv):
 
 def _view(folder, out=0, err=0):
     return subprocess.run(
-        ["/bin/sh", "-c", JOB_VIEW, "sh", str(folder), str(out), str(err)],
+        [
+            "/bin/sh",
+            "-c",
+            JOB_VIEW,
+            "sh",
+            str(folder),
+            str(out),
+            str(err),
+            "s",
+        ],
         capture_output=True,
         timeout=20,
     )
@@ -378,9 +387,9 @@ def test_a_detached_job_is_viewed_to_its_exit_code(tmp_path):
     assert started.returncode == 0
     viewed = _view(folder)
     assert viewed.stdout == b"arg: a b\n"
-    assert viewed.stderr == b"e1\n\0mirage-job 3\n"
+    assert viewed.stderr == b"e1\n\0mirage-job s 3\n"
     assert _view(folder, 5, 3).stdout == b"a b\n"
-    assert _view(folder, 5, 3).stderr == b"\0mirage-job 3\n"
+    assert _view(folder, 5, 3).stderr == b"\0mirage-job s 3\n"
 
 
 @DETACHES
@@ -407,7 +416,7 @@ def test_a_group_stop_leaves_the_exit_code_written(tmp_path):
         _start(folder, tag, "sh", "-c", "sleep 30 & sleep 30").returncode == 0
     )
     subprocess.run(["/bin/sh", "-c", signal_line(tag, 15, True)], check=True)
-    assert _view(folder).stderr == b"\0mirage-job 143\n"
+    assert _view(folder).stderr == b"\0mirage-job s 143\n"
 
 
 # A group stop reaches the children a program that exited left holding its
@@ -421,7 +430,7 @@ def test_a_group_stop_reaches_children_the_program_left(tmp_path):
         time.sleep(0.05)
     subprocess.run(["/bin/sh", "-c", signal_line(tag, 15, True)], check=True)
     viewed = _view(folder)
-    assert (viewed.stdout, viewed.stderr) == (b"", b"\0mirage-job 7\n")
+    assert (viewed.stdout, viewed.stderr) == (b"", b"\0mirage-job s 7\n")
 
 
 # A job whose wrapper went with no exit code, or whose folder went, is
@@ -434,13 +443,13 @@ def test_a_lost_or_unlaunched_job_ends_as_such(tmp_path):
     os.kill(wrapper, 9)
     os.kill(program, 9)
     time.sleep(0.3)
-    assert _view(folder).stderr == b"\0mirage-job lost\n"
-    assert _view(tmp_path / "none").stderr == b"\0mirage-job lost\n"
+    assert _view(folder).stderr == b"\0mirage-job s lost\n"
+    assert _view(tmp_path / "none").stderr == b"\0mirage-job s lost\n"
     missing = tmp_path / "jobs" / "missing"
     assert _start(missing, tag, "no-such-program").returncode == 0
     viewed = _view(missing)
     assert b"no-such-program: not found" in viewed.stderr
-    assert viewed.stderr.endswith(b"\0mirage-job 127\n")
+    assert viewed.stderr.endswith(b"\0mirage-job s 127\n")
 
 
 # A job's folder is the user's alone: none other reads its output, and a
@@ -471,7 +480,7 @@ def test_a_job_ends_once_what_it_started_stopped(tmp_path):
     assert _start(folder, tag, "sh", "-c", program).returncode == 0
     viewed = _view(folder)
     assert viewed.stdout == b"early\nlate\n"
-    assert viewed.stderr == b"\0mirage-job 7\n"
+    assert viewed.stderr == b"\0mirage-job s 7\n"
 
 
 # Folders the user made writable by others before are made the user's
@@ -496,6 +505,6 @@ def test_a_child_that_closed_its_output_does_not_hold_the_job(tmp_path):
     program = "sleep 30 </dev/null >/dev/null 2>&1 & exit 7"
     assert _start(folder, tag, "sh", "-c", program).returncode == 0
     began = time.monotonic()
-    assert _view(folder).stderr == b"\0mirage-job 7\n"
+    assert _view(folder).stderr == b"\0mirage-job s 7\n"
     assert time.monotonic() - began < 5
     subprocess.run(["/bin/sh", "-c", stop_line(tag, 9)])

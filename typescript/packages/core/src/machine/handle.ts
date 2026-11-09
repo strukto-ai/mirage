@@ -552,6 +552,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     const kept: [Uint8Array[], Uint8Array[]] = [[], []]
     let wait = VIEW_RETRY_SECONDS
     for (;;) {
+      const secret = crypto.randomUUID().replaceAll('-', '').slice(0, 16)
       let held = new Uint8Array()
       const undelivered: unknown[] = []
       const out = async (data: Uint8Array): Promise<void> => {
@@ -582,11 +583,10 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       }
       const before = sent.out + sent.err
       let returned: [Uint8Array | null, Uint8Array | null] = [null, null]
-      let finished = false
       try {
         await this.ensureConnected(signal)
         const done = await this.execArgv(
-          ['/bin/sh', '-c', JOB_VIEW, 'sh', folder, String(sent.out), String(sent.err)],
+          ['/bin/sh', '-c', JOB_VIEW, 'sh', folder, String(sent.out), String(sent.err), secret],
           null,
           { ...this.config.env },
           '/',
@@ -595,7 +595,6 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
           signal,
         )
         returned = [done.stdout, done.stderr]
-        finished = done.exitCode === 0
       } catch (error) {
         if (signal?.aborted === true) throw error
         logger.debug?.(`${this.id.toString()}: job view ended: ${String(error)}`)
@@ -607,17 +606,14 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       } catch (error) {
         logger.debug?.(`${this.id.toString()}: job output not kept: ${String(error)}`)
       }
-      // Only a viewer that exited itself printed the mark: else what is held
-      // may be the program's. A view whose output did not all land is viewed
-      // again, however it ended.
+      // A mark without this view's secret is the program's output. A view
+      // whose output did not all land is viewed again, however it ended.
       const ended =
-        finished && undelivered.length === 0
-          ? JOB_END.exec(new TextDecoder('latin1').decode(held))
-          : null
-      if (ended !== null) {
+        undelivered.length === 0 ? JOB_END.exec(new TextDecoder('latin1').decode(held)) : null
+      if (ended !== null && ended[1] === secret) {
         const stdout = concat(kept[0])
         const stderr = concat(kept[1])
-        const code = ended[1] ?? JOB_LOST
+        const code = ended[2] ?? JOB_LOST
         if (code !== JOB_LOST)
           return { stdout, stderr: stderr.length > 0 ? stderr : null, exitCode: Number(code) }
         await this.stop(tag, SIGTERM)
