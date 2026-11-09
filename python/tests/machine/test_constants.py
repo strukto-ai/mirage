@@ -410,6 +410,20 @@ def test_a_group_stop_leaves_the_exit_code_written(tmp_path):
     assert _view(folder).stderr == b"\0mirage-job 143\n"
 
 
+# A group stop reaches the children a program that exited left holding its
+# output, in the group it led.
+@DETACHES
+def test_a_group_stop_reaches_children_the_program_left(tmp_path):
+    folder, tag = tmp_path / "jobs" / "job", f"t{uuid.uuid4().hex}:9"
+    started = _start(folder, tag, "sh", "-c", "(sleep 30; echo late) & exit 7")
+    assert started.returncode == 0
+    while not (folder / "exit").exists():
+        time.sleep(0.05)
+    subprocess.run(["/bin/sh", "-c", signal_line(tag, 15, True)], check=True)
+    viewed = _view(folder)
+    assert (viewed.stdout, viewed.stderr) == (b"", b"\0mirage-job 7\n")
+
+
 # A job whose wrapper went with no exit code, or whose folder went, is
 # lost; one that never launched ends with the shell's own words.
 @DETACHES

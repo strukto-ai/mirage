@@ -2370,6 +2370,60 @@ describe('detached jobs a daemon left', () => {
     }
   })
 
+  // A restart adopts a detached job its session disowned, unlisted as it
+  // was, rather than leave its program to the sweep.
+  it('are adopted disowned when disowned', async () => {
+    const store = new RAMExecutionStore(30)
+    const [old, job] = await leftDetached(store)
+    expect(await old.disown(job.id, job.sessionId)).toBe(true)
+    const fresh = new JobTable(store, new ProcessTable(), null, undefined, old.daemon)
+    const seen: unknown[][] = []
+    resuming(fresh, 3, seen)
+    try {
+      await fresh.claim()
+      expect(fresh.listJobs(job.sessionId)).toEqual([])
+      const disowned = Reflect.get(fresh, 'disowned') as JobHandle[]
+      expect(disowned.map((j) => j.process?.record.id.pid)).toEqual([job.pid])
+      await disowned[0]?.process?.join()
+      expect(seen.map((s) => s.slice(1))).toEqual([[[7, 0], WHERE]])
+      expect((await store.load(job.sessionId))?.disowned).toBeUndefined()
+    } finally {
+      await fresh.killAll()
+      await fresh.close()
+      await old.killAll()
+    }
+  })
+
+  // A lease lost while a job's swap lands leaves the job to the daemon that
+  // takes the lease next: this one neither views it nor counts as adopted.
+  it('are left when the lease goes while adopting', async () => {
+    const store = new RAMExecutionStore(30)
+    const [old] = await leftDetached(store)
+    const fresh = new JobTable(store, new ProcessTable())
+    const seen: unknown[] = []
+    resuming(fresh, 3, seen)
+    const write = (Reflect.get(fresh, 'write') as (...args: unknown[]) => Promise<boolean>).bind(
+      fresh,
+    )
+    Reflect.set(fresh, 'write', async (...args: unknown[]) => {
+      const landed = await write(...args)
+      clearTimeout(Reflect.get(fresh, 'lease') as ReturnType<typeof setTimeout>)
+      ;(Reflect.get(fresh, 'lost') as () => void).call(fresh)
+      return landed
+    })
+    try {
+      await fresh.claim()
+      expect(seen).toEqual([])
+      expect(fresh.allJobs()).toEqual([])
+      expect(Reflect.get(fresh, 'disowned')).toEqual([])
+      expect(Reflect.get(fresh, 'adopted')).toBe(false)
+      expect(fresh.claimed).toBe(false)
+    } finally {
+      await fresh.close()
+      await old.killAll()
+    }
+  })
+
   // A daemon that loses the swap for a job's entry leaves the job to the one
   // that won: it neither views nor stops it.
   it('are left to the daemon that won the swap', async () => {

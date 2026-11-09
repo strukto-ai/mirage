@@ -2076,6 +2076,60 @@ async def test_a_restarted_daemon_adopts_its_own_detached_job():
         await old.kill_all()
 
 
+# A restart adopts a detached job its session disowned, unlisted as it
+# was, rather than leave its program to the sweep.
+@pytest.mark.asyncio
+async def test_a_restarted_daemon_adopts_a_disowned_detached_job():
+    store = RAMExecutionStore(lease_seconds=30.0)
+    old, job = await _left_detached(store)
+    assert await old.disown(job.id, job.session_id)
+    new = JobTable(store, ProcessTable(), daemon=old.daemon)
+    seen: list = []
+    _resuming(new, 3, seen)
+    try:
+        await new.claim()
+        assert new.list_jobs(job.session_id) == []
+        [adopted] = new._disowned
+        assert adopted.process is not None
+        assert adopted.process.record.pid == job.pid
+        await adopted.process.join()
+        assert [s[1:] for s in seen] == [((7, 0), _WHERE)]
+        fields = await store.load(job.session_id)
+        assert "disowned" not in fields
+    finally:
+        await new.kill_all()
+        await new.close()
+        await old.kill_all()
+
+
+# A lease lost while a job's swap lands leaves the job to the daemon that
+# takes the lease next: this one neither views it nor counts as adopted.
+@pytest.mark.asyncio
+async def test_a_lease_lost_while_adopting_leaves_the_job(monkeypatch):
+    store = RAMExecutionStore(lease_seconds=30.0)
+    old, job = await _left_detached(store)
+    new = JobTable(store, ProcessTable())
+    seen: list = []
+    _resuming(new, 3, seen)
+    write = new._write
+
+    async def swap_then_lose(*args, **kwargs) -> bool:
+        landed = await write(*args, **kwargs)
+        if new._lease is not None:
+            new._lease.cancel()
+        new._lost()
+        return landed
+
+    monkeypatch.setattr(new, "_write", swap_then_lose)
+    try:
+        await new.claim()
+        assert seen == [] and new.all_jobs() == [] and new._disowned == []
+        assert not new._adopted and not new.claimed
+    finally:
+        await new.close()
+        await old.kill_all()
+
+
 # A daemon that loses the swap for a job's entry leaves the job to the one
 # that won: it neither views nor stops it.
 @pytest.mark.asyncio

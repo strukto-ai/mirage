@@ -387,7 +387,9 @@ def signal_line(
         target (str | MachinePid): the run's tag, or the process.
         signum (int): the signal.
         group (bool): send it to the process group the tagged program
-            leads, as a detached job's program does (``JOB_START``).
+            leads, as a detached job's program does (``JOB_START``): the
+            group each tagged process whose parent carries none is in,
+            so children the program left still get it once it exited.
     """
     if isinstance(target, MachinePid):
         pid = target.pid
@@ -405,11 +407,12 @@ def signal_line(
         "tr '\\000' '\\n' 2>/dev/null < \"$p/environ\" "
         '| grep -qxF "$m" || continue; '
         's=$(cat "$p/stat" 2>/dev/null) || continue; set -- ${s##*)}; '
-        'l="$l${p#/proc/} "; r="$r ${p#/proc/}:$2"; done; '
-        'k=; for e in $r; do case $l in *" ${e#*:} "*) ;; '
-        '*) k="$k ${e%%:*}" ;; esac; done; '
+        'l="$l${p#/proc/} "; r="$r ${p#/proc/}:$2:$3"; done; '
+        'k=; g=; for e in $r; do x=${e#*:}; case $l in *" ${x%%:*} "*) ;; '
+        '*) k="$k ${e%%:*}"; case "$g " in *" -${x#*:} "*) ;; '
+        '*) g="$g -${x#*:}" ;; esac ;; esac; done; '
         f'[ -n "$k" ] || exit {NOT_RUNNING_STATUS}; '
-        + ('g=; for p in $k; do g="$g -$p"; done; k=$g; ' if group else "")
+        + ("k=$g; " if group else "")
         + f"kill -{signum} $k 2>/dev/null; true"
     )
 

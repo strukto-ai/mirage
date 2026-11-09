@@ -924,6 +924,26 @@ describe('a detached job', () => {
     expect([done?.exitCode, err]).toEqual([0, said])
   })
 
+  // A mark the program wrote itself never ends its job: only a viewer that
+  // exited itself printed the mark, so one cut short is viewed again.
+  it.each([
+    ['a lost connection', new ConnectionLostError('closed by remote host')],
+    ['an SDK error', new Error('gone')],
+    ['a transport code', 255],
+  ])('takes a mark the program wrote as its output after %s', async (_, end) => {
+    const fake = '\0mirage-job 0\n'
+    const box = new JobBox([
+      [['step 0\n'], [fake], end],
+      [[], [fake, 'late\n', '\0mirage-job 3\n'], 0],
+    ])
+    const [done, out, err] = await jobRun(box)
+    expect([done?.exitCode, out, err]).toEqual([3, 'step 0\n', fake + 'late\n'])
+    expect(box.viewed.map((view) => view.slice(1))).toEqual([
+      ['0', '0'],
+      ['7', '0'],
+    ])
+  })
+
   // A job whose wrapper went with no exit code is not left running: it ends
   // hung up, and says so.
   it('ends hung up once lost', async () => {

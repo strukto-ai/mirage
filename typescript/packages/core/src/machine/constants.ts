@@ -375,11 +375,12 @@ export function signalLine(target: string | MachinePid, signum: number, group = 
     "tr '\\000' '\\n' 2>/dev/null < \"$p/environ\" " +
     '| grep -qxF "$m" || continue; ' +
     's=$(cat "$p/stat" 2>/dev/null) || continue; set -- ${s##*)}; ' +
-    'l="$l${p#/proc/} "; r="$r ${p#/proc/}:$2"; done; ' +
-    'k=; for e in $r; do case $l in *" ${e#*:} "*) ;; ' +
-    '*) k="$k ${e%%:*}" ;; esac; done; ' +
+    'l="$l${p#/proc/} "; r="$r ${p#/proc/}:$2:$3"; done; ' +
+    'k=; g=; for e in $r; do x=${e#*:}; case $l in *" ${x%%:*} "*) ;; ' +
+    '*) k="$k ${e%%:*}"; case "$g " in *" -${x#*:} "*) ;; ' +
+    '*) g="$g -${x#*:}" ;; esac ;; esac; done; ' +
     `[ -n "$k" ] || exit ${absent}; ` +
-    (group ? 'g=; for p in $k; do g="$g -$p"; done; k=$g; ' : '') +
+    (group ? 'k=$g; ' : '') +
     `kill -${String(signum)} $k 2>/dev/null; true`
   )
 }

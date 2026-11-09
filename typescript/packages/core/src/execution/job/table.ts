@@ -337,6 +337,7 @@ export class JobTable {
     } catch (err) {
       console.debug('detached jobs not adopted:', err)
     }
+    if (!this.claimed) return
     this.adopted = true
     for (const [pid, record] of Object.entries(earlier))
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- earlier is keyed by pid
@@ -591,12 +592,13 @@ export class JobTable {
   /**
    * Hold a job this table runs as its process: listed in its session, found
    * by its pid on the plane, its list checked unless the caller does it
-   * last. Mirrors Python's `JobTable._track`.
+   * last; one not listed runs disowned. Mirrors Python's `JobTable._track`.
    */
-  private track(job: JobHandle, process: ProcessHandle, check = true): void {
+  private track(job: JobHandle, process: ProcessHandle, check = true, listed = true): void {
     job.process = process
     process.saved = () => consoleBytes(job.console)
-    this.sessionJobs(job.sessionId).set(job.id, job)
+    if (listed) this.sessionJobs(job.sessionId).set(job.id, job)
+    else this.disowned.push(job)
     const plane = this.plane
     const pid = process.record.id.pid
     plane.jobTables.set(pid, this)
@@ -634,7 +636,8 @@ export class JobTable {
    * lease left detached, this daemon's earlier life included: each one whose
    * entry this daemon takes first runs here from then on, viewed from what
    * its console holds. Answers the pids adopted, whose published records no
-   * sweep stops after. Mirrors Python's `JobTable._adopt_left`.
+   * sweep stops after. A disowned job is adopted as one, and a lease lost
+   * meanwhile stops the adopting. Mirrors Python's `JobTable._adopt_left`.
    */
   private async adoptLeft(): Promise<Set<number>> {
     const adopted = new Set<number>()
@@ -648,15 +651,22 @@ export class JobTable {
     const owners = new Set<string>()
     for (const sessionId of await this.store.sessions()) {
       const fields = await this.store.load(sessionId)
-      for (const [key, entry] of Object.entries(
-        (fields?.jobs ?? {}) as Record<string, ListEntry>,
-      )) {
+      const found: [number | null, ListEntry][] = [
+        ...Object.entries((fields?.jobs ?? {}) as Record<string, ListEntry>).map(
+          ([key, entry]): [number | null, ListEntry] => [Number(key), entry],
+        ),
+        ...Object.values((fields?.disowned ?? {}) as Record<string, ListEntry>).map(
+          (entry): [number | null, ListEntry] => [null, entry],
+        ),
+      ]
+      for (const [number, entry] of found) {
+        if (!this.held) return adopted
         if (entry.state !== 'running' || !entry.detached || own.has(entry.console)) continue
         let taken: boolean
         try {
-          taken = await this.adopt(sessionId, Number(key), entry, resume)
+          taken = await this.adopt(sessionId, number, entry, resume)
         } catch (err) {
-          console.debug(`job ${key} not adopted:`, err)
+          console.debug(`job ${entry.console} not adopted:`, err)
           continue
         }
         if (taken) {
@@ -681,12 +691,15 @@ export class JobTable {
    * Take one detached job from the daemon that left it: its entry names
    * this daemon once the swap lands, and a process under its pid views its
    * program from the bytes its console holds. A swap another daemon won
-   * leaves the job to it. What can fail is read before the swap, so a job
-   * this daemon takes is one it views. Mirrors Python's `JobTable._adopt`.
+   * leaves the job to it, and a lease lost while it lands leaves the job to
+   * the daemon that takes the lease next. What can fail is read before the
+   * swap, so a job this daemon takes is one it views. A null number names a
+   * disowned job, which the list holds by its console. Mirrors Python's
+   * `JobTable._adopt`.
    */
   async adopt(
     sessionId: string,
-    number: number,
+    number: number | null,
     entry: ListEntry,
     resume: (job: JobHandle, sent: [number, number]) => Promise<number>,
   ): Promise<boolean> {
@@ -697,16 +710,18 @@ export class JobTable {
     let swapped = false
     for (let attempt = 0; attempt < LIST_MAX_RETRIES && !swapped; attempt++) {
       const fields = await this.store.load(sessionId)
-      const jobs = { ...((fields?.jobs ?? {}) as Record<string, ListEntry>) }
-      if (fields === null || JSON.stringify(jobs[String(number)]) !== JSON.stringify(entry))
-        return false
-      jobs[String(number)] = { ...entry, owner: this.daemon }
-      swapped = await this.write(sessionId, fields, jobs, Number(fields.next ?? 1))
+      if (fields === null) return false
+      const jobs = { ...((fields.jobs ?? {}) as Record<string, ListEntry>) }
+      const held = { ...((fields.disowned ?? {}) as Record<string, ListEntry>) }
+      const [where, key] = number === null ? [held, entry.console] : [jobs, String(number)]
+      if (JSON.stringify(where[key]) !== JSON.stringify(entry)) return false
+      where[key] = { ...entry, owner: this.daemon }
+      swapped = await this.write(sessionId, fields, jobs, Number(fields.next ?? 1), held)
     }
-    if (!swapped) return false
+    if (!swapped || !this.held) return false
     const abort = new AbortController()
     const job = new JobHandle({
-      id: number,
+      id: number ?? 0,
       command: entry.command,
       abort,
       cwd: entry.cwd,
@@ -754,7 +769,7 @@ export class JobTable {
     process.afterEnding = []
     process.mayWrite = () => this.holding()
     jobConsole.bindProcess(process.record.id.toString())
-    this.track(job, process)
+    this.track(job, process, true, number !== null)
     return true
   }
 

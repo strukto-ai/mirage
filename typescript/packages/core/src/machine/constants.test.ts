@@ -393,6 +393,18 @@ describe.skipIf(!detaches)('a detached job in a real sh', () => {
     expect(viewJob(folder).stderr.toString()).toBe('\0mirage-job 143\n')
   })
 
+  // A group stop reaches the children a program that exited left holding
+  // its output, in the group it led.
+  it('reaches the children a program that exited left', () => {
+    const folder = fresh()
+    const named = tag()
+    expect(startJob(folder, named, 'sh', '-c', '(sleep 30; echo late) & exit 7').status).toBe(0)
+    while (!existsSync(join(folder, 'exit'))) spawnSync('sleep', ['0.05'])
+    expect(spawnSync('/bin/sh', ['-c', signalLine(named, 15, true)]).status).toBe(0)
+    const viewed = viewJob(folder)
+    expect([viewed.stdout.toString(), viewed.stderr.toString()]).toEqual(['', '\0mirage-job 7\n'])
+  })
+
   // A job's folder is the user's alone: none other reads its output.
   it("keeps its folder the user's alone", () => {
     const folder = fresh()

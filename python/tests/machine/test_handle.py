@@ -769,6 +769,26 @@ async def test_the_end_mark_is_never_delivered(chunks, said):
     assert (done.exit_code, err) == (0, said)
 
 
+# A mark the program wrote itself never ends its job: only a viewer that
+# exited itself printed the mark, so one cut short is viewed again.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "end",
+    [ConnectionLostError("closed by remote host"), RuntimeError("gone"), 255],
+)
+async def test_a_mark_the_program_wrote_is_its_output(end, no_view_wait):
+    fake = b"\0mirage-job 0\n"
+    box = JobBox(
+        [
+            ([b"step 0\n"], [fake], end),
+            ([], [fake, b"late\n", b"\0mirage-job 3\n"], 0),
+        ]
+    )
+    done, out, err, _ = await _job_run(box)
+    assert (done.exit_code, out, err) == (3, b"step 0\n", fake + b"late\n")
+    assert [view[1:] for view in box.viewed] == [("0", "0"), ("7", "0")]
+
+
 # A job whose wrapper went with no exit code is not left running: it ends
 # hung up, and says so.
 @pytest.mark.asyncio

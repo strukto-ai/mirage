@@ -348,6 +348,8 @@ class JobTable:
             except Exception as exc:
                 adopted = set()
                 logger.debug("detached jobs not adopted: %s", exc)
+            if not self._claimed:
+                return
             self._adopted = True
             earlier = {
                 pid: record
@@ -577,17 +579,24 @@ class JobTable:
             self._drop_checking()
             await _after_ending(job)
 
-    def _track(self, job: JobHandle, process: ProcessHandle) -> None:
+    def _track(
+        self, job: JobHandle, process: ProcessHandle, listed: bool = True
+    ) -> None:
         """Hold a job this table runs as its process: listed in its
-        session, found by its pid on the plane, its list checked.
+        session, or disowned, found by its pid on the plane, its list
+        checked.
 
         Args:
             job (JobHandle): the job.
             process (ProcessHandle): its process.
+            listed (bool): its session lists it; else it runs disowned.
         """
         job.process = process
         process.saved = lambda: _console_bytes(job.console)
-        self._jobs.setdefault(job.session_id, {})[job.id] = job
+        if listed:
+            self._jobs.setdefault(job.session_id, {})[job.id] = job
+        else:
+            self._disowned.append(job)
         plane, pid = self._plane, process.record.pid
         plane._job_tables[pid] = self
         process.task.add_done_callback(
@@ -635,7 +644,9 @@ class JobTable:
         holds the lease left detached, this daemon's earlier life
         included: each one whose entry this daemon takes first runs here
         from then on, viewed from what its console holds. Answers the
-        pids adopted, whose published records no sweep stops after.
+        pids adopted, whose published records no sweep stops after. A
+        disowned job is adopted as one, and a lease lost meanwhile stops
+        the adopting.
         """
         adopted: set[int] = set()
         resume = self.resumer
@@ -648,8 +659,15 @@ class JobTable:
         }
         owners: set[str] = set()
         for session_id in await self.store.sessions():
-            fields = await self.store.load(session_id)
-            for key, entry in (fields or {}).get("jobs", {}).items():
+            fields = await self.store.load(session_id) or {}
+            found: list[tuple[int | None, RecordFields]] = [
+                (int(key), entry)
+                for key, entry in fields.get("jobs", {}).items()
+            ]
+            found += [(None, e) for e in fields.get("disowned", {}).values()]
+            for number, entry in found:
+                if not self._claimed:
+                    return adopted
                 if (
                     entry["state"] != JobState.RUNNING.value
                     or not entry.get("detached")
@@ -658,10 +676,12 @@ class JobTable:
                     continue
                 try:
                     taken = await self._adopt(
-                        session_id, int(key), entry, resume
+                        session_id, number, entry, resume
                     )
                 except Exception:
-                    logger.debug("job %s not adopted", key, exc_info=True)
+                    logger.debug(
+                        "job %s not adopted", entry["console"], exc_info=True
+                    )
                     continue
                 if taken:
                     adopted.add(entry["pid"])
@@ -680,19 +700,22 @@ class JobTable:
     async def _adopt(
         self,
         session_id: str,
-        number: int,
+        number: int | None,
         entry: RecordFields,
         resume: Callable[[JobHandle, tuple[int, int]], Awaitable[int]],
     ) -> bool:
         """Take one detached job from the daemon that left it: its entry
         names this daemon once the swap lands, and a process under its
         pid views its program from the bytes its console holds. A swap
-        another daemon won leaves the job to it. What can fail is read
-        before the swap, so a job this daemon takes is one it views.
+        another daemon won leaves the job to it, and a lease lost while it
+        lands leaves the job to the daemon that takes the lease next. What
+        can fail is read before the swap, so a job this daemon takes is
+        one it views.
 
         Args:
             session_id (str): the session whose list names it.
-            number (int): its number there.
+            number (int | None): its number there; None for a disowned
+                job, which the list holds by its console.
             entry (RecordFields): its entry as read.
             resume (Callable[[JobHandle, tuple[int, int]], Awaitable[int]]):
                 views its program to its end (``resumer``).
@@ -702,18 +725,28 @@ class JobTable:
         sent = await _console_bytes(console)
         for _ in range(LIST_MAX_RETRIES):
             fields = await self.store.load(session_id)
-            jobs = dict((fields or {}).get("jobs", {}))
-            if fields is None or jobs.get(str(number)) != entry:
+            if fields is None:
                 return False
-            jobs[str(number)] = {**entry, "owner": self.daemon}
+            jobs = dict(fields.get("jobs", {}))
+            held = dict(fields.get("disowned", {}))
+            where, key = (
+                (held, entry["console"])
+                if number is None
+                else (jobs, str(number))
+            )
+            if where.get(key) != entry:
+                return False
+            where[key] = {**entry, "owner": self.daemon}
             if await self._write(
-                session_id, fields, jobs, int(fields.get("next", 1))
+                session_id, fields, jobs, int(fields.get("next", 1)), held
             ):
                 break
         else:
             return False
+        if not self._claimed:
+            return False
         job = JobHandle(
-            id=number,
+            id=number or 0,
             command=entry["command"],
             cwd=entry["cwd"],
             session_id=session_id,
@@ -755,7 +788,7 @@ class JobTable:
         process.after_ending = []
         process.may_write = self._holding
         console.bind_process(str(process.record.id))
-        self._track(job, process)
+        self._track(job, process, listed=number is not None)
         return True
 
     async def load(self, job: JobHandle) -> None:

@@ -620,6 +620,7 @@ class MachineHandle:
 
             before = tuple(delivered)
             returned: tuple[bytes | None, bytes | None] = (None, None)
+            finished = False
             try:
                 await self._ensure_connected()
                 done = await self._exec_argv(
@@ -638,6 +639,7 @@ class MachineHandle:
                     err,
                 )
                 returned = (done.stdout, done.stderr)
+                finished = done.exit_code == 0
             except ConnectionLostError as exc:
                 logger.debug("%s: job view lost", self.id, exc_info=True)
                 returned = (exc.stdout, exc.stderr)
@@ -650,9 +652,14 @@ class MachineHandle:
                     await err(returned[1])
             except Exception:
                 logger.debug("%s: job output not kept", self.id, exc_info=True)
-            # A view whose output did not all land is viewed again, however
-            # it ended.
-            ended = None if undelivered else JOB_END.fullmatch(bytes(held))
+            # Only a viewer that exited itself printed the mark: else what
+            # is held may be the program's. A view whose output did not all
+            # land is viewed again, however it ended.
+            ended = (
+                JOB_END.fullmatch(bytes(held))
+                if finished and not undelivered
+                else None
+            )
             if ended is not None:
                 stderr = bytes(kept[1])
                 code = ended.group(1).decode()
