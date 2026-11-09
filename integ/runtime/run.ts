@@ -65,6 +65,7 @@ import {
   type FilesystemOperation,
   type Context,
 } from '@struktoai/mirage-node'
+import { RAMExecutionStore } from '@struktoai/mirage-core/execution/ram'
 import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
@@ -187,6 +188,7 @@ interface World {
   builtin_clis?: string[]
   session_id?: string
   command_limits?: unknown
+  lease_seconds?: number
   max_memory?: string | number | null
   network?: NetworkSetting
   register_runtimes?: Record<string, string>
@@ -969,6 +971,8 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
   }
   if (world.profile !== undefined) options.profile = world.profile
   const ws = new Workspace(mounts, options)
+  if (world.lease_seconds !== undefined)
+    ws.jobTable.store = new RAMExecutionStore(world.lease_seconds)
   if (world.read_control !== undefined) ws.policies.add(new ReadControl(ws, world.read_control))
   if (world.decide_lines !== undefined) {
     ws.policies.add(new DecideLines(ws, world.decide_lines.path, world.decide_lines.lines))

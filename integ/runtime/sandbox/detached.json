@@ -1,0 +1,61 @@
+{
+  "cases": [
+    {
+      "id": "a_detached_job_ends_once_its_program_exits",
+      "runtimes": ["docker", "microsandbox"],
+      "world": {
+        "lease_seconds": 30
+      },
+      "entry": {
+        "captures": ["dash"]
+      },
+      "steps": [
+        {
+          "command": "s=$(date +%s); dash -c '(sleep 20) & echo early' & wait $!; echo rc=$?; [ $(($(date +%s) - s)) -lt 10 ] && echo soon",
+          "expect": {
+            "exit": 0,
+            "stdout": "early\nrc=0\nsoon\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_detached_job_names_a_quick_programs_pid",
+      "runtimes": ["docker", "microsandbox"],
+      "world": {
+        "lease_seconds": 30
+      },
+      "entry": {
+        "captures": ["dash"]
+      },
+      "steps": [
+        {
+          "command": "dash -c 'exit 4' & p=$!; wait $p; echo rc=$?; [ \"$p\" -lt 4194305 ] && echo mpid",
+          "expect": {
+            "exit": 0,
+            "stdout": "rc=4\nmpid\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_signal_reaches_a_detached_program_alone",
+      "runtimes": ["docker", "microsandbox"],
+      "world": {
+        "lease_seconds": 30
+      },
+      "entry": {
+        "captures": ["dash"]
+      },
+      "steps": [
+        {
+          "command": "dash -c 'trap \"echo got\" USR1; sleep 1; echo slept=$?' & sleep 0.3; kill -USR1 $!; wait",
+          "expect": {
+            "exit": 0,
+            "stdout": "got\nslept=0\n"
+          }
+        }
+      ]
+    }
+  ]
+}

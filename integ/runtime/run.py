@@ -48,6 +48,7 @@ from mirage.commands.cli.types import CLI  # noqa: E402
 from mirage.commands.config import Context  # noqa: E402
 from mirage.commands.spec.types import CommandSpec  # noqa: E402
 from mirage.errors import classify  # noqa: E402
+from mirage.execution.ram import RAMExecutionStore  # noqa: E402
 from mirage.fuse.fs import MirageFS  # noqa: E402
 from mirage.mount.core import MountCore  # noqa: E402
 from mirage.policy import Policy  # noqa: E402
@@ -977,6 +978,10 @@ async def _build_workspace(world: dict[str, Any], run_id: str) -> Workspace:
     if "network" in world:
         kwargs["network"] = world["network"]
     ws = Workspace(mounts, mode=MountMode.EXEC, **kwargs)
+    if "lease_seconds" in world:
+        ws.job_table.store = RAMExecutionStore(
+            lease_seconds=world["lease_seconds"]
+        )
     if "read_control" in world:
         ws.policies.add(ReadControl(ws, world["read_control"]))
     if "decide_lines" in world:

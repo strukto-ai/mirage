@@ -168,6 +168,7 @@ cli_expressible() {
     and (((.world.mounts // {}) | to_entries) | all(.value.generated_files == null))
     and (((.world.mounts // {}) | to_entries) | all(.value.failing == null))
     and (.world.read_control == null)
+    and (.world.lease_seconds == null)
     and (((.world.builtin_clis // []) | length) == 0)
     and (((.world.policies // []) | length) == 0)
     and (((.world.runtimes // []) | map(select((type == "object" and .name == "echobox") or . == "echobox")) | length) == 0)

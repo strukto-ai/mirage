@@ -23,6 +23,7 @@ error, though the program saw it succeed.
 | `captures.json`   | only captured commands go to the box; the rest stay in mirage                                                           | every box                                                       |
 | `kernel.json`     | the box runs its own Linux kernel                                                                                       | smolvm, microsandbox, apple_container                           |
 | `mounts.json`     | `mount_type` serves the session's view into the box                                                                     | docker, e2b, microsandbox                                       |
+| `detached.json`   | a background job on a leased store runs detached: it ends once its program exits, `$!` and `kill` name the program      | docker, microsandbox; not over the CLI                          |
 
 The boxes are docker, ssh, e2b, smolvm, microsandbox and apple_container. CI runs docker
 and ssh in `integ-runtime` against containers it starts, e2b in
