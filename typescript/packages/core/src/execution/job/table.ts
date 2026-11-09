@@ -338,6 +338,11 @@ export class JobTable {
     limit?: number | null
     // The job is one simple command (`JobHandle.simple`).
     simple?: boolean
+    // Its statement redirects no output, so its one program may run
+    // detached from a machine's connection; only a top-level job on a store
+    // whose leases lapse is (`ProcessHandle.detachable`), since only there
+    // does a restart find it.
+    detachable?: boolean
     // Runs as the job's process ends, whether or not its runner began.
     ended?: () => Promise<void>
   }): Promise<JobHandle> {
@@ -387,6 +392,11 @@ export class JobTable {
       oneCommand: init.simple === true,
       programIgnores: IGNORED_SIGNALS,
     })
+    process.detachable =
+      init.detachable === true &&
+      init.simple === true &&
+      this.plane === this &&
+      this.store.leaseSeconds !== null
     const { line, group } = process.record
     let jobId: number
     try {

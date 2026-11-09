@@ -58,6 +58,7 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
     """
 
     provider = "ssh"
+    detaches = True
     config_cls = SSHMachineConfig
     config: SSHMachineConfig
 

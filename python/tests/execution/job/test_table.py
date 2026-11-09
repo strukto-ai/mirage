@@ -1963,3 +1963,33 @@ async def test_a_jobs_record_names_its_line_and_group():
     parent.terminate()
     await parent.join()
     await a.close()
+
+
+# A job's one program may run detached only where a restart finds the
+# job again: a top-level job, on a store whose leases lapse, whose
+# statement redirects no output.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "lease,simple,detachable,child,expected",
+    [
+        (30.0, True, True, False, True),
+        (None, True, True, False, False),
+        (30.0, False, True, False, False),
+        (30.0, True, False, False, False),
+        (30.0, True, True, True, False),
+    ],
+)
+async def test_only_a_job_a_restart_finds_is_detachable(
+    lease, simple, detachable, child, expected
+):
+    table = JobTable(RAMExecutionStore(lease_seconds=lease))
+    submitter = table.child() if child else table
+    job = await submitter.submit(
+        "train", _run_forever, "/", simple=simple, detachable=detachable
+    )
+    try:
+        assert job.process is not None
+        assert job.process.detachable is expected
+    finally:
+        await table.kill_all()
+        await table.close()

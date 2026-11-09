@@ -24,15 +24,24 @@ from mirage.commands.config import Context
 from mirage.context.session_context import run_as_process
 from mirage.execution.process.constants import FIRST_PID
 from mirage.execution.process.table import ProcessTable
+from mirage.execution.ram import RAMExecutionStore
 from mirage.io.types import materialize
 from mirage.machine import MachineConfig, MachineHandle
+from mirage.machine import handle as handle_module
 from mirage.machine.constants import (
+    JOB_REFUSED_STATUS,
+    JOB_REMOVE,
+    JOB_START,
+    JOB_VIEW,
     NOT_RUNNING_STATUS,
     PROCESS,
+    SETSID_PROBE,
     faketime_probe,
+    signal_line,
     stop_line,
 )
 from mirage.machine.errors import ConnectionLostError
+from mirage.machine.registry import known_providers, machine_class
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.machine import MachineRuntime
@@ -600,3 +609,384 @@ async def test_a_machine_is_asked_once_and_again_after_a_failed_probe():
         assert box.probes == 2
     finally:
         await ws.close()
+
+
+class JobBox(RecordingMachine):
+    """A box that detaches jobs, answering each viewer from ``views``:
+    the stdout and stderr chunks it prints, then how it ends (an exit
+    code, an error it raises, or an event it waits on)."""
+
+    detaches = True
+
+    def __init__(self, views=(), setsid=True, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.views = list(views)
+        self.setsid = setsid
+        self.start_code = 0
+        self.probes = 0
+        self.started: list[tuple[str, ...]] = []
+        self.viewed: list[tuple[str, ...]] = []
+        self.removed: list[str] = []
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        script = argv[2] if argv[:2] == ("/bin/sh", "-c") else None
+        if script == JOB_START:
+            self.started.append(argv[4:])
+            self.exec_envs.append(dict(env))
+            return RunResult(
+                stdout=b"", stderr=None, exit_code=self.start_code
+            )
+        if script == JOB_VIEW:
+            self.viewed.append(argv[4:])
+            out, err, end = self.views.pop(0)
+            for chunk in out:
+                await output(chunk)
+            for chunk in err:
+                await errors(chunk)
+            if isinstance(end, BaseException):
+                raise end
+            if isinstance(end, asyncio.Event):
+                await end.wait()
+                end = 0
+            if isinstance(end, RunResult):
+                return end
+            return RunResult(stdout=b"", stderr=None, exit_code=end)
+        if script == JOB_REMOVE:
+            self.removed.append(argv[4])
+            return RunResult(stdout=b"", stderr=None, exit_code=0)
+        return await super()._exec_argv(argv, stdin, env, cwd, output, errors)
+
+    async def exec_line(self, line, stdin, env, cwd) -> RunResult:
+        if line == SETSID_PROBE:
+            self.probes += 1
+            return RunResult(
+                stdout=b"", stderr=None, exit_code=0 if self.setsid else 1
+            )
+        return await super().exec_line(line, stdin, env, cwd)
+
+
+@pytest.fixture
+def no_view_wait(monkeypatch):
+    monkeypatch.setattr(handle_module, "VIEW_RETRY_SECONDS", 0)
+
+
+async def _job_run(
+    box, detachable=True, stdin=None, started=None, streamed=True
+):
+    """Run ``train`` on ``box`` as a job's process, its output streamed
+    unless not ``streamed``: the result, stdout and stderr, and the
+    process."""
+    out, err, done = bytearray(), bytearray(), []
+    ctx = Context(cwd=PathSpec.from_str_path("/"), stdin=stdin)
+
+    async def output(data: bytes) -> None:
+        out.extend(data)
+
+    async def errors(data: bytes) -> None:
+        err.extend(data)
+
+    async def run() -> int:
+        sinks = (output, errors) if streamed else (None, None)
+        done.append(await box.run(("train",), ctx, None, *sinks))
+        return done[0].exit_code
+
+    runner = ProcessTable("w1", bind=run_as_process).start(
+        session_id="s", command="train", cwd=ctx.cwd, run=run
+    )
+    runner.detachable = detachable
+    if started is not None:
+        started(runner)
+    await runner.join()
+    return done[0] if done else None, bytes(out), bytes(err), runner
+
+
+# However a viewer ends without the end mark, the job is viewed again from
+# the bytes each stream delivered, so nothing comes twice or goes missing.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "end",
+    [
+        ConnectionLostError("closed by remote host"),
+        RuntimeError("sdk stream ended"),
+        255,
+        0,
+    ],
+)
+async def test_a_detached_job_is_viewed_again_from_what_it_delivered(
+    end, no_view_wait
+):
+    box = JobBox(
+        [
+            ([b"step 0\n"], [b"warn\n"], end),
+            ([b"step 1\n"], [b"\0mirage-job 3\n"], 0),
+        ]
+    )
+    done, out, err, runner = await _job_run(box)
+    assert (done.exit_code, out, err) == (3, b"step 0\nstep 1\n", b"warn\n")
+    folder = box.viewed[0][0]
+    assert [view[1:] for view in box.viewed] == [("0", "0"), ("7", "5")]
+    assert box.started == [(folder, str(runner.record.id), "train")]
+    assert PROCESS not in box.exec_envs[0]
+    assert box.removed == [folder]
+
+
+# The end mark is Mirage's, never the job's: one split across reads is
+# held back, and a NUL the job wrote itself is delivered.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "chunks,said",
+    [
+        ([b"warn\n\0mira", b"ge-job 0", b"\n"], b"warn\n"),
+        ([b"a\0b\n", b"\0", b"mirage-job 0\n"], b"a\0b\n"),
+    ],
+)
+async def test_the_end_mark_is_never_delivered(chunks, said):
+    box = JobBox([([], chunks, 0)])
+    done, _, err, _ = await _job_run(box)
+    assert (done.exit_code, err) == (0, said)
+
+
+# A job whose wrapper went with no exit code is not left running: it ends
+# hung up, and says so.
+@pytest.mark.asyncio
+async def test_a_lost_job_ends_hung_up():
+    box = JobBox([([b"step 0\n"], [b"\0mirage-job lost\n"], 0)])
+    done, out, err, runner = await _job_run(box)
+    assert (done.exit_code, out, err) == (129, b"step 0\n", b"")
+    assert done.stderr == f"mirage: {box.id}: job lost\n".encode()
+    assert runner.ended_by == 1
+    assert stop_line(str(runner.record.id), 15) in [
+        line for line, _, _ in box.execs
+    ]
+    assert box.removed == [box.viewed[0][0]]
+
+
+# A detached job a kill stops is stopped in the box by its tag, with the
+# signal named, and its folder goes.
+@pytest.mark.asyncio
+async def test_a_killed_detached_job_is_stopped_and_its_folder_removed():
+    box = JobBox([([], [], asyncio.Event())])
+    task = asyncio.ensure_future(_job_run(box, started=_kill_when_viewed(box)))
+    _, _, _, runner = await task
+    tag = str(runner.record.id)
+    assert [line for line, _, _ in box.execs][-1] == stop_line(tag, 15)
+    assert box.removed == [box.viewed[0][0]]
+
+
+def _kill_when_viewed(box):
+    def started(runner) -> None:
+        async def kill() -> None:
+            while not box.viewed:
+                await asyncio.sleep(0)
+            runner.terminate(15)
+
+        asyncio.ensure_future(kill())
+
+    return started
+
+
+# A signal a job takes and goes on reaches the group its detached program
+# leads, so what it started stops and continues with it.
+@pytest.mark.asyncio
+async def test_a_signal_reaches_a_detached_jobs_group():
+    gate = asyncio.Event()
+    box = JobBox([([], [], gate)])
+    sent = []
+
+    def started(runner) -> None:
+        async def signal() -> None:
+            while not box.viewed:
+                await asyncio.sleep(0)
+            sent.append(await box.signal(str(runner.record.id), 19))
+            gate.set()
+
+        asyncio.ensure_future(signal())
+
+    box.views.append(([], [b"\0mirage-job 0\n"], 0))
+    _, _, _, runner = await _job_run(box, started=started)
+    assert sent == [True]
+    assert signal_line(str(runner.record.id), 19, True) in [
+        line for line, _, _ in box.execs
+    ]
+
+
+# Only a detachable job's program, fed no input, on a box that detaches
+# and holds setsid, detaches; any other run is one attached exec.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "detachable,stdin,detaches,setsid",
+    [
+        (False, None, True, True),
+        (True, b"input", True, True),
+        (True, None, False, True),
+        (True, None, True, False),
+    ],
+)
+async def test_a_run_that_does_not_qualify_stays_attached(
+    detachable, stdin, detaches, setsid
+):
+    box = JobBox(setsid=setsid)
+    box.detaches = detaches
+    done, _, _, runner = await _job_run(box, detachable, stdin)
+    assert (done.exit_code, box.started) == (0, [])
+    assert box.execs[-1][0] == "train"
+    assert box.exec_envs[-1][PROCESS] == str(runner.record.id)
+
+
+@pytest.mark.asyncio
+async def test_a_machine_serving_mounts_keeps_jobs_attached():
+    class Served:
+        async def validate(self, binding, cwd):
+            return None
+
+        def guarded(self, argv):
+            return argv
+
+        async def land(self):
+            return []
+
+    box = JobBox()
+    box._mounts = Served()
+    done, _, _, _ = await _job_run(box)
+    assert (done.exit_code, box.started, box.probes) == (0, [], 0)
+
+
+@pytest.mark.asyncio
+async def test_a_box_is_asked_for_setsid_once():
+    box = JobBox(
+        [([], [b"\0mirage-job 0\n"], 0), ([], [b"\0mirage-job 0\n"], 0)]
+    )
+    await _job_run(box)
+    await _job_run(box)
+    assert (box.probes, len(box.started)) == (2 - 1, 2)
+
+
+# A background job detaches only on a store a restart reads, and only when
+# its statement redirects no output; its output and status reach the
+# console as an attached job's would.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,lease,detached",
+    [
+        ("train &", 30.0, True),
+        ("train > /data/log &", 30.0, False),
+        ("train &", None, False),
+        ("{ train; } &", 30.0, False),
+    ],
+)
+async def test_a_background_job_detaches_where_a_restart_finds_it(
+    line, lease, detached
+):
+    box = JobBox(
+        [([b"step 0\n"], [b"\0mirage-job 3\n"], 0)], captures=("train",)
+    )
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
+    try:
+        ws.job_table.store = RAMExecutionStore(lease_seconds=lease)
+        await ws.shell(line)
+        io = await ws.shell("wait %1")
+        assert bool(box.started) is detached
+        if detached:
+            assert io.exit_code == 3
+    finally:
+        await ws.close()
+
+
+# Jobs detach only on the providers a dropped connection was measured on.
+def test_jobs_detach_on_the_measured_providers():
+    assert {p for p in known_providers() if machine_class(p).detaches} == {
+        "docker",
+        "e2b",
+        "microsandbox",
+        "ssh",
+    }
+
+
+# A start that failed returns its own status, and whatever a wrapper that
+# outlived the start's wait started is stopped by its tag, its folder gone.
+@pytest.mark.asyncio
+async def test_a_failed_start_returns_its_status_and_stops_its_tag():
+    box = JobBox()
+    box.start_code = 126
+    done, _, _, runner = await _job_run(box)
+    assert (done.exit_code, box.viewed) == (126, [])
+    assert box.execs[-1][0] == stop_line(str(runner.record.id), 15)
+    assert box.removed == [box.started[0][0]]
+
+
+# Output a transport returns whole, or one a dropped connection read, is
+# kept and counted, so the next viewer starts after it.
+@pytest.mark.asyncio
+async def test_output_returned_whole_is_kept_and_counted(no_view_wait):
+    box = JobBox(
+        [
+            ([], [], ConnectionLostError("closed", b"a\n", b"w\n")),
+            ([], [], RunResult(b"b\n", b"\0mirage-job 0\n", 0)),
+        ]
+    )
+    done, _, _, _ = await _job_run(box, streamed=False)
+    assert (done.stdout, done.stderr) == (b"a\nb\n", b"w\n")
+    assert box.viewed[1][1:] == ("2", "2")
+
+
+# A start that failed past the connection may have started what nothing
+# would view: it is stopped by its tag and its folder goes.
+@pytest.mark.asyncio
+async def test_a_start_that_failed_stops_its_tag():
+    class BrokenStart(JobBox):
+        async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+            if argv[2:3] == (JOB_START,):
+                self.started.append(argv[4:])
+                raise RuntimeError("sdk failed")
+            return await super()._exec_argv(
+                argv, stdin, env, cwd, output, errors
+            )
+
+    box = BrokenStart()
+    _, _, _, runner = await _job_run(box)
+    assert box.execs[-1][0] == stop_line(str(runner.record.id), 15)
+    assert box.removed == [box.started[0][0]]
+
+
+# Output counts as delivered only once delivered: a chunk whose delivery
+# failed is viewed again.
+@pytest.mark.asyncio
+async def test_a_chunk_whose_delivery_failed_is_viewed_again(no_view_wait):
+    box = JobBox(
+        [([b"step 0\n"], [], 0), ([b"step 0\n"], [b"\0mirage-job 0\n"], 0)]
+    )
+    out, failed = bytearray(), []
+    ctx = Context(cwd=PathSpec.from_str_path("/"))
+
+    async def output(data: bytes) -> None:
+        if not failed:
+            failed.append(data)
+            raise ConnectionError("console unavailable")
+        out.extend(data)
+
+    async def errors(data: bytes) -> None:
+        return None
+
+    async def run() -> int:
+        runner.detachable = True
+        return (await box.run(("train",), ctx, None, output, errors)).exit_code
+
+    runner = ProcessTable("w1", bind=run_as_process).start(
+        session_id="s", command="train", cwd=ctx.cwd, run=run
+    )
+    assert (await runner.join()).exit == 0
+    assert [view[1:] for view in box.viewed] == [("0", "0"), ("0", "0")]
+    assert out == b"step 0\n"
+
+
+# A box that cannot detach a job, with no folder of the user's own or no
+# setsid, runs it attached, as it would any other run.
+@pytest.mark.asyncio
+async def test_a_job_the_box_cannot_detach_runs_attached():
+    box = JobBox()
+    box.start_code = JOB_REFUSED_STATUS
+    done, _, _, runner = await _job_run(box)
+    assert (done.exit_code, box.viewed) == (0, [])
+    assert box.removed == [box.started[0][0]]
+    assert box.execs[-1][0] == "train"
+    assert box.exec_envs[-1][PROCESS] == str(runner.record.id)

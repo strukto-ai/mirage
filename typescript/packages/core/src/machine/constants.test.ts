@@ -13,18 +13,24 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   ENCODE_OUTPUT,
+  JOB_REMOVE,
+  JOB_START,
+  JOB_VIEW,
   MOUNT_GUARD,
   PROCESS,
   NOT_RUNNING_STATUS,
+  SETSID_PROBE,
   TOOLS_PATH,
   decodeOutput,
   mountField,
+  signalLine,
   stopLine,
   wrapLine,
 } from './constants.ts'
@@ -296,5 +302,103 @@ describe('ENCODE_OUTPUT', () => {
     } finally {
       rmSync(empty, { recursive: true, force: true })
     }
+  })
+})
+
+// The scripts a detached job runs are the same bytes on both hosts:
+// Python's constants test pins the same digests.
+describe('job scripts', () => {
+  it.each([
+    ['start', JOB_START, 'cbdc227c30e0f913'],
+    ['view', JOB_VIEW, 'd2226d4e017eb5fd'],
+    ['remove', JOB_REMOVE, '7cde63f731a3578a'],
+    ['probe', SETSID_PROBE, '16bda6f7218e7026'],
+  ])('%s matches Python', (_, script, digest) => {
+    expect(createHash('sha256').update(script).digest('hex').slice(0, 16)).toBe(digest)
+  })
+})
+
+const detaches =
+  existsSync('/proc/self') && spawnSync('/bin/sh', ['-c', 'command -v setsid']).status === 0
+
+function startJob(folder: string, tag: string, ...argv: string[]) {
+  return spawnSync('/bin/sh', ['-c', JOB_START, 'sh', folder, tag, ...argv], { timeout: 20_000 })
+}
+
+function viewJob(folder: string, out = 0, err = 0) {
+  return spawnSync('/bin/sh', ['-c', JOB_VIEW, 'sh', folder, String(out), String(err)], {
+    timeout: 20_000,
+  })
+}
+
+function jobPids(folder: string): number[] {
+  return readFileSync(join(folder, 'pid'), 'utf8').trim().split(' ').map(Number)
+}
+
+describe.skipIf(!detaches)('a detached job in a real sh', () => {
+  const folders: string[] = []
+  const fresh = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-job-'))
+    folders.push(dir)
+    return join(dir, 'job')
+  }
+  const tag = (): string => `t${crypto.randomUUID().replaceAll('-', '')}:9`
+  afterEach(() => {
+    for (const dir of folders.splice(0)) rmSync(dir, { recursive: true, force: true })
+  })
+
+  // It runs with its arguments intact, and a viewer prints its output from
+  // the offsets it is given, then the end mark with the exit code.
+  it('is viewed to its exit code', () => {
+    const folder = fresh()
+    const args = ['sh', '-c', 'echo "arg: $1"; echo e1 >&2; exit 3', 'x', 'a b']
+    expect(startJob(folder, tag(), ...args).status).toBe(0)
+    const viewed = viewJob(folder)
+    expect(viewed.stdout.toString()).toBe('arg: a b\n')
+    expect(viewed.stderr.toString()).toBe('e1\n\0mirage-job 3\n')
+    expect(viewJob(folder, 5, 3).stdout.toString()).toBe('a b\n')
+  })
+
+  it('tags only its program, which leads its own group', () => {
+    const folder = fresh()
+    const named = tag()
+    expect(startJob(folder, named, 'sleep', '30').status).toBe(0)
+    const [program, wrapper] = jobPids(folder)
+    try {
+      const entries = (pid: number | undefined): string[] =>
+        readFileSync(`/proc/${String(pid)}/environ`, 'utf8').split('\0')
+      expect(entries(program)).toContain(`${PROCESS}=${named}`)
+      expect(entries(wrapper)).not.toContain(`${PROCESS}=${named}`)
+    } finally {
+      process.kill(program ?? 0, 9)
+    }
+  })
+
+  // A group stop reaches what the program started, and the wrapper lives on
+  // to write the code the signal left.
+  it('keeps the exit code a group stop left', () => {
+    const folder = fresh()
+    const named = tag()
+    expect(startJob(folder, named, 'sh', '-c', 'sleep 30 & sleep 30').status).toBe(0)
+    expect(spawnSync('/bin/sh', ['-c', signalLine(named, 15, true)]).status).toBe(0)
+    expect(viewJob(folder).stderr.toString()).toBe('\0mirage-job 143\n')
+  })
+
+  // A job's folder is the user's alone: none other reads its output.
+  it("keeps its folder the user's alone", () => {
+    const folder = fresh()
+    expect(startJob(folder, tag(), 'true').status).toBe(0)
+    expect(statSync(folder).mode & 0o077).toBe(0)
+  })
+
+  it('ends lost when its wrapper or folder went', () => {
+    const folder = fresh()
+    expect(startJob(folder, tag(), 'sleep', '30').status).toBe(0)
+    const [program, wrapper] = jobPids(folder)
+    process.kill(wrapper ?? 0, 9)
+    process.kill(program ?? 0, 9)
+    spawnSync('sleep', ['0.3'])
+    expect(viewJob(folder).stderr.toString()).toBe('\0mirage-job lost\n')
+    expect(viewJob(join(folder, 'none')).stderr.toString()).toBe('\0mirage-job lost\n')
   })
 })

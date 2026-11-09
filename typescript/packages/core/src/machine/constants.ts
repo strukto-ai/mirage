@@ -353,8 +353,10 @@ export function scanLine(workspace: string): string {
  *
  * @param target the run's tag, or the process.
  * @param signum the signal.
+ * @param group send it to the process group the tagged program leads, as
+ *   a detached job's program does (`JOB_START`).
  */
-export function signalLine(target: string | MachinePid, signum: number): string {
+export function signalLine(target: string | MachinePid, signum: number, group = false): string {
   const absent = String(NOT_RUNNING_STATUS)
   if (typeof target !== 'string') {
     const pid = String(target.pid)
@@ -376,8 +378,111 @@ export function signalLine(target: string | MachinePid, signum: number): string 
     'l="$l${p#/proc/} "; r="$r ${p#/proc/}:$2"; done; ' +
     'k=; for e in $r; do case $l in *" ${e#*:} "*) ;; ' +
     '*) k="$k ${e%%:*}" ;; esac; done; ' +
-    `[ -n "$k" ] || exit ${absent}; kill -${String(signum)} $k 2>/dev/null; true`
+    `[ -n "$k" ] || exit ${absent}; ` +
+    (group ? 'g=; for p in $k; do g="$g -$p"; done; k=$g; ' : '') +
+    `kill -${String(signum)} $k 2>/dev/null; true`
   )
+}
+
+// Where a detached job keeps its files in the box, one folder per run:
+// `out` and `err`, `pid` (the program's pid, the wrapper's and its start)
+// and `exit`.
+export const JOBS_DIR = '/tmp/.mirage/jobs'
+
+// What the viewer prints on stderr after a detached job's last byte: this,
+// then the exit code or `JOB_LOST`, and a newline.
+export const JOB_MARK = '\0mirage-job '
+export const JOB_LOST = 'lost'
+
+export const JOB_END = /^\0mirage-job (\d+|lost)\n$/
+// A mark the viewer has begun but not finished printing.
+
+export const JOB_END_PART = /^\0mirage-job (\d*|l|lo|los|lost)$/
+
+// Whether the box can detach a job: it holds setsid.
+export const SETSID_PROBE = `PATH=${TOOLS_PATH}; command -v setsid`
+
+// The wrapper a detached job runs under, in a session of its own: $1 the
+// folder, $2 the tag, $3 setsid, then the argv. The inner setsid execs in
+// place, so the program keeps the pid it is recorded under, leads its own
+// group and is the only process the tag marks; the wrapper writes the
+// program's pid and its own with its start, waits, and writes the exit code,
+// a signal's 128 plus it. Its names are prefixed, so a name the session
+// exported reaches the program as it was. Mirrors Python's.
+export const JOB_WRAPPER =
+  '_md=$1; _mt=$2; _ms=$3; shift 3; "$_ms" /bin/sh -c ' +
+  `'export ${PROCESS}="$1"; shift; exec "$@"' ` +
+  'sh "$_mt" "$@" </dev/null >"$_md/out" 2>"$_md/err" & _mp=$!; ' +
+  '_mx=; read -r _mx 2>/dev/null </proc/$$/stat; set -- ${_mx##*)}; ' +
+  'printf \'%s %s %s\\n\' "$_mp" "$$" "${20}" >"$_md/pid"; ' +
+  'wait "$_mp"; echo $? >"$_md/exit"'
+
+// What the start of a detached job exits with when the box cannot detach it
+// and nothing started: no setsid, or no folder of the user's own.
+export const JOB_REFUSED_STATUS = 75
+
+// Starts a detached job: $1 the folder, $2 the tag, then the argv, from the
+// run's cwd. It returns 0 once the wrapper wrote `pid`, `JOB_REFUSED_STATUS`
+// without setsid or a folder of the user's own, and 126 when the wrapper
+// never wrote `pid`. The folder is the user's alone, under folders no other
+// user owns, so none reads the job's output or swaps its files.
+export const JOB_START =
+  `_mT=${TOOLS_PATH}; _ms=$(PATH=$_mT; command -v setsid) || ` +
+  `exit ${String(JOB_REFUSED_STATUS)}; ` +
+  '_md=$1; _mt=$2; shift 2; (umask 077; PATH=$_mT mkdir -p -- "$_md") ' +
+  '&& [ ! -h "${_md%/*/*}" ] && [ -O "${_md%/*/*}" ] ' +
+  '&& [ -O "${_md%/*}" ] && [ -O "$_md" ] || ' +
+  '{ echo "mirage: ${_md%/*}: no folder of this user\'s own" >&2; ' +
+  `exit ${String(JOB_REFUSED_STATUS)}; }; ` +
+  `"$_ms" /bin/sh -c ${singleQuote(JOB_WRAPPER)} ` +
+  'sh "$_md" "$_mt" "$_ms" "$@" </dev/null >/dev/null 2>&1 & _mi=0; ' +
+  'while [ ! -s "$_md/pid" ] && [ ! -s "$_md/exit" ]; do _mi=$((_mi + 1)); ' +
+  '[ $_mi -le 200 ] || exit 126; PATH=$_mT sleep 0.05; done; true'
+
+// Views a detached job: $1 the folder, $2 and $3 the bytes of `out` and
+// `err` already delivered. It prints the rest as it is written, each read
+// exactly up to the size measured first, and ends with `JOB_MARK`: the exit
+// code once `exit` holds one, `JOB_LOST` once the folder or a wrapper that
+// wrote none is gone. A start the connection dropped gets as long to write
+// `pid` as `JOB_START` waits for it.
+export const JOB_VIEW =
+  `PATH=${TOOLS_PATH}; d=$1; o=$2; e=$3; ` +
+  `q() { printf '\\000${JOB_MARK.slice(1)}%s\\n' "$1" >&2; exit 0; }; ` +
+  `[ -d "$d" ] || q ${JOB_LOST}; w=; v=; i=0; ` +
+  'while [ ! -s "$d/pid" ] && [ ! -s "$d/exit" ] && [ $i -lt 100 ]; ' +
+  'do i=$((i + 1)); sleep 0.1; done; ' +
+  '[ -r "$d/pid" ] && read -r _ w v <"$d/pid"; ' +
+  'u() { x=; read -r x 2>/dev/null </proc/"$w"/stat || return 1; ' +
+  'set -- ${x##*)}; [ "$1" != Z ] && [ "${20}" = "$v" ]; }; ' +
+  'p() { n=$(wc -c 2>/dev/null <"$d/$1") || n=$2; n=$((n)); ' +
+  '[ "$n" -gt "$2" ] || { n=$2; return 0; }; ' +
+  'tail -c +$(($2 + 1)) "$d/$1" | head -c $((n - $2)); }; ' +
+  'while :; do f=; [ -s "$d/exit" ] && f=1; ' +
+  'p out "$o"; o=$n; p err "$e" >&2; e=$n; ' +
+  'if [ -n "$f" ]; then read -r c <"$d/exit"; q "$c"; fi; ' +
+  `[ -d "$d" ] || q ${JOB_LOST}; u || [ -s "$d/exit" ] || q ${JOB_LOST}; ` +
+  'sleep 0.2; done'
+
+// Removes a detached job's folder: $1.
+export const JOB_REMOVE = `PATH=${TOOLS_PATH}; rm -rf -- "$1"`
+
+// How long a viewer that ended without the mark waits before viewing again,
+// doubling up to the most.
+export const VIEW_RETRY_SECONDS = 0.5
+export const VIEW_RETRY_MAX_SECONDS = 10.0
+
+/**
+ * A new folder for the detached job `tag` runs, never reused. Mirrors
+ * Python's `job_folder`.
+ *
+ * @param tag the id of the process the run is.
+ */
+export function jobFolder(tag: string): string {
+  const name = tag.replace(/[^A-Za-z0-9_.:-]/g, '_')
+  const random = Array.from(crypto.getRandomValues(new Uint8Array(4)), (b) =>
+    b.toString(16).padStart(2, '0'),
+  ).join('')
+  return `${JOBS_DIR}/${name}-${random}`
 }
 
 // How long a machine gets to answer the libfaketime probe, which every run

@@ -681,6 +681,7 @@ export async function handleBackground(
       parent: session.processId,
       limit: session.processes.max,
       simple: oneProgram(left, session),
+      detachable: left.type !== NT.REDIRECTED_STATEMENT,
       // A job whose runner never begins skips runBg's finally, so its
       // holds on readers go as its process ends.
       ended: () =>

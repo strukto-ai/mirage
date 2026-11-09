@@ -54,6 +54,7 @@ export class SSHMachine extends MachineHandle<SSHMachineConfig> implements PipeT
   static override readonly configFields: ConfigFields = SSH_RUNTIME_CONFIG_FIELDS
   readonly [PIPE_TRANSPORT] = true as const
   static override readonly provider = 'ssh'
+  static override readonly detaches: boolean = true
   private client: Client | null = null
 
   constructor(name: string, config?: SSHMachineConfig) {

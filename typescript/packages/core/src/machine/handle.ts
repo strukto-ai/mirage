@@ -16,14 +16,15 @@ import type { Context } from '../commands/config.ts'
 import { currentCaller } from '../context/session_context.ts'
 import { HANGUP_EXIT_CODE } from '../execution/job/constants.ts'
 import type { MachineProcess } from '../execution/machine/types.ts'
+import type { ProcessHandle } from '../execution/process/handle.ts'
 import { MachineId, type MachinePid } from '../execution/types.ts'
 import type { ByteSource } from '../io/types.ts'
 import type { WorkspaceBinding } from '../runtime/binding.ts'
 import { coerceRuntimeConfig, type ConfigFields } from '../runtime/config.ts'
 import type { MountType } from './types.ts'
 import type { OutputFn, RunResult } from '../runtime/types.ts'
-import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
-import { abortable } from '../utils/abort.ts'
+import { CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS, SIGTERM } from '../shell/constants.ts'
+import { abortable, sleep } from '../utils/abort.ts'
 import { concat } from '../utils/bytes.ts'
 import { boundSystemClock } from '../utils/clock.ts'
 import { rstripSlash } from '../utils/slash.ts'
@@ -40,6 +41,15 @@ import {
   FAKETIME_PROBE_SECONDS,
   faketimeEnv,
   faketimeProbe,
+  JOB_END,
+  JOB_END_PART,
+  JOB_LOST,
+  JOB_MARK,
+  JOB_REFUSED_STATUS,
+  JOB_REMOVE,
+  JOB_START,
+  JOB_VIEW,
+  jobFolder,
   PROCESS,
   NOT_RUNNING_STATUS,
   MACHINE_STOP_WAIT_SECONDS,
@@ -48,6 +58,9 @@ import {
   SCAN_WAIT_SECONDS,
   scanLine,
   signalLine,
+  SETSID_PROBE,
+  VIEW_RETRY_MAX_SECONDS,
+  VIEW_RETRY_SECONDS,
 } from './constants.ts'
 import { ConnectionLostError } from './errors.ts'
 import { isPipeTransport } from './mixin.ts'
@@ -76,6 +89,12 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   static readonly configFields: ConfigFields = BASE_CONFIG_FIELDS
   /** The provider this class reaches machines through, as `machines:` spells it. */
   static readonly provider: string
+  /**
+   * Whether a background job's one program runs detached here, under a
+   * wrapper in the box (`JOB_START`), so it outlives the connection; on only
+   * for the providers it was measured on.
+   */
+  static readonly detaches: boolean = false
 
   /** This handle's provider: its class's. */
   get provider(): string {
@@ -94,6 +113,11 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   // The runs executing here right now; a scan asks only a machine with
   // one, or with processes an earlier scan found.
   private runs = 0
+  // Whether the box holds setsid, asked once a job first detaches; a probe
+  // that got no answer is cleared, so a later job asks again.
+  private setsidProbe: Promise<boolean> | null = null
+  // The folder of each detached job's run here, by its tag.
+  private readonly detached = new Map<string, string>()
 
   /**
    * @param name the machine's name, its key under `machines:`.
@@ -185,21 +209,33 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     // outside a process gets a tag of its own.
     const runner = currentCaller().process
     const tag = runner?.record.id.toString() ?? crypto.randomUUID().replaceAll('-', '')
+    const detached = await this.detaches(runner, ctx)
     let done: RunResult
     this.runs += 1
     try {
-      done = await this.execArgv(
-        run,
-        ctx.stdin,
-        { ...given, ...clock, [PROCESS]: tag },
-        ctx.cwd.virtual,
-        output,
-        errors,
-        ctx.signal,
-      )
+      done = detached
+        ? await this.runDetached(
+            run,
+            { ...given, ...clock },
+            ctx.cwd.virtual,
+            tag,
+            runner,
+            output,
+            errors,
+            ctx.signal,
+          )
+        : await this.execArgv(
+            run,
+            ctx.stdin,
+            { ...given, ...clock, [PROCESS]: tag },
+            ctx.cwd.virtual,
+            output,
+            errors,
+            ctx.signal,
+          )
     } catch (error) {
       if (ctx.signal?.aborted === true) {
-        await this.stop(tag, runner?.signal ?? runner?.interrupted ?? 15)
+        await this.stop(tag, stopWith(runner))
         throw error
       }
       if (!(error instanceof ConnectionLostError)) throw error
@@ -274,7 +310,11 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * @param signum the signal.
    */
   async signal(target: string | MachinePid, signum: number): Promise<boolean> {
-    const done = await this.connectedLine(signalLine(target, signum), MACHINE_STOP_WAIT_SECONDS)
+    const group = typeof target === 'string' && this.detached.has(target)
+    const done = await this.connectedLine(
+      signalLine(target, signum, group),
+      MACHINE_STOP_WAIT_SECONDS,
+    )
     if (done.exitCode !== 0 && done.exitCode !== NOT_RUNNING_STATUS)
       throw new Error(
         `${this.id.toString()}: signal ${String(signum)} not sent: exit ${String(done.exitCode)}`,
@@ -318,6 +358,216 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     } catch (error) {
       console.debug(`${this.id.toString()}: run ${tag} not stopped: ${String(error)}`)
       return false
+    }
+  }
+
+  /**
+   * Whether a run detaches: a detachable job's one program
+   * (`ProcessHandle.detachable`), fed no input, on a machine that detaches,
+   * holds setsid and is served no mounts, whose pipe would go with the
+   * connection. Mirrors Python's `MachineHandle._detaches`.
+   */
+  private async detaches(runner: ProcessHandle | null, ctx: Context): Promise<boolean> {
+    if (
+      !(this.constructor as typeof MachineHandle).detaches ||
+      runner?.detachable !== true ||
+      ctx.stdin !== null ||
+      this.mounts !== null
+    )
+      return false
+    let probe = this.setsidProbe
+    if (probe === null) {
+      const deadline = AbortSignal.timeout(CHECK_WAIT_SECONDS * 1000)
+      probe = abortable(this.setup(SETSID_PROBE, deadline), deadline).then((found) => {
+        if (![0, 1, NOT_FOUND_STATUS].includes(found.exitCode))
+          throw new Error(`${this.id.toString()}: setsid probe exited ${String(found.exitCode)}`)
+        if (found.exitCode !== 0)
+          logger.debug?.(`${this.id.toString()}: no setsid, so jobs stay attached`)
+        return found.exitCode === 0
+      })
+      this.setsidProbe = probe
+    }
+    try {
+      return await abortable(probe, ctx.signal)
+    } catch (err) {
+      if (ctx.signal?.aborted === true) throw err
+      logger.debug?.(`${this.id.toString()}: setsid probe failed: ${String(err)}`)
+      if (this.setsidProbe === probe) this.setsidProbe = null
+      return false
+    }
+  }
+
+  /**
+   * Run a job's program detached (`JOB_START`) and view it to its end
+   * (`view`), then remove its folder; a box that cannot detach it runs it
+   * attached, as any other run. A start the connection dropped in is
+   * viewed all the same: the job may run. A cancelled run removes its
+   * folder; `run` stops it by its tag. Mirrors Python's
+   * `MachineHandle._run_detached`.
+   */
+  private async runDetached(
+    argv: readonly string[],
+    env: Record<string, string>,
+    cwd: string,
+    tag: string,
+    runner: ProcessHandle | null,
+    output: OutputFn | null,
+    errors: OutputFn | null,
+    signal?: AbortSignal,
+  ): Promise<RunResult> {
+    const folder = jobFolder(tag)
+    this.detached.set(tag, folder)
+    try {
+      let started: RunResult | null = null
+      try {
+        started = await this.execArgv(
+          ['/bin/sh', '-c', JOB_START, 'sh', folder, tag, ...argv],
+          null,
+          env,
+          cwd,
+          null,
+          null,
+          signal,
+        )
+      } catch (error) {
+        if (!(error instanceof ConnectionLostError) || signal?.aborted === true) {
+          // The wrapper may have started what nothing now views.
+          if (signal?.aborted !== true) {
+            await this.stop(tag, SIGTERM)
+            await this.removeJob(folder)
+          }
+          throw error
+        }
+        logger.debug?.(`${this.id.toString()}: job start lost: ${String(error)}`)
+      }
+      if (started?.exitCode === JOB_REFUSED_STATUS) {
+        logger.debug?.(`${this.id.toString()}: job not detached: ${String(started.stderr)}`)
+        this.detached.delete(tag)
+        await this.removeJob(folder)
+        return await this.execArgv(
+          argv,
+          null,
+          { ...env, [PROCESS]: tag },
+          cwd,
+          output,
+          errors,
+          signal,
+        )
+      }
+      if (started !== null && started.exitCode !== 0) {
+        // A wrapper that outlived the start's wait may run it.
+        await this.stop(tag, SIGTERM)
+        await this.removeJob(folder)
+        return started
+      }
+      const done = await this.view(folder, tag, runner, output, errors, signal)
+      await this.removeJob(folder)
+      return done
+    } catch (error) {
+      if (signal?.aborted === true) await this.removeJob(folder)
+      throw error
+    } finally {
+      this.detached.delete(tag)
+    }
+  }
+
+  /**
+   * View a detached job to its end mark (`JOB_VIEW`), viewing again from the
+   * bytes delivered whenever a viewer ends without it, however it ended,
+   * after a wait that doubles while nothing new arrives. A job whose wrapper
+   * is gone with no exit code ends hung up, its program stopped by its tag
+   * should it still run. Output a transport returns
+   * whole, or a callback that is null, is kept and returned. Mirrors
+   * Python's `MachineHandle._view`.
+   */
+  private async view(
+    folder: string,
+    tag: string,
+    runner: ProcessHandle | null,
+    output: OutputFn | null,
+    errors: OutputFn | null,
+    signal?: AbortSignal,
+  ): Promise<RunResult> {
+    const sent = { out: 0, err: 0 }
+    const kept: [Uint8Array[], Uint8Array[]] = [[], []]
+    let wait = VIEW_RETRY_SECONDS
+    for (;;) {
+      let held = new Uint8Array()
+      const out = async (data: Uint8Array): Promise<void> => {
+        if (output === null) kept[0].push(data)
+        else await output(data)
+        sent.out += data.length
+      }
+      const err = async (data: Uint8Array): Promise<void> => {
+        held = concat([held, data])
+        const cut = unmarked(held)
+        if (cut === 0) return
+        const chunk = held.slice(0, cut)
+        held = held.slice(cut)
+        if (errors === null) kept[1].push(chunk)
+        else await errors(chunk)
+        sent.err += chunk.length
+      }
+      const before = sent.out + sent.err
+      let returned: [Uint8Array | null, Uint8Array | null] = [null, null]
+      try {
+        await this.ensureConnected(signal)
+        const done = await this.execArgv(
+          ['/bin/sh', '-c', JOB_VIEW, 'sh', folder, String(sent.out), String(sent.err)],
+          null,
+          { ...this.config.env },
+          '/',
+          out,
+          err,
+          signal,
+        )
+        returned = [done.stdout, done.stderr]
+      } catch (error) {
+        if (signal?.aborted === true) throw error
+        logger.debug?.(`${this.id.toString()}: job view ended: ${String(error)}`)
+        if (error instanceof ConnectionLostError) returned = [error.stdout, error.stderr]
+      }
+      if (returned[0] !== null && returned[0].length > 0) await out(returned[0])
+      if (returned[1] !== null && returned[1].length > 0) await err(returned[1])
+      const ended = JOB_END.exec(new TextDecoder('latin1').decode(held))
+      if (ended !== null) {
+        const stdout = concat(kept[0])
+        const stderr = concat(kept[1])
+        const code = ended[1] ?? JOB_LOST
+        if (code !== JOB_LOST)
+          return { stdout, stderr: stderr.length > 0 ? stderr : null, exitCode: Number(code) }
+        await this.stop(tag, SIGTERM)
+        runner?.programSignaled(HANGUP_EXIT_CODE - 128)
+        const said = new TextEncoder().encode(`mirage: ${this.id.toString()}: job lost\n`)
+        return { stdout, stderr: concat([stderr, said]), exitCode: HANGUP_EXIT_CODE }
+      }
+      if (sent.out + sent.err !== before) wait = VIEW_RETRY_SECONDS
+      await sleep(wait * 1000, signal)
+      wait = Math.min(wait * 2, VIEW_RETRY_MAX_SECONDS)
+    }
+  }
+
+  /**
+   * Remove a detached job's folder, bounded as a stop is; a box that does
+   * not answer keeps it.
+   */
+  private async removeJob(folder: string): Promise<void> {
+    const signal = AbortSignal.timeout(MACHINE_STOP_WAIT_SECONDS * 1000)
+    try {
+      await abortable(
+        this.execArgv(
+          ['/bin/sh', '-c', JOB_REMOVE, 'sh', folder],
+          null,
+          { ...this.config.env },
+          '/',
+          null,
+          null,
+          signal,
+        ),
+        signal,
+      )
+    } catch (error) {
+      logger.debug?.(`${this.id.toString()}: ${folder} not removed: ${String(error)}`)
     }
   }
 
@@ -455,6 +705,30 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       this.disconnected()
     }
   }
+}
+
+/**
+ * The signal a cancelled run is stopped with in the box: the one its
+ * process was stopped with, or the interrupt it took, else TERM. Mirrors
+ * Python's `_stop_with`.
+ */
+function stopWith(runner: ProcessHandle | null): number {
+  return runner?.signal ?? runner?.interrupted ?? SIGTERM
+}
+
+/**
+ * How much of the stderr a job's viewer printed is the job's for sure: all
+ * of it but a tail from a NUL that is, or may still grow into, the end mark
+ * (`JOB_END`). Mirrors Python's `_unmarked`.
+ *
+ * @param held the stderr not yet delivered.
+ */
+function unmarked(held: Uint8Array): number {
+  const at = held.lastIndexOf(0)
+  if (at < 0) return held.length
+  const tail = new TextDecoder('latin1').decode(held.slice(at))
+  if (tail.length <= JOB_MARK.length) return JOB_MARK.startsWith(tail) ? at : held.length
+  return JOB_END.test(tail) || JOB_END_PART.test(tail) ? at : held.length
 }
 
 /**

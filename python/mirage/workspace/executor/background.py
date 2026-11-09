@@ -772,6 +772,7 @@ async def handle_background(
             parent=session.process_id,
             limit=session.processes.max,
             simple=one_program(left, session),
+            detachable=left.type != NT.REDIRECTED_STATEMENT,
         )
     except BaseException as exc:
         release_job()

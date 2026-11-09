@@ -38,6 +38,7 @@ import { ProgramMachine } from '../transport.ts'
 export class MicrosandboxMachine extends ProgramMachine<MicrosandboxConfig> {
   static override readonly configFields: ConfigFields = MICROSANDBOX_CONFIG_FIELDS
   static override readonly provider = 'microsandbox'
+  static override readonly detaches: boolean = true
   protected readonly program = 'msb'
   protected readonly installHint = MICROSANDBOX_HINT
 

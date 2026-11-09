@@ -13,6 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
+import { knownProviders, machineClass } from '@struktoai/mirage-core/machine/registry'
+import '@struktoai/mirage-core/machine/e2b/handle'
+import './apple_container/handle.ts'
+import './daytona/handle.ts'
+import './docker/handle.ts'
+import './microsandbox/handle.ts'
+import './smolvm/handle.ts'
+import './ssh/handle.ts'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import {
   existsSync,
@@ -861,3 +869,13 @@ it.skipIf(process.platform === 'win32')(
     }
   },
 )
+
+// Jobs detach only on the providers a dropped connection was measured on.
+it('detaches jobs on the measured providers', () => {
+  expect(knownProviders().filter((provider) => machineClass(provider).detaches)).toEqual([
+    'docker',
+    'e2b',
+    'microsandbox',
+    'ssh',
+  ])
+})

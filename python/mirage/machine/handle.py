@@ -21,6 +21,7 @@ from mirage.commands.config import Context
 from mirage.context.session_context import current_caller
 from mirage.execution.job.constants import HANGUP_EXIT_CODE
 from mirage.execution.machine.types import MachineProcess
+from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.types import MachineId, MachinePid
 from mirage.io.types import ByteSource
 from mirage.machine.config import MachineConfig, check_mount_type
@@ -29,13 +30,25 @@ from mirage.machine.constants import (
     CHECK_MARK,
     CHECK_WAIT_SECONDS,
     FAKETIME_PROBE_SECONDS,
+    JOB_END,
+    JOB_END_PART,
+    JOB_LOST,
+    JOB_MARK,
+    JOB_REFUSED_STATUS,
+    JOB_REMOVE,
+    JOB_START,
+    JOB_VIEW,
     MACHINE_STOP_WAIT_SECONDS,
     NOT_RUNNING_STATUS,
     PROCESS,
     SCAN_MARK,
     SCAN_WAIT_SECONDS,
+    SETSID_PROBE,
+    VIEW_RETRY_MAX_SECONDS,
+    VIEW_RETRY_SECONDS,
     faketime_env,
     faketime_probe,
+    job_folder,
     scan_line,
     signal_line,
     stop_line,
@@ -45,7 +58,11 @@ from mirage.machine.mixin import PipeTransportMixin
 from mirage.machine.mounts import MachineMounts
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.types import OutputFn, RunResult
-from mirage.shell.constants import CANNOT_EXECUTE_STATUS
+from mirage.shell.constants import (
+    CANNOT_EXECUTE_STATUS,
+    NOT_FOUND_STATUS,
+    SIGTERM,
+)
 from mirage.utils.clock import bound_system_clock
 
 logger = logging.getLogger(__name__)
@@ -76,6 +93,10 @@ class MachineHandle:
 
     provider: ClassVar[str]
     config_cls: ClassVar[type[MachineConfig]] = MachineConfig
+    # Whether a background job's one program runs detached here, under a
+    # wrapper in the box (``JOB_START``), so it outlives the connection;
+    # on only for the providers it was measured on.
+    detaches: ClassVar[bool] = False
     config: MachineConfig
 
     def __init__(
@@ -101,6 +122,13 @@ class MachineHandle:
         # The runs executing here right now; a scan asks only a machine
         # with one, or with processes an earlier scan found.
         self._executing = 0
+        # Whether the box holds setsid, asked once a job first detaches; a
+        # probe that got no answer is not kept.
+        self._setsid = False
+        self._setsid_known = False
+        self._setsid_lock = asyncio.Lock()
+        # The folder of each detached job's run here, by its tag.
+        self._detached: dict[str, str] = {}
         check_mount_type(self.provider, self.config.mount_type)
         if self.config.mount_type is not None:
             if not isinstance(self, PipeTransportMixin):
@@ -192,25 +220,30 @@ class MachineHandle:
         # outside a process gets a tag of its own.
         runner = current_caller().process
         tag = str(runner.record.id) if runner is not None else uuid.uuid4().hex
+        detached = await self._detaches(runner, ctx)
         self._executing += 1
         try:
-            done = await self._exec_argv(
-                run,
-                ctx.stdin,
-                {**given, **clock, PROCESS: tag},
-                ctx.cwd.virtual,
-                output,
-                errors,
-            )
-        except asyncio.CancelledError:
-            signum = None
-            if runner is not None:
-                signum = (
-                    runner.signal
-                    if runner.signal is not None
-                    else runner.interrupted
+            if detached:
+                done = await self._run_detached(
+                    run,
+                    {**given, **clock},
+                    ctx.cwd.virtual,
+                    tag,
+                    runner,
+                    output,
+                    errors,
                 )
-            await asyncio.shield(self.stop(tag, signum or 15))
+            else:
+                done = await self._exec_argv(
+                    run,
+                    ctx.stdin,
+                    {**given, **clock, PROCESS: tag},
+                    ctx.cwd.virtual,
+                    output,
+                    errors,
+                )
+        except asyncio.CancelledError:
+            await asyncio.shield(self.stop(tag, _stop_with(runner)))
             raise
         except ConnectionLostError as exc:
             logger.debug("%s: connection lost", self.id, exc_info=True)
@@ -300,8 +333,9 @@ class MachineHandle:
             Exception: the machine could not be reached, or the line
                 failed.
         """
+        group = isinstance(target, str) and target in self._detached
         done = await self._connected_line(
-            signal_line(target, signum), MACHINE_STOP_WAIT_SECONDS
+            signal_line(target, signum, group), MACHINE_STOP_WAIT_SECONDS
         )
         if done.exit_code not in (0, NOT_RUNNING_STATUS):
             raise RuntimeError(
@@ -347,6 +381,235 @@ class MachineHandle:
                 done.exit_code,
             )
         return done.exit_code == 0
+
+    async def _detaches(
+        self, runner: ProcessHandle | None, ctx: Context
+    ) -> bool:
+        """Whether a run detaches: a detachable job's one program
+        (``ProcessHandle.detachable``), fed no input, on a machine that
+        detaches, holds setsid and is served no mounts, whose pipe would
+        go with the connection.
+
+        Args:
+            runner (ProcessHandle | None): the process the run is.
+            ctx (Context): the run's context.
+        """
+        if not (
+            self.detaches
+            and runner is not None
+            and runner.detachable
+            and ctx.stdin is None
+            and self._mounts is None
+        ):
+            return False
+        if not self._setsid_known:
+            await self._probe_setsid()
+        return self._setsid
+
+    async def _probe_setsid(self) -> None:
+        """Ask the box whether it holds setsid, once."""
+        async with self._setsid_lock:
+            if self._setsid_known:
+                return
+            try:
+                async with asyncio.timeout(CHECK_WAIT_SECONDS):
+                    found = await self._setup(SETSID_PROBE)
+            except Exception:
+                logger.debug("%s: setsid probe failed", self.id, exc_info=True)
+                return
+            if found.exit_code not in (0, 1, NOT_FOUND_STATUS):
+                logger.debug(
+                    "%s: setsid probe exited %d", self.id, found.exit_code
+                )
+                return
+            self._setsid = found.exit_code == 0
+            self._setsid_known = True
+            if not self._setsid:
+                logger.debug("%s: no setsid, so jobs stay attached", self.id)
+
+    async def _run_detached(
+        self,
+        argv: tuple[str, ...],
+        env: dict[str, str],
+        cwd: str,
+        tag: str,
+        runner: ProcessHandle | None,
+        output: OutputFn | None,
+        errors: OutputFn | None,
+    ) -> RunResult:
+        """Run a job's program detached (``JOB_START``) and view it to
+        its end (``_view``), then remove its folder; a box that cannot
+        detach it runs it attached, as any other run. A start the
+        connection dropped in is viewed all the same: the job may run. A
+        cancelled run removes its folder; ``run`` stops it by its tag.
+
+        Args:
+            argv (tuple[str, ...]): the program and its arguments.
+            env (dict[str, str]): its environment, the tag left out.
+            cwd (str): its working directory.
+            tag (str): the id of the process the run is.
+            runner (ProcessHandle | None): that process.
+            output (OutputFn | None): receives stdout as it arrives.
+            errors (OutputFn | None): receives stderr as it arrives.
+        """
+        folder = job_folder(tag)
+        self._detached[tag] = folder
+        try:
+            try:
+                started = await self._exec_argv(
+                    ("/bin/sh", "-c", JOB_START, "sh", folder, tag, *argv),
+                    None,
+                    env,
+                    cwd,
+                    None,
+                    None,
+                )
+            except ConnectionLostError:
+                logger.debug("%s: job start lost", self.id, exc_info=True)
+            except Exception:
+                # The wrapper may have started what nothing now views.
+                await self.stop(tag, SIGTERM)
+                await self._remove(folder)
+                raise
+            else:
+                if started.exit_code == JOB_REFUSED_STATUS:
+                    logger.debug(
+                        "%s: job not detached: %r", self.id, started.stderr
+                    )
+                    self._detached.pop(tag, None)
+                    await self._remove(folder)
+                    return await self._exec_argv(
+                        argv, None, {**env, PROCESS: tag}, cwd, output, errors
+                    )
+                if started.exit_code != 0:
+                    # A wrapper that outlived the start's wait may run it.
+                    await self.stop(tag, SIGTERM)
+                    await self._remove(folder)
+                    return started
+            done = await self._view(folder, tag, runner, output, errors)
+            await self._remove(folder)
+            return done
+        except asyncio.CancelledError:
+            await asyncio.shield(self._remove(folder))
+            raise
+        finally:
+            self._detached.pop(tag, None)
+
+    async def _view(
+        self,
+        folder: str,
+        tag: str,
+        runner: ProcessHandle | None,
+        output: OutputFn | None,
+        errors: OutputFn | None,
+    ) -> RunResult:
+        """View a detached job to its end mark (``JOB_VIEW``), viewing
+        again from the bytes delivered whenever a viewer ends without it,
+        however it ended, after a wait that doubles while nothing new
+        arrives. A job whose wrapper is gone with no exit code ends hung
+        up, its program stopped by its tag should it still run. Output a
+        transport returns whole, or a callback that is None, is kept and
+        returned.
+
+        Args:
+            folder (str): the job's folder.
+            tag (str): the id of the process the run is.
+            runner (ProcessHandle | None): the process the run is.
+            output (OutputFn | None): receives stdout as it arrives.
+            errors (OutputFn | None): receives stderr as it arrives.
+        """
+        delivered = [0, 0]
+        kept = (bytearray(), bytearray())
+        wait = VIEW_RETRY_SECONDS
+        while True:
+            held = bytearray()
+
+            async def out(data: bytes) -> None:
+                if output is None:
+                    kept[0].extend(data)
+                else:
+                    await output(data)
+                delivered[0] += len(data)
+
+            async def err(data: bytes) -> None:
+                held.extend(data)
+                cut = _unmarked(held)
+                if not cut:
+                    return
+                chunk = bytes(held[:cut])
+                del held[:cut]
+                if errors is None:
+                    kept[1].extend(chunk)
+                else:
+                    await errors(chunk)
+                delivered[1] += len(chunk)
+
+            before = tuple(delivered)
+            returned: tuple[bytes | None, bytes | None] = (None, None)
+            try:
+                await self._ensure_connected()
+                done = await self._exec_argv(
+                    (
+                        "/bin/sh",
+                        "-c",
+                        JOB_VIEW,
+                        "sh",
+                        folder,
+                        *map(str, delivered),
+                    ),
+                    None,
+                    dict(self.config.env),
+                    "/",
+                    out,
+                    err,
+                )
+                returned = (done.stdout, done.stderr)
+            except ConnectionLostError as exc:
+                logger.debug("%s: job view lost", self.id, exc_info=True)
+                returned = (exc.stdout, exc.stderr)
+            except Exception:
+                logger.debug("%s: job view failed", self.id, exc_info=True)
+            if returned[0]:
+                await out(returned[0])
+            if returned[1]:
+                await err(returned[1])
+            ended = JOB_END.fullmatch(bytes(held))
+            if ended is not None:
+                stderr = bytes(kept[1])
+                code = ended.group(1).decode()
+                if code != JOB_LOST:
+                    return RunResult(bytes(kept[0]), stderr or None, int(code))
+                await self.stop(tag, SIGTERM)
+                if runner is not None:
+                    runner.program_signaled(HANGUP_EXIT_CODE - 128)
+                said = f"mirage: {self.id}: job lost\n".encode()
+                return RunResult(
+                    bytes(kept[0]), stderr + said, HANGUP_EXIT_CODE
+                )
+            if tuple(delivered) != before:
+                wait = VIEW_RETRY_SECONDS
+            await asyncio.sleep(wait)
+            wait = min(wait * 2, VIEW_RETRY_MAX_SECONDS)
+
+    async def _remove(self, folder: str) -> None:
+        """Remove a detached job's folder, bounded as a stop is; a box
+        that does not answer keeps it.
+
+        Args:
+            folder (str): the folder.
+        """
+        try:
+            async with asyncio.timeout(MACHINE_STOP_WAIT_SECONDS):
+                await self._exec_argv(
+                    ("/bin/sh", "-c", JOB_REMOVE, "sh", folder),
+                    None,
+                    dict(self.config.env),
+                    "/",
+                    None,
+                    None,
+                )
+        except Exception:
+            logger.debug("%s: %s not removed", self.id, folder, exc_info=True)
 
     async def _system_time_env(self, env: dict[str, str]) -> dict[str, str]:
         """What a program on this machine needs to read the running
@@ -480,6 +743,41 @@ class MachineHandle:
                 await self._mounts.close()
         finally:
             self._connected = False
+
+
+def _stop_with(runner: ProcessHandle | None) -> int:
+    """The signal a cancelled run is stopped with in the box: the one its
+    process was stopped with, or the interrupt it took, else TERM.
+
+    Args:
+        runner (ProcessHandle | None): the process the run is.
+    """
+    if runner is None:
+        return SIGTERM
+    signum = runner.signal if runner.signal is not None else runner.interrupted
+    return signum or SIGTERM
+
+
+def _unmarked(held: bytearray) -> int:
+    """How much of the stderr a job's viewer printed is the job's for
+    sure: all of it but a tail from a NUL that is, or may still grow
+    into, the end mark (``JOB_END``).
+
+    Args:
+        held (bytearray): the stderr not yet delivered.
+    """
+    at = held.rfind(b"\0")
+    if at < 0:
+        return len(held)
+    tail = bytes(held[at:])
+    mark = JOB_MARK.encode()
+    if len(tail) <= len(mark):
+        return at if mark.startswith(tail) else len(held)
+    return (
+        at
+        if JOB_END.fullmatch(tail) or JOB_END_PART.fullmatch(tail)
+        else len(held)
+    )
 
 
 def _parse_scan_rows(stdout: bytes | None) -> list[MachineProcess]:

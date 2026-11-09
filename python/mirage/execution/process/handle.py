@@ -80,6 +80,9 @@ class ProcessHandle:
         # What the program that takes it (``take``) ignores as well: a
         # job's INT and QUIT, never what only a shell ignores.
         self.program_ignores: frozenset[int] = frozenset()
+        # A background job a restart can adopt, whose one program, should
+        # it run on a machine, may run detached from the connection.
+        self.detachable = False
         # The host stopped it (its table stopped, its session closed),
         # which ends whoever waits for it as well.
         self.revoked = False

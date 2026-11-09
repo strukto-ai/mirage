@@ -2260,3 +2260,37 @@ describe('JobTable process plane', () => {
     await a.close()
   })
 })
+
+// A job's one program may run detached only where a restart finds the job
+// again: a top-level job, on a store whose leases lapse, whose statement
+// redirects no output.
+describe('detachable jobs', () => {
+  it.each([
+    [30, true, true, false, true],
+    [null, true, true, false, false],
+    [30, false, true, false, false],
+    [30, true, false, false, false],
+    [30, true, true, true, false],
+  ])(
+    'lease %s simple %s detachable %s child %s: %s',
+    async (lease, simple, detachable, child, expected) => {
+      const table = new JobTable(new RAMExecutionStore(lease))
+      const submitter = child ? table.child() : table
+      const run: JobRunner = () => new Promise(() => undefined)
+      const job = await submitter.submit({
+        command: 'train',
+        run,
+        abort: new AbortController(),
+        cwd: '/',
+        simple,
+        detachable,
+      })
+      try {
+        expect(job.process?.detachable).toBe(expected)
+      } finally {
+        await table.killAll()
+        await table.close()
+      }
+    },
+  )
+})

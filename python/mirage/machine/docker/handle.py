@@ -36,6 +36,7 @@ class DockerMachine(ProgramMachine):
     """
 
     provider = "docker"
+    detaches = True
     config_cls = DockerConfig
     config: DockerConfig
     program = "docker"

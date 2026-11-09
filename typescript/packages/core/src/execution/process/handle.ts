@@ -37,6 +37,11 @@ export class ProcessHandle {
    * QUIT, never what only a shell ignores.
    */
   programIgnores: ReadonlySet<number> = new Set()
+  /**
+   * A background job a restart can adopt, whose one program, should it run
+   * on a machine, may run detached from the connection.
+   */
+  detachable = false
   /** Told the record each time it changes, as its table keeps it. */
   noted: ((record: Process) => void) | null = null
   private current: Process

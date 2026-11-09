@@ -22,6 +22,12 @@ import { shellJoin } from '../shell/join.ts'
 import { ConnectionLostError } from './errors.ts'
 import { MachineHandle } from './handle.ts'
 import {
+  JOB_REFUSED_STATUS,
+  JOB_REMOVE,
+  JOB_START,
+  JOB_VIEW,
+  SETSID_PROBE,
+  signalLine,
   PROCESS,
   FAKETIME_PROBE_SECONDS,
   faketimeProbe,
@@ -37,6 +43,9 @@ import { ProcessTable } from '../execution/process/table.ts'
 import { runAsProcess } from '../context/session_context.ts'
 import { machineRuntime, on } from '../../tests/fixtures/machine.ts'
 import { FIRST_PID } from '../execution/process/constants.ts'
+import type { ProcessHandle } from '../execution/process/handle.ts'
+import { RAMExecutionStore } from '../execution/ram.ts'
+import type { OutputFn } from '../runtime/types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -716,4 +725,413 @@ describe('MachineHandle', () => {
     const config = { snapshot: 'mirage-fuse' } as MachineConfig
     expect(() => new RecordingMachine({ config })).toThrow("unknown machine config key 'snapshot'")
   })
+})
+
+type View = [string[], string[], number | Error | Promise<void> | RunResult]
+
+// A box that detaches jobs, answering each viewer from `views`: the stdout
+// and stderr chunks it prints, then how it ends (an exit code, an error it
+// throws, or a promise it waits on).
+class JobBox extends RecordingMachine {
+  static override readonly detaches: boolean = true
+  readonly views: View[]
+  probes = 0
+  readonly started: string[][] = []
+  readonly viewed: string[][] = []
+  readonly removed: string[] = []
+  readonly startEnvs: Record<string, string>[] = []
+  startCode = 0
+
+  constructor(
+    views: View[] = [],
+    readonly holdsSetsid = true,
+    captures?: readonly string[],
+  ) {
+    super(captures === undefined ? {} : { captures })
+    this.views = views
+  }
+
+  protected override async execArgv(
+    argv: readonly string[],
+    stdin: ByteSource | null,
+    env: Record<string, string>,
+    cwd: string,
+    output?: OutputFn | null,
+    errors?: OutputFn | null,
+    signal?: AbortSignal,
+  ): Promise<RunResult> {
+    const script = lineOf(argv)
+    if (script === JOB_START) {
+      this.started.push(argv.slice(4))
+      this.startEnvs.push({ ...env })
+      return { stdout: new Uint8Array(), stderr: null, exitCode: this.startCode }
+    }
+    if (script === JOB_VIEW) {
+      this.viewed.push(argv.slice(4))
+      const [out, err, end] = this.views.shift() ?? [[], [], 0]
+      for (const chunk of out) await output?.(ENC.encode(chunk))
+      for (const chunk of err) await errors?.(ENC.encode(chunk))
+      if (end instanceof Error) throw end
+      if (end instanceof Promise) {
+        await new Promise<void>((resolve, reject) => {
+          void end.then(resolve)
+          signal?.addEventListener(
+            'abort',
+            () => {
+              reject(new DOMException('execute aborted', 'AbortError'))
+            },
+            { once: true },
+          )
+        })
+        return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
+      }
+      if (typeof end !== 'number') return end
+      return { stdout: new Uint8Array(), stderr: null, exitCode: end }
+    }
+    if (script === JOB_REMOVE) {
+      this.removed.push(argv[4] ?? '')
+      return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
+    }
+    return super.execArgv(argv, stdin, env, cwd)
+  }
+
+  override execLine(
+    line: string,
+    stdin: Uint8Array | null,
+    env: Record<string, string>,
+    cwd: string,
+  ): Promise<RunResult> {
+    if (line === SETSID_PROBE) {
+      this.probes += 1
+      return Promise.resolve({
+        stdout: new Uint8Array(),
+        stderr: null,
+        exitCode: this.holdsSetsid ? 0 : 1,
+      })
+    }
+    return super.execLine(line, stdin, env, cwd)
+  }
+}
+
+// Run `train` on `box` as a job's process, its output streamed: the result,
+// stdout and stderr, and the process.
+async function jobRun(
+  box: JobBox,
+  options: {
+    detachable?: boolean
+    stdin?: Uint8Array | null
+    started?: (runner: ProcessHandle) => void
+    streamed?: boolean
+  } = {},
+): Promise<[RunResult | null, string, string, ProcessHandle]> {
+  const out: Uint8Array[] = []
+  const err: Uint8Array[] = []
+  let done: RunResult | null = null
+  const abort = new AbortController()
+  const ctx = {
+    stdin: options.stdin ?? null,
+    flags: {},
+    env: {},
+    cwd: PathSpec.fromStrPath('/'),
+    signal: abort.signal,
+  }
+  const runner = new ProcessTable('w1', undefined, runAsProcess).start({
+    sessionId: 's',
+    command: 'train',
+    cwd: ctx.cwd,
+    cancel: () => {
+      abort.abort()
+    },
+    run: async () => {
+      const streamed = options.streamed ?? true
+      done = await box.run(
+        ['train'],
+        ctx,
+        null,
+        streamed
+          ? (chunk) => {
+              out.push(chunk)
+              return Promise.resolve()
+            }
+          : null,
+        streamed
+          ? (chunk) => {
+              err.push(chunk)
+              return Promise.resolve()
+            }
+          : null,
+      )
+      return done.exitCode
+    },
+  })
+  runner.detachable = options.detachable ?? true
+  options.started?.(runner)
+  await runner.join()
+  const text = (chunks: Uint8Array[]): string => chunks.map((c) => DEC.decode(c)).join('')
+  return [done, text(out), text(err), runner]
+}
+
+describe('a detached job', () => {
+  // However a viewer ends without the end mark, the job is viewed again from
+  // the bytes each stream delivered, so nothing comes twice or goes missing.
+  it.each([
+    ['a lost connection', new ConnectionLostError('closed by remote host')],
+    ['an SDK error', new Error('sdk stream ended')],
+    ['a transport code', 255],
+    ['a clean end', 0],
+  ])('is viewed again from what it delivered after %s', async (_, end) => {
+    const box = new JobBox([
+      [['step 0\n'], ['warn\n'], end],
+      [['step 1\n'], ['\0mirage-job 3\n'], 0],
+    ])
+    const [done, out, err, runner] = await jobRun(box)
+    expect([done?.exitCode, out, err]).toEqual([3, 'step 0\nstep 1\n', 'warn\n'])
+    const folder = box.viewed[0]?.[0] ?? ''
+    expect(box.viewed.map((view) => view.slice(1))).toEqual([
+      ['0', '0'],
+      ['7', '5'],
+    ])
+    expect(box.started).toEqual([[folder, runner.record.id.toString(), 'train']])
+    expect(box.startEnvs[0]?.[PROCESS]).toBeUndefined()
+    expect(box.removed).toEqual([folder])
+  })
+
+  // The end mark is Mirage's, never the job's: one split across reads is held
+  // back, and a NUL the job wrote itself is delivered.
+  it.each([
+    [['warn\n\0mira', 'ge-job 0', '\n'], 'warn\n'],
+    [['a\0b\n', '\0', 'mirage-job 0\n'], 'a\0b\n'],
+  ])('never delivers the end mark (%j)', async (chunks, said) => {
+    const box = new JobBox([[[], chunks, 0]])
+    const [done, , err] = await jobRun(box)
+    expect([done?.exitCode, err]).toEqual([0, said])
+  })
+
+  // A job whose wrapper went with no exit code is not left running: it ends
+  // hung up, and says so.
+  it('ends hung up once lost', async () => {
+    const box = new JobBox([[['step 0\n'], ['\0mirage-job lost\n'], 0]])
+    const [done, out, err, runner] = await jobRun(box)
+    expect([done?.exitCode, out, err]).toEqual([129, 'step 0\n', ''])
+    expect(DEC.decode(done?.stderr ?? new Uint8Array())).toBe(
+      `mirage: ${box.id.toString()}: job lost\n`,
+    )
+    expect(runner.endedBy).toBe(1)
+    expect(box.execs.map(([line]) => line)).toContain(stopLine(runner.record.id.toString(), 15))
+    expect(box.removed).toEqual([box.viewed[0]?.[0]])
+  })
+
+  // A detached job a kill stops is stopped in the box by its tag, with the
+  // signal named, and its folder goes.
+  it('is stopped by its tag and its folder removed once killed', async () => {
+    const box = new JobBox([[[], [], new Promise<void>(() => undefined)]])
+    const [, , , runner] = await jobRun(box, {
+      started: (runner) => {
+        void vi
+          .waitFor(() => {
+            expect(box.viewed).toHaveLength(1)
+          })
+          .then(() => runner.terminate(15))
+      },
+    })
+    expect(box.execs.map(([line]) => line).at(-1)).toBe(stopLine(runner.record.id.toString(), 15))
+    expect(box.removed).toEqual([box.viewed[0]?.[0]])
+  })
+
+  // A signal a job takes and goes on reaches the group its detached program
+  // leads, so what it started stops and continues with it.
+  it('takes a signal in its group', async () => {
+    let open!: () => void
+    const gate = new Promise<void>((resolve) => {
+      open = resolve
+    })
+    const box = new JobBox([
+      [[], [], gate],
+      [[], ['\0mirage-job 0\n'], 0],
+    ])
+    const sent: boolean[] = []
+    const [, , , runner] = await jobRun(box, {
+      started: (runner) => {
+        void vi
+          .waitFor(() => {
+            expect(box.viewed).toHaveLength(1)
+          })
+          .then(async () => {
+            sent.push(await box.signal(runner.record.id.toString(), 19))
+            open()
+          })
+      },
+    })
+    expect(sent).toEqual([true])
+    expect(box.execs.map(([line]) => line)).toContain(
+      signalLine(runner.record.id.toString(), 19, true),
+    )
+  })
+
+  // Only a detachable job's program, fed no input, on a box that detaches
+  // and holds setsid, detaches; any other run is one attached exec.
+  it.each([
+    ['not detachable', false, null, true, true],
+    ['fed input', true, ENC.encode('input'), true, true],
+    ['on a box that keeps jobs attached', true, null, false, true],
+    ['on a box without setsid', true, null, true, false],
+  ])('stays attached %s', async (_, detachable, stdin, detaches, setsid) => {
+    class Box extends JobBox {
+      static override readonly detaches: boolean = detaches
+    }
+    const box = new Box([], setsid)
+    const [done, , , runner] = await jobRun(box, { detachable, stdin })
+    expect([done?.exitCode, box.started]).toEqual([0, []])
+    expect(box.execs.at(-1)?.[0]).toBe('train')
+    expect(box.execs.at(-1)?.[2][PROCESS]).toBe(runner.record.id.toString())
+  })
+
+  it('stays attached on a machine serving mounts', async () => {
+    const box = new JobBox()
+    Reflect.set(box, 'mounts', {
+      validate: () => Promise.resolve(null),
+      guarded: (argv: readonly string[]) => argv,
+      land: () => Promise.resolve([]),
+    })
+    const [done] = await jobRun(box)
+    expect([done?.exitCode, box.started, box.probes]).toEqual([0, [], 0])
+  })
+
+  it('asks a box for setsid once', async () => {
+    const box = new JobBox([
+      [[], ['\0mirage-job 0\n'], 0],
+      [[], ['\0mirage-job 0\n'], 0],
+    ])
+    await jobRun(box)
+    await jobRun(box)
+    expect([box.probes, box.started.length]).toEqual([1, 2])
+  })
+
+  // A background job detaches only on a store a restart reads, and only when
+  // its statement redirects no output; its status reaches the console as an
+  // attached job's would.
+  it.each([
+    ['train &', 30, true],
+    ['train > /data/log &', 30, false],
+    ['train &', null, false],
+    ['{ train; } &', 30, false],
+  ])('detaches %s on a store with lease %s: %s', async (line, lease, detached) => {
+    const box = new JobBox([[['step 0\n'], ['\0mirage-job 3\n'], 0]], true, ['train'])
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, ...on(box) })
+    try {
+      ws.jobTable.store = new RAMExecutionStore(lease)
+      await ws.shell(line)
+      const io = await ws.shell('wait %1')
+      expect(box.started.length > 0).toBe(detached)
+      if (detached) expect(io.exitCode).toBe(3)
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+// A start that failed returns its own status, and whatever a wrapper that
+// outlived the start's wait started is stopped by its tag, its folder gone.
+it('returns a failed start and stops its tag', async () => {
+  const box = new JobBox()
+  box.startCode = 126
+  const [done, , , runner] = await jobRun(box)
+  expect([done?.exitCode, box.viewed]).toEqual([126, []])
+  expect(box.execs.at(-1)?.[0]).toBe(stopLine(runner.record.id.toString(), 15))
+  expect(box.removed).toEqual([box.started[0]?.[0]])
+})
+
+// Output a transport returns whole, or one a dropped connection read, is kept
+// and counted, so the next viewer starts after it.
+it('keeps and counts output returned whole', async () => {
+  const box = new JobBox([
+    [[], [], new ConnectionLostError('closed', ENC.encode('a\n'), ENC.encode('w\n'))],
+    [[], [], { stdout: ENC.encode('b\n'), stderr: ENC.encode('\0mirage-job 0\n'), exitCode: 0 }],
+  ])
+  const [done] = await jobRun(box, { streamed: false })
+  expect([DEC.decode(done?.stdout), DEC.decode(done?.stderr ?? new Uint8Array())]).toEqual([
+    'a\nb\n',
+    'w\n',
+  ])
+  expect(box.viewed[1]?.slice(1)).toEqual(['2', '2'])
+})
+
+// A start that failed past the connection may have started what nothing
+// would view: it is stopped by its tag and its folder goes.
+it('stops the tag of a start that failed', async () => {
+  class BrokenStart extends JobBox {
+    protected override async execArgv(
+      argv: readonly string[],
+      stdin: ByteSource | null,
+      env: Record<string, string>,
+      cwd: string,
+      output?: OutputFn | null,
+      errors?: OutputFn | null,
+      signal?: AbortSignal,
+    ): Promise<RunResult> {
+      if (argv[2] === JOB_START) {
+        this.started.push(argv.slice(4))
+        throw new Error('sdk failed')
+      }
+      return super.execArgv(argv, stdin, env, cwd, output, errors, signal)
+    }
+  }
+  const box = new BrokenStart()
+  const [, , , runner] = await jobRun(box)
+  expect(box.execs.at(-1)?.[0]).toBe(stopLine(runner.record.id.toString(), 15))
+  expect(box.removed).toEqual([box.started[0]?.[0]])
+})
+
+// Output counts as delivered only once delivered: a chunk whose delivery
+// failed is viewed again.
+it('views again a chunk whose delivery failed', async () => {
+  const box = new JobBox([
+    [['step 0\n'], [], 0],
+    [['step 0\n'], ['\0mirage-job 0\n'], 0],
+  ])
+  const out: string[] = []
+  let failed = false
+  const ctx = { stdin: null, flags: {}, env: {}, cwd: PathSpec.fromStrPath('/') }
+  const runner = new ProcessTable('w1', undefined, runAsProcess).start({
+    sessionId: 's',
+    command: 'train',
+    cwd: ctx.cwd,
+    cancel: () => undefined,
+    run: async () => {
+      runner.detachable = true
+      const done = await box.run(
+        ['train'],
+        ctx,
+        null,
+        (chunk) => {
+          if (!failed) {
+            failed = true
+            return Promise.reject(new Error('console unavailable'))
+          }
+          out.push(DEC.decode(chunk))
+          return Promise.resolve()
+        },
+        () => Promise.resolve(),
+      )
+      return done.exitCode
+    },
+  })
+  expect((await runner.join()).exit).toBe(0)
+  expect(box.viewed.map((view) => view.slice(1))).toEqual([
+    ['0', '0'],
+    ['0', '0'],
+  ])
+  expect(out.join('')).toBe('step 0\n')
+})
+
+// A box that cannot detach a job, with no folder of the user's own or no
+// setsid, runs it attached, as it would any other run.
+it('runs attached a job the box cannot detach', async () => {
+  const box = new JobBox()
+  box.startCode = JOB_REFUSED_STATUS
+  const [done, , , runner] = await jobRun(box)
+  expect([done?.exitCode, box.viewed]).toEqual([0, []])
+  expect(box.removed).toEqual([box.started[0]?.[0]])
+  expect(box.execs.at(-1)?.[0]).toBe('train')
+  expect(box.execs.at(-1)?.[2][PROCESS]).toBe(runner.record.id.toString())
 })

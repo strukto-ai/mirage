@@ -46,6 +46,7 @@ class MicrosandboxMachine(ProgramMachine):
     """
 
     provider = "microsandbox"
+    detaches = True
     config_cls = MicrosandboxConfig
     config: MicrosandboxConfig
     program = "msb"

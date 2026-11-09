@@ -12,20 +12,30 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import hashlib
 import os
+import shutil
 import subprocess
+import time
 import uuid
+from pathlib import Path
 
 import pytest
 
 from mirage.machine.constants import (
     ENCODE_OUTPUT,
+    JOB_REFUSED_STATUS,
+    JOB_REMOVE,
+    JOB_START,
+    JOB_VIEW,
     MOUNT_GUARD,
     NOT_RUNNING_STATUS,
     PROCESS,
+    SETSID_PROBE,
     TOOLS_PATH,
     decode_output,
     mount_field,
+    signal_line,
     stop_line,
     wrap_line,
 )
@@ -306,3 +316,132 @@ def test_a_sandbox_without_the_encoder_runs_nothing(tmp_path):
         b"",
         b"mirage: the machine needs dd and base64 to return output\n",
     )
+
+
+# The scripts a detached job runs are the same bytes on both hosts:
+# TypeScript's constants test pins the same digests.
+@pytest.mark.parametrize(
+    ("script", "digest"),
+    [
+        (JOB_START, "cbdc227c30e0f913"),
+        (JOB_VIEW, "d2226d4e017eb5fd"),
+        (JOB_REMOVE, "7cde63f731a3578a"),
+        (SETSID_PROBE, "16bda6f7218e7026"),
+    ],
+    ids=["start", "view", "remove", "probe"],
+)
+def test_the_job_scripts_match_typescripts(script, digest):
+    assert hashlib.sha256(script.encode()).hexdigest()[:16] == digest
+
+
+DETACHES = pytest.mark.skipif(
+    not os.path.isdir("/proc/self") or shutil.which("setsid") is None,
+    reason="needs /proc and setsid",
+)
+
+
+def _start(folder, tag, *argv):
+    return subprocess.run(
+        ["/bin/sh", "-c", JOB_START, "sh", str(folder), tag, *argv],
+        capture_output=True,
+        timeout=20,
+    )
+
+
+def _view(folder, out=0, err=0):
+    return subprocess.run(
+        ["/bin/sh", "-c", JOB_VIEW, "sh", str(folder), str(out), str(err)],
+        capture_output=True,
+        timeout=20,
+    )
+
+
+def _pids(folder):
+    return [int(word) for word in (folder / "pid").read_text().split()]
+
+
+# A job started detached runs with its arguments intact, only its program
+# and what it starts carry the tag, and a viewer prints its output from
+# the offsets it is given, then the end mark with the exit code.
+@DETACHES
+def test_a_detached_job_is_viewed_to_its_exit_code(tmp_path):
+    folder, tag = tmp_path / "w1:9-ab", f"t{uuid.uuid4().hex}:9"
+    started = _start(
+        folder,
+        tag,
+        "sh",
+        "-c",
+        'echo "arg: $1"; echo e1 >&2; exit 3',
+        "x",
+        "a b",
+    )
+    assert started.returncode == 0
+    viewed = _view(folder)
+    assert viewed.stdout == b"arg: a b\n"
+    assert viewed.stderr == b"e1\n\0mirage-job 3\n"
+    assert _view(folder, 5, 3).stdout == b"a b\n"
+    assert _view(folder, 5, 3).stderr == b"\0mirage-job 3\n"
+
+
+@DETACHES
+def test_only_the_detached_program_carries_the_tag(tmp_path):
+    folder, tag = tmp_path / "job", f"t{uuid.uuid4().hex}:9"
+    assert _start(folder, tag, "sleep", "30").returncode == 0
+    program, wrapper, _ = _pids(folder)
+    try:
+        environ = Path(f"/proc/{program}/environ").read_bytes()
+        assert f"{PROCESS}={tag}".encode() in environ.split(b"\0")
+        wrapped = Path(f"/proc/{wrapper}/environ").read_bytes()
+        assert f"{PROCESS}={tag}".encode() not in wrapped.split(b"\0")
+        assert os.getpgid(program) == program
+    finally:
+        os.kill(program, 9)
+
+
+# A group stop reaches what the program started, and the wrapper lives on
+# to write the code the signal left.
+@DETACHES
+def test_a_group_stop_leaves_the_exit_code_written(tmp_path):
+    folder, tag = tmp_path / "job", f"t{uuid.uuid4().hex}:9"
+    assert (
+        _start(folder, tag, "sh", "-c", "sleep 30 & sleep 30").returncode == 0
+    )
+    subprocess.run(["/bin/sh", "-c", signal_line(tag, 15, True)], check=True)
+    assert _view(folder).stderr == b"\0mirage-job 143\n"
+
+
+# A job whose wrapper went with no exit code, or whose folder went, is
+# lost; one that never launched ends with the shell's own words.
+@DETACHES
+def test_a_lost_or_unlaunched_job_ends_as_such(tmp_path):
+    folder, tag = tmp_path / "job", f"t{uuid.uuid4().hex}:9"
+    assert _start(folder, tag, "sleep", "30").returncode == 0
+    program, wrapper, _ = _pids(folder)
+    os.kill(wrapper, 9)
+    os.kill(program, 9)
+    time.sleep(0.3)
+    assert _view(folder).stderr == b"\0mirage-job lost\n"
+    assert _view(tmp_path / "none").stderr == b"\0mirage-job lost\n"
+    missing = tmp_path / "missing"
+    assert _start(missing, tag, "no-such-program").returncode == 0
+    viewed = _view(missing)
+    assert b"no-such-program: not found" in viewed.stderr
+    assert viewed.stderr.endswith(b"\0mirage-job 127\n")
+
+
+# A job's folder is the user's alone: none other reads its output, and a
+# folder another user owns above it refuses the start.
+@DETACHES
+def test_a_job_folder_is_the_users_alone(tmp_path):
+    folder, tag = tmp_path / "jobs" / "job", f"t{uuid.uuid4().hex}:9"
+    assert _start(folder, tag, "true").returncode == 0
+    assert folder.stat().st_mode & 0o077 == 0
+    assert (tmp_path / "jobs").stat().st_mode & 0o077 == 0
+    if os.geteuid() != 0:
+        return
+    other = tmp_path / "other"
+    other.mkdir()
+    os.chown(other, 65534, 65534)
+    started = _start(other / "job", tag, "true")
+    assert started.returncode == JOB_REFUSED_STATUS
+    assert b"no folder of this user's own" in started.stderr

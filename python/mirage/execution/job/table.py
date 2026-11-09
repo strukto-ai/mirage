@@ -320,6 +320,7 @@ class JobTable:
         parent: int | None = None,
         limit: int | None = None,
         simple: bool = False,
+        detachable: bool = False,
     ) -> JobHandle:
         """Register a job in its session's list and start it.
 
@@ -343,6 +344,11 @@ class JobTable:
                 (``processes.max``); None for no cap.
             simple (bool): the job is one simple command
                 (``JobHandle.simple``), which its process runs as.
+            detachable (bool): its statement redirects no output, so
+                its one program may run detached from a machine's
+                connection; only a top-level job on a store whose leases
+                lapse is (``ProcessHandle.detachable``), since only there
+                does a restart find it.
 
         Raises:
             BlockingIOError: the session is at its process cap.
@@ -380,6 +386,12 @@ class JobTable:
             ignores=IGNORED_SIGNALS,
             one_command=simple,
             program_ignores=IGNORED_SIGNALS,
+        )
+        process.detachable = (
+            detachable
+            and simple
+            and self._plane is self
+            and self.store.lease_seconds is not None
         )
         line, group = process.record.line, process.record.group
         try:
