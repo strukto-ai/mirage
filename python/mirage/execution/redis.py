@@ -15,6 +15,7 @@
 import asyncio
 import json
 import logging
+import re
 import threading
 from collections.abc import Awaitable, Mapping, Sequence
 from importlib.resources import files
@@ -53,6 +54,24 @@ PID_SCRIPT = (files("mirage.execution") / "pid.lua").read_text(
 HISTORY_SCRIPT = (files("mirage.execution") / "history.lua").read_text(
     encoding="utf-8"
 )
+OWN_KEY = re.compile(
+    rb"lists|lease|pid|(records|ended):(lines|processes)"
+    rb"|console:[^:]+:(stream|seq|ended)|(processes|stops):[^:]+"
+)
+
+
+def _key_part(name: str) -> str:
+    """Refuse a daemon id or console name holding ``:``, which
+    ``OWN_KEY`` could not tell from a longer prefix's keys.
+
+    Args:
+        name (str): the daemon id or console name.
+    """
+    if ":" in name:
+        raise ValueError(
+            f"a redis execution store refuses ':' in a name: {name!r}"
+        )
+    return name
 
 
 def _field_of(record: Line | Process) -> tuple[bool, str]:
@@ -323,7 +342,7 @@ class RedisExecutionStore(ExecutionStore):
     def console(self, name: str) -> RedisConsoleStore:
         return RedisConsoleStore(
             url=self._url,
-            key_prefix=f"{self._prefix}console:{name}:",
+            key_prefix=f"{self._prefix}console:{_key_part(name)}:",
             ttl_seconds=CONSOLE_TTL_SECONDS,
             client=self._client,
         )
@@ -369,7 +388,7 @@ class RedisExecutionStore(ExecutionStore):
         processes: Mapping[str, RecordFields],
         last_pid: int = 0,
     ) -> None:
-        key = f"{self._prefix}processes:{daemon}"
+        key = f"{self._prefix}processes:{_key_part(daemon)}"
         if last_pid > self._raised:
             await self._pid_script(keys=[self._pid], args=[last_pid])
             self._raised = last_pid
@@ -382,8 +401,7 @@ class RedisExecutionStore(ExecutionStore):
 
     async def processes(self) -> dict[str, dict[str, RecordFields]]:
         head = f"{self._prefix}processes:"
-        match = f"{glob_escape(head)}*"
-        keys = [key async for key in self._client.scan_iter(match)]
+        keys = await self._own_keys("processes:")
         if not keys:
             return {}
         values = await self._client.mget(keys)
@@ -393,11 +411,29 @@ class RedisExecutionStore(ExecutionStore):
             if value is not None
         }
 
+    async def _own_keys(self, family: str) -> list[bytes]:
+        """This store's keys under ``{prefix}{family}``.
+
+        Another store's prefix can start with this one, as workspace
+        ``a:execution:x``'s does with ``a``'s, so a key counts only in a
+        shape this store writes.
+
+        Args:
+            family (str): the literal after the prefix to scan under.
+        """
+        match = f"{glob_escape(self._prefix + family)}*"
+        start = len(self._prefix.encode())
+        return [
+            key
+            async for key in self._client.scan_iter(match)
+            if OWN_KEY.fullmatch(key[start:])
+        ]
+
     async def highest_pid(self) -> int:
         return int(await self._client.get(self._pid) or 0)
 
     async def request_stop(self, daemon: str, pid: int, signal: int) -> None:
-        key = f"{self._prefix}stops:{daemon}"
+        key = f"{self._prefix}stops:{_key_part(daemon)}"
         pipe = self._client.pipeline(transaction=False)
         pipe.rpush(key, json.dumps([pid, signal]))
         pipe.expire(key, CONSOLE_TTL_SECONDS)
@@ -413,8 +449,7 @@ class RedisExecutionStore(ExecutionStore):
 
     async def clear(self) -> None:
         await self._flush()
-        match = f"{glob_escape(self._prefix)}*"
-        keys = [key async for key in self._client.scan_iter(match)]
+        keys = await self._own_keys("")
         if keys:
             await self._client.delete(*keys)
         self._raised = 0

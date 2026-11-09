@@ -149,6 +149,13 @@ describe.skipIf(REDIS_URL === '')('RedisExecutionStore', () => {
     expect(records).toBeGreaterThan(5)
   })
 
+  it('refuses a name with a colon', async () => {
+    const store = open()
+    expect(() => store.console('a:b')).toThrow()
+    await expect(store.publish('a:b', { '1': { pid: 1 } }, 1)).rejects.toThrow()
+    await expect(store.requestStop('a:b', 1, 15)).rejects.toThrow()
+  })
+
   it('matches a glob character in the prefix only as itself', async () => {
     const base = `test:jobs:${randomUUID()}:`
     const doomed = new RedisExecutionStore({ url: REDIS_URL, keyPrefix: `${base}w?:` })
@@ -170,12 +177,14 @@ describe.skipIf(REDIS_URL === '')('RedisExecutionStore', () => {
     }
   })
 
-  it('clear drops lists, consoles and the lease', async () => {
+  it('clear drops every key the store writes', async () => {
     const store = open()
     await store.casSet('s', { generation: 1 }, 0)
     await store.console('c').append(Channel.STDOUT, new TextEncoder().encode('x'))
     await store.lease('o')
-    await store.publish('o', {}, 4)
+    await store.publish('o', { '4': { pid: 4 } }, 4)
+    await store.requestStop('o', 4, 15)
+    store.note(lineOf(1, 2))
     await store.clear()
     expect(await store.load('s')).toBeNull()
     const client = createClient({ url: REDIS_URL })

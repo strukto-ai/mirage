@@ -109,12 +109,14 @@ async def test_one_daemon_holds_the_lease_while_it_renews(stores):
 
 
 @pytest.mark.asyncio
-async def test_clear_drops_lists_consoles_and_the_lease(stores, prefix):
+async def test_clear_drops_every_key_the_store_writes(stores, prefix):
     store = stores()
     await store.cas_set("s", {"generation": 1}, 0)
     await store.console("c").append(Channel.STDOUT, b"x")
     await store.lease("o")
-    await store.publish("o", {}, 4)
+    await store.publish("o", {"4": {"pid": 4}}, 4)
+    await store.request_stop("o", 4, 15)
+    store.note(_line(1, ended_at=2.0))
     await store.clear()
     assert await store.load("s") is None
     assert [k async for k in store._client.scan_iter(f"{prefix}*")] == []
@@ -252,6 +254,17 @@ async def test_ended_records_are_kept_to_the_history(stores):
     kept = [r.id.value for r in await b.find_lines()]
     assert len(kept) == HISTORY_MAX_RECORDS + 1
     assert kept[:2] == ["line_0", "line_3"]
+
+
+@pytest.mark.asyncio
+async def test_a_name_with_a_colon_is_refused(stores):
+    store = stores()
+    with pytest.raises(ValueError):
+        store.console("a:b")
+    with pytest.raises(ValueError):
+        await store.publish("a:b", {"1": {"pid": 1}}, 1)
+    with pytest.raises(ValueError):
+        await store.request_stop("a:b", 1, 15)
 
 
 @pytest.mark.asyncio

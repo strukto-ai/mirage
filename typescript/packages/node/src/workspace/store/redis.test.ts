@@ -17,6 +17,7 @@ import { createClient } from 'redis'
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
+import { Channel } from '@struktoai/mirage-core/shell/console/index'
 import { Workspace } from '../../workspace.ts'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import { RedisWorkspaceStateStore } from './redis.ts'
@@ -194,6 +195,8 @@ describe.skipIf(skip)('RedisWorkspaceStateStore', () => {
   it.each([
     ['w?', 'w1'],
     ['a', 'a:execution:x'],
+    ['a', 'a:execution:processes:x'],
+    ['a', 'a:execution:console:x'],
   ])('drop(%s) leaves %s, whose keys its id would match', async (doomed, kept) => {
     const prefix = testPrefix()
     const store = makeStore(prefix)
@@ -201,13 +204,14 @@ describe.skipIf(skip)('RedisWorkspaceStateStore', () => {
       const seed = async (ws: string): Promise<void> => {
         const execution = store.execution(ws)
         await execution.casSet('s', { generation: 1 }, 0)
-        await execution.lease(ws)
-        await execution.publish(ws, { '7': { pid: 7 } }, 7)
+        await execution.lease('d')
+        await execution.publish('d', { '7': { pid: 7 } }, 7)
+        await execution.console('c').append(Channel.STDOUT, new TextEncoder().encode('x'))
       }
       await seed(kept)
       const keptKeys = await keysUnder(prefix)
       await seed(doomed)
-      expect(Object.keys(await store.execution(doomed).processes())).toEqual([doomed])
+      expect(Object.keys(await store.execution(doomed).processes())).toEqual(['d'])
       await store.drop(doomed)
       expect(await keysUnder(prefix)).toEqual(keptKeys)
     } finally {
