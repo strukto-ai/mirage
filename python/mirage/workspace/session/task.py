@@ -79,6 +79,19 @@ class TaskHost(Protocol):
         """
         ...
 
+    async def run(self, index: int, test: bool) -> tuple[int, str, int, bool]:
+        """Run a list of statements on the shell the task lent.
+
+        Args:
+            index (int): which of the construct's lists.
+            test (bool): its status decides a branch.
+
+        Returns:
+            Its status, the tag and levels of what unwinds, and whether
+            ``set -e`` is ending the shell.
+        """
+        ...
+
 
 def fault_error(fault: Fault) -> BaseException:
     """The exception an operation's stop raises.
@@ -142,15 +155,18 @@ async def drive(
         match ask[0]:
             case "pause":
                 records.shell = ask[-1]
-            case "subscript":
+            case "subscript" | "run":
                 records.shell = ask[1]
             case _:
                 records.shell = ask[1].fork()
-        failed: Callable[[], None] = (
-            partial(task.answer_subscript, None, ask[1])
-            if ask[0] == "subscript"
-            else task.answer_failed
-        )
+        failed: Callable[[], None]
+        match ask[0]:
+            case "subscript":
+                failed = partial(task.answer_subscript, None, ask[1])
+            case "run":
+                failed = partial(task.answer_ran, ask[1], 0, "stop", 0, False)
+            case _:
+                failed = task.answer_failed
         answer: Callable[[], None] = failed
         try:
             match ask:
@@ -171,6 +187,10 @@ async def drive(
                         task.answer_subscript,
                         await host.subscript(text),
                         shell,
+                    )
+                case ("run", shell, index, test):
+                    answer = partial(
+                        task.answer_ran, shell, *await host.run(index, test)
                     )
                 case ("pause", _):
                     await task_turn()

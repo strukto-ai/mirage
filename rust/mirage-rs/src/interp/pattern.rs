@@ -185,6 +185,15 @@ impl Matcher {
     }
 }
 
+/// Whether `pattern` matches the whole of `value`, as `case` tests an arm.
+pub fn matches(value: &[u8], pattern: &Pattern, extglob: bool, utf8: bool) -> bool {
+    let (subject, _) = units(value, utf8);
+    let mut matcher = Matcher::new(pattern, extglob);
+    let hit = matcher.matches(&subject);
+    matcher.keep(pattern, extglob);
+    hit
+}
+
 /// `${v#p}`, `${v##p}`, `${v%p}`, `${v%%p}`: the value less the shortest or
 /// longest prefix or suffix the pattern matches, the value itself when it
 /// matches none.

@@ -16,6 +16,7 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from mirage._rs import Shell, ShellNode, ShellTask
 from mirage.commands.builtin.utils.strtol import atoi
 from mirage.execution.job import JobTable
 from mirage.io import IOResult
@@ -32,14 +33,13 @@ from mirage.shell.descriptors import Recorder
 from mirage.shell.errors import (
     ArithError,
     ExitSignal,
-    ReadonlyVariableError,
     ReturnSignal,
 )
+from mirage.shell.parse.program import shell_node
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec, word_text
-from mirage.utils.fnmatch import fnmatch
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.background import run_program, run_statement
 from mirage.workspace.executor.builtins.read.read import read_reply
@@ -57,8 +57,10 @@ from mirage.workspace.executor.traps import (
     run_err_trap,
     run_return_trap,
 )
+from mirage.workspace.expand.node import ExpandHost
 from mirage.workspace.session import SessionState
-from mirage.workspace.session.state import session_view, visible_env
+from mirage.workspace.session.state import frame, session_view, visible_env
+from mirage.workspace.session.task import drive
 from mirage.workspace.types import ExecutionNode
 
 BodyRun = Callable[
@@ -397,240 +399,359 @@ def _collect_loop_result(
     return _chain_streams(all_stdout), merged_io, exec_node
 
 
+class _ConstructHost(ExpandHost):
+    """What a compound command asks of the shell: to run the lists of
+    statements it picks, here, keeping what they wrote.
+
+    Args:
+        body (BodyRun): ``execute_body`` bound to the walk.
+        lists (list[list[TSNodeLike]]): the construct's lists.
+        context (EvaluationContext): the evaluation.
+        execute_fn (Callable[..., Any]): evaluator for nested lines.
+        call_stack (CallStack): shell call stack.
+        word (TSNodeLike | None): a word of the construct, whose program
+            the nodes it names belong to.
+        whole_tests (bool): a test's whole result joins the construct's
+            rather than its stderr alone.
+    """
+
+    def __init__(
+        self,
+        body: BodyRun,
+        lists: list[list[TSNodeLike]],
+        context: EvaluationContext,
+        execute_fn: Callable[..., Any],
+        call_stack: CallStack,
+        word: TSNodeLike | None,
+        whole_tests: bool,
+    ) -> None:
+        super().__init__(context, execute_fn, call_stack, word)
+        self.body = body
+        self.lists = lists
+        self.whole_tests = whole_tests
+        self.all_stdout: list[ByteSource | None] = []
+        self.merged_io = IOResult()
+        self.last_exec: ExecutionNode | None = None
+        self.loop_signal: LoopSignal | None = None
+        self.left: Exception | None = None
+        # Each test and body reads the fd 0 the construct started with,
+        # so an `exec < f` in one reaches the rest.
+        self.bound = fd0_binding(context.session)
+
+    async def run(self, index: int, test: bool) -> tuple[int, str, int, bool]:
+        session = self.session
+        statements = self.lists[index]
+        try:
+            if test:
+                with ignoring_errexit(session):
+                    stdout, io, _ = await self.body(
+                        statements, bound=self.bound
+                    )
+                kept = (
+                    io
+                    if self.whole_tests
+                    else IOResult(
+                        stderr=io.stderr, exit_code=self.merged_io.exit_code
+                    )
+                )
+            else:
+                stdout, io, self.last_exec = await self.body(
+                    statements, bound=self.bound
+                )
+                kept = io
+        except LoopSignal as sig:
+            _keep(self.all_stdout, sig.stdout)
+            self.merged_io = await self.merged_io.merge(sig.io)
+            self.loop_signal = sig
+            tag = "break" if isinstance(sig, BreakSignal) else "continue"
+            return sig.io.exit_code, tag, sig.levels, False
+        except UNWINDING as sig:
+            self.left = sig
+            return 0, "stop", 0, False
+        _keep(self.all_stdout, stdout)
+        self.merged_io = await self.merged_io.merge(kept)
+        status = io.exit_code
+        # The list changed the session; the shell reads it as it goes on.
+        frame(session, self.call_stack)
+        return status, "", 0, session.errexit_exiting and not test
+
+
+async def _run_construct(
+    start: Callable[[Shell], ShellTask],
+    body: BodyRun,
+    lists: list[list[TSNodeLike]],
+    context: EvaluationContext,
+    execute_fn: Callable[..., Any],
+    call_stack: CallStack,
+    word: TSNodeLike | None = None,
+    whole_tests: bool = False,
+) -> _ConstructHost:
+    """Run a compound command on the session's shell, which picks each
+    list and hands it here to run.
+
+    Args:
+        start (Callable[[Shell], ShellTask]): starts it on the shell.
+        body (BodyRun): ``execute_body`` bound to the walk.
+        lists (list[list[TSNodeLike]]): the construct's lists.
+        context (EvaluationContext): the evaluation.
+        execute_fn (Callable[..., Any]): evaluator for nested lines.
+        call_stack (CallStack): shell call stack.
+        word (TSNodeLike | None): a word of the construct, for the nodes
+            its expansions name.
+        whole_tests (bool): a test's whole result joins the construct's.
+
+    Returns:
+        The host holding what the lists wrote.
+    """
+    session = context.session
+    frame(session, call_stack)
+    host = _ConstructHost(
+        body, lists, context, execute_fn, call_stack, word, whole_tests
+    )
+    try:
+        said, failed, tag, levels = await drive(
+            start(session.vars.shell), host, context.frame.diagnostics
+        )
+    except UNWINDING as sig:
+        raise await carried(
+            sig, _chain_streams(host.all_stdout), host.merged_io
+        )
+    stdout = _chain_streams(host.all_stdout)
+    if host.left is not None:
+        raise await carried(host.left, stdout, host.merged_io)
+    if tag:
+        signal = host.loop_signal
+        assert signal is not None
+        signal.stdout, signal.io, signal.levels = (
+            stdout,
+            host.merged_io,
+            levels,
+        )
+        raise signal
+    if failed:
+        host.merged_io = await host.merged_io.merge(
+            IOResult(exit_code=1, stderr=encode_text(said) or None)
+        )
+    return host
+
+
+def _looped(
+    host: _ConstructHost, label: str
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """A loop's result: what its lists wrote, and its status.
+
+    Args:
+        host (_ConstructHost): the loop's host.
+        label (str): the loop's name, for the node.
+    """
+    return _collect_loop_result(host.all_stdout, host.merged_io, label)
+
+
+def _ended(
+    host: _ConstructHost, label: str
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """An ``if``'s or a ``case``'s result: the last body's node stands
+    for it, or a node of its own when no body ran.
+
+    Args:
+        host (_ConstructHost): the construct's host.
+        label (str): the name a construct running no body reports.
+    """
+    node = host.last_exec or ExecutionNode(command=label, exit_code=0)
+    return _chain_streams(host.all_stdout), host.merged_io, node
+
+
 async def handle_if(
     run: BodyRun,
     branches: list[tuple[list[TSNodeLike], list[TSNodeLike]]],
     else_body: list[TSNodeLike] | None,
-    session: SessionState,
+    context: EvaluationContext,
+    execute_fn: Callable[..., Any],
+    call_stack: CallStack,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    # Each test and the branch read the fd 0 the `if` started with, so an
-    # `exec < f` or `exec <&-` in one reaches the next.
-    bound = fd0_binding(session)
-    # What the tests wrote stays, ahead of what the branch writes.
-    lead_stdout: list[ByteSource | None] = []
-    lead = IOResult()
-    try:
-        for test, body in branches:
-            with ignoring_errexit(session):
-                stdout, io, _ = await run(test, bound=bound)
-            lead_stdout.append(stdout)
-            lead = await lead.merge(io)
-            if io.exit_code == 0:
-                break
-        else:
-            body = else_body or []
-        stdout, io, last_exec = await run(body, bound=bound)
-    except UNWINDING as sig:
-        raise await carried(sig, _chain_streams(lead_stdout), lead)
-    return (
-        _chain_streams([*lead_stdout, stdout]),
-        await lead.merge(io),
-        last_exec,
+    """Run ``if``: each test in turn, then the branch the first passing
+    one opens, or the ``else``.
+
+    Args:
+        run (BodyRun): ``execute_body`` bound to the walk.
+        branches (list): each branch's test and body.
+        else_body (list[TSNodeLike] | None): the ``else`` body.
+        context (EvaluationContext): the evaluation.
+        execute_fn (Callable[..., Any]): evaluator for nested lines.
+        call_stack (CallStack): shell call stack.
+    """
+    lists = [else_body or []]
+    pairs: list[tuple[int, int]] = []
+    for test, body in branches:
+        pairs.append((len(lists), len(lists) + 1))
+        lists.extend((test, body))
+    host = await _run_construct(
+        lambda shell: shell.run_if(pairs, 0),
+        run,
+        lists,
+        context,
+        execute_fn,
+        call_stack,
+        whole_tests=True,
     )
+    return _ended(host, "")
 
 
-# `set -n` inside a loop body has to stop the *driver* too, not only the
-# statements: `execute_node` refuses every node while the option is on,
-# so the `break` or the false condition the driver is waiting for is one
-# of the refused nodes and it would spin forever. GNU never runs the
-# loop at all, which is what falling straight out of it produces. A
-# `set -e` failure in a body stops the driver the same way: the body
-# has stopped at it, and another turn would run the shell on.
 async def handle_for(
     run: BodyRun,
     variable: str,
     values: list[str | PathSpec],
     body: list[TSNodeLike],
     context: EvaluationContext,
+    execute_fn: Callable[..., Any],
+    call_stack: CallStack,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    session = context.session
-    merged_io = IOResult()
-    all_stdout: list[ByteSource | None] = []
-    view = session_view(session, diagnostics=context.frame.diagnostics)
-    # The loop variable is the shell's own write: readonly is bash's
-    # rule, checked up front so the loop never starts, exactly as bash
-    # refuses `for x` on a readonly x before the first iteration.
-    if view.is_readonly(variable):
-        err = encode_text(f"{shell_voice()}{variable}: readonly variable\n")
-        return _collect_loop_result(
-            [], IOResult(exit_code=1, stderr=err), "for"
-        )
-    # Each iteration reads the fd 0 the loop started with, so an
-    # `exec < f` in one reaches the next.
-    bound = fd0_binding(session)
-    for val in values:
-        if session.shell_options.get("noexec"):
-            break
-        # bash keeps `for f in sub/*.txt` matches relative, so the loop
-        # variable takes the typed form; a policy denial aborts the loop
-        # before its body runs.
-        try:
-            await view.set(variable, word_text(val))
-        except PolicyDenied as exc:
-            merged_io = await merged_io.merge(
-                IOResult(exit_code=1, stderr=encode_text(f"{exc.strerror}\n"))
-            )
-            break
-        except ArithError as exc:
-            raise exc.signal(fatal=True) from exc
-        try:
-            stdout, io, _ = await run(body, bound=bound)
-        except LoopSignal as sig:
-            merged_io = await _absorbed(sig, all_stdout, merged_io)
-            if isinstance(sig, BreakSignal):
-                break
-            continue
-        merged_io = await merged_io.merge(io)
-        _keep(all_stdout, stdout)
-        if session.errexit_exiting:
-            break
-    # The loop variable is an ordinary variable in bash and keeps its
-    # last value after the loop (`for X in a b; do :; done; echo $X`
-    # prints b); nothing is put back.
-    return _collect_loop_result(all_stdout, merged_io, "for")
+    """Run ``for``: bash keeps ``for f in sub/*.txt`` matches relative,
+    so the variable takes each word as typed, and keeps the last.
+
+    Args:
+        run (BodyRun): ``execute_body`` bound to the walk.
+        variable (str): the loop variable.
+        values (list[str | PathSpec]): its words, already expanded.
+        body (list[TSNodeLike]): the loop's statements.
+        context (EvaluationContext): the evaluation.
+        execute_fn (Callable[..., Any]): evaluator for nested lines.
+        call_stack (CallStack): shell call stack.
+    """
+    words = [word_text(value) for value in values]
+    host = await _run_construct(
+        lambda shell: shell.run_for(variable, words, 0),
+        run,
+        [body],
+        context,
+        execute_fn,
+        call_stack,
+    )
+    return _looped(host, "for")
 
 
 async def handle_while(
     run: BodyRun,
     test: list[TSNodeLike],
     body: list[TSNodeLike],
-    session: SessionState,
+    context: EvaluationContext,
+    execute_fn: Callable[..., Any],
+    call_stack: CallStack,
     until: bool = False,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    label = "until" if until else "while"
-    merged_io = IOResult()
-    all_stdout: list[ByteSource | None] = []
-    # Each test and body reads the fd 0 the loop started with, so an
-    # `exec < f` in one reaches the rest.
-    bound = fd0_binding(session)
-    while not session.shell_options.get("noexec"):
-        try:
-            with ignoring_errexit(session):
-                cond_stdout, cond_io, _ = await run(test, bound=bound)
-            _keep(all_stdout, cond_stdout)
-            merged_io = await merged_io.merge(
-                IOResult(stderr=cond_io.stderr, exit_code=merged_io.exit_code)
-            )
-            if (cond_io.exit_code == 0) == until:
-                break
-            stdout, io, _ = await run(body, bound=bound)
-        except LoopSignal as sig:
-            merged_io = await _absorbed(sig, all_stdout, merged_io)
-            if isinstance(sig, BreakSignal):
-                break
-            continue
-        except UNWINDING as sig:
-            raise await carried(sig, _chain_streams(all_stdout), merged_io)
-        merged_io = await merged_io.merge(io)
-        _keep(all_stdout, stdout)
-        if session.errexit_exiting:
-            break
-    return _collect_loop_result(all_stdout, merged_io, label)
+    """Run ``while`` or ``until``.
+
+    Args:
+        run (BodyRun): ``execute_body`` bound to the walk.
+        test (list[TSNodeLike]): the condition's statements.
+        body (list[TSNodeLike]): the loop's statements.
+        context (EvaluationContext): the evaluation.
+        execute_fn (Callable[..., Any]): evaluator for nested lines.
+        call_stack (CallStack): shell call stack.
+        until (bool): stop when the condition holds.
+    """
+    host = await _run_construct(
+        lambda shell: shell.run_while(0, 1, until),
+        run,
+        [test, body],
+        context,
+        execute_fn,
+        call_stack,
+    )
+    return _looped(host, "until" if until else "while")
+
+
+def _nodes(parts: list[TSNodeLike]) -> list[ShellNode]:
+    """The parsed nodes of a construct's words.
+
+    Args:
+        parts (list[TSNodeLike]): the words.
+    """
+    return [node for node in map(shell_node, parts) if node is not None]
+
+
+def _slot(exprs: list[TSNodeLike]) -> tuple[list[ShellNode], Any] | None:
+    """A C-style ``for`` expression as the shell reads it: its nodes and
+    the node whose start ends its text, None for an empty slot.
+
+    Args:
+        exprs (list[TSNodeLike]): the slot's nodes and tokens, in order.
+    """
+    if not exprs:
+        return None
+    closer = exprs[-1].next_sibling if exprs[0].parent is not None else None
+    return _nodes(exprs), None if closer is None else shell_node(closer)
 
 
 async def handle_cfor(
     run: BodyRun,
     exprs: list[list[TSNodeLike]],
     body: list[TSNodeLike],
-    eval_expr: Callable[..., Any],
-    session: SessionState,
+    context: EvaluationContext,
+    execute_fn: Callable[..., Any],
+    call_stack: CallStack,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run bash's C-style for: ((init; cond; update)) around a body.
 
-    bash runs the update after a ``continue`` too. An expression error
-    aborts the loop with status 1, keeping the output of the iterations
-    that ran, or ends the shell with it in a subscript; a PolicyDenied is
-    a header expression assigning a hidden name.
-
     Args:
         run (BodyRun): ``execute_body`` bound to the walk.
-        exprs (list[list[TSNodeLike]]): init, condition and
-            update expression slots, each the comma-separated
-            expressions it holds; any may be empty (`for ((;;))`).
-        body (list[TSNodeLike]): do_group statements.
-        eval_expr (Callable): async evaluator taking (expr, default)
-            and returning the expression's integer value, or the
-            default when the slot is empty; raises ArithError with the
-            offending expression text on an invalid expression, or
-            ReadonlyVariableError when it assigns to a readonly variable.
-        session (SessionState): the shell running the loop.
+        exprs (list[list[TSNodeLike]]): init, condition and update, each
+            the nodes it holds; any may be empty (``for ((;;))``).
+        body (list[TSNodeLike]): the loop's statements.
+        context (EvaluationContext): the evaluation.
+        execute_fn (Callable[..., Any]): evaluator for nested lines.
+        call_stack (CallStack): shell call stack.
     """
-    merged_io = IOResult()
-    all_stdout: list[ByteSource | None] = []
-    bound = fd0_binding(session)
-    try:
-        await eval_expr(exprs[0], 0)
-        while not session.shell_options.get("noexec"):
-            if await eval_expr(exprs[1], 1) == 0:
-                break
-            try:
-                stdout, io, _ = await run(body, bound=bound)
-            except LoopSignal as sig:
-                merged_io = await _absorbed(sig, all_stdout, merged_io)
-                if isinstance(sig, BreakSignal):
-                    break
-                await eval_expr(exprs[2], 0)
-                continue
-            merged_io = await merged_io.merge(io)
-            _keep(all_stdout, stdout)
-            if session.errexit_exiting:
-                break
-            await eval_expr(exprs[2], 0)
-    except (ArithError, PolicyDenied, ReadonlyVariableError) as exc:
-        if isinstance(exc, ArithError) and exc.in_subscript:
-            stdout = _chain_streams(all_stdout)
-            raise await carried(exc.signal(), stdout, merged_io) from exc
-        voice = "((: " if isinstance(exc, ArithError) else ""
-        said = exc.strerror if isinstance(exc, PolicyDenied) else exc
-        merged_io = await merged_io.merge(
-            IOResult(
-                exit_code=1,
-                stderr=encode_text(f"{shell_voice()}{voice}{said}\n"),
-            )
-        )
-        merged_io.exit_code = 1
-    return _collect_loop_result(all_stdout, merged_io, "for")
+    slots = [_slot(expr) for expr in exprs]
+    word = next((expr[0] for expr in exprs if expr), None)
+    host = await _run_construct(
+        lambda shell: shell.run_cfor(slots, 0),
+        run,
+        [body],
+        context,
+        execute_fn,
+        call_stack,
+        word=word,
+    )
+    return _looped(host, "for")
 
 
 async def handle_case(
     run: BodyRun,
     word: str,
     items: list[tuple[list[TSNodeLike], list[TSNodeLike], str]],
-    session: SessionState,
-    expand: Callable[[TSNodeLike], Awaitable[str]],
+    context: EvaluationContext,
+    execute_fn: Callable[..., Any],
+    call_stack: CallStack,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run the first arm whose pattern matches ``word``, and after it
     the arms its terminator reaches: ``;&`` falls into the next arm's
     body untested, ``;;&`` tests the rest, ``;;`` stops.
+
+    Args:
+        run (BodyRun): ``execute_body`` bound to the walk.
+        word (str): the expanded word.
+        items (list): each arm's patterns, body and terminator.
+        context (EvaluationContext): the evaluation.
+        execute_fn (Callable[..., Any]): evaluator for nested lines.
+        call_stack (CallStack): shell call stack.
     """
-    all_stdout: list[ByteSource | None] = []
-    merged_io = IOResult()
-    last_exec = ExecutionNode(command="case", exit_code=0)
-    fallthrough = False
-    # Each arm reads the fd 0 the `case` started with, so an `exec < f`
-    # in one reaches an arm it falls into.
-    bound = fd0_binding(session)
-    for patterns, body, terminator in items:
-        # An arm a `;;&` left can have turned extglob on for this one.
-        extglob = bool(session.shopts.get("extglob"))
-        try:
-            matched = fallthrough
-            if not matched:
-                for pattern in patterns:
-                    if fnmatch(word, await expand(pattern), extglob=extglob):
-                        matched = True
-                        break
-            if not matched:
-                continue
-            stdout, io, last_exec = await run(body, bound=bound)
-        except UNWINDING as sig:
-            raise await carried(sig, _chain_streams(all_stdout), merged_io)
-        all_stdout.append(stdout)
-        merged_io = await merged_io.merge(io)
-        fallthrough = terminator == ";&"
-        if session.errexit_exiting or terminator not in (";&", ";;&"):
-            break
-    return _chain_streams(all_stdout), merged_io, last_exec
+    lists = [body for _, body, _ in items]
+    arms = [
+        (_nodes(patterns), index, terminator)
+        for index, (patterns, _, terminator) in enumerate(items)
+    ]
+    first = next((patterns[0] for patterns, _, _ in items if patterns), None)
+    host = await _run_construct(
+        lambda shell: shell.run_case(word, arms),
+        run,
+        lists,
+        context,
+        execute_fn,
+        call_stack,
+        word=first,
+    )
+    return _ended(host, "case")
 
 
 def _select_menu(words: list[str], columns: str) -> str:

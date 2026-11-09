@@ -7,6 +7,7 @@ use pyo3::types::{PyBool, PyBytes, PyDict, PyList, PyTuple};
 use streams::arith;
 use streams::interp::builtin::{self, Unsetting};
 use streams::interp::codec::Item;
+use streams::interp::control::{Arm, Construct, Ran, Slot};
 use streams::interp::declare::{Declaration, Marking, Operand};
 use streams::interp::expand::Substitution;
 use streams::interp::host::{self, Held};
@@ -20,6 +21,9 @@ use streams::vars::{self, Assigned, Indexed, Kind, Managed, Store, Value, Var};
 
 use crate::shell::ShellNode;
 use crate::text::{bytes_of, text_of};
+
+/// An expression of a C-style `for`: its nodes and the node after them.
+type SlotNodes<'py> = Option<(Vec<PyRef<'py, ShellNode>>, Option<PyRef<'py, ShellNode>>)>;
 
 /// A managed variable's pointer as Python passes it: source, reference,
 /// key, and whether it is fetched eagerly.
@@ -122,6 +126,17 @@ fn record_in(
 /// The tree of a task that names no node of one.
 fn no_tree() -> (Arc<Tree>, u64) {
     (Arc::new(streams::shell::parse(b"")), 0)
+}
+
+/// Start a compound command on the shell.
+fn start_construct(
+    slf: &Bound<'_, Shell>,
+    (tree, serial): (Arc<Tree>, u64),
+    construct: Construct,
+) -> PyResult<ShellTask> {
+    ShellTask::start(slf, (Arc::clone(&tree), serial), |inner| {
+        task::control(inner, tree, construct)
+    })
 }
 
 /// Declaration operands: a word, or `(name, append, items)`.
@@ -644,6 +659,109 @@ impl Shell {
         })
     }
 
+    /// Run `if`: each branch a test's list and a body's, then the `else`
+    /// list.
+    fn run_if(
+        slf: &Bound<'_, Self>,
+        branches: Vec<(usize, usize)>,
+        otherwise: usize,
+    ) -> PyResult<ShellTask> {
+        start_construct(
+            slf,
+            no_tree(),
+            Construct::If {
+                branches,
+                otherwise,
+            },
+        )
+    }
+
+    /// Run `while`, or `until`, over a test's list and a body's.
+    fn run_while(
+        slf: &Bound<'_, Self>,
+        test: usize,
+        body: usize,
+        until: bool,
+    ) -> PyResult<ShellTask> {
+        start_construct(slf, no_tree(), Construct::While { test, body, until })
+    }
+
+    /// Run `for` over `values`, a body's list each turn.
+    fn run_for(
+        slf: &Bound<'_, Self>,
+        variable: String,
+        values: Vec<Bound<'_, PyAny>>,
+        body: usize,
+    ) -> PyResult<ShellTask> {
+        let values = values.iter().map(bytes_of).collect::<PyResult<Vec<_>>>()?;
+        start_construct(
+            slf,
+            no_tree(),
+            Construct::For {
+                variable,
+                values,
+                body,
+            },
+        )
+    }
+
+    /// Run a C-style `for`: `slots` its three expressions, each its nodes
+    /// and the node after them, None for an empty one.
+    fn run_cfor(
+        slf: &Bound<'_, Self>,
+        slots: Vec<SlotNodes<'_>>,
+        body: usize,
+    ) -> PyResult<ShellTask> {
+        let mut tree = None;
+        let mut converted = slots.into_iter().map(|slot| {
+            slot.map(|(parts, closer)| {
+                if let Some(node) = parts.first() {
+                    tree.get_or_insert((Arc::clone(&node.tree), node.serial));
+                }
+                Slot {
+                    parts: parts.iter().map(|node| node.index as usize).collect(),
+                    closer: closer.map(|node| node.index as usize),
+                }
+            })
+        });
+        let slots = std::array::from_fn(|_| converted.next().flatten());
+        drop(converted);
+        start_construct(
+            slf,
+            tree.unwrap_or_else(no_tree),
+            Construct::CFor { slots, body },
+        )
+    }
+
+    /// Run `case` on `word`: each arm its pattern nodes, a body's list
+    /// and its terminator.
+    fn run_case(
+        slf: &Bound<'_, Self>,
+        word: Bound<'_, PyAny>,
+        arms: Vec<(Vec<PyRef<'_, ShellNode>>, usize, String)>,
+    ) -> PyResult<ShellTask> {
+        let word = bytes_of(&word)?;
+        let mut tree = None;
+        let arms = arms
+            .iter()
+            .map(|(patterns, body, terminator)| {
+                if let Some(node) = patterns.first() {
+                    tree.get_or_insert((Arc::clone(&node.tree), node.serial));
+                }
+                Ok(Arm {
+                    patterns: patterns.iter().map(|node| node.index as usize).collect(),
+                    body: *body,
+                    fall: terminator.parse().map_err(PyRuntimeError::new_err)?,
+                })
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        start_construct(
+            slf,
+            tree.unwrap_or_else(no_tree),
+            Construct::Case { word, arms },
+        )
+    }
+
     /// Run a `declare`, `typeset` or `local` statement: `operands` each a
     /// word, or `(name, append, items)` for an array literal.
     #[allow(clippy::too_many_arguments)]
@@ -1003,6 +1121,9 @@ impl ShellTask {
                     .into_pyobject(py)?
                     .into_any()
             }
+            Ask::Run { shell, list, test } => ("run", Shell::wrap(shell), list, test)
+                .into_pyobject(py)?
+                .into_any(),
             Ask::Pause { view } => ("pause", Shell::wrap(Inner::new(view)))
                 .into_pyobject(py)?
                 .into_any(),
@@ -1084,6 +1205,33 @@ impl ShellTask {
         let inner = shell.borrow_mut().0.take().ok_or_else(running)?;
         let shell = Box::new(inner);
         self.answer(py, Answer::Subscripted { shell, text })
+    }
+
+    /// How a list ran: its status, the tag and levels of what unwinds
+    /// (`""`, `break`, `continue` or `stop`), whether `set -e` is ending
+    /// the shell, and the shell the task lent.
+    fn answer_ran(
+        &mut self,
+        py: Python<'_>,
+        shell: &Bound<'_, Shell>,
+        status: i32,
+        tag: &str,
+        levels: u32,
+        exiting: bool,
+    ) -> PyResult<()> {
+        let unwound = host::unwound_in(tag, levels).map_err(PyRuntimeError::new_err)?;
+        let inner = shell.borrow_mut().0.take().ok_or_else(running)?;
+        self.answer(
+            py,
+            Answer::Ran {
+                shell: Box::new(inner),
+                ran: Ran {
+                    status,
+                    unwound,
+                    exiting,
+                },
+            },
+        )
     }
 
     fn answer_resumed(&mut self, py: Python<'_>) -> PyResult<()> {

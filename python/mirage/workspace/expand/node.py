@@ -116,6 +116,9 @@ class ExpandHost:
         self.call_stack = call_stack
         self.program = word.program if isinstance(word, ProgramNode) else None
 
+    async def run(self, index: int, test: bool) -> tuple[int, str, int, bool]:
+        raise RuntimeError(f"no construct holds list {index} (test={test})")
+
     def _node(self, node: ShellNode) -> TSNodeLike:
         if self.program is None:
             return node

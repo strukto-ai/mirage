@@ -52,7 +52,7 @@ from mirage.io.types import ByteSource
 from mirage.policy import HandOff, PolicyDenied
 from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
-from mirage.shell.bytes import decode_text, encode_text
+from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.constants import (
@@ -140,7 +140,6 @@ from mirage.workspace.expand import (
 )
 from mirage.workspace.expand.globs import glob_options, resolve_globs
 from mirage.workspace.expand.node import expand_arith
-from mirage.workspace.expand.pattern import expand_pattern
 from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -166,86 +165,6 @@ from mirage.workspace.session.state import (
     session_arith,
 )
 from mirage.workspace.types import ExecutionNode
-
-
-async def _eval_cfor_expr(
-    exprs: list[Any],
-    default: int,
-    context: EvaluationContext,
-    execute_fn: ExecuteFn,
-    call_stack: CallStack | None,
-) -> int:
-    """Evaluate one C-style for expression slot.
-
-    Args:
-        exprs (list[Any]): the slot's parsed expression nodes, one
-            per comma-separated expression; empty for an empty slot.
-        default (int): value an empty slot yields (1 for the condition
-            so `for ((;;))` loops, 0 for init/update).
-        context (EvaluationContext): the evaluation; arithmetic assignments
-            land in its session's env.
-        execute_fn (Callable): recursive execute for substitutions.
-        call_stack (CallStack | None): function-call scope, if any.
-
-    Raises:
-        ArithError: the slot did not evaluate; the loop prints it as
-            bash's ``((: expr: reason`` diagnostic.
-        ReadonlyVariableError: the expression assigns to a readonly variable,
-            which aborts the loop the same way an invalid expression
-            does; the writes before it have landed.
-        ExitSignal: that assignment was inside a subscript.
-        PolicyDenied: one of the writes named a hidden name.
-    """
-    if not exprs:
-        return default
-    text = await _slot_text(exprs, context, execute_fn, call_stack)
-    try:
-        return await session_arith(context.session, text, call_stack)
-    except ReadonlyVariableError as exc:
-        if exc.in_subscript:
-            raise exc.signal() from exc
-        raise
-
-
-async def _slot_text(
-    exprs: list[Any],
-    context: EvaluationContext,
-    execute_fn: ExecuteFn,
-    call_stack: CallStack | None,
-) -> str:
-    """A C-style for slot's text as bash evaluates it: its source up to
-    the ``;`` or ``))`` that ends it, each node's expansions substituted.
-
-    Args:
-        exprs (list[Any]): the slot's nodes and tokens, in order.
-        context (EvaluationContext): the evaluation.
-        execute_fn (Callable): recursive execute for substitutions.
-        call_stack (CallStack | None): function-call scope, if any.
-    """
-    first, last = exprs[0], exprs[-1]
-    parent = first.parent
-    closer = last.next_sibling
-    if parent is None or closer is None:
-        raw, base, end = b"", first.start_byte, last.end_byte
-    else:
-        raw, base, end = (
-            parent.text or b"",
-            parent.start_byte,
-            closer.start_byte,
-        )
-    parts: list[str] = []
-    at = first.start_byte
-    for expr in exprs:
-        parts.append(decode_text(raw[at - base : expr.start_byte - base]))
-        parts.append(
-            await expand_arith(expr, context, execute_fn, call_stack)
-            if expr.is_named
-            else get_text(expr)
-        )
-        at = expr.end_byte
-    parts.append(decode_text(raw[at - base : end - base]))
-    return "".join(parts)
-
 
 STREAMING_KINDS = frozenset(
     {
@@ -1354,7 +1273,9 @@ async def _run_for(
                 stdin,
                 sink=sink,
             )
-        return await handle_for(run_body, var, classified, body, context)
+        return await handle_for(
+            run_body, var, classified, body, context, execute_fn, cs
+        )
 
 
 def _define_function(
@@ -1751,18 +1672,16 @@ async def _execute_node(
 
     if kind == NodeKind.IF:
         branches, else_body = get_if_branches(node)
-        return await handle_if(run_body, branches, else_body, session)
+        return await handle_if(
+            run_body, branches, else_body, context, execute_fn, cs
+        )
 
     if kind == NodeKind.CFOR:
         exprs, body = get_cfor_parts(node)
-        eval_expr = partial(
-            _eval_cfor_expr,
-            context=context,
-            execute_fn=execute_fn,
-            call_stack=cs,
-        )
         with cs.loop():
-            return await handle_cfor(run_body, exprs, body, eval_expr, session)
+            return await handle_cfor(
+                run_body, exprs, body, context, execute_fn, cs
+            )
 
     if kind in (NodeKind.FOR, NodeKind.SELECT):
         return await _run_for(
@@ -1782,23 +1701,20 @@ async def _execute_node(
         test, body = get_while_parts(node)
         with cs.loop():
             return await handle_while(
-                run_body, test, body, session, until=kind == NodeKind.UNTIL
+                run_body,
+                test,
+                body,
+                context,
+                execute_fn,
+                cs,
+                until=kind == NodeKind.UNTIL,
             )
 
     if kind == NodeKind.CASE:
         word_node = get_case_word(node)
         word = await expand_node(word_node, context, execute_fn, cs)
         return await handle_case(
-            run_body,
-            word,
-            get_case_items(node),
-            session,
-            partial(
-                expand_pattern,
-                context=context,
-                execute_fn=execute_fn,
-                call_stack=cs,
-            ),
+            run_body, word, get_case_items(node), context, execute_fn, cs
         )
 
     if kind == NodeKind.FUNCTION_DEF:
