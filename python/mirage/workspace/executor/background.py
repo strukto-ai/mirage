@@ -509,6 +509,38 @@ async def run_program(
     return stdout, io, ran
 
 
+def _job_left(
+    sig: ExitSignal | ReturnSignal,
+    left: TSNodeLike,
+    call_stack: CallStack | None,
+    command: str,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """What a job answers when ``exit`` or ``return`` ends it. A job is
+    its own shell: exit ends the job only, a simple command the top shell
+    forked with the status that shell would exit with (``: ${U?} &`` is
+    127, ``{ : ${U?}; } &`` and ``( : ${U?} & )`` are 1).
+
+    Args:
+        sig (ExitSignal | ReturnSignal): what ended it.
+        left (TSNodeLike): the job's command.
+        call_stack (CallStack | None): the shell's call stack.
+        command (str): the job's text, for the node.
+    """
+    status = sig.exit_code
+    if isinstance(sig, ExitSignal) and (
+        not simple_command(left)
+        or sig.sourced
+        or (call_stack is not None and call_stack.subshell)
+    ):
+        status = sig.contained_code
+    stdout = (sig.stdout or b"") if isinstance(sig, ExitSignal) else sig.stdout
+    return (
+        stdout,
+        IOResult(exit_code=status, stderr=sig.stderr or None),
+        ExecutionNode(command=command, stderr=sig.stderr, exit_code=status),
+    )
+
+
 async def handle_background(
     execute_node: Callable[
         ..., Awaitable[tuple[ByteSource | None, IOResult, ExecutionNode]]
@@ -666,34 +698,9 @@ async def handle_background(
                     ends_shell=True,
                     jobs=job_table.child(),
                 )
-            except ExitSignal as sig:
-                # A background job is its own shell: exit ends the job
-                # only, a simple command the top shell forked with the
-                # status that shell would exit with (`: ${U?} &` is 127,
-                # `{ : ${U?}; } &` and `( : ${U?} & )` are 1).
-                stdout = sig.stdout or b""
-                status = (
-                    sig.exit_code
-                    if simple_command(left)
-                    and not sig.sourced
-                    and not (call_stack is not None and call_stack.subshell)
-                    else sig.contained_code
-                )
-                io = IOResult(exit_code=status, stderr=sig.stderr or None)
-                exec_node = ExecutionNode(
-                    command=cmd_str_inner,
-                    stderr=sig.stderr,
-                    exit_code=status,
-                )
-            except ReturnSignal as sig:
-                stdout = sig.stdout
-                io = IOResult(
-                    exit_code=sig.exit_code, stderr=sig.stderr or None
-                )
-                exec_node = ExecutionNode(
-                    command=cmd_str_inner,
-                    stderr=sig.stderr,
-                    exit_code=sig.exit_code,
+            except (ExitSignal, ReturnSignal) as sig:
+                stdout, io, exec_node = _job_left(
+                    sig, left, call_stack, cmd_str_inner
                 )
             # Drain inside the rebind: pumping the stream can still run
             # ops that read the ambient session.

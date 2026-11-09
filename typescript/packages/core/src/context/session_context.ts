@@ -400,12 +400,6 @@ export function lineSignal(session: SessionState): AbortSignal | undefined {
   return signals.size === 1 ? [...signals][0] : undefined
 }
 
-/** The one signal among `signals`, or none when they differ. */
-function soleSignal(signals: readonly (AbortSignal | undefined)[]): AbortSignal | undefined {
-  const distinct = new Set(signals)
-  return distinct.size === 1 ? [...distinct][0] : undefined
-}
-
 /**
  * The signal the current call answers to: its evaluation frame's and its
  * line's, which withdraw a pipe read or copy that waits; Python cancels the
@@ -425,19 +419,21 @@ export function callerSignal(): AbortSignal | undefined {
     )
   }
   const sameShell = (other: SessionState): boolean => other.sessionId === session.sessionId
+  const frames = new Set(
+    liveCallers().flatMap((caller) =>
+      caller.evaluation !== null && sameShell(caller.evaluation.session)
+        ? [caller.evaluation.frame.abortSignal ?? undefined]
+        : [],
+    ),
+  )
+  const lines = new Set(
+    lineFrames()
+      .filter((frame) => frame.sessions.some(sameShell))
+      .map((frame) => frame.stop ?? frame.signal),
+  )
   return mergeSignals(
-    soleSignal(
-      liveCallers().flatMap((caller) =>
-        caller.evaluation !== null && sameShell(caller.evaluation.session)
-          ? [caller.evaluation.frame.abortSignal ?? undefined]
-          : [],
-      ),
-    ),
-    soleSignal(
-      lineFrames()
-        .filter((frame) => frame.sessions.some(sameShell))
-        .map((frame) => frame.stop ?? frame.signal),
-    ),
+    frames.size === 1 ? [...frames][0] : undefined,
+    lines.size === 1 ? [...lines][0] : undefined,
   )
 }
 

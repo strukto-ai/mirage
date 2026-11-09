@@ -528,6 +528,151 @@ export async function makeLink(
   }
 }
 
+// The line refusing a link its paths cannot reach, null for one they can.
+async function walkRefusal(
+  links: NamespaceReader,
+  dispatch: DispatchFn,
+  cwd: string,
+  plan: LinkPlan,
+  flags: LnFlags,
+): Promise<string | null> {
+  const typed = plan.linkTyped
+  const targetTyped = wordText(plan.source)
+  // A `.` or `..` resolves against the directory in front of it, which has
+  // to be there. A symlink's target is stored as typed and never walked; a
+  // hard link's is the file it names.
+  const walker = dispatchStat(dispatch)
+  // What the walk answers before any op, in GNU's order: symlink(2)
+  // refuses an empty target ahead of the name, and then GNU names the
+  // target alongside; a hard link's source is reached first; the name
+  // last, as the call that makes it would meet it.
+  if (flags.symbolic && targetTyped === '') {
+    return `ln: failed to create symbolic link '${typed}' -> '': ${posixPhrase('ENOENT')}\n`
+  }
+  if (!flags.symbolic) {
+    const why = walkVerdict(links, plan.source, cwd, flags.logical)
+    if (why !== null) {
+      return `ln: failed to access '${targetTyped}': ${posixPhrase(why)}\n`
+    }
+  }
+  const nameWhy = walkVerdict(links, typed, cwd)
+  if (nameWhy !== null) {
+    return refused(flags, typed, targetTyped, nameWhy)
+  }
+  if (!flags.symbolic) {
+    let unwalked: unknown
+    try {
+      unwalked = await dotRefusal(walker, PathSpec.fromStrPath(plan.source, undefined, cwd), (v) =>
+        links.follow(v),
+      )
+    } catch (err) {
+      if (!isRefusal(err)) throw err
+      unwalked = err
+    }
+    if (unwalked !== null) {
+      return `ln: failed to access '${targetTyped}': ${fsStrerror(unwalked) ?? posixPhrase('ENOENT')}\n`
+    }
+  }
+  // -f and -b look at the name before making it, so a plain file behind its
+  // slash is ENOTDIR there and EEXIST only to symlink(2).
+  const replaces = flags.force || (flags.backup !== null && flags.backup !== 'none')
+  const unwalked = await dotRefusal(
+    walker,
+    PathSpec.fromStrPath(typed, undefined, cwd),
+    (v) => links.follow(v),
+    !replaces,
+  )
+  if (unwalked !== null) {
+    return refused(flags, typed, targetTyped, classify(unwalked) ?? 'ENOENT')
+  }
+  return null
+}
+
+// The line refusing a link name typed with a trailing slash, null when
+// nothing here settles it.
+async function slashRefusal(
+  links: NamespaceReader,
+  dispatch: DispatchFn,
+  plan: LinkPlan,
+  flags: LnFlags,
+  kind: string,
+): Promise<string | null> {
+  const typed = plan.linkTyped
+  const targetTyped = wordText(plan.source)
+  const backs = flags.backup !== null && flags.backup !== 'none'
+  // A link name typed with a slash asks for a directory the link can
+  // never be, and GNU settles it before -f or -b touch anything there:
+  // those two lstat the name first, and `reg/` over a file (or a link
+  // to one) is ENOTDIR, `failed to access`, with the file kept and
+  // nothing renamed aside. Without them symlink(2) and link(2) answer
+  // `missing/` with ENOENT and anything standing behind the slash with
+  // EEXIST, so GNU creates nothing where the normalized name would have
+  // made a link called `missing`. A directory there took the link
+  // inside it in planLinks, so only a non-directory and the absent name
+  // are settled here, and a plain file without a flag falls to the
+  // dispatcher's "File exists" below.
+  const linked = links.isLink(plan.linkAbs)
+  const behind = linked
+    ? await linkTargetStat(links, dispatch, plan.linkAbs)
+    : await pathStat(dispatch, plan.linkAbs)
+  if (behind !== null && behind.type !== FileType.DIRECTORY && (flags.force || backs)) {
+    return refused(flags, typed, targetTyped, 'ENOTDIR')
+  }
+  if (!linked && behind === null) {
+    return refused(flags, typed, targetTyped, await missCondition(dispatch, plan.linkAbs))
+  }
+  if (linked && behind?.type !== FileType.DIRECTORY) {
+    return `ln: failed to create ${kind} '${typed}': File exists\n`
+  }
+  return null
+}
+
+// Make the link, and answer the line refusing it, null when made.
+async function createLink(
+  dispatch: DispatchFn,
+  linkSpec: PathSpec,
+  linkTarget: string | null,
+  data: Uint8Array | null,
+  flags: LnFlags,
+  typed: string,
+  targetTyped: string,
+): Promise<string | null> {
+  const kind = flags.symbolic ? 'symbolic link' : 'hard link'
+  try {
+    if (linkTarget !== null) {
+      await dispatch('symlink', linkSpec, [], { target: linkTarget })
+    } else {
+      await dispatch('write', linkSpec, [data ?? new Uint8Array()])
+    }
+  } catch (err) {
+    const code = (err as { code?: string }).code
+    if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'ELOOP') {
+      // The dispatcher refuses a name its parent cannot hold (symlink(2)'s
+      // ENOENT, ENOTDIR and ELOOP), and a store's write refuses the same
+      // way.
+      return refused(flags, typed, targetTyped, code)
+    }
+    if (isEexist(err)) {
+      // The dispatcher owns the existence rule (it is the only layer that can
+      // see both the node table and the backend); ln owns the wording.
+      return `ln: failed to create ${kind} '${typed}': File exists\n`
+    }
+    if (isEnoent(err) || isEnotdir(err)) {
+      // A parent the name cannot sit under. GNU names a hard link's target
+      // alongside for these errnos, a symlink's never.
+      const arrow = flags.symbolic ? '' : ` => '${targetTyped}'`
+      return `ln: failed to create ${kind} '${typed}'${arrow}: ${String(fsStrerror(err))}\n`
+    }
+    if (isRefusal(err)) {
+      // A read-only region or a policy deny, which ln voices as its own
+      // per-operand line, as GNU does for EROFS.
+      return `ln: failed to create ${kind} '${typed}': ${String(fsStrerror(err))}\n`
+    }
+    throw err
+  }
+  return null
+}
+
 // makeLink up to a refused stat of the name.
 async function attemptLink(
   links: NamespaceReader,
@@ -543,58 +688,9 @@ async function attemptLink(
   const targetTyped = wordText(plan.source)
   let linkTarget: string | null = null
   let data: Uint8Array | null = null
-  // A `.` or `..` resolves against the directory in front of it, which has
-  // to be there. A symlink's target is stored as typed and never walked; a
-  // hard link's is the file it names.
-  const walker = dispatchStat(dispatch)
-  // What the walk answers before any op, in GNU's order: symlink(2)
-  // refuses an empty target ahead of the name, and then GNU names the
-  // target alongside; a hard link's source is reached first; the name
-  // last, as the call that makes it would meet it.
-  if (flags.symbolic && targetTyped === '') {
-    errors.push(`ln: failed to create symbolic link '${typed}' -> '': ${posixPhrase('ENOENT')}\n`)
-    return
-  }
-  if (!flags.symbolic) {
-    const why = walkVerdict(links, plan.source, cwd, flags.logical)
-    if (why !== null) {
-      errors.push(`ln: failed to access '${targetTyped}': ${posixPhrase(why)}\n`)
-      return
-    }
-  }
-  const nameWhy = walkVerdict(links, typed, cwd)
-  if (nameWhy !== null) {
-    errors.push(refused(flags, typed, targetTyped, nameWhy))
-    return
-  }
-  if (!flags.symbolic) {
-    let unwalked: unknown
-    try {
-      unwalked = await dotRefusal(walker, PathSpec.fromStrPath(plan.source, undefined, cwd), (v) =>
-        links.follow(v),
-      )
-    } catch (err) {
-      if (!isRefusal(err)) throw err
-      unwalked = err
-    }
-    if (unwalked !== null) {
-      errors.push(
-        `ln: failed to access '${targetTyped}': ${fsStrerror(unwalked) ?? posixPhrase('ENOENT')}\n`,
-      )
-      return
-    }
-  }
-  // -f and -b look at the name before making it, so a plain file behind its
-  // slash is ENOTDIR there and EEXIST only to symlink(2).
-  const replaces = flags.force || (flags.backup !== null && flags.backup !== 'none')
-  const unwalked = await dotRefusal(
-    walker,
-    PathSpec.fromStrPath(typed, undefined, cwd),
-    (v) => links.follow(v),
-    !replaces,
-  )
-  if (unwalked !== null) {
-    errors.push(refused(flags, typed, targetTyped, classify(unwalked) ?? 'ENOENT'))
+  const refusal = await walkRefusal(links, dispatch, cwd, plan, flags)
+  if (refusal !== null) {
+    errors.push(refusal)
     return
   }
   if (flags.symbolic) {
@@ -638,31 +734,9 @@ async function attemptLink(
   const control = flags.backup
   const backs = control !== null && control !== 'none'
   if (typed.endsWith('/')) {
-    // A link name typed with a slash asks for a directory the link can
-    // never be, and GNU settles it before -f or -b touch anything there:
-    // those two lstat the name first, and `reg/` over a file (or a link
-    // to one) is ENOTDIR, `failed to access`, with the file kept and
-    // nothing renamed aside. Without them symlink(2) and link(2) answer
-    // `missing/` with ENOENT and anything standing behind the slash with
-    // EEXIST, so GNU creates nothing where the normalized name would have
-    // made a link called `missing`. A directory there took the link
-    // inside it in planLinks, so only a non-directory and the absent name
-    // are settled here, and a plain file without a flag falls to the
-    // dispatcher's "File exists" below.
-    const linked = links.isLink(plan.linkAbs)
-    const behind = linked
-      ? await linkTargetStat(links, dispatch, plan.linkAbs)
-      : await pathStat(dispatch, plan.linkAbs)
-    if (behind !== null && behind.type !== FileType.DIRECTORY && (flags.force || backs)) {
-      errors.push(refused(flags, typed, targetTyped, 'ENOTDIR'))
-      return
-    }
-    if (!linked && behind === null) {
-      errors.push(refused(flags, typed, targetTyped, await missCondition(dispatch, plan.linkAbs)))
-      return
-    }
-    if (linked && behind?.type !== FileType.DIRECTORY) {
-      errors.push(`ln: failed to create ${kind} '${typed}': File exists\n`)
+    const slashed = await slashRefusal(links, dispatch, plan, flags, kind)
+    if (slashed !== null) {
+      errors.push(slashed)
       return
     }
   }
@@ -765,41 +839,10 @@ async function attemptLink(
       return
     }
   }
-  try {
-    if (linkTarget !== null) {
-      await dispatch('symlink', linkSpec, [], { target: linkTarget })
-    } else {
-      await dispatch('write', linkSpec, [data ?? new Uint8Array()])
-    }
-  } catch (err) {
-    const code = (err as { code?: string }).code
-    if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'ELOOP') {
-      // The dispatcher refuses a name its parent cannot hold (symlink(2)'s
-      // ENOENT, ENOTDIR and ELOOP), and a store's write refuses the same
-      // way.
-      errors.push(refused(flags, typed, targetTyped, code))
-      return
-    }
-    if (isEexist(err)) {
-      // The dispatcher owns the existence rule (it is the only layer that can
-      // see both the node table and the backend); ln owns the wording.
-      errors.push(`ln: failed to create ${kind} '${typed}': File exists\n`)
-      return
-    }
-    if (isEnoent(err) || isEnotdir(err)) {
-      // A parent the name cannot sit under. GNU names a hard link's target
-      // alongside for these errnos, a symlink's never.
-      const arrow = flags.symbolic ? '' : ` => '${targetTyped}'`
-      errors.push(`ln: failed to create ${kind} '${typed}'${arrow}: ${String(fsStrerror(err))}\n`)
-      return
-    }
-    if (isRefusal(err)) {
-      // A read-only region or a policy deny, which ln voices as its own
-      // per-operand line, as GNU does for EROFS.
-      errors.push(`ln: failed to create ${kind} '${typed}': ${String(fsStrerror(err))}\n`)
-      return
-    }
-    throw err
+  const failed = await createLink(dispatch, linkSpec, linkTarget, data, flags, typed, targetTyped)
+  if (failed !== null) {
+    errors.push(failed)
+    return
   }
   if (flags.verbose) {
     // A symlink reports the target it stored (relative under -r); a hard

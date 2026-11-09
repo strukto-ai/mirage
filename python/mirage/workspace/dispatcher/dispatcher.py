@@ -1552,6 +1552,32 @@ class Dispatcher:
         served = await self._serve_cached(call, mount, boundary, mark)
         if served is not None:
             return served, IOResult()
+        result = await self._perform(
+            name, kwargs, caller, call, mount, boundary, mark
+        )
+        return result, IOResult()
+
+    async def _perform(
+        self,
+        name: str,
+        kwargs: dict[str, Any],
+        caller: Caller,
+        call: _Call,
+        mount: MountEntry,
+        boundary: Boundary,
+        mark: VfsCall,
+    ) -> Any:
+        """Make the call on the backend and settle what it changed.
+
+        Args:
+            name (str): the op.
+            kwargs (dict[str, Any]): its keywords.
+            caller (Caller): who makes it.
+            call (_Call): the walked call.
+            mount (MountEntry): the mount that serves it.
+            boundary (Boundary): the admission to complete.
+            mark (VfsCall): the op's declaration.
+        """
         settles = (
             name in DISPATCH_WRITE_OPS
             or (call.write and name not in POLICY_WRITE_OPS)
@@ -1618,7 +1644,7 @@ class Dispatcher:
                     mount,
                     delivered=isinstance(result, bytes) and bool(result),
                 )
-        return result, IOResult()
+        return result
 
     def _observe_reads(
         self, call: _Call, mount: MountEntry, *, delivered: bool
