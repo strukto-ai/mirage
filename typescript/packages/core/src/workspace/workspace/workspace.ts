@@ -138,6 +138,7 @@ import { Dispatcher } from '../dispatcher/index.ts'
 import { Documents } from '../documentation/documents.ts'
 import { LineHandle } from '../../execution/line/handle.ts'
 import { expandingAliases } from '../executor/builtins/alias/alias.ts'
+import { resumeJob } from '../executor/background.ts'
 import { recordStatus } from '../executor/statement.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
 import { resolveGlobs } from '../expand/globs.ts'
@@ -753,6 +754,7 @@ export class Workspace {
     )
     this.jobTable.runStopper = (record, signum) =>
       this.machineTable.stop(this.processTable, record, signum)
+    this.jobTable.resumer = (job, sent) => resumeJob(this.machineTable, job, sent)
     this.processTable.scanner = () => this.machineTable.scan(this.processTable, this.workspaceId)
     this.processTable.sender = (handle, signum) =>
       this.machineTable.send(this.processTable, handle, signum)

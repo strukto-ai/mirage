@@ -180,6 +180,7 @@ from mirage.view.types import SessionView
 from mirage.workspace.cli import CLIInstall
 from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.documentation.documents import Documents
+from mirage.workspace.executor.background import resume_job
 from mirage.workspace.executor.builtins.alias.alias import expanding_aliases
 from mirage.workspace.executor.statement import (
     record_status,
@@ -804,6 +805,7 @@ class Workspace:
         self.job_table.run_stopper = lambda record, signum: (
             self.machine_table.stop(self.process_table, record, signum)
         )
+        self.job_table.resumer = partial(resume_job, self.machine_table)
         self.process_table.scanner = lambda: self.machine_table.scan(
             self.process_table, self._workspace_id
         )

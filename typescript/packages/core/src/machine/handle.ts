@@ -235,7 +235,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
           )
     } catch (error) {
       if (ctx.signal?.aborted === true) {
-        await this.stop(tag, stopWith(runner))
+        if (runner?.released !== true) await this.stop(tag, stopWith(runner))
         throw error
       }
       if (!(error instanceof ConnectionLostError)) throw error
@@ -460,15 +460,61 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
         await this.removeJob(folder)
         return started
       }
+      if (runner !== null) {
+        runner.detached = true
+        await tellDetached(runner, this.id, folder)
+      }
       const done = await this.view(folder, tag, runner, output, errors, signal)
       await this.removeJob(folder)
       return done
     } catch (error) {
-      if (signal?.aborted === true) await this.removeJob(folder)
+      if (signal?.aborted === true && runner?.released !== true) await this.removeJob(folder)
       throw error
     } finally {
       this.detached.delete(tag)
     }
+  }
+
+  /**
+   * View a detached job a daemon before this one started to its end, as
+   * `run` would have, from the bytes its console already holds; stopped by
+   * its tag once `signal` aborts, as `run` is. Mirrors Python's
+   * `MachineHandle.resume`.
+   *
+   * @param folder the job's folder.
+   * @param tag the id of the process its run was.
+   * @param sent the stdout and stderr bytes already delivered.
+   * @param output receives stdout as it arrives.
+   * @param errors receives stderr as it arrives.
+   * @param signal stops the program.
+   */
+  async resume(
+    folder: string,
+    tag: string,
+    sent: readonly [number, number],
+    output: OutputFn | null,
+    errors: OutputFn | null,
+    signal?: AbortSignal,
+  ): Promise<RunResult> {
+    const runner = currentCaller().process
+    if (runner !== null) runner.detached = true
+    this.detached.set(tag, folder)
+    this.runs += 1
+    let done: RunResult
+    try {
+      done = await this.view(folder, tag, runner, output, errors, signal, sent)
+    } catch (error) {
+      if (signal?.aborted === true && runner?.released !== true) {
+        await this.stop(tag, stopWith(runner))
+        await this.removeJob(folder)
+      }
+      throw error
+    } finally {
+      this.detached.delete(tag)
+      this.runs -= 1
+    }
+    await this.removeJob(folder)
+    return done
   }
 
   /**
@@ -487,8 +533,9 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     output: OutputFn | null,
     errors: OutputFn | null,
     signal?: AbortSignal,
+    from: readonly [number, number] = [0, 0],
   ): Promise<RunResult> {
-    const sent = { out: 0, err: 0 }
+    const sent = { out: from[0], err: from[1] }
     const kept: [Uint8Array[], Uint8Array[]] = [[], []]
     let wait = VIEW_RETRY_SECONDS
     for (;;) {
@@ -714,6 +761,29 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
  */
 function stopWith(runner: ProcessHandle | null): number {
   return runner?.signal ?? runner?.interrupted ?? SIGTERM
+}
+
+/**
+ * Tell the job a run is that its program runs detached, and where, so a
+ * daemon that outlives this one finds it; a failed telling is logged and the
+ * job runs on. Mirrors Python's `_tell_detached`.
+ */
+async function tellDetached(
+  runner: ProcessHandle,
+  machine: MachineId,
+  folder: string,
+): Promise<void> {
+  if (runner.onDetach === null) return
+  try {
+    await runner.onDetach({
+      machine: machine.toString(),
+      folder,
+      tag: runner.record.id.toString(),
+      runtime: runner.record.runtime,
+    })
+  } catch (error) {
+    logger.debug?.(`${machine.toString()}: detached job not recorded: ${String(error)}`)
+  }
 }
 
 /**

@@ -712,3 +712,23 @@ async def test_a_workspace_that_fails_to_build_holds_no_machine():
     await Workspace(
         {"/": RAMVFS()}, mode=MountMode.EXEC, machines={"a": box}
     ).close()
+
+
+# A detached job's program leads its group, which only its tag reaches: a
+# signal goes by the tag even once a scan placed the program by its pid.
+@pytest.mark.asyncio
+async def test_a_detached_program_is_signalled_by_its_tag_after_a_scan():
+    box = _Sleeper("a")
+    ws = _sleepers(a=box)
+    try:
+        pid = int((await ws.shell("train 1 & echo $!")).stdout)
+        await _started(box)
+        await ws.shell("ps")
+        [job] = ws.job_table.all_jobs()
+        assert job.process is not None
+        assert job.process.record.machine_pid is not None
+        job.process.detached = True
+        assert (await ws.shell(f"kill {pid}; wait {pid}")).exit_code == 143
+        assert box.sent == [(f"{ws.workspace_id}:{pid}", 15)]
+    finally:
+        await ws.close()

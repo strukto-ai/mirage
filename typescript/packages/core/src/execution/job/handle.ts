@@ -26,6 +26,7 @@ import {
 import { encodeText } from '../../shell/bytes.ts'
 import { sleep } from '../../utils/abort.ts'
 import { SystemClock } from '../../utils/clock.ts'
+import type { RecordFields } from '../../workspace/record/types.ts'
 import { KILLED_EXIT_CODE, WATCH_RETRY_SECONDS } from './constants.ts'
 import type { Job, JobState } from './types.ts'
 
@@ -86,6 +87,12 @@ export class JobHandle {
   workspaceId: string
   line: LineId | null
   group: number | null
+  // Where the job's program runs detached (`machine`, `folder`, `tag`,
+  // `runtime`), once it does; null for a job attached to its daemon.
+  detached: RecordFields | null
+  // The real time its line's limit ends at, and that limit's seconds.
+  readonly deadline: number | null
+  readonly timeout: number | null
   private readonly now: () => number
   private ended: ((record: Job) => void) | null
 
@@ -113,6 +120,9 @@ export class JobHandle {
     workspaceId?: string
     line?: LineId | null
     group?: number | null
+    detached?: RecordFields | null
+    deadline?: number | null
+    timeout?: number | null
     now?: () => number
     ended?: ((record: Job) => void) | null
   }) {
@@ -129,6 +139,9 @@ export class JobHandle {
     this.workspaceId = init.workspaceId ?? ''
     this.line = init.line ?? null
     this.group = init.group ?? null
+    this.detached = init.detached ?? null
+    this.deadline = init.deadline ?? null
+    this.timeout = init.timeout ?? null
     const clock = new SystemClock()
     this.now = init.now ?? (() => clock.now())
     this.ended = init.ended ?? null
@@ -274,6 +287,9 @@ export class JobHandle {
       if (this.abort?.signal.aborted) throw new DOMException('aborted', 'AbortError')
       result = await run(this)
     } catch (err) {
+      // A daemon that lost the lease leaves a detached job's ending to the
+      // daemon that adopts it.
+      if (this.process?.released === true) throw err
       const aborted =
         (err instanceof Error || err instanceof DOMException) && err.name === 'AbortError'
       if (aborted || this.state !== 'running') {

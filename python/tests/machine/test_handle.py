@@ -14,6 +14,7 @@
 
 import asyncio
 import shlex
+import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -22,6 +23,8 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.cache.index.config import LookupStatus
 from mirage.commands.config import Context
 from mirage.context.session_context import run_as_process
+from mirage.execution.job.handle import JobHandle
+from mirage.execution.machine.table import MachineTable
 from mirage.execution.process.constants import FIRST_PID
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.ram import RAMExecutionStore
@@ -47,7 +50,9 @@ from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.machine import MachineRuntime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.types import RunResult
+from mirage.shell.console import Channel
 from mirage.types import FileStat, FileType, Limit, PathSpec
+from mirage.workspace.executor.background import resume_job
 from tests.fixtures.machine import machine_runtime, on
 
 
@@ -872,6 +877,7 @@ async def test_a_box_is_asked_for_setsid_once():
         ("train > /data/log &", 30.0, False),
         ("train &", None, False),
         ("{ train; } &", 30.0, False),
+        ("set -x; train &", 30.0, False),
     ],
 )
 async def test_a_background_job_detaches_where_a_restart_finds_it(
@@ -902,6 +908,113 @@ def test_jobs_detach_on_the_measured_providers():
     }
 
 
+def _shared(box: MachineHandle) -> Workspace:
+    """A workspace on ``box`` that another daemon may run too."""
+    return Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        workspace_id="shared",
+        session_id="s",
+        **on(box),
+    )
+
+
+def _crash(ws: Workspace) -> None:
+    """Leave a workspace as a crashed daemon would: its lease no longer
+    renewed, whatever it runs left as it is."""
+    lease = ws.job_table._lease
+    assert lease is not None
+    lease.cancel()
+
+
+async def _until(check) -> None:
+    async with asyncio.timeout(5):
+        while not check():
+            await asyncio.sleep(0.01)
+
+
+# A daemon that takes the lease after one crashed adopts the detached job
+# it left: the job keeps its number, its output goes on from what its
+# console holds with nothing twice, and ``wait`` answers its real status,
+# however far it got while no daemon held the lease.
+@pytest.mark.asyncio
+async def test_a_restarted_daemon_adopts_a_detached_job():
+    store = RAMExecutionStore(lease_seconds=0.2)
+    first = JobBox([([b"step 0\n"], [b"warn\n"], asyncio.Event())])
+    old = _shared(first)
+    old.job_table.store = store
+    second = JobBox(captures=None)
+    second.views = first.views
+    second.views.append(([b"step 1\n"], [b"\0mirage-job 3\n"], 0))
+    new = _shared(second)
+    new.job_table.store = store
+    try:
+        await old.shell("train &", session_id="s")
+        await _until(lambda: first.viewed)
+        [job] = old.job_table.all_jobs()
+        await _until(lambda: job.detached is not None)
+        _crash(old)
+        await asyncio.sleep(0.3)
+        await new.shell("true", session_id="s")
+        [adopted] = new.job_table.all_jobs()
+        io = await new.shell("wait %1", session_id="s")
+        assert io.exit_code == 3
+        assert second.viewed[0][1:] == ("7", "5")
+        assert adopted.process is not None
+        assert adopted.process.record.pid == job.pid
+        chunks, _, _ = await adopted.console.read_from(0)
+        stdout = [c.data for c in chunks if c.channel == Channel.STDOUT]
+        assert b"".join(stdout) == b"step 0\nstep 1\n"
+        assert second.removed == [second.viewed[0][0]]
+    finally:
+        await new.close()
+        await old.close()
+
+
+# A daemon that lost the lease leaves a detached job to the daemon that
+# adopts it: its run is cancelled without stopping the program or
+# removing its folder.
+@pytest.mark.asyncio
+async def test_a_released_detached_job_is_left_running():
+    box = JobBox([([], [], asyncio.Event())])
+
+    def started(runner) -> None:
+        async def release() -> None:
+            while not box.viewed:
+                await asyncio.sleep(0)
+            runner.released = True
+            runner.terminate(1)
+
+        asyncio.ensure_future(release())
+
+    _, _, _, runner = await _job_run(box, started=started)
+    assert runner.detached
+    assert not any(line.startswith("PATH=") for line, _, _ in box.execs[1:])
+    assert box.removed == []
+
+
+# An adopted job past its line's limit is stopped in the box and ends 124
+# with the line's notice, as it would have where it started.
+@pytest.mark.asyncio
+async def test_an_adopted_job_past_its_deadline_ends_124():
+    box = JobBox([([], [], asyncio.Event())])
+    job = JobHandle(
+        id=1,
+        command="train",
+        cwd="/",
+        created_at=0.0,
+        detached={"machine": str(box.id), "folder": "/f", "tag": "w:9"},
+        deadline=time.time() - 1,
+        timeout=5.0,
+    )
+    code = await resume_job(MachineTable({box.name: box}), job, (0, 0))
+    chunks, _, _ = await job.console.read_from(0)
+    assert code == 124
+    assert b"line" in b"".join(c.data for c in chunks)
+    assert box.execs[-1][0] == stop_line("w:9", 15)
+    assert box.removed == ["/f"]
+
+
 # A start that failed returns its own status, and whatever a wrapper that
 # outlived the start's wait started is stopped by its tag, its folder gone.
 @pytest.mark.asyncio
@@ -927,6 +1040,23 @@ async def test_output_returned_whole_is_kept_and_counted(no_view_wait):
     done, _, _, _ = await _job_run(box, streamed=False)
     assert (done.stdout, done.stderr) == (b"a\nb\n", b"w\n")
     assert box.viewed[1][1:] == ("2", "2")
+
+
+# An adopted job on a machine this workspace no longer has is lost.
+@pytest.mark.asyncio
+async def test_an_adopted_job_on_an_unknown_machine_is_lost():
+    job = JobHandle(
+        id=1,
+        command="train",
+        cwd="/",
+        created_at=0.0,
+        detached={"machine": "docker:gone", "folder": "/f", "tag": "w:9"},
+    )
+    assert await resume_job(MachineTable({}), job, (0, 0)) == 129
+    chunks, _, _ = await job.console.read_from(0)
+    assert (
+        b"".join(c.data for c in chunks) == b"mirage: docker:gone: job lost\n"
+    )
 
 
 # A start that failed past the connection may have started what nothing

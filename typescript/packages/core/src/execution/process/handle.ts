@@ -2,6 +2,7 @@ import { isAborting } from '../../errors/fs.ts'
 import type { MachineId, MachinePid } from '../types.ts'
 import { SignalStop } from '../../utils/abort.ts'
 import type { Process, ProcessRunner } from './types.ts'
+import type { RecordFields } from '../../workspace/record/types.ts'
 
 /**
  * Runs a runner as the process it is, so what it records names it. The
@@ -42,6 +43,14 @@ export class ProcessHandle {
    * on a machine, may run detached from the connection.
    */
   detachable = false
+  /**
+   * Its program runs detached on a machine (`MachineHandle.run`), told the
+   * job through `onDetach`; a released one is left to the daemon that
+   * adopts it once this one lost the lease.
+   */
+  detached = false
+  released = false
+  onDetach: ((where: RecordFields) => Promise<void>) | null = null
   /** Told the record each time it changes, as its table keeps it. */
   noted: ((record: Process) => void) | null = null
   private current: Process

@@ -38,25 +38,41 @@ from mirage.execution.process.config import ProcessPermissions
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.ram import RAMExecutionStore
-from mirage.execution.types import JobId, LineId
-from mirage.shell.console import JobConsole
+from mirage.execution.types import JobId, LineId, MachineId
+from mirage.io.types import IOResult
+from mirage.shell.console import Channel, JobConsole
 from mirage.types import PathSpec
 from mirage.utils.clock import Clock, SystemClock
 from mirage.workspace.record.types import RecordFields, generation_of
+from mirage.workspace.types import ExecutionNode
 
 logger = logging.getLogger(__name__)
 
 
-def _entry(record: Job, owner: str) -> RecordFields:
+def _entry(
+    record: Job,
+    owner: str,
+    detached: RecordFields | None = None,
+    deadline: float | None = None,
+    timeout: float | None = None,
+) -> RecordFields:
     """A job's entry in its session's list: its record, but for its
     number, which keys the entry, and its session, which keys the list,
-    and the daemon running it.
+    and the daemon running it, with what a daemon that adopts it needs.
 
     Args:
         record (Job): the job's record.
         owner (str): the id of the daemon running it.
+        detached (RecordFields | None): where its program runs detached
+            (``JobHandle.detached``).
+        deadline (float | None): the real time its line's limit ends at.
+        timeout (float | None): that limit's seconds.
     """
     return {
+        "pid": record.pid,
+        "detached": detached,
+        "deadline": deadline,
+        "timeout": timeout,
         "command": record.command,
         "cwd": record.cwd,
         "started_at": record.started_at,
@@ -79,6 +95,7 @@ def _take_entry(job: JobHandle, entry: RecordFields) -> None:
         job (JobHandle): the job.
         entry (RecordFields): its list entry.
     """
+    job.owner, job.detached = entry["owner"], entry.get("detached")
     if entry["state"] != JobState.EXITED.value:
         return
     job.state, job.ended_at = JobState.EXITED, entry["ended_at"]
@@ -195,6 +212,9 @@ class JobTable:
         self._stopped_owners: set[str] = set()
         self._stops_ended = False
         self._swept = False
+        # Whether this table's claim has adopted the detached jobs left to
+        # it, and so may stop what it did not.
+        self._adopted = False
         # The table whose store and owner the process plane is read and
         # written through: this one, or for a child shell's table the
         # workspace's, since a child shell keeps only its job list private.
@@ -209,6 +229,13 @@ class JobTable:
         # workspace sets it, since it holds the runtimes that reach it.
         self.run_stopper: (
             Callable[[RecordFields, int], Awaitable[bool]] | None
+        ) = None
+        # Views an adopted job's detached program to its end into its
+        # console, from the stdout and stderr bytes the console already
+        # holds, and answers its status; the workspace sets it, since it
+        # holds the machines.
+        self.resumer: (
+            Callable[[JobHandle, tuple[int, int]], Awaitable[int]] | None
         ) = None
         # Told each job this table's jobs run as it ends; the workspace
         # sets it, to trace the job.
@@ -266,6 +293,7 @@ class JobTable:
         async with self._claim_lock:
             if (self._claimed and not self._lapsed()) or self._closed:
                 return
+            self._adopted = False
             holder = await self.store.lease(self.daemon)
             if holder is not None:
                 raise WorkspaceHeldError(self.processes.workspace_id, holder)
@@ -284,6 +312,17 @@ class JobTable:
             self._claimed = True
             self._renewed = time.monotonic()
             self._keep_lease()
+            try:
+                adopted = await self._adopt_left()
+            except Exception as exc:
+                adopted = set()
+                logger.debug("detached jobs not adopted: %s", exc)
+            self._adopted = True
+            earlier = {
+                pid: record
+                for pid, record in earlier.items()
+                if record.get("pid") not in adopted
+            }
             if self.taken is not None:
                 try:
                     await self.taken()
@@ -305,11 +344,26 @@ class JobTable:
         """Let the lease go once another daemon may hold it: the next line
         or job asks for it again, and what this table runs ends as hung
         up, as the daemon that took it records it, so the two never both
-        change the workspace."""
+        change the workspace. A job whose program runs detached is
+        released instead: its viewing stops, its program runs on and its
+        ending is left to the daemon that adopts it, which lists it."""
         self._claimed = False
+        self._adopted = False
         self._lease = None
         for handle in self.processes.live():
+            handle.released = handle.detached
             handle.terminate(HANGUP_EXIT_CODE - 128)
+        for session_id, jobs in self._jobs.items():
+            self._jobs[session_id] = {
+                number: job
+                for number, job in jobs.items()
+                if job.process is None or not job.process.released
+            }
+        self._disowned = [
+            job
+            for job in self._disowned
+            if job.process is None or not job.process.released
+        ]
 
     async def submit(
         self,
@@ -321,6 +375,7 @@ class JobTable:
         limit: int | None = None,
         simple: bool = False,
         detachable: bool = False,
+        timeout: float | None = None,
     ) -> JobHandle:
         """Register a job in its session's list and start it.
 
@@ -349,6 +404,9 @@ class JobTable:
                 connection; only a top-level job on a store whose leases
                 lapse is (``ProcessHandle.detachable``), since only there
                 does a restart find it.
+            timeout (float | None): the seconds its line's limit gives
+                it from now, which a daemon that adopts it still holds it
+                to; None for none.
 
         Raises:
             BlockingIOError: the session is at its process cap.
@@ -358,6 +416,7 @@ class JobTable:
         await self.claim()
         name = uuid.uuid4().hex
         created_at = self.clock.now()
+        deadline = time.time() + timeout if timeout else None
         job: JobHandle | None = None
         ready = asyncio.Event()
 
@@ -365,16 +424,11 @@ class JobTable:
             await ready.wait()
             if job is None:
                 return KILLED_EXIT_CODE
-            if job.state != JobState.RUNNING:
-                return job.exit_code
-            watcher = asyncio.ensure_future(job.watch())
-            try:
-                return await job.settle(run)
-            finally:
-                watcher.cancel()
-                await self._record_ending(job)
-                self._disowned = [j for j in self._disowned if j is not job]
-                self._drop_checking()
+            return await self._execute(job, run)
+
+        async def detached(where: RecordFields) -> None:
+            if job is not None:
+                await self._mark_detached(job, where)
 
         process = self.processes.start(
             session_id=session_id,
@@ -393,6 +447,7 @@ class JobTable:
             and self._plane is self
             and self.store.lease_seconds is not None
         )
+        process.on_detach = detached
         line, group = process.record.line, process.record.group
         try:
             job_id = await self._allocate(
@@ -410,6 +465,8 @@ class JobTable:
                         process.record.pid,
                     ),
                     self.daemon,
+                    deadline=deadline,
+                    timeout=timeout,
                 ),
             )
         except BaseException:
@@ -435,6 +492,8 @@ class JobTable:
                 workspace_id=self.processes.workspace_id,
                 line=line,
                 group=group,
+                deadline=deadline,
+                timeout=timeout,
                 now=self.clock.now,
                 ended=self._plane.ended,
             )
@@ -443,16 +502,205 @@ class JobTable:
             ready.set()
             await self._remove(session_id, {name}, give_back=True)
             raise
-        job.process = process
-        self._jobs.setdefault(session_id, {})[job_id] = job
+        self._track(job, process)
         ready.set()
+        return job
+
+    async def _execute(self, job: JobHandle, run: JobRunner) -> int:
+        """Run a job this table holds to its end, as its process: stopped
+        once another daemon ends its console, its ending kept in its
+        entry.
+
+        Args:
+            job (JobHandle): the job.
+            run (JobRunner): produces its output and its result.
+        """
+        if job.state != JobState.RUNNING:
+            return job.exit_code
+        watcher = asyncio.ensure_future(job.watch())
+        try:
+            return await job.settle(run)
+        finally:
+            watcher.cancel()
+            await self._record_ending(job)
+            self._disowned = [j for j in self._disowned if j is not job]
+            self._drop_checking()
+
+    def _track(self, job: JobHandle, process: ProcessHandle) -> None:
+        """Hold a job this table runs as its process: listed in its
+        session, found by its pid on the plane, its list checked.
+
+        Args:
+            job (JobHandle): the job.
+            process (ProcessHandle): its process.
+        """
+        job.process = process
+        self._jobs.setdefault(job.session_id, {})[job.id] = job
         plane, pid = self._plane, process.record.pid
         plane._job_tables[pid] = self
         process.task.add_done_callback(
             lambda _: plane._job_tables.pop(pid, None)
         )
         self._keep_checking()
-        return job
+
+    async def _mark_detached(
+        self, job: JobHandle, where: RecordFields
+    ) -> None:
+        """Record in a job's entry where its program runs detached, so a
+        daemon that outlives this one adopts it, and publish its process
+        as detached, so no other daemon stops it.
+
+        Args:
+            job (JobHandle): the job.
+            where (RecordFields): its machine, folder and runtime.
+        """
+        job.detached = where
+        self.processes_changed()
+        for _ in range(LIST_MAX_RETRIES):
+            fields = await self.store.load(job.session_id)
+            jobs = dict((fields or {}).get("jobs", {}))
+            entry = jobs.get(str(job.id))
+            if (
+                fields is None
+                or entry is None
+                or entry["console"] != job.console_name
+            ):
+                return
+            jobs[str(job.id)] = {**entry, "detached": where}
+            if await self._write(
+                job.session_id, fields, jobs, int(fields.get("next", 1))
+            ):
+                return
+        logger.debug("job %d detached entry kept conflicting", job.id)
+
+    async def _adopt_left(self) -> set[int]:
+        """Adopt every running job whose program a daemon that no longer
+        holds the lease left detached, this daemon's earlier life
+        included: each one whose entry this daemon takes first runs here
+        from then on, viewed from what its console holds. Answers the
+        pids adopted, whose published records no sweep stops after.
+        """
+        adopted: set[int] = set()
+        resume = self.resumer
+        if resume is None or self.store.lease_seconds is None:
+            return adopted
+        own = {
+            j.console_name
+            for j in [*self.all_jobs(), *self._disowned]
+            if j.process is not None
+        }
+        owners: set[str] = set()
+        for session_id in await self.store.sessions():
+            fields = await self.store.load(session_id)
+            for key, entry in (fields or {}).get("jobs", {}).items():
+                if (
+                    entry["state"] != JobState.RUNNING.value
+                    or not entry.get("detached")
+                    or entry["console"] in own
+                ):
+                    continue
+                try:
+                    taken = await self._adopt(
+                        session_id, int(key), entry, resume
+                    )
+                except Exception:
+                    logger.debug("job %s not adopted", key, exc_info=True)
+                    continue
+                if taken:
+                    adopted.add(entry["pid"])
+                    owners.add(entry["owner"])
+        for owner in owners - {self.daemon}:
+            records = (await self.store.processes()).get(owner, {})
+            kept = {
+                pid: record
+                for pid, record in records.items()
+                if record.get("pid") not in adopted
+            }
+            if kept != records and not await self._running(owner):
+                await self.store.publish(owner, kept)
+        return adopted
+
+    async def _adopt(
+        self,
+        session_id: str,
+        number: int,
+        entry: RecordFields,
+        resume: Callable[[JobHandle, tuple[int, int]], Awaitable[int]],
+    ) -> bool:
+        """Take one detached job from the daemon that left it: its entry
+        names this daemon once the swap lands, and a process under its
+        pid views its program from the bytes its console holds. A swap
+        another daemon won leaves the job to it. What can fail is read
+        before the swap, so a job this daemon takes is one it views.
+
+        Args:
+            session_id (str): the session whose list names it.
+            number (int): its number there.
+            entry (RecordFields): its entry as read.
+            resume (Callable[[JobHandle, tuple[int, int]], Awaitable[int]]):
+                views its program to its end (``resumer``).
+        """
+        machine = MachineId.parse(entry["detached"]["machine"])
+        console = JobConsole(self.store.console(entry["console"]))
+        chunks, _, _ = await console.read_from(0)
+        sent = (
+            sum(len(c.data) for c in chunks if c.channel == Channel.STDOUT),
+            sum(len(c.data) for c in chunks if c.channel == Channel.STDERR),
+        )
+        for _ in range(LIST_MAX_RETRIES):
+            fields = await self.store.load(session_id)
+            jobs = dict((fields or {}).get("jobs", {}))
+            if fields is None or jobs.get(str(number)) != entry:
+                return False
+            jobs[str(number)] = {**entry, "owner": self.daemon}
+            if await self._write(
+                session_id, fields, jobs, int(fields.get("next", 1))
+            ):
+                break
+        else:
+            return False
+        job = JobHandle(
+            id=number,
+            command=entry["command"],
+            cwd=entry["cwd"],
+            session_id=session_id,
+            console=console,
+            simple=True,
+            created_at=entry["started_at"],
+            owner=self.daemon,
+            console_name=entry["console"],
+            workspace_id=self.processes.workspace_id,
+            line=LineId(entry["line"]) if entry.get("line") else None,
+            group=entry.get("group"),
+            detached=entry["detached"],
+            deadline=entry.get("deadline"),
+            timeout=entry.get("timeout"),
+            now=self.clock.now,
+            ended=self._plane.ended,
+        )
+
+        async def run(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
+            code = await resume(job, sent)
+            return IOResult(exit_code=code), ExecutionNode(
+                command=job.command, exit_code=code
+            )
+
+        process = self.processes.start(
+            session_id=session_id,
+            command=entry["command"],
+            cwd=PathSpec.from_str_path(entry["cwd"]),
+            run=lambda: self._execute(job, run),
+            line=job.line,
+            ignores=IGNORED_SIGNALS,
+            pid=entry["pid"],
+            machine=machine,
+            runtime=entry["detached"].get("runtime"),
+            program_ignores=IGNORED_SIGNALS,
+        )
+        process.detached = True
+        console.bind_process(str(process.record.id))
+        self._track(job, process)
+        return True
 
     async def load(self, job: JobHandle) -> None:
         """Insert a finished job restored from a snapshot into its session.
@@ -1053,7 +1301,11 @@ class JobTable:
         Args:
             job (JobHandle): a job this table ran, now ended.
         """
-        kept = _entry(job.record, job.owner)
+        if job.process is not None and job.process.released:
+            return
+        kept = _entry(
+            job.record, job.owner, job.detached, job.deadline, job.timeout
+        )
         try:
             for _ in range(LIST_MAX_RETRIES):
                 fields = await self.store.load(job.session_id)
@@ -1088,7 +1340,9 @@ class JobTable:
         """
         outcome = await job.console.outcome()
         if outcome is None:
-            if await self._running(job.owner):
+            if (
+                job.detached and not await self._left_unadopted(job)
+            ) or await self._running(job.owner):
                 return
             self._stop_later(job.owner)
             await mark_killed(
@@ -1098,6 +1352,26 @@ class JobTable:
             if outcome is None:
                 return
         job.take(outcome)
+
+    async def _left_unadopted(self, job: JobHandle) -> bool:
+        """Whether a detached job's program was left to no daemon: this
+        one holds the lease, has adopted what it could, and the job's
+        entry still names the daemon that left it. Its program outlives
+        that daemon, so until then the daemon that holds the lease next
+        adopts it.
+
+        Args:
+            job (JobHandle): another daemon's detached job.
+        """
+        if not self._plane._adopted:
+            return False
+        fields = await self._plane.store.load(job.session_id)
+        entry = (fields or {}).get("jobs", {}).get(str(job.id))
+        return (
+            entry is not None
+            and entry["console"] == job.console_name
+            and entry["owner"] == job.owner
+        )
 
     async def _join_remote(self, job: JobHandle) -> None:
         """Block until another workspace's job ends.
@@ -1352,6 +1626,7 @@ class JobTable:
                 "state": record.state.value,
                 "line": str(record.line) if record.line is not None else None,
                 "runtime": record.runtime,
+                "detached": handle.detached,
                 "machine_pid": (
                     {
                         "pid": record.machine_pid.pid,
@@ -1539,7 +1814,11 @@ class JobTable:
         """
         left: dict[str, RecordFields] = {}
         for pid, record in records.items():
-            if record.get("runtime") is None:
+            # Only the lease holder, which adopted the detached jobs it
+            # could, stops the rest.
+            if record.get("runtime") is None or (
+                record.get("detached") and not self._plane._adopted
+            ):
                 continue
             if await self._running(owner):
                 return records

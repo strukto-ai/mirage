@@ -28,7 +28,7 @@ from mirage.execution.process.config import ProcessPermissions
 from mirage.execution.process.constants import FIRST_PID
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.ram import RAMExecutionStore
-from mirage.execution.types import LineId
+from mirage.execution.types import LineId, MachineId
 from mirage.io import IOResult
 from mirage.shell.console import (
     Channel,
@@ -1993,3 +1993,227 @@ async def test_only_a_job_a_restart_finds_is_detachable(
     finally:
         await table.kill_all()
         await table.close()
+
+
+_WHERE = {
+    "machine": "docker:t",
+    "folder": "/f",
+    "tag": "w:1",
+    "runtime": "box",
+}
+
+
+async def _run_detached(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
+    """A runner whose program detaches, then runs on.
+
+    Args:
+        job (JobHandle): the job being run.
+    """
+    assert job.process is not None and job.process.on_detach is not None
+    assert job.process.take(MachineId("docker", "t"), "box")
+    job.process.detached = True
+    await job.process.on_detach(_WHERE)
+    await job.console.emit(Channel.STDOUT, b"step 0\n")
+    await asyncio.Event().wait()
+    return IOResult(), ExecutionNode()
+
+
+async def _left_detached(
+    store: RAMExecutionStore,
+) -> tuple[JobTable, JobHandle]:
+    """A table that started a detached job and then crashed: its lease
+    let go, its job left running."""
+    table = _publishing(store)
+    job = await table.submit(
+        "train", _run_detached, "/", simple=True, detachable=True, timeout=60
+    )
+    await _until(lambda: _entry_detached(store, job))
+    assert table._lease is not None
+    table._lease.cancel()
+    await store.release(table.daemon)
+    return table, job
+
+
+async def _entry_detached(store: RAMExecutionStore, job: JobHandle) -> bool:
+    fields = await store.load(job.session_id)
+    return fields["jobs"][str(job.id)].get("detached") == _WHERE
+
+
+def _resuming(table: JobTable, code: int, seen: list) -> None:
+    async def resume(job: JobHandle, sent: tuple[int, int]) -> int:
+        seen.append((job.id, sent, job.detached))
+        await job.console.emit(Channel.STDOUT, b"step 1\n")
+        return code
+
+    table.resumer = resume
+
+
+# A daemon restarted under its own id adopts the detached job its earlier
+# life left, rather than ending it as hung up, from what its console holds.
+@pytest.mark.asyncio
+async def test_a_restarted_daemon_adopts_its_own_detached_job():
+    store = RAMExecutionStore(lease_seconds=30.0)
+    old, job = await _left_detached(store)
+    new = JobTable(store, ProcessTable(), daemon=old.daemon)
+    seen: list = []
+    _resuming(new, 3, seen)
+    try:
+        await new.claim()
+        adopted = new.get(job.id, job.session_id)
+        assert adopted is not None and adopted.process is not None
+        assert adopted.process.record.pid == job.pid
+        assert (await new.wait(job.id, job.session_id)).exit_code == 3
+        assert seen == [(job.id, (7, 0), _WHERE)]
+    finally:
+        await new.kill_all()
+        await new.close()
+        await old.kill_all()
+
+
+# A daemon that loses the swap for a job's entry leaves the job to the one
+# that won: it neither views nor stops it.
+@pytest.mark.asyncio
+async def test_a_daemon_that_loses_the_swap_leaves_the_job():
+    store = RAMExecutionStore(lease_seconds=30.0)
+    old, job = await _left_detached(store)
+    new = JobTable(store, ProcessTable())
+    seen: list = []
+    _resuming(new, 3, seen)
+    try:
+        fields = await store.load(job.session_id)
+        stale = {**fields["jobs"][str(job.id)], "owner": "someone"}
+        assert not await new._adopt(job.session_id, job.id, stale, new.resumer)
+        assert seen == [] and new.all_jobs() == []
+    finally:
+        await old.kill_all()
+
+
+# Without the lease a daemon neither hangs up nor stops a detached job a
+# lapsed daemon left: the daemon that next holds the lease adopts it.
+@pytest.mark.asyncio
+async def test_a_daemon_without_the_lease_leaves_a_detached_job_running(
+    monkeypatch,
+):
+    monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
+    store = RAMExecutionStore(lease_seconds=30.0)
+    old, job = await _left_detached(store)
+
+    async def published() -> bool:
+        records = (await store.processes()).get(old.daemon, {})
+        return any(r.get("detached") for r in records.values())
+
+    await _until(published)
+    stopped: list = []
+
+    async def stopper(record: dict, signum: int) -> bool:
+        stopped.append(record["pid"])
+        return True
+
+    reader = JobTable(store, ProcessTable())
+    reader.run_stopper = stopper
+    try:
+        await reader.sync(job.session_id)
+        [listed] = reader.list_jobs(job.session_id)
+        assert listed.state == JobState.RUNNING
+        assert await listed.console.outcome() is None
+        await reader.remote_processes()
+        await asyncio.sleep(0.05)
+        assert stopped == []
+    finally:
+        await old.kill_all()
+
+
+# A daemon that lost the lease releases a detached job: it stops viewing,
+# writes no ending, and lists it as the daemon that adopts it does.
+@pytest.mark.asyncio
+async def test_a_lost_lease_releases_a_detached_job():
+    store = RAMExecutionStore(lease_seconds=30.0)
+    table = _publishing(store)
+    job = await table.submit(
+        "train", _run_detached, "/", simple=True, detachable=True
+    )
+    await _until(lambda: _entry_detached(store, job))
+    assert job.process is not None
+    table._lost()
+    await job.process.join()
+    assert job.process.released
+    assert await job.console.outcome() is None
+    fields = await store.load(job.session_id)
+    assert fields["jobs"][str(job.id)]["state"] == JobState.RUNNING.value
+    assert table.all_jobs() == []
+
+
+# Another daemon that adopts a detached job holds it to the deadline it
+# started under, and drops it from the old daemon's published processes,
+# so no sweep stops it after.
+@pytest.mark.asyncio
+async def test_another_daemon_adopts_a_job_under_its_deadline(monkeypatch):
+    monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
+    store = RAMExecutionStore(lease_seconds=30.0)
+    old, job = await _left_detached(store)
+
+    async def published() -> bool:
+        records = (await store.processes()).get(old.daemon, {})
+        return any(r.get("detached") for r in records.values())
+
+    await _until(published)
+    assert old._publishing is not None
+    old._publishing.cancel()
+    new = JobTable(store, ProcessTable())
+    new.resumer = lambda job, sent: asyncio.Event().wait()
+    try:
+        await new.claim()
+        adopted = new.get(job.id, job.session_id)
+        assert adopted is not None
+        assert (adopted.deadline, adopted.timeout) == (job.deadline, 60)
+        records = (await store.processes()).get(old.daemon, {})
+        assert job.pid not in [r.get("pid") for r in records.values()]
+    finally:
+        await new.kill_all()
+        await new.close()
+        await old.kill_all()
+
+
+# The lease holder ends as hung up a detached job it did not adopt, as the
+# sweep stops its program, rather than list it running for good.
+@pytest.mark.asyncio
+async def test_the_lease_holder_hangs_up_a_detached_job_it_did_not_adopt():
+    store = RAMExecutionStore(lease_seconds=30.0)
+    old, job = await _left_detached(store)
+    holder = JobTable(store, ProcessTable())
+    try:
+        await holder.claim()
+        await holder.sync(job.session_id)
+        [listed] = holder.list_jobs(job.session_id)
+        assert (listed.state, listed.exit_code) == (JobState.EXITED, 129)
+    finally:
+        await holder.close()
+        await old.kill_all()
+
+
+# A sync that read a detached job before the lease holder adopted it never
+# hangs it up: not while the claim still adopts, nor once the entry names
+# the daemon that adopted it.
+@pytest.mark.asyncio
+async def test_a_sync_before_adoption_never_hangs_up_a_detached_job():
+    store = RAMExecutionStore(lease_seconds=30.0)
+    old, job = await _left_detached(store)
+    holder = JobTable(store, ProcessTable())
+    holder.resumer = lambda job, sent: asyncio.Event().wait()
+    try:
+        fields = await store.load(job.session_id)
+        stale = holder._remote(
+            job.id, job.session_id, fields["jobs"][str(job.id)]
+        )
+        holder._claimed = True
+        await holder._refresh(stale)
+        assert stale.state == JobState.RUNNING
+        holder._claimed = False
+        await holder.claim()
+        await holder._refresh(stale)
+        assert stale.state == JobState.RUNNING
+        assert await stale.console.outcome() is None
+    finally:
+        await holder.kill_all()
+        await holder.close()
+        await old.kill_all()

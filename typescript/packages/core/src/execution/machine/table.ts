@@ -253,7 +253,13 @@ export class MachineTable {
       (target === null && record.runtime === null)
     )
       return null
-    return this.deliverSignal(handle, record.machine, target ?? record.id.toString(), signum)
+    // A detached job's program leads its group, which its tag reaches.
+    return this.deliverSignal(
+      handle,
+      record.machine,
+      target !== null && !handle.detached ? target : record.id.toString(),
+      signum,
+    )
   }
 
   /**

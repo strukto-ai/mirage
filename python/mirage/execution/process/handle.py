@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine
 from concurrent.futures import Future
 from dataclasses import replace
 from threading import RLock
@@ -16,6 +16,7 @@ from mirage.execution.process.types import (
 )
 from mirage.execution.types import MachineId, MachinePid
 from mirage.utils.clock import system_now
+from mirage.workspace.record.types import RecordFields
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,12 @@ class ProcessHandle:
         # A background job a restart can adopt, whose one program, should
         # it run on a machine, may run detached from the connection.
         self.detachable = False
+        # Its program runs detached on a machine (``MachineHandle.run``),
+        # told the job through ``on_detach``; a released one is left to
+        # the daemon that adopts it once this one lost the lease.
+        self.detached = False
+        self.released = False
+        self.on_detach: Callable[[RecordFields], Awaitable[None]] | None = None
         # The host stopped it (its table stopped, its session closed),
         # which ends whoever waits for it as well.
         self.revoked = False

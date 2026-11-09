@@ -243,7 +243,8 @@ class MachineHandle:
                     errors,
                 )
         except asyncio.CancelledError:
-            await asyncio.shield(self.stop(tag, _stop_with(runner)))
+            if runner is None or not runner.released:
+                await asyncio.shield(self.stop(tag, _stop_with(runner)))
             raise
         except ConnectionLostError as exc:
             logger.debug("%s: connection lost", self.id, exc_info=True)
@@ -486,14 +487,56 @@ class MachineHandle:
                     await self.stop(tag, SIGTERM)
                     await self._remove(folder)
                     return started
+            if runner is not None:
+                runner.detached = True
+                await _tell_detached(runner, self.id, folder)
             done = await self._view(folder, tag, runner, output, errors)
             await self._remove(folder)
             return done
         except asyncio.CancelledError:
-            await asyncio.shield(self._remove(folder))
+            if runner is None or not runner.released:
+                await asyncio.shield(self._remove(folder))
             raise
         finally:
             self._detached.pop(tag, None)
+
+    async def resume(
+        self,
+        folder: str,
+        tag: str,
+        sent: tuple[int, int],
+        output: OutputFn | None,
+        errors: OutputFn | None,
+    ) -> RunResult:
+        """View a detached job a daemon before this one started to its
+        end, as ``run`` would have, from the bytes its console already
+        holds; stopped by its tag once cancelled, as ``run`` is.
+
+        Args:
+            folder (str): the job's folder.
+            tag (str): the id of the process its run was.
+            sent (tuple[int, int]): the stdout and stderr bytes already
+                delivered.
+            output (OutputFn | None): receives stdout as it arrives.
+            errors (OutputFn | None): receives stderr as it arrives.
+        """
+        runner = current_caller().process
+        if runner is not None:
+            runner.detached = True
+        self._detached[tag] = folder
+        self._executing += 1
+        try:
+            done = await self._view(folder, tag, runner, output, errors, sent)
+        except asyncio.CancelledError:
+            if runner is None or not runner.released:
+                await asyncio.shield(self.stop(tag, _stop_with(runner)))
+                await asyncio.shield(self._remove(folder))
+            raise
+        finally:
+            self._detached.pop(tag, None)
+            self._executing -= 1
+        await self._remove(folder)
+        return done
 
     async def _view(
         self,
@@ -502,6 +545,7 @@ class MachineHandle:
         runner: ProcessHandle | None,
         output: OutputFn | None,
         errors: OutputFn | None,
+        sent: tuple[int, int] = (0, 0),
     ) -> RunResult:
         """View a detached job to its end mark (``JOB_VIEW``), viewing
         again from the bytes delivered whenever a viewer ends without it,
@@ -517,8 +561,10 @@ class MachineHandle:
             runner (ProcessHandle | None): the process the run is.
             output (OutputFn | None): receives stdout as it arrives.
             errors (OutputFn | None): receives stderr as it arrives.
+            sent (tuple[int, int]): the stdout and stderr bytes already
+                delivered.
         """
-        delivered = [0, 0]
+        delivered = list(sent)
         kept = (bytearray(), bytearray())
         wait = VIEW_RETRY_SECONDS
         while True:
@@ -756,6 +802,33 @@ def _stop_with(runner: ProcessHandle | None) -> int:
         return SIGTERM
     signum = runner.signal if runner.signal is not None else runner.interrupted
     return signum or SIGTERM
+
+
+async def _tell_detached(
+    runner: ProcessHandle, machine: MachineId, folder: str
+) -> None:
+    """Tell the job a run is that its program runs detached, and where,
+    so a daemon that outlives this one finds it; a failed telling is
+    logged and the job runs on.
+
+    Args:
+        runner (ProcessHandle): the job's process.
+        machine (MachineId): the machine it runs on.
+        folder (str): its folder there.
+    """
+    if runner.on_detach is None:
+        return
+    try:
+        await runner.on_detach(
+            {
+                "machine": str(machine),
+                "folder": folder,
+                "tag": str(runner.record.id),
+                "runtime": runner.record.runtime,
+            }
+        )
+    except Exception:
+        logger.debug("%s: detached job not recorded", machine, exc_info=True)
 
 
 def _unmarked(held: bytearray) -> int:

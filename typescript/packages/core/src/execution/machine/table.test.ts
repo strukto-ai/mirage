@@ -300,6 +300,26 @@ describe('MachineTable scans', () => {
     }
   })
 
+  // A detached job's program leads its group, which only its tag reaches: a
+  // signal goes by the tag even once a scan placed the program by its pid.
+  it('signals a detached program by its tag after a scan', async () => {
+    const box = new Sleeper('a')
+    const ws = sleepers({ a: box })
+    try {
+      const pid = DEC.decode((await ws.shell('train 1 & echo $!')).stdout).trim()
+      await started(box)
+      await ws.shell('ps')
+      const [job] = ws.jobTable.allJobs()
+      expect(job?.process?.record.machinePid).not.toBeNull()
+      if (job?.process) job.process.detached = true
+      expect((await ws.shell(`kill ${pid}; wait ${pid}`)).exitCode).toBe(143)
+      expect(box.sent).toEqual([[`${ws.workspaceId}:${pid}`, 15]])
+    } finally {
+      box.finish()
+      await ws.close()
+    }
+  })
+
   it('signals a program no scan placed by its tag', async () => {
     const box = new Sleeper('a')
     const ws = sleepers({ a: box })

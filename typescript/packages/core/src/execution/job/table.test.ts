@@ -30,7 +30,7 @@ import {
   WATCH_RETRY_SECONDS,
 } from './constants.ts'
 import { WorkspaceHeldError } from '../errors.ts'
-import { LineId } from '../types.ts'
+import { LineId, MachineId } from '../types.ts'
 import { RAMExecutionStore } from '../ram.ts'
 import { ProcessTable } from '../process/table.ts'
 import { PathSpec } from '../../types.ts'
@@ -2293,4 +2293,224 @@ describe('detachable jobs', () => {
       }
     },
   )
+})
+
+const WHERE = { machine: 'docker:t', folder: '/f', tag: 'w:1', runtime: 'box' }
+
+// A runner whose program detaches, then runs on.
+const runDetached: JobRunner = async (job) => {
+  const process = job.process
+  const onDetach = process?.onDetach
+  if (process == null || onDetach == null) throw new Error('no process')
+  expect(process.take(new MachineId('docker', 't'), 'box')).toBe(true)
+  process.detached = true
+  await onDetach(WHERE)
+  await job.console.emit(Channel.STDOUT, new TextEncoder().encode('step 0\n'))
+  return new Promise((_, reject) => {
+    job.abort?.signal.addEventListener('abort', () => {
+      reject(new DOMException('aborted', 'AbortError'))
+    })
+  })
+}
+
+async function entryDetached(store: RAMExecutionStore, job: JobHandle): Promise<boolean> {
+  const fields = await store.load(job.sessionId)
+  const jobs = (fields?.jobs ?? {}) as Record<string, RecordFields>
+  return JSON.stringify(jobs[String(job.id)]?.detached) === JSON.stringify(WHERE)
+}
+
+// A table that started a detached job and then crashed: its lease let go,
+// its job left running.
+async function leftDetached(store: RAMExecutionStore): Promise<[JobTable, JobHandle]> {
+  const table = publishing(store)
+  const job = await table.submit({
+    command: 'train',
+    run: runDetached,
+    abort: new AbortController(),
+    cwd: '/',
+    simple: true,
+    detachable: true,
+    timeout: 60,
+  })
+  await until(() => entryDetached(store, job))
+  clearTimeout(Reflect.get(table, 'lease') as ReturnType<typeof setTimeout>)
+  await store.release(table.daemon)
+  return [table, job]
+}
+
+function resuming(table: JobTable, code: number, seen: unknown[]): void {
+  table.resumer = async (job, sent) => {
+    seen.push([job.id, sent, job.detached])
+    await job.console.emit(Channel.STDOUT, new TextEncoder().encode('step 1\n'))
+    return code
+  }
+}
+
+describe('detached jobs a daemon left', () => {
+  // A daemon restarted under its own id adopts the detached job its earlier
+  // life left, rather than ending it as hung up, from what its console holds.
+  it('are adopted by the same daemon restarted', async () => {
+    const store = new RAMExecutionStore(30)
+    const [old, job] = await leftDetached(store)
+    const fresh = new JobTable(store, new ProcessTable(), null, undefined, old.daemon)
+    const seen: unknown[] = []
+    resuming(fresh, 3, seen)
+    try {
+      await fresh.claim()
+      const adopted = fresh.get(job.id, job.sessionId)
+      expect(adopted?.process?.record.id.pid).toBe(job.pid)
+      expect((await fresh.wait(job.id, job.sessionId)).exitCode).toBe(3)
+      expect(seen).toEqual([[job.id, [7, 0], WHERE]])
+    } finally {
+      await fresh.killAll()
+      await fresh.close()
+      await old.killAll()
+    }
+  })
+
+  // A daemon that loses the swap for a job's entry leaves the job to the one
+  // that won: it neither views nor stops it.
+  it('are left to the daemon that won the swap', async () => {
+    const store = new RAMExecutionStore(30)
+    const [old, job] = await leftDetached(store)
+    const fresh = new JobTable(store, new ProcessTable())
+    const seen: unknown[] = []
+    resuming(fresh, 3, seen)
+    try {
+      const fields = await store.load(job.sessionId)
+      const entry = ((fields?.jobs ?? {}) as Record<string, RecordFields>)[String(job.id)]
+      const stale = { ...entry, owner: 'someone' } as Parameters<JobTable['adopt']>[2]
+      const resume = fresh.resumer
+      if (resume === null) throw new Error('no resumer')
+      expect(await fresh.adopt(job.sessionId, job.id, stale, resume)).toBe(false)
+      expect(seen).toEqual([])
+      expect(fresh.allJobs()).toEqual([])
+    } finally {
+      await old.killAll()
+    }
+  })
+
+  // Without the lease a daemon neither hangs up nor stops a detached job a
+  // lapsed daemon left: the daemon that next holds the lease adopts it.
+  it('run on under a daemon without the lease', async () => {
+    const store = new RAMExecutionStore(30)
+    const [old, job] = await leftDetached(store)
+    await until(async () =>
+      Object.values((await store.processes())[old.daemon] ?? {}).some((r) => r.detached === true),
+    )
+    const stopped: unknown[] = []
+    const reader = new JobTable(store, new ProcessTable())
+    reader.runStopper = (record) => {
+      stopped.push(record.pid)
+      return Promise.resolve(true)
+    }
+    try {
+      await reader.sync(job.sessionId)
+      const [listed] = reader.listJobs(job.sessionId)
+      expect(listed?.state).toBe('running')
+      expect(await listed?.console.outcome()).toBeNull()
+      await reader.remoteProcesses()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(stopped).toEqual([])
+    } finally {
+      await old.killAll()
+    }
+  })
+
+  // Another daemon that adopts a detached job holds it to the deadline it
+  // started under, and drops it from the old daemon's published processes,
+  // so no sweep stops it after.
+  it('are adopted by another daemon under their deadline', async () => {
+    const store = new RAMExecutionStore(30)
+    const [old, job] = await leftDetached(store)
+    await until(async () =>
+      Object.values((await store.processes())[old.daemon] ?? {}).some((r) => r.detached === true),
+    )
+    // Its publishing stops with it, as a crashed daemon's does.
+    old.processesChanged = () => undefined
+    Reflect.set(old, 'held', false)
+    const fresh = new JobTable(store, new ProcessTable())
+    fresh.resumer = () => new Promise(() => undefined)
+    try {
+      await fresh.claim()
+      const adopted = fresh.get(job.id, job.sessionId)
+      expect([adopted?.deadline, adopted?.timeout]).toEqual([job.deadline, 60])
+      const records = (await store.processes())[old.daemon] ?? {}
+      expect(Object.values(records).map((r) => r.pid)).not.toContain(job.pid)
+    } finally {
+      await fresh.killAll()
+      await fresh.close()
+      await old.killAll()
+    }
+  })
+
+  // The lease holder ends as hung up a detached job it did not adopt, as the
+  // sweep stops its program, rather than list it running for good.
+  it('are hung up by the lease holder that did not adopt them', async () => {
+    const store = new RAMExecutionStore(30)
+    const [old, job] = await leftDetached(store)
+    const holder = new JobTable(store, new ProcessTable())
+    try {
+      await holder.claim()
+      await holder.sync(job.sessionId)
+      const [listed] = holder.listJobs(job.sessionId)
+      expect([listed?.state, listed?.exitCode]).toEqual(['exited', 129])
+    } finally {
+      await holder.close()
+      await old.killAll()
+    }
+  })
+
+  // A sync that read a detached job before the lease holder adopted it never
+  // hangs it up: not while the claim still adopts, nor once the entry names
+  // the daemon that adopted it.
+  it('are never hung up by a sync from before their adoption', async () => {
+    const store = new RAMExecutionStore(30)
+    const [old, job] = await leftDetached(store)
+    const holder = new JobTable(store, new ProcessTable())
+    holder.resumer = () => new Promise(() => undefined)
+    try {
+      await holder.sync(job.sessionId)
+      const [stale] = holder.listJobs(job.sessionId)
+      if (stale === undefined) throw new Error('not listed')
+      const refresh = Reflect.get(holder, 'refresh') as (job: JobHandle) => Promise<void>
+      Reflect.set(holder, 'held', true)
+      await refresh.call(holder, stale)
+      expect(stale.state).toBe('running')
+      Reflect.set(holder, 'held', false)
+      await holder.claim()
+      await refresh.call(holder, stale)
+      expect(stale.state).toBe('running')
+      expect(await stale.console.outcome()).toBeNull()
+    } finally {
+      await holder.killAll()
+      await holder.close()
+      await old.killAll()
+    }
+  })
+
+  // A daemon that lost the lease releases a detached job: it stops viewing,
+  // writes no ending, and lists it as the daemon that adopts it does.
+  it('are released by a daemon that lost the lease', async () => {
+    const store = new RAMExecutionStore(30)
+    const table = publishing(store)
+    const job = await table.submit({
+      command: 'train',
+      run: runDetached,
+      abort: new AbortController(),
+      cwd: '/',
+      simple: true,
+      detachable: true,
+    })
+    await until(() => entryDetached(store, job))
+    ;(Reflect.get(table, 'lost') as () => void).call(table)
+    await job.process?.join()
+    expect(job.process?.released).toBe(true)
+    expect(await job.console.outcome()).toBeNull()
+    const fields = await store.load(job.sessionId)
+    expect(((fields?.jobs ?? {}) as Record<string, RecordFields>)[String(job.id)]?.state).toBe(
+      'running',
+    )
+    expect(table.allJobs()).toEqual([])
+  })
 })

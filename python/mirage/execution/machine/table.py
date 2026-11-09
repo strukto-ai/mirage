@@ -289,8 +289,14 @@ class MachineTable:
             target is None and record.runtime is None
         ):
             return None
+        # A detached job's program leads its group, which its tag reaches.
         return self._deliver(
-            handle, record.machine, target or str(record.id), signum
+            handle,
+            record.machine,
+            target
+            if target is not None and not handle.detached
+            else str(record.id),
+            signum,
         )
 
     async def _deliver(

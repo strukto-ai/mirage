@@ -16,7 +16,9 @@ import type { ProcessPermissions } from '../process/config.ts'
 import type { ProcessHandle } from '../process/handle.ts'
 import { ProcessTable } from '../process/table.ts'
 import { PathSpec } from '../../types.ts'
-import { JobConsole } from '../../shell/console/index.ts'
+import { Channel, JobConsole } from '../../shell/console/index.ts'
+import { IOResult } from '../../io/types.ts'
+import { ExecutionNode } from '../../workspace/types.ts'
 import {
   GENERATION_BITS,
   HANGUP_EXIT_CODE,
@@ -30,7 +32,7 @@ import {
 import type { ExecutionStore } from '../base.ts'
 import { WorkspaceHeldError } from '../errors.ts'
 import { RAMExecutionStore } from '../ram.ts'
-import { JobId, LineId } from '../types.ts'
+import { JobId, LineId, MachineId } from '../types.ts'
 import { JobHandle, type JobRunner, markKilled } from './handle.ts'
 import type { Job, JobState } from './types.ts'
 import { SystemClock, type Clock } from '../../utils/clock.ts'
@@ -40,6 +42,10 @@ import { generationOf, type RecordFields } from '../../workspace/record/types.ts
 // which keys the entry, and its session, which keys the list, and the
 // daemon running it.
 interface ListEntry {
+  pid?: number | null
+  detached?: RecordFields | null
+  deadline?: number | null
+  timeout?: number | null
   command: string
   cwd: string
   started_at: number
@@ -53,9 +59,23 @@ interface ListEntry {
   signal: number | null
 }
 
-/** A job's entry in its session's list. Mirrors Python's `_list_entry`. */
-function listEntry(record: Job, owner: string): ListEntry {
+/**
+ * A job's entry in its session's list, with what a daemon that adopts it
+ * needs: where its program runs detached, its line's deadline and that
+ * limit's seconds. Mirrors Python's `_entry`.
+ */
+function listEntry(
+  record: Job,
+  owner: string,
+  detached: RecordFields | null = null,
+  deadline: number | null = null,
+  timeout: number | null = null,
+): ListEntry {
   return {
+    pid: record.pid,
+    detached,
+    deadline,
+    timeout,
     command: record.command,
     cwd: record.cwd,
     started_at: record.startedAt,
@@ -75,6 +95,8 @@ function listEntry(record: Job, owner: string): ListEntry {
  * record an ending. Mirrors Python's `_take_entry`.
  */
 function takeEntry(job: JobHandle, entry: ListEntry): void {
+  job.owner = entry.owner
+  job.detached = entry.detached ?? null
   if (entry.state !== 'exited') return
   job.state = 'exited'
   job.endedAt = entry.ended_at
@@ -164,6 +186,9 @@ export class JobTable {
   private stoppedOwners = new Set<string>()
   private stopsEnded = false
   private swept = false
+  // Whether this table's claim has adopted the detached jobs left to it, and
+  // so may stop what it did not.
+  private adopted = false
   // The startup sweep's pending wait for a lease to pass, which a teardown
   // ends at once.
   private sweepTick: { timer: ReturnType<typeof setTimeout>; wake: () => void } | null = null
@@ -189,6 +214,10 @@ export class JobTable {
   // sets it, to end the line and process records the daemon before it left
   // running.
   taken: (() => Promise<void>) | null = null
+  // Views an adopted job's detached program to its end into its console,
+  // from the stdout and stderr bytes the console already holds, and answers
+  // its status; the workspace sets it, since it holds the machines.
+  resumer: ((job: JobHandle, sent: [number, number]) => Promise<number>) | null = null
 
   /**
    * @param store the job plane holding each session's list and each job's
@@ -258,6 +287,7 @@ export class JobTable {
 
   private async takeLease(): Promise<void> {
     if ((this.held && !this.lapsed()) || this.closed) return
+    this.adopted = false
     const holder = await this.store.lease(this.daemon)
     if (holder !== null) throw new WorkspaceHeldError(this.processes.workspaceId, holder)
     const live = new Map(
@@ -272,6 +302,16 @@ export class JobTable {
     this.held = true
     this.renewedAt = performance.now()
     this.keepLease()
+    let adopted = new Set<number>()
+    try {
+      adopted = await this.adoptLeft()
+    } catch (err) {
+      console.debug('detached jobs not adopted:', err)
+    }
+    this.adopted = true
+    for (const [pid, record] of Object.entries(earlier))
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- earlier is keyed by pid
+      if (adopted.has(record.pid as number)) delete earlier[pid]
     if (this.taken !== null) {
       try {
         await this.taken()
@@ -298,13 +338,23 @@ export class JobTable {
    * Let the lease go once another daemon may hold it: the next line or job
    * asks for it again, and what this table runs ends as hung up, as the
    * daemon that took it records it, so the two never both change the
-   * workspace.
+   * workspace. A job whose program runs detached is released instead: its
+   * viewing stops, its program runs on and its ending is left to the daemon
+   * that adopts it, which lists it.
    */
   private lost(): void {
     if (this.lease !== null) clearTimeout(this.lease)
     this.lease = null
     this.held = false
-    for (const handle of this.processes.live()) handle.terminate(HANGUP_EXIT_CODE - 128)
+    this.adopted = false
+    for (const handle of this.processes.live()) {
+      handle.released = handle.detached
+      handle.terminate(HANGUP_EXIT_CODE - 128)
+    }
+    const kept = (job: JobHandle): boolean => job.process?.released !== true
+    for (const [sessionId, jobs] of this.jobs)
+      this.jobs.set(sessionId, new Map([...jobs].filter(([, job]) => kept(job))))
+    this.disowned = this.disowned.filter(kept)
   }
 
   private sessionJobs(sessionId: string): Map<number, JobHandle> {
@@ -343,6 +393,9 @@ export class JobTable {
     // whose leases lapse is (`ProcessHandle.detachable`), since only there
     // does a restart find it.
     detachable?: boolean
+    // The seconds its line's limit gives it from now, which a daemon that
+    // adopts it still holds it to; null for none.
+    timeout?: number | null
     // Runs as the job's process ends, whether or not its runner began.
     ended?: () => Promise<void>
   }): Promise<JobHandle> {
@@ -350,6 +403,8 @@ export class JobTable {
     const sessionId = init.sessionId ?? ''
     const name = crypto.randomUUID().replaceAll('-', '')
     const createdAt = this.clock.now()
+    const timeout = init.timeout ?? null
+    const deadline = timeout ? Date.now() / 1000 + timeout : null
     let job: JobHandle | null = null
     let ready!: () => void
     const begun = new Promise<void>((resolve) => {
@@ -367,19 +422,7 @@ export class JobTable {
         try {
           await begun
           if (job === null) return KILLED_EXIT_CODE
-          if (job.state !== 'running') return job.exitCode
-          const watching = new AbortController()
-          void job.watch(watching.signal).catch((err: unknown) => {
-            console.debug('job watch failed:', err)
-          })
-          try {
-            return await job.settle(init.run)
-          } finally {
-            watching.abort()
-            await this.recordEnding(job)
-            this.disowned = this.disowned.filter((j) => j !== job)
-            this.dropChecking()
-          }
+          return await this.execute(job, init.run)
         } finally {
           await init.ended?.()
         }
@@ -397,6 +440,9 @@ export class JobTable {
       init.simple === true &&
       this.plane === this &&
       this.store.leaseSeconds !== null
+    process.onDetach = async (where) => {
+      if (job !== null) await this.markDetached(job, where)
+    }
     const { line, group } = process.record
     let jobId: number
     try {
@@ -419,6 +465,9 @@ export class JobTable {
             signal: null,
           },
           this.daemon,
+          null,
+          deadline,
+          timeout,
         ),
       )
     } catch (error) {
@@ -443,6 +492,8 @@ export class JobTable {
         workspaceId: this.processes.workspaceId,
         line,
         group,
+        deadline,
+        timeout,
         now: () => this.clock.now(),
         ended: this.plane.ended,
       })
@@ -452,13 +503,8 @@ export class JobTable {
       await this.remove(sessionId, new Set([name]), true)
       throw error
     }
-    job.process = process
-    this.sessionJobs(sessionId).set(job.id, job)
+    this.track(job, process, false)
     ready()
-    const plane = this.plane
-    const pid = process.record.id.pid
-    plane.jobTables.set(pid, this)
-    void process.join().then(() => plane.jobTables.delete(pid))
     // An abort from elsewhere stops the runner; one the runner's own stop
     // sent is that stop, which a KILL here would cut short.
     const onAbort = () => {
@@ -471,6 +517,193 @@ export class JobTable {
     })
     this.keepChecking()
     return job
+  }
+
+  /**
+   * Run a job this table holds to its end, as its process: stopped once
+   * another daemon ends its console, its ending kept in its entry. Mirrors
+   * Python's `JobTable._execute`.
+   */
+  private async execute(job: JobHandle, run: JobRunner): Promise<number> {
+    if (job.state !== 'running') return job.exitCode
+    const watching = new AbortController()
+    void job.watch(watching.signal).catch((err: unknown) => {
+      console.debug('job watch failed:', err)
+    })
+    try {
+      return await job.settle(run)
+    } finally {
+      watching.abort()
+      await this.recordEnding(job)
+      this.disowned = this.disowned.filter((j) => j !== job)
+      this.dropChecking()
+    }
+  }
+
+  /**
+   * Hold a job this table runs as its process: listed in its session, found
+   * by its pid on the plane, its list checked unless the caller does it
+   * last. Mirrors Python's `JobTable._track`.
+   */
+  private track(job: JobHandle, process: ProcessHandle, check = true): void {
+    job.process = process
+    this.sessionJobs(job.sessionId).set(job.id, job)
+    const plane = this.plane
+    const pid = process.record.id.pid
+    plane.jobTables.set(pid, this)
+    void process.join().then(() => plane.jobTables.delete(pid))
+    if (check) this.keepChecking()
+  }
+
+  /**
+   * Record in a job's entry where its program runs detached, so a daemon
+   * that outlives this one adopts it, and publish its process as detached,
+   * so no other daemon stops it. Mirrors Python's
+   * `JobTable._mark_detached`.
+   */
+  private async markDetached(job: JobHandle, where: RecordFields): Promise<void> {
+    job.detached = where
+    this.processesChanged()
+    for (let attempt = 0; attempt < LIST_MAX_RETRIES; attempt++) {
+      const fields = await this.store.load(job.sessionId)
+      const jobs = { ...((fields?.jobs ?? {}) as Record<string, ListEntry>) }
+      const entry = jobs[job.id.toString()]
+      if (fields === null || entry?.console !== job.consoleName) return
+      jobs[job.id.toString()] = { ...entry, detached: where }
+      if (await this.write(job.sessionId, fields, jobs, Number(fields.next ?? 1))) return
+    }
+    console.debug('job detached entry kept conflicting:', job.id)
+  }
+
+  /**
+   * Adopt every running job whose program a daemon that no longer holds the
+   * lease left detached, this daemon's earlier life included: each one whose
+   * entry this daemon takes first runs here from then on, viewed from what
+   * its console holds. Answers the pids adopted, whose published records no
+   * sweep stops after. Mirrors Python's `JobTable._adopt_left`.
+   */
+  private async adoptLeft(): Promise<Set<number>> {
+    const adopted = new Set<number>()
+    const resume = this.resumer
+    if (resume === null || this.store.leaseSeconds === null) return adopted
+    const own = new Set(
+      [...this.allJobs(), ...this.disowned]
+        .filter((j) => j.process !== null)
+        .map((j) => j.consoleName),
+    )
+    const owners = new Set<string>()
+    for (const sessionId of await this.store.sessions()) {
+      const fields = await this.store.load(sessionId)
+      for (const [key, entry] of Object.entries(
+        (fields?.jobs ?? {}) as Record<string, ListEntry>,
+      )) {
+        if (entry.state !== 'running' || !entry.detached || own.has(entry.console)) continue
+        let taken: boolean
+        try {
+          taken = await this.adopt(sessionId, Number(key), entry, resume)
+        } catch (err) {
+          console.debug(`job ${key} not adopted:`, err)
+          continue
+        }
+        if (taken) {
+          adopted.add(entry.pid ?? -1)
+          owners.add(entry.owner)
+        }
+      }
+    }
+    owners.delete(this.daemon)
+    for (const owner of owners) {
+      const records = (await this.store.processes())[owner] ?? {}
+      const kept = Object.fromEntries(
+        Object.entries(records).filter(([, record]) => !adopted.has(record.pid as number)),
+      )
+      if (Object.keys(kept).length !== Object.keys(records).length && !(await this.running(owner)))
+        await this.store.publish(owner, kept)
+    }
+    return adopted
+  }
+
+  /**
+   * Take one detached job from the daemon that left it: its entry names
+   * this daemon once the swap lands, and a process under its pid views its
+   * program from the bytes its console holds. A swap another daemon won
+   * leaves the job to it. What can fail is read before the swap, so a job
+   * this daemon takes is one it views. Mirrors Python's `JobTable._adopt`.
+   */
+  async adopt(
+    sessionId: string,
+    number: number,
+    entry: ListEntry,
+    resume: (job: JobHandle, sent: [number, number]) => Promise<number>,
+  ): Promise<boolean> {
+    const detached = entry.detached ?? {}
+    const machine = MachineId.parse(String(detached.machine))
+    const jobConsole = new JobConsole(this.store.console(entry.console))
+    const [chunks] = await jobConsole.readFrom(0)
+    const sent: [number, number] = [0, 0]
+    for (const chunk of chunks) {
+      if (chunk.channel === Channel.STDOUT) sent[0] += chunk.data.length
+      else if (chunk.channel === Channel.STDERR) sent[1] += chunk.data.length
+    }
+    let swapped = false
+    for (let attempt = 0; attempt < LIST_MAX_RETRIES && !swapped; attempt++) {
+      const fields = await this.store.load(sessionId)
+      const jobs = { ...((fields?.jobs ?? {}) as Record<string, ListEntry>) }
+      if (fields === null || JSON.stringify(jobs[String(number)]) !== JSON.stringify(entry))
+        return false
+      jobs[String(number)] = { ...entry, owner: this.daemon }
+      swapped = await this.write(sessionId, fields, jobs, Number(fields.next ?? 1))
+    }
+    if (!swapped) return false
+    const abort = new AbortController()
+    const job = new JobHandle({
+      id: number,
+      command: entry.command,
+      abort,
+      cwd: entry.cwd,
+      sessionId,
+      console: jobConsole,
+      simple: true,
+      createdAt: entry.started_at,
+      owner: this.daemon,
+      consoleName: entry.console,
+      workspaceId: this.processes.workspaceId,
+      line: entry.line ? new LineId(entry.line) : null,
+      group: entry.group ?? null,
+      detached,
+      deadline: entry.deadline ?? null,
+      timeout: entry.timeout ?? null,
+      now: () => this.clock.now(),
+      ended: this.plane.ended,
+    })
+    const run: JobRunner = async (job) => {
+      const code = await resume(job, sent)
+      return [
+        new IOResult({ exitCode: code }),
+        new ExecutionNode({ command: job.command, exitCode: code }),
+      ]
+    }
+    const process = this.processes.start({
+      sessionId,
+      parent: null,
+      command: entry.command,
+      cwd: PathSpec.fromStrPath(entry.cwd),
+      run: () => this.execute(job, run),
+      cancel: () => {
+        abort.abort()
+      },
+      limit: null,
+      line: job.line,
+      ignores: IGNORED_SIGNALS,
+      pid: entry.pid ?? null,
+      machine,
+      runtime: (detached.runtime as string | null | undefined) ?? null,
+      programIgnores: IGNORED_SIGNALS,
+    })
+    process.detached = true
+    jobConsole.bindProcess(process.record.id.toString())
+    this.track(job, process)
+    return true
   }
 
   /**
@@ -1009,7 +1242,8 @@ export class JobTable {
    * holds the ending.
    */
   private async recordEnding(job: JobHandle): Promise<void> {
-    const kept = listEntry(job.record, job.owner)
+    if (job.process?.released === true) return
+    const kept = listEntry(job.record, job.owner, job.detached, job.deadline, job.timeout)
     try {
       for (let attempt = 0; attempt < LIST_MAX_RETRIES; attempt++) {
         const fields = await this.store.load(job.sessionId)
@@ -1046,7 +1280,11 @@ export class JobTable {
   private async refresh(job: JobHandle): Promise<void> {
     let outcome = await job.console.outcome()
     if (outcome === null) {
-      if (await this.running(job.owner)) return
+      if (
+        (job.detached !== null && !(await this.leftUnadopted(job))) ||
+        (await this.running(job.owner))
+      )
+        return
       this.stopLater(job.owner)
       await markKilled(job.console, HANGUP_EXIT_CODE, HANGUP_EXIT_CODE - 128)
       outcome = await job.console.outcome()
@@ -1060,6 +1298,20 @@ export class JobTable {
    * follows the console across every lease check, so a long wait never
    * stacks readers, and an abandoned one stops reading.
    */
+  /**
+   * Whether a detached job's program was left to no daemon: this one holds
+   * the lease, has adopted what it could, and the job's entry still names the
+   * daemon that left it. Its program outlives that daemon, so until then the
+   * daemon that holds the lease next adopts it. Mirrors Python's
+   * `JobTable._left_unadopted`.
+   */
+  private async leftUnadopted(job: JobHandle): Promise<boolean> {
+    if (!this.plane.adopted) return false
+    const fields = await this.plane.store.load(job.sessionId)
+    const entry = ((fields?.jobs ?? {}) as Record<string, ListEntry>)[String(job.id)]
+    return entry?.console === job.consoleName && entry.owner === job.owner
+  }
+
   private async joinRemote(job: JobHandle, signal?: AbortSignal): Promise<void> {
     const lease = this.store.leaseSeconds
     const finished = job.console.waitFinished(signal)
@@ -1272,6 +1524,7 @@ export class JobTable {
         state: record.state,
         line: record.line?.toString() ?? null,
         runtime: record.runtime,
+        detached: handle.detached,
         machine_pid:
           record.machinePid === null
             ? null
@@ -1463,7 +1716,9 @@ export class JobTable {
   ): Promise<Record<string, RecordFields>> {
     const left: Record<string, RecordFields> = {}
     for (const [pid, record] of Object.entries(records)) {
-      if (record.runtime == null) continue
+      // Only the lease holder, which adopted the detached jobs it could,
+      // stops the rest.
+      if (record.runtime == null || (record.detached === true && !this.plane.adopted)) continue
       if (await this.running(owner)) return records
       if (this.runStopper === null || !(await this.runStopper(record, 15))) left[pid] = record
     }

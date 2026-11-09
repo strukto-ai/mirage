@@ -14,6 +14,7 @@
 
 import asyncio
 import logging
+import time
 from collections.abc import (
     AsyncGenerator,
     AsyncIterator,
@@ -38,9 +39,11 @@ from mirage.execution.context import new_line_id
 from mirage.execution.job import JobHandle, JobState, JobTable
 from mirage.execution.job.constants import (
     ENDING_SIGNALS,
+    HANGUP_EXIT_CODE,
     STOP_WAIT_SECONDS,
 )
 from mirage.execution.line.handle import LineHandle
+from mirage.execution.machine.table import MachineTable
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.process.types import ProcessRunner
@@ -772,7 +775,10 @@ async def handle_background(
             parent=session.process_id,
             limit=session.processes.max,
             simple=one_program(left, session),
-            detachable=left.type != NT.REDIRECTED_STATEMENT,
+            # Its trace lands in its console, past what a restart counts.
+            detachable=left.type != NT.REDIRECTED_STATEMENT
+            and not session.shell_options.get("xtrace"),
+            timeout=child_evaluation.frame.line_timeout,
         )
     except BaseException as exc:
         release_job()
@@ -882,3 +888,51 @@ async def run_statement(
         handed,
         decisions,
     )
+
+
+async def resume_job(
+    machines: MachineTable, job: JobHandle, sent: tuple[int, int]
+) -> int:
+    """View an adopted job's detached program to its end into its
+    console, from the bytes the console already holds, under what is
+    left of its line's limit: past it, the program is stopped and the
+    job ends 124 with the line's notice, as it would have where it
+    started (``JobTable.resumer``).
+
+    Args:
+        machines (MachineTable): the workspace's machines.
+        job (JobHandle): the adopted job.
+        sent (tuple[int, int]): the stdout and stderr bytes its console
+            holds.
+    """
+    where = job.detached or {}
+
+    async def out(data: bytes) -> None:
+        await job.console.emit(Channel.STDOUT, data)
+
+    async def err(data: bytes) -> None:
+        await job.console.emit(Channel.STDERR, data)
+
+    handle = machines.by_id(str(where.get("machine")))
+    if handle is None:
+        await err(f"mirage: {where.get('machine')}: job lost\n".encode())
+        return HANGUP_EXIT_CODE
+    left = None
+    if job.timeout and job.deadline is not None:
+        # A deadline already past still cancels the view, which stops the
+        # program.
+        left = max(job.deadline - time.time(), 0.0)
+    try:
+        async with asyncio.timeout(left):
+            done = await handle.resume(
+                where["folder"], where["tag"], sent, out, err
+            )
+    except TimeoutError:
+        notice = CommandTimeoutError(LINE_NAME, job.timeout or 0)
+        await err(encode_text(f"{notice}\n"))
+        return TIMEOUT_STATUS
+    if done.stdout:
+        await out(done.stdout)
+    if done.stderr:
+        await err(done.stderr)
+    return done.exit_code

@@ -43,7 +43,12 @@ import {
 import { signalReport, signalReported } from '../../shell/signals.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import { getRedirects, isBackgrounded } from '../../shell/helpers.ts'
-import { ENDING_SIGNALS, STOP_WAIT_SECONDS } from '../../execution/job/constants.ts'
+import {
+  ENDING_SIGNALS,
+  HANGUP_EXIT_CODE,
+  STOP_WAIT_SECONDS,
+} from '../../execution/job/constants.ts'
+import type { MachineTable } from '../../execution/machine/table.ts'
 import type { JobHandle, JobTable } from '../../execution/job/index.ts'
 import { NodeKind, nodeKind, simpleCommand } from '../../shell/node_kind.ts'
 import { commandInvocations } from '../../shell/parse/names.ts'
@@ -681,7 +686,9 @@ export async function handleBackground(
       parent: session.processId,
       limit: session.processes.max,
       simple: oneProgram(left, session),
-      detachable: left.type !== NT.REDIRECTED_STATEMENT,
+      // Its trace lands in its console, past what a restart counts.
+      detachable: left.type !== NT.REDIRECTED_STATEMENT && session.shellOptions.xtrace !== true,
+      timeout: childEvaluation.frame.lineTimeout,
       // A job whose runner never begins skips runBg's finally, so its
       // holds on readers go as its process ends.
       ended: () =>
@@ -772,4 +779,57 @@ export function runStatement(
     handed,
     decisions,
   )
+}
+
+/**
+ * View an adopted job's detached program to its end into its console, from
+ * the bytes the console already holds, under what is left of its line's
+ * limit: past it, the program is stopped and the job ends 124 with the
+ * line's notice, as it would have where it started (`JobTable.resumer`).
+ * Mirrors Python's `resume_job`.
+ *
+ * @param machines the workspace's machines.
+ * @param job the adopted job.
+ * @param sent the stdout and stderr bytes its console holds.
+ */
+export async function resumeJob(
+  machines: MachineTable,
+  job: JobHandle,
+  sent: [number, number],
+): Promise<number> {
+  const where = job.detached ?? {}
+  const out = (data: Uint8Array): Promise<void> => job.console.emit(Channel.STDOUT, data)
+  const err = (data: Uint8Array): Promise<void> => job.console.emit(Channel.STDERR, data)
+  const handle = machines.byId(String(where.machine))
+  if (handle === null) {
+    await err(encodeText(`mirage: ${String(where.machine)}: job lost\n`))
+    return HANGUP_EXIT_CODE
+  }
+  const expiry = new AbortController()
+  const signal =
+    job.abort === null ? expiry.signal : AbortSignal.any([job.abort.signal, expiry.signal])
+  // A deadline already past still aborts the view, which stops the program.
+  const timer =
+    job.timeout && job.deadline !== null
+      ? setTimeout(
+          () => {
+            expiry.abort()
+          },
+          Math.max(job.deadline - Date.now() / 1000, 0) * 1000,
+        )
+      : undefined
+  let done
+  try {
+    done = await handle.resume(String(where.folder), String(where.tag), sent, out, err, signal)
+  } catch (error) {
+    if (!expiry.signal.aborted) throw error
+    const notice = new CommandTimeoutError(LINE_NAME, job.timeout ?? 0)
+    await err(encodeText(`${notice.message}\n`))
+    return TIMEOUT_STATUS
+  } finally {
+    clearTimeout(timer)
+  }
+  if (done.stdout.length > 0) await out(done.stdout)
+  if (done.stderr !== null && done.stderr.length > 0) await err(done.stderr)
+  return done.exitCode
 }

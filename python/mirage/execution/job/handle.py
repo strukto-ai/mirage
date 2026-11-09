@@ -35,6 +35,7 @@ from mirage.shell.console import (
     killed_outcome,
 )
 from mirage.utils.clock import SystemClock
+from mirage.workspace.record.types import RecordFields
 from mirage.workspace.types import ExecutionNode
 
 logger = logging.getLogger(__name__)
@@ -108,6 +109,13 @@ class JobHandle:
     workspace_id: str = ""
     line: LineId | None = None
     group: int | None = None
+    # Where the job's program runs detached (``machine``, ``folder``,
+    # ``tag``, ``runtime``), once it does; None for one attached to its
+    # daemon.
+    detached: RecordFields | None = None
+    # The real time its line's limit ends at, and that limit's seconds.
+    deadline: float | None = None
+    timeout: float | None = None
     now: Callable[[], float] = field(
         default_factory=lambda: SystemClock().now, repr=False
     )
@@ -286,6 +294,10 @@ class JobHandle:
         try:
             io_result, _ = await run(self)
         except asyncio.CancelledError:
+            # A daemon that lost the lease leaves a detached job's ending
+            # to the daemon that adopts it.
+            if self.process is not None and self.process.released:
+                raise
             # This task is already unwinding from a cancel, and a store
             # that suspends (Redis) would take a second cancellation
             # mid-write and lose the ending readers are parked on. The

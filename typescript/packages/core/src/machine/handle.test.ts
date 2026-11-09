@@ -45,6 +45,10 @@ import { machineRuntime, on } from '../../tests/fixtures/machine.ts'
 import { FIRST_PID } from '../execution/process/constants.ts'
 import type { ProcessHandle } from '../execution/process/handle.ts'
 import { RAMExecutionStore } from '../execution/ram.ts'
+import { Channel } from '../shell/console/index.ts'
+import { JobHandle } from '../execution/job/handle.ts'
+import { MachineTable } from '../execution/machine/table.ts'
+import { resumeJob } from '../workspace/executor/background.ts'
 import type { OutputFn } from '../runtime/types.ts'
 
 const ENC = new TextEncoder()
@@ -1015,6 +1019,7 @@ describe('a detached job', () => {
     ['train > /data/log &', 30, false],
     ['train &', null, false],
     ['{ train; } &', 30, false],
+    ['set -x; train &', 30, false],
   ])('detaches %s on a store with lease %s: %s', async (line, lease, detached) => {
     const box = new JobBox([[['step 0\n'], ['\0mirage-job 3\n'], 0]], true, ['train'])
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, ...on(box) })
@@ -1028,6 +1033,96 @@ describe('a detached job', () => {
       await ws.close()
     }
   })
+})
+
+// A workspace on `box` that another daemon may run too.
+function shared(box: JobBox): Workspace {
+  return new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.EXEC, workspaceId: 'shared', sessionId: 's', ...on(box) },
+  )
+}
+
+describe('a daemon that takes the lease after one crashed', () => {
+  // It adopts the detached job the crashed daemon left: the job keeps its
+  // number, its output goes on from what its console holds with nothing
+  // twice, and `wait` answers its real status.
+  it('adopts a detached job', async () => {
+    const store = new RAMExecutionStore(0.2)
+    const first = new JobBox([[['step 0\n'], ['warn\n'], new Promise<void>(() => undefined)]])
+    const old = shared(first)
+    old.jobTable.store = store
+    const second = new JobBox()
+    second.views.push([['step 1\n'], ['\0mirage-job 3\n'], 0])
+    const fresh = shared(second)
+    fresh.jobTable.store = store
+    try {
+      await old.shell('train &', { sessionId: 's' })
+      await vi.waitFor(() => {
+        expect(old.jobTable.allJobs()[0]?.detached).not.toBeNull()
+      })
+      const [job] = old.jobTable.allJobs()
+      clearTimeout(Reflect.get(old.jobTable, 'lease') as ReturnType<typeof setTimeout>)
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      await fresh.shell('true', { sessionId: 's' })
+      const [adopted] = fresh.jobTable.allJobs()
+      const io = await fresh.shell('wait %1', { sessionId: 's' })
+      expect(io.exitCode).toBe(3)
+      expect(second.viewed[0]?.slice(1)).toEqual(['7', '5'])
+      expect(adopted?.process?.record.id.pid).toBe(job?.pid)
+      const [chunks] = (await adopted?.console.readFrom(0)) ?? [[]]
+      const stdout = chunks.filter((c) => c.channel === Channel.STDOUT)
+      expect(stdout.map((c) => DEC.decode(c.data)).join('')).toBe('step 0\nstep 1\n')
+      expect(second.removed).toEqual([second.viewed[0]?.[0]])
+    } finally {
+      await fresh.close()
+      await old.close()
+    }
+  })
+})
+
+// A daemon that lost the lease leaves a detached job to the daemon that
+// adopts it: its run is cancelled without stopping the program or removing
+// its folder.
+it('leaves a released detached job running', async () => {
+  const box = new JobBox([[[], [], new Promise<void>(() => undefined)]])
+  const [, , , runner] = await jobRun(box, {
+    started: (runner) => {
+      void vi
+        .waitFor(() => {
+          expect(box.viewed).toHaveLength(1)
+        })
+        .then(() => {
+          runner.released = true
+          runner.terminate(1)
+        })
+    },
+  })
+  expect(runner.detached).toBe(true)
+  expect(box.execs.slice(1).some(([line]) => line.startsWith('PATH='))).toBe(false)
+  expect(box.removed).toEqual([])
+})
+
+// An adopted job past its line's limit is stopped in the box and ends 124
+// with the line's notice, as it would have where it started.
+it('ends an adopted job past its deadline 124', async () => {
+  const box = new JobBox([[[], [], new Promise<void>(() => undefined)]])
+  const job = new JobHandle({
+    id: 1,
+    command: 'train',
+    cwd: '/',
+    createdAt: 0,
+    abort: new AbortController(),
+    detached: { machine: box.id.toString(), folder: '/f', tag: 'w:9' },
+    deadline: Date.now() / 1000 - 1,
+    timeout: 5,
+  })
+  const code = await resumeJob(new MachineTable({ [box.name]: box }), job, [0, 0])
+  const [chunks] = await job.console.readFrom(0)
+  expect(code).toBe(124)
+  expect(chunks.map((c) => DEC.decode(c.data)).join('')).toContain('line')
+  expect(box.execs.at(-1)?.[0]).toBe(stopLine('w:9', 15))
+  expect(box.removed).toEqual(['/f'])
 })
 
 // A start that failed returns its own status, and whatever a wrapper that
@@ -1054,6 +1149,20 @@ it('keeps and counts output returned whole', async () => {
     'w\n',
   ])
   expect(box.viewed[1]?.slice(1)).toEqual(['2', '2'])
+})
+
+// An adopted job on a machine this workspace no longer has is lost.
+it('loses an adopted job on an unknown machine', async () => {
+  const job = new JobHandle({
+    id: 1,
+    command: 'train',
+    cwd: '/',
+    createdAt: 0,
+    detached: { machine: 'docker:gone', folder: '/f', tag: 'w:9' },
+  })
+  expect(await resumeJob(new MachineTable({}), job, [0, 0])).toBe(129)
+  const [chunks] = await job.console.readFrom(0)
+  expect(chunks.map((c) => DEC.decode(c.data)).join('')).toBe('mirage: docker:gone: job lost\n')
 })
 
 // A start that failed past the connection may have started what nothing
