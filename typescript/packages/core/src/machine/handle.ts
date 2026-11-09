@@ -427,6 +427,9 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
         signal,
       )
     this.detached.set(tag, folder)
+    // Its program may run before the start returns: a lease lost meanwhile
+    // releases it to the daemon that adopts it.
+    if (runner !== null) runner.detached = true
     try {
       let started: RunResult | null = null
       try {
@@ -443,6 +446,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
         if (!(error instanceof ConnectionLostError) || signal?.aborted === true) {
           // The wrapper may have started what nothing now views.
           if (signal?.aborted !== true) {
+            if (runner !== null) runner.detached = false
             await this.stop(tag, SIGTERM)
             await this.removeJob(folder)
           }
@@ -453,6 +457,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       if (started?.exitCode === JOB_REFUSED_STATUS) {
         logger.debug?.(`${this.id.toString()}: job not detached: ${String(started.stderr)}`)
         this.detached.delete(tag)
+        if (runner !== null) runner.detached = false
         await this.removeJob(folder)
         if (runner !== null) await untellDetached(runner, this.id)
         return await this.execArgv(
@@ -467,11 +472,11 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       }
       if (started !== null && started.exitCode !== 0) {
         // A wrapper that outlived the start's wait may run it.
+        if (runner !== null) runner.detached = false
         await this.stop(tag, SIGTERM)
         await this.removeJob(folder)
         return started
       }
-      if (runner !== null) runner.detached = true
       const done = await this.view(folder, tag, runner, output, errors, signal)
       await this.settled(runner, folder)
       return done
@@ -554,6 +559,8 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
         if (output === null) kept[0].push(data)
         else
           await output(data).catch((error: unknown) => {
+            // The console keeps what its copy failed on.
+            sent.out += data.length
             undelivered.push(error)
             throw error
           })
@@ -568,6 +575,8 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
         if (errors === null) kept[1].push(chunk)
         else
           await errors(chunk).catch((error: unknown) => {
+            held = held.slice(cut)
+            sent.err += chunk.length
             undelivered.push(error)
             throw error
           })

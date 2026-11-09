@@ -512,10 +512,13 @@ class MachineTable:
             try:
                 await gone.wait()
             except asyncio.CancelledError:
-                signum = held[0].signal if held else None
-                await asyncio.shield(
-                    self._stop_found(machine, target, signum or 15)
-                )
+                # A detached job's child runs on for the daemon that adopts
+                # the job.
+                if not held or not held[0].released:
+                    signum = held[0].signal if held else None
+                    await asyncio.shield(
+                        self._stop_found(machine, target, signum or 15)
+                    )
                 raise
             return 0
 

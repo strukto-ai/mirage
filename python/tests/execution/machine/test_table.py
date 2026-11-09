@@ -751,3 +751,34 @@ async def test_a_detached_program_is_signalled_by_the_tag_it_carries():
         assert box.sent == [("w:777", 15)]
     finally:
         await ws.close()
+
+
+# A daemon that lost the lease leaves what a scan found under a detached
+# job running for the daemon that adopts it, and still hangs up what it
+# found under any other job.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("detached", [True, False])
+async def test_a_lost_lease_leaves_a_detached_jobs_found_children(detached):
+    box = _Sleeper("a")
+    ws = _sleepers(a=box)
+    try:
+        pid = int((await ws.shell("train 1 & echo $!")).stdout)
+        await _started(box)
+        await ws.shell("ps")
+        [job] = ws.job_table.all_jobs()
+        assert job.process is not None
+        job.process.detached = detached
+        [found] = [
+            handle
+            for handle in ws.process_table.live()
+            if handle.record.parent == pid
+        ]
+        ws.job_table._lost()
+        await found.join()
+        assert found.released is detached
+        child = [
+            sent for sent in box.sent if sent[0] == MachinePid(413, 101.0)
+        ]
+        assert child == ([] if detached else [(MachinePid(413, 101.0), 1)])
+    finally:
+        await ws.close()

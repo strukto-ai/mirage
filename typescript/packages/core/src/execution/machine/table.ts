@@ -450,6 +450,11 @@ export class MachineTable {
         run: () => ended,
         cancel: () => {
           const signum = handle?.signal ?? 15
+          // A detached job's child runs on for the daemon that adopts the job.
+          if (handle?.released === true) {
+            end(128 + signum)
+            return
+          }
           void this.stopFound(machine, target, signum).finally(() => {
             end(128 + signum)
           })

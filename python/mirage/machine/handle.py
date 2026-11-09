@@ -462,6 +462,10 @@ class MachineHandle:
                 argv, None, {**env, PROCESS: tag}, cwd, output, errors
             )
         self._detached[tag] = folder
+        # Its program may run before the start returns: a lease lost
+        # meanwhile releases it to the daemon that adopts it.
+        if runner is not None:
+            runner.detached = True
         try:
             try:
                 started = await self._exec_argv(
@@ -476,6 +480,8 @@ class MachineHandle:
                 logger.debug("%s: job start lost", self.id, exc_info=True)
             except Exception:
                 # The wrapper may have started what nothing now views.
+                if runner is not None:
+                    runner.detached = False
                 await self.stop(tag, SIGTERM)
                 await self._remove(folder)
                 raise
@@ -485,6 +491,8 @@ class MachineHandle:
                         "%s: job not detached: %r", self.id, started.stderr
                     )
                     self._detached.pop(tag, None)
+                    if runner is not None:
+                        runner.detached = False
                     await self._remove(folder)
                     if runner is not None:
                         await _untell_detached(runner, self.id)
@@ -493,11 +501,11 @@ class MachineHandle:
                     )
                 if started.exit_code != 0:
                     # A wrapper that outlived the start's wait may run it.
+                    if runner is not None:
+                        runner.detached = False
                     await self.stop(tag, SIGTERM)
                     await self._remove(folder)
                     return started
-            if runner is not None:
-                runner.detached = True
             done = await self._view(folder, tag, runner, output, errors)
             await self._settled(runner, folder)
             return done
@@ -587,6 +595,8 @@ class MachineHandle:
                     try:
                         await output(data)
                     except BaseException as exc:
+                        # The console keeps what its copy failed on.
+                        delivered[0] += len(data)
                         undelivered.append(exc)
                         raise
                 delivered[0] += len(data)
@@ -604,6 +614,8 @@ class MachineHandle:
                     try:
                         await errors(chunk)
                     except BaseException as exc:
+                        del held[:cut]
+                        delivered[1] += len(chunk)
                         undelivered.append(exc)
                         raise
                 del held[:cut]

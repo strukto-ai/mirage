@@ -17,7 +17,7 @@ import { MachineHandle } from './handle.ts'
 
 /** A provider's handle class, built from a machine's name and config. */
 export type MachineClass = (new (name: string, config?: never) => MachineHandle) &
-  Pick<typeof MachineHandle, 'configFields'>
+  Pick<typeof MachineHandle, 'configFields' | 'detaches'>
 
 // Null prototype: provider names come from config, and a name like
 // `constructor` must miss instead of resolving an `Object.prototype` member.

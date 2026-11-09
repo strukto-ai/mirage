@@ -824,14 +824,11 @@ export async function resumeJob(
   const signal =
     job.abort === null ? expiry.signal : AbortSignal.any([job.abort.signal, expiry.signal])
   // A deadline already past still aborts the view, which stops the program.
-  const timer =
+  const disarm =
     job.timeout && job.deadline !== null
-      ? setTimeout(
-          () => {
-            expiry.abort()
-          },
-          Math.max(job.deadline - Date.now() / 1000, 0) * 1000,
-        )
+      ? atDeadline(Math.max(job.deadline - Date.now() / 1000, 0), () => {
+          expiry.abort()
+        })
       : undefined
   let done
   try {
@@ -842,7 +839,7 @@ export async function resumeJob(
     await err(encodeText(`${notice.message}\n`))
     return TIMEOUT_STATUS
   } finally {
-    clearTimeout(timer)
+    disarm?.()
   }
   if (done.stdout.length > 0) await out(done.stdout)
   if (done.stderr !== null && done.stderr.length > 0) await err(done.stderr)

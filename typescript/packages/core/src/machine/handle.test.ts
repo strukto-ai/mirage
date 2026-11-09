@@ -745,6 +745,7 @@ class JobBox extends RecordingMachine {
   readonly removed: string[] = []
   readonly startEnvs: Record<string, string>[] = []
   startCode = 0
+  startGate: Promise<void> | null = null
 
   constructor(
     views: View[] = [],
@@ -768,6 +769,18 @@ class JobBox extends RecordingMachine {
     if (script === JOB_START) {
       this.started.push(argv.slice(4))
       this.startEnvs.push({ ...env })
+      const gate = this.startGate
+      if (gate !== null)
+        await new Promise<void>((resolve, reject) => {
+          void gate.then(resolve)
+          signal?.addEventListener(
+            'abort',
+            () => {
+              reject(new DOMException('execute aborted', 'AbortError'))
+            },
+            { once: true },
+          )
+        })
       return { stdout: new Uint8Array(), stderr: null, exitCode: this.startCode }
     }
     if (script === JOB_VIEW) {
@@ -1103,6 +1116,28 @@ it('leaves a released detached job running', async () => {
   expect(box.removed).toEqual([])
 })
 
+// A lease lost while the start has not answered releases the job too: the
+// wrapper may already run its program, which the adopter views.
+it('leaves a job released while starting running', async () => {
+  const box = new JobBox()
+  box.startGate = new Promise<void>(() => undefined)
+  const [, , , runner] = await jobRun(box, {
+    started: (runner) => {
+      void vi
+        .waitFor(() => {
+          expect(box.started).toHaveLength(1)
+        })
+        .then(() => {
+          runner.released = runner.detached
+          runner.terminate(1)
+        })
+    },
+  })
+  expect(runner.released).toBe(true)
+  expect(box.execs.slice(1).some(([line]) => line.startsWith('PATH='))).toBe(false)
+  expect(box.removed).toEqual([])
+})
+
 // An adopted job past its line's limit is stopped in the box and ends 124
 // with the line's notice, as it would have where it started.
 it('ends an adopted job past its deadline 124', async () => {
@@ -1123,6 +1158,25 @@ it('ends an adopted job past its deadline 124', async () => {
   expect(chunks.map((c) => DEC.decode(c.data)).join('')).toContain('line')
   expect(box.execs.at(-1)?.[0]).toBe(stopLine('w:9', 15))
   expect(box.removed).toEqual(['/f'])
+})
+
+// An adopted job whose deadline lies past what one timer waits keeps it: its
+// view runs to the program's end, not 124.
+it('keeps an adopted job a deadline weeks away', async () => {
+  const later = new Promise<void>((resolve) => setTimeout(resolve, 50))
+  const box = new JobBox([[[], ['\0mirage-job 7\n'], later]])
+  const job = new JobHandle({
+    id: 1,
+    command: 'train',
+    cwd: '/',
+    createdAt: 0,
+    abort: new AbortController(),
+    detached: { machine: box.id.toString(), folder: '/f', tag: 'w:9' },
+    deadline: Date.now() / 1000 + 30 * 86400,
+    timeout: 30 * 86400,
+  })
+  const code = await resumeJob(new MachineTable({ [box.name]: box }), job, [0, 0])
+  expect(code).toBe(7)
 })
 
 // A start that failed returns its own status, and whatever a wrapper that
@@ -1191,48 +1245,6 @@ it('stops the tag of a start that failed', async () => {
   expect(box.removed).toEqual([box.started[0]?.[0]])
 })
 
-// Output counts as delivered only once delivered: a chunk whose delivery
-// failed is viewed again.
-it('views again a chunk whose delivery failed', async () => {
-  const box = new JobBox([
-    [['step 0\n'], [], 0],
-    [['step 0\n'], ['\0mirage-job 0\n'], 0],
-  ])
-  const out: string[] = []
-  let failed = false
-  const ctx = { stdin: null, flags: {}, env: {}, cwd: PathSpec.fromStrPath('/') }
-  const runner = new ProcessTable('w1', undefined, runAsProcess).start({
-    sessionId: 's',
-    command: 'train',
-    cwd: ctx.cwd,
-    cancel: () => undefined,
-    run: async () => {
-      runner.detachable = true
-      const done = await box.run(
-        ['train'],
-        ctx,
-        null,
-        (chunk) => {
-          if (!failed) {
-            failed = true
-            return Promise.reject(new Error('console unavailable'))
-          }
-          out.push(DEC.decode(chunk))
-          return Promise.resolve()
-        },
-        () => Promise.resolve(),
-      )
-      return done.exitCode
-    },
-  })
-  expect((await runner.join()).exit).toBe(0)
-  expect(box.viewed.map((view) => view.slice(1))).toEqual([
-    ['0', '0'],
-    ['0', '0'],
-  ])
-  expect(out.join('')).toBe('step 0\n')
-})
-
 // A box that cannot detach a job, with no folder of the user's own or no
 // setsid, runs it attached, as it would any other run.
 it('runs attached a job the box cannot detach', async () => {
@@ -1252,21 +1264,23 @@ it('runs attached a job the box cannot detach', async () => {
   expect(box.removed).toEqual([box.started[0]?.[0]])
   expect(box.execs.at(-1)?.[0]).toBe('train')
   expect(box.execs.at(-1)?.[2][PROCESS]).toBe(runner.record.id.toString())
+  expect(runner.detached).toBe(false)
 })
 
-// Run `train` on `box` with output callbacks that fail once each, as a store
-// that went away mid-write: the stdout and stderr that landed.
+// Run `train` on `box` with output callbacks that fail once each after
+// keeping the chunk, as a job's console keeps a chunk its terminal copy
+// failed on: the stdout and stderr that landed.
 async function flakyRun(box: JobBox, fail: 'out' | 'err'): Promise<[string, string]> {
   const landed = { out: '', err: '' }
   let failed = false
   const deliver =
     (which: 'out' | 'err') =>
     (chunk: Uint8Array): Promise<void> => {
+      landed[which] += DEC.decode(chunk)
       if (which === fail && !failed) {
         failed = true
-        return Promise.reject(new Error('console unavailable'))
+        return Promise.reject(new Error('terminal full'))
       }
-      landed[which] += DEC.decode(chunk)
       return Promise.resolve()
     }
   const ctx = { stdin: null, flags: {}, env: {}, cwd: PathSpec.fromStrPath('/') }
@@ -1285,16 +1299,17 @@ async function flakyRun(box: JobBox, fail: 'out' | 'err'): Promise<[string, stri
 }
 
 // The end mark counts only when all the view printed before it landed: a view
-// whose output failed to land is viewed again, however it ended.
+// whose output failed to land is viewed again, however it ended, from after
+// what its sink kept.
 it('views again a mark after output that did not land', async () => {
   const box = new JobBox([
     [[], ['warn\n\0mirage-job 0\n'], 0],
-    [[], ['warn\n\0mirage-job 0\n'], 0],
+    [[], ['\0mirage-job 0\n'], 0],
   ])
   const [, err] = await flakyRun(box, 'err')
   expect(box.viewed.map((view) => view.slice(1))).toEqual([
     ['0', '0'],
-    ['0', '0'],
+    ['0', '5'],
   ])
   expect(err).toBe('warn\n')
 })
@@ -1304,12 +1319,12 @@ it('views again a mark before stdout that did not land', async () => {
   const whole: RunResult = { stdout: ENC.encode('x\n'), stderr: null, exitCode: 0 }
   const box = new JobBox([
     [[], ['\0mirage-job 0\n'], whole],
-    [[], ['\0mirage-job 0\n'], whole],
+    [[], ['\0mirage-job 0\n'], 0],
   ])
   const [out] = await flakyRun(box, 'out')
   expect(box.viewed.map((view) => view.slice(1))).toEqual([
     ['0', '0'],
-    ['0', '0'],
+    ['2', '0'],
   ])
   expect(out).toBe('x\n')
 })

@@ -378,10 +378,11 @@ export class JobTable {
     this.lease = null
     this.held = false
     this.adopted = false
-    for (const handle of this.processes.live()) {
-      handle.released = handle.detached
-      handle.terminate(HANGUP_EXIT_CODE - 128)
-    }
+    const live = this.processes.live()
+    const detached = new Set(live.filter((h) => h.detached).map((h) => h.record.id.pid))
+    for (const handle of live)
+      handle.released = handle.detached || handle.record.ancestors.some((pid) => detached.has(pid))
+    for (const handle of live) handle.terminate(HANGUP_EXIT_CODE - 128)
     const kept = (job: JobHandle): boolean => job.process?.released !== true
     for (const [sessionId, jobs] of this.jobs)
       this.jobs.set(sessionId, new Map([...jobs].filter(([, job]) => kept(job))))

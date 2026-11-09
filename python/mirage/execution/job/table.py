@@ -374,12 +374,18 @@ class JobTable:
         up, as the daemon that took it records it, so the two never both
         change the workspace. A job whose program runs detached is
         released instead: its viewing stops, its program runs on and its
-        ending is left to the daemon that adopts it, which lists it."""
+        ending is left to the daemon that adopts it, which lists it; so
+        is what a scan found under it."""
         self._claimed = False
         self._adopted = False
         self._lease = None
-        for handle in self.processes.live():
-            handle.released = handle.detached
+        live = self.processes.live()
+        detached = {handle.record.pid for handle in live if handle.detached}
+        for handle in live:
+            handle.released = handle.detached or not detached.isdisjoint(
+                handle.record.ancestors
+            )
+        for handle in live:
             handle.terminate(HANGUP_EXIT_CODE - 128)
         for session_id, jobs in self._jobs.items():
             self._jobs[session_id] = {

@@ -320,6 +320,36 @@ describe('MachineTable scans', () => {
     }
   })
 
+  // A daemon that lost the lease leaves what a scan found under a detached job
+  // running for the daemon that adopts it, and still hangs up what it found
+  // under any other job.
+  it.each([true, false])(
+    "leaves a detached job's found children on a lost lease (detached %s)",
+    async (detached) => {
+      const box = new Sleeper('a')
+      const ws = sleepers({ a: box })
+      try {
+        const pid = Number(DEC.decode((await ws.shell('train 1 & echo $!')).stdout).trim())
+        await started(box)
+        await ws.shell('ps')
+        const [job] = ws.jobTable.allJobs()
+        if (job?.process) job.process.detached = detached
+        const found = ws.processTable.live().find((handle) => handle.record.parent === pid)
+        expect(found).toBeDefined()
+        ;(Reflect.get(ws.jobTable, 'lost') as () => void).call(ws.jobTable)
+        await found?.join()
+        expect(found?.released).toBe(detached)
+        const child = box.sent.filter(
+          ([target]) => typeof target !== 'string' && target.pid === 413,
+        )
+        expect(child).toEqual(detached ? [] : [[{ pid: 413, started: 101, exited: null }, 1]])
+      } finally {
+        box.finish()
+        await ws.close()
+      }
+    },
+  )
+
   // An adopted job's program carries the tag its first run gave it, which a
   // signal goes by whatever pid the adopter runs it under.
   it('signals a detached program by the tag it carries', async () => {

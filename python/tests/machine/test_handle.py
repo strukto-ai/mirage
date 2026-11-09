@@ -628,6 +628,7 @@ class JobBox(RecordingMachine):
         self.views = list(views)
         self.setsid = setsid
         self.start_code = 0
+        self.start_gate: asyncio.Event | None = None
         self.probes = 0
         self.started: list[tuple[str, ...]] = []
         self.viewed: list[tuple[str, ...]] = []
@@ -638,6 +639,8 @@ class JobBox(RecordingMachine):
         if script == JOB_START:
             self.started.append(argv[4:])
             self.exec_envs.append(dict(env))
+            if self.start_gate is not None:
+                await self.start_gate.wait()
             return RunResult(
                 stdout=b"", stderr=None, exit_code=self.start_code
             )
@@ -993,6 +996,28 @@ async def test_a_released_detached_job_is_left_running():
     assert box.removed == []
 
 
+# A lease lost while the start has not answered releases the job too: the
+# wrapper may already run its program, which the adopter views.
+@pytest.mark.asyncio
+async def test_a_job_released_while_starting_is_left_running():
+    box = JobBox()
+    box.start_gate = asyncio.Event()
+
+    def started(runner) -> None:
+        async def release() -> None:
+            while not box.started:
+                await asyncio.sleep(0)
+            runner.released = runner.detached
+            runner.terminate(1)
+
+        asyncio.ensure_future(release())
+
+    _, _, _, runner = await _job_run(box, started=started)
+    assert runner.released
+    assert not any(line.startswith("PATH=") for line, _, _ in box.execs[1:])
+    assert box.removed == []
+
+
 # An adopted job past its line's limit is stopped in the box and ends 124
 # with the line's notice, as it would have where it started.
 @pytest.mark.asyncio
@@ -1078,37 +1103,6 @@ async def test_a_start_that_failed_stops_its_tag():
     assert box.removed == [box.started[0][0]]
 
 
-# Output counts as delivered only once delivered: a chunk whose delivery
-# failed is viewed again.
-@pytest.mark.asyncio
-async def test_a_chunk_whose_delivery_failed_is_viewed_again(no_view_wait):
-    box = JobBox(
-        [([b"step 0\n"], [], 0), ([b"step 0\n"], [b"\0mirage-job 0\n"], 0)]
-    )
-    out, failed = bytearray(), []
-    ctx = Context(cwd=PathSpec.from_str_path("/"))
-
-    async def output(data: bytes) -> None:
-        if not failed:
-            failed.append(data)
-            raise ConnectionError("console unavailable")
-        out.extend(data)
-
-    async def errors(data: bytes) -> None:
-        return None
-
-    async def run() -> int:
-        runner.detachable = True
-        return (await box.run(("train",), ctx, None, output, errors)).exit_code
-
-    runner = ProcessTable("w1", bind=run_as_process).start(
-        session_id="s", command="train", cwd=ctx.cwd, run=run
-    )
-    assert (await runner.join()).exit == 0
-    assert [view[1:] for view in box.viewed] == [("0", "0"), ("0", "0")]
-    assert out == b"step 0\n"
-
-
 # A box that cannot detach a job, with no folder of the user's own or no
 # setsid, runs it attached, as it would any other run.
 @pytest.mark.asyncio
@@ -1128,11 +1122,14 @@ async def test_a_job_the_box_cannot_detach_runs_attached():
     assert [where is None for where in told] == [False, True]
     assert box.removed == [box.started[0][0]]
     assert box.execs[-1][0] == "train"
+    assert not runner.detached
     assert box.exec_envs[-1][PROCESS] == str(runner.record.id)
 
 
 # The end mark counts only when all the view printed before it landed: a
-# view whose output failed to land is viewed again, however it ended.
+# view whose output failed to land is viewed again, however it ended, from
+# after what its sink kept, as a job's console keeps a chunk its terminal
+# copy failed on.
 @pytest.mark.asyncio
 async def test_a_mark_after_output_that_did_not_land_is_viewed_again(
     no_view_wait,
@@ -1140,7 +1137,7 @@ async def test_a_mark_after_output_that_did_not_land_is_viewed_again(
     box = JobBox(
         [
             ([], [b"warn\n\0mirage-job 0\n"], 0),
-            ([], [b"warn\n\0mirage-job 0\n"], 0),
+            ([], [b"\0mirage-job 0\n"], 0),
         ]
     )
     err, failed = bytearray(), []
@@ -1150,10 +1147,10 @@ async def test_a_mark_after_output_that_did_not_land_is_viewed_again(
         return None
 
     async def errors(data: bytes) -> None:
+        err.extend(data)
         if not failed:
             failed.append(data)
-            raise ConnectionError("console unavailable")
-        err.extend(data)
+            raise MemoryError("terminal full")
 
     async def run() -> int:
         runner.detachable = True
@@ -1163,7 +1160,7 @@ async def test_a_mark_after_output_that_did_not_land_is_viewed_again(
         session_id="s", command="train", cwd=ctx.cwd, run=run
     )
     assert (await runner.join()).exit == 0
-    assert [view[1:] for view in box.viewed] == [("0", "0"), ("0", "0")]
+    assert [view[1:] for view in box.viewed] == [("0", "0"), ("0", "5")]
     assert err == b"warn\n"
 
 
@@ -1207,15 +1204,15 @@ async def test_a_mark_before_stdout_that_did_not_land_is_viewed_again(
     no_view_wait,
 ):
     view = ([], [b"\0mirage-job 0\n"], RunResult(b"x\n", None, 0))
-    box = JobBox([view, view])
+    box = JobBox([view, ([], [b"\0mirage-job 0\n"], 0)])
     out, failed = bytearray(), []
     ctx = Context(cwd=PathSpec.from_str_path("/"))
 
     async def output(data: bytes) -> None:
+        out.extend(data)
         if not failed:
             failed.append(data)
-            raise ConnectionError("console unavailable")
-        out.extend(data)
+            raise MemoryError("terminal full")
 
     async def errors(data: bytes) -> None:
         return None
@@ -1228,7 +1225,7 @@ async def test_a_mark_before_stdout_that_did_not_land_is_viewed_again(
         session_id="s", command="train", cwd=ctx.cwd, run=run
     )
     assert (await runner.join()).exit == 0
-    assert [v[1:] for v in box.viewed] == [("0", "0"), ("0", "0")]
+    assert [v[1:] for v in box.viewed] == [("0", "0"), ("2", "0")]
     assert out == b"x\n"
 
 
