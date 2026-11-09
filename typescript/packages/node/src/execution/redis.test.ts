@@ -138,6 +138,29 @@ describe.skipIf(REDIS_URL === '')('RedisExecutionStore', () => {
     expect(records).toBeGreaterThan(5)
   })
 
+  it('matches a glob character in the prefix only as itself', async () => {
+    const base = `test:jobs:${randomUUID()}:`
+    const doomed = new RedisExecutionStore({ url: REDIS_URL, keyPrefix: `${base}w?:` })
+    const kept = new RedisExecutionStore({ url: REDIS_URL, keyPrefix: `${base}w1:` })
+    try {
+      await kept.casSet('s', { generation: 1 }, 0)
+      await kept.lease('k')
+      await kept.publish('k', { '7': { pid: 7 } }, 7)
+      await doomed.publish('d', { '8': { pid: 8 } }, 8)
+      expect(Object.keys(await doomed.processes())).toEqual(['d'])
+      await doomed.clear()
+      expect(await kept.load('s')).toEqual({ generation: 1 })
+      expect(await kept.holder()).toBe('k')
+      expect(await kept.highestPid()).toBe(7)
+      expect(Object.keys(await kept.processes())).toEqual(['k'])
+    } finally {
+      await doomed.clear()
+      await kept.clear()
+      await doomed.close()
+      await kept.close()
+    }
+  })
+
   it('clear drops lists, consoles and the lease', async () => {
     const store = open()
     await store.casSet('s', { generation: 1 }, 0)

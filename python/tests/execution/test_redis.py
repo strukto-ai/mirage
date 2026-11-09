@@ -252,3 +252,25 @@ async def test_ended_records_are_kept_to_the_history(stores):
     kept = [r.id.value for r in await b.find_lines()]
     assert len(kept) == HISTORY_MAX_RECORDS + 1
     assert kept[:2] == ["line_0", "line_3"]
+
+
+@pytest.mark.asyncio
+async def test_a_glob_character_in_the_prefix_matches_only_itself(prefix):
+    doomed = RedisExecutionStore(url=REDIS_URL, key_prefix=f"{prefix}w?:")
+    kept = RedisExecutionStore(url=REDIS_URL, key_prefix=f"{prefix}w1:")
+    try:
+        await kept.cas_set("s", {"generation": 1}, 0)
+        await kept.lease("k")
+        await kept.publish("k", {"7": {"pid": 7}}, 7)
+        await doomed.publish("d", {"8": {"pid": 8}}, 8)
+        assert list(await doomed.processes()) == ["d"]
+        await doomed.clear()
+        assert await kept.load("s") == {"generation": 1}
+        assert await kept.holder() == "k"
+        assert await kept.highest_pid() == 7
+        assert list(await kept.processes()) == ["k"]
+    finally:
+        await doomed.clear()
+        await kept.clear()
+        await doomed.close()
+        await kept.close()

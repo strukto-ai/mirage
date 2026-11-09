@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { readFileSync } from 'node:fs'
+import { globEscape } from '@struktoai/mirage-core/cache/file/utils'
 import { ExecutionStore } from '@struktoai/mirage-core/execution/base'
 import { HISTORY_MAX_RECORDS, HISTORY_SECONDS } from '@struktoai/mirage-core/execution/constants'
 import { CONSOLE_TTL_SECONDS, LEASE_SECONDS } from '@struktoai/mirage-core/execution/job/constants'
@@ -298,7 +299,7 @@ export class RedisExecutionStore extends ExecutionStore {
     const c = await this.redis.client()
     const head = `${this.prefix}processes:`
     const keys: string[] = []
-    for await (const k of c.scanIterator({ MATCH: `${head}*` })) {
+    for await (const k of c.scanIterator({ MATCH: `${globEscape(head)}*` })) {
       keys.push(...(Array.isArray(k) ? k : [k]))
     }
     if (keys.length === 0) return {}
@@ -338,7 +339,7 @@ export class RedisExecutionStore extends ExecutionStore {
     await this.writing
     const c = await this.redis.client()
     const keys: string[] = []
-    for await (const k of c.scanIterator({ MATCH: `${this.prefix}*` })) {
+    for await (const k of c.scanIterator({ MATCH: `${globEscape(this.prefix)}*` })) {
       keys.push(...(Array.isArray(k) ? k : [k]))
     }
     if (keys.length > 0) await c.del(keys)

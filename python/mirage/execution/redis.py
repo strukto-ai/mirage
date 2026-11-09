@@ -22,6 +22,7 @@ from typing import cast
 
 import redis.asyncio as aioredis
 
+from mirage.cache.file.utils import glob_escape
 from mirage.execution.base import ExecutionStore
 from mirage.execution.constants import HISTORY_MAX_RECORDS, HISTORY_SECONDS
 from mirage.execution.job.constants import (
@@ -381,7 +382,8 @@ class RedisExecutionStore(ExecutionStore):
 
     async def processes(self) -> dict[str, dict[str, RecordFields]]:
         head = f"{self._prefix}processes:"
-        keys = [key async for key in self._client.scan_iter(f"{head}*")]
+        match = f"{glob_escape(head)}*"
+        keys = [key async for key in self._client.scan_iter(match)]
         if not keys:
             return {}
         values = await self._client.mget(keys)
@@ -411,9 +413,8 @@ class RedisExecutionStore(ExecutionStore):
 
     async def clear(self) -> None:
         await self._flush()
-        keys = [
-            key async for key in self._client.scan_iter(f"{self._prefix}*")
-        ]
+        match = f"{glob_escape(self._prefix)}*"
+        keys = [key async for key in self._client.scan_iter(match)]
         if keys:
             await self._client.delete(*keys)
         self._raised = 0
