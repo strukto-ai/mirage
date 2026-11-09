@@ -68,9 +68,9 @@ or put the files there yourself. Once connected, run the shared
 - If the machine restarts, Mirage mounts the paths again. A line caught
   mid-restart exits 126 without running.
 - A write the workspace refuses, such as one past a mount's `capacity`,
-  looks done to the program but fails the line when it ends. Stderr names
-  the file, as `docker: /data/big.bin: Disk quota exceeded`, and a line
-  that would exit 0 exits 1.
+  looks done to the program, but its command fails when the program ends:
+  stderr names the file, as `docker: /data/big.bin: Disk quota exceeded`,
+  and a command that would exit 0 exits 1.
 - The root mount and `/dev` are not served.
 
 Mirage refuses to run a program when it cannot enforce the session's file
