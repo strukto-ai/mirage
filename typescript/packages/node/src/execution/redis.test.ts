@@ -52,6 +52,17 @@ function pending(abort: AbortController): JobRunner {
     })
 }
 
+async function keysUnder(prefix: string): Promise<string[]> {
+  const c = createClient({ url: REDIS_URL })
+  await c.connect()
+  const keys: string[] = []
+  for await (const k of c.scanIterator({ MATCH: `${prefix}*` })) {
+    keys.push(...(Array.isArray(k) ? k : [k]))
+  }
+  await c.quit()
+  return keys.sort()
+}
+
 describe.skipIf(REDIS_URL === '')('RedisExecutionStore', () => {
   let prefix = ''
   const opened: RedisExecutionStore[] = []
@@ -146,13 +157,11 @@ describe.skipIf(REDIS_URL === '')('RedisExecutionStore', () => {
       await kept.casSet('s', { generation: 1 }, 0)
       await kept.lease('k')
       await kept.publish('k', { '7': { pid: 7 } }, 7)
+      const keptKeys = await keysUnder(base)
       await doomed.publish('d', { '8': { pid: 8 } }, 8)
       expect(Object.keys(await doomed.processes())).toEqual(['d'])
       await doomed.clear()
-      expect(await kept.load('s')).toEqual({ generation: 1 })
-      expect(await kept.holder()).toBe('k')
-      expect(await kept.highestPid()).toBe(7)
-      expect(Object.keys(await kept.processes())).toEqual(['k'])
+      expect(await keysUnder(base)).toEqual(keptKeys)
     } finally {
       await doomed.clear()
       await kept.clear()

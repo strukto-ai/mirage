@@ -47,6 +47,17 @@ async function cleanup(prefix: string): Promise<void> {
   await c.quit()
 }
 
+async function keysUnder(prefix: string): Promise<string[]> {
+  const c = createClient({ url: REDIS_URL ?? 'redis://localhost:6379/0' })
+  await c.connect()
+  const keys: string[] = []
+  for await (const key of c.scanIterator({ MATCH: `${prefix}*` })) {
+    keys.push(...(Array.isArray(key) ? key : [key]))
+  }
+  await c.quit()
+  return keys.sort()
+}
+
 describe.skipIf(skip)('RedisWorkspaceStateStore', () => {
   it('scopes keys by workspace id', async () => {
     const prefix = testPrefix()
@@ -187,19 +198,18 @@ describe.skipIf(skip)('RedisWorkspaceStateStore', () => {
     const prefix = testPrefix()
     const store = makeStore(prefix)
     try {
-      for (const ws of [doomed, kept]) {
+      const seed = async (ws: string): Promise<void> => {
         const execution = store.execution(ws)
         await execution.casSet('s', { generation: 1 }, 0)
         await execution.lease(ws)
         await execution.publish(ws, { '7': { pid: 7 } }, 7)
       }
+      await seed(kept)
+      const keptKeys = await keysUnder(prefix)
+      await seed(doomed)
       expect(Object.keys(await store.execution(doomed).processes())).toEqual([doomed])
       await store.drop(doomed)
-      const execution = store.execution(kept)
-      expect(await execution.load('s')).toEqual({ generation: 1 })
-      expect(await execution.holder()).toBe(kept)
-      expect(await execution.highestPid()).toBe(7)
-      expect(Object.keys(await execution.processes())).toEqual([kept])
+      expect(await keysUnder(prefix)).toEqual(keptKeys)
     } finally {
       await cleanup(prefix)
       await store.close()

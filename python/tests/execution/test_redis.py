@@ -262,13 +262,12 @@ async def test_a_glob_character_in_the_prefix_matches_only_itself(prefix):
         await kept.cas_set("s", {"generation": 1}, 0)
         await kept.lease("k")
         await kept.publish("k", {"7": {"pid": 7}}, 7)
+        scan = kept._client.scan_iter
+        kept_keys = {key async for key in scan(f"{prefix}*")}
         await doomed.publish("d", {"8": {"pid": 8}}, 8)
         assert list(await doomed.processes()) == ["d"]
         await doomed.clear()
-        assert await kept.load("s") == {"generation": 1}
-        assert await kept.holder() == "k"
-        assert await kept.highest_pid() == 7
-        assert list(await kept.processes()) == ["k"]
+        assert {key async for key in scan(f"{prefix}*")} == kept_keys
     finally:
         await doomed.clear()
         await kept.clear()

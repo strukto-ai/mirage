@@ -193,17 +193,25 @@ async def test_drop_deletes_every_key_of_the_workspace(prefix, store):
     ("doomed", "kept"), [("w?", "w1"), ("a", "a:execution:x")]
 )
 async def test_drop_leaves_a_workspace_whose_keys_its_id_would_match(
-    store, doomed, kept
+    prefix, store, doomed, kept
 ):
-    for ws in (doomed, kept):
+    async def seed(ws: str) -> None:
+        """Give a workspace jobs, the lease and a published process.
+
+        Args:
+            ws (str): the workspace id.
+        """
         execution = store.execution(ws)
         await execution.cas_set("s", {"generation": 1}, 0)
         await execution.lease(ws)
         await execution.publish(ws, {"7": {"pid": 7}}, 7)
+
+    client = aioredis.from_url(REDIS_URL)
+    await seed(kept)
+    kept_keys = {key async for key in client.scan_iter(f"{prefix}*")}
+    await seed(doomed)
     assert list(await store.execution(doomed).processes()) == [doomed]
     await store.drop(doomed)
-    execution = store.execution(kept)
-    assert await execution.load("s") == {"generation": 1}
-    assert await execution.holder() == kept
-    assert await execution.highest_pid() == 7
-    assert list(await execution.processes()) == [kept]
+    left = {key async for key in client.scan_iter(f"{prefix}*")}
+    await client.aclose()
+    assert left == kept_keys
