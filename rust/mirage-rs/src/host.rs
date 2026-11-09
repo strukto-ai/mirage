@@ -334,6 +334,9 @@ impl Host {
             }
             "readlink" => {
                 let path = normal(&text(&request["path"]));
+                if path.contains("denied/") {
+                    return (failure("EACCES", "Permission denied"), Vec::new());
+                }
                 if let Some(target) = self.links.get(&path) {
                     let mtime = self.mtimes.get(&path);
                     return (json!({"target": target, "mtime": mtime}), Vec::new());

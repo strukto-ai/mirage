@@ -508,8 +508,8 @@ class StreamHost:
 
     async def _readlink(self, name: str) -> Served:
         """What a link holds, or that the name is no link; a name nothing
-        stands at answers why. The name itself is never followed, the
-        links above it are."""
+        stands at, or a link the rules refuse, answers why. The name itself
+        is never followed, the links above it are."""
         if self.dispatch is None:
             return Served({"fatal": "file output requires a workspace"})
         path = PathSpec.from_str_path(text_view(name), cwd=self.cwd.virtual)
@@ -518,6 +518,7 @@ class StreamHost:
             link = None if self.links is None else self.links.stat_at(where)
             target = None if link is None else link.extra.get(LINK_TARGET_KEY)
             if link is not None and isinstance(target, str):
+                await self.dispatch("readlink", path)
                 mtime = stat_epoch(link.modified)
                 return Served({"target": byte_view(target), "mtime": mtime})
             found, _ = await self.dispatch("stat", path)

@@ -985,7 +985,8 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
 /// What `-u` or `-f` with no file named looks at: each file the archive
 /// holds that still stands under its stored name, the archive itself left
 /// out. Under `-y` a link standing there is weighed by its own time and goes
-/// in as a link, the time of what it points at being no reason to change it.
+/// in as a link, the time of what it points at being no reason to change it,
+/// and a name the rules refuse to read as a link stays as the archive has it.
 async fn stored_files(host: &Host, old: Option<&Original>, config: &Config) -> Vec<Found> {
     let mut stored = Vec::new();
     for record in old.map_or(&[][..], |old| &old.records[..]) {
@@ -995,6 +996,9 @@ async fn stored_files(host: &Host, old: Option<&Original>, config: &Config) -> V
         if config.store_links {
             let path = record.name.clone();
             let (reply, _) = host.ask(Request::Readlink { path }).await;
+            if failed(&reply) {
+                continue;
+            }
             if let Some(target) = reply.target {
                 stored.push(Found {
                     spelled: record.name.clone(),

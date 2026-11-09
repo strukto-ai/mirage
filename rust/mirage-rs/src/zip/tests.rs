@@ -598,6 +598,24 @@ fn a_nul_anywhere_marks_a_member_binary() {
 }
 
 #[test]
+fn a_refresh_under_y_leaves_a_link_the_rules_refuse() {
+    let mut host = Host::with(&[("denied/link", "t\n")], "");
+    host.links.insert("denied/link".into(), "target".into());
+    let link =
+        json!({"spelled": "denied/link", "kind": "link", "target": "old", "mtime": YEAR_2001});
+    assert_eq!(zip(&mut host, "z.zip", json!([link])).0, 0);
+    host.mtimes.insert("denied/link".into(), YEAR_2001 + 100);
+    let refresh = json!({
+        "archive": "z.zip",
+        "output": "z.zip",
+        "update": true,
+        "refresh_all": true,
+        "store_links": true,
+    });
+    assert_eq!(run(&mut host, "zip", refresh).0, 12);
+}
+
+#[test]
 fn a_refresh_under_y_weighs_what_stands_at_the_name() {
     let mut host = Host::with(&[("target", "t\n"), ("other", "o\n")], "");
     host.links.insert("link".into(), "target".into());

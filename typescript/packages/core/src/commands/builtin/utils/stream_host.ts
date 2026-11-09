@@ -563,6 +563,7 @@ export class StreamHost {
       const link = linksOf(this.ctx)?.statAt(this.where(path))
       const target = link?.extra[LINK_TARGET_KEY]
       if (link !== null && link !== undefined && typeof target === 'string') {
+        await dispatch('readlink', path)
         return { reply: { target: byteView(target), mtime: statEpoch(link.modified) } }
       }
       const [found] = await dispatch('stat', path)
