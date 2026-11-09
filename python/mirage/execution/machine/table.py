@@ -289,13 +289,11 @@ class MachineTable:
             target is None and record.runtime is None
         ):
             return None
-        # A detached job's program leads its group, which its tag reaches.
+        # An adopted job's program carries the tag its first run gave it.
         return self._deliver(
             handle,
             record.machine,
-            target
-            if target is not None and not handle.detached
-            else handle.tag or str(record.id),
+            target if target is not None else handle.tag or str(record.id),
             signum,
         )
 

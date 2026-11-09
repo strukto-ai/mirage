@@ -43,7 +43,6 @@ from mirage.machine.constants import (
     SETSID_PROBE,
     faketime_probe,
     is_run,
-    signal_line,
     stop_line,
 )
 from mirage.machine.errors import ConnectionLostError
@@ -868,31 +867,6 @@ def _kill_when_viewed(box):
         asyncio.ensure_future(kill())
 
     return started
-
-
-# A signal a job takes and goes on reaches the group its detached program
-# leads, so what it started stops and continues with it.
-@pytest.mark.asyncio
-async def test_a_signal_reaches_a_detached_jobs_group():
-    gate = asyncio.Event()
-    box = JobBox([([], [], gate)])
-    sent = []
-
-    def started(runner) -> None:
-        async def signal() -> None:
-            while not box.viewed:
-                await asyncio.sleep(0)
-            sent.append(await box.signal(str(runner.record.id), 19))
-            gate.set()
-
-        asyncio.ensure_future(signal())
-
-    box.views.append(([], [b"\0mirage-job 0\n"], 0))
-    _, _, _, runner = await _job_run(box, started=started)
-    assert sent == [True]
-    assert signal_line(str(runner.record.id), 19, True) in [
-        line for line, _, _ in box.execs
-    ]
 
 
 # Only a detachable job's program, fed no input, on a box that detaches

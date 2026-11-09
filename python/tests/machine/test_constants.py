@@ -323,10 +323,10 @@ def test_a_sandbox_without_the_encoder_runs_nothing(tmp_path):
 @pytest.mark.parametrize(
     ("script", "digest"),
     [
-        (JOB_START, "0ef05838d35b5277"),
-        (JOB_VIEW, "b1159bcdc7dbf586"),
+        (JOB_START, "3f4cbd63cadf18c7"),
+        (JOB_VIEW, "08dc153d075e3556"),
         (JOB_REMOVE, "7cde63f731a3578a"),
-        (SETSID_PROBE, "45361050d388f83b"),
+        (SETSID_PROBE, "16bda6f7218e7026"),
     ],
     ids=["start", "view", "remove", "probe"],
 )
@@ -396,7 +396,7 @@ def test_a_detached_job_is_viewed_to_its_exit_code(tmp_path):
 def test_only_the_detached_program_carries_the_tag(tmp_path):
     folder, tag = tmp_path / "jobs" / "job", f"t{uuid.uuid4().hex}:9"
     assert _start(folder, tag, "sleep", "30").returncode == 0
-    program, wrapper, _ = _pids(folder)
+    program, _, wrapper, _ = _pids(folder)
     try:
         environ = Path(f"/proc/{program}/environ").read_bytes()
         assert f"{PROCESS}={tag}".encode() in environ.split(b"\0")
@@ -407,30 +407,17 @@ def test_only_the_detached_program_carries_the_tag(tmp_path):
         os.kill(program, 9)
 
 
-# A group stop reaches what the program started, and the wrapper lives on
-# to write the code the signal left.
+# A signal by the tag reaches the program, and the wrapper lives on to
+# write the code the signal left.
 @DETACHES
-def test_a_group_stop_leaves_the_exit_code_written(tmp_path):
+def test_a_signal_leaves_the_exit_code_written(tmp_path):
     folder, tag = tmp_path / "jobs" / "job", f"t{uuid.uuid4().hex}:9"
     assert (
         _start(folder, tag, "sh", "-c", "sleep 30 & sleep 30").returncode == 0
     )
-    subprocess.run(["/bin/sh", "-c", signal_line(tag, 15, True)], check=True)
+    subprocess.run(["/bin/sh", "-c", signal_line(tag, 15)], check=True)
     assert _view(folder).stderr == b"\0mirage-job s 143\n"
-
-
-# A group stop reaches the children a program that exited left holding its
-# output, in the group it led.
-@DETACHES
-def test_a_group_stop_reaches_children_the_program_left(tmp_path):
-    folder, tag = tmp_path / "jobs" / "job", f"t{uuid.uuid4().hex}:9"
-    started = _start(folder, tag, "sh", "-c", "(sleep 30; echo late) & exit 7")
-    assert started.returncode == 0
-    while not (folder / "exit").exists():
-        time.sleep(0.05)
-    subprocess.run(["/bin/sh", "-c", signal_line(tag, 15, True)], check=True)
-    viewed = _view(folder)
-    assert (viewed.stdout, viewed.stderr) == (b"", b"\0mirage-job s 7\n")
+    subprocess.run(["/bin/sh", "-c", stop_line(tag, 9)])
 
 
 # A job whose wrapper went with no exit code, or whose folder went, is
@@ -439,7 +426,7 @@ def test_a_group_stop_reaches_children_the_program_left(tmp_path):
 def test_a_lost_or_unlaunched_job_ends_as_such(tmp_path):
     folder, tag = tmp_path / "jobs" / "job", f"t{uuid.uuid4().hex}:9"
     assert _start(folder, tag, "sleep", "30").returncode == 0
-    program, wrapper, _ = _pids(folder)
+    program, _, wrapper, _ = _pids(folder)
     os.kill(wrapper, 9)
     os.kill(program, 9)
     time.sleep(0.3)
@@ -470,17 +457,33 @@ def test_a_job_folder_is_the_users_alone(tmp_path):
     assert b"no folder of this user's own" in started.stderr
 
 
-# A job ends once what its program started has stopped too, as an attached
-# run ends once every writer closed its output: a child's late output is
-# viewed before the end mark.
+# A job ends once its program exits, as an attached run does, though
+# what it started still holds its output.
 @DETACHES
-def test_a_job_ends_once_what_it_started_stopped(tmp_path):
+def test_a_job_ends_once_its_program_exits(tmp_path):
     folder, tag = tmp_path / "jobs" / "job", f"t{uuid.uuid4().hex}:9"
-    program = "(sleep 1; echo late) & echo early; exit 7"
+    program = "(sleep 30; echo late) & echo early; exit 7"
     assert _start(folder, tag, "sh", "-c", program).returncode == 0
+    began = time.monotonic()
     viewed = _view(folder)
-    assert viewed.stdout == b"early\nlate\n"
-    assert viewed.stderr == b"\0mirage-job s 7\n"
+    assert time.monotonic() - began < 5
+    assert (viewed.stdout, viewed.stderr) == (
+        b"early\n",
+        b"\0mirage-job s 7\n",
+    )
+    subprocess.run(["/bin/sh", "-c", stop_line(tag, 9)])
+
+
+# A program that exits at once still names its pid and its start.
+@DETACHES
+def test_a_program_that_exits_at_once_names_its_pid(tmp_path):
+    folder, tag = tmp_path / "jobs" / "job", f"t{uuid.uuid4().hex}:9"
+    started = _start(folder, tag, "true")
+    program, begun, _, _ = _pids(folder)
+    assert started.stdout.split() == [
+        str(program).encode(),
+        str(begun).encode(),
+    ]
 
 
 # Folders the user made writable by others before are made the user's
@@ -495,16 +498,3 @@ def test_a_job_folder_s_parents_are_made_private(tmp_path):
     )
     assert jobs.stat().st_mode & 0o777 == 0o700
     assert tmp_path.stat().st_mode & 0o777 == 0o700
-
-
-# A child that closed its output does not hold the job open, as it would
-# not hold an attached run: only one still holding ``out`` or ``err`` does.
-@DETACHES
-def test_a_child_that_closed_its_output_does_not_hold_the_job(tmp_path):
-    folder, tag = tmp_path / "jobs" / "job", f"t{uuid.uuid4().hex}:9"
-    program = "sleep 30 </dev/null >/dev/null 2>&1 & exit 7"
-    assert _start(folder, tag, "sh", "-c", program).returncode == 0
-    began = time.monotonic()
-    assert _view(folder).stderr == b"\0mirage-job s 7\n"
-    assert time.monotonic() - began < 5
-    subprocess.run(["/bin/sh", "-c", stop_line(tag, 9)])

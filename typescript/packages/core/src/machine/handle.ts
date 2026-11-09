@@ -123,8 +123,6 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   // Whether the box holds setsid, asked once a job first detaches; a probe
   // that got no answer is cleared, so a later job asks again.
   private setsidProbe: Promise<boolean> | null = null
-  // The folder of each detached job's run here, by its tag.
-  private readonly detached = new Map<string, string>()
   // Each executing run's end and what finishes with it, by tag, for a look
   // at its report to settle while its exec stays open.
   private readonly ended = new Map<
@@ -505,11 +503,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * @param signum the signal.
    */
   async signal(target: string | MachinePid, signum: number): Promise<boolean> {
-    const group = typeof target === 'string' && this.detached.has(target)
-    const done = await this.connectedLine(
-      signalLine(target, signum, group),
-      MACHINE_STOP_WAIT_SECONDS,
-    )
+    const done = await this.connectedLine(signalLine(target, signum), MACHINE_STOP_WAIT_SECONDS)
     if (done.exitCode !== 0 && done.exitCode !== NOT_RUNNING_STATUS)
       throw new Error(
         `${this.id.toString()}: signal ${String(signum)} not sent: exit ${String(done.exitCode)}`,
@@ -612,7 +606,6 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   ): Promise<RunResult | null> {
     const folder = jobFolder(tag)
     if (runner !== null && !(await tellDetached(runner, this.id, folder))) return null
-    this.detached.set(tag, folder)
     // Its program may run before the start returns: a lease lost meanwhile
     // releases it to the daemon that adopts it.
     if (runner !== null) runner.detached = true
@@ -642,7 +635,6 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       }
       if (started?.exitCode === JOB_REFUSED_STATUS) {
         logger.debug?.(`${this.id.toString()}: job not detached: ${String(started.stderr)}`)
-        this.detached.delete(tag)
         if (runner !== null) runner.detached = false
         await this.removeJob(folder)
         if (runner !== null) await untellDetached(runner, this.id)
@@ -664,8 +656,6 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     } catch (error) {
       if (signal?.aborted === true && runner?.released !== true) await this.removeJob(folder)
       throw error
-    } finally {
-      this.detached.delete(tag)
     }
   }
 
@@ -692,7 +682,6 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   ): Promise<RunResult> {
     const runner = currentCaller().process
     if (runner !== null) runner.detached = true
-    this.detached.set(tag, folder)
     this.runs += 1
     let done: RunResult
     try {
@@ -704,7 +693,6 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       }
       throw error
     } finally {
-      this.detached.delete(tag)
       this.runs -= 1
     }
     await this.settled(runner, folder)

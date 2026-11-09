@@ -137,8 +137,6 @@ class MachineHandle:
         self._setsid = False
         self._setsid_known = False
         self._setsid_lock = asyncio.Lock()
-        # The folder of each detached job's run here, by its tag.
-        self._detached: dict[str, str] = {}
         # Each executing run's end and its task, by tag, for a look at its
         # report to settle while its exec stays open.
         self._ended: dict[
@@ -541,9 +539,8 @@ class MachineHandle:
             Exception: the machine could not be reached, or the line
                 failed.
         """
-        group = isinstance(target, str) and target in self._detached
         done = await self._connected_line(
-            signal_line(target, signum, group), MACHINE_STOP_WAIT_SECONDS
+            signal_line(target, signum), MACHINE_STOP_WAIT_SECONDS
         )
         if done.exit_code not in (0, NOT_RUNNING_STATUS):
             raise RuntimeError(
@@ -666,7 +663,6 @@ class MachineHandle:
             runner, self.id, folder
         ):
             return None
-        self._detached[tag] = folder
         # Its program may run before the start returns: a lease lost
         # meanwhile releases it to the daemon that adopts it.
         if runner is not None:
@@ -695,7 +691,6 @@ class MachineHandle:
                     logger.debug(
                         "%s: job not detached: %r", self.id, started.stderr
                     )
-                    self._detached.pop(tag, None)
                     if runner is not None:
                         runner.detached = False
                     await self._remove(folder)
@@ -726,8 +721,6 @@ class MachineHandle:
             if runner is None or not runner.released:
                 await asyncio.shield(self._remove(folder))
             raise
-        finally:
-            self._detached.pop(tag, None)
 
     async def resume(
         self,
@@ -752,7 +745,6 @@ class MachineHandle:
         runner = current_caller().process
         if runner is not None:
             runner.detached = True
-        self._detached[tag] = folder
         self._executing += 1
         try:
             done = await self._view(folder, tag, runner, output, errors, sent)
@@ -762,7 +754,6 @@ class MachineHandle:
                 await asyncio.shield(self._remove(folder))
             raise
         finally:
-            self._detached.pop(tag, None)
             self._executing -= 1
         await self._settled(runner, folder)
         return done

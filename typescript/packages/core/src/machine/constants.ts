@@ -461,10 +461,8 @@ export function scanLine(workspace: string): string {
  *
  * @param target the run's tag, or the process.
  * @param signum the signal.
- * @param group send it to the process group the tagged program leads, as
- *   a detached job's program does (`JOB_START`).
  */
-export function signalLine(target: string | MachinePid, signum: number, group = false): string {
+export function signalLine(target: string | MachinePid, signum: number): string {
   const absent = String(NOT_RUNNING_STATUS)
   if (typeof target !== 'string') {
     const pid = String(target.pid)
@@ -483,19 +481,16 @@ export function signalLine(target: string | MachinePid, signum: number, group = 
     "tr '\\000' '\\n' 2>/dev/null < \"$p/environ\" " +
     '| grep -qxF "$m" || continue; ' +
     's=$(cat "$p/stat" 2>/dev/null) || continue; set -- ${s##*)}; ' +
-    'l="$l${p#/proc/} "; r="$r ${p#/proc/}:$2:$3"; done; ' +
-    'k=; g=; for e in $r; do x=${e#*:}; case $l in *" ${x%%:*} "*) ;; ' +
-    '*) k="$k ${e%%:*}"; case "$g " in *" -${x#*:} "*) ;; ' +
-    '*) g="$g -${x#*:}" ;; esac ;; esac; done; ' +
-    `[ -n "$k" ] || exit ${absent}; ` +
-    (group ? 'k=$g; ' : '') +
-    `kill -${String(signum)} $k 2>/dev/null; true`
+    'l="$l${p#/proc/} "; r="$r ${p#/proc/}:$2"; done; ' +
+    'k=; for e in $r; do case $l in *" ${e#*:} "*) ;; ' +
+    '*) k="$k ${e%%:*}" ;; esac; done; ' +
+    `[ -n "$k" ] || exit ${absent}; kill -${String(signum)} $k 2>/dev/null; true`
   )
 }
 
 // Where a detached job keeps its files in the box, one folder per run:
-// `out` and `err`, `pid` (the program's pid, the wrapper's and its start)
-// and `exit`.
+// `out` and `err`, `pid` (the program's pid and start, the wrapper's and its
+// start) and `exit`.
 export const JOBS_DIR = '/tmp/.mirage/jobs'
 
 // What the viewer prints on stderr after a detached job's last byte: this,
@@ -506,26 +501,28 @@ export const JOB_LOST = 'lost'
 
 export const JOB_END = /^\0mirage-job ([0-9a-f]+) (\d+|lost)\n$/
 // A mark the viewer has begun but not finished printing.
-
 export const JOB_END_PART = /^\0mirage-job ([0-9a-f]*|[0-9a-f]+ (\d*|l|lo|los|lost))$/
 
-// Whether the box can detach a job: it holds setsid, and readlink, which
-// tells the viewer who still writes a job's output.
-export const SETSID_PROBE = `PATH=${TOOLS_PATH}; command -v readlink >/dev/null && command -v setsid`
+// Whether the box can detach a job: it holds setsid.
+export const SETSID_PROBE = `PATH=${TOOLS_PATH}; command -v setsid`
 
 // The wrapper a detached job runs under, in a session of its own: $1 the
 // folder, $2 the tag, $3 setsid, then the argv. The inner setsid execs in
 // place, so the program keeps the pid it is recorded under, leads its own
 // group and is the only process the tag marks; the wrapper writes the
-// program's pid and its own with its start, waits, and writes the exit code,
-// a signal's 128 plus it. Its names are prefixed, so a name the session
+// program's pid and its own, each with its start in clock ticks (`-` when not
+// read), waits, and writes the exit code, a signal's 128 plus it. The
+// program's start is read before the wait, while even one that exited at
+// once is still there to read. Its names are prefixed, so a name the session
 // exported reaches the program as it was. Mirrors Python's.
 export const JOB_WRAPPER =
   '_md=$1; _mt=$2; _ms=$3; shift 3; "$_ms" /bin/sh -c ' +
   `'export ${PROCESS}="$1"; shift; exec "$@"' ` +
   'sh "$_mt" "$@" </dev/null >"$_md/out" 2>"$_md/err" & _mp=$!; ' +
+  '_mx=; read -r _mx 2>/dev/null </proc/$_mp/stat; set -- ${_mx##*)}; ' +
+  '_mq=${20:--}; ' +
   '_mx=; read -r _mx 2>/dev/null </proc/$$/stat; set -- ${_mx##*)}; ' +
-  'printf \'%s %s %s\\n\' "$_mp" "$$" "${20}" >"$_md/pid"; ' +
+  'printf \'%s %s %s %s\\n\' "$_mp" "$_mq" "$$" "${20:--}" >"$_md/pid"; ' +
   'wait "$_mp"; echo $? >"$_md/exit"'
 
 // What the start of a detached job exits with when the box cannot detach it
@@ -534,14 +531,13 @@ export const JOB_REFUSED_STATUS = 75
 
 // Starts a detached job: $1 the folder, $2 the tag, then the argv, from the
 // run's cwd. It returns 0 once the wrapper wrote `pid`, printing the
-// program's pid and its start in clock ticks while it still runs,
-// `JOB_REFUSED_STATUS` without setsid or a folder of the user's own, and 126
-// when the wrapper never wrote `pid`. The folder and the two above it are the
-// user's alone, mode 700 and no links, so none reads the job's output or
-// swaps its files.
+// program's pid and its start in clock ticks, `JOB_REFUSED_STATUS` without
+// setsid or a folder of the user's own, and 126 when the wrapper never wrote
+// `pid`. The folder and the two above it are the user's alone, mode 700 and
+// no links, so none reads the job's output or swaps its files.
 export const JOB_START =
   `_mT=${TOOLS_PATH}; ` +
-  '_ms=$(PATH=$_mT; command -v readlink >/dev/null && command -v setsid) || ' +
+  '_ms=$(PATH=$_mT; command -v setsid) || ' +
   `exit ${String(JOB_REFUSED_STATUS)}; ` +
   '_md=$1; _mt=$2; shift 2; (umask 077; PATH=$_mT mkdir -p -- "$_md") ' +
   '&& [ ! -h "${_md%/*/*}" ] && [ ! -h "${_md%/*}" ] ' +
@@ -553,39 +549,31 @@ export const JOB_START =
   'sh "$_md" "$_mt" "$_ms" "$@" </dev/null >/dev/null 2>&1 & _mi=0; ' +
   'while [ ! -s "$_md/pid" ] && [ ! -s "$_md/exit" ]; do _mi=$((_mi + 1)); ' +
   '[ $_mi -le 200 ] || exit 126; PATH=$_mT sleep 0.05; done; ' +
-  '_mp=; read -r _mp _mx <"$_md/pid"; _mx=; ' +
-  'read -r _mx 2>/dev/null </proc/$_mp/stat && ' +
-  '{ set -- ${_mx##*)}; echo "$_mp ${20}"; }; true'
+  '_mp=; _mq=; read -r _mp _mq _mx <"$_md/pid"; echo "$_mp $_mq"'
 
 // Views a detached job: $1 the folder, $2 and $3 the bytes of `out` and `err`
 // already delivered, $4 the secret its mark carries. It prints the rest as it
 // is written, each read exactly up to the size measured first, and ends with
-// `JOB_MARK`, the secret and the exit code once `exit` holds one and no
-// process left in the program's group holds `out` or `err` open (one whose
-// files cannot be read counts as holding them), as an attached run ends once
-// every writer closed its output; `JOB_LOST` once the folder or a wrapper that
-// wrote none is gone. A start the connection dropped gets as long to write
-// `pid` as `JOB_START` waits for it.
+// `JOB_MARK`, the secret and the exit code once `exit` holds one, what the
+// program wrote before it exited printed first, as an attached run ends once
+// its program exited (what a process it left running writes later is not
+// shown); `JOB_LOST` once the folder or a wrapper that wrote none is gone. A
+// start the connection dropped gets as long to write `pid` as `JOB_START`
+// waits for it.
 export const JOB_VIEW =
   `PATH=${TOOLS_PATH}; d=$1; o=$2; e=$3; s=$4; ` +
   `q() { printf '\\000${JOB_MARK.slice(1)}%s %s\\n' "$s" "$1" >&2; ` +
   'exit 0; }; ' +
-  `[ -d "$d" ] || q ${JOB_LOST}; r=; w=; v=; i=0; ` +
+  `[ -d "$d" ] || q ${JOB_LOST}; r=; t=; w=; v=; i=0; ` +
   'while [ ! -s "$d/pid" ] && [ ! -s "$d/exit" ] && [ $i -lt 100 ]; ' +
   'do i=$((i + 1)); sleep 0.1; done; ' +
-  '[ -r "$d/pid" ] && read -r r w v <"$d/pid"; ' +
+  '[ -r "$d/pid" ] && read -r r t w v <"$d/pid"; ' +
   'u() { x=; read -r x 2>/dev/null </proc/"$w"/stat || return 1; ' +
   'set -- ${x##*)}; [ "$1" != Z ] && [ "${20}" = "$v" ]; }; ' +
-  'k() { for y in /proc/[0-9]*; do x=; ' +
-  'read -r x 2>/dev/null <"$y/stat" || continue; set -- ${x##*)}; ' +
-  '[ "$3" = "$r" ] && [ "$1" != Z ] || continue; ' +
-  '[ -r "$y/fd" ] && [ -x "$y/fd" ] || return 0; ' +
-  'for z in "$y"/fd/*; do case $(readlink "$z" 2>/dev/null) in ' +
-  '"$d/out" | "$d/err") return 0 ;; esac; done; done; return 1; }; ' +
   'p() { n=$(wc -c 2>/dev/null <"$d/$1") || n=$2; n=$((n)); ' +
   '[ "$n" -gt "$2" ] || { n=$2; return 0; }; ' +
   'tail -c +$(($2 + 1)) "$d/$1" | head -c $((n - $2)); }; ' +
-  'while :; do f=; [ -s "$d/exit" ] && ! k && f=1; ' +
+  'while :; do f=; [ -s "$d/exit" ] && f=1; ' +
   'p out "$o"; o=$n; p err "$e" >&2; e=$n; ' +
   'if [ -n "$f" ]; then read -r c <"$d/exit"; q "$c"; fi; ' +
   `[ -d "$d" ] || q ${JOB_LOST}; u || [ -s "$d/exit" ] || q ${JOB_LOST}; ` +

@@ -318,10 +318,10 @@ describe('ENCODE_OUTPUT', () => {
 // Python's constants test pins the same digests.
 describe('job scripts', () => {
   it.each([
-    ['start', JOB_START, '0ef05838d35b5277'],
-    ['view', JOB_VIEW, 'b1159bcdc7dbf586'],
+    ['start', JOB_START, '3f4cbd63cadf18c7'],
+    ['view', JOB_VIEW, '08dc153d075e3556'],
     ['remove', JOB_REMOVE, '7cde63f731a3578a'],
-    ['probe', SETSID_PROBE, '45361050d388f83b'],
+    ['probe', SETSID_PROBE, '16bda6f7218e7026'],
   ])('%s matches Python', (_, script, digest) => {
     expect(createHash('sha256').update(script).digest('hex').slice(0, 16)).toBe(digest)
   })
@@ -372,7 +372,7 @@ describe.skipIf(!detaches)('a detached job in a real sh', () => {
     const folder = fresh()
     const named = tag()
     expect(startJob(folder, named, 'sleep', '30').status).toBe(0)
-    const [program, wrapper] = jobPids(folder)
+    const [program, , wrapper] = jobPids(folder)
     try {
       const entries = (pid: number | undefined): string[] =>
         readFileSync(`/proc/${String(pid)}/environ`, 'utf8').split('\0')
@@ -383,26 +383,15 @@ describe.skipIf(!detaches)('a detached job in a real sh', () => {
     }
   })
 
-  // A group stop reaches what the program started, and the wrapper lives on
-  // to write the code the signal left.
-  it('keeps the exit code a group stop left', () => {
+  // A signal by the tag reaches the program, and the wrapper lives on to
+  // write the code the signal left.
+  it('keeps the exit code a signal left', () => {
     const folder = fresh()
     const named = tag()
     expect(startJob(folder, named, 'sh', '-c', 'sleep 30 & sleep 30').status).toBe(0)
-    expect(spawnSync('/bin/sh', ['-c', signalLine(named, 15, true)]).status).toBe(0)
+    expect(spawnSync('/bin/sh', ['-c', signalLine(named, 15)]).status).toBe(0)
     expect(viewJob(folder).stderr.toString()).toBe('\0mirage-job s 143\n')
-  })
-
-  // A group stop reaches the children a program that exited left holding
-  // its output, in the group it led.
-  it('reaches the children a program that exited left', () => {
-    const folder = fresh()
-    const named = tag()
-    expect(startJob(folder, named, 'sh', '-c', '(sleep 30; echo late) & exit 7').status).toBe(0)
-    while (!existsSync(join(folder, 'exit'))) spawnSync('sleep', ['0.05'])
-    expect(spawnSync('/bin/sh', ['-c', signalLine(named, 15, true)]).status).toBe(0)
-    const viewed = viewJob(folder)
-    expect([viewed.stdout.toString(), viewed.stderr.toString()]).toEqual(['', '\0mirage-job s 7\n'])
+    spawnSync('/bin/sh', ['-c', stopLine(named, 9)])
   })
 
   // A job's folder is the user's alone: none other reads its output.
@@ -412,15 +401,29 @@ describe.skipIf(!detaches)('a detached job in a real sh', () => {
     expect(statSync(folder).mode & 0o077).toBe(0)
   })
 
-  // It ends once what its program started has stopped too, as an attached
-  // run ends once every writer closed its output.
-  it('ends once what it started stopped', () => {
+  // It ends once its program exits, as an attached run does, though what it
+  // started still holds its output.
+  it('ends once its program exits', () => {
     const folder = fresh()
-    const program = '(sleep 1; echo late) & echo early; exit 7'
-    expect(startJob(folder, tag(), 'sh', '-c', program).status).toBe(0)
+    const named = tag()
+    const program = '(sleep 30; echo late) & echo early; exit 7'
+    expect(startJob(folder, named, 'sh', '-c', program).status).toBe(0)
+    const began = Date.now()
     const viewed = viewJob(folder)
-    expect(viewed.stdout.toString()).toBe('early\nlate\n')
-    expect(viewed.stderr.toString()).toBe('\0mirage-job s 7\n')
+    expect(Date.now() - began).toBeLessThan(5000)
+    expect([viewed.stdout.toString(), viewed.stderr.toString()]).toEqual([
+      'early\n',
+      '\0mirage-job s 7\n',
+    ])
+    spawnSync('/bin/sh', ['-c', stopLine(named, 9)])
+  })
+
+  // A program that exits at once still names its pid and its start.
+  it('names the pid of a program that exits at once', () => {
+    const folder = fresh()
+    const started = startJob(folder, tag(), 'true')
+    const [program, begun] = jobPids(folder)
+    expect(started.stdout.toString().trim()).toBe(`${String(program)} ${String(begun)}`)
   })
 
   // Folders the user made writable by others before are made the user's alone
@@ -433,23 +436,10 @@ describe.skipIf(!detaches)('a detached job in a real sh', () => {
     expect(statSync(jobs).mode & 0o777).toBe(0o700)
   })
 
-  // A child that closed its output does not hold the job open, as it would
-  // not hold an attached run: only one still holding `out` or `err` does.
-  it('is not held by a child that closed its output', () => {
-    const folder = fresh()
-    const named = tag()
-    const program = 'sleep 30 </dev/null >/dev/null 2>&1 & exit 7'
-    expect(startJob(folder, named, 'sh', '-c', program).status).toBe(0)
-    const began = Date.now()
-    expect(viewJob(folder).stderr.toString()).toBe('\0mirage-job s 7\n')
-    expect(Date.now() - began).toBeLessThan(5000)
-    spawnSync('/bin/sh', ['-c', stopLine(named, 9)])
-  })
-
   it('ends lost when its wrapper or folder went', () => {
     const folder = fresh()
     expect(startJob(folder, tag(), 'sleep', '30').status).toBe(0)
-    const [program, wrapper] = jobPids(folder)
+    const [program, , wrapper] = jobPids(folder)
     process.kill(wrapper ?? 0, 9)
     process.kill(program ?? 0, 9)
     spawnSync('sleep', ['0.3'])

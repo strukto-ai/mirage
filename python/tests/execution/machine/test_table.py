@@ -828,10 +828,10 @@ async def test_a_workspace_that_fails_to_build_holds_no_machine():
     ).close()
 
 
-# A detached job's program leads its group, which only its tag reaches: a
-# signal goes by the tag even once a scan placed the program by its pid.
+# A detached job's program is signalled by its pid once a scan placed it,
+# as an attached one is: what it started is left alone.
 @pytest.mark.asyncio
-async def test_a_detached_program_is_signalled_by_its_tag_after_a_scan():
+async def test_a_detached_program_is_signalled_by_its_pid_after_a_scan():
     box = _Sleeper("a")
     ws = _sleepers(a=box)
     try:
@@ -843,7 +843,7 @@ async def test_a_detached_program_is_signalled_by_its_tag_after_a_scan():
         assert job.process.record.machine_pid is not None
         job.process.detached = True
         assert (await ws.shell(f"kill {pid}; wait {pid}")).exit_code == 143
-        assert box.sent == [(str(job.process.record.id), 15)]
+        assert box.sent == [(MachinePid(412, 100.0), 15)]
     finally:
         await ws.close()
 
@@ -851,8 +851,11 @@ async def test_a_detached_program_is_signalled_by_its_tag_after_a_scan():
 # An adopted job's program carries the tag its first run gave it, which a
 # signal goes by whatever pid the adopter runs it under.
 @pytest.mark.asyncio
-async def test_a_detached_program_is_signalled_by_the_tag_it_carries():
-    box = _Sleeper("a")
+async def test_a_detached_program_is_signalled_by_the_tag_it_carries(
+    monkeypatch,
+):
+    monkeypatch.setattr("mirage.machine.handle.RUN_START_WAIT_SECONDS", 0.01)
+    box = _Unreported("a")
     ws = _sleepers(a=box)
     try:
         pid = int((await ws.shell("train 1 & echo $!")).stdout)

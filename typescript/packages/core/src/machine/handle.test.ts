@@ -27,7 +27,6 @@ import {
   JOB_START,
   JOB_VIEW,
   SETSID_PROBE,
-  signalLine,
   PROCESS,
   FAKETIME_PROBE_SECONDS,
   faketimeProbe,
@@ -1005,36 +1004,6 @@ describe('a detached job', () => {
     })
     expect(box.execs.map(([line]) => line).at(-1)).toBe(stopLine(runner.record.id.toString(), 15))
     expect(box.removed).toEqual([box.viewed[0]?.[0]])
-  })
-
-  // A signal a job takes and goes on reaches the group its detached program
-  // leads, so what it started stops and continues with it.
-  it('takes a signal in its group', async () => {
-    let open!: () => void
-    const gate = new Promise<void>((resolve) => {
-      open = resolve
-    })
-    const box = new JobBox([
-      [[], [], gate],
-      [[], ['\0mirage-job 0\n'], 0],
-    ])
-    const sent: boolean[] = []
-    const [, , , runner] = await jobRun(box, {
-      started: (runner) => {
-        void vi
-          .waitFor(() => {
-            expect(box.viewed).toHaveLength(1)
-          })
-          .then(async () => {
-            sent.push(await box.signal(runner.record.id.toString(), 19))
-            open()
-          })
-      },
-    })
-    expect(sent).toEqual([true])
-    expect(box.execs.map(([line]) => line)).toContain(
-      signalLine(runner.record.id.toString(), 19, true),
-    )
   })
 
   // Only a detachable job's program, fed no input, on a box that detaches
