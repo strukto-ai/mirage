@@ -149,12 +149,15 @@ describe.skipIf(REDIS_URL === '')('RedisExecutionStore', () => {
     expect(records).toBeGreaterThan(5)
   })
 
-  it('refuses a name with a colon', async () => {
-    const store = open()
-    expect(() => store.console('a:b')).toThrow()
-    await expect(store.publish('a:b', { '1': { pid: 1 } }, 1)).rejects.toThrow()
-    await expect(store.requestStop('a:b', 1, 15)).rejects.toThrow()
-  })
+  it.each(['', 'a:b', 'sessions'])(
+    'refuses the name %j, which the key filter would not count',
+    async (name) => {
+      const store = open()
+      expect(() => store.console(name)).toThrow()
+      await expect(store.publish(name, { '1': { pid: 1 } }, 1)).rejects.toThrow()
+      await expect(store.requestStop(name, 1, 15)).rejects.toThrow()
+    },
+  )
 
   it('matches a glob character in the prefix only as itself', async () => {
     const base = `test:jobs:${randomUUID()}:`

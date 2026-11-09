@@ -35,12 +35,16 @@ import { CAS_SCRIPT } from '../workspace/mount/namespace/redis.ts'
 export const LEASE_SCRIPT = readFileSync(new URL('./lease.lua', import.meta.url), 'utf8')
 export const PID_SCRIPT = readFileSync(new URL('./pid.lua', import.meta.url), 'utf8')
 export const HISTORY_SCRIPT = readFileSync(new URL('./history.lua', import.meta.url), 'utf8')
+// A longer workspace id ending in `:execution:processes` puts its session
+// table at `processes:sessions`, so no daemon is named `sessions`.
 export const OWN_KEY =
-  /^(?:lists|lease|pid|(?:records|ended):(?:lines|processes)|console:[^:]+:(?:stream|seq|ended)|(?:processes|stops):[^:]+)$/
+  /^(?:lists|lease|pid|(?:records|ended):(?:lines|processes)|console:[^:]+:(?:stream|seq|ended)|(?:processes|stops):(?!sessions$)[^:]+)$/
 
-/** Refuse a daemon id or console name holding `:`, which `OWN_KEY` could not tell from a longer prefix's keys. */
+/** Refuse a daemon id or console name `OWN_KEY` would not count as this store's: empty, holding `:`, or `sessions`. */
 function keyPart(name: string): string {
-  if (name.includes(':')) throw new Error(`a redis execution store refuses ':' in a name: ${name}`)
+  if (name === '' || name.includes(':') || name === 'sessions') {
+    throw new Error(`a redis execution store refuses an empty name, ':' or 'sessions': ${name}`)
+  }
   return name
 }
 

@@ -197,13 +197,16 @@ async def test_drop_deletes_every_key_of_the_workspace(prefix, store):
         ("a", "a:execution:x"),
         ("a", "a:execution:processes:x"),
         ("a", "a:execution:console:x"),
+        ("a", "a:execution:processes"),
+        ("a", "a:execution:stops"),
     ],
 )
 async def test_drop_leaves_a_workspace_whose_keys_its_id_would_match(
     prefix, store, doomed, kept
 ):
     async def seed(ws: str) -> None:
-        """Give a workspace jobs, the lease, a process and a console.
+        """Give a workspace a session, jobs, the lease, a process and a
+        console.
 
         Args:
             ws (str): the workspace id.
@@ -213,6 +216,7 @@ async def test_drop_leaves_a_workspace_whose_keys_its_id_would_match(
         await execution.lease("d")
         await execution.publish("d", {"7": {"pid": 7}}, 7)
         await execution.console("c").append(Channel.STDOUT, b"x")
+        await store.sessions(ws).set("s1", {"session_id": "s1"})
 
     client = aioredis.from_url(REDIS_URL)
     await seed(kept)

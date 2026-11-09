@@ -197,6 +197,8 @@ describe.skipIf(skip)('RedisWorkspaceStateStore', () => {
     ['a', 'a:execution:x'],
     ['a', 'a:execution:processes:x'],
     ['a', 'a:execution:console:x'],
+    ['a', 'a:execution:processes'],
+    ['a', 'a:execution:stops'],
   ])('drop(%s) leaves %s, whose keys its id would match', async (doomed, kept) => {
     const prefix = testPrefix()
     const store = makeStore(prefix)
@@ -207,6 +209,7 @@ describe.skipIf(skip)('RedisWorkspaceStateStore', () => {
         await execution.lease('d')
         await execution.publish('d', { '7': { pid: 7 } }, 7)
         await execution.console('c').append(Channel.STDOUT, new TextEncoder().encode('x'))
+        await store.sessions(ws).set('s1', { session_id: 's1' })
       }
       await seed(kept)
       const keptKeys = await keysUnder(prefix)

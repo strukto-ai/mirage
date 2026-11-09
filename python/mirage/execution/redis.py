@@ -54,22 +54,25 @@ PID_SCRIPT = (files("mirage.execution") / "pid.lua").read_text(
 HISTORY_SCRIPT = (files("mirage.execution") / "history.lua").read_text(
     encoding="utf-8"
 )
+# A longer workspace id ending in `:execution:processes` puts its session
+# table at `processes:sessions`, so no daemon is named `sessions`.
 OWN_KEY = re.compile(
     rb"lists|lease|pid|(records|ended):(lines|processes)"
-    rb"|console:[^:]+:(stream|seq|ended)|(processes|stops):[^:]+"
+    rb"|console:[^:]+:(stream|seq|ended)|(processes|stops):(?!sessions$)[^:]+"
 )
 
 
 def _key_part(name: str) -> str:
-    """Refuse a daemon id or console name holding ``:``, which
-    ``OWN_KEY`` could not tell from a longer prefix's keys.
+    """Refuse a daemon id or console name ``OWN_KEY`` would not count as
+    this store's: empty, holding ``:``, or ``sessions``.
 
     Args:
         name (str): the daemon id or console name.
     """
-    if ":" in name:
+    if not name or ":" in name or name == "sessions":
         raise ValueError(
-            f"a redis execution store refuses ':' in a name: {name!r}"
+            "a redis execution store refuses an empty name, ':' or"
+            f" 'sessions': {name!r}"
         )
     return name
 

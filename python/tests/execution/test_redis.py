@@ -257,14 +257,15 @@ async def test_ended_records_are_kept_to_the_history(stores):
 
 
 @pytest.mark.asyncio
-async def test_a_name_with_a_colon_is_refused(stores):
+@pytest.mark.parametrize("name", ["", "a:b", "sessions"])
+async def test_a_name_the_key_filter_would_not_count_is_refused(stores, name):
     store = stores()
     with pytest.raises(ValueError):
-        store.console("a:b")
+        store.console(name)
     with pytest.raises(ValueError):
-        await store.publish("a:b", {"1": {"pid": 1}}, 1)
+        await store.publish(name, {"1": {"pid": 1}}, 1)
     with pytest.raises(ValueError):
-        await store.request_stop("a:b", 1, 15)
+        await store.request_stop(name, 1, 15)
 
 
 @pytest.mark.asyncio
