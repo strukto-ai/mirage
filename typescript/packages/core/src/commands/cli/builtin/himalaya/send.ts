@@ -20,7 +20,7 @@ import { IOResult, materialize, type ByteSource } from '../../../../io/types.ts'
 import type { EmailAccessor } from '../../../../accessor/email.ts'
 import type { Files } from '../../../../workspace/files.ts'
 import { appendMessage } from './deliver.ts'
-import { rendered } from './printer.ts'
+import { ChainedError, rendered } from './printer.ts'
 import { sendRaw } from './smtp.ts'
 import { finishMessage } from './util.ts'
 
@@ -34,8 +34,13 @@ const IMAP_FLAGS: Record<string, string> = {
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
-function crlf(text: string): Uint8Array {
-  return ENC.encode(text.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n'))
+function crlf(data: Uint8Array): Uint8Array {
+  const out: number[] = []
+  data.forEach((byte, index) => {
+    if (byte === 0x0a && (index === 0 || data[index - 1] !== 0x0d)) out.push(0x0d)
+    out.push(byte)
+  })
+  return Uint8Array.from(out)
 }
 
 async function readMessage(
@@ -48,9 +53,9 @@ async function readMessage(
     const inline = texts.join(' ').replace(/\\r/g, '').replace(/\\n/g, '\r\n')
     if (vfs !== undefined) {
       const path = PathSpecClass.fromStrPath(inline, cwd.virtual)
-      if (await vfs.exists(path)) return crlf(DEC.decode(await vfs.read(path)))
+      if (await vfs.exists(path)) return crlf(await vfs.read(path))
     }
-    return crlf(inline)
+    return crlf(ENC.encode(inline))
   }
   return stdin === null ? new Uint8Array(0) : await materialize(stdin)
 }
@@ -83,7 +88,16 @@ export async function add(
   const flags = fl.asList('flag').map((name) => IMAP_FLAGS[name] ?? name)
   const sent = fl.asBool('send')
   if (sent) await sendRaw(accessor.config, raw)
-  const uid = await appendMessage(accessor, raw, fl.asStr('mailbox') ?? '', flags)
+  const mailbox = fl.asStr('mailbox') ?? ''
+  let uid: string | null
+  try {
+    uid = await appendMessage(accessor, raw, mailbox, flags)
+  } catch (error) {
+    if (!sent) throw error
+    throw new ChainedError(`Message sent, but saving a copy to ${mailbox} failed`, [
+      error instanceof Error ? error.message : String(error),
+    ])
+  }
   const suffix = sent ? ' and sent' : ''
   const text =
     uid !== null

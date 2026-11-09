@@ -40,4 +40,4 @@ async def reply(
         posting_style=cast(PostingStyle, fl.as_str("posting_style", "top")),
         quote_headline=fl.as_str("quote_headline") or "",
     )
-    return await route(accessor, fl, ctx.stdin, source, ctx.vfs)
+    return await route(accessor, fl, ctx.stdin, source, ctx.vfs, ctx.ids)

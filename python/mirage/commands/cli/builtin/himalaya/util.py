@@ -35,6 +35,7 @@ from mirage.core.email.mime import parse_mime
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.filetype import mime_type_for
+from mirage.utils.ids import IdSource
 from mirage.workspace.files import Files
 
 NO_ENTRY = 2
@@ -215,6 +216,7 @@ async def route(
     stdin: ByteSource | None,
     source: Source | None,
     vfs: Files | None,
+    ids: IdSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Assemble a message, then send it or write its MIME to stdout.
 
@@ -229,6 +231,7 @@ async def route(
         source (Source | None): the replied-to or forwarded message.
         vfs (Files | None): the session's files, read only when --attach
             names files to load.
+        ids (IdSource | None): where the message id and boundary draw from.
     """
     send = fl.as_bool("send")
     template = fl.as_bool("json") and not send and fl.as_str("save") is None
@@ -253,4 +256,6 @@ async def route(
         signature=None if template else signature,
         attachments=await load_attachments(vfs, fl.as_paths("attach")),
     )
-    return await finish_message(accessor, fl, build(compose, source), send)
+    return await finish_message(
+        accessor, fl, build(compose, source, ids), send
+    )

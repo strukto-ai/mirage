@@ -123,7 +123,7 @@ export function usageLine(
     bits.push(clap ? operandSlot(op) : slot(op))
   }
   if (cs.rest !== null) {
-    if (clap && cs.rest.nargs === 'REMAINDER') bits.push(`[-- <${cs.rest.names[0]!}>...]`)
+    if (clap && cs.rest.nargs === 'REMAINDER') bits.push(`[-- <${cs.rest.names[0] ?? ''}>...]`)
     else if (clap) bits.push(operandSlot(cs.rest, !positionalRequired(cs.rest)))
     else bits.push(`[${slot(cs.rest)}...]`)
   }

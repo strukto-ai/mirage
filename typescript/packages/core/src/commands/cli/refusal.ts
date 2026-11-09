@@ -243,11 +243,11 @@ export function clapStrayOperand(
   argv: readonly string[],
 ): Uint8Array | null {
   const rest = compileSpec(spec).rest
-  if (rest === null || rest.nargs !== 'REMAINDER' || typed.length === 0) return null
+  if (rest?.nargs !== 'REMAINDER' || typed.length === 0) return null
   if (argv.includes(END_OF_OPTIONS)) return null
   const usage = usageLine(prog, spec, [], UsageStyle.CLAP)
   return ENC.encode(
-    `${clapUnexpectedArgument(typed[0]!)}\n\n${usage}\n\nFor more information, try '--help'.\n`,
+    `${clapUnexpectedArgument(typed[0] ?? '')}\n\n${usage}\n\nFor more information, try '--help'.\n`,
   )
 }
 
@@ -257,12 +257,12 @@ type ClapRefusalFacts = Pick<
   | 'ambiguousOptions'
   | 'optionErrorKinds'
   | 'needsValueOptions'
-  | 'invalidIntOptions'
-  | 'invalidValueOptions'
-  | 'missingRequiredOptions'
   | 'texts'
   | 'paths'
->
+> &
+  Partial<
+    Pick<ParsedCommand, 'invalidIntOptions' | 'invalidValueOptions' | 'missingRequiredOptions'>
+  >
 
 /**
  * clap's refusal for a leaf's option error, null when not one of them.
@@ -287,28 +287,31 @@ export function clapLeafRefusal(
   }
   const usage = usageLine(prog, spec, [], UsageStyle.CLAP)
   for (const kind of parsed.optionErrorKinds) {
-    if (kind === 'needs_value' && parsed.needsValueOptions.length > 0) {
+    const needsValue = parsed.needsValueOptions[0]
+    if (kind === 'needs_value' && needsValue !== undefined) {
       return ENC.encode(
-        `error: a value is required for '${shown(parsed.needsValueOptions[0]!)}' but none was supplied${footer}`,
+        `error: a value is required for '${shown(needsValue)}' but none was supplied${footer}`,
       )
     }
-    if ((kind === 'invalid' || kind === 'unexpected_value') && parsed.invalidOptions.length > 0) {
-      const token = parsed.invalidOptions[0]!
+    const token = parsed.invalidOptions[0]
+    if ((kind === 'invalid' || kind === 'unexpected_value') && token !== undefined) {
       const word = token.startsWith('-') ? token : `-${token}`
       const tip =
-        compiled.rest !== null && compiled.rest.nargs === 'REMAINDER'
+        compiled.rest?.nargs === 'REMAINDER'
           ? `\n\n  tip: to pass '${word}' as a value, use '-- ${word}'`
           : ''
       return ENC.encode(`${clapUnexpectedArgument(word)}${tip}\n\n${usage}${footer}`)
     }
-    if (kind === 'int' && (parsed.invalidIntOptions ?? []).length > 0) {
-      const [dest, value] = parsed.invalidIntOptions[0]!
+    const badInt = parsed.invalidIntOptions?.[0]
+    if (kind === 'int' && badInt !== undefined) {
+      const [dest, value] = badInt
       return ENC.encode(
         `error: invalid value '${value}' for '${shown(dest)}': invalid digit found in string${footer}`,
       )
     }
-    if (kind === 'value' && (parsed.invalidValueOptions ?? []).length > 0) {
-      const [dest, value] = parsed.invalidValueOptions[0]!
+    const badValue = parsed.invalidValueOptions?.[0]
+    if (kind === 'value' && badValue !== undefined) {
+      const [dest, value] = badValue
       const allowed = (byDest.get(dest)?.choices ?? []).join(', ')
       return ENC.encode(
         `error: invalid value '${value}' for '${shown(dest)}'\n  [possible values: ${allowed}]${footer}`,

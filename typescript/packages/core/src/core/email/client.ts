@@ -64,7 +64,7 @@ export class MailboxNotFound extends Error {
   constructor(
     folder: string,
     readonly detail: string,
-    readonly verb: string = 'SELECT',
+    readonly verb = 'SELECT',
   ) {
     super(`no such mailbox '${folder}'`)
   }
@@ -102,6 +102,7 @@ export async function listMessageUids(
  * object; `or` and `not` nest further objects.
  */
 export interface SearchQuery {
+  keyword?: string
   all?: boolean
   seen?: boolean
   answered?: boolean
@@ -210,6 +211,7 @@ class CriteriaParser {
     if (word === 'NOT') return { not: this.parseKey() }
     if (word === 'OR') return { or: [this.parseKey(), this.parseKey()] }
     if (word === 'UNSEEN') return { seen: false }
+    if (word === 'KEYWORD') return { keyword: this.take() }
     const flag = FLAG_KEYS[word]
     if (flag !== undefined) return { [flag]: true }
     const textKey = TEXT_KEYS[word]

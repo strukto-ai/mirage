@@ -49,14 +49,14 @@ export function formatSize(size: number): string {
     scale += 1
   }
   const places = Number.isInteger(value) ? 0 : 2
-  return `${value.toFixed(places)} ${SIZE_UNITS[scale]!}`
+  return `${value.toFixed(places)} ${SIZE_UNITS[scale] ?? ''}`
 }
 
 function splitLongWord(allowed: number, word: string): [string, string] {
-  const chars = [...word]
+  const chars = Array.from(word)
   let taken = 0
   for (let index = 0; index < chars.length; index += 1) {
-    taken += displayWidth(chars[index]!)
+    taken += displayWidth(chars[index] ?? '')
     if (taken > allowed) return [chars.slice(0, index).join(''), chars.slice(index).join('')]
   }
   return [word, '']
@@ -78,7 +78,7 @@ export function splitLine(line: string, width: number): string[] {
   let current = ''
   let length = 0
   while (words.length > 0) {
-    const word = words.pop()!
+    const word = words.pop() ?? ''
     const wordLength = displayWidth(word)
     const added = wordLength + length + (current !== '' ? 1 : 0)
     let remaining = width - length
@@ -105,8 +105,8 @@ export function splitLine(line: string, width: number): string[] {
       if (!fresh) current += ' '
       const [head, tail] = splitLongWord(remaining, word)
       if (fresh && head === '') {
-        const chars = [...tail]
-        current += chars[0]!
+        const chars = Array.from(tail)
+        current += chars[0] ?? ''
         words.push(chars.slice(1).join(''))
       } else {
         current += head
@@ -152,7 +152,7 @@ export function arrangedWidths(
   fitted: ReadonlySet<number>,
   maxWidth: number | null,
 ): number[] {
-  const count = rows[0]!.cells.length
+  const count = rows[0]?.cells.length ?? 0
   const natural: number[] = []
   for (let column = 0; column < count; column += 1) {
     let widest = 0
@@ -165,10 +165,10 @@ export function arrangedWidths(
   }
   if (maxWidth === null) return natural
   const decided = new Map<number, number>()
-  for (const column of fitted) decided.set(column, natural[column]!)
+  for (const column of fitted) decided.set(column, natural[column] ?? 0)
   let remainingWidth = Math.max(maxWidth - (count + 1), 0)
   for (let column = 0; column < count; column += 1) {
-    const taken = decided.has(column) ? decided.get(column)! + PADDING : PADDING
+    const taken = decided.has(column) ? (decided.get(column) ?? 0) + PADDING : PADDING
     remainingWidth = Math.max(remainingWidth - taken, 0)
   }
   let remainingColumns = count - decided.size
@@ -184,8 +184,8 @@ export function arrangedWidths(
     if (average() === 0) break
     for (let column = 0; column < count; column += 1) {
       if (decided.has(column)) continue
-      if (natural[column]! <= average()) {
-        fix(column, natural[column]!)
+      if ((natural[column] ?? 0) <= average()) {
+        fix(column, natural[column] ?? 0)
         found = true
         if (remainingColumns === 0) break
       }
@@ -204,7 +204,7 @@ export function arrangedWidths(
       }
     }
   }
-  if (remainingColumns === 0) return natural.map((_, column) => decided.get(column)!)
+  if (remainingColumns === 0) return natural.map((_, column) => decided.get(column) ?? 0)
   remainingWidth = Math.max(remainingWidth, remainingColumns)
   const even = Math.floor(remainingWidth / remainingColumns)
   let excess = remainingWidth - even * remainingColumns
@@ -213,7 +213,7 @@ export function arrangedWidths(
     decided.set(column, even + (excess > 0 ? 1 : 0))
     excess -= 1
   }
-  return natural.map((_, column) => decided.get(column)!)
+  return natural.map((_, column) => decided.get(column) ?? 0)
 }
 
 function truncated(line: string, width: number): string {
@@ -221,10 +221,10 @@ function truncated(line: string, width: number): string {
   let length = displayWidth(indicator)
   let cut = 0
   let fits = false
-  const chars = [...line]
+  const chars = Array.from(line)
   for (let index = 0; index < chars.length; index += 1) {
     cut = index
-    const wider = length + displayWidth(chars[index]!)
+    const wider = length + displayWidth(chars[index] ?? '')
     if (wider > width) break
     length = wider
     if (index === chars.length - 1) fits = true
@@ -240,7 +240,7 @@ function cellLines(one: Cell, width: number, maxHeight: number | null): string[]
   }
   if (maxHeight !== null && lines.length > maxHeight) {
     lines.length = maxHeight
-    lines[lines.length - 1] = truncated(lines[lines.length - 1]!, width)
+    lines[lines.length - 1] = truncated(lines[lines.length - 1] ?? '', width)
   }
   return lines.map((line) => {
     const gap = ' '.repeat(Math.max(width - displayWidth(line), 0))
@@ -249,12 +249,14 @@ function cellLines(one: Cell, width: number, maxHeight: number | null): string[]
 }
 
 function renderRow(entry: Row, widths: readonly number[]): string[] {
-  const columns = entry.cells.map((one, index) => cellLines(one, widths[index]!, entry.maxHeight))
+  const columns = entry.cells.map((one, index) =>
+    cellLines(one, widths[index] ?? 0, entry.maxHeight),
+  )
   const height = columns.reduce((widest, lines) => Math.max(widest, lines.length), 0)
   const out: string[] = []
   for (let index = 0; index < height; index += 1) {
     const fields = columns.map(
-      (lines, column) => lines[index] ?? ' '.repeat(widths[column]! + PADDING),
+      (lines, column) => lines[index] ?? ' '.repeat((widths[column] ?? 0) + PADDING),
     )
     out.push(`│${fields.join('┆')}│`)
   }

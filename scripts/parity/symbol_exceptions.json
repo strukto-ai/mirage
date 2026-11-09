@@ -1009,6 +1009,7 @@
     "MailAddress": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
     "bytesToBase64": "A byte or formatting helper Python's standard library already provides.",
     "hexPair": "A byte or formatting helper Python's standard library already provides.",
+    "pushAll": "A byte or formatting helper Python's standard library already provides.",
     "randomHex": "A byte or formatting helper Python's standard library already provides."
    }
   },
@@ -1062,7 +1063,9 @@
     "hexValue": "A byte or formatting helper Python's standard library already provides.",
     "isAlpha": "A byte or formatting helper Python's standard library already provides.",
     "isHex": "A byte or formatting helper Python's standard library already provides.",
-    "newState": "A dataclass carries these defaults in Python."
+    "newState": "A dataclass carries these defaults in Python.",
+    "partAt": "A Python list index raises on its own when a part is missing.",
+    "popState": "A Python list pop raises on its own when the stack is empty."
    }
   },
   "core/email/client": {

@@ -14,7 +14,10 @@
 
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya.deliver import append_message
-from mirage.commands.cli.builtin.himalaya.printer import rendered
+from mirage.commands.cli.builtin.himalaya.printer import (
+    ChainedError,
+    rendered,
+)
 from mirage.commands.cli.builtin.himalaya.smtp import send_raw
 from mirage.commands.cli.builtin.himalaya.util import finish_message
 from mirage.commands.config import Context
@@ -83,9 +86,16 @@ async def add(
     sent = fl.as_bool("send")
     if sent:
         await send_raw(accessor.config, raw)
-    uid = await append_message(
-        accessor, raw, fl.as_str("mailbox") or "", flags
-    )
+    mailbox = fl.as_str("mailbox") or ""
+    try:
+        uid = await append_message(accessor, raw, mailbox, flags)
+    except Exception as exc:
+        if not sent:
+            raise
+        raise ChainedError(
+            f"Message sent, but saving a copy to {mailbox} failed",
+            (str(exc),),
+        ) from exc
     suffix = " and sent" if sent else ""
     text = (
         f"Message {uid} successfully added{suffix}"

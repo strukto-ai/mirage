@@ -189,3 +189,61 @@ def test_an_explicit_sort_has_to_consider_the_whole_window():
 
 def test_page_zero_still_costs_one_page():
     assert uid_budget(0, 25, (), 200) == 25
+
+
+def _message(source: str) -> str:
+    with pytest.raises(QueryError) as caught:
+        parse_query(source)
+    return str(caught.value)
+
+
+def test_a_report_shows_only_the_failing_line():
+    assert _message("subject a\nand\n  zzz qq") == (
+        "Error: cannot parse search emails query `subject a\nand\n  zzz qq`\n"
+        "   ╭─[ query:3:3 ]\n"
+        "   │\n"
+        " 3 │   zzz qq\n"
+        "   │   ┬  \n"
+        "   │   ╰── found 'z' expected space between filters, `and`, `or`, "
+        "or end of input\n"
+        "───╯\n"
+    )
+
+
+def test_the_gutter_grows_with_the_line_number():
+    report = _message("subject a" + "\n" * 10 + "and zzz")
+    assert "    ╭─[ query:11:5 ]\n" in report
+    assert " 11 │ and zzz\n" in report
+    assert report.endswith("\n────╯\n")
+
+
+def test_a_position_counts_bytes():
+    assert "query:1:12 ]" in _message("subject é zz")
+    assert _message("subject é and") == (
+        "Error: cannot parse search emails query `subject é and`\n"
+    )
+
+
+def test_a_wide_found_character_underlines_its_bytes():
+    report = _message("not 日abc")
+    assert "   │     ──┬─  \n" in report
+    assert "   │       ╰─── found '日' expected" in report
+
+
+def test_a_label_past_its_line_draws_no_text():
+    assert _message("not é") == (
+        "Error: cannot parse search emails query `not é`\n"
+        "   ╭─[ query:1:5 ]\n"
+        "   │\n"
+        "   │ \n"
+        "───╯\n"
+    )
+
+
+def test_a_keyword_must_be_an_atom():
+    assert _message('flag a"b') == 'Invalid IMAP keyword `a"b`'
+    assert parse_query("flag custom").criteria == "KEYWORD custom"
+
+
+def test_a_pattern_with_a_line_break_finds_nothing():
+    assert parse_query("subject a\nzzz").criteria == "NOT ALL"

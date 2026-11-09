@@ -84,12 +84,11 @@ def part_mime(headers: list[dict[str, Any]]) -> str | None:
     return f"{content['c_type']}/{subtype}" if subtype else content["c_type"]
 
 
-def part_payload(body: dict[str, Any], raw: bytes) -> bytes:
+def part_payload(body: dict[str, Any]) -> bytes:
     """A part's decoded contents.
 
     Args:
         body (dict[str, Any]): the part's body.
-        raw (bytes): the whole message, for an attached one.
     """
     for kind in ("Text", "Html"):
         if kind in body:
@@ -97,15 +96,14 @@ def part_payload(body: dict[str, Any], raw: bytes) -> bytes:
     for kind in ("Binary", "InlineBinary"):
         if kind in body:
             return bytes(body[kind])
-    return raw if "Message" in body else b""
+    return body["Message"].raw if "Message" in body else b""
 
 
-def attachment_rows(message: MimeMessage, raw: bytes) -> list[AttachmentRow]:
+def attachment_rows(message: MimeMessage) -> list[AttachmentRow]:
     """Every attachment of a parsed message, in order.
 
     Args:
         message (MimeMessage): the parsed message.
-        raw (bytes): its raw bytes.
     """
     rows = []
     for part_id in message.attachments:
@@ -117,7 +115,7 @@ def attachment_rows(message: MimeMessage, raw: bytes) -> list[AttachmentRow]:
                 id=str(part_id + 1),
                 filename=part_name(headers),
                 mime=part_mime(headers),
-                payload=part_payload(part["body"], raw),
+                payload=part_payload(part["body"]),
                 inline=disposition is not None
                 and disposition["c_type"].lower() == "inline",
             )
@@ -132,7 +130,7 @@ async def _rows_of(
     message = parse_mime(raw)
     if message is None:
         raise ValueError(PARSE_FAILURE)
-    return attachment_rows(message, raw)
+    return attachment_rows(message)
 
 
 def _document(row: AttachmentRow, path: str | None) -> dict[str, Any]:

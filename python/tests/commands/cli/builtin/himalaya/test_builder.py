@@ -158,3 +158,12 @@ def test_attachments_build_multipart_mixed():
     assert 'Content-Disposition: attachment; filename="note.txt"' in text
     assert "Content-Transfer-Encoding: base64\r\n\r\nAP8=\r\n" in text
     assert text.endswith(f"\r\n--{boundary}--\r\n")
+
+
+def test_a_decoded_name_cannot_break_a_header_line():
+    raw = build(
+        Compose(
+            sender="me@x", to=("=?UTF-8?B?QQ0KQmNjOiB4QHk=?= <a@b>",), body="x"
+        )
+    )
+    assert b'To: "ABcc: x@y" <a@b>\r\n' in raw

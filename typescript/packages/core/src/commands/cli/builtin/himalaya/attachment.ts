@@ -22,11 +22,13 @@ import {
   attributeOf,
   contentTypeOf,
   parseMime,
+  partAt,
   type MimeBody,
   type MimeHeader,
   type MimeMessage,
 } from '../../../../core/email/mime.ts'
 import type { Files } from '../../../../workspace/files.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 import { ensureDir } from '../../operand.ts'
 import { rendered } from './printer.ts'
 import { cell, formatSize, renderTable, row } from './table.ts'
@@ -60,24 +62,24 @@ export function partMime(headers: MimeHeader[]): string | null {
 }
 
 /** A part's decoded contents. */
-export function partPayload(body: MimeBody, raw: Uint8Array): Uint8Array {
+export function partPayload(body: MimeBody): Uint8Array {
   if ('Text' in body) return ENC.encode(body.Text)
   if ('Html' in body) return ENC.encode(body.Html)
   if ('Binary' in body) return Uint8Array.from(body.Binary)
   if ('InlineBinary' in body) return Uint8Array.from(body.InlineBinary)
-  return 'Message' in body ? raw : new Uint8Array(0)
+  return 'Message' in body ? body.Message.raw : new Uint8Array(0)
 }
 
 /** Every attachment of a parsed message, in order. */
-export function attachmentRows(message: MimeMessage, raw: Uint8Array): AttachmentRow[] {
+export function attachmentRows(message: MimeMessage): AttachmentRow[] {
   return message.attachments.map((partId) => {
-    const part = message.parts[partId]!
+    const part = partAt(message, partId)
     const disposition = contentTypeOf(part.headers, 'content_disposition')
     return {
       id: String(partId + 1),
       filename: partName(part.headers),
       mime: partMime(part.headers),
-      payload: partPayload(part.body, raw),
+      payload: partPayload(part.body),
       inline: disposition !== null && disposition.c_type.toLowerCase() === 'inline',
     }
   })
@@ -91,7 +93,7 @@ async function rowsOf(
   const raw = await fetchSource(accessor, mailbox, uid)
   const message = parseMime(raw)
   if (message === null) throw new Error(PARSE_FAILURE)
-  return attachmentRows(message, raw)
+  return attachmentRows(message)
 }
 
 function document(entry: AttachmentRow, path: string | null): Record<string, unknown> {
@@ -122,7 +124,7 @@ function table(
       cell(formatSize(entry.payload.length)),
     ]
     if (withInline) cells.push(cell(entry.inline ? 'yes' : 'no'))
-    if (paths !== null) cells.push(cell(paths[index]!))
+    if (paths !== null) cells.push(cell(paths[index] ?? ''))
     return row(cells)
   })
   return `\n${renderTable(
@@ -136,7 +138,7 @@ function table(
 
 /** A file name a hostile header cannot climb out of the directory with. */
 function safeName(name: string): string {
-  const cleaned = [...name.trim()]
+  const cleaned = Array.from(name.trim())
     .map((char) => (char === '/' || char === '\\' || char === '\0' ? '_' : char))
     .join('')
     .replace(/^\.+/, '')
@@ -166,7 +168,7 @@ export async function attachmentList(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, ctx.spec)
   const withInline = fl.asBool('inline')
-  const rows = (await rowsOf(accessor, fl.asStr('mailbox', 'INBOX'), texts[0]!)).filter(
+  const rows = (await rowsOf(accessor, fl.asStr('mailbox', 'INBOX'), texts[0] ?? '')).filter(
     (entry) => withInline || !entry.inline,
   )
   const out = rendered(
@@ -184,7 +186,7 @@ export async function attachmentDownload(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, ctx.spec)
-  const uid = texts[0]!
+  const uid = texts[0] ?? ''
   if (ctx.vfs === undefined) throw new Error('attachment download needs a workspace')
   const rows = await rowsOf(accessor, fl.asStr('mailbox', 'INBOX'), uid)
   const directory = fl.asPath('dir') ?? PathSpecClass.fromStrPath('.', ctx.cwd.virtual)
@@ -203,12 +205,12 @@ export async function attachmentDownload(
   }
   if (remaining.size > 0) {
     throw new Error(
-      `No attachment with id ${[...remaining].sort().join(', ')} on message \`${uid}\``,
+      `No attachment with id ${[...remaining].sort(compareCodePoints).join(', ')} on message \`${uid}\``,
     )
   }
   const out = rendered(
     fl,
-    { attachments: written.map((entry, index) => document(entry, writtenPaths[index]!)) },
+    { attachments: written.map((entry, index) => document(entry, writtenPaths[index] ?? '')) },
     table(
       written,
       writtenPaths,

@@ -22,6 +22,7 @@ import {
   contentTypeOf,
   headerValue,
   parseMime,
+  partAt,
   type ContentFields,
   type MimeMessage,
   type MimePart,
@@ -81,7 +82,7 @@ function dayOfWeek(year: number, month: number, day: number): number {
       Math.floor(y / 4) -
       Math.floor(y / 100) +
       Math.floor(y / 400) +
-      offsets[month - 1]! +
+      (offsets[month - 1] ?? 0) +
       day) %
     7
   )
@@ -90,8 +91,8 @@ function dayOfWeek(year: number, month: number, day: number): number {
 function rfc822(value: DateFields): string {
   const negative = value.tz_before_gmt && (value.tz_hour > 0 || value.tz_minute > 0)
   return (
-    `${DAYS[dayOfWeek(value.year, value.month, value.day)]!}, ${String(value.day)} ` +
-    `${MONTH_NAMES[value.month - 1]!} ${pad(value.year, 4)} ${pad(value.hour)}:${pad(value.minute)}:` +
+    `${DAYS[dayOfWeek(value.year, value.month, value.day)] ?? ''}, ${String(value.day)} ` +
+    `${MONTH_NAMES[value.month - 1] ?? ''} ${pad(value.year, 4)} ${pad(value.hour)}:${pad(value.minute)}:` +
     `${pad(value.second)} ${negative ? '-' : '+'}${pad(value.tz_hour)}${pad(value.tz_minute)}`
   )
 }
@@ -140,12 +141,12 @@ function firstText(value: MimeValue): string | null {
   return textOf(value)
 }
 
-function renderPart(part: MimePart, position: number, raw: Uint8Array, htmlOnly: boolean): string {
+function renderPart(part: MimePart, position: number, htmlOnly: boolean): string {
   const { headers, body } = part
   const mime =
     partMime(headers) ??
     ('Html' in body ? 'text/html' : 'Text' in body ? 'text/plain' : 'application/octet-stream')
-  const size = formatSize(partPayload(body, raw).length)
+  const size = formatSize(partPayload(body).length)
   const name = partName(headers)
   const label =
     name !== null
@@ -175,8 +176,8 @@ function isHtmlOnly(message: MimeMessage): boolean {
 }
 
 /** A message as `message read` shows it. */
-export function messageView(message: MimeMessage, raw: Uint8Array): string {
-  const top = message.parts[0]!.headers
+export function messageView(message: MimeMessage): string {
+  const top = partAt(message, 0).headers
   let out = ''
   const date = headerValue(top, 'date')
   if (date !== null && typeof date === 'object' && 'DateTime' in date) {
@@ -194,7 +195,7 @@ export function messageView(message: MimeMessage, raw: Uint8Array): string {
   if (subject !== null) out += `Subject: ${subject}\n`
   const htmlOnly = isHtmlOnly(message)
   message.parts.forEach((part, index) => {
-    if (!('Multipart' in part.body)) out += renderPart(part, index + 1, raw, htmlOnly)
+    if (!('Multipart' in part.body)) out += renderPart(part, index + 1, htmlOnly)
   })
   return out
 }
@@ -206,7 +207,7 @@ export async function read(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, ctx.spec)
-  const uid = texts[0]!
+  const uid = texts[0] ?? ''
   const mailbox = fl.asStr('mailbox', 'INBOX')
   const raw = await fetchSource(accessor, mailbox, uid)
   if (fl.asBool('seen')) await storeFlags(accessor, mailbox, [uid], [SEEN_FLAG], 'add')
@@ -217,5 +218,5 @@ export async function read(
   const message = parseMime(raw)
   if (message === null) throw new Error(PARSE_FAILURE)
   if (fl.asBool('json')) return [compactJsonBytes(message.asDocument()), new IOResult()]
-  return [ENC.encode(messageView(message, raw)), new IOResult()]
+  return [ENC.encode(messageView(message)), new IOResult()]
 }

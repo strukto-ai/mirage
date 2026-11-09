@@ -1481,6 +1481,61 @@
         "stdout": "rc=2\nrc=2\nrc=2\nrc=2\nrc=2\nrc=2\n",
         "stderr": "error: a value is required for '--page <N>' but none was supplied\n\nFor more information, try '--help'.\nerror: invalid value 'x' for '--page <N>': invalid digit found in string\n\nFor more information, try '--help'.\nerror: the following required arguments were not provided:\n  --to <NAME>\n\nUsage: himalaya message copy --to <NAME> <MESSAGE-IDS>...\n\nFor more information, try '--help'.\nerror: unexpected argument 'hello' found\n\nUsage: himalaya message send [OPTIONS] [-- <MESSAGE>...]\n\nFor more information, try '--help'.\nerror: invalid value 'nope' for '--flag <FLAG>'\n  [possible values: seen, answered, flagged, draft]\n\nFor more information, try '--help'.\n"
       }
+    },
+    {
+      "id": "hm_query_report_shows_the_failing_line",
+      "seq": 561987,
+      "targets": ["cli-himalaya"],
+      "command": "himalaya envelope search $'subject a\\nand\\n  zzz qq'; echo rc=$?; himalaya envelope search $'subject a\\r\\nand zzz'; himalaya envelope search $'subject a\\n\\n\\n\\n\\n\\n\\n\\n\\n\\nand zzz'; himalaya envelope search $'not\\nnot\\nnot'",
+      "expect": {
+        "exit": 1,
+        "stdout": "Error: Error: cannot parse search emails query `subject a\nand\n  zzz qq`\n   ╭─[ query:3:3 ]\n   │\n 3 │   zzz qq\n   │   ┬  \n   │   ╰── found 'z' expected space between filters, `and`, `or`, or end of input\n───╯\n\n\nSuggestions:\n - Run with --log-level to enable more verbose logs\nrc=1\nError: Error: cannot parse search emails query `subject a\r\nand zzz`\n   ╭─[ query:2:5 ]\n   │\n 2 │ and zzz\n   │     ┬  \n   │     ╰── found 'z' expected space between filters, `and`, `or`, or end of input\n───╯\n\n\nSuggestions:\n - Run with --log-level to enable more verbose logs\nError: Error: cannot parse search emails query `subject a\n\n\n\n\n\n\n\n\n\nand zzz`\n    ╭─[ query:11:5 ]\n    │\n 11 │ and zzz\n    │     ┬  \n    │     ╰── found 'z' expected space between filters, `and`, `or`, or end of input\n────╯\n\n\nSuggestions:\n - Run with --log-level to enable more verbose logs\nError: Error: cannot parse search emails query `not\nnot\nnot`\n   ╭─[ query:1:4 ]\n   │\n 1 │ not\n   │    ┬  \n   │    ╰── found '\n' expected space after `not`\n───╯\n\n\nSuggestions:\n - Run with --log-level to enable more verbose logs\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_query_report_counts_bytes_and_columns",
+      "seq": 561988,
+      "targets": ["cli-himalaya"],
+      "command": "himalaya envelope search 'subject é zz'; himalaya envelope search 'subject é and'; himalaya envelope search 'not 日abc'; himalaya envelope search 'not é'; himalaya envelope search 'subject é z'",
+      "expect": {
+        "exit": 1,
+        "stdout": "Error: Error: cannot parse search emails query `subject é zz`\n   ╭─[ query:1:12 ]\n   │\n 1 │ subject é zz\n   │            ┬  \n   │            ╰── found 'z' expected space between filters, `and`, `or`, or end of input\n───╯\n\n\nSuggestions:\n - Run with --log-level to enable more verbose logs\nError: Error: cannot parse search emails query `subject é and`\n\n\nSuggestions:\n - Run with --log-level to enable more verbose logs\nError: Error: cannot parse search emails query `not 日abc`\n   ╭─[ query:1:5 ]\n   │\n 1 │ not 日abc\n   │     ──┬─  \n   │       ╰─── found '日' expected space after `not`, `not`, `date`, `after`, `from`, `to`, `subject`, `body`, `flag`, or (nested filter)\n───╯\n\n\nSuggestions:\n - Run with --log-level to enable more verbose logs\nError: Error: cannot parse search emails query `not é`\n   ╭─[ query:1:5 ]\n   │\n   │ \n───╯\n\n\nSuggestions:\n - Run with --log-level to enable more verbose logs\nError: Error: cannot parse search emails query `subject é z`\n   ╭─[ query:1:12 ]\n   │\n   │ \n───╯\n\n\nSuggestions:\n - Run with --log-level to enable more verbose logs\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_query_keyword_is_validated_and_searched",
+      "seq": 561989,
+      "targets": ["cli-himalaya"],
+      "command": "himalaya envelope search 'flag a\"b'; echo rc=$?; himalaya envelope search 'flag \"é\"'; echo rc=$?; himalaya --json envelope search 'flag custom' | jq -c .; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "Error: Invalid IMAP keyword `a\"b`\n\nSuggestions:\n - Run with --log-level to enable more verbose logs\nrc=1\nError: Invalid IMAP keyword `\"é\"`\n\nSuggestions:\n - Run with --log-level to enable more verbose logs\nrc=1\n{\"queued\":0,\"envelopes\":[]}\nrc=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_query_line_break_in_a_pattern_finds_nothing",
+      "seq": 561990,
+      "targets": ["cli-himalaya"],
+      "command": "himalaya --json envelope search $'subject a\\nzzz' | jq -c .; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"queued\":0,\"envelopes\":[]}\nrc=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_attached_message_is_sized_by_its_own_bytes",
+      "seq": 9940139,
+      "targets": ["cli-himalaya"],
+      "command": "printf 'Subject: outer\\r\\nContent-Type: multipart/mixed; boundary=\"b\"\\r\\n\\r\\n--b\\r\\nContent-Type: message/rfc822\\r\\n\\r\\nSubject: inner\\r\\n\\r\\ninner body\\r\\n--b--\\r\\n' | himalaya message add -m Archive > /dev/null; id=$(himalaya --json envelope list -m Archive | jq -r '.envelopes[0].id'); himalaya --json attachment list -m Archive \"$id\" | jq -c '.attachments[] | [.mime, .size]'; himalaya attachment list -m Archive \"$id\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"message/rfc822\",28]\n\n┌────┬──────────┬────────────────┬──────┐\n│ ID ┆ FILENAME ┆ TYPE           ┆ SIZE │\n╞════╪══════════╪════════════════╪══════╡\n│ 2  ┆          ┆ message/rfc822 ┆ 28 B │\n└────┴──────────┴────────────────┴──────┘\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import base64
-import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -21,6 +20,7 @@ from typing import Any, Literal
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.email.mime import Stream
 from mirage.io.types import ByteSource, materialize
+from mirage.utils.ids import IdSource, SystemIdSource
 
 SourceMode = Literal["reply", "forward"]
 PostingStyle = Literal["top", "bottom", "none"]
@@ -287,7 +287,8 @@ def _phrase_atoms(name: str) -> list[str]:
         return _b_word_atoms(name)
     if kind == "q":
         return _q_word_atoms(name, True)
-    escaped = name.replace("\\", "\\\\").replace('"', '\\"')
+    bare = name.replace("\r", "").replace("\n", "")
+    escaped = bare.replace("\\", "\\\\").replace('"', '\\"')
     return [f'"{escaped}"']
 
 
@@ -497,8 +498,10 @@ def _parameter(key: str, value: str) -> str:
     return f'{key}="{escaped}"'
 
 
-def _boundary(separator: str) -> str:
-    return separator.join(f"{secrets.randbits(64):x}" for _ in range(3))
+def _boundary(separator: str, ids: IdSource) -> str:
+    return separator.join(
+        f"{ids.random_u32() << 32 | ids.random_u32():x}" for _ in range(3)
+    )
 
 
 def _text_part(body: str) -> bytes:
@@ -523,10 +526,12 @@ def _attachment_part(attachment: Attachment) -> bytes:
     )
 
 
-def _body_bytes(body: str, attachments: tuple[Attachment, ...]) -> bytes:
+def _body_bytes(
+    body: str, attachments: tuple[Attachment, ...], ids: IdSource
+) -> bytes:
     if not attachments:
         return _text_part(body)
-    boundary = _boundary("_")
+    boundary = _boundary("_", ids)
     parameter = f'boundary="{boundary}"'
     gap = (
         f";{CRLF} "
@@ -549,16 +554,23 @@ def _rfc822_now() -> str:
 
 
 def _bare_id(message_id: str) -> str:
-    return message_id.strip().removeprefix("<").removesuffix(">").strip()
+    bare = message_id.strip().removeprefix("<").removesuffix(">").strip()
+    return bare.replace("\r", "").replace("\n", "")
 
 
-def build(compose: Compose, source: Source | None = None) -> bytes:
+def build(
+    compose: Compose,
+    source: Source | None = None,
+    ids: IdSource | None = None,
+) -> bytes:
     """Assemble an RFC 5322 message from flags and an optional source.
 
     Args:
         compose (Compose): the header and body fields.
         source (Source | None): the replied-to or forwarded message.
+        ids (IdSource | None): where the message id and boundary draw from.
     """
+    draws = ids if ids is not None else SystemIdSource()
     head: list[str] = []
     name, email = parse_mailboxes(compose.sender)[0]
     head.append(_address_header("From", [(name, email)]))
@@ -604,11 +616,13 @@ def build(compose: Compose, source: Source | None = None) -> bytes:
         compose.body, source_text, headline, compose.signature or "", style
     )
     head.append(
-        f"Message-ID: <{_boundary('.')}@{MESSAGE_ID_HOST}>{CRLF}"
+        f"Message-ID: <{_boundary('.', draws)}@{MESSAGE_ID_HOST}>{CRLF}"
         f"Date: {_rfc822_now()}{CRLF}"
         f"MIME-Version: 1.0{CRLF}"
     )
-    return "".join(head).encode() + _body_bytes(body, compose.attachments)
+    return "".join(head).encode() + _body_bytes(
+        body, compose.attachments, draws
+    )
 
 
 async def read_body(

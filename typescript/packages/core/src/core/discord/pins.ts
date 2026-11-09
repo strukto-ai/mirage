@@ -44,7 +44,7 @@ export async function listPins(
       'GET',
       `/channels/${channelId}/messages/pins`,
       params,
-    )) as unknown as { items?: Record<string, unknown>[]; has_more?: boolean }
+    )) as { items?: Record<string, unknown>[]; has_more?: boolean }
     const items = page.items ?? []
     pins.push(...items)
     const last = items[items.length - 1]

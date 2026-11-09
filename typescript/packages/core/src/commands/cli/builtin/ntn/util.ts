@@ -16,6 +16,7 @@ import { concat } from '../../../../utils/bytes.ts'
 import { NotionAccessor } from '../../../../accessor/notion.ts'
 import { HttpNotionTransport } from '../../../../core/notion/client.ts'
 import type { NotionConfig } from '../../../../core/notion/config.ts'
+import { valueText } from '../../../../core/render/json.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { FlagValue } from '../../../spec/types.ts'
@@ -99,7 +100,7 @@ export const UPLOAD_COLUMNS = [
 /** One tab-separated line of a file upload, an absent value left empty. */
 export function uploadRow(upload: Record<string, unknown>, columns: readonly string[]): string {
   return columns
-    .map((key) => (upload[key] === undefined || upload[key] === null ? '' : String(upload[key])))
+    .map((key) => (upload[key] === undefined || upload[key] === null ? '' : valueText(upload[key])))
     .join('\t')
 }
 

@@ -629,7 +629,7 @@ async function runCli(
       cliVoice(prog),
       {
         settle: settled,
-        ...(binding.write && dropCaches !== null ? { drop: dropCaches } : {}),
+        ...(binding.writes(walked.argv) && dropCaches !== null ? { drop: dropCaches } : {}),
         ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
         ...(ctx.vfs !== undefined ? { vfs: ctx.vfs } : {}),
       },

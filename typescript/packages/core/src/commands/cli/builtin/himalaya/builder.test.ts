@@ -23,6 +23,7 @@ const ORIGINAL = {
   from: { name: 'Alice', email: 'alice@example.com' },
   message_id: '<m1@example.com>',
   references: ['<m0@example.com>'],
+  reply_to: [],
   body_text: 'line one\nline two',
 } as unknown as Source['message']
 
@@ -111,8 +112,15 @@ it('builds multipart/mixed for attachments', () => {
       ],
     }),
   )
-  const boundary = /boundary="([^"]+)"/.exec(text)![1]!
+  const boundary = /boundary="([^"]+)"/.exec(text)?.[1] ?? ''
   expect(text).toContain('Content-Disposition: attachment; filename="note.txt"')
   expect(text).toContain('Content-Transfer-Encoding: base64\r\n\r\nAP8=\r\n')
   expect(text.endsWith(`\r\n--${boundary}--\r\n`)).toBe(true)
+})
+
+it('keeps a decoded name from breaking a header line', () => {
+  const text = DEC.decode(
+    build({ ...COMPOSE, sender: 'me@x', to: ['=?UTF-8?B?QQ0KQmNjOiB4QHk=?= <a@b>'], body: 'x' }),
+  )
+  expect(text).toContain('To: "ABcc: x@y" <a@b>\r\n')
 })

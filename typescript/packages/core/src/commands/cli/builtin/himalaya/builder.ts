@@ -17,6 +17,7 @@ import type { ByteSource } from '../../../../io/types.ts'
 import { materialize } from '../../../../io/types.ts'
 import { Stream } from '../../../../core/email/mime.ts'
 import type { fetchMessage } from '../../../../core/email/client.ts'
+import { SYSTEM_IDS, type IdSource } from '../../../../utils/ids.ts'
 
 type SourceMode = 'reply' | 'forward'
 export type PostingStyle = 'top' | 'bottom' | 'none'
@@ -106,8 +107,8 @@ export function hasPrefix(subject: string, prefix: string): boolean {
 }
 
 function replyRecipients(message: Source['message']): Mailbox[] {
-  const replyTo = message.reply_to ?? []
-  const entries = replyTo.length > 0 ? replyTo : message.from !== undefined ? [message.from] : []
+  const replyTo = message.reply_to
+  const entries = replyTo.length > 0 ? replyTo : [message.from]
   return entries
     .filter((entry) => entry.email !== '')
     .map((entry): Mailbox => [entry.name === '' ? null : entry.name, entry.email])
@@ -163,8 +164,8 @@ function hexPair(byte: number): string {
   return byte.toString(16).toUpperCase().padStart(2, '0')
 }
 
-function qWordAtoms(text: string, phrase: boolean, column: number = 0): string[] {
-  const ascii = [...text].every((char) => char.charCodeAt(0) < 0x80)
+function qWordAtoms(text: string, phrase: boolean, column = 0): string[] {
+  const ascii = Array.from(text).every((char) => char.charCodeAt(0) < 0x80)
   const head = `=?${ascii ? 'us-ascii' : 'utf-8'}?Q?`
   const tail = '?='
   let limit = Math.min(ENCODED_LINE_TARGET - column, MAX_ENCODED_WORD)
@@ -203,7 +204,7 @@ function bytesToBase64(data: Uint8Array): string {
   return btoa(binary)
 }
 
-function bWordAtoms(text: string, column: number = 0): string[] {
+function bWordAtoms(text: string, column = 0): string[] {
   const head = '=?utf-8?B?'
   const tail = '?='
   const budget = Math.min(ENCODED_LINE_TARGET - column, MAX_ENCODED_WORD)
@@ -228,7 +229,8 @@ function phraseAtoms(name: string): string[] {
   const kind = inlineEncoding(data)
   if (kind === 'b') return bWordAtoms(name)
   if (kind === 'q') return qWordAtoms(name, true)
-  return [`"${name.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`]
+  const bare = name.replace(/[\r\n]/g, '')
+  return [`"${bare.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`]
 }
 
 function folded(start: number, atoms: readonly string[]): string {
@@ -264,9 +266,9 @@ function unstructured(text: string): string[] {
   const words: string[] = []
   let current = ''
   for (let index = 0; index < text.length;) {
-    const char = text[index]!
+    const char = text.charAt(index)
     if (char === '\r' || char === '\n') {
-      while (index < text.length && ' \t\r\n'.includes(text[index]!)) index += 1
+      while (index < text.length && ' \t\r\n'.includes(text.charAt(index))) index += 1
       words.push(current)
       current = ''
       continue
@@ -296,7 +298,7 @@ function bodyScan(data: Uint8Array, isBody: boolean): { encoding: string; bareFe
   let high = false
   let bareFeed = false
   let lineStart = 0
-  data.forEach((byte, at) => {
+  for (const [at, byte] of data.entries()) {
     if (byte >= 127) {
       high = true
       qpLength += 2
@@ -319,7 +321,7 @@ function bodyScan(data: Uint8Array, isBody: boolean): { encoding: string; bareFe
         if (!afterCr) needs = true
       }
     }
-  })
+  }
   needs = needs || high
   const last = data[data.length - 1]
   if (last === 0x20 || last === 0x09) {
@@ -341,11 +343,12 @@ function quotedPrintable(data: Uint8Array, isBody: boolean): number[] {
     let rest = chunk
     while (column + rest.length > MAX_CONTENT_LEN) {
       const room = Math.max(MAX_CONTENT_LEN - column, 0)
-      out.push(...rest.slice(0, room), 0x3d, 0x0d, 0x0a)
+      pushAll(out, rest.slice(0, room))
+      out.push(0x3d, 0x0d, 0x0a)
       column = 0
       rest = rest.slice(room)
     }
-    out.push(...rest)
+    pushAll(out, rest)
     column += rest.length
   }
   const escape = (byte: number): void => {
@@ -380,10 +383,15 @@ function quotedPrintable(data: Uint8Array, isBody: boolean): number[] {
     if (trailing) escape(last)
     return out
   }
-  const lines: number[][] = [[]]
+  let open: number[] = []
+  const lines = [open]
   for (const byte of bytes) {
-    if (byte === 0x0a) lines.push([])
-    else lines[lines.length - 1]!.push(byte)
+    if (byte === 0x0a) {
+      open = []
+      lines.push(open)
+    } else {
+      open.push(byte)
+    }
   }
   lines.forEach((source, index) => {
     const isLast = index === lines.length - 1
@@ -404,11 +412,15 @@ function quotedPrintable(data: Uint8Array, isBody: boolean): number[] {
   return out
 }
 
+function pushAll(out: number[], bytes: Iterable<number>): void {
+  for (const byte of bytes) out.push(byte)
+}
+
 function base64Wrapped(data: Uint8Array): number[] {
   const encoded = bytesToBase64(data)
   const out: number[] = []
   for (let at = 0; at < encoded.length; at += BASE64_LINE) {
-    out.push(...ENC.encode(`${encoded.slice(at, at + BASE64_LINE)}\r\n`))
+    pushAll(out, ENC.encode(`${encoded.slice(at, at + BASE64_LINE)}\r\n`))
   }
   return out
 }
@@ -430,14 +442,12 @@ function encodedText(data: Uint8Array, isBody: boolean): number[] {
   return [...head, ...(isBody && bareFeed ? crlfNormalized(data) : data)]
 }
 
-function randomHex(): string {
-  const words = new Uint32Array(2)
-  globalThis.crypto.getRandomValues(words)
-  return `${words[0]!.toString(16)}${words[1]!.toString(16).padStart(8, '0')}`
+function randomHex(ids: IdSource): string {
+  return `${ids.randomU32().toString(16)}${ids.randomU32().toString(16).padStart(8, '0')}`
 }
 
-function boundary(separator: string): string {
-  return [randomHex(), randomHex(), randomHex()].join(separator)
+function boundary(separator: string, ids: IdSource): string {
+  return [randomHex(ids), randomHex(ids), randomHex(ids)].join(separator)
 }
 
 function textPart(body: string): number[] {
@@ -480,16 +490,18 @@ function attachmentPart(attachment: Attachment): number[] {
   ]
 }
 
-function bodyBytes(body: string, attachments: readonly Attachment[]): number[] {
+function bodyBytes(body: string, attachments: readonly Attachment[], ids: IdSource): number[] {
   if (attachments.length === 0) return textPart(body)
-  const mark = boundary('_')
+  const mark = boundary('_', ids)
   const parameter = `boundary="${mark}"`
   const gap = CONTENT_TYPE_COLUMN + 15 + 2 + parameter.length > FOLD_TARGET ? `;${CRLF} ` : '; '
-  const out = [...ENC.encode(`Content-Type: multipart/mixed${gap}${parameter}${CRLF}${CRLF}`)]
+  const out: number[] = []
+  pushAll(out, ENC.encode(`Content-Type: multipart/mixed${gap}${parameter}${CRLF}${CRLF}`))
   for (const part of [textPart(body), ...attachments.map(attachmentPart)]) {
-    out.push(...ENC.encode(`\r\n--${mark}\r\n`), ...part)
+    pushAll(out, ENC.encode(`\r\n--${mark}\r\n`))
+    pushAll(out, part)
   }
-  out.push(...ENC.encode(`\r\n--${mark}--\r\n`))
+  pushAll(out, ENC.encode(`\r\n--${mark}--\r\n`))
   return out
 }
 
@@ -497,7 +509,7 @@ function bareId(messageId: string): string {
   let id = messageId.trim()
   if (id.startsWith('<')) id = id.slice(1)
   if (id.endsWith('>')) id = id.slice(0, -1)
-  return id.trim()
+  return id.trim().replace(/[\r\n]/g, '')
 }
 
 function rfc822Now(): string {
@@ -521,15 +533,21 @@ function rfc822Now(): string {
   const mm = String(now.getUTCMinutes()).padStart(2, '0')
   const ss = String(now.getUTCSeconds()).padStart(2, '0')
   return (
-    `${days[now.getUTCDay()]!}, ${String(now.getUTCDate())} ${months[now.getUTCMonth()]!} ` +
+    `${days[now.getUTCDay()] ?? ''}, ${String(now.getUTCDate())} ${months[now.getUTCMonth()] ?? ''} ` +
     `${String(now.getUTCFullYear())} ${hh}:${mm}:${ss} +0000`
   )
 }
 
 /** Assemble an RFC 5322 message from flags and an optional source. */
-export function build(compose: Compose, source: Source | null = null): Uint8Array {
+export function build(
+  compose: Compose,
+  source: Source | null = null,
+  ids: IdSource = SYSTEM_IDS,
+): Uint8Array {
   const head: string[] = []
-  const [name, email] = parseMailboxes(compose.sender)[0]!
+  const first = parseMailboxes(compose.sender)[0]
+  if (first === undefined) throw new Error(`Could not parse address \`${compose.sender}\``)
+  const [name, email] = first
   head.push(addressHeader('From', [[name, email]]))
   if (compose.to.length > 0) head.push(addressHeader('To', addressesOf(compose.to)))
   if (compose.cc.length > 0) head.push(addressHeader('Cc', addressesOf(compose.cc)))
@@ -541,11 +559,9 @@ export function build(compose: Compose, source: Source | null = null): Uint8Arra
   if (source !== null) {
     const original = source.message
     const prefix = PREFIXES[source.mode]
-    if (subject === null) {
-      subject = hasPrefix(original.subject, prefix)
-        ? original.subject
-        : `${prefix}${original.subject}`
-    }
+    subject ??= hasPrefix(original.subject, prefix)
+      ? original.subject
+      : `${prefix}${original.subject}`
     if (source.mode === 'reply' && compose.to.length === 0) {
       const recipients = replyRecipients(original)
       if (recipients.length > 0) head.push(addressHeader('To', recipients))
@@ -553,7 +569,7 @@ export function build(compose: Compose, source: Source | null = null): Uint8Arra
     const messageId = original.message_id
     if (messageId !== '') {
       if (source.mode === 'reply') head.push(`In-Reply-To: <${bareId(messageId)}>${CRLF}`)
-      const chain = [...(original.references ?? []), messageId]
+      const chain = [...original.references, messageId]
       const references = chain
         .filter((one) => bareId(one) !== '')
         .map((one) => `<${bareId(one)}>`)
@@ -567,9 +583,12 @@ export function build(compose: Compose, source: Source | null = null): Uint8Arra
   if (subject !== null) head.push(textHeader('Subject', subject))
   const body = composeBody(compose.body, sourceText, headline, compose.signature ?? '', style)
   head.push(
-    `Message-ID: <${boundary('.')}@${MESSAGE_ID_HOST}>${CRLF}Date: ${rfc822Now()}${CRLF}MIME-Version: 1.0${CRLF}`,
+    `Message-ID: <${boundary('.', ids)}@${MESSAGE_ID_HOST}>${CRLF}Date: ${rfc822Now()}${CRLF}MIME-Version: 1.0${CRLF}`,
   )
-  return Uint8Array.from([...ENC.encode(head.join('')), ...bodyBytes(body, compose.attachments)])
+  const out: number[] = []
+  pushAll(out, ENC.encode(head.join('')))
+  pushAll(out, bodyBytes(body, compose.attachments, ids))
+  return Uint8Array.from(out)
 }
 
 /** Resolve the body from --body, --body-file, then piped stdin. */

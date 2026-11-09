@@ -27,5 +27,10 @@ async def compose(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     return await route(
-        accessor, FlagView(ctx.flags, ctx.spec), ctx.stdin, None, ctx.vfs
+        accessor,
+        FlagView(ctx.flags, ctx.spec),
+        ctx.stdin,
+        None,
+        ctx.vfs,
+        ctx.ids,
     )

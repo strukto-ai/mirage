@@ -369,7 +369,7 @@ export const HIMALAYA = new CLI({
     'message delete': new CLIHandler({ fn: guarded(messageDelete), write: true }),
     'envelope list': new CLIHandler({ fn: guarded(listEnvelopes) }),
     'envelope search': new CLIHandler({ fn: guarded(searchEnvelopes) }),
-    'message read': new CLIHandler({ fn: guarded(read) }),
+    'message read': new CLIHandler({ fn: guarded(read), writeWhen: ['--seen'] }),
     'message compose': new CLIHandler({ fn: guarded(compose), write: true }),
     'message send': new CLIHandler({ fn: guarded(send), write: true }),
     'message add': new CLIHandler({ fn: guarded(add), write: true }),

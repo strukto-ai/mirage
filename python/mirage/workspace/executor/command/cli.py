@@ -775,7 +775,7 @@ async def _run_cli(
             prog,
             Producer(command=prog, declared=binding.limit),
             cli_voice(prog),
-            drop=drop_caches if binding.write else None,
+            drop=drop_caches if binding.writes(walked.argv) else None,
             vfs=ctx.vfs,
         )
 

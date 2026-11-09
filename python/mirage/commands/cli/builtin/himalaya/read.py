@@ -123,9 +123,7 @@ def _first_text(value: Any) -> str | None:
     return _text_of(value)
 
 
-def _render_part(
-    part: dict[str, Any], position: int, raw: bytes, html_only: bool
-) -> str:
+def _render_part(part: dict[str, Any], position: int, html_only: bool) -> str:
     headers = part["headers"]
     body = part["body"]
     mime = part_mime(headers) or (
@@ -135,7 +133,7 @@ def _render_part(
         if "Text" in body
         else "application/octet-stream"
     )
-    size = format_size(len(part_payload(body, raw)))
+    size = format_size(len(part_payload(body)))
     name = part_name(headers)
     label = (
         f"[{position}] {mime} — {name} ({size})"
@@ -166,12 +164,11 @@ def _render_part(
     return "\n".join(lines) + "\n"
 
 
-def message_view(message: MimeMessage, raw: bytes) -> str:
+def message_view(message: MimeMessage) -> str:
     """A message as `message read` shows it.
 
     Args:
         message (MimeMessage): the parsed message.
-        raw (bytes): its raw bytes.
     """
     top = message.parts[0]["headers"]
     out = ""
@@ -189,7 +186,7 @@ def message_view(message: MimeMessage, raw: bytes) -> str:
     for index, part in enumerate(message.parts):
         if "Multipart" in part["body"]:
             continue
-        out += _render_part(part, index + 1, raw, html_only)
+        out += _render_part(part, index + 1, html_only)
     return out
 
 
@@ -214,4 +211,4 @@ async def read(
         raise ValueError(PARSE_FAILURE)
     if fl.as_bool("json"):
         return compact_json_bytes(message.as_document()), IOResult()
-    return message_view(message, raw).encode(), IOResult()
+    return message_view(message).encode(), IOResult()

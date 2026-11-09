@@ -27,9 +27,10 @@ const encoder = new TextEncoder()
 function messageDocument(
   message: Awaited<ReturnType<typeof fetchMessage>>,
 ): Partial<Awaited<ReturnType<typeof fetchMessage>>> {
-  const body: Partial<Awaited<ReturnType<typeof fetchMessage>>> = { ...message }
-  for (const key of TRANSPORT_KEYS) delete body[key]
-  return body
+  const transport: readonly string[] = TRANSPORT_KEYS
+  return Object.fromEntries(
+    Object.entries(message).filter(([key]) => !transport.includes(key)),
+  ) as Partial<Awaited<ReturnType<typeof fetchMessage>>>
 }
 
 export function messageJsonText(message: Awaited<ReturnType<typeof fetchMessage>>): string {

@@ -132,6 +132,8 @@ model NotionFileUpload {
   filename      String
   contentType   String?
   contentLength Int?
+  numberOfParts Int?
+  partsJson     String  @default("[]")
   createdTime   String
   expiryTime    String
 

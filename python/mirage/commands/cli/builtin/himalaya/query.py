@@ -18,6 +18,7 @@ from email.utils import parsedate_to_datetime
 from typing import Any, Callable
 
 from mirage.commands.builtin.utils.constants import MONTHS
+from mirage.commands.cli.builtin.git.ref_format import display_width
 from mirage.core.email.client import quote_string
 from mirage.types import JsonValue
 
@@ -43,6 +44,15 @@ DATE_FORMATS = ("%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%d/%m/%Y")
 QUOTED_ESCAPES = '\\"'
 UNQUOTED_ESCAPES = "\\ ()"
 END_OF_INPUT = "end of input"
+ATOM_SPECIALS = '(){%*"\\]'
+LINE_BREAKS = "\r\n\x0b\x0c\x85\u2028\u2029"
+WHITE_SPACE = (
+    LINE_BREAKS
+    + "\t \xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006"
+    + "\u2007\u2008\u2009\u200a\u202f\u205f\u3000"
+)
+TAB_WIDTH = 4
+MATCH_NOTHING = "NOT ALL"
 
 
 class QueryError(ValueError):
@@ -83,18 +93,18 @@ def _parse_date_word(text: str) -> date | None:
     return None
 
 
-def _quoted_char(char: str) -> str:
-    if char == "\\":
-        return "'\\\\'"
-    if char == "'":
-        return "'\\''"
-    if char == "\n":
-        return "'\\n'"
-    if char == "\r":
-        return "'\\r'"
-    if char == "\t":
-        return "'\\t'"
-    return f"'{char}'"
+def _text_criteria(word: str, pattern: str) -> str:
+    # A header is unfolded before it is searched, so a pattern holding a
+    # line break finds nothing, and a quoted string cannot carry one.
+    if any(char in pattern for char in "\r\n"):
+        return MATCH_NOTHING
+    return f"{word.upper()} {quote_string(pattern)}"
+
+
+def _is_atom(word: str) -> bool:
+    return bool(word) and all(
+        0x20 < ord(char) < 0x7F and char not in ATOM_SPECIALS for char in word
+    )
 
 
 def _expected(labels: list[str]) -> str:
@@ -251,7 +261,7 @@ class _Grammar:
         )
         if found is None:
             return None
-        return f"{word.upper()} {quote_string(found[0])}", found[1]
+        return _text_criteria(word, found[0]), found[1]
 
     def flag_condition(self, pos: int) -> tuple[str, int] | None:
         found = self.keyword(
@@ -261,8 +271,9 @@ class _Grammar:
             return None
         name = found[0].removeprefix("\\").removeprefix("$").lower()
         key = FLAGS.get(name)
-        criteria = key if key else f"KEYWORD {found[0]}"
-        return criteria, found[1]
+        if key is None and not _is_atom(found[0]):
+            raise QueryError(f"Invalid IMAP keyword `{found[0]}`")
+        return (key if key else f"KEYWORD {found[0]}"), found[1]
 
     def nested(self, pos: int) -> tuple[str, int] | None:
         after = self.char(pos, "(", "nested filter opening '('")
@@ -373,7 +384,7 @@ class _Grammar:
 
     def error(self) -> QueryError:
         found = self.at(self.best)
-        shown = END_OF_INPUT if found is None else _quoted_char(found)
+        shown = END_OF_INPUT if found is None else f"'{found}'"
         message = f"found {shown} expected {_expected(self.labels)}"
         return QueryError(_report(self.source, self.best, message))
 
@@ -381,19 +392,100 @@ class _Grammar:
 SORT_KINDS = ("date", "from", "to", "subject")
 
 
+def _line_at(source: str, offset: int) -> tuple[int, int, int, int]:
+    """Find the line an offset falls on.
+
+    Args:
+        source (str): the query.
+        offset (int): a character offset into it.
+
+    Returns:
+        tuple[int, int, int, int]: the 1-based line number, where the line
+            starts, where its text ends and where its terminator ends.
+    """
+    number = 1
+    start = 0
+    index = 0
+    while index < len(source):
+        char = source[index]
+        index += 1
+        if char not in LINE_BREAKS:
+            continue
+        text_end = index - 1
+        if char == "\r" and source[index : index + 1] == "\n":
+            index += 1
+        if offset < index:
+            return number, start, text_end, index
+        number += 1
+        start = index
+    return number, start, len(source), len(source)
+
+
+def _drawn(line: str) -> tuple[str, list[int]]:
+    """Lay a line out the way the report draws it.
+
+    Args:
+        line (str): the line with its terminator.
+
+    Returns:
+        tuple[str, list[int]]: the text as drawn, and the column each
+            character starts at followed by the column after the last.
+    """
+    shown: list[str] = []
+    columns = [0]
+    for char in line:
+        column = columns[-1]
+        if char == "\t":
+            cells = (column // TAB_WIDTH + 1) * TAB_WIDTH - column
+            shown.append(" " * cells)
+        elif char in WHITE_SPACE:
+            cells = 1
+            shown.append(" ")
+        else:
+            cells = display_width(char)
+            shown.append(char)
+        columns.append(column + cells)
+    return "".join(shown), columns
+
+
 def _report(source: str, pos: int, message: str) -> str:
-    gap = " " * pos
-    at_end = pos >= len(source)
-    marker = "│ " if at_end else "┬  "
-    arrow = "╰─" if at_end else "╰──"
+    # The parser counts bytes and the report reads them as characters, so
+    # text past a multibyte character sits further right than it is, and
+    # can fall off the end of the query altogether.
+    head = f"Error: cannot parse search emails query `{source}`\n"
+    offset = len(source[:pos].encode("utf-8", "surrogatepass"))
+    size = (
+        len(source[pos].encode("utf-8", "surrogatepass"))
+        if pos < len(source)
+        else 0
+    )
+    if offset > len(source) or (size and offset + size - 1 > len(source)):
+        return head
+    number, start, text_end, line_end = _line_at(source, offset)
+    margin = " " * (len(str(number)) + 2)
+    column = offset - start
+    title = f"{margin}╭─[ {QUERY_SOURCE}:{number}:{column + 1} ]\n"
+    bottom = f"{'─' * len(margin)}╯\n"
+    if size and offset + size > line_end:
+        return f"{head}{title}{margin}│\n{margin}│ \n{bottom}"
+    columns = _drawn(source[start:line_end])[1]
+    shown = _drawn(source[start:text_end])[0].rstrip()
+    first = columns[column]
+    if size == 0:
+        marker = f"{' ' * first}│ "
+        arrow = f"{' ' * first}╰─"
+    else:
+        middle = columns[column + size // 2]
+        last = columns[column + size]
+        underline = "─" * (middle - first) + "┬" + "─" * (last - middle - 1)
+        marker = f"{' ' * first}{underline}  "
+        arrow = f"{' ' * middle}╰{'─' * (last - middle + 1)}"
     return (
-        f"Error: cannot parse search emails query `{source}`\n"
-        f"   ╭─[ {QUERY_SOURCE}:1:{pos + 1} ]\n"
-        "   │\n"
-        f" 1 │ {source}\n"
-        f"   │ {gap}{marker}\n"
-        f"   │ {gap}{arrow} {message}\n"
-        "───╯\n"
+        f"{head}{title}{margin}│\n"
+        f" {number} │ {shown}\n"
+        f"{margin}│ {marker}\n"
+        f"{margin}│ {arrow} {message}\n"
+        f"{bottom}"
     )
 
 

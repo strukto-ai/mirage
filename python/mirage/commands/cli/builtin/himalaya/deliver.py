@@ -161,10 +161,11 @@ async def deliver(
     message = await send_raw(accessor.config, raw)
     if no_save or (save is None and not accessor.config.save_copy):
         return message, False
-    folder = save or await resolve_sent_folder(
-        accessor, accessor.config.sent_folder
-    )
+    folder = save or accessor.config.sent_folder or DEFAULT_SENT_FOLDER
     try:
+        folder = save or await resolve_sent_folder(
+            accessor, accessor.config.sent_folder
+        )
         await append_message(accessor, raw, folder, SEEN_FLAG)
     except Exception as exc:
         logger.warning("sent copy not saved: %s", exc)

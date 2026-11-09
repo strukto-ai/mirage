@@ -99,8 +99,9 @@ export async function deliver(
 ): Promise<boolean> {
   await sendRaw(accessor.config, raw)
   if (noSave || (save === null && !accessor.config.saveCopy)) return false
-  const folder = save ?? (await resolveSentFolder(accessor, accessor.config.sentFolder))
+  let folder = save ?? accessor.config.sentFolder ?? DEFAULT_SENT_FOLDER
   try {
+    folder = save ?? (await resolveSentFolder(accessor, accessor.config.sentFolder))
     await appendMessage(accessor, raw, folder, [SEEN_FLAG])
   } catch (error) {
     throw new ChainedError(`Message sent, but saving a copy to ${folder} failed`, [

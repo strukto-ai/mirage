@@ -36,6 +36,6 @@ export async function messageReactions(
   const message = (await accessor.transport.call(
     'GET',
     `/channels/${channelId}/messages/${messageId}`,
-  )) as unknown as { reactions?: unknown[] }
+  )) as { reactions?: unknown[] }
   return message.reactions ?? []
 }

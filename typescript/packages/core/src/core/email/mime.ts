@@ -120,7 +120,9 @@ const SPACE = new Set([0x20, 0x09])
 const WHITESPACE = new Set([0x20, 0x09, 0x0a, 0x0c, 0x0d])
 const HEX_DIGITS = new Set(new TextEncoder().encode('0123456789abcdefABCDEF'))
 const BASE64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-const BASE64_VALUE = new Map([...BASE64_CHARS].map((char, index) => [char.charCodeAt(0), index]))
+const BASE64_VALUE = new Map(
+  Array.from(BASE64_CHARS).map((char, index) => [char.charCodeAt(0), index]),
+)
 const DASH = 0x2d
 const NEWLINE = 0x0a
 const RETURN = 0x0d
@@ -203,26 +205,26 @@ function partialBase64(group: number[], keep: number): number[] {
   const values = [...group]
   while (values.length < 4) values.push(0x41)
   const bits =
-    ((BASE64_VALUE.get(values[0]!) ?? 0) << 18) |
-    ((BASE64_VALUE.get(values[1]!) ?? 0) << 12) |
-    ((BASE64_VALUE.get(values[2]!) ?? 0) << 6) |
-    (BASE64_VALUE.get(values[3]!) ?? 0)
+    ((BASE64_VALUE.get(values[0] ?? 0) ?? 0) << 18) |
+    ((BASE64_VALUE.get(values[1] ?? 0) ?? 0) << 12) |
+    ((BASE64_VALUE.get(values[2] ?? 0) ?? 0) << 6) |
+    (BASE64_VALUE.get(values[3] ?? 0) ?? 0)
   return [(bits >> 16) & 0xff, (bits >> 8) & 0xff, bits & 0xff].slice(0, keep)
 }
 
 function decodeQWord(body: Uint8Array): Uint8Array {
   const out: number[] = []
   for (let index = 0; index < body.length; index += 1) {
-    const byte = body[index]!
+    const byte = body[index] ?? 0
     if (byte === 0x5f) {
       out.push(0x20)
     } else if (
       byte === 0x3d &&
       index + 2 < body.length &&
-      isHex(body[index + 1]!) &&
-      isHex(body[index + 2]!)
+      isHex(body[index + 1] ?? 0) &&
+      isHex(body[index + 2] ?? 0)
     ) {
-      out.push(hexValue(body[index + 1]!, body[index + 2]!))
+      out.push(hexValue(body[index + 1] ?? 0, body[index + 2] ?? 0))
       index += 2
     } else {
       out.push(byte)
@@ -259,16 +261,14 @@ export class Stream {
   constructor(readonly data: Uint8Array) {}
 
   next(): number | null {
-    if (this.pos < this.data.length) {
-      const byte = this.data[this.pos]!
-      this.pos += 1
-      return byte
-    }
-    return null
+    const byte = this.data[this.pos]
+    if (byte === undefined) return null
+    this.pos += 1
+    return byte
   }
 
   peek(): number | null {
-    return this.pos < this.data.length ? this.data[this.pos]! : null
+    return this.data[this.pos] ?? null
   }
 
   checkpoint(): void {
@@ -587,7 +587,7 @@ export class Stream {
     const tokens: string[] = []
     let start = 0
     let end = 0
-    let lastEncoded = true
+    let lastEncoded = true as boolean
     const flush = (): void => {
       if (start > 0) {
         if (tokens.length > 0) tokens.push(' ')
@@ -632,7 +632,7 @@ export class Stream {
     for (let byte = this.next(); byte !== null; byte = this.next()) {
       if (byte === NEWLINE) {
         if (this.tryNextIsSpace()) continue
-        if (ids.length === 1) return { Text: ids[0]! }
+        if (ids.length === 1) return { Text: ids[0] ?? '' }
         if (ids.length === 0) {
           if (looseStart > 0) return { Text: text(this.slice(looseStart - 1, looseEnd)) }
           return 'Empty'
@@ -689,7 +689,7 @@ export class Stream {
         flush(false)
         if (this.tryNextIsSpace()) continue
         collect()
-        if (items.length === 1) return { Text: items[0]! }
+        if (items.length === 1) return { Text: items[0] ?? '' }
         return items.length > 0 ? { TextList: items } : 'Empty'
       }
       if (SPACE.has(byte)) {
@@ -843,7 +843,7 @@ function receivedTokens(value: string): string[] {
   const tokens: string[] = []
   let index = 0
   while (index < value.length) {
-    const char = value[index]!
+    const char = value.charAt(index)
     if (/\s/.test(char)) {
       index += 1
       continue
@@ -861,7 +861,8 @@ function receivedTokens(value: string): string[] {
       }
       index += 1
     } else {
-      while (index < value.length && !/\s/.test(value[index]!) && value[index] !== '(') index += 1
+      while (index < value.length && !/\s/.test(value.charAt(index)) && value[index] !== '(')
+        index += 1
     }
     tokens.push(value.slice(start, index))
   }
@@ -921,7 +922,7 @@ function parseReceivedValue(stream: Stream): MimeValue {
   }
   const words = receivedTokens(clauses)
   for (let index = 0; index < words.length;) {
-    const word = words[index]!.toLowerCase()
+    const word = (words[index] ?? '').toLowerCase()
     const next = words[index + 1]
     if (RECEIVED_WORDS.has(word) && next !== undefined) {
       if (word === 'from' && received.from === null) {
@@ -1011,9 +1012,10 @@ class DateParser {
         else if (byte === 0x5c && stream.peek() === 0x29) stream.pos += 1
         continue
       } else if (byte >= 0x30 && byte <= 0x39) {
-        if (this.pos < 7 && this.sizes[this.pos]! > 0) {
-          this.sizes[this.pos]! -= 1
-          this.parts[this.pos]! += (byte - 0x30) * 10 ** this.sizes[this.pos]!
+        const size = this.sizes[this.pos] ?? 0
+        if (this.pos < 7 && size > 0) {
+          this.sizes[this.pos] = size - 1
+          this.parts[this.pos] = (this.parts[this.pos] ?? 0) + (byte - 0x30) * 10 ** (size - 1)
           this.ignore = false
         }
         this.fresh = false
@@ -1052,8 +1054,9 @@ class DateParser {
         continue
       }
       if (advance) {
-        if (this.pos < 7 && this.sizes[this.pos]! > 0) {
-          this.parts[this.pos] = Math.floor(this.parts[this.pos]! / 10 ** this.sizes[this.pos]!)
+        const size = this.sizes[this.pos] ?? 0
+        if (this.pos < 7 && size > 0) {
+          this.parts[this.pos] = Math.floor((this.parts[this.pos] ?? 0) / 10 ** size)
         }
         this.pos += 1
         this.fresh = true
@@ -1064,22 +1067,22 @@ class DateParser {
 
   finish(): MimeValue {
     if (this.pos < 6) return 'Empty'
-    const month = this.monthChars === 3 ? (MONTHS[this.month] ?? 0) : this.parts[1]!
+    const month = this.monthChars === 3 ? (MONTHS[this.month] ?? 0) : (this.parts[1] ?? 0)
     if (month < 1 || month > 12) return 'Empty'
-    let year = this.parts[2]!
+    let year = this.parts[2] ?? 0
     if (year >= 0 && year <= 49) year += 2000
     else if (year >= 50 && year <= 99) year += 1900
     return {
       DateTime: {
         year,
         month,
-        day: this.parts[0]!,
-        hour: this.parts[3]!,
-        minute: this.parts[4]!,
-        second: this.parts[5]!,
+        day: this.parts[0] ?? 0,
+        hour: this.parts[3] ?? 0,
+        minute: this.parts[4] ?? 0,
+        second: this.parts[5] ?? 0,
         tz_before_gmt: !this.plus,
-        tz_hour: Math.floor(this.parts[6]! / 100) % 24,
-        tz_minute: (this.parts[6]! % 100) % 60,
+        tz_hour: Math.floor((this.parts[6] ?? 0) / 100) % 24,
+        tz_minute: ((this.parts[6] ?? 0) % 100) % 60,
       },
     }
   }
@@ -1738,6 +1741,8 @@ export class MimeMessage {
   textBody: number[] = []
   attachments: number[] = []
   parts: MimePart[] = []
+  /** An attached message keeps its own bytes here. */
+  raw: Uint8Array = new Uint8Array(0)
 
   isEmpty(): boolean {
     return this.parts.length === 0
@@ -1765,6 +1770,19 @@ function partDocument(part: MimePart): JsonValue {
     offset_body: part.offset_body,
     offset_end: part.offset_end,
   }
+}
+
+/** The part at this position, which the walk has just built. */
+export function partAt(message: MimeMessage, id: number): MimePart {
+  const part = message.parts[id]
+  if (part === undefined) throw new Error(`mime: no part ${String(id)}`)
+  return part
+}
+
+function popState(stack: [WalkState, MimeMessage | null][]): [WalkState, MimeMessage | null] {
+  const top = stack.pop()
+  if (top === undefined) throw new Error('mime: empty part stack')
+  return top
 }
 
 /** The value of a part's first header of this name, null when absent. */
@@ -1982,7 +2000,10 @@ function partBody(
   if (kind === Kind.MESSAGE) {
     message.attachments.push(index)
     const nested = depth !== 0 ? parseMime(data, depth - 1) : null
-    if (nested !== null) return { body: { Message: nested }, problem: false }
+    if (nested !== null) {
+      nested.raw = data
+      return { body: { Message: nested }, problem: false }
+    }
     return { body: { Binary: [...data] }, problem: true }
   }
   const disposition = contentTypeOf(headers, 'content_disposition')
@@ -2034,7 +2055,8 @@ function closeParts(
 ): { state: WalkState; message: MimeMessage; done: boolean } {
   for (;;) {
     if (state.kind === Kind.MESSAGE) {
-      const [previous, parent] = stack.pop()!
+      const [previous, parent] = popState(stack)
+      if (parent === null) throw new Error('mime: no parent message')
       let position: number
       if (state.boundary !== null) {
         position = Math.max(stream.pos - state.boundary.length - 2, 0)
@@ -2043,15 +2065,16 @@ function closeParts(
       } else {
         position = stream.pos
       }
-      const part = parent!.parts[state.partId]!
+      const part = partAt(parent, state.partId)
       part.offset_end = position
       if (message.isEmpty()) {
         part.is_encoding_problem = true
         part.body = { Text: text(raw.subarray(part.offset_body, position)) }
       } else {
+        message.raw = raw.subarray(part.offset_body, position)
         part.body = { Message: message }
       }
-      message = parent!
+      message = parent
       previous.boundary = state.boundary
       state = previous
     }
@@ -2059,7 +2082,7 @@ function closeParts(
     if (state.kind === Kind.ALTERNATIVE && state.needHtml && state.needText) {
       shareAlternative(message, state)
     }
-    const part = message.parts[state.partId]!
+    const part = partAt(message, state.partId)
     if (state.subParts.length !== 1 || state.subParts[0] !== 0) {
       part.body = { Multipart: state.subParts }
     }
@@ -2067,7 +2090,7 @@ function closeParts(
       part.offset_end = stream.pos
       return { state, message, done: true }
     }
-    state = stack.pop()![0]
+    state = popState(stack)[0]
     if (state.boundary !== null) {
       const offset = stream.seekNextPartOffset(state.boundary)
       if (offset !== null) {
@@ -2098,19 +2121,20 @@ function finish(
   raw: Uint8Array,
 ): MimeMessage | null {
   while (stack.length > 0) {
-    const [previous, parent] = stack.pop()!
+    const [previous, parent] = popState(stack)
     if (parent !== null) {
-      const part = parent.parts[state.partId]!
+      const part = partAt(parent, state.partId)
       part.offset_end = stream.pos
       if (message.isEmpty()) {
         part.is_encoding_problem = true
         part.body = { Text: text(raw.subarray(part.offset_body, stream.pos)) }
       } else {
+        message.raw = raw.subarray(part.offset_body, stream.pos)
         part.body = { Message: message }
       }
       message = parent
     } else {
-      const part = message.parts[state.partId]!
+      const part = partAt(message, state.partId)
       part.offset_end = stream.pos
       if (state.subParts.length !== 1 || state.subParts[0] !== 0) {
         part.body = { Multipart: state.subParts }
@@ -2119,7 +2143,7 @@ function finish(
     state = previous
   }
   if (!message.isEmpty()) {
-    message.parts[0]!.offset_end = raw.length
+    partAt(message, 0).offset_end = raw.length
     return message
   }
   if (headers.length > 0) {

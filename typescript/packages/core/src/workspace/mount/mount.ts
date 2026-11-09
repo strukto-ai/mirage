@@ -405,7 +405,9 @@ function treeCommand(cli: CLI): Command {
     vfs: null,
     filetype: null,
     fn: treeRoot,
-    write: Object.values(cli.handlers).some((handler) => handler.write),
+    write: Object.values(cli.handlers).some(
+      (handler) => handler.write || handler.writeWhen.length > 0,
+    ),
   })
 }
 
@@ -2170,7 +2172,7 @@ export class MountEntry {
       vfs: null,
       filetype: null,
       fn,
-      write: handler.write,
+      write: handler.writes(ctx.argv ?? []),
       limit: handler.limit,
     })
     return this.use(async (): Promise<CommandFnResult> => {
@@ -2190,7 +2192,7 @@ export class MountEntry {
           runCtx,
           cliVoice(prog),
           { command: prog, prefixes: [this.prefix], declared: handler.limit },
-          handler.write && this.isUserCommand(root),
+          handler.writes(ctx.argv ?? []) && this.isUserCommand(root),
           (leafCtx) =>
             answered(Promise.resolve().then(() => fn(accessor, keyedPaths, texts, leafCtx))),
         )

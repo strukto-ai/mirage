@@ -456,7 +456,7 @@ HIMALAYA = CLI(
         "message delete": CLIHandler(fn=guarded(message_delete), write=True),
         "envelope list": CLIHandler(fn=guarded(list_envelopes)),
         "envelope search": CLIHandler(fn=guarded(search_envelopes)),
-        "message read": CLIHandler(fn=guarded(read)),
+        "message read": CLIHandler(fn=guarded(read), write_when=("--seen",)),
         "message compose": CLIHandler(fn=guarded(compose), write=True),
         "message send": CLIHandler(fn=guarded(send), write=True),
         "message add": CLIHandler(fn=guarded(add), write=True),

@@ -1608,12 +1608,16 @@ class WalkState:
 
 @dataclass
 class MimeMessage:
-    """A parsed message: its part list and the body indexes into it."""
+    """A parsed message: its part list and the body indexes into it.
+
+    An attached message also keeps its own bytes in `raw`.
+    """
 
     html_body: list[int] = field(default_factory=list)
     text_body: list[int] = field(default_factory=list)
     attachments: list[int] = field(default_factory=list)
     parts: list[dict[str, Any]] = field(default_factory=list)
+    raw: bytes = b""
 
     def is_empty(self) -> bool:
         return not self.parts
@@ -1879,6 +1883,7 @@ def _part_body(
         message.attachments.append(index)
         nested = parse_mime(data, depth - 1) if depth != 0 else None
         if nested is not None:
+            nested.raw = data
             return {"Message": nested}
         return {"Binary": list(data), "__problem": True}
     disposition = content_type_of(headers, "content_disposition")
@@ -1959,6 +1964,7 @@ def _close_parts(
                     "Text": _text(raw[part["offset_body"] : position])
                 }
             else:
+                message.raw = raw[part["offset_body"] : position]
                 part["body"] = {"Message": message}
             message = parent
             previous.boundary = state.boundary
@@ -2019,6 +2025,7 @@ def _finish(
                     "Text": _text(raw[part["offset_body"] : stream.pos])
                 }
             else:
+                message.raw = raw[part["offset_body"] : stream.pos]
                 part["body"] = {"Message": message}
             message = parent
         else:

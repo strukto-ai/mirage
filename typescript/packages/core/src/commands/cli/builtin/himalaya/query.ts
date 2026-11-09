@@ -15,6 +15,7 @@
 import { MONTHS } from '../../../builtin/utils/constants.ts'
 import type { fetchMessage } from '../../../../core/email/client.ts'
 import { quoteString } from '../../../../core/email/client.ts'
+import { displayWidth } from '../git/ref_format.ts'
 
 // himalaya's search DSL: 3 operators (and, or, not) and 7 conditions
 // (date, after, from, to, subject, body, flag), optionally followed by
@@ -36,6 +37,33 @@ const ORDER_BY = 'order by'
 const QUOTED_ESCAPES = '\\"'
 const UNQUOTED_ESCAPES = '\\ ()'
 const END_OF_INPUT = 'end of input'
+const ATOM_SPECIALS = '(){%*"\\]'
+const LINE_BREAKS = String.fromCodePoint(0x0d, 0x0a, 0x0b, 0x0c, 0x85, 0x2028, 0x2029)
+const WHITE_SPACE =
+  LINE_BREAKS +
+  String.fromCodePoint(
+    0x09,
+    0x20,
+    0xa0,
+    0x1680,
+    0x2000,
+    0x2001,
+    0x2002,
+    0x2003,
+    0x2004,
+    0x2005,
+    0x2006,
+    0x2007,
+    0x2008,
+    0x2009,
+    0x200a,
+    0x202f,
+    0x205f,
+    0x3000,
+  )
+const TAB_WIDTH = 4
+const MATCH_NOTHING = 'NOT ALL'
+const ENC = new TextEncoder()
 
 type Parsed<T = string> = [T, number] | null
 
@@ -53,7 +81,7 @@ export interface Query {
 
 function formatDate(value: Date): string {
   const day = String(value.getUTCDate()).padStart(2, '0')
-  return `${day}-${MONTHS[value.getUTCMonth()]!}-${String(value.getUTCFullYear())}`
+  return `${day}-${MONTHS[value.getUTCMonth()] ?? ''}-${String(value.getUTCFullYear())}`
 }
 
 function validDate(year: number, month: number, day: number): Date | null {
@@ -70,7 +98,7 @@ function validDate(year: number, month: number, day: number): Date | null {
 
 function parseDateWord(text: string): Date | null {
   let match = /^(\d{1,4})[-/](\d{1,2})[-/](\d{1,2})$/.exec(text)
-  if (match !== null && match[1]!.length === 4) {
+  if (match !== null && match[1]?.length === 4) {
     return validDate(Number(match[1]), Number(match[2]), Number(match[3]))
   }
   match = /^(\d{1,2})[-/](\d{1,2})[-/](\d{1,4})$/.exec(text)
@@ -78,33 +106,103 @@ function parseDateWord(text: string): Date | null {
   return null
 }
 
-function quotedChar(char: string): string {
-  if (char === '\\') return "'\\\\'"
-  if (char === "'") return "'\\''"
-  if (char === '\n') return "'\\n'"
-  if (char === '\r') return "'\\r'"
-  if (char === '\t') return "'\\t'"
-  return `'${char}'`
+// A header is unfolded before it is searched, so a pattern holding a line
+// break finds nothing, and a quoted string cannot carry one.
+function textCriteria(word: string, pattern: string): string {
+  if (pattern.includes('\r') || pattern.includes('\n')) return MATCH_NOTHING
+  return `${word.toUpperCase()} ${quoteString(pattern)}`
+}
+
+function isAtom(word: string): boolean {
+  return (
+    word !== '' &&
+    Array.from(word).every((char) => {
+      const code = char.charCodeAt(0)
+      return code > 0x20 && code < 0x7f && !ATOM_SPECIALS.includes(char)
+    })
+  )
 }
 
 function expected(labels: readonly string[]): string {
-  if (labels.length === 1) return labels[0]!
-  return `${labels.slice(0, -1).join(', ')}, or ${labels[labels.length - 1]!}`
+  if (labels.length === 1) return labels[0] ?? ''
+  return `${labels.slice(0, -1).join(', ')}, or ${labels[labels.length - 1] ?? ''}`
 }
 
+/** The line number, start, end of text and end of terminator at an offset. */
+function lineAt(chars: readonly string[], offset: number): [number, number, number, number] {
+  let number = 1
+  let start = 0
+  let index = 0
+  while (index < chars.length) {
+    const char = chars[index] ?? ''
+    index += 1
+    if (!LINE_BREAKS.includes(char)) continue
+    const textEnd = index - 1
+    if (char === '\r' && chars[index] === '\n') index += 1
+    if (offset < index) return [number, start, textEnd, index]
+    number += 1
+    start = index
+  }
+  return [number, start, chars.length, chars.length]
+}
+
+/** The text as drawn, and the column each character starts at, then the end. */
+function drawn(line: readonly string[]): [string, number[]] {
+  let shown = ''
+  let column = 0
+  const columns = [0]
+  for (const char of line) {
+    let cells = 1
+    if (char === '\t') {
+      cells = (Math.floor(column / TAB_WIDTH) + 1) * TAB_WIDTH - column
+      shown += ' '.repeat(cells)
+    } else if (WHITE_SPACE.includes(char)) {
+      shown += ' '
+    } else {
+      cells = displayWidth(char)
+      shown += char
+    }
+    column += cells
+    columns.push(column)
+  }
+  return [shown, columns]
+}
+
+// The parser counts bytes and the report reads them as characters, so text
+// past a multibyte character sits further right than it is, and can fall off
+// the end of the query altogether.
 function report(source: string, pos: number, message: string): string {
-  const gap = ' '.repeat(pos)
-  const atEnd = pos >= source.length
-  const marker = atEnd ? '│ ' : '┬  '
-  const arrow = atEnd ? '╰─' : '╰──'
+  const head = `Error: cannot parse search emails query \`${source}\`\n`
+  const chars = Array.from(source)
+  const offset = ENC.encode(source.slice(0, pos)).length
+  const point = pos < source.length ? source.codePointAt(pos) : undefined
+  const size = point === undefined ? 0 : ENC.encode(String.fromCodePoint(point)).length
+  if (offset > chars.length || (size > 0 && offset + size - 1 > chars.length)) return head
+  const [number, start, textEnd, lineEnd] = lineAt(chars, offset)
+  const margin = ' '.repeat(String(number).length + 2)
+  const column = offset - start
+  const title = `${margin}╭─[ ${QUERY_SOURCE}:${String(number)}:${String(column + 1)} ]\n`
+  const bottom = `${'─'.repeat(margin.length)}╯\n`
+  if (size > 0 && offset + size > lineEnd) {
+    return `${head}${title}${margin}│\n${margin}│ \n${bottom}`
+  }
+  const columns = drawn(chars.slice(start, lineEnd))[1]
+  const shown = drawn(chars.slice(start, textEnd))[0].trimEnd()
+  const first = columns[column] ?? 0
+  let marker = `${' '.repeat(first)}│ `
+  let arrow = `${' '.repeat(first)}╰─`
+  if (size > 0) {
+    const middle = columns[column + Math.floor(size / 2)] ?? first
+    const last = columns[column + size] ?? middle
+    marker = `${' '.repeat(first)}${'─'.repeat(middle - first)}┬${'─'.repeat(last - middle - 1)}  `
+    arrow = `${' '.repeat(middle)}╰${'─'.repeat(last - middle + 1)}`
+  }
   return (
-    `Error: cannot parse search emails query \`${source}\`\n` +
-    `   ╭─[ ${QUERY_SOURCE}:1:${String(pos + 1)} ]\n` +
-    '   │\n' +
-    ` 1 │ ${source}\n` +
-    `   │ ${gap}${marker}\n` +
-    `   │ ${gap}${arrow} ${message}\n` +
-    '───╯\n'
+    `${head}${title}${margin}│\n` +
+    ` ${String(number)} │ ${shown}\n` +
+    `${margin}│ ${marker}\n` +
+    `${margin}│ ${arrow} ${message}\n` +
+    bottom
   )
 }
 
@@ -130,7 +228,7 @@ class Grammar {
   }
 
   at(pos: number): string | null {
-    return pos < this.source.length ? this.source[pos]! : null
+    return pos < this.source.length ? this.source.charAt(pos) : null
   }
 
   char(pos: number, char: string, label: string): number | null {
@@ -265,14 +363,18 @@ class Grammar {
 
   textCondition(pos: number, word: string): Parsed {
     const found = this.keyword(pos, word, `pattern after \`${word}\``, (at) => this.pattern(at))
-    return found === null ? null : [`${word.toUpperCase()} ${quoteString(found[0])}`, found[1]]
+    return found === null ? null : [textCriteria(word, found[0]), found[1]]
   }
 
   flagCondition(pos: number): Parsed {
     const found = this.keyword(pos, 'flag', 'flag name after `flag`', (at) => this.unquoted(at))
     if (found === null) return null
     const name = found[0].replace(/^\\/, '').replace(/^\$/, '').toLowerCase()
-    return [FLAGS[name] ?? `KEYWORD ${found[0]}`, found[1]]
+    const key = FLAGS[name]
+    if (key === undefined && !isAtom(found[0])) {
+      throw new QueryError(`Invalid IMAP keyword \`${found[0]}\``)
+    }
+    return [key ?? `KEYWORD ${found[0]}`, found[1]]
   }
 
   nested(pos: number): Parsed {
@@ -376,8 +478,8 @@ class Grammar {
   }
 
   error(): QueryError {
-    const found = this.at(this.best)
-    const shown = found === null ? END_OF_INPUT : quotedChar(found)
+    const point = this.source.codePointAt(this.best)
+    const shown = point === undefined ? END_OF_INPUT : `'${String.fromCodePoint(point)}'`
     return new QueryError(
       report(this.source, this.best, `found ${shown} expected ${expected(this.labels)}`),
     )

@@ -60,7 +60,7 @@ def fetched(monkeypatch):
 def test_the_view_walks_each_part():
     message = parse_mime(RAW)
     assert message is not None
-    assert message_view(message, RAW) == (
+    assert message_view(message) == (
         "Date: Mon, 5 Jan 2026 09:30:00 +0000\n"
         "From: Alice <a@b.c>\n"
         "To: d@e.f\n"

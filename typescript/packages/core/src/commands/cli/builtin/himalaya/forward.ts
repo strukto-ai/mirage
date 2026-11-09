@@ -27,7 +27,7 @@ export async function forward(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, ctx.spec)
-  const original = await fetchMessage(accessor, fl.asStr('mailbox', 'INBOX'), texts[0]!)
+  const original = await fetchMessage(accessor, fl.asStr('mailbox', 'INBOX'), texts[0] ?? '')
   return route(
     accessor,
     fl,
@@ -39,5 +39,6 @@ export async function forward(
       quoteHeadline: fl.asStr('quote_headline') ?? '',
     },
     ctx.vfs,
+    ctx.ids,
   )
 }

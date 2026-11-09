@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any, Callable, Literal
@@ -41,12 +41,23 @@ class CLIHandler:
             texts, ctx)``, the same ``Context`` a command gets; None only
             for a script installation.
         write (bool): whether invoking the command may mutate state.
+        write_when (tuple[str, ...]): option spellings that make a leaf
+            otherwise read-only a writer on the line that carries them.
         limit (Limit | None): default execution and output limits.
     """
 
     fn: Callable[..., Any] | None = None
     write: bool = False
     limit: Limit | None = None
+    write_when: tuple[str, ...] = ()
+
+    def writes(self, argv: Sequence[str]) -> bool:
+        """Whether this invocation may mutate state.
+
+        Args:
+            argv (Sequence[str]): the words after the head, as typed.
+        """
+        return self.write or any(word in self.write_when for word in argv)
 
 
 @dataclass(frozen=True)

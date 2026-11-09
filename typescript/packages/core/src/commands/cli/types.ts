@@ -20,7 +20,8 @@ import { compareCodePoints } from '../../utils/sort.ts'
 import type { CommandFnResult, Context } from '../config.ts'
 import { argumentDest, compileSpec } from '../spec/compile.ts'
 import type { MCPSource } from './mcp/types.ts'
-import { Argument, CommandSpec, type CommandSpecInit, type FlagValue } from '../spec/types.ts'
+import type { Argument } from '../spec/types.ts'
+import { CommandSpec, type CommandSpecInit, type FlagValue } from '../spec/types.ts'
 
 /** A leaf callback: the install's accessor, the operands and the `Context` a command gets. */
 export type CLIVerbFn<A extends Accessor = Accessor> = (
@@ -43,6 +44,8 @@ export class CLIHandler {
   readonly fn: CLIVerbFn | null
   readonly write: boolean
   readonly limit: Limit | null
+  /** Option spellings that make a read-only leaf a writer on that line. */
+  readonly writeWhen: readonly string[]
 
   constructor(
     init: {
@@ -50,12 +53,19 @@ export class CLIHandler {
       fn?: CLIVerbFn<never> | null
       write?: boolean
       limit?: Limit | null
+      writeWhen?: readonly string[]
     } = {},
   ) {
     this.fn = (init.fn ?? null) as CLIVerbFn | null
     this.write = init.write ?? false
     this.limit = init.limit ?? null
+    this.writeWhen = init.writeWhen ?? []
     Object.freeze(this)
+  }
+
+  /** Whether this invocation may mutate state. */
+  writes(argv: readonly string[]): boolean {
+    return this.write || argv.some((word) => this.writeWhen.includes(word))
   }
 }
 

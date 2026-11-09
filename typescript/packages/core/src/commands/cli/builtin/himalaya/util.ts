@@ -18,10 +18,11 @@ import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { mimeTypeFor } from '../../../../utils/filetype.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
+import type { IdSource } from '../../../../utils/ids.ts'
 import type { Files } from '../../../../workspace/files.ts'
 import type { EmailAccessor } from '../../../../accessor/email.ts'
 import { fetchRawMessage } from '../../../../core/email/client.ts'
-import { headerValue, parseMime, type MimeValue } from '../../../../core/email/mime.ts'
+import { headerValue, parseMime, partAt, type MimeValue } from '../../../../core/email/mime.ts'
 import { readOperand } from '../../operand.ts'
 import { build, readBody, type Attachment, type Source } from './builder.ts'
 import { deliver, saveSentCopy } from './deliver.ts'
@@ -108,7 +109,7 @@ function mailboxText(entry: MailAddress): string {
   const email = entry.address ?? ''
   const name = entry.name
   if (name === null || name === '') return email
-  if ([...name].some((char) => ADDRESS_SPECIALS.includes(char))) {
+  if (Array.from(name).some((char) => ADDRESS_SPECIALS.includes(char))) {
     return `"${name.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}" <${email}>`
   }
   return `${name} <${email}>`
@@ -129,7 +130,7 @@ function addressesOf(value: MimeValue): string[] {
 export function templateDocument(raw: Uint8Array): Record<string, unknown> {
   const message = parseMime(raw)
   if (message === null) throw new Error(PARSE_FAILURE)
-  const headers = message.parts[0]!.headers
+  const headers = partAt(message, 0).headers
   const document: Record<string, unknown> = {}
   const senders = addressesOf(headerValue(headers, 'from'))
   if (senders.length > 0) document.from = senders[0]
@@ -141,7 +142,7 @@ export function templateDocument(raw: Uint8Array): Record<string, unknown> {
     document.subject = subject.Text
   }
   const first = message.textBody[0]
-  const body = first === undefined ? undefined : message.parts[first]!.body
+  const body = first === undefined ? undefined : message.parts[first]?.body
   document.body = body !== undefined && 'Text' in body ? body.Text : ''
   return document
 }
@@ -179,6 +180,7 @@ export async function route(
   stdin: ByteSource | null,
   source: Source | null,
   vfs: Files | undefined,
+  ids?: IdSource,
 ): Promise<CommandFnResult> {
   const send = fl.asBool('send')
   const template = fl.asBool('json') && !send && (fl.asStr('save') ?? null) === null
@@ -204,6 +206,7 @@ export async function route(
       attachments: await loadAttachments(vfs, fl.asPaths('attach')),
     },
     source,
+    ids,
   )
   return finishMessage(accessor, fl, raw, send)
 }

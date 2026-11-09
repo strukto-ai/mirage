@@ -27,6 +27,8 @@ interface UploadRow {
   filename: string
   contentType: string | null
   contentLength: number | null
+  numberOfParts: number | null
+  partsJson: string
   createdTime: string
   expiryTime: string
 }
@@ -52,6 +54,10 @@ function render(ctx: Ctx<C>, row: UploadRow): JsonValue {
 
 function asText(value: JsonValue | undefined): string | null {
   return typeof value === 'string' && value !== '' ? value : null
+}
+
+function receivedParts(row: UploadRow): Set<number> {
+  return new Set(JSON.parse(row.partsJson) as number[])
 }
 
 async function found(ctx: Ctx<C>): Promise<UploadRow | null> {
@@ -81,6 +87,7 @@ export async function createUpload(ctx: Ctx<C>): Promise<Reply> {
       status: mode === 'external_url' ? 'uploaded' : 'pending',
       filename: filename ?? 'upload.bin',
       contentType: asText(body.content_type),
+      numberOfParts: mode === 'multi_part' ? (body.number_of_parts as number) : null,
       createdTime: new Date(now).toISOString(),
       expiryTime: new Date(now + EXPIRY_MS).toISOString(),
     },
@@ -94,12 +101,22 @@ export async function sendUpload(ctx: Ctx<C>): Promise<Reply> {
   if (row.status !== 'pending') {
     return apiError(400, 'validation_error', 'This file upload is not pending.')
   }
-  const file = (await readMultipart(ctx)).file
+  const form = await readMultipart(ctx)
+  const file = form.file
   if (file === undefined) return apiError(400, 'validation_error', 'file should be defined.')
+  const parts = receivedParts(row)
+  if (row.mode === 'multi_part') {
+    const number = Number(form.part_number?.text)
+    if (!Number.isInteger(number) || number < 1 || number > (row.numberOfParts ?? 0)) {
+      return apiError(400, 'validation_error', 'part_number is out of range.')
+    }
+    parts.add(number)
+  }
   const updated = await ctx.db.notionFileUpload.update({
     where: { tenant_id: { tenant: ctx.tenant, id: row.id } },
     data: {
       contentLength: (row.contentLength ?? 0) + file.bytes.byteLength,
+      partsJson: JSON.stringify([...parts]),
       status: row.mode === 'multi_part' ? 'pending' : 'uploaded',
     },
   })
@@ -111,6 +128,14 @@ export async function completeUpload(ctx: Ctx<C>): Promise<Reply> {
   if (row === null) return notFound('file upload', ctx.params.id ?? '')
   if (row.mode !== 'multi_part' || row.status !== 'pending') {
     return apiError(400, 'validation_error', 'This file upload cannot be completed.')
+  }
+  const received = receivedParts(row).size
+  if (received !== row.numberOfParts) {
+    return apiError(
+      400,
+      'validation_error',
+      `Expected ${String(row.numberOfParts)} parts, received ${String(received)}.`,
+    )
   }
   const updated = await ctx.db.notionFileUpload.update({
     where: { tenant_id: { tenant: ctx.tenant, id: row.id } },

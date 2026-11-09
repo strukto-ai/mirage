@@ -940,7 +940,7 @@ class MountRegistry:
                 result = walk(cmd_name, tree.spec, argv, cwd, defer_env=True)
                 if result.leaf is None:
                     continue
-                writes = tree.handlers[" ".join(result.path)].write
+                writes = tree.handlers[" ".join(result.path)].writes(argv)
                 if result.path:
                     named_trees.add(mount)
             else:
