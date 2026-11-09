@@ -15,7 +15,11 @@
 import pytest
 
 from mirage.io.types import materialize
+from mirage.policy.types import Outcome, Scope
+from mirage.runtime.base import Runtime
+from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.language import LanguageRuntime
+from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.types import RunResult
 from mirage.shell.parse import parse, syntax_refusal
 from mirage.types import MountMode
@@ -131,3 +135,178 @@ def test_an_alias_name_is_reserved_inside_its_own_text(line, own, stderr):
     )
     io = syntax_refusal(parse(line, aliases), "bash: -c: ", 1, True)
     assert (io and io.stderr) == (stderr and stderr.encode())
+
+
+class Box(Runtime, ProcessExecutorMixin):
+    name = "box"
+    captures = (EXTERNAL_COMMANDS,)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.ran: list[list[str]] = []
+
+    async def run_process(
+        self, engine, paths, texts, ctx, output, errors=None
+    ) -> RunResult:
+        self.ran.append(list(texts))
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+
+WRAPPERS = ["nohup", "nice", "stdbuf", "setsid", "ionice"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("line", "refused"),
+    [
+        ("nohup python3 -c x", "python3"),
+        ("nice -n 5 python3 -c x", "python3"),
+        ("stdbuf -oL python3 -c x", "python3"),
+        ("setsid -w python3 -c x", "python3"),
+        ("ionice -c 3 python3 -c x", "python3"),
+        ("nohup nice python3 -c x", "python3"),
+        ("nohup python3 -c x & wait $!", "python3"),
+        ("nohup time python3 -c x", "python3"),
+        ("nohup nice time -p python3 -c x", "python3"),
+        ("nohup time env python3 -c x", "python3"),
+    ],
+)
+async def test_an_outside_wrapper_runs_no_program_the_allow_list_leaves_out(
+    line, refused
+):
+    box = Box()
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box])
+    try:
+        ws.create_session(
+            "s",
+            profile={
+                "commands": {"allow": [*WRAPPERS, "wait", "time", "env"]}
+            },
+        )
+        bare = await ws.shell(f"{refused} -c x", session_id="s")
+        r = await ws.shell(line, session_id="s")
+        assert bare.exit_code == 126
+        assert (r.exit_code, r.stderr) == (126, bare.stderr)
+        assert box.ran == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_an_outside_wrapper_admits_every_wrapper_it_runs():
+    box = Box()
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box])
+    try:
+        ws.create_session(
+            "s", profile={"commands": {"allow": ["nohup", "python3"]}}
+        )
+        r = await ws.shell("nohup nice python3 -c x", session_id="s")
+        assert r.exit_code == 126
+        assert r.stderr is not None and r.stderr.startswith(b"nice: ")
+        assert box.ran == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line", ["nohup python3 -c x", "nohup --help", "nohup -- python3 -c x"]
+)
+async def test_an_outside_wrapper_runs_a_listed_program(line):
+    box = Box()
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box])
+    try:
+        ws.create_session(
+            "s", profile={"commands": {"allow": ["nohup", "python3"]}}
+        )
+        r = await ws.shell(line, session_id="s")
+        assert r.exit_code == 0
+        assert box.ran == [line.split()]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_an_outside_wrapper_reads_its_program_s_operands():
+    box = Box()
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box])
+    try:
+        ws.create_session(
+            "s",
+            profile={
+                "commands": {
+                    "deny": [
+                        {"reason": "secret", "paths": ["/data/secret.py"]}
+                    ]
+                }
+            },
+        )
+        bare = await ws.shell("cd /data && python3 secret.py", session_id="s")
+        r = await ws.shell(
+            "cd /data && nohup python3 secret.py", session_id="s"
+        )
+        assert bare.exit_code != 0 and bare.stderr
+        assert (r.exit_code, r.stderr) == (bare.exit_code, bare.stderr)
+        assert box.ran == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_an_outside_wrapper_s_program_is_asked_once():
+    # The pass asks about the program where it stands under the wrapper,
+    # and the gate finds that answer there rather than asking again.
+    box = Box()
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box])
+    try:
+        ws.create_session(
+            "s",
+            profile={
+                "commands": {
+                    "ask": [{"reason": "nod", "commands": ["python3"]}]
+                }
+            },
+        )
+        line = "nohup python3 -c x"
+        held = await ws.shell(line, session_id="s")
+        assert held.exit_code == 126
+        (pending,) = ws.decisions.pending()
+        await ws.decisions.answer(pending.id, Outcome.ALLOW, Scope.ONCE)
+        ran = await ws.shell(line, session_id="s")
+        assert ran.exit_code == 0
+        assert box.ran == [["nohup", "python3", "-c", "x"]]
+        assert ws.decisions.pending() == ()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("profile", "refused"),
+    [
+        ({"commands": {"allow": ["nohup"]}}, True),
+        ({"commands": {"deny": [{"reason": "r", "commands": ["rm"]}]}}, False),
+        ({}, False),
+    ],
+)
+async def test_an_outside_wrapper_runs_a_path_only_without_an_allow_list(
+    profile, refused
+):
+    # The box resolves a path on its own disk, which the gate cannot read,
+    # so an allow list, which names only what it can read, refuses it.
+    box = Box()
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box])
+    try:
+        ws.create_session("s", profile=profile)
+        r = await ws.shell("nohup /usr/bin/env python3 -c x", session_id="s")
+        if refused:
+            assert (r.exit_code, r.stderr) == (
+                126,
+                b"/usr/bin/env: Permission denied\n",
+            )
+            assert box.ran == []
+        else:
+            assert r.exit_code == 0
+            assert box.ran == [["nohup", "/usr/bin/env", "python3", "-c", "x"]]
+    finally:
+        await ws.close()

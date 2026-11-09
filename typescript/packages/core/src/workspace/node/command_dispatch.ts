@@ -36,6 +36,7 @@ import { commandRecords } from '../../observe/context.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import {
   type Claimant,
+  type Deny,
   type HandOff,
   PolicyDenied,
   postCommandGate,
@@ -102,7 +103,7 @@ import { expandBoundaryGlobs } from '../expand/globs.ts'
 import { expandAssignment } from '../expand/node.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import { Consumer, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
-import { RUNNERS } from '../lookup/constants.ts'
+import { PROGRAM_WRAPPERS, RUNNERS } from '../lookup/constants.ts'
 import { mirageProgramAt, routedConsumer, wrapperAnswer, wrapperRefusal } from '../lookup/lookup.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -117,8 +118,10 @@ import {
   visibleEnv,
 } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
-import { admit, Admitted, classifiedWords } from './admission.ts'
-import { claimantFor, evaluatedFrom } from './occurrence.ts'
+import { admit, Admitted, classifiedWords, type Refused } from './admission.ts'
+import { UNREADABLE_LINES } from './explain.ts'
+import { innerLines, type Word, wordValue } from './inner_lines.ts'
+import { argvFrame, claimantFor, evaluatedFrom, wholeOccurrence } from './occurrence.ts'
 import type { ExpandedWords } from './types.ts'
 
 /**
@@ -943,22 +946,7 @@ async function runArgv(
         signal,
         claimant,
       )
-      if (!(verdict instanceof Admitted)) {
-        return [
-          null,
-          new IOResult({
-            exitCode: verdict.exitCode,
-            stderr: verdict.stderr,
-            refusal: verdict.refusal,
-          }),
-          new ExecutionNode({
-            command: [name, ...argv.args].join(' '),
-            stderr: verdict.stderr,
-            exitCode: verdict.exitCode,
-            refused: true,
-          }),
-        ]
-      }
+      if (!(verdict instanceof Admitted)) return refused([name, ...argv.args].join(' '), verdict)
       admitted = verdict
     }
     return null
@@ -991,7 +979,7 @@ async function runArgv(
         jobTable,
         signal,
         row,
-        claimant?.line ?? null,
+        claimant,
         output,
         parser,
         admitted,
@@ -1206,6 +1194,89 @@ function runProgram(
   const [stdout, io] = runOutput(run)
   return [stdout, io, node]
 }
+/** A command the gate refused, as its run answers it. */
+function refused(command: string, verdict: Refused): RedirectResult {
+  return [
+    null,
+    new IOResult({
+      exitCode: verdict.exitCode,
+      stderr: verdict.stderr,
+      refusal: verdict.refusal,
+    }),
+    new ExecutionNode({
+      command,
+      stderr: verdict.stderr,
+      exitCode: verdict.exitCode,
+      refused: true,
+    }),
+  ]
+}
+
+/**
+ * The refusal of a program a wrapper runs where Mirage cannot see it run
+ * (`nohup python3` on a machine). What the words run is followed as the
+ * line's pass follows it (`innerLines`): each program is admitted as `env`
+ * and `timeout` have theirs admitted, at the place the pass judged it, and a
+ * line the gate cannot read (`nohup /usr/bin/env`) is refused under an allow
+ * list, which only names what it can read. Returns the first refusal, or
+ * null.
+ */
+async function wrappedRefusal(
+  words: readonly Word[],
+  session: SessionState,
+  registry: MountRegistry,
+  namespace: Namespace,
+  stdin: ByteSource | null,
+  signal: AbortSignal | undefined,
+  claimant: Claimant | null,
+): Promise<Refused | null> {
+  const [first, ...rest] = words
+  if (first === undefined) return null
+  const head = wordValue(first)
+  for (const inner of innerLines(head, rest)) {
+    if (inner.argv.length === 0) {
+      // shortcut: a line run under the box (`time sh -c`) is not judged.
+      if ((session.commands?.allow ?? null) === null) continue
+      const deny: Deny = { kind: 'deny', reason: UNREADABLE_LINES }
+      const [stderr, exitCode] = renderDeny(head, deny)
+      return { stderr, exitCode, refusal: refusalOf(deny) }
+    }
+    const [name, ...args] = inner.argv.map(wordValue) as [string, ...string[]]
+    const place =
+      claimant === null
+        ? null
+        : {
+            line: claimant.line,
+            occurrence: wholeOccurrence(argvFrame([name, ...args], claimant.occurrence)),
+          }
+    const operands = await classifiedWords(name, args, session, registry)
+    const verdict = await admit(
+      name,
+      args,
+      operands.slice(1),
+      session,
+      registry,
+      namespace,
+      stdin,
+      [],
+      signal,
+      place,
+    )
+    if (!(verdict instanceof Admitted)) return verdict
+    const deeper = await wrappedRefusal(
+      inner.argv,
+      session,
+      registry,
+      namespace,
+      stdin,
+      signal,
+      place,
+    )
+    if (deeper !== null) return deeper
+  }
+  return null
+}
+
 async function routeArgv(
   recurse: (
     n: TSNodeLike,
@@ -1224,7 +1295,7 @@ async function routeArgv(
   jobTable: JobTable | null,
   signal: AbortSignal | undefined,
   row: number,
-  handed: HandOff | null,
+  claimant: Claimant | null,
   sink?: JobConsole,
   parser?: ParseScope,
   admission: EntryGate | null = null,
@@ -1301,6 +1372,18 @@ async function routeArgv(
   )
   if (consumer === Consumer.EXTERNAL) {
     if (routing === undefined) throw new Error(`${name}: run outside a routed line`)
+    const denied = PROGRAM_WRAPPERS.has(name)
+      ? await wrappedRefusal(
+          [name, ...argv.args].map((w) => ({ raw: w, text: w })),
+          session,
+          registry,
+          namespace,
+          stdin,
+          signal,
+          claimant,
+        )
+      : null
+    if (denied !== null) return refused([name, ...argv.args].join(' '), denied)
     return runExternal(argv, stdin, session, registry, routing, signal, sink)
   }
 
@@ -1437,7 +1520,7 @@ async function routeArgv(
     jobTable,
     namespace,
     executeFn,
-    handed ?? null,
+    claimant?.line ?? null,
     signal,
     sink,
     parser,

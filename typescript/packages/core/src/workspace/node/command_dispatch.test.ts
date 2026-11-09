@@ -15,7 +15,11 @@
 import { describe, expect, it } from 'vitest'
 import type { Context } from '../../commands/config.ts'
 import { materialize } from '../../io/types.ts'
+import { Outcome, Scope } from '../../policy/index.ts'
+import { Runtime } from '../../runtime/base.ts'
+import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import { LanguageRuntime } from '../../runtime/language.ts'
+import { PROCESS_EXECUTOR, type ProcessExecutorMixin } from '../../runtime/mixin.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
@@ -163,3 +167,131 @@ it.each([
     expect(io === null ? null : new TextDecoder().decode(io.stderr as Uint8Array)).toBe(stderr)
   },
 )
+
+class Box extends Runtime implements ProcessExecutorMixin {
+  readonly [PROCESS_EXECUTOR] = true as const
+  readonly name = 'box'
+  readonly ran: string[][] = []
+  constructor() {
+    super({}, [EXTERNAL_COMMANDS])
+  }
+  runProcess(_engine: unknown, _paths: unknown, texts: string[]): Promise<RunResult> {
+    this.ran.push([...texts])
+    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+  }
+}
+
+const WRAPPERS = ['nohup', 'nice', 'stdbuf', 'setsid', 'ionice']
+
+async function withBox(
+  profile: Record<string, unknown>,
+  run: (ws: Workspace, box: Box) => Promise<void>,
+): Promise<void> {
+  const box = new Box()
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [box] })
+  try {
+    ws.createSession('s', { profile })
+    await run(ws, box)
+  } finally {
+    await ws.close()
+  }
+}
+
+// A wrapper a runtime outside Mirage runs execs its program there, so the
+// program is admitted as `env`, `timeout` and `command` have theirs admitted.
+describe('a wrapper run outside Mirage', () => {
+  it.each([
+    'nohup python3 -c x',
+    'nice -n 5 python3 -c x',
+    'stdbuf -oL python3 -c x',
+    'setsid -w python3 -c x',
+    'ionice -c 3 python3 -c x',
+    'nohup nice python3 -c x',
+    'nohup python3 -c x & wait $!',
+    'nohup time python3 -c x',
+    'nohup nice time -p python3 -c x',
+    'nohup time env python3 -c x',
+  ])('runs no program the allow list leaves out: %s', async (line) => {
+    await withBox(
+      { commands: { allow: [...WRAPPERS, 'wait', 'time', 'env'] } },
+      async (ws, box) => {
+        const bare = await ws.shell('python3 -c x', { sessionId: 's' })
+        const io = await ws.shell(line, { sessionId: 's' })
+        expect(bare.exitCode).toBe(126)
+        expect([io.exitCode, text(io.stderr)]).toEqual([126, text(bare.stderr)])
+        expect(box.ran).toEqual([])
+      },
+    )
+  })
+
+  it('admits every wrapper it runs', async () => {
+    await withBox({ commands: { allow: ['nohup', 'python3'] } }, async (ws, box) => {
+      const io = await ws.shell('nohup nice python3 -c x', { sessionId: 's' })
+      expect(io.exitCode).toBe(126)
+      expect(text(io.stderr).startsWith('nice: ')).toBe(true)
+      expect(box.ran).toEqual([])
+    })
+  })
+
+  it.each(['nohup python3 -c x', 'nohup --help', 'nohup -- python3 -c x'])(
+    'runs a listed program: %s',
+    async (line) => {
+      await withBox({ commands: { allow: ['nohup', 'python3'] } }, async (ws, box) => {
+        const io = await ws.shell(line, { sessionId: 's' })
+        expect(io.exitCode).toBe(0)
+        expect(box.ran).toEqual([line.split(' ')])
+      })
+    },
+  )
+
+  it("reads its program's operands", async () => {
+    const profile = { commands: { deny: [{ reason: 'secret', paths: ['/data/secret.py'] }] } }
+    await withBox(profile, async (ws, box) => {
+      const bare = await ws.shell('cd /data && python3 secret.py', { sessionId: 's' })
+      const io = await ws.shell('cd /data && nohup python3 secret.py', { sessionId: 's' })
+      expect(bare.exitCode).not.toBe(0)
+      expect(text(bare.stderr)).not.toBe('')
+      expect([io.exitCode, text(io.stderr)]).toEqual([bare.exitCode, text(bare.stderr)])
+      expect(box.ran).toEqual([])
+    })
+  })
+
+  // The pass asks about the program where it stands under the wrapper, and
+  // the gate finds that answer there rather than asking again.
+  it('asks about its program once', async () => {
+    await withBox(
+      { commands: { ask: [{ reason: 'nod', commands: ['python3'] }] } },
+      async (ws, box) => {
+        const line = 'nohup python3 -c x'
+        const held = await ws.shell(line, { sessionId: 's' })
+        expect(held.exitCode).toBe(126)
+        const pending = ws.decisions.pending()
+        expect(pending).toHaveLength(1)
+        await ws.decisions.answer(pending[0]?.id ?? '', Outcome.ALLOW, Scope.ONCE)
+        const ran = await ws.shell(line, { sessionId: 's' })
+        expect(ran.exitCode).toBe(0)
+        expect(box.ran).toEqual([['nohup', 'python3', '-c', 'x']])
+        expect(ws.decisions.pending()).toEqual([])
+      },
+    )
+  })
+
+  // The box resolves a path on its own disk, which the gate cannot read, so an
+  // allow list, which names only what it can read, refuses it.
+  it.each([
+    [{ commands: { allow: ['nohup'] } }, true],
+    [{ commands: { deny: [{ reason: 'r', commands: ['rm'] }] } }, false],
+    [{}, false],
+  ])('runs a path only without an allow list: %j', async (profile, refused) => {
+    await withBox(profile, async (ws, box) => {
+      const io = await ws.shell('nohup /usr/bin/env python3 -c x', { sessionId: 's' })
+      if (refused) {
+        expect([io.exitCode, text(io.stderr)]).toEqual([126, '/usr/bin/env: Permission denied\n'])
+        expect(box.ran).toEqual([])
+      } else {
+        expect(io.exitCode).toBe(0)
+        expect(box.ran).toEqual([['nohup', '/usr/bin/env', 'python3', '-c', 'x']])
+      }
+    })
+  })
+})
