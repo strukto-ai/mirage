@@ -392,6 +392,22 @@ describe('MachineHandle', () => {
     ])
   })
 
+  it('lists a job whose connection dropped as killed', async () => {
+    const box = new DroppedBox({ captures: ['train'] })
+    const ws = sandboxWorkspace(box)
+    try {
+      await ws.shell('train &')
+      let rows = 'running'
+      while (rows.includes('running')) {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        rows = DEC.decode((await ws.shell('jobs')).stdout)
+      }
+      expect(rows.endsWith('[1] killed train\n')).toBe(true)
+    } finally {
+      await ws.close()
+    }
+  })
+
   // Only a transport's ConnectionLostError means the connection went; any
   // other error from elsewhere in the run stays the error it is.
   it('leaves another error alone', async () => {

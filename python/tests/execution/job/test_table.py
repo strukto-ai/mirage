@@ -258,6 +258,23 @@ async def test_a_job_killed_with_a_signal_exits_128_plus_it(signal, code):
     assert (await job.process.join()).exit == code
 
 
+# A job whose program ended on a signal no kill sent lists by that signal,
+# as bash's jobs does; its output gains no kill marker.
+@pytest.mark.asyncio
+async def test_a_job_its_program_signal_ended_records_the_signal():
+    table = JobTable()
+
+    async def run(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
+        assert job.process is not None
+        job.process.program_signaled(1)
+        return IOResult(exit_code=129), ExecutionNode()
+
+    job = await table.submit("train", run, "/")
+    waited = await table.wait(job.id)
+    assert (waited.exit_code, job.signal) == (129, 1)
+    assert await waited.console.snapshot(Channel.STDERR) == b""
+
+
 async def _submit_handling(
     table: JobTable, simple: bool, stopped: list[str]
 ) -> tuple[JobHandle, asyncio.Event]:

@@ -350,6 +350,21 @@ async def test_another_connection_family_error_is_not_a_lost_connection():
 
 
 @pytest.mark.asyncio
+async def test_a_job_whose_connection_dropped_is_listed_as_killed():
+    box = DroppedBox(captures=("train",))
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
+    try:
+        await ws.shell("train &")
+        rows = b"running"
+        while b"running" in rows:
+            await asyncio.sleep(0.01)
+            rows = await materialize((await ws.shell("jobs")).stdout)
+        assert rows.endswith(b"[1] killed train\n")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_job_whose_connection_dropped_is_reported_hung_up():
     box = DroppedBox(captures=("train",))
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))

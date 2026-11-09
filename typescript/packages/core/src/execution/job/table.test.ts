@@ -420,6 +420,26 @@ describe('JobTable.wait', () => {
   })
 })
 
+// A job whose program ended on a signal no kill sent lists by that signal,
+// as bash's jobs does; its output gains no kill marker.
+describe('JobTable signal-ended jobs', () => {
+  it('records the signal its program ended on', async () => {
+    const jt = new JobTable()
+    const job = await jt.submit({
+      command: 'train',
+      run: (handle) => {
+        handle.process?.programSignaled(1)
+        return Promise.resolve([new IOResult({ exitCode: 129 }), new ExecutionNode()] as JobResult)
+      },
+      abort: new AbortController(),
+      cwd: '/',
+    })
+    const waited = await jt.wait(job.id)
+    expect([waited.exitCode, job.signal]).toEqual([129, 1])
+    expect(dec(await waited.console.snapshot(Channel.STDERR))).toBe('')
+  })
+})
+
 // Port of tests/shell/test_background_jobs.py::test_wait_all_survives_failing_task.
 describe('JobTable.wait ordering', () => {
   it('joins a kill that is still appending its marker', async () => {
