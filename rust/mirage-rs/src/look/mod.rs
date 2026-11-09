@@ -422,6 +422,7 @@ impl Stream for Look {
         if reply.error.is_some() {
             self.stderr
                 .extend(read_failure(b"look", &self.name, &reply));
+            self.found = false;
             self.stage = Stage::Done;
             return Ok(());
         }
@@ -464,7 +465,7 @@ impl Stream for Look {
 mod tests {
     use serde_json::json;
 
-    use crate::host::Host;
+    use crate::host::{Fault, Host};
     use crate::open;
 
     const WORDS: &str = "a b\nab\na-b c\nab-c\nabc\nabz\nb x\n";
@@ -536,6 +537,30 @@ mod tests {
         // Folded letters sort as lowercase, past `_`.
         let folded = json!({"prefix": "_", "fold": true});
         assert_eq!(found(folded, "_x\nZx\nax\n"), "_x\n");
+    }
+
+    #[test]
+    fn a_read_that_fails_after_a_match_fails_the_run() {
+        // The run passes the 8 MiB the search holds, then its read fails.
+        let words = "a\n".repeat(9 << 20);
+        let config = json!({"operands": ["a", "f"], "fold": false});
+        let mut stream = open("look", config.to_string().as_bytes()).expect("opens");
+        let mut host = Host::with(&[("f", &words)], "");
+        host.chunk = Some(1 << 16);
+        host.faults.insert(
+            "f".to_owned(),
+            Fault {
+                after: 9 << 20,
+                errno: "EIO",
+                text: "Input/output error",
+            },
+        );
+        assert_eq!(host.drive(stream.as_mut()), 1);
+        assert!(!host.out.is_empty());
+        assert_eq!(
+            String::from_utf8_lossy(&host.err),
+            "look: f: Input/output error\n"
+        );
     }
 
     #[test]

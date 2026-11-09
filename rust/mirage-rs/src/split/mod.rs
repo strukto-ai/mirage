@@ -25,8 +25,9 @@ const HEX: &[u8] = b"0123456789abcdef";
 const HINT: &[u8] = b"\nTry 'split --help' for more information.";
 
 /// The most pieces r/N writes in one pass over the spool: each is an
-/// output held open, a descriptor where the files are on disk.
-const GROUP: u64 = 256;
+/// output held open, a descriptor where the files are on disk, so this
+/// leaves a process under a limit of 256 descriptors room for its others.
+const GROUP: u64 = 128;
 
 /// The least each of them holds before it goes, so a large pass still
 /// writes in blocks.

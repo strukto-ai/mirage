@@ -379,6 +379,10 @@ class StreamHost:
         end = min(length, start + size) if isinstance(size, int) else length
         opened: dict[str, JsonValue] = {"skipped": start, "size": length}
         if start >= end:
+            # A skip past the whole file still opens it: one that refuses
+            # fails here, and its bytes are not skipped.
+            if start > 0:
+                await drain(ranged_stream(self.stream, named, 0, 1))
             self.named.pop(fd, None)
             return opened, None
         return opened, ranged_stream(self.stream, named, start, end)

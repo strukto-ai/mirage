@@ -301,3 +301,53 @@ async def test_a_kept_copy_lands_as_a_rename_would_put_it() -> None:
     assert (
         await host.serve({"op": "readlink", "path": "/f"}, b"")
     ).reply == {}
+
+
+async def _kilobyte(path: PathSpec) -> int:
+    return 1024
+
+
+@pytest.mark.asyncio
+async def test_a_skip_past_a_whole_file_still_opens_it() -> None:
+    asked: list[tuple[str, int, int | None]] = []
+
+    async def stream(
+        path: PathSpec, offset: int = 0, size: int | None = None
+    ) -> AsyncIterator[bytes]:
+        asked.append((path.virtual, offset, size))
+        if path.virtual == "/locked":
+            raise PermissionError(errno.EACCES, "Permission denied")
+        yield b"x"
+
+    host = StreamHost(
+        [_spec("/a"), _spec("/locked")],
+        stream,
+        None,
+        None,
+        ROOT_CWD,
+        command="od",
+        sized=_kilobyte,
+    )
+    whole: dict[str, JsonValue] = {
+        "op": "read",
+        "fd": 1,
+        "path": "/a",
+        "operand": 1,
+        "skip": 1 << 20,
+    }
+    assert (await host.serve(whole, b"")).reply == {
+        "skipped": 1024,
+        "size": 1024,
+        "end": True,
+    }
+    assert asked == [("/a", 0, 1)]
+    locked: dict[str, JsonValue] = {
+        "op": "read",
+        "fd": 2,
+        "path": "/locked",
+        "operand": 2,
+        "skip": 1 << 20,
+    }
+    reply = (await host.serve(locked, b"")).reply
+    assert reply["errno"] == "EACCES"
+    assert "skipped" not in reply

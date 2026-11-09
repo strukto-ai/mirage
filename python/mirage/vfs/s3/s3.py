@@ -43,7 +43,7 @@ from mirage.core.s3.truncate import truncate as _truncate
 from mirage.core.s3.unlink import unlink as _unlink
 from mirage.core.s3.write import replace as _replace
 from mirage.core.s3.write import write as _write
-from mirage.errors.fs import exdev
+from mirage.errors.fs import eisdir, exdev
 from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
@@ -137,6 +137,10 @@ class S3VFS(BaseVFS):
     async def read(
         self, path: PathSpec, offset: int = 0, size: int | None = None
     ) -> ByteSource:
+        # The root names no object: a GET of the bare bucket answers its
+        # listing.
+        if not path.mount_path.strip("/"):
+            raise eisdir(path)
         if not offset and size is None:
             return _read_stream(self.accessor, path)
         return await _read(self.accessor, path, offset, size)

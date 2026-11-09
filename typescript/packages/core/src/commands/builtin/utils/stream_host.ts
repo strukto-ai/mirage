@@ -312,6 +312,9 @@ export class StreamHost {
     const end = typeof size === 'number' ? Math.min(length, start + size) : length
     const opened = { skipped: start, size: length }
     if (start >= end) {
+      // A skip past the whole file still opens it: one that refuses fails
+      // here, and its bytes are not skipped.
+      if (start > 0) await drain(rangedStream(this.stream, named, 0, 1))
       this.named.delete(fd)
       return [opened, undefined]
     }

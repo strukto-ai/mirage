@@ -28,6 +28,7 @@ import {
 import { readVersioned } from '../../cache/context.ts'
 import { ANY_WRITE } from '../../cache/types.ts'
 import type { Handed } from '../../vfs/types.ts'
+import { enoent } from '../../errors/fs.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -457,6 +458,34 @@ describe('Mount.call', () => {
   it('throws on unknown op', async () => {
     const m = makeMount()
     await expect(m.call('nope', '/x')).rejects.toThrow(/no op/)
+  })
+})
+
+describe('a lookup beside another', () => {
+  it('finds a file a listing landing beside it names', async () => {
+    const row = new FileStat({ name: 'a', size: 1, type: FileType.FILE })
+    class Drive extends StubVFS {
+      override readonly handed = { read: ['entry'] } as const
+      override read(path: PathSpec, handed?: Handed): Promise<Uint8Array> {
+        if (handed?.entry == null) return Promise.reject(enoent(path))
+        return Promise.resolve(new Uint8Array(1))
+      }
+      override readdir(): Promise<FileStat[]> {
+        return Promise.resolve([row])
+      }
+      override write(): Promise<void> {
+        return Promise.resolve()
+      }
+    }
+    const m = makeMount(MountMode.WRITE, new Drive())
+    await m.index.setDir('/ram/w', [])
+    const listDir = m.index.listDir.bind(m.index)
+    vi.spyOn(m.index, 'listDir').mockImplementationOnce(async (...args) => {
+      const stale = await listDir(...args)
+      await m.index.setDir('/ram/w', [['a', row]])
+      return stale
+    })
+    await expect(m.call('read', '/ram/w/a')).resolves.toBeInstanceOf(Uint8Array)
   })
 })
 

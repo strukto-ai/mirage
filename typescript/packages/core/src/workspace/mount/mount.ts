@@ -1301,7 +1301,12 @@ export class MountEntry {
     if (row !== null) return row
     if (!fetched.has(key)) return null
     if (await beyondWindow(index, key)) return this.beyond(scope, index)
-    if (!(await this.unproven(index, key))) return null
+    if (!(await this.unproven(index, key))) {
+      // A stored listing this lookup missed in may since have been replaced
+      // by one running beside it; a listing it fetched itself stands.
+      if (listed.length > 0) return null
+      return (await entryAt(index, key, warm)) ?? fetched.get(key) ?? null
+    }
     if (this.asksByPath) return this.beyond(scope, index)
     await index.invalidateDir(folderOf(key))
     return (await entryAt(index, key, warm)) ?? fetched.get(key) ?? null

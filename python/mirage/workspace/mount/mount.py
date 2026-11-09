@@ -2108,7 +2108,12 @@ class MountEntry:
         if await beyond_window(index, key):
             return await self._beyond(scope, index)
         if not await self._unproven(index, key):
-            return None
+            # A stored listing this lookup missed in may since have been
+            # replaced by one running beside it; a listing it fetched
+            # itself stands.
+            if listed:
+                return None
+            return await entry_at(index, key, warm) or fetched.get(key)
         if self._asks_by_path:
             return await self._beyond(scope, index)
         await index.invalidate_dir(folder_of(key))
