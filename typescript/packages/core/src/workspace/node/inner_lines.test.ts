@@ -56,12 +56,14 @@ describe('innerLines', () => {
     ['env', ['-i', '-u', 'HOME', 'A=1', 'rm', '/x'], [['argv', ['rm', '/x'], false]]],
     ['timeout', ['-s', 'KILL', '5', 'rm', '/x'], [['argv', ['rm', '/x'], false]]],
     ['nohup', ['rm', '/x'], [['argv', ['rm', '/x'], false]]],
+    ['nohup', ['--help'], []],
     // bash runs the named builtin with the words as given, so
     // `builtin eval 'rm /x'` is eval's line, admitted in turn.
     ['builtin', ['eval', 'rm /x'], [['argv', ['eval', 'rm /x'], false]]],
     ['builtin', ['--', 'echo', 'hi'], [['argv', ['echo', 'hi'], false]]],
     ['builtin', [], []],
     ['nice', ['-n', '5', 'rm', '/x'], [['argv', ['rm', '/x'], false]]],
+    ['ionice', ['-c', '3', 'rm', '/x'], [['argv', ['rm', '/x'], false]]],
     ['time', ['-p', 'rm', '/x'], [['argv', ['rm', '/x'], false]]],
     // Operands the runtime appends: stdin items, matched paths.
     ['xargs', ['-n', '1', 'rm', '-f'], [['argv', ['rm', '-f'], true]]],
