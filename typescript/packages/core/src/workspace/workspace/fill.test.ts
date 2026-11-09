@@ -1711,8 +1711,8 @@ describe('fillEnv through execute', () => {
   })
 
   it('a runtime line keeps its fetch past an inner refusal', async () => {
-    // A runtime that runs `nice env` whole never hands `env` to the gate,
-    // so only `nice`, which the list allows, decides whether it runs.
+    // The pass leaves `env` to the gate where `nice` runs it, which refuses it
+    // there, so the line's own command keeps its fetch.
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-nice-box', FakeConfig, fetch)
     const ws = new Workspace(
@@ -1727,7 +1727,7 @@ describe('fillEnv through execute', () => {
     )
     try {
       const io = await ws.shell('nice env')
-      expect([io.exitCode, stdoutStr(io)]).toEqual([0, 't0\n'])
+      expect([io.exitCode, stderrStr(io)]).toEqual([126, 'env: Permission denied\n'])
       expect(calls).toEqual(['r'])
     } finally {
       await ws.close()
