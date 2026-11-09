@@ -423,6 +423,57 @@ fn a_transform_renames_what_it_matches_as_a_run_reads() {
 }
 
 #[test]
+fn a_rename_that_reaches_a_parent_stays_below_the_root() {
+    let mut host = Host::with(&[], "");
+    let tar = archive("bundle-../x", (0, b""));
+    let typed = json!([["extract", ""], ["transform", "s/^bundle-//"]]);
+    let options = json!({"mode": "extract", "typed": typed, "base": "/out/sub"});
+    let (status, _, err) = read(&mut host, &tar, options);
+    assert_eq!(status, 0);
+    assert_eq!(err, "tar: Removing leading `../' from member names\n");
+    assert_eq!(host.files["/out/sub/x"], b"hello\n");
+    assert!(!host.files.contains_key("/out/x"));
+}
+
+#[test]
+fn a_renamed_member_loses_its_parents_before_its_strip() {
+    let mut host = Host::with(&[], "");
+    let tar = [
+        member("bundle-../x", (0, b"")),
+        member("bundle-../d/e/y", (0, b"")),
+        vec![0; 2 * BLOCK],
+    ]
+    .concat();
+    let typed = json!([
+        ["extract", ""],
+        ["transform", "s/^bundle-//"],
+        ["strip_components", "1"]
+    ]);
+    let (status, _, err) = read(&mut host, &tar, json!({"mode": "extract", "typed": typed}));
+    assert_eq!(status, 0);
+    assert_eq!(err, "tar: Removing leading `../' from member names\n");
+    assert_eq!(host.files["/out/e/y"], b"hello\n");
+    assert!(!host.files.contains_key("/out/x"));
+}
+
+#[test]
+fn a_link_to_nothing_counts_as_an_old_file() {
+    let mut host = Host::with(&[], "");
+    host.links.insert("/out/x".into(), "/out/gone".into());
+    let tar = archive("x", (0, b""));
+    let keep = json!({"mode": "extract", "typed": [["extract", ""], ["keep_old_files", ""]]});
+    let (status, _, err) = read(&mut host, &tar, keep);
+    assert_eq!(status, 2);
+    assert!(err.contains("tar: x: Cannot open: File exists"), "{err}");
+    let skip = json!({"mode": "extract", "typed": [["extract", ""], ["skip_old_files", ""]]});
+    assert_eq!(
+        read(&mut host, &tar, skip),
+        (0, String::new(), String::new())
+    );
+    assert!(!host.files.contains_key("/out/gone"));
+}
+
+#[test]
 fn a_value_octal_cannot_hold_goes_in_base_256() {
     let mut host = two();
     let config = json!({

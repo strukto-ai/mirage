@@ -6,6 +6,7 @@ from mirage.commands.builtin.generic.archive.walk import (
     OTHER_FILESYSTEM,
     DirProbe,
     WalkFn,
+    link_time,
     recorded_stamp,
     scan_operand,
 )
@@ -383,6 +384,8 @@ async def plan_create(
                 notices.append(f"tar: {name}: {constants.SELF_DUMP}")
                 continue
             mtime, mode = await recorded_stamp(stat, read)
+            if entry.kind == "link":
+                mtime = link_time(links, entry.name_path)
             members.append(
                 Member(
                     name=name,

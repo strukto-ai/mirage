@@ -672,6 +672,16 @@ impl Run<'_, '_> {
         }
     }
 
+    /// Whether anything stands at a path, a link to nothing included.
+    async fn taken(&self, path: &[u8]) -> bool {
+        if self.host.stat(path).await.is_some() {
+            return true;
+        }
+        let path = path.to_vec();
+        let (reply, _) = self.host.ask(Request::Readlink { path }).await;
+        reply.target.is_some()
+    }
+
     /// Say once a run each prefix a member's name loses.
     fn announce(&mut self, name: &[u8]) {
         if self.config.absolute {
@@ -697,9 +707,14 @@ impl Run<'_, '_> {
             .collect()
     }
 
-    /// One member, its data read past or taken; false when the input ended
-    /// inside it.
-    async fn member(&mut self, input: &mut Input<'_>, member: &Member) -> bool {
+    /// One member under the name `--transform` gave it, its data read past
+    /// or taken; false when the input ended inside it.
+    async fn member(
+        &mut self,
+        input: &mut Input<'_>,
+        member: &Member,
+        mut target: Vec<u8>,
+    ) -> bool {
         let (config, host) = (self.config, self.host);
         if config.mode == Mode::List {
             let mut row = if config.verbose {
@@ -717,7 +732,10 @@ impl Run<'_, '_> {
             self.failed = true;
             return input.skip(member.size).await;
         }
-        let target = config.transformed(&member.name, Scope::Regular);
+        if !config.absolute {
+            let lost = prefix(&target).len();
+            target.drain(..lost);
+        }
         let (base, parts) = if config.absolute && config.strip == 0 {
             let joined = if target.starts_with(b"/") {
                 target.clone()
@@ -770,7 +788,7 @@ impl Run<'_, '_> {
                 if parts.is_empty() {
                     return input.skip(member.size).await;
                 }
-                if config.overwrites != Overwrites::Replace && host.stat(&path).await.is_some() {
+                if config.overwrites != Overwrites::Replace && self.taken(&path).await {
                     let name = escaped(&member.name);
                     if config.verbose {
                         host.print(&[&name[..], b"\n"].concat());
@@ -1003,7 +1021,8 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
         if member.kind == Kind::File && member.name.ends_with(b"/") {
             member.kind = Kind::Dir;
         }
-        run.announce(&member.name);
+        let target = config.transformed(&member.name, Scope::Regular);
+        run.announce(&target);
         if !run.selection.hit(&member.name) || run.selection.excluded(&member.name) {
             if input.skip(member.size).await {
                 continue;
@@ -1015,7 +1034,7 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
             host.warn(&lines(&config.refusal));
             return FAILED;
         }
-        if !run.member(&mut input, &member).await {
+        if !run.member(&mut input, &member, target).await {
             cut = true;
             break;
         }

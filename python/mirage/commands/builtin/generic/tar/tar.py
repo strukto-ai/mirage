@@ -609,7 +609,14 @@ async def tar(
             "refusal": [byte_view(line) for line in refusal],
         }
         host = StreamHost(
-            [archive], stream, stdin, dispatch, cwd, dash=False, chmod=chmod
+            [archive],
+            stream,
+            stdin,
+            dispatch,
+            cwd,
+            dash=False,
+            chmod=chmod,
+            links=links,
         )
     io = IOResult()
     return hosted_stream("tar", config, host, io), io

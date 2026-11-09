@@ -22,6 +22,7 @@ import type { LinkView, MountView } from '../../../../view/types.ts'
 import type { MemberKind } from '../archive/types.ts'
 import {
   OTHER_FILESYSTEM,
+  linkTime,
   recordedStamp,
   scanOperand,
   type DirProbe,
@@ -293,7 +294,8 @@ export async function planCreate(
         notices.push(`tar: ${name}: ${SELF_DUMP}`)
         continue
       }
-      const [mtime, mode] = await recordedStamp(deps.stat, read)
+      const [recorded, mode] = await recordedStamp(deps.stat, read)
+      const mtime = entry.kind === 'link' ? linkTime(deps.links ?? null, entry.namePath) : recorded
       members.push({
         name,
         kind: entry.kind,
