@@ -25,6 +25,7 @@ import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { builtinUsage } from '../shared.ts'
 import { MAX_PID_OPERAND } from '../constants.ts'
+import type { MachineId } from '../../../../execution/types.ts'
 import {
   grantsOf,
   jobOfSpec,
@@ -160,6 +161,7 @@ export async function handleKill(
   await jobTable.sync(sid)
   for (const operand of words) {
     const jobs = jobTable.listJobs(sid)
+    let groupMachine: MachineId | null = null
     let [pid, refusal] = killPid(jobs, operand, jobTable.jobMarks(sid))
     const shown = new Map(jobs.map((job) => [job.pid, job.shownPid]))
     if (pid !== null && pid > 0 && pid < FIRST_PID && /^[0-9]+$/.test(operand)) {
@@ -177,6 +179,7 @@ export async function handleKill(
         continue
       }
       pid = leader !== null ? -leader.group : null
+      groupMachine = leader?.machine ?? null
       refusal = `(${operand}) - No such process`
     } else if (pid !== null && pid > 0 && machine !== null) {
       await processes.scan()
@@ -195,7 +198,7 @@ export async function handleKill(
     if (operand.startsWith('-')) {
       let found: boolean
       try {
-        found = await killGroup(jobTable, session, jobs, -pid, signal)
+        found = await killGroup(jobTable, session, jobs, -pid, signal, groupMachine)
       } catch (err) {
         if ((err as { code?: unknown }).code !== 'EPERM') throw err
         errors.push(`${voice}kill: (${operand}) - Operation not permitted`)
@@ -271,6 +274,7 @@ async function killGroup(
   jobs: JobHandle[],
   group: number,
   signal: number,
+  machine: MachineId | null = null,
 ): Promise<boolean> {
   const processes = jobTable.processes
   const sid = sessionOf(session)
@@ -278,7 +282,12 @@ async function killGroup(
   if (processes.group(group, sid, granted) === null) return false
   if (signal === 0) return true
   await processes.scan()
-  await processes.signalMembers(processes.group(group, sid, granted) ?? [], signal)
+  await processes.signalMembers(
+    (processes.group(group, sid, granted) ?? []).filter(
+      (member) => machine === null || member.record.machine.toString() === machine.toString(),
+    ),
+    signal,
+  )
   for (const job of jobs) {
     if (
       job.process !== null &&

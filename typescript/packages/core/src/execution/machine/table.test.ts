@@ -367,6 +367,26 @@ describe('MachineTable scans', () => {
     }
   })
 
+  it('keeps a group a machine pid names on its machine', async () => {
+    const a = new Sleeper('a')
+    const b = new Sleeper('b', 700)
+    const ws = sleepers({ a, b })
+    try {
+      await ws.shell('train 1 &')
+      await started(a)
+      await ws.shell('train 1 &', { machine: 'b' })
+      await started(b)
+      expect((await ws.shell('kill -m a -- -412')).exitCode).toBe(0)
+      expect(a.sent.length).toBeGreaterThan(0)
+      expect(b.sent).toEqual([])
+      expect(DEC.decode((await ws.shell('echo alive')).stdout)).toBe('alive\n')
+    } finally {
+      a.finish()
+      b.finish()
+      await ws.close()
+    }
+  })
+
   it('keeps a saved status with its machine', async () => {
     const a = new Sleeper('a')
     const b = new Sleeper('b')

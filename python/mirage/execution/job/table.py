@@ -866,6 +866,15 @@ class JobTable:
         for pid in list(kept)[: max(0, len(kept) - SAVED_STATUSES)]:
             del kept[pid]
 
+    def forget_statuses(self, session_id: str = "") -> None:
+        """Drop how the jobs that left the list ended, as a bare ``wait``
+        does, which leaves bash nothing to answer for their pids.
+
+        Args:
+            session_id (str): the session whose jobs they were.
+        """
+        self._statuses.pop(session_id, None)
+
     def saved_statuses(self, session_id: str, pid: int) -> dict[str, int]:
         """How the jobs a pid named ended, once they have left the list.
 

@@ -230,6 +230,25 @@ async def test_a_machine_pid_names_the_process_whose_program_has_it():
 
 
 @pytest.mark.asyncio
+async def test_a_group_a_machine_pid_names_stays_on_its_machine():
+    a, b = _Sleeper("a"), _Sleeper("b", base=700)
+    ws = _sleepers(a=a, b=b)
+    try:
+        await ws.shell("train 1 &")
+        await _started(a)
+        await ws.shell("train 1 &", machine="b")
+        await _started(b)
+        assert (await ws.shell("kill -m a -- -412")).exit_code == 0
+        assert a.sent
+        assert b.sent == []
+        assert (await ws.shell("echo alive")).stdout == b"alive\n"
+    finally:
+        a.ended.set()
+        b.ended.set()
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_saved_status_stays_with_its_machine():
     a, b = _Sleeper("a"), _Sleeper("b")
     b.code = 7

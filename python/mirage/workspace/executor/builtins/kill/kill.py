@@ -21,6 +21,7 @@ from mirage.context import (
 from mirage.execution.job import JobHandle, JobTable
 from mirage.execution.process.constants import FIRST_PID
 from mirage.execution.process.types import ProcessState
+from mirage.execution.types import MachineId
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
@@ -199,6 +200,7 @@ async def handle_kill(
     await job_table.sync(sid)
     for operand in words:
         jobs = job_table.list_jobs(sid)
+        group_machine: MachineId | None = None
         pid, refusal = _kill_pid(jobs, operand, job_table.job_marks(sid))
         shown = {job.pid: job.shown_pid for job in jobs}
         if pid is not None and 0 < pid < FIRST_PID and operand.isdigit():
@@ -218,6 +220,7 @@ async def handle_kill(
                 errors.append(f"{voice}kill: {operand}: ambiguous job spec")
                 continue
             pid = -leader.group if leader is not None else None
+            group_machine = leader.machine if leader is not None else None
             refusal = f"({operand}) - No such process"
         elif pid is not None and pid > 0 and machine is not None:
             await processes.scan()
@@ -233,7 +236,7 @@ async def handle_kill(
         if operand.startswith("-"):
             try:
                 found = await _kill_group(
-                    job_table, session, jobs, -pid, signal
+                    job_table, session, jobs, -pid, signal, group_machine
                 )
             except PermissionError:
                 errors.append(
@@ -310,6 +313,7 @@ async def _kill_group(
     jobs: list[JobHandle],
     group: int,
     signal: int,
+    machine: MachineId | None = None,
 ) -> bool:
     """Signal a process group the session may reach as killpg(2) does,
     its jobs Mirage stops recorded as killed by the signal.
@@ -320,6 +324,8 @@ async def _kill_group(
         jobs (list[JobHandle]): the jobs the builtin can see.
         group (int): the group.
         signal (int): the signal; 0 only probes.
+        machine (MachineId | None): only its members on this machine,
+            for a group a machine pid named.
 
     Returns:
         bool: whether the group had a runner the session sees.
@@ -333,7 +339,12 @@ async def _kill_group(
         return True
     await processes.scan()
     await processes.signal_members(
-        processes.group(group, sid, granted) or [], signal
+        [
+            member
+            for member in processes.group(group, sid, granted) or []
+            if machine is None or member.record.machine == machine
+        ],
+        signal,
     )
     for job in jobs:
         if (

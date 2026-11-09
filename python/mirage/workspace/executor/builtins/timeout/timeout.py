@@ -71,6 +71,7 @@ from mirage.shell.constants import (
 from mirage.shell.helpers import ends_line, get_text
 from mirage.shell.join import shell_join
 from mirage.shell.signals import signal_report
+from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec
@@ -677,14 +678,15 @@ def _own_job(
             record.parent, record.session_id, ProcessPermissions()
         )
     )
-    if (
-        job is not None
-        and job.background
-        and syntax is not None
-        and job.record.command == get_text(syntax)
-    ):
-        return job
-    return None
+    if job is None or not job.background or syntax is None:
+        return None
+    above = syntax.parent
+    whole = (
+        above
+        if above is not None and above.type == NT.REDIRECTED_STATEMENT
+        else syntax
+    )
+    return job if job.record.command == get_text(whole) else None
 
 
 async def _signal(

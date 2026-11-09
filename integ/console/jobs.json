@@ -248,7 +248,7 @@
         "opfs",
         "console-redis"
       ],
-      "command": "echo a; ps -o cmd=",
+      "command": "sleep 0.3; echo a; ps -o cmd=",
       "expect": {
         "exit": 0,
         "stdout": "a\nps -o cmd=\n",
@@ -263,10 +263,10 @@
         "opfs",
         "console-redis"
       ],
-      "command": "ps -o cmd=; echo b",
+      "command": "sleep 0.3; ps -o cmd=; echo b",
       "expect": {
         "exit": 0,
-        "stdout": "ps -o cmd=; echo b\nps -o cmd=\nb\n",
+        "stdout": "sleep 0.3; ps -o cmd=; echo b\nps -o cmd=\nb\n",
         "stderr": ""
       }
     },
@@ -578,7 +578,7 @@
         "opfs",
         "console-redis"
       ],
-      "command": "echo a; ps -o cmd=;",
+      "command": "sleep 0.3; echo a; ps -o cmd=;",
       "expect": {
         "exit": 0,
         "stdout": "a\nps -o cmd=\n",
@@ -609,6 +609,36 @@
         "console-redis"
       ],
       "command": "( timeout -s STOP -k 0.1 0.1 sleep 3 & p=$!; sleep 0.4; ps -o stat= -p $p | cut -c1; kill -CONT $p; wait $p; echo $? ) 2>/dev/null",
+      "expect": {
+        "exit": 0,
+        "stdout": "T\n137\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_bare_wait_discards_what_it_reaped",
+      "seq": 509062,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "( sleep 0.1 & p=$!; wait; wait \"$p\" 2>/dev/null; echo $? )",
+      "expect": {
+        "exit": 0,
+        "stdout": "127\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_timeout_under_a_redirect_is_its_own_job",
+      "seq": 509063,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "( timeout -s STOP -k 0.1 0.1 sleep 3 > /data/c-to & p=$!; sleep 0.4; ps -o stat= -p $p | cut -c1; kill -CONT $p; wait $p; echo $?; rm /data/c-to ) 2>/dev/null",
       "expect": {
         "exit": 0,
         "stdout": "T\n137\n",

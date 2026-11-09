@@ -237,6 +237,7 @@ async def handle_wait(
         keep = _left_listed(session, visible, began)
         told = _wait_reports(session, job_table)
         await job_table.pop_completed(sid, keep)
+        job_table.forget_statuses(sid)
         return (
             None,
             IOResult(stderr=told or None),

@@ -857,6 +857,15 @@ export class JobTable {
   }
 
   /**
+   * Drop how the jobs that left the list ended, as a bare `wait` does, which
+   * leaves bash nothing to answer for their pids. Mirrors Python's
+   * `forget_statuses`.
+   */
+  forgetStatuses(sessionId = ''): void {
+    this.statuses.delete(sessionId)
+  }
+
+  /**
    * How the jobs a pid named ended, once they have left the list: each
    * machine's status for it, as `ps` shows the machine; empty for none.
    */

@@ -40,6 +40,9 @@ SLEEP_SLICE_SECONDS = 0.05
 IGNORED_BY_DEFAULT = (
     signal.SIGCHLD,
     signal.SIGCONT,
+    signal.SIGTSTP,
+    signal.SIGTTIN,
+    signal.SIGTTOU,
     signal.SIGURG,
     signal.SIGWINCH,
 )

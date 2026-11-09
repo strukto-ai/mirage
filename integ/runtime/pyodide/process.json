@@ -353,6 +353,45 @@
       ]
     },
     {
+      "id": "a_terminal_stop_leaves_a_program_running",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "ids": "import os\nprint(os.getpid(), os.getppid())\n",
+              "spin": "open('/ram/ready', 'w').close()\nwhile True:\n    pass\n",
+              "gap": "import time\nstart = time.monotonic()\nlast = start\nworst = 0.0\nopen('/ram/ready', 'w').close()\nwhile last - start < 4.0:\n    now = time.monotonic()\n    if now - last > worst:\n        worst = now - last\n    last = now\nprint('held' if worst > 1.0 else 'ran')\n",
+              "term": "import signal, sys, time\ndef handle(number, frame):\n    print('caught', number, flush=True)\n    sys.exit(7)\nsignal.signal(signal.SIGTERM, handle)\nsignal.signal(signal.SIGUSR1, handle)\nopen('/ram/ready', 'w').close()\nwhile True:\n    time.sleep(0.05)\n",
+              "ignore": "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nopen('/ram/ready', 'w').close()\ntime.sleep(2)\nprint('survived', flush=True)\n",
+              "waiter": "import signal, subprocess, sys\ndef handle(number, frame):\n    print('stopping', flush=True)\n    child.kill()\n    child.wait()\n    sys.exit(5)\nsignal.signal(signal.SIGTERM, handle)\nchild = subprocess.Popen(['sleep', '40'])\nopen('/ram/ready', 'w').close()\nchild.wait()\nprint('not reached', flush=True)\n",
+              "children": "import os, signal, subprocess, time\nchild = subprocess.Popen(['sleep', '40'])\nchild.send_signal(signal.SIGSTOP)\ntime.sleep(0.2)\nchild.send_signal(signal.SIGCONT)\nchild.send_signal(signal.SIGUSR1)\nprint(child.wait())\nchild = subprocess.Popen(['sleep', '40'])\nos.kill(child.pid, signal.SIGTERM)\nprint(child.wait())\ntry:\n    os.kill(4000000, 0)\nexcept ProcessLookupError:\n    print('no such process')\n",
+              "suicide": "import os, signal\nsignal.signal(signal.SIGUSR2, lambda number, frame: print('handled', number, flush=True))\nos.kill(os.getpid(), signal.SIGUSR2)\nsignal.raise_signal(signal.SIGUSR2)\nos.kill(os.getpid(), 0)\nos.kill(os.getpid(), signal.SIGTERM)\nprint('not reached', flush=True)\n",
+              "reader": "import sys\nopen('/ram/ready', 'w').close()\nprint(len(sys.stdin.read()))\n",
+              "catches": "import time\nopen('/ram/ready', 'w').close()\ntry:\n    while True:\n        time.sleep(0.05)\nexcept BaseException as error:\n    print('caught', type(error).__name__, flush=True)\n    raise\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /ram/spin & p=$!; until [ -e /ram/ready ]; do sleep 0.05; done; kill -TSTP $p; sleep 0.2; kill -0 $p && echo alive; kill -9 $p; wait $p 2>/dev/null; echo $?",
+          "expect": {
+            "exit": 0,
+            "stdout": "alive\n137\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
       "id": "kill_ends_a_stopped_program",
       "hosts": [
         "typescript"

@@ -859,3 +859,27 @@ async def test_an_ended_process_lets_go_of_what_it_held():
     process.terminate(15)
     await process.join()
     assert not process.paused
+
+
+@pytest.mark.asyncio
+async def test_revoking_a_session_lets_a_stopped_runner_go():
+    processes = ProcessTable()
+    started = asyncio.Event()
+
+    async def run():
+        started.set()
+        await asyncio.Event().wait()
+        return 0
+
+    handle = processes.start(
+        session_id="a",
+        command="held",
+        cwd=PathSpec.from_str_path("/"),
+        run=run,
+    )
+    await started.wait()
+    processes.pause(handle)
+    assert handle.paused
+    processes.revoke_session("a")
+    assert not handle.paused
+    await handle.join()

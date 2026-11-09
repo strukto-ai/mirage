@@ -300,6 +300,10 @@ export class ProcessHandle {
    */
   expire(): void {
     this.expired = SIGTERM
+    this.releasePause()
+  }
+
+  private releasePause(): void {
     const pid = this.current.id.pid
     const held = this.pauses.get(pid)
     this.pauses.delete(pid)
@@ -399,6 +403,7 @@ export class ProcessHandle {
    */
   terminate(signal = 9, children = true): boolean {
     if (this.ignores.has(signal)) return false
+    this.releasePause()
     if (this.current.state === 'exited') {
       if (children) this.cancelChildren(signal)
       return false

@@ -54,7 +54,7 @@ import {
 import { STOP_WAIT_SECONDS } from '../../../../execution/job/constants.ts'
 import { shellJoin } from '../../../../shell/join.ts'
 import { signalReport } from '../../../../shell/signals.ts'
-import type { TSNodeLike } from '../../../../shell/types.ts'
+import { NodeType as NT, type TSNodeLike } from '../../../../shell/types.ts'
 import { shellVoice } from '../../../../shell/voice.ts'
 import { abortable, atDeadline, runCancellable, SignalStop } from '../../../../utils/abort.ts'
 import { PathSpec } from '../../../../types.ts'
@@ -507,7 +507,10 @@ function ownJob(
 ): ProcessHandle | null {
   const { parent, sessionId } = process.record
   const job = parent === null ? null : processes.target(parent, sessionId)
-  return job?.background === true && job.record.command === syntax?.text ? job : null
+  if (job?.background !== true || syntax === null) return null
+  const above = syntax.parent
+  const whole = above?.type === NT.REDIRECTED_STATEMENT ? above : syntax
+  return job.record.command === whole.text ? job : null
 }
 
 /**

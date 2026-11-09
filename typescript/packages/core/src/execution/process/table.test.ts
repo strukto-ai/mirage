@@ -778,3 +778,22 @@ describe('signal', () => {
     expect(process.record.shownState ?? null).toBeNull()
   })
 })
+
+it('lets a stopped runner go when its session is revoked', async () => {
+  const processes = new ProcessTable(undefined, undefined, runAsProcess)
+  const handle: ProcessHandle = processes.start({
+    sessionId: 'a',
+    command: 'held',
+    cwd: PathSpec.fromStrPath('/'),
+    cancel: () => undefined,
+    run: async () => {
+      await Promise.resolve()
+      await handle.resumed()
+      return 0
+    },
+  })
+  processes.pause(handle)
+  processes.revokeSession('a')
+  await handle.join()
+  expect(handle.paused).toBe(false)
+})

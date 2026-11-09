@@ -240,6 +240,7 @@ export async function handleWait(
     const keep = leftListed(session, visible, began)
     const told = waitReports(session, jobTable)
     await jobTable.popCompleted(sid, keep)
+    jobTable.forgetStatuses(sid)
     return [
       null,
       new IOResult({ stderr: told.length > 0 ? told : null }),
