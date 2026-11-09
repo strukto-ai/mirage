@@ -15,35 +15,43 @@ tags:
     parent: Workspace operations
   - name: Tools
   - name: Documents
+    x-group: Agent Instructions
     parent: Workspace operations
   - name: Snapshots
   - name: Templates
+    parent: Configuration
   - name: Saved VFS
     x-group: VFS
-    parent: Saved configurations
+    parent: Configuration
   - name: Saved CLIs
-    x-group: CLIs
-    parent: Saved configurations
+    x-group: CLI
+    parent: Configuration
   - name: Saved runtimes
-    x-group: Runtimes
-    parent: Saved configurations
+    x-group: Runtime
+    parent: Configuration
   - name: Saved machines
-    x-group: Machines
-    parent: Saved configurations
-  - name: Saved configurations
+    x-group: Machine
+    parent: Configuration
+  - name: Configuration
   - name: Policies
+    parent: Configuration
   - name: Asks
     parent: Workspace operations
+    x-group: Approval requests
   - name: Lines
     parent: Workspace operations
+    x-group: Commands
   - name: Jobs
     parent: Workspace operations
   - name: Processes
     parent: Workspace operations
   - name: Machines
     parent: Workspace operations
+  - name: Server
   - name: Service
+    parent: Server
   - name: Daemon
+    parent: Server
   - name: Auth
 servers:
   - url: http://127.0.0.1:8765
@@ -53,7 +61,7 @@ security:
 paths:
   /v1/workspaces:
     post:
-      summary: Create a workspace
+      summary: Create workspace
       operationId: create_workspace_v1_workspaces_post
       parameters:
         - name: explain
@@ -78,8 +86,8 @@ paths:
                     mode: write
       responses:
         '200':
-          description: An identical retry answers the existing workspace; with explain=true,
-            what the server's policies say about the config
+          description: Existing workspace for an identical retry, or policy evaluation when
+            `explain=true`.
           content:
             application/json:
               schema:
@@ -142,12 +150,10 @@ paths:
           $ref: '#/components/responses/429'
         '503':
           $ref: '#/components/responses/503'
-      description: 'Create a workspace from a configuration or a saved template.
+      description: |-
+        Create a workspace from a configuration or saved template.
 
-
-        An identical configuration retried with the same id returns the existing workspace with 200.
-        A conflicting id returns 409. Policies check the configuration before creation and return
-        403 on refusal. Set explain=true to inspect those decisions without creating a workspace.'
+        Returns `201` when created, `200` for an identical retry with the same ID, or `409` if that ID has a different configuration. Set `explain=true` to check policies without creating anything.
       tags:
         - Workspaces
       x-hosts:
@@ -186,9 +192,10 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
+      description: List workspaces available to the authenticated account.
   /v1/workspaces/{workspace_id}:
     get:
-      summary: Get a workspace
+      summary: Get workspace
       operationId: get_workspace_v1_workspaces__workspace_id__get
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -221,8 +228,9 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
+      description: Get workspace details, including mounts and sessions.
     delete:
-      summary: Delete a workspace
+      summary: Delete workspace
       operationId: delete_workspace_v1_workspaces__workspace_id__delete
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -253,6 +261,7 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
+      description: Stop the workspace and delete its saved state. Files in external storage are not deleted.
   /v1/workspaces/{workspace_id}/logs:
     get:
       summary: List workspace logs
@@ -261,12 +270,12 @@ paths:
         - $ref: '#/components/parameters/workspaceId'
         - name: session
           in: query
-          description: Only this session; absent or empty selects all sessions.
+          description: Filter by session ID. Omit or leave empty to include all sessions.
           schema:
             type: string
         - name: limit
           in: query
-          description: Commands per JSON page. Ignored for JSONL export.
+          description: Maximum commands per JSON page. Ignored for JSONL export.
           schema:
             type: integer
             minimum: 1
@@ -274,19 +283,23 @@ paths:
             default: 50
         - name: after
           in: query
-          description: Opaque next cursor from the previous page with the same filters. Ignored
-            for JSONL export.
+          description: The `next` cursor from the previous JSON page. Reuse it on the same server with
+            the same filters. Results can change between pages. Ignored for JSONL export.
           schema:
             type: string
         - name: format
           in: query
-          description: jsonl downloads all retained matching commands; other values select JSON.
+          description: Use `json` for paginated results, newest first, or `jsonl` to export all retained
+            matches oldest first. JSONL ignores `limit` and `after` and contains `command`, `vfs`, and
+            `result` records linked by `parent`. Each record has a `timestamp` in Unix milliseconds.
+            Values other than `jsonl` select JSON.
           schema:
             type: string
             default: json
       responses:
         '200':
-          description: OK
+          description: 'Completed command logs. Empty JSON returns `{"items": [], "next": null}`; an empty
+            JSONL export has no body.'
           content:
             application/json:
               schema:
@@ -332,19 +345,17 @@ paths:
           $ref: '#/components/responses/429'
         '403':
           $ref: '#/components/responses/403'
-      description: 'Return completed commands newest first by start time and ID, with their mount
-        calls. JSON started_at values and durations are milliseconds. JSONL exports all retained
-        matching commands oldest first as command, vfs and result records, linked by parent, with
-        timestamp in Unix milliseconds. JSONL ignores limit and after. Empty JSON is {items: [],
-        next: null}; empty JSONL has an empty body. Retention is server-specific. Cursors are
-        opaque and server-specific; pagination is not a snapshot.'
+      description: |-
+        List completed commands with captured output and related file operations, newest first.
+
+        Use `limit` and `after` for pagination, or `format=jsonl` to export all matching commands. Log retention depends on the server.
       tags:
         - Workspaces
       x-hosts:
         - daemon
   /v1/workspaces/{workspace_id}/stop:
     post:
-      summary: Stop a workspace
+      summary: Stop workspace
       operationId: stop_workspace_v1_workspaces__workspace_id__stop_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -367,19 +378,17 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: 'Stop the workspace and keep its state and config for start. A stopped workspace
-        answers as it is, so a stop can be repeated.
+      description: |-
+        Stop the workspace while keeping its saved state and configuration. Calling this again on a stopped workspace has no effect.
 
-
-        RAM file contents do not survive stopping and starting. Save files to persistent storage
-        before stopping the workspace.'
+        RAM-backed files do not survive a stop/start cycle. Save them to persistent storage first.
       tags:
         - Workspaces
       x-hosts:
         - daemon
   /v1/workspaces/{workspace_id}/start:
     post:
-      summary: Start a workspace
+      summary: Start workspace
       operationId: start_workspace_v1_workspaces__workspace_id__start_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -410,23 +419,17 @@ paths:
           $ref: '#/components/responses/429'
         '503':
           $ref: '#/components/responses/503'
-      description: 'Start a stopped workspace from the config it was created with, over the state
-        it kept; a running one answers as it is.
+      description: |-
+        Start the workspace using its saved configuration and retained state. The server checks policies and reloads credentials. If already running, return the existing workspace.
 
-
-        The server''s policies judge the config again, and the secrets and saved entries it names
-        are read again, so a rotated secret is picked up.
-
-
-        RAM file contents do not survive stopping and starting. Save files to persistent storage
-        before stopping the workspace.'
+        RAM-backed files do not survive a stop/start cycle.
       tags:
         - Workspaces
       x-hosts:
         - daemon
   /v1/workspaces/{workspace_id}/cancel:
     post:
-      summary: Cancel a workspace's lines
+      summary: Cancel all commands
       operationId: cancel_workspace_lines_v1_workspaces__workspace_id__cancel_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -449,14 +452,15 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: Cancel every session's running and queued lines; all stay open.
+      description: Cancel all running and queued commands across every session. The workspace and sessions
+        remain open.
       tags:
         - Workspaces
       x-hosts:
         - daemon
   /v1/workspaces/{workspace_id}/kill:
     post:
-      summary: Kill a workspace's jobs
+      summary: Stop all background jobs
       operationId: kill_workspace_jobs_v1_workspaces__workspace_id__kill_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -479,14 +483,15 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: Kill every session's background jobs and runners.
+      description: Stop background jobs and runtime processes across every session. The workspace and
+        sessions remain open.
       tags:
         - Workspaces
       x-hosts:
         - daemon
   /v1/workspaces/{workspace_id}/profiles/{name}:
     put:
-      summary: Set a profile
+      summary: Set profile
       operationId: set_profile_v1_workspaces__workspace_id__profiles__name__put
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -527,12 +532,9 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: 'Define a named profile on the live workspace, or replace it.
-
-
-        Only the live table changes: a session moves when it is updated
-
-        onto the name, and the workspace''s config is never rewritten.'
+      description: Create or replace a named permissions profile in the running workspace. Existing sessions
+        keep their current permissions until explicitly updated. This does not change the saved workspace
+        configuration.
       tags:
         - Workspaces
       x-hosts:
@@ -711,13 +713,13 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      description: The saved templates, by name.
+      description: List saved workspace templates by name.
       tags:
         - Templates
       x-hosts:
         - daemon
     post:
-      summary: Create a template
+      summary: Create template
       operationId: create_template_v1_templates_post
       requestBody:
         content:
@@ -751,16 +753,15 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      description: 'Save a template: a whole workspace config, checked as a create
-
-        checks one, and kept as written. A name already saved is a 409.'
+      description: Save a reusable workspace configuration. The server validates it when saved and preserves
+        environment placeholders as written. Returns `409` if the name already exists.
       tags:
         - Templates
       x-hosts:
         - daemon
   /v1/templates/{ref}:
     get:
-      summary: Get a template
+      summary: Get template
       operationId: get_template_v1_templates__ref__get
       parameters:
         - name: ref
@@ -793,8 +794,9 @@ paths:
         - Templates
       x-hosts:
         - daemon
+      description: Get a saved workspace template.
     delete:
-      summary: Delete a template
+      summary: Delete template
       operationId: delete_template_v1_templates__ref__delete
       parameters:
         - name: ref
@@ -819,14 +821,14 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      description: Delete a template; `restore` brings it back.
+      description: Delete a saved template. Use the restore endpoint to recover it.
       tags:
         - Templates
       x-hosts:
         - daemon
   /v1/templates/{ref}/restore:
     post:
-      summary: Restore a template
+      summary: Restore template
       operationId: restore_template_v1_templates__ref__restore_post
       parameters:
         - name: ref
@@ -859,9 +861,10 @@ paths:
         - Templates
       x-hosts:
         - daemon
+      description: Restore a deleted template.
   /v1/workspaces/{workspace_id}/vfs-md:
     get:
-      summary: Read the workspace's VFS.md
+      summary: Read VFS.md
       operationId: get_v1_workspaces__workspace_id__vfs_md_get
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -892,8 +895,9 @@ paths:
         - Documents
       x-hosts:
         - daemon
+      description: Read VFS.md as Markdown for the selected session.
     put:
-      summary: Write the workspace's VFS.md
+      summary: Write VFS.md
       operationId: put_v1_workspaces__workspace_id__vfs_md_put
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -932,6 +936,7 @@ paths:
         - Documents
       x-hosts:
         - daemon
+      description: Write VFS.md to the specified path for the selected session.
   /v1/workspaces/{workspace_id}/sessions/{session_id}/vfs-md:
     get:
       summary: Read a session's VFS.md
@@ -1021,7 +1026,7 @@ paths:
       x-excluded: true
   /v1/workspaces/{workspace_id}/skill-md:
     get:
-      summary: Read the workspace's SKILL.md
+      summary: Read SKILL.md
       operationId: get_v1_workspaces__workspace_id__skill_md_get
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -1052,8 +1057,9 @@ paths:
         - Documents
       x-hosts:
         - daemon
+      description: Read SKILL.md as Markdown for the selected session.
     put:
-      summary: Write the workspace's SKILL.md
+      summary: Write SKILL.md
       operationId: put_v1_workspaces__workspace_id__skill_md_put
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -1092,6 +1098,7 @@ paths:
         - Documents
       x-hosts:
         - daemon
+      description: Write SKILL.md to the specified path for the selected session.
   /v1/workspaces/{workspace_id}/sessions/{session_id}/skill-md:
     get:
       summary: Read a session's SKILL.md
@@ -1418,7 +1425,7 @@ paths:
         - name: session_id
           in: query
           required: false
-          description: Only this session's records; every session's when absent.
+          description: Filter by session ID. If omitted, include all sessions.
           schema:
             type: string
         - name: all
@@ -1449,18 +1456,15 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: 'The workspace''s asks: pending by default, every decision under
-
-        `all=true`. The ledger already serves both views from one store,
-
-        so the entry point only picks which query to run.'
+      description: List pending approval requests. Set `all=true` to include requests that have
+        already been approved or denied.
       tags:
         - Asks
       x-hosts:
         - daemon
   /v1/workspaces/{workspace_id}/asks/{ask_id}:
     post:
-      summary: Answer an ask
+      summary: Respond to ask
       operationId: answer_ask_v1_workspaces__workspace_id__asks__ask_id__post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -1497,33 +1501,28 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: 'Answer one waiting ask, allow or deny, and return the settled
-
-        record. A known id with nothing waiting is 409 rather than 404, so
-
-        an operator retrying a click reads "already answered", not "not
-
-        found".'
+      description: Approve or deny a pending request and return the recorded decision. Returns
+        `409` if the request has already been answered.
       tags:
         - Asks
       x-hosts:
         - daemon
   /v1/workspaces/{workspace_id}/lines:
     get:
-      summary: List lines
+      summary: List commands
       operationId: list_lines_v1_workspaces__workspace_id__lines_get
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - name: session_id
           in: query
           required: false
-          description: Only this session's records; every session's when absent.
+          description: Filter by session ID. If omitted, include all sessions.
           schema:
             type: string
         - name: state
           in: query
           required: false
-          description: Only the records in this state.
+          description: Filter by execution state.
           schema:
             $ref: '#/components/schemas/LineState'
       responses:
@@ -1558,32 +1557,24 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: 'The lines the workspace keeps, oldest first: every one not ended
+      description: |-
+        List running and recently completed commands, oldest first. Each record represents one submitted shell command or script.
 
-        yet and the newest ended ones, a session''s or those in a state when
-
-        named.
-
-
-        Lines and processes remain available while running. After completion, the newest 1,024
-        records are kept for up to an hour. Servers using the same workspace store share these
-        records, and snapshots keep ended records. Jobs are listed only while the session retains
-        them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix
-        epoch seconds.'
+        Completed commands are retained for up to one hour, with a maximum of 1,024 records. Servers sharing a workspace store share these records; snapshots preserve completed records. Timestamps are Unix seconds.
       tags:
         - Lines
       x-hosts:
         - daemon
   /v1/workspaces/{workspace_id}/lines/{line_id}:
     get:
-      summary: Get a line
+      summary: Get command
       operationId: get_line_v1_workspaces__workspace_id__lines__line_id__get
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - name: line_id
           in: path
           required: true
-          description: The line's id, as a shell result's `line_id` names it.
+          description: Command execution ID returned as `line_id` by the shell endpoint.
           schema:
             type: string
       responses:
@@ -1621,32 +1612,24 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: 'One line, with the ids of the jobs it started, the pids of the
+      description: |-
+        Get a command execution with its job, process, and machine IDs. Use the `line_id` returned by the shell endpoint.
 
-        processes it ran that the workspace still keeps and the machines
-
-        those ran on.
-
-
-        Lines and processes remain available while running. After completion, the newest 1,024
-        records are kept for up to an hour. Servers using the same workspace store share these
-        records, and snapshots keep ended records. Jobs are listed only while the session retains
-        them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix
-        epoch seconds.'
+        Completed commands are retained for up to one hour, with a maximum of 1,024 records. Servers sharing a workspace store share these records; snapshots preserve completed records. Timestamps are Unix seconds.
       tags:
         - Lines
       x-hosts:
         - daemon
   /v1/workspaces/{workspace_id}/lines/{line_id}/stdin:
     post:
-      summary: Write to a running line
+      summary: Write stdin
       operationId: write_stdin_v1_workspaces__workspace_id__lines__line_id__stdin_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - name: line_id
           in: path
           required: true
-          description: The line's id, from the first record of its stream.
+          description: Command ID returned as `line_id` in the first stream record.
           schema:
             type: string
             title: Line Id
@@ -1674,20 +1657,20 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: Send the body to a running line's open stdin. It answers once the bytes are buffered, so a line that stops reading holds its writer back.
+      description: Send input to a running command with open stdin. The request completes when the bytes are buffered. If the command reads slowly, the request waits.
       tags:
         - Lines
       x-hosts:
         - daemon
     delete:
-      summary: Close stdin of a running line
+      summary: Close stdin
       operationId: close_stdin_v1_workspaces__workspace_id__lines__line_id__stdin_delete
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - name: line_id
           in: path
           required: true
-          description: The line's id, from the first record of its stream.
+          description: Command ID returned as `line_id` in the first stream record.
           schema:
             type: string
             title: Line Id
@@ -1708,7 +1691,7 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: 'End a running line''s open stdin: the line reads what was sent, then end of file.'
+      description: Close stdin for a running command. The command can read any buffered input before reaching end of file.
       tags:
         - Lines
       x-hosts:
@@ -1722,19 +1705,19 @@ paths:
         - name: session_id
           in: query
           required: false
-          description: Only this session's records; every session's when absent.
+          description: Filter by session ID. If omitted, include all sessions.
           schema:
             type: string
         - name: state
           in: query
           required: false
-          description: Only the records in this state.
+          description: Filter by execution state.
           schema:
             $ref: '#/components/schemas/JobState'
         - name: line_id
           in: query
           required: false
-          description: Only the jobs this line started.
+          description: Command execution ID returned as `line_id` by the shell endpoint.
           schema:
             type: string
       responses:
@@ -1773,30 +1756,24 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: 'The jobs the workspace''s sessions list, as ``jobs`` does, a
+      description: |-
+        List jobs tracked by workspace sessions. Filter by session, state, or command execution.
 
-        session''s, those in a state or those a line started when named.
-
-
-        Lines and processes remain available while running. After completion, the newest 1,024
-        records are kept for up to an hour. Servers using the same workspace store share these
-        records, and snapshots keep ended records. Jobs are listed only while the session retains
-        them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix
-        epoch seconds.'
+        Completed jobs remain available until the session removes them. Running `wait` or `jobs` can remove completed jobs after reporting them. Timestamps are Unix seconds.
       tags:
         - Jobs
       x-hosts:
         - daemon
   /v1/workspaces/{workspace_id}/jobs/{job_id}:
     get:
-      summary: Get a job
+      summary: Get job
       operationId: get_job_v1_workspaces__workspace_id__jobs__job_id__get
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - name: job_id
           in: path
           required: true
-          description: The job's id, as its listing gives it.
+          description: Job ID returned by the job list endpoint.
           schema:
             type: string
       responses:
@@ -1834,18 +1811,10 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: 'One job, named by the id its listing gives, with the pids of the
+      description: |-
+        Get a job with its process IDs, including descendant processes still tracked by the workspace.
 
-        processes it ran that the workspace still keeps: its own and every
-
-        one under it.
-
-
-        Lines and processes remain available while running. After completion, the newest 1,024
-        records are kept for up to an hour. Servers using the same workspace store share these
-        records, and snapshots keep ended records. Jobs are listed only while the session retains
-        them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix
-        epoch seconds.'
+        Completed jobs remain available until the session removes them. Running `wait` or `jobs` can remove completed jobs after reporting them. Timestamps are Unix seconds.
       tags:
         - Jobs
       x-hosts:
@@ -1859,31 +1828,31 @@ paths:
         - name: session_id
           in: query
           required: false
-          description: Only this session's records; every session's when absent.
+          description: Filter by session ID. If omitted, include all sessions.
           schema:
             type: string
         - name: state
           in: query
           required: false
-          description: Only the records in this state.
+          description: Filter by execution state.
           schema:
             $ref: '#/components/schemas/ProcessState'
         - name: line_id
           in: query
           required: false
-          description: Only the processes this line ran.
+          description: Command execution ID returned as `line_id` by the shell endpoint.
           schema:
             type: string
         - name: job_id
           in: query
           required: false
-          description: Only the processes this job ran, its own and every one under it.
+          description: Filter processes by job ID, including descendant processes.
           schema:
             type: string
         - name: machine
           in: query
           required: false
-          description: Only the processes run on this machine, written `provider:name`.
+          description: Filter by machine identifier in `provider:name` format.
           schema:
             type: string
       responses:
@@ -1930,34 +1899,24 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: 'The processes the workspace keeps, by pid: every live one and the
+      description: |-
+        List running and recently ended processes, ordered by process ID. Filter by session, state, command execution, job, or machine.
 
-        newest ended ones, a session''s, those in a state, those a line ran,
-
-        those a job ran or those run on a machine (``provider:name``) when
-
-        named.
-
-
-        Lines and processes remain available while running. After completion, the newest 1,024
-        records are kept for up to an hour. Servers using the same workspace store share these
-        records, and snapshots keep ended records. Jobs are listed only while the session retains
-        them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix
-        epoch seconds.'
+        Ended processes are retained for up to one hour, with a maximum of 1,024 records. Servers sharing a workspace store share these records; snapshots preserve ended records. Timestamps are Unix seconds.
       tags:
         - Processes
       x-hosts:
         - daemon
   /v1/workspaces/{workspace_id}/processes/{pid}:
     get:
-      summary: Get a process
+      summary: Get process
       operationId: get_process_v1_workspaces__workspace_id__processes__pid__get
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - name: pid
           in: path
           required: true
-          description: The process's pid.
+          description: Process ID.
           schema:
             type: integer
       responses:
@@ -1999,14 +1958,10 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: 'One process, by its pid.
+      description: |-
+        Get a tracked process by its process ID.
 
-
-        Lines and processes remain available while running. After completion, the newest 1,024
-        records are kept for up to an hour. Servers using the same workspace store share these
-        records, and snapshots keep ended records. Jobs are listed only while the session retains
-        them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix
-        epoch seconds.'
+        Ended processes are retained for up to one hour, with a maximum of 1,024 records. Servers sharing a workspace store share these records; snapshots preserve ended records. Timestamps are Unix seconds.
       tags:
         - Processes
       x-hosts:
@@ -2039,27 +1994,24 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: 'The machines the workspace runs programs on, its own host first, each
+      description: |-
+        List machines used to run workspace programs, with the local host first. Each machine is checked when requested.
 
-        checked now: `managed` when Mirage sees and stops every process its
-
-        programs start there, `reachable` when only what it started itself,
-
-        `unreachable` when the check failed.'
+        `managed` means Mirage can inspect and stop every process started by its programs. `reachable` limits control to processes Mirage started directly. `unreachable` means the latest check failed.
       tags:
         - Machines
       x-hosts:
         - daemon
   /v1/workspaces/{workspace_id}/machines/{machine_id}:
     get:
-      summary: Get a machine
+      summary: Get machine
       operationId: get_machine_v1_workspaces__workspace_id__machines__machine_id__get
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - name: machine_id
           in: path
           required: true
-          description: The machine's id, written `provider:name`.
+          description: Machine ID in `provider:name` format.
           schema:
             type: string
       responses:
@@ -2083,16 +2035,15 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: One machine, checked now, with the processes the workspace keeps that
-
-        ran on it, what a scan of it finds among them.
+      description: Get machine status and the tracked processes found on it. The machine is checked when
+        requested.
       tags:
         - Machines
       x-hosts:
         - daemon
   /v1/workspaces/{workspace_id}/shell:
     post:
-      summary: Run a shell line
+      summary: Run shell command
       operationId: shell_v1_workspaces__workspace_id__shell_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -2114,9 +2065,8 @@ paths:
             default: false
       responses:
         '200':
-          description: The line's result; with explain=true, its explanation; with stream=true,
-            an NDJSON stream ending in a status record. With open_stdin, the first record names
-            the line.
+          description: Command result, policy evaluation when `explain=true`, or streamed output ending
+            with a status record when `stream=true`. With `open_stdin`, the first record contains `line_id`.
           content:
             application/json:
               schema:
@@ -2148,8 +2098,8 @@ paths:
         '404':
           $ref: '#/components/responses/404'
         '409':
-          description: Another daemon holds the workspace's lease and runs its lines; the detail
-            names it
+          description: Another server owns command execution for this workspace. The error detail identifies
+            that server.
           content:
             application/json:
               schema:
@@ -2192,11 +2142,10 @@ paths:
                   description: Up to 64 MiB, read as it arrives.
               required:
                 - request
-      description: Run a shell line in a workspace. HTTP 200 means the request completed. Check
-        exit_code to determine whether the command succeeded. Set stream=true for NDJSON output
-        records. See [Streaming and stdin](/api/streaming#stream-command-output) for the record
-        format. Set open_stdin with stream=true to keep writing to the line's stdin while it
-        runs; see [Write to a running line](/api/streaming#write-to-a-running-line).
+      description: |-
+        Run a shell command or script in the workspace. Check `exit_code` to determine whether it succeeded.
+
+        Set `stream=true` for live output. Add `open_stdin=true` to send more input while the command runs. See [Streaming and stdin](/api/streaming) for output formats and input examples.
   /v1/workspaces/{workspace_id}/tools/shell:
     post:
       summary: Shell tool
@@ -2597,7 +2546,7 @@ paths:
       x-excluded: true
   /v1/workspaces/{workspace_id}/vfs/read:
     post:
-      summary: VFS read
+      summary: Read file
       operationId: endpoint_v1_workspaces__workspace_id__vfs_read_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -2672,10 +2621,14 @@ paths:
                 - path
             example:
               path: /hello.txt
-      description: Read a file's bytes, from an offset.
+      description: Read file bytes, optionally starting at an offset. Set `stream=true` to receive raw
+        bytes instead of JSON.
+      x-mint:
+        metadata:
+          sidebarTitle: read
   /v1/workspaces/{workspace_id}/vfs/write:
     post:
-      summary: VFS write
+      summary: Write file
       operationId: endpoint_v1_workspaces__workspace_id__vfs_write_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -2739,10 +2692,13 @@ paths:
             example:
               path: /hello.txt
               data: aGVsbG8K
-      description: Write a file's bytes, replacing what it held.
+      description: Replace file contents with the supplied bytes.
+      x-mint:
+        metadata:
+          sidebarTitle: write
   /v1/workspaces/{workspace_id}/vfs/append:
     post:
-      summary: VFS append
+      summary: Append to file
       operationId: endpoint_v1_workspaces__workspace_id__vfs_append_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -2806,10 +2762,13 @@ paths:
             example:
               path: /hello.txt
               data: aGVsbG8K
-      description: Append bytes to a file.
+      description: Append the supplied bytes to a file.
+      x-mint:
+        metadata:
+          sidebarTitle: append
   /v1/workspaces/{workspace_id}/vfs/pwrite:
     post:
-      summary: VFS pwrite
+      summary: Write at file offset
       operationId: endpoint_v1_workspaces__workspace_id__vfs_pwrite_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -2877,10 +2836,13 @@ paths:
               path: /hello.txt
               data: aGVsbG8K
               offset: 0
-      description: Write bytes into a file at an offset.
+      description: Write bytes at the specified file offset.
+      x-mint:
+        metadata:
+          sidebarTitle: pwrite
   /v1/workspaces/{workspace_id}/vfs/stat:
     post:
-      summary: VFS stat
+      summary: Get path metadata
       operationId: endpoint_v1_workspaces__workspace_id__vfs_stat_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -2941,10 +2903,13 @@ paths:
                 - path
             example:
               path: /hello.txt
-      description: A path's metadata.
+      description: Get metadata for a file or directory.
+      x-mint:
+        metadata:
+          sidebarTitle: stat
   /v1/workspaces/{workspace_id}/vfs/readdir:
     post:
-      summary: VFS readdir
+      summary: List directory entries
       operationId: endpoint_v1_workspaces__workspace_id__vfs_readdir_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -3005,10 +2970,13 @@ paths:
                 - path
             example:
               path: /
-      description: A directory's entries.
+      description: List entries in a directory.
+      x-mint:
+        metadata:
+          sidebarTitle: readdir
   /v1/workspaces/{workspace_id}/vfs/exists:
     post:
-      summary: VFS exists
+      summary: Check path exists
       operationId: endpoint_v1_workspaces__workspace_id__vfs_exists_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -3066,10 +3034,13 @@ paths:
                 - path
             example:
               path: /hello.txt
-      description: Whether a path exists.
+      description: Check whether a file or directory exists at the path.
+      x-mint:
+        metadata:
+          sidebarTitle: exists
   /v1/workspaces/{workspace_id}/vfs/is_dir:
     post:
-      summary: VFS is_dir
+      summary: Check path is directory
       operationId: endpoint_v1_workspaces__workspace_id__vfs_is_dir_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -3127,10 +3098,13 @@ paths:
                 - path
             example:
               path: /
-      description: Whether a path is a directory.
+      description: Check whether the path identifies a directory.
+      x-mint:
+        metadata:
+          sidebarTitle: is_dir
   /v1/workspaces/{workspace_id}/vfs/is_file:
     post:
-      summary: VFS is_file
+      summary: Check path is file
       operationId: endpoint_v1_workspaces__workspace_id__vfs_is_file_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -3188,10 +3162,13 @@ paths:
                 - path
             example:
               path: /hello.txt
-      description: Whether a path is a file.
+      description: Check whether the path identifies a file.
+      x-mint:
+        metadata:
+          sidebarTitle: is_file
   /v1/workspaces/{workspace_id}/vfs/list_files:
     post:
-      summary: VFS list_files
+      summary: List file names
       operationId: endpoint_v1_workspaces__workspace_id__vfs_list_files_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -3252,10 +3229,13 @@ paths:
                 - path
             example:
               path: /
-      description: The names of a directory's files.
+      description: List file names in a directory.
+      x-mint:
+        metadata:
+          sidebarTitle: list_files
   /v1/workspaces/{workspace_id}/vfs/mkdir:
     post:
-      summary: VFS mkdir
+      summary: Create directory
       operationId: endpoint_v1_workspaces__workspace_id__vfs_mkdir_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -3313,10 +3293,13 @@ paths:
                 - path
             example:
               path: /notes
-      description: Make a directory.
+      description: Create a directory at the path.
+      x-mint:
+        metadata:
+          sidebarTitle: mkdir
   /v1/workspaces/{workspace_id}/vfs/rmdir:
     post:
-      summary: VFS rmdir
+      summary: Delete empty directory
       operationId: endpoint_v1_workspaces__workspace_id__vfs_rmdir_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -3374,10 +3357,13 @@ paths:
                 - path
             example:
               path: /notes
-      description: Remove an empty directory.
+      description: Delete an empty directory.
+      x-mint:
+        metadata:
+          sidebarTitle: rmdir
   /v1/workspaces/{workspace_id}/vfs/unlink:
     post:
-      summary: VFS unlink
+      summary: Delete file
       operationId: endpoint_v1_workspaces__workspace_id__vfs_unlink_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -3435,10 +3421,13 @@ paths:
                 - path
             example:
               path: /hello.txt
-      description: Remove a file.
+      description: Delete a file at the path.
+      x-mint:
+        metadata:
+          sidebarTitle: unlink
   /v1/workspaces/{workspace_id}/vfs/create:
     post:
-      summary: VFS create
+      summary: Create empty file
       operationId: endpoint_v1_workspaces__workspace_id__vfs_create_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -3496,10 +3485,13 @@ paths:
                 - path
             example:
               path: /hello.txt
-      description: Create an empty file.
+      description: Create an empty file at the path.
+      x-mint:
+        metadata:
+          sidebarTitle: create
   /v1/workspaces/{workspace_id}/vfs/rename:
     post:
-      summary: VFS rename
+      summary: Rename path
       operationId: endpoint_v1_workspaces__workspace_id__vfs_rename_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -3561,10 +3553,13 @@ paths:
             example:
               src: /hello.txt
               dst: /goodbye.txt
-      description: Rename a path within its mount.
+      description: Rename a file or directory within the same mount.
+      x-mint:
+        metadata:
+          sidebarTitle: rename
   /v1/workspaces/{workspace_id}/vfs/symlink:
     post:
-      summary: VFS symlink
+      summary: Create symbolic link
       operationId: endpoint_v1_workspaces__workspace_id__vfs_symlink_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -3626,10 +3621,13 @@ paths:
             example:
               path: /hello-link.txt
               target: /hello.txt
-      description: Make a symbolic link at a path.
+      description: Create a symbolic link at the path.
+      x-mint:
+        metadata:
+          sidebarTitle: symlink
   /v1/workspaces/{workspace_id}/vfs/readlink:
     post:
-      summary: VFS readlink
+      summary: Read symbolic link
       operationId: endpoint_v1_workspaces__workspace_id__vfs_readlink_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -3688,10 +3686,13 @@ paths:
                 - path
             example:
               path: /hello-link.txt
-      description: Where a symbolic link points.
+      description: Read the target path of a symbolic link.
+      x-mint:
+        metadata:
+          sidebarTitle: readlink
   /v1/workspaces/{workspace_id}/vfs/setattr:
     post:
-      summary: VFS setattr
+      summary: Update path attributes
       operationId: endpoint_v1_workspaces__workspace_id__vfs_setattr_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -3765,10 +3766,13 @@ paths:
             example:
               path: /hello.txt
               mode: 420
-      description: Change a path's mode, owner or times.
+      description: Update permissions, ownership, or timestamps for a file or directory.
+      x-mint:
+        metadata:
+          sidebarTitle: setattr
   /v1/workspaces/{workspace_id}/vfs/getxattr:
     post:
-      summary: VFS getxattr
+      summary: Get extended attribute
       operationId: endpoint_v1_workspaces__workspace_id__vfs_getxattr_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -3833,10 +3837,13 @@ paths:
             example:
               path: /hello.txt
               name: user.note
-      description: One extended attribute's value.
+      description: Read the value of an extended attribute.
+      x-mint:
+        metadata:
+          sidebarTitle: getxattr
   /v1/workspaces/{workspace_id}/vfs/listxattr:
     post:
-      summary: VFS listxattr
+      summary: List extended attributes
       operationId: endpoint_v1_workspaces__workspace_id__vfs_listxattr_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -3898,10 +3905,13 @@ paths:
                 - path
             example:
               path: /hello.txt
-      description: A path's extended attribute names.
+      description: List extended attribute names for a path.
+      x-mint:
+        metadata:
+          sidebarTitle: listxattr
   /v1/workspaces/{workspace_id}/vfs/setxattr:
     post:
-      summary: VFS setxattr
+      summary: Set extended attribute
       operationId: endpoint_v1_workspaces__workspace_id__vfs_setxattr_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -3975,10 +3985,13 @@ paths:
               path: /hello.txt
               name: user.note
               value: aGVsbG8K
-      description: Set an extended attribute.
+      description: Set the value of an extended attribute.
+      x-mint:
+        metadata:
+          sidebarTitle: setxattr
   /v1/workspaces/{workspace_id}/vfs/removexattr:
     post:
-      summary: VFS removexattr
+      summary: Remove extended attribute
       operationId: endpoint_v1_workspaces__workspace_id__vfs_removexattr_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -4043,9 +4056,12 @@ paths:
               path: /hello.txt
               name: user.note
       description: Remove an extended attribute.
+      x-mint:
+        metadata:
+          sidebarTitle: removexattr
   /v1/workspaces/{workspace_id}/vfs/truncate:
     post:
-      summary: VFS truncate
+      summary: Resize file
       operationId: endpoint_v1_workspaces__workspace_id__vfs_truncate_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -4107,10 +4123,13 @@ paths:
             example:
               path: /hello.txt
               length: 0
-      description: Cut or extend a file to a length.
+      description: Resize a file to the specified byte length.
+      x-mint:
+        metadata:
+          sidebarTitle: truncate
   /v1/workspaces/{workspace_id}/glob:
     post:
-      summary: Match paths
+      summary: Find paths
       operationId: glob_v1_workspaces__workspace_id__glob_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -4138,11 +4157,10 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: '`session.glob`: every path a pattern matches, as the session
-
-        sees them.'
+      description: Find workspace paths that match a glob pattern, such as `/src/**/*.py`. Results include
+        only paths visible to the selected session.
       tags:
-        - Shell
+        - VFS
       x-hosts:
         - daemon
       requestBody:
@@ -4159,9 +4177,12 @@ paths:
                 - pattern
             example:
               pattern: /**/*.txt
+      x-mint:
+        metadata:
+          sidebarTitle: glob
   /v1/workspaces/{workspace_id}/vfs/{name}:
     post:
-      summary: Call any VFS function
+      summary: Call VFS function
       operationId: custom_function_v1_workspaces__workspace_id__vfs__name__post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -4199,9 +4220,8 @@ paths:
           $ref: '#/components/responses/500'
         '507':
           $ref: '#/components/responses/507'
-      description: Call a declared VFS function using the ordinary session and policy gate. The
-        selected function defines the returned JSON value; there is no shared response shape.
-        The example shows response headers only.
+      description: Call a VFS function by name using the selected session and its permissions. Request
+        arguments and the JSON response depend on the function. The response example shows headers only.
       tags:
         - VFS
       x-hosts:
@@ -4224,6 +4244,9 @@ paths:
             example:
               path: /hello.txt
               kwargs: {}
+      x-mint:
+        metadata:
+          sidebarTitle: call
   /v1/health:
     get:
       summary: Check health
@@ -4240,6 +4263,7 @@ paths:
       x-hosts:
         - daemon
       security: []
+      description: Check whether the server is running. This endpoint does not require authentication.
   /v1/daemon/ready:
     get:
       summary: Check readiness
@@ -4276,11 +4300,8 @@ paths:
                   - status
               example:
                 status: full
-      description: 'Whether the server takes new workspaces: 503 while it drains for
-
-        shutdown or holds `max_workspaces`, so a load balancer sends new
-
-        work elsewhere. `/v1/health` only says the process is up.'
+      description: Check whether the server can accept new workspaces. Returns `503` when capacity is
+        reached or shutdown is in progress. Use this endpoint for load balancer readiness checks.
       tags:
         - Daemon
       x-hosts:
@@ -4288,7 +4309,7 @@ paths:
       security: []
   /v1/daemon/shutdown:
     post:
-      summary: Shut down the server
+      summary: Shut down server
       operationId: shutdown_v1_daemon_shutdown_post
       responses:
         '200':
@@ -4301,16 +4322,10 @@ paths:
           $ref: '#/components/responses/401'
         '429':
           $ref: '#/components/responses/429'
-      description: 'Trip the exit event, which the app''s `on_idle_exit` acts on.
+      description: |-
+        Request graceful shutdown of the server and its active workspaces. This operation is unavailable to account-scoped callers.
 
-
-        The daemon''s hook sends SIGTERM to its own process, so uvicorn runs
-
-        its graceful shutdown (close connections, run the lifespan''s finally
-
-        block). An app run without a hook keeps serving. The server serves
-
-        every account, so an account may not stop it.'
+        A custom server must configure `on_idle_exit` in Python or `onIdleExit` in TypeScript. Without that callback, it continues serving. See [server shutdown configuration](/home/access/http#shut-down).
       tags:
         - Daemon
       x-hosts:
@@ -4352,7 +4367,7 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
-          description: Only entries of this type, such as s3.
+          description: Filter by configuration type, such as `s3`.
         - in: query
           name: q
           required: false
@@ -4360,7 +4375,7 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
-          description: Only entries whose name contains this text, ignoring case.
+          description: Filter names by this text, ignoring case.
       responses:
         '200':
           description: OK
@@ -4380,9 +4395,8 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: List VFS configs
-      description: 'The saved VFS configs: a mount''s type and fields, kept by name for templates
-        to use.'
+      summary: List VFS
+      description: List saved VFS configurations for reuse in workspace templates.
       tags:
         - Saved VFS
       x-hosts: &id002
@@ -4406,7 +4420,7 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: Create a VFS config
+      summary: Create VFS
       requestBody:
         required: true
         content:
@@ -4419,9 +4433,9 @@ paths:
               fields:
                 bucket: example-bucket
                 region: us-east-1
-      description: Save a VFS config. Its fields are checked against the type's; secret fields
-        are sealed, and a string field may point at a saved store's secret instead. A name
-        already saved is a 409.
+      description: Save a named VFS configuration. Fields are validated for the selected type. Secret
+        values are stored securely and omitted from read responses. String fields can reference secrets
+        in a saved store. Returns `409` if the name exists.
       tags:
         - Saved VFS
       x-hosts: *id002
@@ -4493,8 +4507,9 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: List VFS config types
-      description: Every type a VFS config can be, with the fields its config takes. The example shows one registered type; the response includes all types available on the server.
+      summary: List VFS types
+      description: List supported VFS configuration types and their fields. Available types depend on
+        the server.
       tags:
         - Saved VFS
       x-hosts: *id002
@@ -4507,7 +4522,7 @@ paths:
           required: true
           schema:
             type: string
-          description: The VFS config's name.
+          description: Saved configuration name.
       responses:
         '200':
           description: OK
@@ -4529,8 +4544,9 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: Get a VFS config
-      description: One saved VFS config, with its sealed fields named but not answered.
+      summary: Get VFS
+      description: Get a saved VFS configuration without secret values. The `sealed` field lists stored
+        secret names.
       tags:
         - Saved VFS
       x-hosts: *id002
@@ -4542,7 +4558,7 @@ paths:
           required: true
           schema:
             type: string
-          description: The VFS config's name.
+          description: Saved configuration name.
       responses:
         '200':
           description: OK
@@ -4566,7 +4582,7 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: Update a VFS config
+      summary: Update VFS
       requestBody:
         required: true
         content:
@@ -4577,8 +4593,8 @@ paths:
               fields:
                 bucket: example-bucket
                 region: us-east-1
-      description: Change a VFS config's fields. Its name and type stay; a sealed field left
-        out keeps its value.
+      description: Update a saved VFS configuration. The name and type cannot change. Omitted secret fields
+        keep their values; `null` removes a field.
       tags:
         - Saved VFS
       x-hosts: *id002
@@ -4590,7 +4606,7 @@ paths:
           required: true
           schema:
             type: string
-          description: The VFS config's name.
+          description: Saved configuration name.
       responses:
         '204':
           description: No content
@@ -4608,8 +4624,8 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: Delete a VFS config
-      description: Delete a saved VFS config.
+      summary: Delete VFS
+      description: Delete a saved VFS configuration.
       tags:
         - Saved VFS
       x-hosts: *id002
@@ -4624,7 +4640,7 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
-          description: Only entries of this type, such as s3.
+          description: Filter by configuration type, such as `mcp`.
         - in: query
           name: q
           required: false
@@ -4632,7 +4648,7 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
-          description: Only entries whose name contains this text, ignoring case.
+          description: Filter names by this text, ignoring case.
       responses:
         '200':
           description: OK
@@ -4652,9 +4668,8 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: List CLI configs
-      description: 'The saved CLI configs: a CLI install''s type and fields, kept by name
-        for templates to use.'
+      summary: List CLIs
+      description: List saved CLI configurations for reuse in workspace templates.
       tags:
         - Saved CLIs
       x-hosts: *id002
@@ -4677,7 +4692,7 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: Create a CLI config
+      summary: Create CLI
       requestBody:
         required: true
         content:
@@ -4690,9 +4705,9 @@ paths:
               fields:
                 token: <github-token>
                 repo: owner/repository
-      description: Save a CLI config. Its fields are checked against the type's; secret fields
-        are sealed, and a string field may point at a saved store's secret instead. A name
-        already saved is a 409.
+      description: Save a named CLI configuration. Fields are validated for the selected type. Secret
+        values are stored securely and omitted from read responses. String fields can reference secrets
+        in a saved store. Returns `409` if the name exists.
       tags:
         - Saved CLIs
       x-hosts: *id002
@@ -4735,8 +4750,9 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: List CLI config types
-      description: Every type a CLI config can be, with the fields its config takes. The example shows one registered type; the response includes all types available on the server.
+      summary: List CLI types
+      description: List supported CLI configuration types and their fields. Available types depend on
+        the server.
       tags:
         - Saved CLIs
       x-hosts: *id002
@@ -4749,7 +4765,7 @@ paths:
           required: true
           schema:
             type: string
-          description: The CLI config's name.
+          description: Saved configuration name.
       responses:
         '200':
           description: OK
@@ -4771,8 +4787,9 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: Get a CLI config
-      description: One saved CLI config, with its sealed fields named but not answered.
+      summary: Get CLI
+      description: Get a saved CLI configuration without secret values. The `sealed` field lists stored
+        secret names.
       tags:
         - Saved CLIs
       x-hosts: *id002
@@ -4784,7 +4801,7 @@ paths:
           required: true
           schema:
             type: string
-          description: The CLI config's name.
+          description: Saved configuration name.
       responses:
         '200':
           description: OK
@@ -4808,7 +4825,7 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: Update a CLI config
+      summary: Update CLI
       requestBody:
         required: true
         content:
@@ -4818,8 +4835,8 @@ paths:
             example:
               fields:
                 repo: owner/another-repository
-      description: Change a CLI config's fields. Its name and type stay; a sealed field left
-        out keeps its value.
+      description: Update a saved CLI configuration. The name and type cannot change. Omitted secret fields
+        keep their values; `null` removes a field.
       tags:
         - Saved CLIs
       x-hosts: *id002
@@ -4831,7 +4848,7 @@ paths:
           required: true
           schema:
             type: string
-          description: The CLI config's name.
+          description: Saved configuration name.
       responses:
         '204':
           description: No content
@@ -4849,8 +4866,8 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: Delete a CLI config
-      description: Delete a saved CLI config.
+      summary: Delete CLI
+      description: Delete a saved CLI configuration.
       tags:
         - Saved CLIs
       x-hosts: *id002
@@ -4865,7 +4882,7 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
-          description: Only entries of this type, such as s3.
+          description: Filter by a type returned by `GET /v1/runtimes/types`.
         - in: query
           name: q
           required: false
@@ -4873,7 +4890,7 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
-          description: Only entries whose name contains this text, ignoring case.
+          description: Filter names by this text, ignoring case.
       responses:
         '200':
           description: OK
@@ -4893,9 +4910,8 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: List runtime configs
-      description: 'The saved runtime configs: a runtime''s type and fields, kept by name
-        for templates to use.'
+      summary: List runtimes
+      description: List saved runtime configurations for reuse in workspace templates.
       tags:
         - Saved runtimes
       x-hosts: *id002
@@ -4918,7 +4934,7 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: Create a runtime config
+      summary: Create runtime
       requestBody:
         required: true
         content:
@@ -4930,9 +4946,9 @@ paths:
               type: monty
               fields:
                 max_memory: 128MB
-      description: Save a runtime config. Its fields are checked against the type's; secret
-        fields are sealed, and a string field may point at a saved store's secret instead.
-        A name already saved is a 409.
+      description: Save a named runtime configuration. Fields are validated for the selected type. Secret
+        values are stored securely and omitted from read responses. String fields can reference secrets
+        in a saved store. Returns `409` if the name exists.
       tags:
         - Saved runtimes
       x-hosts: *id002
@@ -4958,8 +4974,9 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: List runtime config types
-      description: Every type a runtime config can be, with the fields its config takes. The example shows one registered type; the response includes all types available on the server.
+      summary: List runtime types
+      description: List supported runtime configuration types and their fields. Available types depend
+        on the server.
       tags:
         - Saved runtimes
       x-hosts: *id002
@@ -4972,7 +4989,7 @@ paths:
           required: true
           schema:
             type: string
-          description: The runtime config's name.
+          description: Saved configuration name.
       responses:
         '200':
           description: OK
@@ -4994,8 +5011,9 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: Get a runtime config
-      description: One saved runtime config, with its sealed fields named but not answered.
+      summary: Get runtime
+      description: Get a saved runtime configuration without secret values. The `sealed` field lists stored
+        secret names.
       tags:
         - Saved runtimes
       x-hosts: *id002
@@ -5007,7 +5025,7 @@ paths:
           required: true
           schema:
             type: string
-          description: The runtime config's name.
+          description: Saved configuration name.
       responses:
         '200':
           description: OK
@@ -5031,7 +5049,7 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: Update a runtime config
+      summary: Update runtime
       requestBody:
         required: true
         content:
@@ -5041,8 +5059,8 @@ paths:
             example:
               fields:
                 max_memory: 256MB
-      description: Change a runtime config's fields. Its name and type stay; a sealed field
-        left out keeps its value.
+      description: Update a saved runtime configuration. The name and type cannot change. Omitted secret
+        fields keep their values; `null` removes a field.
       tags:
         - Saved runtimes
       x-hosts: *id002
@@ -5054,7 +5072,7 @@ paths:
           required: true
           schema:
             type: string
-          description: The runtime config's name.
+          description: Saved configuration name.
       responses:
         '204':
           description: No content
@@ -5072,8 +5090,8 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: Delete a runtime config
-      description: Delete a saved runtime config.
+      summary: Delete runtime
+      description: Delete a saved runtime configuration.
       tags:
         - Saved runtimes
       x-hosts: *id002
@@ -5088,7 +5106,7 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
-          description: Only entries of this type, such as s3.
+          description: Filter by a type returned by `GET /v1/machines/types`.
         - in: query
           name: q
           required: false
@@ -5096,7 +5114,7 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
-          description: Only entries whose name contains this text, ignoring case.
+          description: Filter names by this text, ignoring case.
       responses:
         '200':
           description: OK
@@ -5116,9 +5134,8 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: List machine configs
-      description: 'The saved machine configs: a machine''s provider and fields, kept by name
-        for templates to use.'
+      summary: List machines
+      description: List saved machine configurations for reuse in workspace templates.
       tags:
         - Saved machines
       x-hosts: *id002
@@ -5141,7 +5158,7 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: Create a machine config
+      summary: Create machine
       requestBody:
         required: true
         content:
@@ -5153,9 +5170,9 @@ paths:
               type: docker
               fields:
                 container: mirage-tools
-      description: Save a machine config. Its fields are checked against the type's; secret
-        fields are sealed, and a string field may point at a saved store's secret instead.
-        A name already saved is a 409.
+      description: Save a named machine configuration. Fields are validated for the selected type. Secret
+        values are stored securely and omitted from read responses. String fields can reference secrets
+        in a saved store. Returns `409` if the name exists.
       tags:
         - Saved machines
       x-hosts: *id002
@@ -5181,8 +5198,9 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: List machine config types
-      description: Every type a machine config can be, with the fields its config takes. The example shows one registered type; the response includes all types available on the server.
+      summary: List machine types
+      description: List supported machine configuration types and their fields. Available types depend
+        on the server.
       tags:
         - Saved machines
       x-hosts: *id002
@@ -5195,7 +5213,7 @@ paths:
           required: true
           schema:
             type: string
-          description: The machine config's name.
+          description: Saved configuration name.
       responses:
         '200':
           description: OK
@@ -5217,8 +5235,9 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: Get a machine config
-      description: One saved machine config, with its sealed fields named but not answered.
+      summary: Get machine
+      description: Get a saved machine configuration without secret values. The `sealed` field lists stored
+        secret names.
       tags:
         - Saved machines
       x-hosts: *id002
@@ -5230,7 +5249,7 @@ paths:
           required: true
           schema:
             type: string
-          description: The machine config's name.
+          description: Saved configuration name.
       responses:
         '200':
           description: OK
@@ -5254,7 +5273,7 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: Update a machine config
+      summary: Update machine
       requestBody:
         required: true
         content:
@@ -5264,8 +5283,8 @@ paths:
             example:
               fields:
                 container: mirage-tools-2
-      description: Change a machine config's fields. Its name and type stay; a sealed field
-        left out keeps its value.
+      description: Update a saved machine configuration. The name and type cannot change. Omitted secret
+        fields keep their values; `null` removes a field.
       tags:
         - Saved machines
       x-hosts: *id002
@@ -5277,7 +5296,7 @@ paths:
           required: true
           schema:
             type: string
-          description: The machine config's name.
+          description: Saved configuration name.
       responses:
         '204':
           description: No content
@@ -5295,8 +5314,8 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: Delete a machine config
-      description: Delete a saved machine config.
+      summary: Delete machine
+      description: Delete a saved machine configuration.
       tags:
         - Saved machines
       x-hosts: *id002
@@ -5317,7 +5336,8 @@ paths:
         '501':
           $ref: '#/components/responses/501'
       summary: List policies
-      description: The saved policies' names, sorted. Get one for its source.
+      description: List saved policy names in alphabetical order. Use the get endpoint to read policy
+        source code.
       tags:
         - Policies
       x-hosts: *id002
@@ -5358,8 +5378,8 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: Create a policy
-      description: Save a policy program, by name. A name already saved is a 409.
+      summary: Create policy
+      description: Save a named Python policy program. Returns `409` if the name already exists.
       tags:
         - Policies
       x-hosts: *id002
@@ -5372,7 +5392,7 @@ paths:
           required: true
           schema:
             type: string
-          description: The policy's name, such as guard.py.
+          description: Policy name, such as `guard.py`.
       responses:
         '200': &id004
           description: OK
@@ -5391,8 +5411,8 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: Get a policy
-      description: One saved policy, with its source.
+      summary: Get policy
+      description: Get saved policy source code.
       tags:
         - Policies
       x-hosts: *id002
@@ -5404,7 +5424,7 @@ paths:
           required: true
           schema:
             type: string
-          description: The policy's name, such as guard.py.
+          description: Policy name, such as `guard.py`.
       requestBody:
         content:
           application/json:
@@ -5434,8 +5454,8 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: Update a policy
-      description: Replace a saved policy's source.
+      summary: Update policy
+      description: Replace saved policy source code.
       tags:
         - Policies
       x-hosts: *id002
@@ -5447,7 +5467,7 @@ paths:
           required: true
           schema:
             type: string
-          description: The policy's name, such as guard.py.
+          description: Policy name, such as `guard.py`.
       responses:
         '204':
           description: No content
@@ -5465,8 +5485,8 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      summary: Delete a policy
-      description: Delete a saved policy. Success returns HTTP 204 No Content with no response body.
+      summary: Delete policy
+      description: Delete a saved policy. Returns `204 No Content` with no response body.
       tags:
         - Policies
       x-hosts: *id002
@@ -5486,12 +5506,13 @@ components:
             - type: 'null'
           title: Cwd
         started_at:
-          description: Start time as Unix epoch milliseconds.
+          description: Command start time in Unix milliseconds.
           title: Started At
           type: number
         duration_ms:
           title: Duration Ms
           type: number
+          description: Command duration in milliseconds.
         exit_code:
           anyOf:
             - type: integer
@@ -5576,6 +5597,7 @@ components:
             - type: string
             - type: 'null'
           title: Next
+          description: Cursor for the next page, or null when no more results are available.
       required:
         - items
         - next
@@ -5937,15 +5959,15 @@ components:
         - reachable
         - unreachable
       title: MachineState
-      description: 'How far Mirage reaches a machine, as its last check found it: `managed`
-        (Mirage sees and stops every process its programs start there), `reachable`
-        (only what it started itself) or `unreachable` (the last check failed).'
+      description: Machine access status. `managed` allows inspection and control of every process
+        started by Mirage programs. `reachable` limits this to processes Mirage started directly.
+        `unreachable` means the latest check failed.
     MachineResponse:
       properties:
         id:
           type: string
           title: Id
-          description: The machine's id, written `provider:name`.
+          description: Machine ID in `provider:name` format.
         state:
           $ref: '#/components/schemas/MachineState'
         checked_at:
@@ -5963,7 +5985,7 @@ components:
         id:
           type: string
           title: Id
-          description: The machine's id, written `provider:name`.
+          description: Machine ID in `provider:name` format.
         state:
           $ref: '#/components/schemas/MachineState'
         checked_at:
@@ -6117,26 +6139,9 @@ components:
       additionalProperties: false
       type: object
       title: CLIBlock
-      description: 'One ``clis:`` entry: install a named CLI with its own config.
-
-
-        The section key is the installed head word. Exactly one handler
-
-        source: ``cli`` names a registered spec tree; ``script`` references
-
-        a program file whose content is embedded at load (the docker
-
-        build-context model). ``runtime`` optionally pins the world runtime
-
-        entry that runs the script; unset picks the first entry speaking
-
-        the script''s language. ``config`` validates through the spec''s
-
-        ``config_model`` at install time (fail loud). A CLI never takes a
-
-        mode and never shares a mount''s credentials: a binary has no mode,
-
-        the credential does.'
+      description: Install named commands in the workspace. Set `cli` to a registered CLI type or `script`
+        to a program file. Use `config` for settings and credentials. For scripts, `runtime` selects the
+        execution environment; when omitted, Mirage selects one for the script language.
     CancelLinesResponse:
       properties:
         canceled:
@@ -6188,30 +6193,9 @@ components:
       required:
         - reason
       title: CommandRule
-      description: "One admission rule of the permissions document: refuse (or ask\nabout)\
-        \ matching commands, on matching paths when it names any.\n\nIt is the compiled element\
-        \ of ``commands.deny`` and ``commands.ask``\nwherever the profile writes one, and\
-        \ reaches the workspace only inside\nthat document; ``PermissionsPolicy`` is what\
-        \ evaluates it. The\ndocument writes a rule in one of three shapes, and each compiles\
-        \ to\nrules of this class: a list of command patterns (a whole-line rule\non each,\
-        \ no paths), a mapping of command pattern to its paths (one\ncommand to many paths,\
-        \ one rule per command, so a path is never\nstated beside a command it was not meant\
-        \ for), or paths alone (a\nrule on every command, at the dispatcher too). A command\
-        \ entry is a\ntoken-prefix pattern over the line as the entry point normalizes it\
-        \ (``rm``\nis every rm line, ``git push`` every ``git push ...``, a ``*`` token\n\
-        any one token). Path entries use the document's one grammar: an\nentry with ``*``,\
-        \ ``?`` or ``[`` is a pattern (repo fnmatch dialect,\n``*`` crossing ``/``, a slashless\
-        \ pattern matching any name\ncomponent), anything else is an exact path and its subtree.\
-        \ Every\nentry is absolute or a name pattern, holds a token (a blank one\nwould be\
-        \ the root), and inside a mount section must name something\nunder that mount root.\n\
-        \nArgs:\n    reason (str): why the command is refused, carried on the\n        result's\
-        \ refusal record.\n    commands (tuple[str, ...]): command patterns the rule applies\n\
-        \        to; empty means every command. A path-scoped rule carries\n        exactly\
-        \ one.\n    paths (tuple[str, ...]): path entries; empty refuses the\n        command\
-        \ regardless of its operands.\n    mount (str): set by the compiler for a rule written\
-        \ under a\n        ``mounts.<prefix>`` section, the mount root it is scoped to:\n\
-        \        it applies only to a line whose cwd or paths lie under it.\n        Empty\
-        \ for a rule written at the top level; never typed in\n        the document."
+      description: Require approval or deny commands matching the specified patterns. A pattern such as
+        `git push` matches that command and its arguments. Optional paths restrict the rule to matching
+        files or directories. Rules under a mount apply only within that mount.
     CommandsBlock:
       properties:
         allow:
@@ -6236,17 +6220,9 @@ components:
       additionalProperties: false
       type: object
       title: CommandsBlock
-      description: "``commands:`` at the top level of a profile.\n\n``allow`` lists the command\
-        \ patterns the profile allows; a line no\npattern covers is refused, ``<cmd>: Permission\
-        \ denied`` at 126, like\nany other rule's Deny. Shell builtins are subjects like everything\n\
-        else: a list stating only ``cat`` refuses ``echo`` and ``cd``. The agent's\nown functions\
-        \ are the one exemption, safe because every line of a\nbody passes the gate itself.\
-        \ ``ask`` rules are admitted only with a\nhost approval; ``deny`` rules refuse with\
-        \ a reason. A bare string in\neither is one command pattern with the default reason.\n\
-        \nArgs:\n    allow (tuple[str, ...] | None): the profile's allow patterns;\n     \
-        \   None (unstated) allows everything.\n    ask (tuple[CommandRule, ...]): what needs\
-        \ sign-off, in order.\n    deny (tuple[CommandRule, ...]): the profile's refusals,\
-        \ in order."
+      description: Command access rules. `allow` restricts available commands to matching patterns. `ask`
+        requires approval, and `deny` blocks matching commands with a reason. If `allow` is omitted, it
+        adds no restriction.
     CreateSessionRequest:
       properties:
         session_id:
@@ -6308,9 +6284,8 @@ components:
       additionalProperties: false
       type: object
       title: CreateWorkspaceRequest
-      description: 'A workspace to create: from ``config``, or from the saved
-
-        ``template`` of that name, never both.'
+      description: Workspace configuration or saved template to create from. Supply exactly one of `config`
+        and `template`.
     DeleteSessionResponse:
       properties:
         session_id:
@@ -6397,23 +6372,9 @@ components:
       additionalProperties: false
       type: object
       title: EnvVar
-      description: "One entry of the env map: a literal value or a managed pointer.\n\nThe\
-        \ env block is one map, name -> entry. A bare string in the map\nis the literal short\
-        \ form and never reaches this model; a dict is\nvalidated through it. `value` and\
-        \ `from` are mutually exclusive and\none is required: `export` belongs to a literal\
-        \ entry, `ref`/`key`/\n`fetch` to a managed one, and `readonly` to either.\n\nArgs:\n\
-        \    value (str | None): the literal text; set = a literal entry.\n    readonly (bool):\
-        \ compiles to `VarAttr.READONLY`, so the agent\n        cannot assign to the name\
-        \ or unset it. Legal on a managed\n        entry too, and the point of one: the fetch\
-        \ writes the\n        record itself rather than going through the shell's\n      \
-        \  assignment gate, so mirage still fills a readonly\n        credential while a line\
-        \ that tries to overwrite it is\n        refused.\n    export (bool): literal-only\
-        \ knob (default on); a managed entry\n        is always exported.\n    provider (str\
-        \ | None): registered source name; set = a managed\n        entry. Spelled `from:`\
-        \ in YAML (python keyword), via alias.\n    ref (str): the source's address for the\
-        \ secret.\n    key (str | None): which secret field to read; default the\n       \
-        \ variable's own name.\n    fetch (Literal[\"lazy\", \"eager\"]): eager joins every\
-        \ line's\n        fetch set instead of waiting for a reference."
+      description: An environment variable with a literal `value` or a secret source identified by `from`,
+        never both. Use `ref` and `key` to select a secret. `readonly` prevents commands from changing
+        the variable. Managed secrets are always exported; literal values use the `export` setting.
     HTTPValidationError:
       example:
         detail:
@@ -6462,14 +6423,8 @@ components:
         - patterns
         - reason
       title: HideReason
-      description: "Why one group of hide entries exists, for the operator only.\n\nThe document\
-        \ may state a hide as ``{patterns: [...], reason: ...}``;\nthe patterns compile into\
-        \ the flat hide spec like any other entry,\nand this side table keeps the reason beside\
-        \ them for the host's\nentry points (audit, read-back). It is never rendered to the\
-        \ agent: a hide\nanswers ENOENT, and a reason on a nonexistent path would confirm\n\
-        the path exists.\n\nArgs:\n    patterns (tuple[str, ...]): the group's entries, as\
-        \ compiled\n        (a mount section's entries anchored to its root).\n    reason\
-        \ (str): why the operator hid them."
+      description: An optional explanation for hidden paths. The explanation is available to operators,
+        not to agents accessing the workspace. Hidden paths appear not to exist.
     IOConfig:
       properties:
         buffer_bytes:
@@ -6481,7 +6436,7 @@ components:
       additionalProperties: false
       type: object
       title: IOConfig
-      description: Workspace limits for each in-flight byte queue.
+      description: Buffer limits for input and output while commands run.
     KillJobsResponse:
       properties:
         killed:
@@ -6523,22 +6478,8 @@ components:
       additionalProperties: false
       type: object
       title: Limit
-      description: 'A bound on a result: the policy layer''s limit arm and the shape
-
-        every cap config parses into.
-
-
-        Carries its fields inline (the Deny precedent: an action is its
-
-        payload). ``kind`` is the wire discriminant; ``aggr`` is the
-
-        composition law (AND to the tightest per bound, ANY on error mode)
-
-        and ``layered`` the resolution law (each field from the most
-
-        specific layer that sets it). ``walk_limit`` caps the entries one
-
-        walk lists on a mount, -1 for no cap.'
+      description: Limits for command output, execution time, and directory traversal. Use `on_exceed`
+        to truncate results or return an error. A `walk_limit` of `-1` allows unlimited entries.
     MountBackend:
       type: string
       enum:
@@ -6547,48 +6488,10 @@ components:
         - fskit
         - nfs
       title: MountBackend
-      description: 'How a mount is exposed to the outside world.
+      description: |-
+        How the mount is exposed. `workspace` is available only through Mirage. `fuse` and `fskit` expose operating-system mountpoints. `nfs` uses the system NFS client on Linux or macOS; Linux requires root.
 
-
-        WORKSPACE is the default: the mount lives only inside mirage''s own
-
-        filesystem and is reached through the command surface, with nothing
-
-        registered with the kernel. FUSE and FSKIT additionally expose it as a
-
-        real mountpoint.
-
-
-        FSKIT is macOS 15.4+ only and needs no kernel extension. It has no
-
-        ``direct_io`` equivalent, so it serves correct reads only for mounts
-
-        that set ``sizes_always_known``; ``mirage.fuse.backend`` warns at mount
-
-        time about mounts whose size-unknown files will read as empty. Writes
-
-        are also limited: appends and metadata ops persist, but the macFUSE
-
-        FSKit shim flushes pages a file did not already have (a new file, or
-
-        truncate-then-write) as NUL bytes, a limit pinned in
-
-        ``integ/fuse/truth_fskit.json``.
-
-        There is deliberately no ``auto``: auto-selecting FSKIT would silently
-
-        degrade every API-backed mount.
-
-
-        NFS mounts through the operating system''s own NFS client, so nothing
-
-        is installed: mirage serves NFSv3 on a local port and runs the system
-
-        ``mount``. Linux and macOS; Linux needs root to mount. It is read-only
-
-        for now, and like FSKIT it reads only as far as the size a file
-
-        reports, so it serves mounts that set ``sizes_always_known``.'
+        FSKit requires macOS 15.4 or later. FSKit and NFS require known file sizes for correct reads. NFS is read-only. The macFUSE FSKit adapter supports appends and metadata changes, but new-file and truncate-then-write operations can write zero-filled data instead of content. Select the backend explicitly.
     MountBlock:
       properties:
         vfs:
@@ -6662,13 +6565,8 @@ components:
       additionalProperties: false
       type: object
       title: MountCommandsBlock
-      description: "``commands:`` of one mount section: ``ask`` and ``deny`` only.\n\nA mount\
-        \ rule applies to a line that works inside the mount (its cwd\nor one of its paths\
-        \ lies under the root); its ``paths`` are\nabsolute, like every other path in the\
-        \ document, and must name\nsomething under that root. There is no ``allow`` here:\
-        \ what a\nsession can see is a property of the session, and an operand cannot\nmake\
-        \ a command \"not found\".\n\nArgs:\n    ask (tuple[CommandRule, ...]): what needs\
-        \ sign-off here.\n    deny (tuple[CommandRule, ...]): what is refused here."
+      description: Approval and deny rules for commands working within this mount. Use session-level command
+        rules for an allow list.
     MountMode:
       type: string
       enum:
@@ -6676,22 +6574,10 @@ components:
         - write
         - exec
       title: MountMode
-      description: 'What a mount lets commands do, a cumulative ladder.
+      description: |-
+        Mount access level. `read` allows listing and reading. `write` also allows creating, modifying, and deleting files. `exec` additionally allows interpreter commands such as `python3` and `js`.
 
-
-        READ lists and reads. WRITE also creates, changes and deletes. EXEC
-
-        also lets the interpreter commands (python3, js) run code: a script
-
-        file named as their operand must sit on an EXEC mount, while inline
-
-        code and -m need one somewhere in the workspace (imports are not
-
-        checked by path). Shell scripts need no EXEC, since the shell checks
-
-        each of their commands like a typed one; a ./script whose shebang
-
-        names python3 reaches python3, which does check.'
+        Interpreter script files must be on an `exec` mount. Inline code and module execution require at least one `exec` mount; imports are not checked by path. Shell scripts follow the permissions of each command they run.
     MountSummary:
       properties:
         prefix:
@@ -6742,22 +6628,9 @@ components:
       additionalProperties: false
       type: object
       title: PathsBlock
-      description: "``paths:`` of a profile, or of one of its mount sections.\n\n``hide``\
-        \ entries use the document's one grammar: an entry with\n``*``, ``?`` or ``[`` is\
-        \ a pattern, anything else an exact path\nand its subtree (``utils/hidden.classify_paths``);\
-        \ every entry\nholds a token and is absolute or a name pattern, wherever the block\n\
-        is written. A hide entry may also be a group\n``{patterns: [...], reason: ...}``:\
-        \ the patterns join the flat list\nlike any other entry and the reason lands in ``reasons``,\
-        \ the\noperator-only side table (:class:`HideReason`).\n\n``show`` is the other half\
-        \ of the path axis: a mapping of path to\nmode (``{\"/repo/docs\": r}``), or a plain\
-        \ list whose entries inherit\nthe mount's mode. Every entry is absolute, a subtree\
-        \ or an anchored\npattern, because a show anchors to a place and a name pattern names\n\
-        none. An entry re-opens its subtree inside a hidden region when its\nanchor is deeper\
-        \ than the hide's, and states the mode in force\nbelow its anchor when it carries\
-        \ one; both on the one anchor-depth\nrule.\n\nArgs:\n    hide (tuple[str, ...]): what\
-        \ the profile makes nonexistent.\n    show (tuple[ShowEntry, ...]): the profile's\
-        \ show entries, in\n        document order.\n    reasons (tuple[HideReason, ...]):\
-        \ why grouped hide entries\n        exist, for the operator's entry points only."
+      description: Control which paths a session can access. `hide` makes matching paths appear not to
+        exist. `show` exposes more specific paths inside hidden regions, optionally with reduced permissions.
+        Exact paths include their descendants; patterns support `*`, `?`, and character classes.
     ProcessPermissions:
       properties:
         list:
@@ -6784,15 +6657,9 @@ components:
       additionalProperties: false
       type: object
       title: ProcessPermissions
-      description: "How far past its own session a profile reaches into processes.\n\nA session\
-        \ always sees and stops its own processes. ``list`` widens\nwhat ``ps`` and a handler's\
-        \ process view see; ``kill`` widens what\nthey may stop, and never past ``list``.\
-        \ ``max`` caps the live\nprocesses the session holds, its running line included, as\n\
-        ``ulimit -u`` counts the shell. A bare scope sets both. The workspace\nstates one\
-        \ for every session and a profile's overrides it field by\nfield (``layered``).\n\n\
-        Args:\n    list (ProcessScope): whose processes the session sees.\n    kill (ProcessScope):\
-        \ whose processes the session may stop.\n    max (int | None): most live processes,\
-        \ ``MAX_PROCESSES`` unless\n        stated, None for no cap."
+      description: Control which processes a session can list or stop, and the maximum number it can run.
+        Sessions always have access to their own processes. The stop scope cannot exceed the list scope.
+        Profile settings override workspace defaults.
     ProfileMount:
       properties:
         mode:
@@ -6810,19 +6677,9 @@ components:
       additionalProperties: false
       type: object
       title: ProfileMount
-      description: "One mount's entry in a profile: what this profile may do there.\n\nEvery\
-        \ field is optional, and an omitted mount is not a refusal: the\nmount is reachable\
-        \ at the mode it declares in the workspace's\n``mounts:``, which a profile can only\
-        \ weaken (``weaker_mode``), never\nraise. A profile that must not touch a mount hides\
-        \ it, so the mount\nreads as nonexistent rather than as a permission error naming\n\
-        something the profile cannot see.\n\n``commands`` here carries ask and deny only:\
-        \ an allow list installs\na command for the whole session, and visibility is answered\
-        \ before\nany operand exists, so it cannot be per mount. Rules written here\napply\
-        \ to a line that works inside this mount, by cwd or by operand,\nwhich is what a path-scoped\
-        \ rule cannot express (``cd /repo && git\ncommit`` names no path).\n\nArgs:\n    mode\
-        \ (MountMode | None): this profile's mode for the mount; None\n        keeps the mount's\
-        \ own.\n    commands (MountCommandsBlock | None): ask and deny rules for\n       \
-        \ lines working inside it.\n    paths (PathsBlock | None): hides under it."
+      description: Optional permissions for a specific mount. A profile can reduce mount permissions but
+        cannot increase them. Omitted mounts retain their configured permissions. Use path hiding to prevent
+        access to a mount.
     ProfilePolicy:
       properties:
         script:
@@ -6850,19 +6707,9 @@ components:
       required:
         - script
       title: ProfilePolicy
-      description: "One program of a profile's policy, as the document states it: the\nprogram,\
-        \ and the runtime that runs it.\n\nArgs:\n    script (ScriptSource | str): the policy\
-        \ program. A ``str`` is\n        the path form the config loader accepts and loads;\
-        \ code\n        passes the loaded ``ScriptSource``, so a path still spelled\n    \
-        \    as a string when the workspace reads it means the config\n        layer never\
-        \ saw it, and is refused there.\n    runtime (str | dict[str, Any]): the runtime the\
-        \ program runs on:\n        a name, or ``{name, config}`` for one that needs settings,\n\
-        \        the shape a ``runtimes`` entry has. Monty when the program\n        names\
-        \ none; without the ``monty`` extra installed, such a\n        program fails closed\
-        \ with the extra's install hint.\n    env (dict[str, str | SecretRef]): variables\
-        \ the program runs\n        with beside ``MIRAGE_POLICY_CTX``, on any runtime: a literal,\n\
-        \        or a pointer read from its source when the program first\n        runs. None\
-        \ of the session's reach it."
+      description: Custom policy programs, grouped by the method they handle. Provide a script, its runtime,
+        and optional environment variables. If no runtime is specified, Monty is used and must be installed.
+        Policy programs use their configured environment and can read session variables through `ctx["env"]`.
     ProtectedResource:
       properties:
         resource:
@@ -6940,25 +6787,9 @@ components:
         - bounded
         - pinned
       title: ReadPolicy
-      description: 'How a mount decides whether cached bytes may be served.
-
-
-        FRESH revalidates against the backend''s content token before serving
-
-        a cached copy; BOUNDED serves without revalidating, within the
-
-        staleness bound the mount declares.
-
-
-        PINNED names the content a commit''s fingerprint records. There is no
-
-        version layer to pin to, so a mount declaring it is refused at mount
-
-        time rather than quietly degraded to head: the vocabulary is
-
-        published, so someone will type it, and an informative refusal costs
-
-        one branch over a generic invalid-value error.'
+      description: Cache validation policy. `fresh` checks the backend before returning cached content.
+        `bounded` allows cached content within the configured freshness limit. `pinned` is reserved and
+        currently rejected.
     RedisCacheBlock:
       properties:
         type:
@@ -7111,11 +6942,7 @@ components:
         - bucket
         - type
       title: S3StoreBlock
-      description: 'An ``S3Config`` plus the union discriminator: the block IS the
-
-        backend config, so new S3Config fields flow into the store block
-
-        without re-declaring them here.'
+      description: S3 storage settings. Uses the same configuration fields as the S3 backend.
     ScriptSource:
       properties:
         source:
@@ -7137,16 +6964,9 @@ components:
       required:
         - source
       title: ScriptSource
-      description: "A program's source: a policy program or a script CLI.\n\nA yaml ``script:``\
-        \ value references a ``.py`` or ``.js``/``.mjs``\nfile whose content is embedded here\
-        \ at load; code passes the text.\nIt runs as a program on the runtime its config names,\
-        \ never edited.\n\nArgs:\n    source (str): the script program.\n    language (Language):\
-        \ the script's language (\"python\" or \"js\"),\n        stamped from the file extension\
-        \ at config load; the\n        programmatic default is \"python\".\n    module (bool):\
-        \ the source is an ES module (a ``.mjs`` file), so\n        a js engine must run it\
-        \ in module mode or ``import`` and\n        top-level ``await`` fail. Stamped from\
-        \ the extension at\n        load beside ``language``, since the path is gone once\
-        \ the\n        source is embedded."
+      description: Embedded program source with a language and optional JavaScript module mode. Configuration
+        files can reference `.py`, `.js`, or `.mjs` files; the loader embeds their contents. `.mjs` files
+        use module mode for imports and top-level `await`.
     SecretRef:
       properties:
         from:
@@ -7165,17 +6985,9 @@ components:
         - from
         - key
       title: SecretRef
-      description: "A configured value read from a source instead of written down.\n\nThe\
-        \ plane's one declarative pointer, spelled with the same three\nkeys the env plane's\
-        \ managed entry uses, so one grammar covers\nevery place a deployment points at a\
-        \ secret: a source's own config,\na mount's credential, a CLI's.\n\nWhere it may point\
-        \ is the *context's* rule, not this model's.\n`SecretSource` narrows its own config\
-        \ to `BOOTSTRAP_SOURCES`,\nbecause that is what stops the source table from needing\
-        \ a\ndependency graph; a mount has no such limit, since every source is\nalready built\
-        \ by the time one is read.\n\nArgs:\n    provider (str): the bootstrap source, `env`\
-        \ or `dotenv`.\n        Spelled `from:` in YAML (python keyword), via alias.\n   \
-        \ ref (str): the source's address, a file path for `dotenv`.\n    key (str): which\
-        \ of the secret's fields holds the value."
+      description: Read a configuration value from a secret source using `from`, `ref`, and `key`. The
+        available sources depend on where this reference is used. Secret-source configuration allows only
+        bootstrap sources such as environment variables or dotenv files.
     SecretSource:
       properties:
         source:
@@ -7190,17 +7002,8 @@ components:
       required:
         - source
       title: SecretSource
-      description: "One declared source instance: which source, and its config.\n\nThe `secrets:`\
-        \ block is one map, name -> source, spelled the way\n`mounts:` and `clis:` are: a\
-        \ type beside a config. The\ninstance name is what a managed env entry's `from:` names,\
-        \ so two\naccounts of one platform are two instances, and an instance named\nafter\
-        \ its source reads as that source configured.\n\nThe config map is untyped here, the\
-        \ way `mounts.*.config` is: each\nsource owns its own model, and this block only has\
-        \ to tell a\npointer from a literal. It does that the way the env plane does,\nby\
-        \ the presence of `from`, so a mapping carrying one is validated\nas a `SecretRef`\
-        \ and every other value passes through to the\nsource's model.\n\nArgs:\n    source\
-        \ (str): the registered source this instance speaks to.\n    config (dict[str, Any]):\
-        \ the source's own config fields; a\n        value may be a literal or a `SecretRef`."
+      description: A named secret source and its configuration. Managed environment variables refer to
+        this source by name. Configuration fields can contain literal values or bootstrap secret references.
     SessionProfile:
       properties:
         cwd:
@@ -7283,43 +7086,10 @@ components:
       additionalProperties: false
       type: object
       title: SessionProfile
-      description: "One profile: the whole permission document a session runs under.\n\nA\
-        \ session is created from exactly one of these, and it is the only\nplace permissions\
-        \ are written. There is no workspace-wide block and\nno mount-owned block above it,\
-        \ so reading this object is reading\neverything the profile may do; what a profile\
-        \ does not say, it does not\nrestrict. Configuration, not enforcement: the resolver\
-        \ compiles it\nonto the session's narrowing fields and the entry points keep enforcing.\n\
-        Deliberately not named a View, which per the view convention is a\nhandle an agent\
-        \ holds on one entry point, while a profile is what the\nembedder uses to *define*\
-        \ one. Frozen so two agents with the same\nprofile share one object and neither can\
-        \ bend the other's view.\n\nTwo rules decide a line against it, and they are the whole\
-        \ law.\nA rule naming no path is read by verb (deny before ask before\nallow), wherever\
-        \ it is written. A rule carrying paths, and every\nhide, is read by anchor depth:\
-        \ the deeper entry wins, ties break by\nverb.\n\nA profile may also state a ``policy``:\
-        \ for each method it answers at\n(``pre_execute``, ``pre_command``, ``pre_vfs``, ``pre_network``\
-        \ and\ntheir ``post_`` twins), a list of programs, each with the runtime it runs\n\
-        on (``ProfilePolicy``, the shape a ``clis`` entry has). A program's\nfunction for\
-        \ the method takes its context and returns its answer:\nNone for no opinion, a deny,\
-        \ an ask, or at ``pre_execute`` a route.\nThey are asked in order and the first deny\
-        \ wins, so a policy expresses\nthe conditions a declarative rule cannot; like every\
-        \ policy, it can\nonly restrict, never grant past a deny. The document is optional\n\
-        beside it: a profile stating only a policy hides nothing, and the\npolicy is its whole\
-        \ admission policy.\n\nArgs:\n    cwd (str | None): the session's working directory\
-        \ at creation.\n    env (dict[str, str | EnvVar] | None): the env entries seeded\n\
-        \        into the session at creation, in the workspace ``env``\n        grammar:\
-        \ a bare string is an exported literal, and a\n        ``from:`` entry a managed pointer,\
-        \ so a credential is\n        named here and fetched, never written as its value.\n\
-        \    mounts (dict[str, ProfileMount] | None): per-mount settings,\n        keyed by\
-        \ prefix: a mode, ask and deny rules for lines\n        working inside the mount,\
-        \ and hides under it. A mount the\n        mapping omits keeps its own mode and gains\
-        \ no rules.\n    paths (PathsBlock | None): the profile's hides, absolute.\n    vars\
-        \ (VarsBlock | None): the profile's hidden variables.\n    commands (CommandsBlock\
-        \ | None): the profile's allow list and its\n        ask / deny rules, absolute paths.\n\
-        \    policy (dict[ScriptMethod, list[ProfilePolicy]] | None): the\n        profile's\
-        \ policy: each ``pre_`` method's programs, asked in\n        order.\n    network (bool\
-        \ | dict[str, list[str]] | None): where the\n        session's lines may connect,\
-        \ the workspace's ``network``\n        grammar, held besides the workspace's own;\
-        \ None leaves the\n        workspace's alone."
+      description: |-
+        Permissions and initial settings for a session. Unspecified settings add no restrictions beyond the workspace configuration.
+
+        Use `commands`, `paths`, and `mounts` to control access, and `policy` for custom rules. For command rules without paths, deny takes precedence over approval requests and allow rules. More specific path rules take precedence over broader rules. See [permissions profiles](/home/policy/overview) for rule examples.
     SessionResponse:
       properties:
         session_id:
@@ -7360,12 +7130,8 @@ components:
       required:
         - path
       title: ShowEntry
-      description: "One ``show`` entry of a profile's path axis, compiled.\n\nArgs:\n    path\
-        \ (str): the entry as written: an exact subtree or an\n        anchored pattern, always\
-        \ absolute. A slashless name pattern\n        is refused at validation, because a\
-        \ show anchors to a place\n        and a name pattern names none.\n    mode (MountMode\
-        \ | None): the mode the entry states for its\n        subtree; None for a list-form\
-        \ entry, which inherits the\n        mount's."
+      description: An absolute path or anchored path pattern to expose within a hidden region. Optional
+        `mode` reduces permissions for that path. If omitted, mount permissions apply.
     ShutdownResponse:
       properties:
         status:
@@ -7495,38 +7261,10 @@ components:
       additionalProperties: false
       type: object
       title: StoreBlock
-      description: 'The workspace state store: one block, five planes.
+      description: |-
+        Storage settings for workspace metadata, sessions, filesystem records, logs, and execution records. Top-level settings select the default backend; per-group settings override it.
 
-
-        The top-level type/url/key_prefix pick the default backend for
-
-        every control-plane group (namespace nodes, observer events,
-
-        sessions + workspace metadata, execution). The optional per-group
-
-        overrides redirect one group to a different backend, e.g. large
-
-        observer logs to a separate server. Sessions and workspace metadata
-
-        move together by design (the default-session pointer must live
-
-        beside the session table it points into), so there is one
-
-        `workspace` override, not two. An ``s3`` group hosts only the
-
-        sessions+meta group (conditional-PUT CAS), so it is valid as the
-
-        ``workspace`` override, never as the top-level default. A ``disk``
-
-        store hosts the other planes under ``root`` (lockfile CAS,
-
-        machine-local) and keeps jobs in memory, since a job''s console is a
-
-        stream other processes follow; ``root`` is only read when a disk
-
-        store is selected. The ``execution`` group (job lists, consoles, the
-
-        workspace''s lease, process records) is therefore ram or redis.'
+        S3 is supported only for the `workspace` group. Disk storage uses `root` and keeps jobs in memory. The `execution` group supports RAM or Redis.
     TemplateResponse:
       properties:
         name:
@@ -7610,8 +7348,8 @@ components:
       additionalProperties: false
       type: object
       title: VarsBlock
-      description: "``vars:`` of a profile.\n\nArgs:\n    hide (tuple[str, ...]): variable\
-        \ names or globs over names the\n        session reads as unset."
+      description: Environment variable names or glob patterns to hide from the session. Hidden variables
+        appear unset.
     WorkspaceBrief:
       properties:
         id:
@@ -7906,22 +7644,10 @@ components:
         - conditional
         - staged
       title: WritePolicy
-      description: 'Whether a mount''s writes carry the version they were based on.
-
-
-        UNCONDITIONAL replacements use last-write-wins. Shared rewrites that
-
-        observed a missing file require atomic create-only under either policy.
-
-        CONDITIONAL writes send the version the mount last saw for the path
-
-        (the backend''s native precondition, If-Match on the S3 family), so a
-
-        write based on a stale read is refused instead of overwriting the newer
-
-        bytes. STAGED names a staging layer mirage does not have; a mount declaring it is
-
-        refused at mount time, as ``read: pinned`` is.'
+      description: Write conflict policy. `unconditional` replaces content without checking its version.
+        `conditional` rejects writes when the backend version has changed since the last read. Creating
+        a file previously observed as missing requires an atomic create in either mode. `staged` is reserved
+        and currently rejected.
     Error:
       type: object
       properties:
@@ -7950,7 +7676,7 @@ components:
             - type: 'null'
         line_id:
           type: string
-          description: The line's id, by which `GET .../lines/{line_id}` finds it.
+          description: Command execution ID. Use it with `GET /v1/workspaces/{workspace_id}/lines/{line_id}`.
       required:
         - exit_code
         - stdout
@@ -7962,25 +7688,24 @@ components:
       properties:
         command:
           type: string
-          description: The line.
+          description: Shell command or script to execute.
         cwd:
           type: string
-          description: A working directory for this line only.
+          description: Working directory for this command only.
         runtime:
           type: string
-          description: Run the line on this runtime, by name, instead of the one routing picks.
+          description: Runtime name to use instead of automatic runtime selection.
         machine:
           type: string
-          description: Run the line's programs on this machine, by name, instead of the one
-            routing picks.
+          description: Machine name to use for this command instead of automatic machine selection.
         record:
           type: boolean
           default: true
-          description: Add the line to the session's history.
+          description: Include this command in session history.
         open_stdin:
           type: boolean
           default: false
-          description: Keep the line's stdin open for writes while it runs. Needs `stream=true`; the first record names the line.
+          description: Keep stdin open for additional input. Requires `stream=true`; the first response record contains `line_id`.
       required:
         - command
     LoadRequest:
@@ -7988,17 +7713,17 @@ components:
       properties:
         key:
           type: string
-          description: The tar's key in the snapshot store; leave it out when uploading.
+          description: Archive key in the snapshot store. Omit when uploading an archive.
         id:
           type: string
-          description: The new workspace's id.
+          description: ID for the restored workspace.
         override:
           type: object
           description: Configuration overrides for the restored workspace, including credentials
             redacted from the snapshot.
     Explanation:
       type: object
-      description: What a call would do, without doing it (explain=true).
+      description: Policy evaluation for a request without executing it. Returned when `explain=true`.
       properties:
         type:
           type: string
@@ -8011,7 +7736,7 @@ components:
             - ASK
         reason:
           type: string
-          description: Why, in the deciding policy's words.
+          description: Reason returned by the policy that determined the outcome.
         source:
           type: string
           description: Where in the profile the deciding rule is written.
@@ -8019,7 +7744,7 @@ components:
           type: array
           items:
             type: object
-          description: Every policy's answer.
+          description: Evaluation results from each policy.
         refusal:
           anyOf:
             - type: object
@@ -8040,7 +7765,7 @@ components:
               type: string
             node:
               type: object
-              description: The parsed line and each command's explanation.
+              description: Parsed command structure and policy evaluation for each command.
       title: Shell explanation
     VfsExplanation:
       allOf:
@@ -8074,7 +7799,7 @@ components:
         - ref
         - key
     FieldValue:
-      description: A field's value, or a pointer to a saved store's secret for a string field.
+      description: A configuration value, or a reference to a secret in a saved store for string fields.
       anyOf:
         - type: string
         - type: number
@@ -8087,7 +7812,7 @@ components:
       properties:
         name:
           type: string
-          description: The field's key in `fields`.
+          description: Field name to use in `fields`.
         type:
           type: string
           enum:
@@ -8098,7 +7823,7 @@ components:
             - object
         secret:
           type: boolean
-          description: 'Kept sealed: write-only, never answered.'
+          description: Secret value. Accepted in writes and omitted from read responses.
         required:
           type: boolean
         options:
@@ -8123,7 +7848,7 @@ components:
         - required
     TypeTable:
       type: object
-      description: Each type by name, with the fields its config takes.
+      description: Supported configuration types and their fields, indexed by type name.
       additionalProperties:
         type: array
         items:
@@ -8133,7 +7858,7 @@ components:
       properties:
         id:
           type: string
-          description: The entry's id; the daemon uses its name.
+          description: Configuration ID. On the OSS server, this equals the name.
         name:
           type: string
         kind:
@@ -8151,11 +7876,11 @@ components:
           type: object
           additionalProperties:
             $ref: '#/components/schemas/FieldValue'
-          description: The plain fields. Sealed fields are never answered.
+          description: Non-secret configuration values. Secret values are omitted.
         captures:
           type: array
           items: {}
-          description: A runtime's captures; runtimes only.
+          description: Runtime capture settings, when applicable.
         created_by:
           type:
             - string
@@ -8170,7 +7895,7 @@ components:
             - 'null'
         used_by:
           type: integer
-          description: How many templates name the entry; in a list only.
+          description: Number of templates using this configuration. Included in list responses only.
       required:
         - id
         - name
@@ -8187,7 +7912,7 @@ components:
               type: array
               items:
                 type: string
-              description: The sealed fields, by name.
+              description: Names of stored secret fields. Secret values are omitted.
           required:
             - sealed
     SavedEntryList:
@@ -8208,13 +7933,13 @@ components:
             and not shaped like an id.
         type:
           type: string
-          description: One of the types its kind's `/types` route lists, such as `GET /v1/vfs/types`.
+          description: A supported type from the matching types endpoint, such as `GET /v1/vfs/types`.
         fields:
           type: object
           additionalProperties:
             $ref: '#/components/schemas/FieldValue'
-          description: The type's config. Secret fields are sealed; a string field may point
-            at a saved store instead.
+          description: Settings for the selected type. Secret values are stored securely; string fields
+            can reference a saved secret store.
       required:
         - name
         - type
@@ -8228,8 +7953,8 @@ components:
             anyOf:
               - $ref: '#/components/schemas/FieldValue'
               - type: 'null'
-          description: The fields to set. A sealed field left out keeps its value; null removes
-            a field.
+          description: Configuration fields to update. Omitted secret fields retain their values; null
+            removes a field.
       required:
         - fields
     CreatePolicyRequest:
@@ -8240,7 +7965,7 @@ components:
           description: Ends in .py, such as guard.py.
         source:
           type: string
-          description: The policy's Python program, up to 64 KiB.
+          description: Python policy source code, up to 64 KiB.
       required:
         - name
         - source
@@ -8486,7 +8211,7 @@ components:
       name: workspace_id
       in: path
       required: true
-      description: The workspace's id.
+      description: Workspace ID.
       schema:
         type: string
       example: demo
@@ -8494,7 +8219,7 @@ components:
       name: session_id
       in: query
       required: false
-      description: The session the call acts as; the default session when absent.
+      description: Session ID to use. If omitted, the default session is used.
       schema:
         type: string
       example: analysis

@@ -4,7 +4,7 @@ description: Stream shell output and send input over HTTP.
 icon: arrows-left-right
 ---
 
-Use [Run a shell line](/api/operations/shell/run-a-shell-line) with an
+Use [Run shell command](/api/operations/shell/run-shell-command) with an
 existing workspace. Set `MIRAGE_AUTH_TOKEN` to your server's configured token, or
 omit the authorization header in local mode without a token.
 
@@ -43,7 +43,7 @@ A stream without a final status record was interrupted. HTTP `200` alone does no
 mean the shell command succeeded. Closing the request cancels the running line.
 Streaming cannot be combined with `explain`.
 
-The server includes `line_id` in the result. Use it to [get the line record](/api/operations/lines/get-a-line).
+The server includes `line_id` in the result. Use it to [get the line record](/api/operations/lines/get-command).
 
 ## Send stdin
 
@@ -94,7 +94,7 @@ process.stdout.write(result.stdout)
 
 The command sorts the input and returns `a\nb\n` in `stdout`.
 
-## Write to a running line
+## Write to a running command
 
 A `stdin` part is one upload. To keep sending input after the line starts, from
 any request, set `open_stdin` and `stream=true`. The first record names the line:
@@ -112,7 +112,7 @@ curl --no-buffer --request POST \
 ```
 
 Output keeps arriving on this response. From another request,
-[write to the line](/api/operations/lines/write-to-a-running-line):
+[write stdin](/api/operations/lines/write-stdin):
 
 ```bash
 curl --request POST \
@@ -122,7 +122,7 @@ curl --request POST \
   --data-binary $'hello\n'
 ```
 
-Then [close its stdin](/api/operations/lines/close-stdin-of-a-running-line) to
+Then [close its stdin](/api/operations/lines/close-stdin) to
 send end of file:
 
 ```bash
@@ -142,5 +142,5 @@ writer back. Send one write at a time and wait for its answer, to keep the bytes
 in order. Total input has no limit. `open_stdin` needs `stream=true` and takes no
 `stdin` part. Closing the streaming request cancels the line.
 
-See [Run a shell line](/api/operations/shell/run-a-shell-line) for the complete
+See [Run shell command](/api/operations/shell/run-shell-command) for the complete
 request fields and response schemas.

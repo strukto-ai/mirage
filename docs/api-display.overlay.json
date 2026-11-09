@@ -278,38 +278,10 @@
       "remove": true
     },
     {
-      "target": "$.paths[\"/v1/workspaces/{workspace_id}/glob\"].post",
-      "update": {
-        "x-mint": {
-          "content": "<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `401` | The token is missing or wrong |\n| `403` | A policy or mount mode refused the call |\n| `404` | The workspace, session, job or file does not exist |\n| `422` | Validation Error |\n| `429` | Past a rate limit, or a new session past max_sessions |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
-        }
-      }
-    },
-    {
-      "target": "$.paths[\"/v1/workspaces/{workspace_id}/glob\"].post.responses[\"401\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/workspaces/{workspace_id}/glob\"].post.responses[\"403\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/workspaces/{workspace_id}/glob\"].post.responses[\"404\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/workspaces/{workspace_id}/glob\"].post.responses[\"422\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/workspaces/{workspace_id}/glob\"].post.responses[\"429\"]",
-      "remove": true
-    },
-    {
       "target": "$.paths[\"/v1/workspaces/{workspace_id}/shell\"].post",
       "update": {
         "x-mint": {
-          "content": "<div className=\"hidden\">\n<ResponseExample>\n\n```json 200\n{\n  \"exit_code\": 0,\n  \"stdout\": \"hello\\n\",\n  \"stderr\": \"\",\n  \"refusal\": null,\n  \"line_id\": \"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37\"\n}\n```\n\n```json 200 Stream with open_stdin\n{\"line_id\":\"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37\"}\n{\"stream\":\"stdout\",\"data\":\"aGVsbG8K\"}\n{\"status\":\"done\",\"result\":{\"exit_code\":0,\"stdout\":\"\",\"stderr\":\"\",\"refusal\":null,\"line_id\":\"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37\"},\"error\":null}\n```\n\n</ResponseExample>\n</div>\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `401` | The token is missing or wrong |\n| `403` | A policy or mount mode refused the call |\n| `404` | The workspace, session, job or file does not exist |\n| `409` | Another daemon holds the workspace's lease and runs its lines; the detail names it |\n| `422` | Validation Error |\n| `429` | Past a rate limit, or a new session past max_sessions |\n| `413` | The request body, multipart part, or stdin exceeds its size limit. |\n| `499` | The running shell job was canceled. |\n| `500` | The job or server operation failed internally. Inspect detail and server logs before retrying. |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
+          "content": "<div className=\"hidden\">\n<ResponseExample>\n\n```json 200\n{\n  \"exit_code\": 0,\n  \"stdout\": \"hello\\n\",\n  \"stderr\": \"\",\n  \"refusal\": null,\n  \"line_id\": \"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37\"\n}\n```\n\n```json 200 Stream with open_stdin\n{\"line_id\":\"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37\"}\n{\"stream\":\"stdout\",\"data\":\"aGVsbG8K\"}\n{\"status\":\"done\",\"result\":{\"exit_code\":0,\"stdout\":\"\",\"stderr\":\"\",\"refusal\":null,\"line_id\":\"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37\"},\"error\":null}\n```\n\n</ResponseExample>\n</div>\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `401` | The token is missing or wrong |\n| `403` | A policy or mount mode refused the call |\n| `404` | The workspace, session, job or file does not exist |\n| `409` | Another server owns command execution for this workspace. The error detail identifies that server. |\n| `422` | Validation Error |\n| `429` | Past a rate limit, or a new session past max_sessions |\n| `413` | The request body, multipart part, or stdin exceeds its size limit. |\n| `499` | The running shell job was canceled. |\n| `500` | The job or server operation failed internally. Inspect detail and server logs before retrying. |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
         },
         "x-codeSamples": [
           {
@@ -354,6 +326,34 @@
     },
     {
       "target": "$.paths[\"/v1/workspaces/{workspace_id}/shell\"].post.responses[\"500\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/glob\"].post",
+      "update": {
+        "x-mint": {
+          "content": "<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `401` | The token is missing or wrong |\n| `403` | A policy or mount mode refused the call |\n| `404` | The workspace, session, job or file does not exist |\n| `422` | Validation Error |\n| `429` | Past a rate limit, or a new session past max_sessions |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
+        }
+      }
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/glob\"].post.responses[\"401\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/glob\"].post.responses[\"403\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/glob\"].post.responses[\"404\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/glob\"].post.responses[\"422\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/glob\"].post.responses[\"429\"]",
       "remove": true
     },
     {

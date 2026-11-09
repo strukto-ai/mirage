@@ -79,7 +79,9 @@ def main() -> None:
     visible = operations(source)
     config = json.loads((ROOT / "docs/docs.json").read_text())
     api = next(
-        tab for tab in config["navigation"]["tabs"] if tab["tab"] == "API"
+        tab
+        for tab in config["navigation"]["tabs"]
+        if tab["tab"] == "API reference"
     )
     assert "dropdowns" not in api
     expected = [m.upper() + " " + p for p, m, _ in visible]
@@ -90,6 +92,21 @@ def main() -> None:
         for _, _, op in visible
     }
     assert len(targets) == len(visible), "Endpoint page URL collision"
+    redirects = {
+        item["source"]: item["destination"]
+        for item in config.get("redirects", [])
+    }
+    assert len(redirects) == len(config.get("redirects", [])), (
+        "Duplicate redirect source"
+    )
+    for redirect_source, destination in redirects.items():
+        if redirect_source.startswith("/api/operations/"):
+            assert redirect_source not in targets, (
+                f"Redirect shadows endpoint {redirect_source}"
+            )
+            assert destination in targets, (
+                f"Redirect points to missing endpoint {destination}"
+            )
     for group in api["groups"]:
         if "openapi" in group:
             assert group["openapi"] == {
