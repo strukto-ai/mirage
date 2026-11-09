@@ -18,8 +18,9 @@ import logging
 import os
 import sys
 import time
+import uuid
 from collections.abc import Iterable
-from itertools import count
+from functools import partial
 from typing import Any
 from urllib.parse import quote, unquote
 
@@ -39,8 +40,6 @@ logger = logging.getLogger(__name__)
 LOCK_STALE_SECONDS = 10.0
 LOCK_RETRY_SLEEP = 0.005
 LOCK_RETRY_LIMIT = 2000
-
-_TMP_COUNTER = count()
 
 
 def _acquire_lock(lock_path: str) -> int | None:
@@ -172,7 +171,7 @@ class DiskRecordClient:
         return json.loads(body), ""
 
     async def put(self, name: str, fields: dict[str, Any]) -> None:
-        await aiofiles.os.makedirs(self._dir, exist_ok=True)
+        await aiofiles.os.makedirs(self._dir, 0o700, exist_ok=True)
         await self._write_record(self.path(name), fields)
 
     async def cas_put(
@@ -184,7 +183,7 @@ class DiskRecordClient:
         generation, then tmp-write + rename. Losing the lock race or the
         generation check returns False; the caller adopts and retries.
         """
-        await aiofiles.os.makedirs(self._dir, exist_ok=True)
+        await aiofiles.os.makedirs(self._dir, 0o700, exist_ok=True)
         path = self.path(name)
         lock_path = path + ".lock"
         fd = await _acquire_owned(lock_path)
@@ -210,7 +209,7 @@ class DiskRecordClient:
         (e.g. the single-file namespace plane); spins past contention
         and reclaims stale locks, raising only if a live writer holds
         the lock for the whole retry budget (~10s)."""
-        await aiofiles.os.makedirs(self._dir, exist_ok=True)
+        await aiofiles.os.makedirs(self._dir, 0o700, exist_ok=True)
         lock_path = self.path(name) + ".lock"
         for _ in range(LOCK_RETRY_LIMIT):
             fd = await _acquire_owned(lock_path)
@@ -225,8 +224,10 @@ class DiskRecordClient:
         await _release_owned(fd, self.path(name) + ".lock")
 
     async def _write_record(self, path: str, fields: dict[str, Any]) -> None:
-        tmp = f"{path}.{os.getpid()}.{next(_TMP_COUNTER)}.tmp"
-        async with aiofiles.open(tmp, "wb") as f:
+        tmp = f"{path}.{uuid.uuid4().hex}.tmp"
+        async with aiofiles.open(
+            tmp, "xb", opener=partial(os.open, mode=0o600)
+        ) as f:
             await f.write(json.dumps(fields).encode())
             await f.flush()
             fd = f.fileno()

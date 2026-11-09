@@ -14,6 +14,7 @@
 
 import asyncio
 import importlib
+import os
 import resource
 import uuid
 from unittest.mock import AsyncMock
@@ -61,6 +62,15 @@ def _drain_session_pools(monkeypatch):
     yield
     if made:
         asyncio.run(_close_pools(made))
+
+
+@pytest.fixture
+def umask_022():
+    """The usual 022 umask, so a file's mode shows what its writer asked
+    for rather than what a stricter umask clipped it to."""
+    old = os.umask(0o022)
+    yield
+    os.umask(old)
 
 
 @pytest.fixture

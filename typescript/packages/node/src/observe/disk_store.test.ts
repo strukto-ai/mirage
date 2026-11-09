@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { chmodSync, mkdtempSync, rmSync } from 'node:fs'
+import { chmodSync, mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Observer } from '@struktoai/mirage-core/observe/observer'
@@ -100,6 +100,22 @@ describe('DiskObserverStore', () => {
       await expect(new DiskObserverStore(dir).readAll()).rejects.toThrow(/EACCES|EPERM/)
     } finally {
       chmodSync(dir, 0o755)
+    }
+  })
+
+  // History keeps every typed line, an inline token included, so no other
+  // local user may read it.
+  it.each(['append', 'write'] as const)('keeps history owner-only on %s', async (op) => {
+    const umask = process.umask(0o022)
+    try {
+      await new DiskObserverStore(join(root, 'history'))[op](
+        '/day/s.jsonl',
+        ENC.encode('export TOKEN=x\n'),
+      )
+      expect(statSync(join(root, 'history', 'day')).mode & 0o777).toBe(0o700)
+      expect(statSync(join(root, 'history', 'day', 's.jsonl')).mode & 0o777).toBe(0o600)
+    } finally {
+      process.umask(umask)
     }
   })
 })

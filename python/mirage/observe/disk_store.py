@@ -14,6 +14,7 @@
 
 import os
 import stat
+from functools import partial
 
 import aiofiles
 import aiofiles.os
@@ -43,8 +44,12 @@ class DiskObserverStore(ObserverStoreBase):
             data (bytes): Bytes to append.
         """
         abs_path = self._abs(path)
-        await aiofiles.os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-        async with aiofiles.open(abs_path, "ab") as f:
+        await aiofiles.os.makedirs(
+            os.path.dirname(abs_path), 0o700, exist_ok=True
+        )
+        async with aiofiles.open(
+            abs_path, "ab", opener=partial(os.open, mode=0o600)
+        ) as f:
             await f.write(data)
 
     async def write(self, path: str, data: bytes) -> None:
@@ -55,8 +60,12 @@ class DiskObserverStore(ObserverStoreBase):
             data (bytes): Full new content.
         """
         abs_path = self._abs(path)
-        await aiofiles.os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-        async with aiofiles.open(abs_path, "wb") as f:
+        await aiofiles.os.makedirs(
+            os.path.dirname(abs_path), 0o700, exist_ok=True
+        )
+        async with aiofiles.open(
+            abs_path, "wb", opener=partial(os.open, mode=0o600)
+        ) as f:
             await f.write(data)
 
     async def read_matching(self, suffix: str) -> dict[str, bytes]:

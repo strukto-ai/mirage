@@ -91,3 +91,16 @@ def test_an_unreadable_root_raises_instead_of_reading_empty(tmp_path):
             asyncio.run(DiskObserverStore(str(root)).read_all())
     finally:
         root.chmod(0o755)
+
+
+@pytest.mark.parametrize("op", ["append", "write"])
+def test_history_is_owner_only(tmp_path, umask_022, op):
+    # History keeps every typed line, an inline token included, so no
+    # other local user may read it.
+    store = DiskObserverStore(str(tmp_path / "history"))
+    asyncio.run(getattr(store, op)("/day/s.jsonl", b"export TOKEN=x\n"))
+    assert os.stat(tmp_path / "history" / "day").st_mode & 0o777 == 0o700
+    assert (
+        os.stat(tmp_path / "history" / "day" / "s.jsonl").st_mode & 0o777
+        == 0o600
+    )

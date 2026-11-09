@@ -356,3 +356,60 @@ async def test_release_after_its_lock_vanished(
     if theirs is not None:
         await client.unlock("k", theirs)
         assert os.listdir(tmp_path) == []
+
+
+def _mode(path: Path) -> int:
+    return os.stat(path).st_mode & 0o777
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("op", ["put", "cas_put", "lock"])
+async def test_a_record_folder_is_owner_only(
+    tmp_path: Path, umask_022, op: str
+):
+    # A saved workspace config holds machine keys and mount credentials,
+    # so no other local user may list or enter the folder holding it.
+    client = DiskRecordClient(str(tmp_path), "configs/")
+    if op == "put":
+        await client.put("ws", {"api_key": "k"})
+    elif op == "cas_put":
+        assert await client.cas_put("ws", {"api_key": "k"}, 0)
+    else:
+        await client.unlock("ws", await client.lock("ws"))
+    assert _mode(tmp_path / "configs") == 0o700
+
+
+@pytest.mark.asyncio
+async def test_a_record_is_created_owner_only_and_exclusively(
+    tmp_path: Path, umask_022, monkeypatch
+):
+    # The temp file is created 0600, never chmodded after, so no reader
+    # can open it while it is readable; exclusively, so a file already
+    # at its name is never reused with that file's mode.
+    calls: list[tuple[str, int, int]] = []
+    real_open = os.open
+
+    def spy(path: str, flags: int, mode: int = 0o777) -> int:
+        calls.append((str(path), flags, mode))
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(os, "open", spy)
+    client = DiskRecordClient(str(tmp_path), "configs/")
+    await client.put("ws", {"api_key": "k"})
+    [(_, flags, mode)] = [c for c in calls if c[0].endswith(".tmp")]
+    assert flags & os.O_EXCL and mode == 0o600
+    assert _mode(Path(client.path("ws"))) == 0o600
+
+
+@pytest.mark.asyncio
+async def test_rewriting_a_readable_record_makes_it_owner_only(
+    tmp_path: Path, umask_022
+):
+    # A record an earlier version wrote 0644 is tightened by its next
+    # write, since the write replaces the file rather than reopening it.
+    client = DiskRecordClient(str(tmp_path), "")
+    path = Path(client.path("ws"))
+    path.write_text("{}")
+    path.chmod(0o644)
+    await client.put("ws", {"api_key": "k"})
+    assert _mode(path) == 0o600

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { randomUUID } from 'node:crypto'
 import { mkdir, open, readFile, readdir, rename, stat, unlink } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import path from 'node:path'
@@ -22,8 +23,6 @@ import { generationOf } from '@struktoai/mirage-core/workspace/record/types'
 const LOCK_STALE_SECONDS = 10
 const LOCK_RETRY_SLEEP_MS = 5
 const LOCK_RETRY_LIMIT = 2000
-
-let tmpCounter = 0
 
 // Match Python's urllib quote(safe=""): percent-encode everything
 // outside the unreserved set, so both runtimes produce byte-identical
@@ -163,7 +162,7 @@ export class DiskRecordClient {
   }
 
   async put(name: string, fields: Record<string, unknown>): Promise<void> {
-    await mkdir(this.dir, { recursive: true })
+    await mkdir(this.dir, { recursive: true, mode: 0o700 })
     await this.writeRecord(this.path(name), fields)
   }
 
@@ -179,7 +178,7 @@ export class DiskRecordClient {
     fields: Record<string, unknown>,
     expectedGeneration: number,
   ): Promise<boolean> {
-    await mkdir(this.dir, { recursive: true })
+    await mkdir(this.dir, { recursive: true, mode: 0o700 })
     const target = this.path(name)
     const lockPath = `${target}.lock`
     let fh = await acquireLock(lockPath)
@@ -239,7 +238,7 @@ export class DiskRecordClient {
    * lock for the whole retry budget (~10s).
    */
   async lock(name: string): Promise<FileHandle> {
-    await mkdir(this.dir, { recursive: true })
+    await mkdir(this.dir, { recursive: true, mode: 0o700 })
     const lockPath = `${this.path(name)}.lock`
     for (let i = 0; i < LOCK_RETRY_LIMIT; i++) {
       const fh = await acquireLock(lockPath)
@@ -255,8 +254,8 @@ export class DiskRecordClient {
   }
 
   private async writeRecord(target: string, fields: Record<string, unknown>): Promise<void> {
-    const tmp = `${target}.${String(process.pid)}.${String(tmpCounter++)}.tmp`
-    const fh = await open(tmp, 'w')
+    const tmp = `${target}.${randomUUID().replaceAll('-', '')}.tmp`
+    const fh = await open(tmp, 'wx', 0o600)
     try {
       await fh.writeFile(JSON.stringify(fields))
       await fh.sync()

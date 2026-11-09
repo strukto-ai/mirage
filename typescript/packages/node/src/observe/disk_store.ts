@@ -43,14 +43,14 @@ export class DiskObserverStore extends ObserverStoreBase {
 
   async append(key: string, data: Uint8Array): Promise<void> {
     const absPath = this.abs(key)
-    await mkdir(path.dirname(absPath), { recursive: true })
-    await appendFile(absPath, data)
+    await mkdir(path.dirname(absPath), { recursive: true, mode: 0o700 })
+    await appendFile(absPath, data, { mode: 0o600 })
   }
 
   async write(key: string, data: Uint8Array): Promise<void> {
     const absPath = this.abs(key)
-    await mkdir(path.dirname(absPath), { recursive: true })
-    await writeFile(absPath, data)
+    await mkdir(path.dirname(absPath), { recursive: true, mode: 0o700 })
+    await writeFile(absPath, data, { mode: 0o600 })
   }
 
   async readMatching(suffix: string): Promise<Map<string, Uint8Array>> {

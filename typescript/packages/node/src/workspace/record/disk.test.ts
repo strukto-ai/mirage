@@ -12,7 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import {
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs'
 import * as fs from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -356,5 +364,53 @@ describe('RecordNamespaceStore over DiskRecordClient', () => {
     for (const w of workers) {
       expect((record?.env as Record<string, string>)[w]).toBe('5')
     }
+  })
+})
+
+describe('DiskRecordClient owner-only modes', () => {
+  let root: string
+  let umask: number
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'mirage-record-mode-'))
+    umask = process.umask(0o022)
+  })
+
+  afterEach(() => {
+    process.umask(umask)
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  const mode = (p: string): number => statSync(p).mode & 0o777
+
+  // A saved workspace config holds machine keys and mount credentials, so
+  // no other local user may list or enter the folder holding it.
+  it.each(['put', 'casPut', 'lock'])('makes the record folder owner-only on %s', async (op) => {
+    const client = new DiskRecordClient(root, 'configs/')
+    if (op === 'put') await client.put('ws', { api_key: 'k' })
+    else if (op === 'casPut') expect(await client.casPut('ws', { api_key: 'k' }, 0)).toBe(true)
+    else await client.unlock('ws', await client.lock('ws'))
+    expect(mode(join(root, 'configs'))).toBe(0o700)
+  })
+
+  // The temp file is created 0600, never chmodded after, so no reader can
+  // open it while it is readable; exclusively, so a file already at its
+  // name is never reused with that file's mode.
+  it('creates the record owner-only and exclusively', async () => {
+    vi.mocked(fs.open).mockClear()
+    const client = new DiskRecordClient(root, 'configs/')
+    await client.put('ws', { api_key: 'k' })
+    const temps = vi.mocked(fs.open).mock.calls.filter(([p]) => String(p).endsWith('.tmp'))
+    expect(temps.map(([, flags, m]) => [flags, m])).toEqual([['wx', 0o600]])
+    expect(mode(client.path('ws'))).toBe(0o600)
+  })
+
+  // A record an earlier version wrote 0644 is tightened by its next write,
+  // since the write replaces the file rather than reopening it.
+  it('makes a readable record owner-only when it is written again', async () => {
+    const client = new DiskRecordClient(root, '')
+    writeFileSync(client.path('ws'), '{}', { mode: 0o644 })
+    await client.put('ws', { api_key: 'k' })
+    expect(mode(client.path('ws'))).toBe(0o600)
   })
 })
