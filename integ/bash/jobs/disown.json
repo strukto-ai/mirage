@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "sleep 5 & disown; echo rc=$?; jobs; echo j=$?",
+      "command": "jobs >/dev/null; sleep 5 & disown; echo rc=$?; jobs; echo j=$?",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\nj=0\n",

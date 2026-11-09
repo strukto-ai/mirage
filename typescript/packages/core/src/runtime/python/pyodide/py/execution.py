@@ -177,7 +177,9 @@ def _program_getsignal(number):
     Returns:
         Callable | signal.Handlers: what it does with it.
     """
-    return _carrier_handler if number == SIGNAL_CARRIER else _read_signal(number)
+    return (
+        _carrier_handler if number == SIGNAL_CARRIER else _read_signal(number)
+    )
 
 
 signal.signal = _program_signal

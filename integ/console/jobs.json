@@ -443,7 +443,7 @@
         "opfs",
         "console-redis"
       ],
-      "command": "sleep 1 & p=$!; disown %1; wait $p; echo $?",
+      "command": "sleep 1 & p=$!; disown %1; wait $p; echo $?; kill $p",
       "expect": {
         "exit": 0,
         "stdout": "0\n",
@@ -548,7 +548,7 @@
         "opfs",
         "console-redis"
       ],
-      "command": "( sleep 0.2 | sleep 0.2 & p=$!; disown $p; echo $?; jobs; echo end; sleep 0.3 )",
+      "command": "sleep 5 | sleep 5 & p=$!; f=$(jobs -p); disown $p; echo $?; jobs; echo end; kill $f $p; unset f p",
       "expect": {
         "exit": 0,
         "stdout": "0\nend\n",

@@ -12,11 +12,26 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { fstatSync, statSync } from 'node:fs'
+import { devNull } from 'node:os'
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
 import { resolveWorkspace } from './settings.ts'
 import { emit, fail } from './output.ts'
 import { answer, post, WORKSPACE_FLAGS, WORKSPACE_HELP } from './vfs.ts'
+
+/**
+ * Whether a descriptor that is no terminal may carry input for the line: an
+ * empty file or the null device has none to send, and a line without input
+ * can have what a machine's program prints streamed. Mirrors Python's
+ * `_has_input`.
+ */
+export function hasInput(fd: number): boolean {
+  const info = fstatSync(fd)
+  if (info.isFile()) return info.size > 0
+  const none = statSync(devNull)
+  return !(info.dev === none.dev && info.ino === none.ino)
+}
 
 interface ExplainedNode {
   type: string
@@ -122,7 +137,7 @@ export function registerShellCommand(parent: Command): void {
             c,
             session === '' ? `${path}?stream=true` : `${path}?${session}&stream=true`,
             body,
-            !process.stdin.isTTY,
+            !process.stdin.isTTY && hasInput(0),
             opts.json === true,
           )
         } catch (error) {

@@ -460,10 +460,10 @@
       },
       "steps": [
         {
-          "command": "sleep 2 | python3 /ram/reader & p=$!; until [ -e /ram/ready ]; do sleep 0.05; done; kill $p; wait $p; echo $?",
+          "command": "sleep 30 | python3 /ram/reader & p=$!; until [ -e /ram/ready ]; do sleep 0.05; done; kill $p; while ps -p $p >/dev/null; do sleep 0.05; done; echo gone; kill %1; wait $p; echo $?",
           "expect": {
             "exit": 0,
-            "stdout": "143\n",
+            "stdout": "gone\n143\n",
             "stderr": ""
           }
         }
