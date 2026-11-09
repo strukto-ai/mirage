@@ -63,7 +63,7 @@ The daemon answers `/v1/health` and `/v1/daemon/ready` itself, merges their `GET
 
 ## Started by the CLI
 
-`@struktoai/mirage-cli` runs the same app as a daemon, `mirage-daemon`, on `127.0.0.1:8765` in local auth mode, logging to `~/.mirage/daemon.log`. That entry adds the two daemon behaviors: it writes `$MIRAGE_HOME/daemon.pid` for `mirage daemon stop` and `kill`, and exits 30 seconds (`MIRAGE_IDLE_GRACE_SECONDS`) after its last workspace is deleted. It listens on `MIRAGE_DAEMON_PORT`, the `port` setting, or `8765`. Its settings are on the [CLI page](/home/access/cli#config).
+`@struktoai/mirage-cli` runs the same app as a daemon, `mirage-daemon`, on `127.0.0.1:8765` in local auth mode, logging to `~/.mirage/daemon.log`. That entry adds the two daemon behaviors: it writes `$MIRAGE_HOME/daemon.pid` for `mirage daemon stop` and `kill`, and exits 30 seconds (`MIRAGE_IDLE_GRACE_SECONDS`) after its last running workspace stops or is deleted. It listens on `MIRAGE_DAEMON_PORT`, the `port` setting, or `8765`. Its settings are on the [CLI page](/home/access/cli#daemon-config).
 
 ## MCP and RPC on their own
 

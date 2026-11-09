@@ -20,7 +20,8 @@ export SLACK_BOT_TOKEN=xoxb-your-token
 
 If the local CLI daemon is already running, run `mirage daemon restart` after
 exporting the token. The next workspace creation inherits the updated environment.
-Restarting discards existing workspaces. See [daemon commands](/home/access/cli#daemon).
+Restarting stops every workspace and keeps it; `mirage workspace start ID`
+brings one back. See [daemon commands](/home/access/cli#daemon).
 
 ```yaml workspace.yaml
 mounts:
@@ -96,6 +97,31 @@ mounts:
 Use this config with the same workspace creation and read commands above.
 Relative dotenv paths use the Mirage process's working directory. A pointer's
 non-empty `ref` overrides the source's configured `path`.
+
+## Use a saved connection
+
+On the daemon or the hosted API, save a credential once with
+[`mirage vfs`, `mirage cli`, `mirage runtime` or
+`mirage machine`](/home/access/cli#saved-connections), then point at it with
+`from: strukto`, the entry's name as `ref` and its field as `key`:
+
+```bash
+mirage vfs create slack --type slack --secret token
+```
+
+```yaml workspace.yaml
+mounts:
+  /slack:
+    vfs: slack
+    config:
+      token:
+        from: strukto
+        ref: slack
+        key: token
+```
+
+The server reads the entry each time it creates or starts the workspace. A
+workspace built in your own code has no `strukto` source.
 
 ## Other credential sources
 

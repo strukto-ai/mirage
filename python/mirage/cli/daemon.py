@@ -124,7 +124,7 @@ def stop_cmd(
     """Gracefully stop the daemon.
 
     Calls ``POST /v1/daemon/shutdown`` which trips the daemon's exit event.
-    The daemon closes active workspaces and exits. If the daemon
+    The daemon stops its workspaces, keeps them stopped, and exits. If the daemon
     doesn't exit within ``--timeout``, fall back to SIGTERM via the
     PID file.
     """
@@ -170,9 +170,8 @@ def restart_cmd(
 ) -> None:
     """Stop the daemon. Next CLI command auto-spawns a fresh one.
 
-    Workspaces are LOST on restart. Save any you want to keep first
-    with ``mirage workspace snapshot <id> <path>`` and bring them
-    back with ``mirage workspace load <path>``.
+    Workspaces stay, stopped: ``mirage workspace start <id>`` brings
+    one back.
     """
     with make_client() as client:
         try:
