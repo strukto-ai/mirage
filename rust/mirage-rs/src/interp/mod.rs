@@ -3,6 +3,7 @@
 
 pub mod brace;
 pub mod codec;
+pub mod declare;
 pub mod escapes;
 pub mod expand;
 pub mod host;

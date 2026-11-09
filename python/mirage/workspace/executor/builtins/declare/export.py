@@ -13,36 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.shell.variable import VarAttr
-from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.declare.declare import mark_names
-from mirage.workspace.executor.builtins.declare.types import (
-    DeclarationOperand,
-)
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import SessionState
-from mirage.workspace.session.state import session_view
-
-
-async def handle_export(
-    assignments: list[DeclarationOperand],
-    session: SessionState,
-    state: SessionView | None = None,
-) -> Result:
-    """Export names, or print them (``export -p`` / bare ``export``).
-
-    The exported set, not every shell variable: ``X=hello`` is absent
-    and ``export Y=world`` is present, which is what bash prints. ``-f``
-    marks functions instead, for a nested shell to inherit; bash accepts
-    ``-a`` / ``-A`` although its usage line names only ``-fn``
-    (``mark_names``).
-
-    Args:
-        assignments (list[DeclarationOperand]): the option words, then
-            the operands in order.
-        session (SessionState): shell session state.
-        state (SessionView | None): the gated session view.
-    """
-    return await mark_names(assignments, session, state, VarAttr.EXPORT)
 
 
 async def export_builtin(call: BuiltinCall) -> Result:
@@ -51,11 +23,10 @@ async def export_builtin(call: BuiltinCall) -> Result:
     Args:
         call (BuiltinCall): the invocation.
     """
-    return await handle_export(
+    return await mark_names(
         list(call.argv.args),
-        call.context.session,
-        session_view(
-            call.context.session,
-            diagnostics=call.context.frame.diagnostics,
-        ),
+        call.context,
+        call.execute_fn,
+        call.call_stack,
+        VarAttr.EXPORT,
     )

@@ -181,6 +181,12 @@ pub fn expanded_out(expanded: &Expanded) -> Item {
     match expanded {
         Expanded::Fields(fields) => fields_out(fields),
         Expanded::Text(text) => Item::text(text),
+        Expanded::Declared(declared) => Item::tuple([
+            Item::list(declared.pieces.iter().map(|(failed, piece)| {
+                Item::tuple([Item::Bool(*failed), Item::Raw(piece.clone())])
+            })),
+            Item::int(declared.status),
+        ]),
         Expanded::Runs(runs) => Item::list(
             runs.iter()
                 .map(|(text, quoted)| Item::tuple([Item::text(text), Item::Bool(*quoted)])),

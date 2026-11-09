@@ -12,26 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
-
 # bash takes `-a` / `-A` too, though its usage line names only `-fn`.
 EXPORT_FLAGS = frozenset("aAfnp")
 
 READONLY_FLAGS = frozenset("aAfp")
 
-# The attribute letters a no-name `declare` listing filters on: a name
-# carrying any of them is listed (`declare -ix` lists both kinds).
-LISTED_ATTRIBUTES = frozenset("ilnrtux")
-
 # The declaration builtins that assign whichever variable is visible, a
 # function's local or else the global; `declare` and `local` make a new
 # local inside a function instead.
 VISIBLE_SCOPE_BUILTINS = frozenset({"export", "readonly"})
-
-# `arr[0]` and friends: a target that parses as an assignment but is
-# not a plain name, which the declaration builtins quote on its own.
-SUBSCRIPT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\[.*\]")
-
-# The head of an element operand, `NAME[`, whose subscript runs to the
-# matching `]` (`operand_parts`).
-NAME_BRACKET_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\[")

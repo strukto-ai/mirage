@@ -638,6 +638,15 @@ export type Managed = readonly [string, string, string, boolean]
 export type ShellRecord = readonly [RawValue, string, Managed | null]
 
 /** A request a running task waits on. */
+/** A declaration operand: a word, or a staged array literal. */
+export type DeclarationItem =
+  | string
+  | { readonly name: string; readonly append: boolean; readonly items: readonly string[] }
+
+function operandItem(operand: DeclarationItem): Item {
+  return typeof operand === 'string' ? operand : [operand.name, operand.append, [...operand.items]]
+}
+
 export type Ask =
   | readonly [
       'substitute',
@@ -648,6 +657,7 @@ export type Ask =
       readonly string[] | null,
     ]
   | readonly ['process', Shell, ShellTreeNode]
+  | readonly ['subscript', Shell, string]
   | readonly ['pause', Shell]
 
 /** How an operation ended: `['ok', value]` or a fault, and its diagnostics. */
@@ -724,6 +734,12 @@ export class Shell {
     this.closedInternal = true
     shells.unregister(this)
     closing.push(this.handle)
+  }
+
+  /** The engine took the shell back, so there is nothing left to free. */
+  forget(): void {
+    this.closedInternal = true
+    shells.unregister(this)
   }
 
   /** Whether `close` freed the shell. */
@@ -1035,6 +1051,57 @@ export class Shell {
     return new ShellTask(handle, step, node.tree)
   }
 
+  /** Run a `declare`, `typeset` or `local` statement. */
+  declare(
+    cmd: string,
+    flags: string,
+    plus: string,
+    operands: readonly DeclarationItem[],
+    temporaries: readonly string[],
+    subscripts: boolean,
+    deciding: boolean,
+  ): ShellTask {
+    const [handle, step] = this.call(
+      'declare',
+      cmd,
+      flags,
+      plus,
+      operands.map(operandItem),
+      [...temporaries],
+      subscripts,
+      deciding,
+    ) as readonly [number, Item]
+    return new ShellTask(handle, step, null)
+  }
+
+  /**
+   * Run `export` or `readonly` on variables, `attr` the letter it marks. With
+   * `functions`, only store the literals of a `-f` line.
+   */
+  markNames(
+    cmd: string,
+    attr: string,
+    on: boolean,
+    flags: string,
+    operands: readonly DeclarationItem[],
+    temporaries: readonly string[],
+    functions: boolean,
+    deciding: boolean,
+  ): ShellTask {
+    const [handle, step] = this.call(
+      'mark_names',
+      cmd,
+      attr,
+      on,
+      flags,
+      operands.map(operandItem),
+      [...temporaries],
+      functions,
+      deciding,
+    ) as readonly [number, Item]
+    return new ShellTask(handle, step, null)
+  }
+
   /** Set a variable. */
   set(
     name: string,
@@ -1152,7 +1219,7 @@ export class ShellTask {
   constructor(
     readonly handle: number,
     step: Item,
-    private readonly tree: ShellTree,
+    private readonly tree: ShellTree | null,
   ) {
     tasks.register(this, handle, this)
     this.land(step)
@@ -1163,6 +1230,7 @@ export class ShellTask {
   }
 
   private node(index: Item): ShellTreeNode {
+    if (this.tree === null) throw new Error('this task names no node')
     return new ShellTreeNode(this.tree, index as number)
   }
 
@@ -1213,6 +1281,8 @@ export class ShellTask {
       }
       case 'process':
         return ['process', Shell.adopt(asked[1] as number), this.node(asked[2] ?? null)]
+      case 'subscript':
+        return ['subscript', Shell.adopt(asked[1] as number), asked[2] as string]
       default:
         return ['pause', Shell.adopt(asked[1] as number)]
     }
@@ -1229,6 +1299,16 @@ export class ShellTask {
 
   answerPath(path: string): void {
     this.land(this.call('answer_path', path))
+  }
+
+  /**
+   * The text a subscript expanded to, null when the host failed, and the
+   * shell the task lent it, which goes back to the task.
+   */
+  answerSubscript(text: string | null, shell: Shell): void {
+    const handle = shell.handle
+    shell.forget()
+    this.land(this.call('answer_subscript', text, handle))
   }
 
   /** The host has let others run; the operation goes on. */

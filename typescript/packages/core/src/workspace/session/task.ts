@@ -48,6 +48,8 @@ export interface TaskHost {
   ): Promise<[Uint8Array, Uint8Array, number]>
   /** Start a process substitution in `shell` and name its pipe. */
   process(shell: Shell, node: ShellTreeNode): Promise<string>
+  /** Expand a subscript given as text, on the shell the task lent. */
+  subscript(text: string): Promise<string>
 }
 
 function permissionDenied(name: string): PolicyDenied {
@@ -113,11 +115,14 @@ export async function drive(
   const shown = host.session.visibility
   for (let ask = task.step(); ask !== null; ask = task.step()) {
     const held = records.shell
-    const lent = ask[0] === 'pause' ? ask[1] : ask[1].fork()
+    const moved = ask[0] === 'subscript' ? ask[1] : null
+    const lent = ask[0] === 'pause' || moved !== null ? ask[1] : ask[1].fork()
     records.shell = lent
-    let answer = (): void => {
-      task.answerFailed()
+    const giveUp = (): void => {
+      if (moved !== null) task.answerSubscript(null, moved)
+      else task.answerFailed()
     }
+    let answer = giveUp
     try {
       switch (ask[0]) {
         case 'substitute': {
@@ -145,6 +150,13 @@ export async function drive(
           }
           break
         }
+        case 'subscript': {
+          const text = await host.subscript(ask[2])
+          answer = () => {
+            task.answerSubscript(text, ask[1])
+          }
+          break
+        }
         default:
           budget ??= new YieldBudget(callerSignal())
           await budget.run()
@@ -155,12 +167,10 @@ export async function drive(
     } catch (err) {
       failure = err
       failed = true
-      answer = () => {
-        task.answerFailed()
-      }
+      answer = giveUp
     } finally {
       records.shell = held
-      lent.close()
+      if (moved === null) lent.close()
     }
     // The copies the request lent are dropped ahead of the answer, so a
     // write the task lands shares its records with none and copies nothing.

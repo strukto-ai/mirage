@@ -62,6 +62,14 @@ class TaskHost(Protocol):
         """
         ...
 
+    async def subscript(self, text: str) -> str:
+        """Expand a subscript given as text, on the shell the task lent.
+
+        Args:
+            text (str): the text between the brackets.
+        """
+        ...
+
     async def process(self, shell: Shell, node: ShellNode) -> str:
         """Start a process substitution in ``shell`` and name its pipe.
 
@@ -131,8 +139,19 @@ async def drive(
     shown = host.session.visibility
     while (ask := task.step()) is not None:
         held = records.shell
-        records.shell = ask[-1] if ask[0] == "pause" else ask[1].fork()
-        answer: Callable[[], None] = task.answer_failed
+        match ask[0]:
+            case "pause":
+                records.shell = ask[-1]
+            case "subscript":
+                records.shell = ask[1]
+            case _:
+                records.shell = ask[1].fork()
+        failed: Callable[[], None] = (
+            partial(task.answer_subscript, None, ask[1])
+            if ask[0] == "subscript"
+            else task.answer_failed
+        )
+        answer: Callable[[], None] = failed
         try:
             match ask:
                 case ("substitute", _, body, node, span, read):
@@ -147,12 +166,18 @@ async def drive(
                 case ("process", _, node):
                     path = await host.process(ask[1], node)
                     answer = partial(task.answer_path, path)
+                case ("subscript", shell, text):
+                    answer = partial(
+                        task.answer_subscript,
+                        await host.subscript(text),
+                        shell,
+                    )
                 case ("pause", _):
                     await task_turn()
                     answer = task.answer_resumed
         except BaseException as exc:
             failure = exc
-            answer = task.answer_failed
+            answer = failed
         finally:
             records.shell = held
         # The copies the request lent go before the task goes on, so a

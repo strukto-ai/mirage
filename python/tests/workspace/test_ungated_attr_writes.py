@@ -29,15 +29,7 @@ SRC = pathlib.Path(__file__).resolve().parents[2] / "mirage"
 # So every call site is written down here with the reason it is allowed.
 # A new one fails this test until someone states which gated write covers
 # it, or routes it through `view.mark` instead.
-_DECLARE = "mirage/workspace/executor/builtins/declare"
-
 ALLOWED = {
-    (
-        f"{_DECLARE}/declare.py",
-        "mark_written",
-    ): "only when the name resolves where it did before the caller's "
-    "`view.set` gated it; a write that re-aimed a `declare -n` "
-    "reference marks its new target through `view.mark`",
     (
         "mirage/workspace/node/explain.py",
         "_seeded",

@@ -12,11 +12,4 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export {
-  handleDeclareFunctions,
-  handleDeclarePrint,
-  noteLocalArray,
-  storeStagedArrays,
-} from './declare.ts'
-export { handleExport } from './export.ts'
-export { handleLocal } from './local.ts'
+export { handleDeclareFunctions } from './declare.ts'

@@ -114,6 +114,16 @@ pub trait Host {
         node: usize,
     ) -> impl Future<Output = Result<Vec<u8>, Fault>>;
 
+    /// Expand a subscript given as text on `shell`, which the host holds
+    /// while it does, as a line typed there would.
+    fn subscript(
+        &mut self,
+        _shell: &mut Shell,
+        _text: &[u8],
+    ) -> impl Future<Output = Result<Vec<u8>, Fault>> {
+        async { Err(Fault::Host("no host to expand a subscript")) }
+    }
+
     /// Let the host run others, or stop the operation, between slices of
     /// a long piece of work on `shell`; a host that runs nothing else goes
     /// straight on.
@@ -197,6 +207,20 @@ pub struct Expander<'a, H: Host> {
     /// The bytes left to build the expansion in, the shell's
     /// `memory_room` as it starts; None for no bound.
     pub room: Option<usize>,
+}
+
+/// A subscript a builtin was given as text (`declare 'd[$i]=w'`), expanded
+/// as one typed in `${x[...]}` is; one with no expansion, quote or escape
+/// stays as typed.
+pub async fn subscript_of<H: Host>(
+    shell: &mut Shell,
+    host: &mut H,
+    text: &[u8],
+) -> Result<Vec<u8>, Fault> {
+    if !text.iter().any(|b| b"$`'\"\\".contains(b)) {
+        return Ok(text.to_vec());
+    }
+    host.subscript(shell, text).await
 }
 
 /// The bytes a word's pieces hold.

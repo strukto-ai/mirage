@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
 use super::Diagnostic;
+use super::declare::{Declaration, Declared, Marking, run_declaration, run_marking};
 use super::expand::{Expander, Field, Host, Substitution};
 use super::shell::Shell;
 use super::write::{Fault, Writer, element_reference};
@@ -36,6 +37,9 @@ pub enum Ask {
     },
     /// Start `node`'s process substitution in `shell` and name its pipe.
     ProcessSubstitution { shell: Shell, node: usize },
+    /// Expand a subscript given as text; `shell` is the operation's own,
+    /// moved to the host for it and handed back with the answer.
+    Subscript { shell: Shell, text: Vec<u8> },
     /// A long piece of work has run a while; the host lets others run, or
     /// stops the operation, before it goes on. `view` is the session as the
     /// work has left it so far, which whatever the host runs meanwhile reads
@@ -48,6 +52,12 @@ pub enum Answer {
     Substituted(Substitution),
     Path(Vec<u8>),
     Resumed,
+    /// The subscript's text, None when the host failed, and the shell it
+    /// held meanwhile.
+    Subscripted {
+        shell: Box<Shell>,
+        text: Option<Vec<u8>>,
+    },
     /// The host could not do it; the operation stops with this.
     Failed(Fault),
 }
@@ -86,6 +96,23 @@ impl Line {
 }
 
 impl Host for Line {
+    async fn subscript(&mut self, shell: &mut Shell, text: &[u8]) -> Result<Vec<u8>, Fault> {
+        let stand_in = Shell::new(shell.vars.fork());
+        let lent = std::mem::replace(shell, stand_in);
+        let ask = Ask::Subscript {
+            shell: lent,
+            text: text.to_vec(),
+        };
+        match self.ask(ask).await {
+            Answer::Subscripted { shell: back, text } => {
+                *shell = *back;
+                text.ok_or(Fault::Host("the host failed a subscript"))
+            }
+            Answer::Failed(fault) => Err(fault),
+            _ => Err(Fault::Host("an answer that is no subscript")),
+        }
+    }
+
     async fn substitute(
         &mut self,
         shell: &mut Shell,
@@ -248,6 +275,7 @@ pub enum Expanded {
     Fields(Vec<Field>),
     Text(Vec<u8>),
     Runs(Vec<(Vec<u8>, bool)>),
+    Declared(Declared),
 }
 
 /// An operation's end: the shell it ran on, its result, and what it left
@@ -293,6 +321,38 @@ pub fn expand(shell: Shell, tree: Arc<Tree>, node: usize, mode: Mode) -> Task<En
                 Mode::Subscript => expander.subscript(node).await.map(Expanded::Text),
             }
         };
+        Ended {
+            shell,
+            result,
+            diagnostics,
+        }
+    })
+}
+
+/// Run a `declare`, `typeset` or `local` statement.
+pub fn declare(shell: Shell, declaration: Declaration) -> Task<Ended<Expanded>> {
+    Task::new(move |mut line| async move {
+        let mut shell = shell;
+        let mut diagnostics = Vec::new();
+        let result = run_declaration(&mut shell, &mut line, &mut diagnostics, &declaration)
+            .await
+            .map(Expanded::Declared);
+        Ended {
+            shell,
+            result,
+            diagnostics,
+        }
+    })
+}
+
+/// Run `export` or `readonly` on variables; with `functions`, only store
+/// the literals of a `-f` line.
+pub fn mark_names(shell: Shell, marking: Marking, functions: bool) -> Task<Ended<Expanded>> {
+    Task::new(move |mut line| async move {
+        let mut shell = shell;
+        let mut diagnostics = Vec::new();
+        let result = run_marking(&mut shell, &mut line, &mut diagnostics, &marking, functions)
+            .map(Expanded::Declared);
         Ended {
             shell,
             result,

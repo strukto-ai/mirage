@@ -6,6 +6,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyBytes, PyDict, PyList, PyTuple};
 use streams::arith;
 use streams::interp::codec::Item;
+use streams::interp::declare::{Declaration, Marking, Operand};
 use streams::interp::expand::Substitution;
 use streams::interp::host::{self, Held};
 use streams::interp::job::{Job, Step};
@@ -117,6 +118,31 @@ fn record_in(
 /// special parameters and the options, held in mirage-rs. While a
 /// `ShellTask` runs on it the shell is the task's, and any read of it
 /// raises until the task finishes.
+/// The tree of a task that names no node of one.
+fn no_tree() -> (Arc<Tree>, u64) {
+    (Arc::new(streams::shell::parse(b"")), 0)
+}
+
+/// Declaration operands: a word, or `(name, append, items)`.
+fn operands_in(operands: &[Bound<'_, PyAny>]) -> PyResult<Vec<Operand>> {
+    operands
+        .iter()
+        .map(|operand| {
+            let Ok((name, append, items)) =
+                operand.extract::<(String, bool, Vec<Bound<'_, PyAny>>)>()
+            else {
+                return Ok(Operand::Word(bytes_of(operand)?));
+            };
+            let items = items.iter().map(bytes_of).collect::<PyResult<_>>()?;
+            Ok(Operand::Literal {
+                name,
+                append,
+                items,
+            })
+        })
+        .collect()
+}
+
 #[pyclass(module = "mirage._rs")]
 pub struct Shell(
     Held,
@@ -617,6 +643,59 @@ impl Shell {
         })
     }
 
+    /// Run a `declare`, `typeset` or `local` statement: `operands` each a
+    /// word, or `(name, append, items)` for an array literal.
+    #[allow(clippy::too_many_arguments)]
+    fn declare(
+        slf: &Bound<'_, Self>,
+        cmd: String,
+        flags: &str,
+        plus: &str,
+        operands: Vec<Bound<'_, PyAny>>,
+        temporaries: Vec<String>,
+        subscripts: bool,
+        deciding: bool,
+    ) -> PyResult<ShellTask> {
+        let declaration = Declaration {
+            cmd,
+            flags: flags.as_bytes().to_vec(),
+            plus: plus.as_bytes().to_vec(),
+            operands: operands_in(&operands)?,
+            temporaries,
+            subscripts,
+            deciding,
+        };
+        ShellTask::start(slf, no_tree(), |inner| task::declare(inner, declaration))
+    }
+
+    /// Run `export` or `readonly` on variables; `attr` is the letter it
+    /// marks. With `functions`, only store the literals of a `-f` line.
+    #[allow(clippy::too_many_arguments)]
+    fn mark_names(
+        slf: &Bound<'_, Self>,
+        cmd: String,
+        attr: &str,
+        on: bool,
+        flags: &str,
+        operands: Vec<Bound<'_, PyAny>>,
+        temporaries: Vec<String>,
+        functions: bool,
+        deciding: bool,
+    ) -> PyResult<ShellTask> {
+        let marking = Marking {
+            cmd,
+            attr: vars::attrs_of(attr),
+            on,
+            flags: flags.as_bytes().to_vec(),
+            operands: operands_in(&operands)?,
+            temporaries,
+            deciding,
+        };
+        ShellTask::start(slf, no_tree(), |inner| {
+            task::mark_names(inner, marking, functions)
+        })
+    }
+
     /// Set a variable. `value` is text, or a mapping for an array
     /// (`assoc` for an associative one); `assigned` names the indexes or
     /// keys an array write assigns; `added` is an integer `+=`'s operand.
@@ -865,6 +944,11 @@ impl ShellTask {
                     .into_pyobject(py)?
                     .into_any()
             }
+            Ask::Subscript { shell, text } => {
+                ("subscript", Shell::wrap(shell), text_of(py, &text)?)
+                    .into_pyobject(py)?
+                    .into_any()
+            }
             Ask::Pause { view } => ("pause", Shell::wrap(Inner::new(view)))
                 .into_pyobject(py)?
                 .into_any(),
@@ -934,6 +1018,20 @@ impl ShellTask {
     }
 
     /// The host has let others run; the operation goes on.
+    /// The text a subscript expanded to, None when the host failed, and
+    /// the shell the task lent it.
+    fn answer_subscript(
+        &mut self,
+        py: Python<'_>,
+        text: Option<Bound<'_, PyAny>>,
+        shell: &Bound<'_, Shell>,
+    ) -> PyResult<()> {
+        let text = text.as_ref().map(bytes_of).transpose()?;
+        let inner = shell.borrow_mut().0.take().ok_or_else(running)?;
+        let shell = Box::new(inner);
+        self.answer(py, Answer::Subscripted { shell, text })
+    }
+
     fn answer_resumed(&mut self, py: Python<'_>) -> PyResult<()> {
         self.answer(py, Answer::Resumed)
     }

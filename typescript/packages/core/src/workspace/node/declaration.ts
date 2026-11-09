@@ -14,72 +14,28 @@
 
 import { shellVoice } from '../../shell/voice.ts'
 import type { RedirectResult } from '../../context/session_context.ts'
-import { IOResult } from '../../io/types.ts'
-import { PolicyDenied } from '../../policy/errors.ts'
-import { makeArray, ShellArray } from '../../shell/array.ts'
-import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
-import { DiscardSignal } from '../../shell/errors.ts'
 import { getDeclarationKeyword, getText } from '../../shell/helpers.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
-import { type ShellValue, VarAttr, VarKind } from '../../shell/variable.ts'
+import { VarAttr } from '../../shell/variable.ts'
 import { traceArray, traceCommand } from '../../shell/xtrace.ts'
 import { concat } from '../../utils/bytes.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { EvaluationContext } from '../evaluation.ts'
-import {
-  LISTED_ATTRIBUTES,
-  VISIBLE_SCOPE_BUILTINS,
-} from '../executor/builtins/declare/constants.ts'
-import {
-  declaredKind,
-  elementName,
-  heldValue,
-  kindConflict,
-  markNames,
-  startLocal,
-} from '../executor/builtins/declare/declare.ts'
+import { VISIBLE_SCOPE_BUILTINS } from '../executor/builtins/declare/constants.ts'
+import { declared as declaredOn, markNames } from '../executor/builtins/declare/declare.ts'
 import type { DeclarationOperand } from '../executor/builtins/declare/types.ts'
 import { flagHelp } from '../executor/builtins/help/index.ts'
-import {
-  handleDeclareFunctions,
-  handleDeclarePrint,
-  handleLocal,
-  noteLocalArray,
-} from '../executor/builtins/index.ts'
+import { handleDeclareFunctions } from '../executor/builtins/index.ts'
 import { builtinUsage, fail } from '../executor/builtins/shared.ts'
-import { expandNode, expandSubscript } from '../expand/node.ts'
+import { expandNode } from '../expand/node.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { conversionScalar, ensureVarVisible, seedVar, sessionView } from '../session/state.ts'
+import { deciding, prefixTemporaries } from '../session/state.ts'
 import type { ExpandedWords } from './types.ts'
-import { ExecutionNode } from '../types.ts'
 import { expandArrayItems } from './assignment.ts'
-
-/**
- * Fold kind-conversion refusals into a declaration's result.
- *
- * GNU reports `cannot convert indexed to associative array` per refused
- * name on stderr and fails the builtin with 1 while the other operands
- * still declare, so the refusals ride the handler's own result rather
- * than replacing it.
- */
-function mergeConversionErrors(result: RedirectResult, errors: readonly string[]): RedirectResult {
-  if (errors.length === 0) return result
-  const [stream, io, node] = result
-  const extra = encodeText(errors.join('\n') + '\n')
-  const prior = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array(0)
-  const merged = new Uint8Array(prior.length + extra.length)
-  merged.set(prior, 0)
-  merged.set(extra, prior.length)
-  const newIo = new IOResult({
-    exitCode: 1,
-    stderr: merged,
-  })
-  return [stream, newIo, new ExecutionNode({ command: node.command, exitCode: 1, stderr: merged })]
-}
 
 // Every letter GNU's `declare` accepts, so a typo refuses with the usage
 // line instead of being silently dropped. `-a`/`-A` are kinds, not
@@ -87,13 +43,6 @@ function mergeConversionErrors(result: RedirectResult, errors: readonly string[]
 // /`-I` are modes the handlers read. `-n` stores the reference and every
 // reader and writer resolves through it (`deref` in `session/state`).
 const DECLARE_LETTERS: ReadonlySet<string> = new Set('aAfFgiIlnprtux')
-// The attributes that shape a value as it stores.
-const SHAPING: ReadonlySet<VarAttr> = new Set([VarAttr.Integer, VarAttr.Lower, VarAttr.Upper])
-// `-l` displaces `-u` and vice versa; the record keeps one.
-const DISPLACES: ReadonlyMap<string, VarAttr> = new Map([
-  ['l', VarAttr.Upper],
-  ['u', VarAttr.Lower],
-])
 
 /**
  * The refusal a `declare` family option cluster earns, if any.
@@ -116,44 +65,6 @@ function declareOptionRefusal(
 }
 
 /**
- * The attribute marks a declaration puts on each operand once it lands, in
- * order, readonly last.
- *
- * The letters that shape a value (`-i -l -u`) are stored as attributes and
- * applied by the session view on every *later* write, which is GNU's rule:
- * `v=MiXeD; declare -l v` keeps `MiXeD`, and the next `v=ABC` stores `abc`.
- * So this marks and never rewrites. `-l` and `-u` are exclusive: setting
- * one clears the other, and a cluster naming both (`-lu`, `-ul`) sets
- * neither, both pinned on 5.2.37. A `+` letter clears; `+r` is not an off
- * toggle, since it is refused on a readonly name (`plusRefusal`) and a
- * no-op otherwise. `r` lands last, as each operand's own last step:
- * `declare -rl L=ABC L=DEF` keeps `abc` and refuses the second write.
- */
-function declaredMarks(
-  flagChars: ReadonlySet<string>,
-  plusChars: ReadonlySet<string>,
-): (readonly [VarAttr, boolean])[] {
-  const on = new Set<string>()
-  for (const c of 'iluntxr') if (flagChars.has(c) && !plusChars.has(c)) on.add(c)
-  if (on.has('l') && on.has('u')) {
-    on.delete('l')
-    on.delete('u')
-  }
-  const marks: (readonly [VarAttr, boolean])[] = []
-  for (const c of 'xiluntr') {
-    const attr = c as VarAttr
-    if (on.has(c)) {
-      marks.push([attr, true])
-      const displaced = DISPLACES.get(c)
-      if (displaced !== undefined) marks.push([displaced, false])
-    } else if (plusChars.has(c) && c !== 'r') {
-      marks.push([attr, false])
-    }
-  }
-  return marks
-}
-
-/**
  * Execute one declaration statement (export/local/declare/readonly).
  *
  * The executor only reads the operands: it expands them and sorts out the
@@ -170,7 +81,7 @@ export async function executeDeclaration(
   namespace: Namespace,
   callStack: CallStack | null,
   parser?: ParseScope,
-  declared?: ExpandedWords,
+  expandedWords?: ExpandedWords,
 ): Promise<RedirectResult> {
   const session = context.session
   const keyword = getDeclarationKeyword(node)
@@ -187,7 +98,6 @@ export async function executeDeclaration(
   const plusChars = new Set<string>()
   let optsDone = false
   const traced: string[] = []
-  const view = sessionView(session, context.frame.diagnostics)
   for (const child of node.namedChildren) {
     if (child.type === NT.VARIABLE_ASSIGNMENT) {
       const valNodes = child.namedChildren.filter((c) => c.type !== NT.VARIABLE_NAME)
@@ -262,7 +172,7 @@ export async function executeDeclaration(
   }
   const cmdWord = keyword === NT.LOCAL ? 'local' : keyword
   const words = operands.filter((operand) => typeof operand === 'string')
-  if (declared !== undefined) declared.words = [cmdWord, ...traced]
+  if (expandedWords !== undefined) expandedWords.words = [cmdWord, ...traced]
   if (session.shellOptions.xtrace === true) {
     // Traced once expanded, before the builtin runs and outside its
     // redirects: each array operand, then the command naming them.
@@ -286,7 +196,7 @@ export async function executeDeclaration(
     // only expands and stages. The flags pass through so -p, the bare
     // listing and bad options work.
     const attr = keyword === 'readonly' ? VarAttr.Readonly : VarAttr.Export
-    return await markNames([...flagWords, ...operands], session, view, attr, parser)
+    return await markNames([...flagWords, ...operands], context, executeFn, callStack, attr, parser)
   }
   const refused = declareOptionRefusal(cmdWord, flagChars, plusChars)
   if (refused !== null) return refused
@@ -296,119 +206,21 @@ export async function executeDeclaration(
     // a missing name is exit 1 without a word.
     return handleDeclareFunctions(cmdWord, session, flagChars, words, plusChars, parser)
   }
-  // The value-shaping marks go on or off before a value stores, the rest
-  // once it has (`declaredMarks`).
-  const marks = declaredMarks(flagChars, plusChars)
-  const shaping = marks.filter(([attr]) => SHAPING.has(attr))
-  // `-p` prints rather than declares, so it is answered before anything
-  // declares (`declare -ap NAME` converts nothing); with no names, an
-  // attribute letter lists the names carrying it, `-p` or not.
-  const listing =
-    operands.length === 0 &&
-    [...flagChars].some((c) => LISTED_ATTRIBUTES.has(c) || c === 'a' || c === 'A')
-  if (
-    (flagChars.has('p') || plusChars.has('p') || listing) &&
-    (keyword === 'declare' || keyword === 'typeset')
-  ) {
-    return handleDeclarePrint(words, session, flagChars, keyword)
-  }
-  const conversionErrors: string[] = []
-  const kind = declaredKind(flagChars)
-  // A bare element operand (`declare t[1]`, `local h[2]`) declares its name
-  // an array, as `declare -a t` does.
-  const elements = new Set(words.filter((word) => elementBase(word) !== word).map(elementBase))
-  const declaring = operands.map(elementBase)
-  const names = words.map(elementBase)
-  if (kind !== null || elements.size > 0) {
-    // `declare -a NAME` / `declare -A NAME` with no value declare an
-    // empty array of that kind, so ${#NAME[@]} is 0 and an element
-    // write leaves the other slots unassigned. GNU refuses to
-    // convert between the two kinds and says so per name while the
-    // rest of the operands still declare.
-    for (const bare of names) {
-      const want = kind ?? (elements.has(bare) ? VarKind.Indexed : null)
-      if (bare.includes('=') || want === null) continue
-      const wantAssoc = want === VarKind.Assoc
-      // A hidden name refuses like any assignment spelling before anything
-      // lands, the readonly conversion below included, which writes past
-      // the writer's checks.
-      try {
-        ensureVarVisible(session, bare)
-      } catch (err) {
-        if (!(err instanceof PolicyDenied)) throw err
-        throw new DiscardSignal(encodeText(`${err.message}\n`))
-      }
-      const fresh =
-        !flagChars.has('g') && session.vars.shell.inFunction() && !session.vars.shell.isLocal(bare)
-      const heldVar = session.vars.get(bare)
-      // `handleLocal` refuses a readonly name in its voice.
-      if (fresh && heldVar?.attrs.has(VarAttr.Readonly) === true) continue
-      // Inside a function the name is a local of the declared kind, a new
-      // one starting as `startLocal` leaves it (with `-I`, the value it
-      // shadows); `-g` declares at global scope.
-      const local = !flagChars.has('g') && noteLocalArray(session, bare)
-      if (local && fresh) startLocal(session, bare, flagChars.has('I'))
-      const held = heldValue(session, bare)
-      const conflict = kindConflict(held, want)
-      if (conflict !== null) {
-        conversionErrors.push(`${shellVoice()}${cmdWord}: ${bare}: ${conflict}`)
-        continue
-      }
-      const isMap = held !== null && typeof held === 'object' && !(held instanceof ShellArray)
-      if (wantAssoc ? isMap : held instanceof ShellArray) continue
-      // A local of another kind starts empty; at top level an existing
-      // scalar becomes element 0, or the value at the literal key "0" (GNU
-      // allows scalar-to-associative conversion, unlike indexed).
-      const scalar = local ? null : conversionScalar(session, bare)
-      const fill: ShellValue = wantAssoc
-        ? scalar === null
-          ? {}
-          : { '0': scalar }
-        : makeArray(scalar === null ? [] : [scalar])
-      if (view.isReadonly(bare, false)) {
-        // bash converts a readonly name all the same, which the writer
-        // refuses, so it lands past the writer's checks.
-        seedVar(session, bare, fill)
-      } else {
-        try {
-          await view.set(bare, fill, false)
-        } catch (err) {
-          if (!(err instanceof PolicyDenied)) throw err
-          throw new DiscardSignal(encodeText(`${err.message}\n`))
-        }
-      }
-      // Declared over nothing (a `local -I` holds the caller's value):
-      // `declare -p` prints no value and a bare `set` leaves it out until a
-      // write.
-      if (held === null) session.vars.shell.unassigned(bare)
-    }
-  }
-  // declare/typeset scope like `local` inside a function (bash
-  // semantics) and assign globally at top level, which is exactly
-  // handleLocal's fallback when no function scope is active. `-r` rides
-  // the same path and lands on what each operand wrote, so
-  // `f() { local -r A=(x); }` freezes f's own A, not the caller's.
-  const result = await handleLocal(
-    declaring,
-    session,
-    view,
-    {
-      cmd: cmdWord,
-      kind,
-      shaping,
-      marks,
-      plus: [...plusChars].sort(compareCodePoints).join(''),
-      nameref: flagChars.has('n') && !plusChars.has('n'),
-      globalScope: flagChars.has('g'),
-      inherit: flagChars.has('I'),
-    },
-    (text) => expandSubscript(text, context, executeFn, callStack),
+  const temporaries = prefixTemporaries(session)
+  return declaredOn(
+    cmdWord,
+    (shell) =>
+      shell.declare(
+        cmdWord,
+        [...flagChars].sort(compareCodePoints).join(''),
+        [...plusChars].sort(compareCodePoints).join(''),
+        operands,
+        temporaries,
+        true,
+        deciding(),
+      ),
+    context,
+    executeFn,
+    callStack,
   )
-  return mergeConversionErrors(result, conversionErrors)
-}
-
-/** A bare element operand as the name it declares, any other as is. */
-function elementBase<T extends DeclarationOperand>(operand: T): T | string {
-  if (typeof operand === 'string') return elementName(operand) ?? operand
-  return operand
 }

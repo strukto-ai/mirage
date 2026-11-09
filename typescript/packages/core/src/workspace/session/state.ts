@@ -69,11 +69,16 @@ export function frame(session: SessionState, callStack: CallStack | null = null)
 }
 
 /**
- * Refuse a write a policy makes while it decides: a method may read the
- * session it is handed but not change it. Mirrors Python's _refuse_deciding.
+ * Whether a policy is deciding here: a method may read the session it is
+ * handed but not change it. Mirrors Python's deciding.
  */
+export function deciding(): boolean {
+  return explaining() === DryRun.DECIDING
+}
+
+/** Refuse a write a policy makes while it decides. Mirrors Python's _refuse_deciding. */
 function refuseDeciding(name: string): void {
-  if (explaining() === DryRun.DECIDING) {
+  if (deciding()) {
     throw new PolicyDenied(`${name}: permission denied`, name)
   }
 }

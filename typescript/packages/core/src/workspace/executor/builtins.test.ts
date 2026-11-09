@@ -12,14 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RedirectResult } from '../../context/session_context.ts'
+import type { ExecuteFn } from '../expand/types.ts'
 import { EvaluationContext } from '../evaluation.ts'
 import { helpPage, versionLine } from '../../commands/spec/standard.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
 import { specOf } from '../../commands/spec/index.ts'
 import { makeVar } from '../../shell/variable.ts'
-import { envSnapshot, seedVar, sessionView, setAttr } from '../session/state.ts'
+import { envGet, envSnapshot, seedVar, sessionView, setAttr } from '../session/state.ts'
 import { VarAttr } from '../../shell/variable.ts'
-import { markNames } from './builtins/declare/declare.ts'
+import { declared, markNames } from './builtins/declare/declare.ts'
+import type { DeclarationOperand } from './builtins/declare/types.ts'
 import { varsFromEnv } from '../session/session.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { share } from '../../io/async_line_iterator.ts'
@@ -40,8 +43,6 @@ import {
   handleCd,
   handleEcho,
   handleEval,
-  handleExport,
-  handleLocal,
   handlePrintenv,
   handlePrintf,
   handleGetopts,
@@ -84,10 +85,59 @@ async function handleXargs(
   return [await materialize(out), io, node]
 }
 
+const noLines: ExecuteFn = () => {
+  throw new Error('no nested line runs here')
+}
+
+const handleExport = (
+  assignments: readonly DeclarationOperand[],
+  s: SessionState,
+): Promise<RedirectResult> =>
+  markNames(assignments, new EvaluationContext(s), noLines, null, VarAttr.Export)
+
+const runLocal = (cmd: string, s: SessionState): Promise<RedirectResult> =>
+  declared(
+    cmd,
+    (shell) => shell.declare(cmd, '', '', ['X=1'], [], false, false),
+    new EvaluationContext(s),
+    noLines,
+    null,
+  )
+
 describe('handleExport / handleUnset / handlePrintenv', () => {
+  it('gives the shell back when a subscript fails', async () => {
+    const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ KEPT: 'outer' }) })
+    const outer = s.vars.shell.enter()
+    const stopping: ExecuteFn = () => Promise.reject(new Error('stopped'))
+    await expect(
+      declared(
+        'declare',
+        (shell) =>
+          shell.declare(
+            'declare',
+            '',
+            '',
+            ['KEPT=local', 'LANDED=1', 'a[$(x)]=v'],
+            [],
+            true,
+            false,
+          ),
+        new EvaluationContext(s),
+        stopping,
+        null,
+      ),
+    ).rejects.toThrow('stopped')
+    expect(envGet(s, 'LANDED')).toBe('1')
+    expect(envGet(s, 'KEPT')).toBe('local')
+    s.vars.shell.leave(outer)
+    expect(envGet(s, 'KEPT')).toBe('outer')
+    await sessionView(s).set('LATER', '1')
+    expect(envGet(s, 'LATER')).toBe('1')
+  })
+
   it('export KEY=VAL sets session env', async () => {
     const s = new SessionState({ sessionId: 'test' })
-    await handleExport(['FOO=bar', 'BAZ=qux'], s, sessionView(s))
+    await handleExport(['FOO=bar', 'BAZ=qux'], s)
     expect(s.env.FOO).toBe('bar')
     expect(s.env.BAZ).toBe('qux')
   })
@@ -97,7 +147,7 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     // `declare -x Y` with no `=`, and `env` does not carry it at all, so
     // the empty string this used to write was a divergence.
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ X: 'existing' }) })
-    await handleExport(['X', 'Y'], s, sessionView(s))
+    await handleExport(['X', 'Y'], s)
     expect(s.env.X).toBe('existing')
     expect(s.env.Y).toBeUndefined()
     expect(s.vars.get('Y')?.attrs.has(VarAttr.Export)).toBe(true)
@@ -122,16 +172,9 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     expect(decode(out as Uint8Array)).toBe('declare -x FOO="bar"\ndeclare -x PWD="/"\n')
   })
 
-  it('export write without a threaded view is a wiring bug', async () => {
-    // A write reached without the line's session view raises rather than
-    // writing past the view.
-    const s = new SessionState({ sessionId: 'test' })
-    await expect(handleExport(['SECRET=x'], s)).rejects.toThrow(/gated session view/)
-  })
-
   it('export -p with a name does not print', async () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ KEEP: '1' }) })
-    const [out, io] = await handleExport(['-p', 'FOO=bar'], s, sessionView(s))
+    const [out, io] = await handleExport(['-p', 'FOO=bar'], s)
     expect(io.exitCode).toBe(0)
     expect(out).toBeNull()
     expect(s.env.FOO).toBe('bar')
@@ -143,7 +186,13 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     setAttr(s, 'ONLY', VarAttr.Readonly)
     seedVar(s, 'AR', makeArray(['a', 'b c']))
     setAttr(s, 'AR', VarAttr.Readonly)
-    const [out, io] = await markNames(['-p'], s, null, VarAttr.Readonly)
+    const [out, io] = await markNames(
+      ['-p'],
+      new EvaluationContext(s),
+      noLines,
+      null,
+      VarAttr.Readonly,
+    )
     expect(io.exitCode).toBe(0)
     const text = decode(out as Uint8Array)
     expect(text).toContain('declare -ar AR=([0]="a" [1]="b c")\n')
@@ -190,7 +239,13 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ VAL: 'x' }) })
     setAttr(s, 'VAL', VarAttr.Readonly)
     for (const flag of ['-f', '-A']) {
-      const [out, io] = await markNames([flag], s, null, VarAttr.Readonly)
+      const [out, io] = await markNames(
+        [flag],
+        new EvaluationContext(s),
+        noLines,
+        null,
+        VarAttr.Readonly,
+      )
       expect(io.exitCode).toBe(0)
       expect(decode(out as Uint8Array)).toBe('')
     }
@@ -1554,14 +1609,14 @@ describe('handleReturn / handleLocal', () => {
     // nothing stored. Storing it globally and exiting 0 is the
     // silent-accept this tier removes.
     const s = new SessionState({ sessionId: 'test' })
-    const [, io] = await handleLocal(['X=1'], s, sessionView(s))
+    const [, io] = await runLocal('local', s)
     expect(io.exitCode).toBe(1)
     expect(s.env.X).toBeUndefined()
   })
 
   it('handleLocal assigns to session.env under the declare spelling', async () => {
     const s = new SessionState({ sessionId: 'test' })
-    await handleLocal(['X=1'], s, sessionView(s), { cmd: 'declare' })
+    await runLocal('declare', s)
     expect(s.env.X).toBe('1')
   })
 })

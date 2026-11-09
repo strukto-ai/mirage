@@ -72,14 +72,14 @@ export function result(
  */
 export function written(
   cmd: string,
-  pieces: readonly (readonly [boolean, string])[],
+  pieces: readonly (readonly [boolean, string | Uint8Array])[],
   exitCode = 0,
 ): RedirectResult {
   const out: Uint8Array[] = []
   let size = 0
   const notes: [number, Uint8Array][] = []
   for (const [err, text] of pieces) {
-    const data = encodeText(text)
+    const data = typeof text === 'string' ? encodeText(text) : text
     if (err) notes.push([size, data])
     else {
       out.push(data)

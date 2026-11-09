@@ -12,102 +12,40 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable
 
 from mirage.io import IOResult
-from mirage.policy import PolicyDenied
-from mirage.shell.array import ShellArray, make_array
-from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
-from mirage.shell.errors import DiscardSignal
 from mirage.shell.helpers import get_declaration_keyword, get_text
 from mirage.shell.types import NodeType as NT
-from mirage.shell.variable import ShellValue, VarAttr, VarKind
+from mirage.shell.variable import VarAttr
 from mirage.shell.voice import shell_voice
 from mirage.shell.xtrace import trace_array, trace_command
-from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext
-from mirage.workspace.executor.builtins import (
-    handle_declare_functions,
-    handle_declare_print,
-    handle_local,
-    note_local_array,
-)
+from mirage.workspace.executor.builtins import handle_declare_functions
 from mirage.workspace.executor.builtins.declare.constants import (
-    LISTED_ATTRIBUTES,
     VISIBLE_SCOPE_BUILTINS,
 )
 from mirage.workspace.executor.builtins.declare.declare import (
-    declared_kind,
-    element_name,
-    held_value,
-    kind_conflict,
+    declared,
     mark_names,
-    start_local,
 )
 from mirage.workspace.executor.builtins.declare.types import (
-    AttrMarks,
-    Declaration,
     DeclarationOperand,
 )
 from mirage.workspace.executor.builtins.help import flag_help
 from mirage.workspace.executor.builtins.shared import builtin_usage, fail
 from mirage.workspace.expand import expand_node
-from mirage.workspace.expand.node import expand_subscript
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.assignment import expand_array_items
 from mirage.workspace.node.types import ExpandedWords
-from mirage.workspace.session.state import (
-    conversion_scalar,
-    ensure_var_visible,
-    seed_var,
-)
+from mirage.workspace.session.state import deciding, prefix_temporaries
 from mirage.workspace.types import ExecutionNode
 
-
-def _merge_conversion_errors(
-    result: tuple[Any, IOResult, ExecutionNode],
-    errors: list[str],
-) -> tuple[Any, IOResult, ExecutionNode]:
-    """Fold kind-conversion refusals into a declaration's result.
-
-    GNU reports `cannot convert indexed to associative array` per
-    refused name on stderr and fails the builtin with 1 while the other
-    operands still declare, so the refusals ride the handler's own
-    result rather than replacing it.
-
-    Args:
-        result (tuple): the handler's (stream, io, node) answer.
-        errors (list[str]): the refusal lines, in operand order.
-    """
-    if not errors:
-        return result
-    stream, io, node = result
-    extra = encode_text("\n".join(errors) + "\n")
-    prior = io.stderr if isinstance(io.stderr, bytes) else b""
-    merged = prior + extra
-    new_io = IOResult(
-        exit_code=1,
-        stderr=merged,
-    )
-    new_node = ExecutionNode(command=node.command, exit_code=1, stderr=merged)
-    return stream, new_io, new_node
-
-
 # Every letter GNU's `declare` accepts, so a typo refuses with the usage
-# line instead of being silently dropped. `-a`/`-A` are kinds, not
-# attributes, and are handled by the array branch; `-p`/`-f`/`-F`/`-g`
-# /`-I` are modes the handlers read. `-n` stores the reference and every
-# reader and writer resolves through it (`deref` in `session/state`).
+# line instead of being silently dropped.
 _DECLARE_LETTERS = frozenset("aAfFgiIlnprtux")
-# `-l` displaces `-u` and vice versa; the record keeps one.
-_DISPLACES = {"l": VarAttr.UPPER, "u": VarAttr.LOWER}
-# The attributes that shape a value as it stores.
-_SHAPING = frozenset({VarAttr.INTEGER, VarAttr.LOWER, VarAttr.UPPER})
-# A word or an operand of either kind, handed back as the kind it came in.
-_Operand = TypeVar("_Operand", str, DeclarationOperand)
 
 
 def _declare_option_refusal(
@@ -142,39 +80,6 @@ def _declare_option_refusal(
     )
 
 
-def _declared_marks(flag_chars: set[str], plus_chars: set[str]) -> AttrMarks:
-    """The attribute marks a declaration puts on each operand once it
-    lands, in order, readonly last.
-
-    The letters that shape a value (`-i -l -u`) are stored as
-    attributes and applied by the session view on every *later* write, which is
-    GNU's rule: `v=MiXeD; declare -l v` keeps `MiXeD`, and the next
-    `v=ABC` stores `abc`. So this marks and never rewrites. `-l` and
-    `-u` are exclusive: setting one clears the other, and a cluster
-    naming both (`-lu`, `-ul`) sets neither, both pinned on 5.2.37. A
-    `+` letter clears; `+r` is not an off toggle, since it is refused on
-    a readonly name (`plus_refusal`) and a no-op otherwise. `r` lands
-    last, as each operand's own last step: `declare -rl L=ABC L=DEF`
-    keeps `abc` and refuses the second write.
-
-    Args:
-        flag_chars (set[str]): the `-` letters.
-        plus_chars (set[str]): the `+` letters.
-    """
-    on = {c for c in "iluntxr" if c in flag_chars and c not in plus_chars}
-    if {"l", "u"} <= on:
-        on -= {"l", "u"}
-    marks: list[tuple[VarAttr, bool]] = []
-    for c in "xiluntr":
-        if c in on:
-            marks.append((VarAttr(c), True))
-            if c in _DISPLACES:
-                marks.append((_DISPLACES[c], False))
-        elif c in plus_chars and c != "r":
-            marks.append((VarAttr(c), False))
-    return tuple(marks)
-
-
 async def execute_declaration(
     node: Any,
     context: EvaluationContext,
@@ -182,8 +87,7 @@ async def execute_declaration(
     registry: MountRegistry,
     namespace: Namespace,
     cs: CallStack | None,
-    view: SessionView,
-    declared: ExpandedWords | None = None,
+    expanded_words: ExpandedWords | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Execute one declaration statement (export/local/declare/readonly).
 
@@ -201,9 +105,7 @@ async def execute_declaration(
         registry (MountRegistry): mount registry for glob resolution.
         namespace (Namespace): addressing authority holding the links.
         cs (CallStack | None): function-call scope, if any.
-        view (SessionView): the session view, bound once for the
-            line.
-        declared (ExpandedWords | None): filled with the words the
+        expanded_words (ExpandedWords | None): filled with the words the
             statement expanded to, its keyword first.
     """
     session = context.session
@@ -293,8 +195,8 @@ async def execute_declaration(
                 operands.append(expanded)
     cmd_word = "local" if keyword == NT.LOCAL else str(keyword)
     words = [operand for operand in operands if isinstance(operand, str)]
-    if declared is not None:
-        declared.words = (cmd_word, *traced)
+    if expanded_words is not None:
+        expanded_words.words = (cmd_word, *traced)
     if session.shell_options.get("xtrace"):
         # Traced once expanded, before the builtin runs and outside its
         # redirects: each array operand, then the command naming them.
@@ -315,7 +217,9 @@ async def execute_declaration(
         # only expands and stages. The flags pass through so -p, the bare
         # listing and bad options work.
         attr = VarAttr.READONLY if keyword == "readonly" else VarAttr.EXPORT
-        return await mark_names([*flag_words, *operands], session, view, attr)
+        return await mark_names(
+            [*flag_words, *operands], context, execute_fn, cs, attr
+        )
     refused = _declare_option_refusal(cmd_word, flag_chars, plus_chars)
     if refused is not None:
         return refused
@@ -326,140 +230,19 @@ async def execute_declaration(
         return handle_declare_functions(
             cmd_word, session, flag_chars, words, frozenset(plus_chars)
         )
-    # The value-shaping marks go on or off before a value stores, the
-    # rest once it has (`_declared_marks`).
-    marks = _declared_marks(flag_chars, plus_chars)
-    shaping = tuple(mark for mark in marks if mark[0] in _SHAPING)
-    # `-p` prints rather than declares, so it is answered before anything
-    # declares (`declare -ap NAME` converts nothing); with no names, an
-    # attribute letter lists the names carrying it, `-p` or not.
-    listing = not operands
-    if (
-        "p" in flag_chars
-        or "p" in plus_chars
-        or (listing and flag_chars & (LISTED_ATTRIBUTES | {"a", "A"}))
-    ) and keyword in ("declare", "typeset"):
-        return await handle_declare_print(words, session, flag_chars, keyword)
-    conversion_errors: list[str] = []
-    kind = declared_kind(flag_chars)
-    # A bare element operand (`declare t[1]`, `local h[2]`) declares its
-    # name an array, as `declare -a t` does.
-    elements = {
-        word.partition("[")[0] for word in words if _element_base(word) != word
-    }
-    if elements:
-        operands = [_element_base(operand) for operand in operands]
-        words = [_element_base(word) for word in words]
-    if kind is not None or elements:
-        # `declare -a NAME` / `declare -A NAME` with no value declare
-        # an empty array of that kind, so ${#NAME[@]} is 0 and an
-        # element write leaves the other slots unassigned. GNU
-        # refuses to convert between the two kinds and says so per
-        # name while the rest of the operands still declare.
-        for bare in words:
-            want = kind or (VarKind.INDEXED if bare in elements else None)
-            if "=" in bare or want is None:
-                continue
-            want_assoc = want is VarKind.ASSOC
-            # A hidden name refuses like any assignment spelling before
-            # anything lands, the readonly conversion below included,
-            # which writes past the writer's checks.
-            try:
-                ensure_var_visible(session, bare)
-            except PolicyDenied as exc:
-                raise DiscardSignal(encode_text(f"{exc.strerror}\n")) from exc
-            fresh = (
-                "g" not in flag_chars
-                and session.vars.shell.in_function()
-                and not session.vars.shell.is_local(bare)
-            )
-            held_var = session.vars.get(bare)
-            if (
-                fresh
-                and held_var is not None
-                and VarAttr.READONLY in held_var.attrs
-            ):
-                # `handle_local` refuses the readonly name in its voice.
-                continue
-            # Inside a function the name is a local of the declared kind,
-            # a new one starting as `start_local` leaves it (with `-I`,
-            # the value it shadows); `-g` declares at global scope.
-            local = "g" not in flag_chars and note_local_array(session, bare)
-            if local and fresh:
-                start_local(session, bare, "I" in flag_chars)
-            held = held_value(session, bare)
-            conflict = kind_conflict(held, want)
-            if conflict is not None:
-                conversion_errors.append(
-                    f"{shell_voice()}{cmd_word}: {bare}: {conflict}"
-                )
-                continue
-            if isinstance(held, dict if want_assoc else ShellArray):
-                continue
-            # A local of another kind starts empty; at top level an
-            # existing scalar becomes element 0, or the value at the
-            # literal key "0" (GNU allows scalar-to-associative
-            # conversion, unlike indexed).
-            scalar = None if local else conversion_scalar(session, bare)
-            fill: ShellValue = (
-                ({} if scalar is None else {"0": scalar})
-                if want_assoc
-                else make_array([] if scalar is None else [scalar])
-            )
-            if view.is_readonly(bare, False):
-                # bash converts a readonly name all the same, which the
-                # writer refuses, so it lands past the writer's checks.
-                seed_var(session, bare, fill)
-            else:
-                try:
-                    await view.set(bare, fill, follow_ref=False)
-                except PolicyDenied as exc:
-                    raise DiscardSignal(
-                        encode_text(f"{exc.strerror}\n")
-                    ) from exc
-            if held is None:
-                # Declared over nothing (a `local -I` holds the caller's
-                # value): `declare -p` prints no value and a bare `set`
-                # leaves it out until a write.
-                session.vars.shell.unassigned(bare)
-    # declare/typeset scope like `local` inside a function (bash
-    # semantics) and assign globally at top level, which is exactly
-    # handle_local's fallback when no function scope is active. `-r`
-    # rides the same path and lands on what each operand wrote, so
-    # `f() { local -r A=(x); }` freezes f's own A, not the caller's.
-    decl = Declaration(
-        cmd=cmd_word,
-        kind=kind,
-        shaping=shaping,
-        marks=marks,
-        plus="".join(sorted(plus_chars)),
-        nameref="n" in flag_chars and "n" not in plus_chars,
-        global_scope="g" in flag_chars,
-        inherit="I" in flag_chars,
-    )
-    result = await handle_local(
-        operands,
-        session,
-        view,
-        decl,
-        partial(
-            expand_subscript,
-            context=context,
-            execute_fn=execute_fn,
-            call_stack=cs,
+    temporaries = prefix_temporaries(session)
+    return await declared(
+        cmd_word,
+        lambda shell: shell.declare(
+            cmd_word,
+            "".join(sorted(flag_chars)),
+            "".join(sorted(plus_chars)),
+            operands,
+            temporaries,
+            True,
+            deciding(),
         ),
+        context,
+        execute_fn,
+        cs,
     )
-    return _merge_conversion_errors(result, conversion_errors)
-
-
-def _element_base(operand: _Operand) -> _Operand:
-    """A bare element operand as the name it declares, any other as is.
-
-    Args:
-        operand (_Operand): one operand, a word or a staged array.
-    """
-    if isinstance(operand, str):
-        name = element_name(operand)
-        if name is not None:
-            return name
-    return operand
