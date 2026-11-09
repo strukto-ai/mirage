@@ -248,6 +248,7 @@ pub(crate) async fn search_issue_fields(
     query_text: &str,
     limit: i64,
     selection: &str,
+    search_type: &str,
 ) -> Result<Vec<Json>> {
     let query = format!("fragment issue on Issue {{{selection}}}{ISSUE_SEARCH}");
     let mut rows: Vec<Json> = Vec::new();
@@ -258,7 +259,7 @@ pub(crate) async fn search_issue_fields(
         variables.set("repo", target.repo.as_str());
         variables.set("limit", limit.min(100));
         variables.set("query", query_text);
-        variables.set("type", "ISSUE_ADVANCED");
+        variables.set("type", search_type);
         if let Some(cursor) = &cursor {
             variables.set("after", cursor);
         }

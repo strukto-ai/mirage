@@ -3,15 +3,93 @@
 
 use std::collections::BTreeMap;
 
-use super::accessor::{Flags, Out, csv_values, json_fields, typed_out};
+use super::accessor::{Flags, Out, csv_values, json_fields, typed_out, web_host};
 use super::constants::{
-    SEARCH_BOOLEAN, SEARCH_MULTIPLE, search_alias, search_fields, search_flags, search_shape,
-    search_sorted,
+    GITHUB_HOST, SEARCH_BOOLEAN, SEARCH_MULTIPLE, search_alias, search_fields, search_flags,
+    search_shape, search_sorted,
 };
 use super::template::render_template;
-use crate::core::github::client::{Account, ApiError, Failure, Result, usage, value};
+use crate::core::github::client::{
+    Account, ApiError, Failure, Result, github_request, usage, value,
+};
 use crate::core::github::json::{Json, Obj, quoted};
+use crate::core::github::repo::graphql_data;
 use crate::core::github::search::search;
+
+const SEARCH_TYPES: &str = "query SearchType_enumValues{SearchType: __type(name: \"SearchType\"){enumValues(includeDeprecated: true){name}}}";
+const ADVANCED_SEARCH_SINCE: [u64; 3] = [3, 18, 0];
+
+/// Which issue search a host takes, as gh's SearchFeatures finds out.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct SearchFeatures {
+    pub(crate) advanced: bool,
+    pub(crate) opt_in: bool,
+}
+
+impl SearchFeatures {
+    /// The GraphQL search type these features call for.
+    pub(crate) fn search_type(self) -> &'static str {
+        if self.advanced && self.opt_in {
+            "ISSUE_ADVANCED"
+        } else {
+            "ISSUE"
+        }
+    }
+}
+
+/// Whether gh counts a host as a GitHub Enterprise Server.
+fn is_enterprise(host: &str) -> bool {
+    let host = host.to_lowercase();
+    !(host == GITHUB_HOST
+        || host.ends_with(&format!(".{GITHUB_HOST}"))
+        || host == "github.localhost"
+        || host.ends_with(".github.localhost")
+        || host.ends_with(".ghe.com"))
+}
+
+/// Whether a server's version reaches `floor`, a pre-release falling short
+/// of the release it leads to.
+fn version_reaches(text: &str, floor: [u64; 3]) -> Result<bool> {
+    let bare = text.strip_prefix('v').unwrap_or(text);
+    let core = bare
+        .find(|c: char| !c.is_ascii_digit() && c != '.')
+        .map_or(bare, |end| &bare[..end]);
+    let Some(numbers) = core
+        .split('.')
+        .map(|part| part.parse().ok())
+        .collect::<Option<Vec<u64>>>()
+    else {
+        return value(format!("Malformed version: {text}"));
+    };
+    let mut parts = [0u64; 3];
+    for (part, number) in parts.iter_mut().zip(numbers) {
+        *part = number;
+    }
+    Ok(parts > floor || (parts == floor && core == bare))
+}
+
+/// What the host says about issue search: an Enterprise Server below 3.18
+/// has only the standard search, and any other host opts in while its
+/// schema still lists `ISSUE_ADVANCED`.
+pub(crate) async fn search_features(account: &Account) -> Result<SearchFeatures> {
+    if is_enterprise(&web_host(account)?) {
+        let meta = github_request(account, "GET", "/meta", None).await?;
+        if !version_reaches(meta.get("installed_version").text(), ADVANCED_SEARCH_SINCE)? {
+            return Ok(SearchFeatures::default());
+        }
+    }
+    let data = graphql_data(account, SEARCH_TYPES, Obj::new()).await?;
+    let opt_in = data
+        .get("SearchType")
+        .get("enumValues")
+        .items()
+        .iter()
+        .any(|found| found.get("name").text() == "ISSUE_ADVANCED");
+    Ok(SearchFeatures {
+        advanced: true,
+        opt_in,
+    })
+}
 
 fn quote(text: &str) -> String {
     if text.chars().any(|c| c.is_whitespace() || c == '"') {
@@ -29,7 +107,7 @@ fn boolean(flags: &Flags, name: &str) -> bool {
     flags.gh_bool(&dest(name))
 }
 
-fn build_query(kind: &str, words: &[String], flags: &Flags) -> Result<String> {
+fn qualifiers_of(kind: &str, flags: &Flags) -> Result<BTreeMap<String, Vec<String>>> {
     let mut qualifiers: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for name in search_flags(kind) {
         let key = dest(name);
@@ -90,7 +168,14 @@ fn build_query(kind: &str, words: &[String], flags: &Flags) -> Result<String> {
                 .collect(),
         );
     }
-    let advanced = matches!(kind, "issues" | "prs");
+    Ok(qualifiers)
+}
+
+fn query_text(
+    words: &[String],
+    qualifiers: &BTreeMap<String, Vec<String>>,
+    advanced: bool,
+) -> String {
     let keywords = words
         .iter()
         .map(|word| match word.split_once(':') {
@@ -111,12 +196,12 @@ fn build_query(kind: &str, words: &[String], flags: &Flags) -> Result<String> {
         })
         .collect::<Vec<_>>()
         .join(" ");
-    Ok(match (keywords.is_empty(), tail.is_empty()) {
+    match (keywords.is_empty(), tail.is_empty()) {
         (false, false) if advanced => format!("( {keywords} ) {tail}"),
         (false, false) => format!("{keywords} {tail}"),
         (false, true) => keywords,
         _ => tail,
-    })
+    }
 }
 
 fn plain_terms(key: &str, values: &[String]) -> Vec<String> {
@@ -190,9 +275,9 @@ pub(crate) struct ListQuery<'a> {
     pub(crate) search: Option<&'a str>,
 }
 
-/// The query gh's SearchQueryBuild writes for the advanced issue search:
-/// qualifiers sorted by name, the keywords bracketed in front of them.
-pub(crate) fn list_query(filter: &ListQuery<'_>, repo: &str) -> String {
+/// The query gh's SearchQueryBuild writes: qualifiers sorted by name, the
+/// keywords in front of them, bracketed for the advanced issue search.
+pub(crate) fn list_query(filter: &ListQuery<'_>, repo: &str, advanced: bool) -> String {
     let mut qualifiers: BTreeMap<&str, Vec<String>> = BTreeMap::new();
     for (key, value) in [
         ("assignee", filter.assignee),
@@ -244,7 +329,8 @@ pub(crate) fn list_query(filter: &ListQuery<'_>, repo: &str) -> String {
     }
     let tail = tail.join(" ");
     match filter.search.filter(|words| !words.is_empty()) {
-        Some(words) => format!("( {words} ) {tail}"),
+        Some(words) if advanced => format!("( {words} ) {tail}"),
+        Some(words) => format!("{words} {tail}"),
         None => tail,
     }
 }
@@ -574,7 +660,13 @@ pub(crate) async fn search_cmd(
     if fields.is_none() && template.is_some() {
         return value("cannot use `--template` without specifying `--json`");
     }
-    let query = build_query(kind, texts, flags)?;
+    let qualifiers = qualifiers_of(kind, flags)?;
+    let features = if matches!(kind, "issues" | "prs") {
+        search_features(account).await?
+    } else {
+        SearchFeatures::default()
+    };
+    let query = query_text(texts, &qualifiers, features.advanced);
     let resource = match kind {
         "repos" => "repositories",
         "prs" => "issues",
@@ -588,6 +680,7 @@ pub(crate) async fn search_cmd(
         limit,
         flags.as_str("sort").filter(|_| sorted),
         flags.as_str("order").filter(|_| sorted),
+        features.advanced && features.opt_in,
     )
     .await
     {
@@ -626,6 +719,66 @@ pub(crate) async fn search_cmd(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn enterprise_hosts_are_told_as_gh_tells_them() {
+        assert!(is_enterprise("ghe.example.com"));
+        assert!(is_enterprise("127.0.0.1"));
+        for host in [
+            "github.com",
+            "GitHub.com",
+            "api.github.com",
+            "github.localhost",
+            "acme.ghe.com",
+        ] {
+            assert!(!is_enterprise(host), "{host}");
+        }
+    }
+
+    #[test]
+    fn a_server_version_is_compared_by_its_numbers() {
+        let floor = ADVANCED_SEARCH_SINCE;
+        assert!(version_reaches("3.18.0", floor).unwrap());
+        assert!(version_reaches("3.18", floor).unwrap());
+        assert!(version_reaches("v3.20.1", floor).unwrap());
+        assert!(!version_reaches("3.9.4", floor).unwrap());
+        assert!(!version_reaches("3.16.0", floor).unwrap());
+        assert!(!version_reaches("3.18.0-rc1", floor).unwrap());
+        assert!(version_reaches("", floor).is_err());
+    }
+
+    #[test]
+    fn list_keywords_are_bracketed_only_for_the_advanced_search() {
+        let filter = ListQuery {
+            entity: "issue",
+            state: "open",
+            search: Some("a OR b"),
+            ..ListQuery::default()
+        };
+        assert_eq!(
+            list_query(&filter, "o/r", true),
+            "( a OR b ) repo:o/r state:open type:issue"
+        );
+        assert_eq!(
+            list_query(&filter, "o/r", false),
+            "a OR b repo:o/r state:open type:issue"
+        );
+    }
+
+    #[test]
+    fn the_search_type_follows_the_features() {
+        let opted = SearchFeatures {
+            advanced: true,
+            opt_in: true,
+        };
+        assert_eq!(opted.search_type(), "ISSUE_ADVANCED");
+        let plain = SearchFeatures {
+            advanced: true,
+            opt_in: false,
+        };
+        assert_eq!(plain.search_type(), "ISSUE");
+        assert_eq!(SearchFeatures::default().search_type(), "ISSUE");
+    }
 
     fn words(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_owned()).collect()

@@ -203,6 +203,7 @@ pub(crate) async fn search_pull_request_fields(
     query_text: &str,
     limit: i64,
     selection: &str,
+    search_type: &str,
 ) -> Result<Vec<Json>> {
     let query = format!("fragment pr on PullRequest{{{selection}}}{PULL_SEARCH}");
     let mut rows: Vec<Json> = Vec::new();
@@ -212,7 +213,7 @@ pub(crate) async fn search_pull_request_fields(
     loop {
         let mut variables = Obj::new();
         variables.set("q", query_text);
-        variables.set("type", "ISSUE_ADVANCED");
+        variables.set("type", search_type);
         variables.set("limit", page_limit);
         if let Some(cursor) = &cursor {
             variables.set("endCursor", cursor);

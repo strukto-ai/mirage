@@ -12,6 +12,7 @@ pub(crate) async fn search(
     limit: i64,
     sort: Option<&str>,
     order: Option<&str>,
+    opt_in: bool,
 ) -> Result<Vec<Json>> {
     let accept = if kind == "code" {
         "application/vnd.github.text-match+json"
@@ -27,7 +28,7 @@ pub(crate) async fn search(
             ("per_page".to_owned(), limit.min(100).to_string()),
             ("page".to_owned(), page.to_string()),
         ];
-        if kind == "issues" {
+        if opt_in {
             params.push(("advanced_search".to_owned(), "true".to_owned()));
         }
         if let Some(sort) = sort {

@@ -11,7 +11,7 @@ use super::fields::{
     shared_fields,
 };
 use super::pull::{assignee_list, close_pull, project_list, sorted_labels};
-use super::search::{ListQuery, has_state_clause, list_query};
+use super::search::{ListQuery, has_state_clause, list_query, search_features};
 use super::shape::Shape;
 use crate::core::github::client::{Account, Failure, Result, usage, value};
 use crate::core::github::issue::{
@@ -162,6 +162,7 @@ pub(crate) async fn list_cmd(account: &Account, flags: &Flags) -> Result<Out> {
             Some(number) => Some(milestone_title(account, &repo, i64::from(number)).await?),
             None => milestone.map(str::to_owned),
         };
+        let features = search_features(account).await?;
         let query = list_query(
             &ListQuery {
                 entity: "issue",
@@ -175,8 +176,17 @@ pub(crate) async fn list_cmd(account: &Account, flags: &Flags) -> Result<Out> {
                 ..ListQuery::default()
             },
             &format!("{}/{}", repo.owner, repo.repo),
+            features.advanced,
         );
-        search_issue_fields(account, &repo, &query, limit, &select_text).await?
+        search_issue_fields(
+            account,
+            &repo,
+            &query,
+            limit,
+            &select_text,
+            features.search_type(),
+        )
+        .await?
     } else {
         let me = Me::resolve(account, [assignee, author, mention]).await?;
         let filter = IssueListFilter {

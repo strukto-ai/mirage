@@ -18,7 +18,7 @@ use super::issue::{
     add_comment, check_comment_flags, comment_body, comment_run, comments_for, comments_text,
     reopen_pull, with_special_names,
 };
-use super::search::{ListQuery, has_state_clause, list_query};
+use super::search::{ListQuery, has_state_clause, list_query, search_features};
 use super::shape::{Shape, exported, or_null, pointer, strukt};
 use crate::core::github::client::{
     Account, Failure, Result, github_request, quote_ref, usage, value,
@@ -433,6 +433,7 @@ pub(crate) async fn list_cmd(account: &Account, flags: &Flags) -> Result<Out> {
         || keywords.is_some()
         || !labels.is_empty();
     let answers = if searching {
+        let features = search_features(account).await?;
         let query = list_query(
             &ListQuery {
                 entity: "pr",
@@ -447,8 +448,10 @@ pub(crate) async fn list_cmd(account: &Account, flags: &Flags) -> Result<Out> {
                 ..ListQuery::default()
             },
             &format!("{}/{}", repo.owner, repo.repo),
+            features.advanced,
         );
-        search_pull_request_fields(account, &query, limit, &select_text).await?
+        search_pull_request_fields(account, &query, limit, &select_text, features.search_type())
+            .await?
     } else {
         let filter = PullListFilter {
             states: states(state),

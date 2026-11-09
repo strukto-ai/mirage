@@ -1362,7 +1362,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "Invalid search query \"( needle ) repo:integ/missing type:issue\".\nThe listed users and repositories cannot be searched either because the resources do not exist or you do not have permission to view them.\n"
+        "stderr": "Invalid search query \"needle repo:integ/missing type:issue\".\nThe listed users and repositories cannot be searched either because the resources do not exist or you do not have permission to view them.\n"
       }
     },
     {
@@ -1375,7 +1375,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "Invalid search query \"( needle ) repo:integ/missing type:pr\".\nThe listed users and repositories cannot be searched either because the resources do not exist or you do not have permission to view them.\n"
+        "stderr": "Invalid search query \"needle repo:integ/missing type:pr\".\nThe listed users and repositories cannot be searched either because the resources do not exist or you do not have permission to view them.\n"
       }
     },
     {
