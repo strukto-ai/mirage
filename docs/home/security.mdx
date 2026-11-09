@@ -7,8 +7,8 @@ icon: shield-halved
 A line an agent writes can loop forever, start processes without end, or grow
 a variable until memory runs out. In Mirage it runs beside other agents'
 sessions, in one process or one isolate, so each of these would cost them too.
-Every limit below is on by default, and each stops its case the way bash and
-Linux would, with the same exit status.
+Every limit below is on by default except `max_workspaces`, and each stops
+its case the way bash and Linux would, with the same exit status.
 
 Three layers set them:
 
@@ -29,7 +29,7 @@ Three layers set them:
 | A variable that keeps doubling, `x=$x$x` | `max_env` | `2MB` per session | exit 2, `bash: xmalloc: cannot allocate N bytes (past max_env of N bytes, a mirage workspace setting)` |
 | A file or a command's output held in memory | `max_memory` | `32MB` per workspace | exit 1, `line: memory exhausted`; a write to a RAM file fails with `Disk quota exceeded` |
 | One API reply read whole | `max_body_bytes` | `64MB` | the call fails |
-| Deep recursion in functions, `source`, `eval` or `bash -c` | 32 levels | fixed; `FUNCNEST` can lower it | exit 1, `bash: f: maximum function nesting level exceeded (32)` |
+| Deep recursion in functions, `source`, `eval` or `bash -c` | 32 levels | fixed; `FUNCNEST` can lower it | exit 1, `environment: line 1: f: maximum function nesting level exceeded (32)` |
 | Many sessions on one workspace | `max_sessions` | 16, or 4 on an edge runtime | HTTP 429 |
 | Many workspaces on one server | `max_workspaces` | no cap | HTTP 503 |
 | A burst of requests | `rate_limits` | `ip=1000/minute` | HTTP 429 |
