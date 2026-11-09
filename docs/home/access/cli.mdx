@@ -223,26 +223,6 @@ a `workspace_id`.
 | `mirage workspace vfs-md ID [--session S] [--path PATH] [--profile P]` | Print the VFS.md, or expose it as a live file at `PATH`. |
 | `mirage workspace skill-md ID [--session S] [--path PATH] [--profile P]` | The same for SKILL.md. |
 
-### Stop and start
-
-`mirage workspace stop ID` ends a workspace's lines and jobs and keeps what
-it needs to start again: its config, and each session's working directory,
-variables, functions and history, with the workspace's symlinks.
-`mirage workspace start ID` builds it again from them. The local daemon keeps
-this state under `~/.mirage/state`, or in the workspace's own
-[`store`](/home/infrastructure/overview); a `store` of `type: ram` keeps
-none of it, so the sessions start fresh. Files on a backend, such as S3 or a
-disk folder, stay where they are, while a `ram` mount comes back empty.
-
-```bash
-mirage workspace stop demo
-mirage workspace start demo
-```
-
-`list` and `get` show a stopped workspace as `stopped`, and a shell, VFS,
-session or logs call answers `404` until it starts. [`mirage daemon stop` and
-`restart`](#daemon) stop every workspace the same way.
-
 ### From a template
 
 A template is a saved workspace config. `-f` takes a workspace config, or a
@@ -435,7 +415,7 @@ The server the CLI starts. It exits 30 seconds after its last running workspace 
 | Command | Does |
 | --- | --- |
 | `mirage daemon status` | Show PID, uptime and workspace count. |
-| `mirage daemon stop` | [Stop](#stop-and-start) its workspaces and exit. They stay, stopped. |
+| `mirage daemon stop` | Stop its workspaces and exit. They stay, stopped. |
 | `mirage daemon restart [--eager]` | Stop it; the next command, or `--eager`, starts a new one. Its workspaces stay, stopped, until `mirage workspace start`. |
 | `mirage daemon kill` | Kill it. A last resort. |
 
