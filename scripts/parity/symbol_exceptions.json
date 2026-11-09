@@ -120,7 +120,8 @@
     "Deadline": "Python runs monty on worker processes it kills at a deadline; a TypeScript host that runs it on its own thread (an edge isolate) fires no timer while a run holds that thread, so the run is handed the deadline it runs under, or a cap if sooner, as monty's own limit.",
     "deadlines": "Python runs monty on worker processes it kills at a deadline; a TypeScript host that runs it on its own thread (an edge isolate) fires no timer while a run holds that thread, so the run is handed the deadline it runs under, or a cap if sooner, as monty's own limit.",
     "runWithDeadline": "Python runs monty on worker processes it kills at a deadline; a TypeScript host that runs it on its own thread (an edge isolate) fires no timer while a run holds that thread, so the run is handed the deadline it runs under, or a cap if sooner, as monty's own limit.",
-    "boundDeadline": "Python runs monty on worker processes it kills at a deadline; a TypeScript host that runs it on its own thread (an edge isolate) fires no timer while a run holds that thread, so the run is handed the deadline it runs under, or a cap if sooner, as monty's own limit."
+    "boundDeadline": "Python runs monty on worker processes it kills at a deadline; a TypeScript host that runs it on its own thread (an edge isolate) fires no timer while a run holds that thread, so the run is handed the deadline it runs under, or a cap if sooner, as monty's own limit.",
+    "settledWithin": "Python waits with asyncio.wait and its timeout; a Promise has no such wait."
    }
   },
   "commands/builtin/generic/diff": {
@@ -1636,6 +1637,24 @@
     "ghModule": "gh's Wasm module, which the TypeScript host loads on first use; Python's native module has gh built in.",
     "openGhStream": "gh's Wasm module, which the TypeScript host loads on first use; Python's native module has gh built in.",
     "pairs": "Octokit takes params and headers as plain objects; Python's dict() builds them inline."
+   }
+  },
+  "execution/process/types": {
+   "typescript_only": {
+    "isProgram": "Python's Process is a dataclass with this as a property; TypeScript's is an interface over plain records, so it is a function.",
+    "shownMachine": "Python's Process is a dataclass with this as a property; TypeScript's is an interface over plain records, so it is a function.",
+    "shownPid": "Python's Process is a dataclass with this as a property; TypeScript's is an interface over plain records, so it is a function."
+   }
+  },
+  "execution/process/handle": {
+   "typescript_only": {
+    "PauseGate": "Python holds a paused process on an asyncio.Future; a Promise has no resolve of its own, so TypeScript pairs them.",
+    "newPauseGate": "Python holds a paused process on an asyncio.Future; a Promise has no resolve of its own, so TypeScript pairs them."
+   }
+  },
+  "execution/process/constants": {
+   "typescript_only": {
+    "NEVER_TAKEN": "Only Pyodide programs take signals through their runner (onSignal), and Pyodide runs on the TypeScript host alone."
    }
   }
  }

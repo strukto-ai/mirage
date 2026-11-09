@@ -21,12 +21,16 @@ from mirage.execution.machine.table import MachineTable
 from mirage.execution.machine.types import MachineProcess, MachineState
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.types import MachinePid
-from mirage.machine.constants import CHECK_LINE, CHECK_MARK, PROCESS
+from mirage.machine.constants import CHECK_LINE, CHECK_MARK
 from mirage.machine.handle import MachineHandle
 from mirage.runtime.machine import MachineRuntime
 from mirage.runtime.types import RunResult
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
+
+
+def _tag(argv):
+    return argv[5].partition("=")[2]
 
 
 class _Box(MachineHandle):
@@ -93,14 +97,19 @@ class _Sleeper(MachineHandle):
         return None
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
-        tag = env[PROCESS]
+        tag = _tag(argv)
         self.rows = [
-            MachineProcess(tag, self.base, 1, 100.0, " ".join(argv)),
+            MachineProcess(tag, self.base, 1, 100.0, " ".join(argv[7:])),
             MachineProcess(tag, self.base + 1, self.base, 101.0, "train 2"),
         ]
         await self.ended.wait()
         self.rows = []
         return RunResult(stdout=b"", stderr=None, exit_code=143)
+
+    async def exec_line(self, line, stdin, env, cwd):
+        return RunResult(
+            stdout=f"{self.base} 100\n".encode(), stderr=None, exit_code=0
+        )
 
     async def status(self, workspace):
         return [r for r in self.rows if r.tag.startswith(f"{workspace}:")]
@@ -136,19 +145,20 @@ async def test_a_scan_shows_what_a_program_started_on_its_machine():
         pid = int((await ws.shell("train 1 & echo $!")).stdout)
         shell = int((await ws.shell("echo $$")).stdout)
         await _started(box)
-        said = await ws.shell("ps f -o pid,ppid,machine,mpid,cmd")
+        said = await ws.shell("ps f -o pid,ppid,machine,cmd")
         rows = [
-            line.split(None, 4) for line in said.stdout.decode().splitlines()
+            line.split(None, 3) for line in said.stdout.decode().splitlines()
         ]
-        assert rows[0] == ["PID", "PPID", "MACHINE", "MPID", "CMD"]
+        assert pid == 412
+        assert rows[0] == ["PID", "PPID", "MACHINE", "CMD"]
         assert [row[1:] for row in rows[1:]] == [
-            ["0", "-", "-", "ps f -o pid,ppid,machine,mpid,cmd"],
-            [str(shell), "box:a", "412", "\\_ train 1"],
-            [str(pid), "box:a", "413", "\\_ train 2"],
+            ["0", "mirage", "ps f -o pid,ppid,machine,cmd"],
+            [str(shell), "box:a", "\\_ train 1"],
+            ["412", "box:a", "\\_ train 2"],
         ]
-        assert rows[2][0] == str(pid)
-        found = ws.process_table.records()[-1]
-        assert (found.runtime, found.parent) == (None, pid)
+        assert rows[2][0] == "412" and rows[3][0] == "413"
+        program, found = ws.process_table.records()[-2:]
+        assert (found.runtime, found.parent) == (None, program.pid)
         killed = await ws.shell(f"kill -USR1 413; kill -0 {pid}; echo $?")
         assert killed.stdout == b"0\n"
         assert box.sent == [(MachinePid(413, 101.0), 10)]
@@ -160,9 +170,19 @@ async def test_a_scan_shows_what_a_program_started_on_its_machine():
         await ws.close()
 
 
+class _Unreported(_Sleeper):
+    """A box whose runs report no pid (nothing could write there)."""
+
+    async def exec_line(self, line, stdin, env, cwd):
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+
 @pytest.mark.asyncio
-async def test_a_signal_reaches_a_program_no_scan_placed_by_its_tag():
-    box = _Sleeper("a")
+async def test_a_signal_reaches_a_program_no_scan_placed_by_its_tag(
+    monkeypatch,
+):
+    monkeypatch.setattr("mirage.machine.handle.RUN_START_WAIT_SECONDS", 0.01)
+    box = _Unreported("a")
     ws = _sleepers(a=box)
     try:
         pid = int((await ws.shell("train 1 & echo $!")).stdout)
@@ -175,13 +195,14 @@ async def test_a_signal_reaches_a_program_no_scan_placed_by_its_tag():
 
 @pytest.mark.asyncio
 async def test_a_machine_pid_names_the_process_whose_program_has_it():
-    a, b = _Sleeper("a"), _Sleeper("b", base=500)
+    a, b = _Sleeper("a"), _Sleeper("b")
     ws = _sleepers(a=a, b=b)
     try:
         pid = int((await ws.shell("train 1 & echo $!")).stdout)
         await _started(a)
+        assert pid == 412
         said = await ws.shell("ps -p 412 -o pid=; kill -0 412; echo $?")
-        assert said.stdout.decode().split() == [str(pid), "0"]
+        assert said.stdout.decode().split() == ["412", "0"]
         ws.create_session("other")
         said = await ws.shell("kill -0 412", session_id="other")
         assert said.stderr == b"bash: line 1: kill: (412) - No such process\n"
@@ -192,11 +213,15 @@ async def test_a_machine_pid_names_the_process_whose_program_has_it():
         ]
         await ws.shell("train 1 &", machine="b")
         await _started(b)
-        b.rows = [MachineProcess(r.tag, 412, 1, 9.0, "x") for r in b.rows[:1]]
         said = await ws.shell("kill 412")
         assert said.exit_code == 1
         assert said.stderr == b"bash: line 1: kill: 412: ambiguous job spec\n"
-        assert (await ws.shell(f"kill 413; kill {pid}; wait {pid}")).exit_code
+        said = await ws.shell("wait 412")
+        assert said.stderr == b"bash: line 1: wait: 412: ambiguous job spec\n"
+        assert (await ws.shell("kill -m a 412")).exit_code == 0
+        assert a.sent[-1] == (MachinePid(412, 100.0), 15)
+        assert (await ws.shell("wait -m box:a 412")).exit_code == 143
+        assert b.sent == []
     finally:
         a.ended.set()
         b.ended.set()
@@ -213,7 +238,7 @@ async def test_a_machine_pid_answers_wait_once_its_program_ended():
         await ws.shell("ps")
         box.ended.set()
         async with asyncio.timeout(5):
-            while pid in {p.record.pid for p in ws.process_table.live()}:
+            while pid in {p.record.shown_pid for p in ws.process_table.live()}:
                 await asyncio.sleep(0.01)
         said = await ws.shell("wait 412")
         assert (said.exit_code, said.stderr) == (143, None)
@@ -250,7 +275,7 @@ class _Leaver(_Sleeper):
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
         self.rows = [
-            MachineProcess(env[PROCESS], self.base + 1, 1, 101.0, "daemon")
+            MachineProcess(_tag(argv), self.base + 1, 1, 101.0, "daemon")
         ]
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
@@ -261,7 +286,7 @@ async def test_a_scan_finds_what_an_ended_program_left_running():
     ws = _sleepers(a=box)
     try:
         assert (await ws.shell("train 1")).exit_code == 0
-        said = await ws.shell("ps -o mpid=,args=")
+        said = await ws.shell("ps -o pid=,args=")
         rows = [line.split() for line in said.stdout.decode().splitlines()]
         assert ["413", "daemon"] in rows
         box.rows = []
@@ -281,7 +306,7 @@ async def test_a_session_reusing_a_closed_ones_id_finds_none_of_its_own():
         assert (await old.shell("train 1")).exit_code == 0
         await ws.close_session("agent")
         new = await ws.session("agent")
-        said = await new.shell("ps -o mpid=,args=")
+        said = await new.shell("ps -o pid=,args=")
         assert b"daemon" not in said.stdout
         assert (await new.shell("kill 413")).exit_code == 1
     finally:
@@ -300,7 +325,7 @@ async def test_a_host_scan_finds_what_an_ended_program_left_running():
     )
     try:
         assert (await ws.shell(f'python3 -c "{spawn}"')).exit_code == 0
-        said = await ws.shell("ps -o machine=,mpid=,args=")
+        said = await ws.shell("ps -o machine=,pid=,args=")
         rows = [line.split() for line in said.stdout.decode().splitlines()]
         held = [row for row in rows if row[2:] == ["sleep", "30"]]
         assert len(held) == 1 and held[0][0].startswith("host:")
@@ -322,7 +347,9 @@ async def test_a_group_signal_reaches_a_shells_program_as_sent():
             (MachinePid(413, 101.0), 3),
         }
         said = await ws.shell("jobs")
-        assert said.stdout == b"[1] running ( train 1; true )\n"
+        assert said.stdout == (
+            b"[1]+  Running                 ( train 1; true ) &\n"
+        )
     finally:
         box.ended.set()
         await ws.close()
@@ -356,7 +383,7 @@ async def test_a_forwarded_group_signal_reaches_a_parent_first():
         found = next(
             p for p in ws.process_table.records() if p.machine_pid is not None
         )
-        await ws.process_table.send_group(found.group, 28)
+        await ws.process_table.signal_group(found.group, 28)
         assert box.sent == [
             (MachinePid(412, 100.0), 28),
             (MachinePid(413, 101.0), 28),
@@ -373,9 +400,9 @@ async def test_a_process_a_scan_no_longer_sees_is_gone_from_that_ps():
     try:
         await ws.shell("train 1 &")
         await _started(box)
-        assert b"413" in (await ws.shell("ps -o mpid")).stdout
+        assert b"413" in (await ws.shell("ps -o pid")).stdout
         box.rows = box.rows[:1]
-        assert b"413" not in (await ws.shell("ps -o mpid")).stdout
+        assert b"413" not in (await ws.shell("ps -o pid")).stdout
     finally:
         box.ended.set()
         await ws.close()
@@ -397,7 +424,7 @@ async def test_a_kept_signal_reaches_a_program_as_sent():
             (MachinePid(413, 101.0), 28),
         ]
         said = await ws.shell("jobs")
-        assert said.stdout == b"[1] running train 1\n"
+        assert said.stdout == (b"[1]+  Running                 train 1 &\n")
     finally:
         box.ended.set()
         await ws.close()
@@ -430,7 +457,7 @@ class _Quitter(_Sleeper):
     table: ProcessTable | None = None
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
-        self.rows = [MachineProcess(env[PROCESS], self.base, 1, 100.0, "q")]
+        self.rows = [MachineProcess(_tag(argv), self.base, 1, 100.0, "q")]
         await self.ended.wait()
         self.rows = []
         return RunResult(stdout=b"", stderr=None, exit_code=0)
@@ -453,7 +480,7 @@ async def test_a_kept_signal_to_a_group_that_then_ends_is_sent():
     try:
         await ws.shell("timeout 30 train 1 &")
         await _started(box)
-        listed = (await ws.shell("ps -o pgid=,mpid=")).stdout.decode()
+        listed = (await ws.shell("ps -o pgid=,pid=")).stdout.decode()
         group = next(
             row.split()[0]
             for row in listed.splitlines()
@@ -480,7 +507,7 @@ async def test_a_kept_signal_to_a_group_gone_by_its_scan_fails():
     ws = _sleepers(a=box)
     try:
         assert (await ws.shell("train 1")).exit_code == 0
-        listed = (await ws.shell("ps -o pgid=,mpid=")).stdout.decode()
+        listed = (await ws.shell("ps -o pgid=,pid=")).stdout.decode()
         group = next(
             row.split()[0]
             for row in listed.splitlines()
@@ -569,7 +596,9 @@ async def test_a_program_that_handles_quit_outlives_a_timeout(how):
         )
         await asyncio.sleep(0.4)
         assert not run.done()
-        assert {signum for _, signum in box.sent} == {3}
+        assert {signum for _, signum in box.sent} == (
+            {3, 18} if how == "" else {3}
+        )
         box.ended.set()
         assert (await run).exit_code == 124
     finally:
@@ -597,7 +626,9 @@ async def test_a_timeout_forwards_a_kept_signal_to_the_program(how):
     try:
         said = await ws.shell(f"timeout {how}-s WINCH 0.1 train 1")
         assert said.exit_code == 124
-        assert {signum for _, signum in box.sent} == {28}
+        assert {signum for _, signum in box.sent} == (
+            {28, 18} if how == "" else {28}
+        )
     finally:
         box.ended.set()
         await ws.close()
@@ -633,9 +664,9 @@ class _Shared(_Sleeper):
     rows_of: "dict[str, list[MachineProcess]]" = {}
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
-        tag = env[PROCESS]
+        tag = _tag(argv)
         self.rows_of[self.name] = [
-            MachineProcess(tag, self.base, 1, 100.0, " ".join(argv)),
+            MachineProcess(tag, self.base, 1, 100.0, " ".join(argv[7:])),
             MachineProcess(tag, self.base + 1, self.base, 101.0, "child"),
         ]
         await self.ended.wait()
@@ -661,9 +692,9 @@ async def test_two_entries_on_one_container_list_each_process_once():
         async with asyncio.timeout(5):
             while len(_Shared.rows_of) < 2:
                 await asyncio.sleep(0.01)
-        said = await ws.shell("ps -o machine=,mpid=,args=")
+        said = await ws.shell("ps -o machine=,pid=,args=")
         rows = [line.split()[:2] for line in said.stdout.decode().splitlines()]
-        found = [row for row in rows if row[1:] and row[1] != "-"]
+        found = [row for row in rows if row[0] != "mirage"]
         assert sorted(found) == [
             ["box:a", "412"],
             ["box:a", "413"],

@@ -17,6 +17,7 @@ import asyncio
 import pytest
 
 from mirage.execution.job import JobTable
+from mirage.execution.process.config import ProcessPermissions
 from mirage.execution.process.types import ProcessState
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -201,7 +202,9 @@ async def test_kill_zero_respects_signal_permissions_without_cancelling():
             await ws.shell(f"kill -0 {pid}", session_id="owner")
         ).exit_code == 0
         [info] = [
-            i for i in ws.process_table.view("owner").list() if i.pid == pid
+            i
+            for i in ws.process_table.visible("owner", ProcessPermissions())
+            if i.pid == pid
         ]
         assert info.state == ProcessState.RUNNING
     finally:

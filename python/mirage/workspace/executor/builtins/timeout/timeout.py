@@ -40,8 +40,9 @@ from mirage.context import (
     set_current_evaluation,
     set_program_invocation,
 )
+from mirage.execution.process.config import ProcessPermissions
 from mirage.execution.process.handle import ProcessHandle
-from mirage.execution.process.table import ProcessTable, deliver
+from mirage.execution.process.table import ProcessTable
 from mirage.io import IOResult
 from mirage.io.stream import (
     OutputStream,
@@ -58,6 +59,7 @@ from mirage.shell.constants import (
     NOT_FOUND_STATUS,
     SHELL_IGNORED_SIGNALS,
     SIGCHLD,
+    SIGCONT,
     SIGKILL,
     SIGNALS,
     SIGRTMAX,
@@ -66,7 +68,11 @@ from mirage.shell.constants import (
     STOP_SIGNALS,
     TIMEOUT_STATUS,
 )
+from mirage.shell.helpers import get_text
 from mirage.shell.join import shell_join
+from mirage.shell.signals import signal_report
+from mirage.shell.types import TSNodeLike
+from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.builtins.timeout.constants import (
@@ -76,6 +82,10 @@ from mirage.workspace.executor.builtins.timeout.constants import (
     TIMEOUT_NAMES,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
+from mirage.workspace.executor.statement import (
+    redirected_body,
+    reported_command,
+)
 from mirage.workspace.lookup.lookup import execs
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.types import ExecutionNode
@@ -386,6 +396,13 @@ async def _supervise(
     held: list[IOResult] = []
     ran: list[tuple[bytes | None, IOResult]] = []
     child = child_context(context)
+    syntax = session._line_node
+
+    def killed(number: int) -> str:
+        return _killed_report(context, syntax, process, number, foreground)
+
+    def hold_job() -> None:
+        _hold_job(processes, process, syntax)
 
     async def run() -> int:
         token = set_current_evaluation(child)
@@ -441,6 +458,8 @@ async def _supervise(
                 preserve,
                 verbose,
                 name,
+                killed,
+                hold_job,
             )
         finally:
             if not process.task.done():
@@ -507,6 +526,8 @@ async def _deadline(
     preserve: bool,
     verbose: bool,
     name: str,
+    killed: Callable[[int], str],
+    hold_job: Callable[[], None],
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Wait for the run, and at the deadline do what the signal does.
 
@@ -524,10 +545,22 @@ async def _deadline(
         preserve (bool): --preserve-status.
         verbose (bool): -v, which says each signal sent.
         name (str): the command word, which -v names.
+        killed (Callable[[int], str]): bash's report of timeout dying of
+            a signal.
+        hold_job (Callable[[], None]): holds the job of a timeout that
+            stopped itself.
     """
     task = process.task
     deadline = seconds if 0 < seconds < math.inf else None
     done, _ = await asyncio.wait({task}, timeout=deadline)
+    if task not in done and process.paused:
+        # A stopped timeout takes its alarm once it goes on.
+        resumed = asyncio.ensure_future(process.resumed())
+        either: set[asyncio.Task[Any]] = {task, resumed}
+        done, _ = await asyncio.wait(
+            either, return_when=asyncio.FIRST_COMPLETED
+        )
+        resumed.cancel()
     if task in done:
         task.result()
         stdout, io = ran[0]
@@ -548,43 +581,37 @@ async def _deadline(
 
     say(signal)
     stops = signal in STOP_SIGNALS and (foreground or signal == SIGSTOP)
-    if stops or (signal == SIGCHLD and not foreground):
-        # The command stops, or timeout never wakes: only -k's KILL
-        # ends the wait, and not even that once timeout stopped itself.
-        if stops:
-            await _stop(processes, process, signal, foreground)
-        else:
-            await _forward(processes, process, signal, foreground)
-        if kill_after == 0 or (signal == SIGSTOP and not foreground):
+    ignored = signal in process.ignores
+    # A foreground command Mirage runs itself stops at a terminal stop as
+    # at STOP; an asynchronous one ignores those.
+    sent = SIGSTOP if stops and not process.record.is_program else signal
+    await _signal(processes, process, sent, foreground)
+    if not foreground and signal == SIGSTOP:
+        hold_job()
+    if not foreground and signal in (SIGSTOP, SIGCHLD):
+        # timeout stopped itself, or never wakes: only -k's KILL ends the
+        # wait, and not even that once it stopped itself.
+        if kill_after == 0 or signal == SIGSTOP:
             await asyncio.get_running_loop().create_future()
         await asyncio.sleep(kill_after)
         if not task.done():
-            await _stop(processes, process, SIGKILL, foreground)
+            await _signal(processes, process, SIGKILL, foreground)
         say(SIGKILL)
+        said.append(killed(SIGKILL))
         return await _ended(console, held, said, 137)
-    ignored = signal in process.ignores
+    done, _ = await asyncio.wait({task}, timeout=kill_after or None)
+    if task not in done:
+        await _signal(processes, process, SIGKILL, foreground)
+        say(SIGKILL)
+        said.append(killed(SIGKILL))
+        return await _ended(console, held, said, 137)
     if signal in CONTINUE_SIGNALS or signal in STOP_SIGNALS or ignored:
-        if ignored:
-            # A shell that ignores the signal lives on past the program
-            # it stops; timeout waits for it, and -k's KILL ends the wait.
-            await _stop(processes, process, signal, foreground)
-        else:
-            await _forward(processes, process, signal, foreground)
-        done, _ = await asyncio.wait(
-            {task}, timeout=kill_after if kill_after else None
-        )
-        if task not in done:
-            await _stop(processes, process, SIGKILL, foreground)
-            say(SIGKILL)
-            return await _ended(console, held, said, 137)
         code = task.result() if preserve else TIMEOUT_STATUS
         return await _ended(console, held, said, code, finished=True)
-    if await _stop(processes, process, signal, foreground, kill_after):
-        say(SIGKILL)
-        return await _ended(console, held, said, 137)
     if signal in SELF_KILLING_SIGNALS and (
         not foreground or signal == SIGKILL
     ):
+        said.append(killed(signal))
         return await _ended(console, held, said, 128 + signal)
     if not task.cancelled():
         code = task.result() if preserve else TIMEOUT_STATUS
@@ -594,52 +621,83 @@ async def _deadline(
     )
 
 
-async def _forward(
+def _ends_line(node: TSNodeLike) -> bool:
+    root = node
+    while root.parent is not None:
+        root = root.parent
+    return not (root.text or b"")[node.end_byte - root.start_byte :].strip()
+
+
+def _killed_report(
+    context: EvaluationContext,
+    node: TSNodeLike | None,
+    process: ProcessHandle,
+    number: int,
+    foreground: bool,
+) -> str:
+    """bash's report of timeout dying of the signal it sent its own
+    group, which --foreground does not. None where the shell would not
+    tell it here: in a substitution, under the command's own redirect,
+    or for a line's last command, which bash runs in its own place.
+
+    Args:
+        context (EvaluationContext): the caller's evaluation.
+        node (TSNodeLike | None): the timeout command.
+        process (ProcessHandle): the command's process.
+        number (int): the signal.
+        foreground (bool): --foreground.
+    """
+    if (
+        foreground
+        or node is None
+        or context.frame.substitution
+        or redirected_body(node)
+        or _ends_line(node)
+    ):
+        return ""
+    row = (process.record.pid, 128 + number, number, reported_command(node))
+    return signal_report(shell_voice(), [row], True)
+
+
+def _hold_job(
+    processes: ProcessTable,
+    process: ProcessHandle,
+    syntax: TSNodeLike | None,
+) -> None:
+    # A job that is timeout alone is what stopped itself.
+    record = process.record
+    job = (
+        None
+        if record.parent is None
+        else processes.target(
+            record.parent, record.session_id, ProcessPermissions()
+        )
+    )
+    if (
+        job is not None
+        and job.background
+        and syntax is not None
+        and job.record.command == get_text(syntax)
+    ):
+        processes.pause(job)
+
+
+async def _signal(
     processes: ProcessTable,
     process: ProcessHandle,
     signal: int,
     foreground: bool,
 ) -> None:
-    # A signal a process takes and goes on reaches the programs on machines
-    # as sent, and leaves Mirage's own runners as they are; 0 only probes.
-    if signal == 0:
-        return
-    if not foreground:
-        await processes.send_group(process.record.group, signal)
-        return
-    sending = processes.send(process, signal)
-    if sending is not None:
-        await sending
-
-
-async def _stop(
-    processes: ProcessTable,
-    process: ProcessHandle,
-    signal: int,
-    foreground: bool,
-    kill_after: float = 0,
-) -> bool:
-    # timeout signals its own process group unless --foreground, so what
-    # the command started ends with it, or, where a shell ignores the
-    # signal, the program it runs right now does; the command itself gets
-    # it either way, a program on a machine as sent. One the signal stops
-    # is waited for, and -k's KILL follows should it outlive kill_after:
-    # True then.
+    # What `kill` does to the command, or to its process group unless
+    # --foreground, so what the command started gets it too. That group
+    # then gets CONT, so one that was stopped takes the signal.
     if foreground:
-        sending = processes.send(process, signal)
-        if sending is None:
-            deliver(process, signal)
-        else:
-            await sending
-    else:
-        await processes.signal_group(process.record.group, signal)
-    if signal in process.ignores:
-        return False
-    done, _ = await asyncio.wait({process.task}, timeout=kill_after or None)
-    if done:
-        return False
-    await _stop(processes, process, SIGKILL, foreground)
-    return True
+        await processes.signal(process, signal, group=True)
+        return
+    group = process.record.group
+    await processes.signal_group(group, signal)
+    if signal not in (SIGKILL, SIGCONT, SIGSTOP):
+        await processes.signal_group(group, SIGCONT)
 
 
 async def _cancel(task: asyncio.Future[Any]) -> None:

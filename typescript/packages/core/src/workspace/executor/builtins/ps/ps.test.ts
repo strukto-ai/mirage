@@ -24,10 +24,10 @@ import { handlePs } from './ps.ts'
 import { pendingRun } from '../../../../../tests/workspace/fixtures/job_runners.ts'
 import { FIRST_PID } from '../../../../execution/process/constants.ts'
 
-const HEADER = `${'PID'.padStart(7)} ${'MACHINE'.padEnd(31)} ${'MPID'.padStart(7)} CMD`
+const HEADER = `${'PID'.padStart(7)} ${'MACHINE'.padEnd(31)} CMD`
 
-function row(pid: number, command: string, machine = '-', mpid = '-'): string {
-  return `${String(pid).padStart(7)} ${machine.padEnd(31)} ${mpid.padStart(7)} ${command}`
+function row(pid: number, command: string, machine = 'mirage'): string {
+  return `${String(pid).padStart(7)} ${machine.padEnd(31)} ${command}`
 }
 
 function decode(b: Uint8Array): string {
@@ -63,7 +63,7 @@ describe('handlePs', () => {
         const rows = stdoutStr(await ws.shell(line))
           .trim()
           .split('\n')
-        const commands = rows.slice(1).map((line) => line.slice(48))
+        const commands = rows.slice(1).map((line) => line.slice(40))
         expect(commands).toEqual(expect.arrayContaining(['ps', 'cat']))
       } finally {
         await ws.close()
@@ -256,8 +256,25 @@ it.each([false, true])('ps shows where a program runs (host %s)', async (host) =
     const machine = host ? ws.processTable.machine.toString() : 'docker:tools'
     const own = stdoutStr(await ws.shell('ps', { sessionId: 's' })).split('\n')
     expect(own[0]).toBe(HEADER)
-    expect(own).toContain(row(process.record.id.pid, 'sleep 30', machine, host ? '4242' : '-'))
+    expect(own).toContain(row(host ? 4242 : process.record.id.pid, 'sleep 30', machine))
     await ws.shell('kill %1', { sessionId: 's' })
+  } finally {
+    await ws.close()
+  }
+})
+
+it('ps is a program of its own on a longer line', async () => {
+  const ws = buildWs()
+  try {
+    const last = stdoutStr(await ws.shell('echo a; ps -o pid=,cmd=')).split('\n')
+    const shell = stdoutStr(await ws.shell('echo $$')).trim()
+    expect(last[1]?.trim()).toBe(`${shell} ps -o pid=,cmd=`)
+    const first = stdoutStr(await ws.shell('ps -o ppid=,stat=,cmd=; echo b')).split('\n')
+    expect(first.slice(0, 2).map((row) => row.trim().split(/\s+/).slice(0, 3))).toEqual([
+      ['0', 'Ss', 'ps'],
+      [shell, 'R', 'ps'],
+    ])
+    expect(first[1]?.trim().endsWith('ps -o ppid=,stat=,cmd=')).toBe(true)
   } finally {
     await ws.close()
   }

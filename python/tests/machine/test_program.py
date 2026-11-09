@@ -35,6 +35,8 @@ from mirage.machine.program import (
     Children,
     _served,
     close_children,
+    host_signal,
+    mirage_signal,
     open_program_pipe,
     run_program,
     scan_host,
@@ -102,6 +104,20 @@ async def _running(pid: int) -> bool:
     out, _ = await ps.communicate()
     state = out.decode().strip()
     return bool(state) and not state.startswith("Z")
+
+
+@pytest.mark.parametrize(
+    ("name", "number"),
+    [("KILL", 9), ("USR1", 10), ("TERM", 15), ("CONT", 18), ("STOP", 19)],
+)
+def test_a_signal_is_numbered_as_this_host_does_and_back(name, number):
+    native = int(getattr(signal, f"SIG{name}"))
+    assert host_signal(number) == native
+    assert mirage_signal(native) == number
+
+
+def test_signal_zero_stays_zero():
+    assert host_signal(0) == 0
 
 
 @pytest.mark.asyncio
@@ -185,6 +201,17 @@ async def test_an_exited_command_does_not_wait_on_a_pending_input_pull():
     async with asyncio.timeout(5):
         ran = await run_program("sh", None, ["-c", "printf done"], source())
     assert (ran.stdout, ran.exit_code) == (b"done", 0)
+
+
+@pytest.mark.asyncio
+async def test_a_direct_program_ends_though_what_it_left_holds_its_output():
+    started = time.monotonic()
+    ran = await run_program(
+        "sh", None, ["-c", "sleep 4 & echo out"], None, direct=True
+    )
+    assert ran.stdout == b"out\n"
+    assert ran.exit_code == 0
+    assert time.monotonic() - started < 3
 
 
 @pytest.mark.asyncio

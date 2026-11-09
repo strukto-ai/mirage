@@ -444,7 +444,10 @@ async def test_ampersand_inside_a_body_launches_a_job_with_status_zero(line):
 async def test_loop_body_jobs_are_still_running_when_the_loop_ends():
     ws = _workspace()
     res = await ws.shell("for i in 1 2; do sleep 0.3 & done; jobs")
-    assert res.stdout == b"[1] running sleep 0.3\n[2] running sleep 0.3\n"
+    assert res.stdout == (
+        b"[1]-  Running                 sleep 0.3 &\n"
+        b"[2]+  Running                 sleep 0.3 &\n"
+    )
     await ws.shell("wait")
     assert (await ws.shell("jobs")).stdout == b""
 
@@ -713,7 +716,8 @@ async def test_a_runaway_loop_stops_at_the_process_cap():
         assert io.exit_code == 254
         io = await ws.shell("echo $n; jobs", session_id="capped")
         assert io.stdout == (
-            b"2\n[1] running sleep 30\n[2] running sleep 30\n"
+            b"2\n[1]-  Running                 sleep 30 &\n"
+            b"[2]+  Running                 sleep 30 &\n"
         )
     finally:
         await ws.close()
@@ -826,6 +830,23 @@ class _Held(JobConsole):
 
 
 @pytest.mark.asyncio
+async def test_a_stopped_job_past_its_limit_still_ends():
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        command_limits={"@line": Limit(timeout_seconds=0.2)},
+    )
+    try:
+        await ws.shell("sleep 30 & p=$!; kill -STOP $p")
+        async with asyncio.timeout(5):
+            await ws.job_table.wait(1, ws.default_session_id)
+        job = ws.job_table.get(1, ws.default_session_id)
+        assert job.exit_code == 124
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_job_past_its_limit_ends_while_a_reader_holds_its_output(
     monkeypatch,
 ):
@@ -922,5 +943,147 @@ async def test_a_failed_release_still_lets_go_of_the_other_readers(
         assert len(held) >= 2
         assert [lines.holders for lines in rest] == [0] * len(rest)
         assert failed.holders == 1
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_background_pipeline_is_its_stages():
+    ws = _workspace()
+    try:
+        said = await ws.shell(
+            "sleep 30 | cat & echo $!; echo $$; ps -o pid=,ppid=,cmd=; "
+            "jobs -l; jobs -p"
+        )
+        last, shell, *rest = said.stdout.decode().splitlines()
+        first = str(int(last) - 1)
+        rows = [line.split(None, 2) for line in rest[:4]]
+        assert rows[1:3] == [[first, shell, "sleep 30"], [last, shell, "cat"]]
+        assert rest[4:] == [
+            f"[1]+ {first} Running                 sleep 30",
+            f"     {last}                       | cat &",
+            first,
+        ]
+        said = await ws.shell(f"kill {last}; wait {last}; echo $?; jobs")
+        assert said.stdout == b"143\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_wait_of_a_last_stage_answers_for_the_pipeline_under_pipefail():
+    ws = _workspace()
+    try:
+        said = await ws.shell(
+            "set -o pipefail; sh -c 'exit 4' | sleep 0.1 & wait $!; echo $?"
+        )
+        assert said.stdout == b"4\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_second_wait_for_a_pid_answers_its_status():
+    ws = _workspace()
+    try:
+        said = await ws.shell(
+            "sh -c 'exit 3' & p=$!; wait $p; echo $?; wait $p; echo $?"
+        )
+        assert said.stdout == b"3\n3\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_job_specs_name_jobs_as_bash_does():
+    ws = _workspace()
+    try:
+        await ws.shell("sleep 30 & sleep 31 &")
+        said = await ws.shell(
+            "jobs %%; jobs %+; jobs %; jobs %-; jobs '%sleep 30'; jobs %?31"
+        )
+        one = "[1]-  Running                 sleep 30 &\n"
+        two = "[2]+  Running                 sleep 31 &\n"
+        assert said.stdout.decode() == two * 3 + one * 2 + two
+        said = await ws.shell("jobs %sleep; echo $?; kill %nope; echo $?")
+        assert said.stdout == b"1\n1\n"
+        assert said.stderr == (
+            b"bash: line 1: jobs: sleep: ambiguous job spec\n"
+            b"bash: line 1: jobs: %sleep: no such job\n"
+            b"bash: line 1: kill: %nope: no such job\n"
+        )
+        said = await ws.shell("kill %?31 %-; wait; echo $?; jobs")
+        assert said.stdout == b"0\n[2]   Terminated              sleep 31\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_jobs_marks_what_it_lists_and_jobs_n_what_it_has_not():
+    ws = _workspace()
+    try:
+        said = await ws.shell("sleep 30 & true & sleep 0.2; jobs; jobs -n")
+        assert said.stdout == (
+            b"[1]-  Running                 sleep 30 &\n"
+            b"[2]+  Done                    true\n"
+        )
+    finally:
+        await ws.shell("kill %1")
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_redirected_background_pipeline_is_its_stages():
+    ws = _workspace()
+    try:
+        said = await ws.shell("sleep 30 | cat > /m/out & jobs -l | wc -l")
+        assert said.stdout == b"2\n"
+    finally:
+        await ws.shell("kill %1")
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_job_holds_a_term_until_it_goes_on():
+    ws = _workspace()
+    try:
+        said = await ws.shell(
+            "sleep 30 & kill -STOP %1; kill %1; ps -o stat= -p $!; jobs; "
+            "kill -CONT %1; wait %1; echo $?"
+        )
+        assert said.stdout == (
+            b"T\n[1]+  Running                 sleep 30 &\n143\n"
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_pipeline_moves_no_bytes():
+    ws = _workspace()
+    try:
+        said = await ws.shell(
+            "seq 1 300000 | cat > /m/out & kill -STOP %1; sleep 0.3; jobs; "
+            "kill -CONT %1; wait %1; echo $?; wc -l < /m/out"
+        )
+        assert said.stdout == (
+            b"[1]+  Running                 seq 1 300000 | cat > /m/out &\n"
+            b"0\n300000\n"
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_ppid_is_the_shell_that_started_this_one():
+    ws = _workspace()
+    try:
+        said = await ws.shell(
+            "echo $PPID; (echo $PPID); echo $$; bash -c 'echo $PPID'"
+        )
+        top, sub, shell, nested = said.stdout.decode().split()
+        assert (top, sub, nested) == ("0", "0", shell)
+        said = await ws.shell("PPID=5")
+        assert said.stderr == b"bash: line 1: PPID: readonly variable\n"
     finally:
         await ws.close()

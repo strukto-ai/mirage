@@ -12,13 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import replace
 from datetime import datetime
 
 from mirage.commands.builtin.utils.identity import UNKNOWN_NAME
 from mirage.commands.builtin.utils.strftime import gnu_strftime
+from mirage.context import current_caller
 from mirage.execution.job import JobTable
-from mirage.execution.process.constants import FIRST_PID
-from mirage.execution.process.types import Process
+from mirage.execution.process.types import Process, ProcessState
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
@@ -27,8 +28,8 @@ from mirage.utils.timezone import zone_from_env
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import MAX_PID_OPERAND
 from mirage.workspace.executor.builtins.jobspec import (
+    grants_of,
     job_result,
-    process_view,
     session_of,
 )
 from mirage.workspace.executor.builtins.ps import constants
@@ -215,8 +216,9 @@ def _ps_cell(key: str, info: Process, ctx: PsContext, branch: str) -> str:
     where nobody claimed one or the runner is another session's, whose
     profile this one cannot name. A runner of the calling session belongs
     to the session ``$$`` leads; another session's to its own group. The
-    machine columns name the machine a program runs on and its pid
-    there, ``-`` for a process that is Mirage's own.
+    machine column names the machine a program runs on, ``mirage`` for a
+    process that is Mirage's own, and each pid column shows what the
+    agent knows it by: a program's pid on its machine.
 
     Args:
         key (str): the column key.
@@ -228,26 +230,30 @@ def _ps_cell(key: str, info: Process, ctx: PsContext, branch: str) -> str:
     if fact in constants.FIXED:
         return constants.FIXED[fact]
     if fact == "machine":
-        program = info.runtime is not None or info.machine_pid is not None
-        return str(info.machine) if program else "-"
-    if fact == "mpid":
-        found = info.machine_pid
-        return str(found.pid) if found is not None else "-"
+        return info.shown_machine
     session = (
         ctx.shell_pid
         if info.session_id == ctx.session_id and ctx.shell_pid is not None
         else info.group or info.pid
     )
     if fact == "pid":
-        return str(info.pid)
+        return str(info.shown_pid)
     if fact == "ppid":
-        return str(info.parent) if info.parent else "0"
+        # What outlives its parent is init's, as on any machine.
+        if info.parent:
+            return str(ctx.shown.get(info.parent, 1))
+        return "1" if info.machine_pid is not None else "0"
     if fact == "pgid":
-        return str(info.group or info.pid)
+        group = info.group or info.pid
+        return str(ctx.shown.get(group, group))
     if fact == "sid":
-        return str(session)
+        return str(ctx.shown.get(session, session))
     if fact in ("stat", "state"):
-        state = constants.STATES[info.state]
+        state = info.shown_state or (
+            "R"
+            if info.pid == ctx.running and info.state == ProcessState.RUNNING
+            else constants.STATES[info.state]
+        )
         return state + ("s" if fact == "stat" and info.pid == session else "")
     if fact == "comm":
         head = info.command.split()[0] if info.command.split() else ""
@@ -263,6 +269,50 @@ def _ps_cell(key: str, info: Process, ctx: PsContext, branch: str) -> str:
     if fact in ("lstart", "start", "stime", "bsdstart"):
         return _started(fact, info, ctx)
     return branch + info.command
+
+
+def _as_bash_runs_them(
+    listed: tuple[Process, ...],
+    own: str,
+    running: Process | None,
+    next_pid: int,
+) -> tuple[tuple[Process, ...], Process | None]:
+    """The processes as bash runs them. A background pipeline's stages
+    are its shell's children, with nothing between them, and ``ps`` is a
+    program of its own: run last on a line, the shell replaced itself
+    with it; run before more of the line, it is the shell's child.
+
+    Args:
+        listed (tuple[Process, ...]): the processes the view sees.
+        own (str): the words ``ps`` was run with.
+        running (Process | None): the process running ``ps``.
+        next_pid (int): the pid ``ps`` has as a child.
+
+    Returns:
+        tuple[tuple[Process, ...], Process | None]: the processes to
+        list, and the one to show running.
+    """
+    jobs = {info.pid: info.parent for info in listed if info.stages}
+    rows = tuple(
+        replace(info, parent=jobs[info.parent])
+        if info.parent in jobs
+        else info
+        for info in listed
+        if not info.stages
+    )
+    if running is None or not any(c in running.command for c in ";&|\n"):
+        return rows, running
+    line = running.command.replace('"', "").replace("'", "").rstrip()
+    if line.endswith(own):
+        shown = replace(running, command=own)
+        return tuple(shown if r.pid == shown.pid else r for r in rows), shown
+    child = replace(
+        running,
+        id=replace(running.id, pid=next_pid),
+        parent=running.pid,
+        command=own,
+    )
+    return (*rows, child), child
 
 
 def _forest(rows: list[Process]) -> list[tuple[Process, str]]:
@@ -308,12 +358,12 @@ async def handle_ps(
 
     The machines are scanned first, so what a program started there
     shows as processes of its own. Without ``-o`` the columns are
-    ``PID MACHINE MPID CMD`` (``constants.PLAIN``); ``-o`` lays out
+    ``PID MACHINE CMD`` (``constants.PLAIN``); ``-o`` lays out
     procps-ng 4.0.4's columns, every key a process can answer
-    (``constants.COLUMNS``), ``machine`` and ``mpid`` among them; a
+    (``constants.COLUMNS``), ``machine`` among them; a
     header row prints unless every header is empty. BSD ``f`` and
     ``--forest`` draw each command under its parent's. A ``-p`` number
-    under ``FIRST_PID`` is a machine pid. Selecting nothing (``-p`` of
+    is a pid as ``ps`` shows it. Selecting nothing (``-p`` of
     an absent PID) exits 1, as procps does, and an option error is
     procps's message and usage. A process has no CPU, RSS or TTY
     accounting, and ps never broadens the profile's view.
@@ -333,21 +383,16 @@ async def handle_ps(
     except ValueError as exc:
         return job_result(cmd_str, f"error: {exc}\n{constants.USAGE}", 1)
     sid = session_of(session)
-    processes = process_view(job_table, session)
-    await processes.scan()
+    await job_table.processes.scan()
     every = options.all or not options.pids
-    rows = [
-        info
-        for info in processes.list()
-        if every
-        or info.pid in options.pids
-        or (
-            info.machine_pid is not None
-            and info.machine_pid.exited is None
-            and info.machine_pid.pid < FIRST_PID
-            and info.machine_pid.pid in options.pids
-        )
-    ]
+    runner = current_caller().process
+    listed, running = _as_bash_runs_them(
+        job_table.processes.visible(sid, grants_of(session)),
+        cmd_str,
+        runner.record if runner is not None else None,
+        job_table.processes.last_pid + 1,
+    )
+    rows = [info for info in listed if every or info.shown_pid in options.pids]
     columns = options.columns or constants.PLAIN
     keys = [key for key, _ in columns]
     ctx = PsContext(
@@ -356,6 +401,8 @@ async def handle_ps(
         group=session.profile if session is not None else None,
         session_id=sid,
         shell_pid=session.shell_pid if session is not None else None,
+        running=running.pid if running is not None else None,
+        shown={info.pid: info.shown_pid for info in listed},
     )
     drawn = (
         _forest(rows)

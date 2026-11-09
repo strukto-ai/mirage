@@ -28,6 +28,7 @@ import {
   HOST_START_SLACK_SECONDS,
   PIPE_DIAGNOSTIC_BYTES,
   PIPE_DIAGNOSTIC_WAIT_SECONDS,
+  RUN_DRAIN_SECONDS,
   STOP_GRACE_SECONDS,
   STOP_POLL_SECONDS,
   stopSignal,
@@ -41,9 +42,13 @@ import type { MachineProcess } from '@struktoai/mirage-core/execution/machine/ty
 import type { MachinePid } from '@struktoai/mirage-core/execution/types'
 import { abortable, makeAbortError } from '@struktoai/mirage-core/utils/abort'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
-import { CANNOT_EXECUTE_STATUS } from '@struktoai/mirage-core/shell/constants'
+import { CANNOT_EXECUTE_STATUS, SIGNALS } from '@struktoai/mirage-core/shell/constants'
 import { boundSystemClock } from '@struktoai/mirage-core/utils/clock'
-import { FAKETIME_LIBRARIES, faketimeEnv } from '@struktoai/mirage-core/machine/constants'
+import {
+  FAKETIME_LIBRARIES,
+  faketimeEnv,
+  HOST_STATES,
+} from '@struktoai/mirage-core/machine/constants'
 
 /**
  * What a process on this host needs to read the running workspace's system
@@ -310,6 +315,18 @@ export async function runProgram(
       detached: process.platform !== 'win32',
     },
   )
+  // What a direct program left running can hold its output open for as long
+  // as it likes, and the program's own end is what a `wait` reports, so its
+  // output gets a moment and no more. Mirrors Python's `let_go`.
+  let lettingGo: ReturnType<typeof setTimeout> | undefined
+  if (options.direct === true)
+    child.once('exit', () => {
+      lettingGo = setTimeout(() => {
+        child.stdin.destroy()
+        child.stdout.destroy()
+        child.stderr.destroy()
+      }, RUN_DRAIN_SECONDS * 1000)
+    })
   // Set by the abort listener, which flow analysis does not follow.
   let stopping = null as Promise<void> | null
   const abort = (): void => {
@@ -349,7 +366,7 @@ export async function runProgram(
     })
     child.once('close', (code, name) => {
       children?.delete(child)
-      resolve(code ?? (name === null ? 1 : 128 + constants.signals[name]))
+      resolve(code ?? (name === null ? 1 : 128 + mirageSignal(name)))
     })
   })
   // A failed spawn can arrive before its output readers finish.
@@ -402,9 +419,10 @@ export async function runProgram(
       )
     }
     if (options.direct === true && child.signalCode !== null)
-      runner?.programSignaled(constants.signals[child.signalCode])
+      runner?.programSignaled(mirageSignal(child.signalCode))
     return { stdout: Buffer.concat(out), stderr: stderr.length > 0 ? stderr : null, exitCode: code }
   } finally {
+    clearTimeout(lettingGo)
     if (stopping !== null) await stopping
     if (child.exitCode === null && child.signalCode === null) stopTree(child)
     child.stdin.destroy()
@@ -436,6 +454,35 @@ function ps(args: readonly string[]): Promise<string> {
       },
     )
   })
+}
+
+/**
+ * The number this host gives a signal, which Mirage numbers as Linux does:
+ * others differ (USR1 is 30 on macOS, and 10 is BUS there). Null for a signal
+ * it lacks. Mirrors Python's `host_signal`.
+ *
+ * @param number the signal, as Linux numbers it.
+ */
+export function hostSignal(number: number): number | null {
+  if (number === 0 || process.platform === 'linux') return number
+  const name = SIGNALS.get(number)
+  if (name === undefined) return null
+  return (constants.signals as Record<string, number | undefined>)[`SIG${name}`] ?? null
+}
+
+function nearestSignal(number: number): number {
+  return hostSignal(number) ?? constants.signals.SIGTERM
+}
+
+/**
+ * The number Mirage gives a signal this host reported. Mirrors Python's
+ * `mirage_signal`.
+ *
+ * @param name the signal's name, as Node reports it.
+ */
+export function mirageSignal(name: NodeJS.Signals): number {
+  for (const [number, known] of SIGNALS) if (`SIG${known}` === name) return number
+  return constants.signals[name]
 }
 
 /** A start time as `ps -o lstart` prints it, in epoch seconds; throws for other text. */
@@ -493,22 +540,23 @@ export async function scanHost(
   if (groups.size === 0 || process.platform === 'win32') return []
   const found: [number, MachineProcess][] = []
   const reused = new Set<number>()
-  const text = await ps(['-A', '-o', 'pid=,ppid=,pgid=,lstart=,args='])
+  const text = await ps(['-A', '-o', 'pid=,ppid=,pgid=,stat=,lstart=,args='])
   for (const line of text.split('\n')) {
     const fields = line.trim().split(/\s+/)
-    if (fields.length < 8 || !/^[0-9]+$/.test(fields[2] ?? '')) continue
+    if (fields.length < 9 || !/^[0-9]+$/.test(fields[2] ?? '')) continue
     const group = Number(fields[2])
     const held = groups.get(group)
     if (held === undefined) continue
     const [tag, began] = held
     let started: number
     try {
-      started = lstart(fields.slice(3, 8).join(' '))
+      started = lstart(fields.slice(4, 9).join(' '))
     } catch (err) {
       debuglog('mirage')('process %s: no start: %s', fields[0], err)
       continue
     }
-    const args = line.trim().replace(/^(\S+\s+){8}/, '')
+    const args = line.trim().replace(/^(\S+\s+){9}/, '')
+    const letter = (fields[3] ?? 'R').charAt(0)
     const pid = Number(fields[0])
     if (pid === group && Math.abs(started - began) > HOST_START_SLACK_SECONDS) reused.add(group)
     found.push([
@@ -518,7 +566,8 @@ export async function scanHost(
         pid,
         ppid: Number(fields[1]),
         started,
-        args: fields.length > 8 ? args : '',
+        args: fields.length > 9 ? args : '',
+        state: HOST_STATES[letter] ?? letter,
       },
     ])
   }
@@ -536,12 +585,13 @@ export async function scanHost(
  * @param signum the signal.
  */
 export async function signalHost(target: MachinePid, signum: number): Promise<boolean> {
-  if (process.platform === 'win32') return false
+  const native = hostSignal(signum)
+  if (process.platform === 'win32' || native === null) return false
   const started = await startedAt(target.pid)
   if (started === null || Math.abs(started - target.started) > HOST_START_SLACK_SECONDS)
     return false
   try {
-    process.kill(target.pid, signum)
+    process.kill(target.pid, native)
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ESRCH') return false
     throw err
@@ -595,7 +645,7 @@ export async function stopHostRun(
       return false
   }
   try {
-    process.kill(-pid, signum)
+    process.kill(-pid, nearestSignal(signum))
     const deadline = Date.now() + STOP_GRACE_SECONDS * 1000
     while (Date.now() < deadline) {
       await delay(STOP_POLL_SECONDS * 1000)
@@ -637,7 +687,13 @@ async function readInto(
       else await abortable(sink(chunk as Uint8Array), signal)
     }
   } catch (error) {
-    if (!child.killed && child.signalCode === null && signal?.aborted !== true) throw error
+    if (
+      !child.killed &&
+      child.exitCode === null &&
+      child.signalCode === null &&
+      signal?.aborted !== true
+    )
+      throw error
     debuglog('mirage')('process output closed: %s', error)
     stream.resume()
   }
@@ -736,7 +792,7 @@ export function killTree(child: ChildProcess, signum = 9): void {
     return
   }
   try {
-    process.kill(-child.pid, signum)
+    process.kill(-child.pid, nearestSignal(signum))
     if (signum === 9) child.kill(signum)
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code

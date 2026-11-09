@@ -61,6 +61,6 @@ def rpc_cmd(
     else:
         path = None
     # Load the protocol server only for this CLI verb.
-    from mirage.server.rpc.relay import relay_stdio  # noqa: PLC0415
+    from mirage.server.rpc.relay import relay_stdio
 
     relay_workspace(path, workspace_id, session_id, "rpc", relay_stdio)

@@ -24,7 +24,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { constants, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import {
@@ -37,6 +37,8 @@ import {
   stopHostRun,
   runProgram,
   systemTimeEnv,
+  hostSignal,
+  mirageSignal,
 } from './program.ts'
 import { runWithSystemClock, ShiftedClock, SystemClock } from '@struktoai/mirage-core/utils/clock'
 import { FAKETIME_LIBRARIES } from '@struktoai/mirage-core/machine/constants'
@@ -620,6 +622,23 @@ const UNREAD_THEN_EXIT = [
 ].join('\n')
 const UNREAD_FOREVER = "import os\nos.write(1, b'x' * (1 << 20))"
 
+describe('host signals', () => {
+  it.each([
+    ['SIGKILL', 9],
+    ['SIGUSR1', 10],
+    ['SIGTERM', 15],
+    ['SIGCONT', 18],
+    ['SIGSTOP', 19],
+  ] as const)('numbers %s as this host does and back', (name, number) => {
+    expect(hostSignal(number)).toBe(constants.signals[name])
+    expect(mirageSignal(name)).toBe(number)
+  })
+
+  it('leaves 0 as it is', () => {
+    expect(hostSignal(0)).toBe(0)
+  })
+})
+
 describe('openProgramPipe', () => {
   it('keeps the tail of its stderr', async () => {
     const pipe = await openProgramPipe(process.execPath, [
@@ -709,6 +728,14 @@ describe('host runs', () => {
     const exited = runner.record.machinePid?.exited
     expect(typeof exited === 'number' && Math.abs(exited - Date.now() / 1000) < 5).toBe(true)
     expect((await runner.join()).exit).toBe(0)
+  })
+
+  it('ends a direct program though what it left holds its output', async () => {
+    const started = Date.now()
+    const ran = await runProgram('sh', null, ['-c', 'sleep 4 & echo out'], null, { direct: true })
+    expect(new TextDecoder().decode(ran.stdout)).toBe('out\n')
+    expect(ran.exitCode).toBe(0)
+    expect(Date.now() - started).toBeLessThan(3000)
   })
 
   // A program a lapsed workspace left on this host is stopped, its whole

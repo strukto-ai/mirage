@@ -14,6 +14,7 @@
 
 import asyncio
 import threading
+from concurrent.futures import Future
 
 import pytest
 
@@ -37,6 +38,28 @@ def _info() -> Process:
         machine=LOCAL_MACHINE,
         started_at=0.0,
     )
+
+
+@pytest.mark.asyncio
+async def test_a_program_hears_when_it_is_held_and_let_go():
+    handle = ProcessHandle(_info(), _exits_3, lambda _pid: None)
+    heard: list[bool] = []
+    forget = handle.on_hold(heard.append)
+    assert heard == []
+    handle.pauses[7] = Future()
+    handle.tell_held()
+    handle.tell_held()
+    assert heard == [True]
+    handle.pauses.clear()
+    handle.tell_held()
+    assert heard == [True, False]
+    handle.pauses[7] = Future()
+    handle.tell_held()
+    forget()
+    assert heard == [True, False, True, False]
+    late: list[bool] = []
+    handle.on_hold(late.append)
+    assert late == [True]
 
 
 async def _exits_3() -> int:
@@ -380,3 +403,14 @@ async def test_reap_answers_a_status_unless_the_host_stopped_the_runner():
     with pytest.raises(asyncio.CancelledError):
         await waiter
     assert (await waited.join()).exit == 137
+
+
+def test_a_deadline_names_term_and_lets_a_stopped_process_go():
+    handle = ProcessHandle(_info(), _exits_3, lambda _pid: None)
+    gate: Future[None] = Future()
+    handle.pauses[7] = gate
+    assert handle.paused and handle.interrupted is None
+    handle.expire()
+    assert not handle.paused and gate.done()
+    assert handle.interrupted == 15
+    assert handle.signal is None

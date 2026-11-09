@@ -19,6 +19,17 @@ import type { PipeWriter } from '../runtime/types.ts'
  * host over SFTP, `fuse` leaves them to the machine's own mirage, and
  * `both` serves from the host what the machine does not mount itself.
  */
+/**
+ * What a run has reported on its machine (`RUN_WRAPPER`): its program's pid
+ * and start in clock ticks, null until it starts, and its exit status, null
+ * until it exits. Mirrors Python's `RunStatus`.
+ */
+export interface RunStatus {
+  readonly pid: number | null
+  readonly started: number | null
+  readonly exitCode: number | null
+}
+
 export type MountType = 'ssh' | 'fuse' | 'both'
 
 /** A command a machine runs with its stdin and stdout held open. */

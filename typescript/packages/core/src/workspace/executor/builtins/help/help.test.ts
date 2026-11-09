@@ -67,7 +67,7 @@ describe('help', () => {
     expect(lines[5]).toBe('A star (*) next to a name means that this session may not run it.')
     const rows = lines.slice(7, -1)
     expect(rows.length).toBe(Math.floor((TOPICS.length + 1) / 2))
-    expect(rows[0]).toBe(`${' (( expression ))'.padEnd(40)} kill [-s sigspec | -n signum | -sigs>`)
+    expect(rows[0]).toBe(`${' (( expression ))'.padEnd(40)} jobs [-lnprs] [jobspec ...] or jobs >`)
     expect(Math.max(...rows.map((row) => row.length))).toBe(78)
   })
 
@@ -86,7 +86,7 @@ describe('help', () => {
     ['abc', 40],
   ])('reads COLUMNS=%s as a leading integer', async (columns, width) => {
     const first = (await run(`COLUMNS='${columns}' help`))[0].split('\n')[7] ?? ''
-    expect(first.startsWith(`${' (( expression ))'.padEnd(width)} kill `)).toBe(true)
+    expect(first.startsWith(`${' (( expression ))'.padEnd(width)} jobs `)).toBe(true)
   })
 
   it('stars a command the profile refuses', async () => {
@@ -206,6 +206,7 @@ describe('help', () => {
   })
 
   const SKIPPED = new Set([
+    'bg',
     'break',
     'continue',
     'exit',

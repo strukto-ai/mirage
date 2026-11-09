@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { CHECK_LINE, CHECK_MARK, PROCESS } from '../../machine/constants.ts'
+import { CHECK_LINE, CHECK_MARK } from '../../machine/constants.ts'
+import type * as machineConstants from '../../machine/constants.ts'
 import { MachineHandle } from '../../machine/handle.ts'
 import { MachineRuntime } from '../../runtime/machine/runtime.ts'
 import type { RunResult } from '../../runtime/types.ts'
@@ -22,10 +23,20 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { MachinePid } from '../types.ts'
 import type { ProcessTable } from '../process/table.ts'
+import { shownPid } from '../process/types.ts'
 import { MachineTable } from './table.ts'
 import type { MachineProcess } from './types.ts'
 
+vi.mock('../../machine/constants.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof machineConstants>()),
+  RUN_START_WAIT_SECONDS: 0.01,
+}))
+
 const DEC = new TextDecoder()
+
+function tagOf(argv: readonly string[]): string {
+  return (argv[5] ?? '').split('=')[1] ?? ''
+}
 
 class Box extends MachineHandle {
   static override readonly provider = 'box'
@@ -85,7 +96,7 @@ class Sleeper extends MachineHandle {
   rows: MachineProcess[] = []
   readonly sent: [string | MachinePid, number][] = []
   private end: () => void = () => undefined
-  private readonly ended = new Promise<void>((resolve) => {
+  private readonly stopped = new Promise<void>((resolve) => {
     this.end = resolve
   })
 
@@ -107,19 +118,19 @@ class Sleeper extends MachineHandle {
   protected override async execArgv(
     argv: readonly string[],
     _stdin: unknown,
-    env: Record<string, string>,
+    _env: Record<string, string>,
     _cwd: string,
     _output: unknown,
     _errors: unknown,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    const tag = env[PROCESS] ?? ''
+    const tag = tagOf(argv)
     this.rows = [
-      { tag, pid: this.base, ppid: 1, started: 100, args: argv.join(' ') },
+      { tag, pid: this.base, ppid: 1, started: 100, args: argv.slice(7).join(' ') },
       { tag, pid: this.base + 1, ppid: this.base, started: 101, args: 'train 2' },
     ]
     await Promise.race([
-      this.ended,
+      this.stopped,
       new Promise<void>((resolve) => {
         signal?.addEventListener('abort', () => {
           resolve()
@@ -128,6 +139,11 @@ class Sleeper extends MachineHandle {
     ])
     this.rows = []
     return { stdout: new Uint8Array(), stderr: null, exitCode: 143 }
+  }
+
+  override execLine(): Promise<RunResult> {
+    const stdout = new TextEncoder().encode(`${String(this.base)} 100\n`)
+    return Promise.resolve({ stdout, stderr: null, exitCode: 0 })
   }
 
   override status(workspace: string): Promise<MachineProcess[]> {
@@ -142,14 +158,17 @@ class Sleeper extends MachineHandle {
   }
 }
 
+/** A box whose runs report no pid, as when nothing could write there. */
+class Unreported extends Sleeper {
+  override execLine(): Promise<RunResult> {
+    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+  }
+}
+
 /** A box whose runs start a child and exit before any scan. */
 class Leaver extends Sleeper {
-  protected override execArgv(
-    _argv: readonly string[],
-    _stdin: unknown,
-    env: Record<string, string>,
-  ): Promise<RunResult> {
-    const tag = env[PROCESS] ?? ''
+  protected override execArgv(argv: readonly string[]): Promise<RunResult> {
+    const tag = tagOf(argv)
     this.rows = [{ tag, pid: this.base + 1, ppid: 1, started: 101, args: 'daemon' }]
     return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
   }
@@ -174,12 +193,8 @@ class Quitter extends Sleeper {
     this.quit()
   }
 
-  protected override async execArgv(
-    _argv: readonly string[],
-    _stdin: unknown,
-    env: Record<string, string>,
-  ): Promise<RunResult> {
-    this.rows = [{ tag: env[PROCESS] ?? '', pid: this.base, ppid: 1, started: 100, args: 'q' }]
+  protected override async execArgv(argv: readonly string[]): Promise<RunResult> {
+    this.rows = [{ tag: tagOf(argv), pid: this.base, ppid: 1, started: 100, args: 'q' }]
     await this.quitted
     this.rows = []
     return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
@@ -273,20 +288,21 @@ describe('MachineTable scans', () => {
       const pid = Number(DEC.decode((await ws.shell('train 1 & echo $!')).stdout))
       const shell = DEC.decode((await ws.shell('echo $$')).stdout).trim()
       await started(box)
-      const said = DEC.decode((await ws.shell('ps f -o pid,ppid,machine,mpid,cmd')).stdout)
+      const said = DEC.decode((await ws.shell('ps f -o pid,ppid,machine,cmd')).stdout)
       const rows = said
         .trimEnd()
         .split('\n')
         .map((line) => line.trim().split(/\s+/))
-      expect(rows[0]).toEqual(['PID', 'PPID', 'MACHINE', 'MPID', 'CMD'])
-      expect(rows.slice(1).map((row) => row.slice(1, 5))).toEqual([
-        ['0', '-', '-', 'ps'],
-        [shell, 'box:a', '412', '\\_'],
-        [String(pid), 'box:a', '413', '\\_'],
+      expect(pid).toBe(412)
+      expect(rows[0]).toEqual(['PID', 'PPID', 'MACHINE', 'CMD'])
+      expect(rows.slice(1).map((row) => row.slice(1, 4))).toEqual([
+        ['0', 'mirage', 'ps'],
+        [shell, 'box:a', '\\_'],
+        ['412', 'box:a', '\\_'],
       ])
-      expect(rows[2]?.[0]).toBe(String(pid))
-      const found = ws.processTable.records().at(-1)
-      expect([found?.runtime, found?.parent]).toEqual([null, pid])
+      expect([rows[2]?.[0], rows[3]?.[0]]).toEqual(['412', '413'])
+      const [program, found] = ws.processTable.records().slice(-2)
+      expect([found?.runtime, found?.parent]).toEqual([null, program?.id.pid])
       const killed = await ws.shell(`kill -USR1 413; kill -0 ${String(pid)}; echo $?`)
       expect(DEC.decode(killed.stdout)).toBe('0\n')
       expect(box.sent).toEqual([[{ pid: 413, started: 101, exited: null }, 10]])
@@ -301,7 +317,7 @@ describe('MachineTable scans', () => {
   })
 
   it('signals a program no scan placed by its tag', async () => {
-    const box = new Sleeper('a')
+    const box = new Unreported('a')
     const ws = sleepers({ a: box })
     try {
       const pid = DEC.decode((await ws.shell('train 1 & echo $!')).stdout).trim()
@@ -316,13 +332,14 @@ describe('MachineTable scans', () => {
 
   it('names by a machine pid the process whose program has it', async () => {
     const a = new Sleeper('a')
-    const b = new Sleeper('b', 500)
+    const b = new Sleeper('b')
     const ws = sleepers({ a, b })
     try {
       const pid = DEC.decode((await ws.shell('train 1 & echo $!')).stdout).trim()
       await started(a)
+      expect(pid).toBe('412')
       let said = await ws.shell('ps -p 412 -o pid=; kill -0 412; echo $?')
-      expect(DEC.decode(said.stdout).trim().split(/\s+/)).toEqual([pid, '0'])
+      expect(DEC.decode(said.stdout).trim().split(/\s+/)).toEqual(['412', '0'])
       ws.createSession('other')
       said = await ws.shell('kill -0 412', { sessionId: 'other' })
       expect(DEC.decode(said.stderr)).toBe('bash: line 1: kill: (412) - No such process\n')
@@ -333,10 +350,15 @@ describe('MachineTable scans', () => {
       ])
       await ws.shell('train 1 &', { machine: 'b' })
       await started(b)
-      b.rows = b.rows.slice(0, 1).map((row) => ({ ...row, pid: 412, started: 9, args: 'x' }))
       said = await ws.shell('kill 412')
       expect(said.exitCode).toBe(1)
       expect(DEC.decode(said.stderr)).toBe('bash: line 1: kill: 412: ambiguous job spec\n')
+      said = await ws.shell('wait 412')
+      expect(DEC.decode(said.stderr)).toBe('bash: line 1: wait: 412: ambiguous job spec\n')
+      expect((await ws.shell('kill -m a 412')).exitCode).toBe(0)
+      expect(a.sent.at(-1)).toEqual([{ pid: 412, started: 100, exited: null }, 15])
+      expect((await ws.shell('wait -m box:a 412')).exitCode).toBe(143)
+      expect(b.sent).toEqual([])
     } finally {
       a.finish()
       b.finish()
@@ -353,7 +375,7 @@ describe('MachineTable scans', () => {
       await ws.shell('ps')
       box.finish()
       await vi.waitFor(() => {
-        expect(ws.processTable.live().map((p) => p.record.id.pid)).not.toContain(pid)
+        expect(ws.processTable.live().map((p) => shownPid(p.record))).not.toContain(pid)
       })
       const said = await ws.shell('wait 412')
       expect([said.exitCode, DEC.decode(said.stderr)]).toEqual([143, ''])
@@ -389,7 +411,7 @@ describe('MachineTable scans', () => {
     const ws = sleepers({ a: box })
     try {
       expect((await ws.shell('train 1')).exitCode).toBe(0)
-      const said = await ws.shell('ps -o mpid=,args=')
+      const said = await ws.shell('ps -o pid=,args=')
       const rows = DEC.decode(said.stdout)
         .split('\n')
         .map((line) => line.trim().split(/\s+/))
@@ -410,7 +432,7 @@ describe('MachineTable scans', () => {
       expect((await old.shell('train 1')).exitCode).toBe(0)
       await ws.closeSession('agent')
       const reused = await ws.session('agent')
-      const said = await reused.shell('ps -o mpid=,args=')
+      const said = await reused.shell('ps -o pid=,args=')
       expect(DEC.decode(said.stdout)).not.toContain('daemon')
       expect((await reused.shell('kill 413')).exitCode).toBe(1)
     } finally {
@@ -443,7 +465,7 @@ describe('MachineTable scans', () => {
       await started(box)
       await ws.processTable.scan()
       const found = ws.processTable.records().find((record) => record.machinePid !== null)
-      await ws.processTable.sendGroup(found?.group ?? 0, 28)
+      await ws.processTable.signalGroup(found?.group ?? 0, 28)
       expect(box.sent.map(([target, signum]) => [(target as MachinePid).pid, signum])).toEqual([
         [412, 28],
         [413, 28],
@@ -460,9 +482,9 @@ describe('MachineTable scans', () => {
     try {
       await ws.shell('train 1 &')
       await started(box)
-      expect(DEC.decode((await ws.shell('ps -o mpid')).stdout)).toContain('413')
+      expect(DEC.decode((await ws.shell('ps -o pid')).stdout)).toContain('413')
       box.rows = box.rows.slice(0, 1)
-      expect(DEC.decode((await ws.shell('ps -o mpid')).stdout)).not.toContain('413')
+      expect(DEC.decode((await ws.shell('ps -o pid')).stdout)).not.toContain('413')
     } finally {
       box.finish()
       await ws.close()
@@ -483,7 +505,7 @@ describe('MachineTable scans', () => {
         ].sort(),
       )
       const said = await ws.shell('jobs')
-      expect(DEC.decode(said.stdout)).toBe('[1] running ( train 1; true )\n')
+      expect(DEC.decode(said.stdout)).toBe('[1]+  Running                 ( train 1; true ) &\n')
     } finally {
       box.finish()
       await ws.close()
@@ -508,7 +530,9 @@ describe('MachineTable scans', () => {
         [412, 28],
         [413, 28],
       ])
-      expect(DEC.decode((await ws.shell('jobs')).stdout)).toBe('[1] running train 1\n')
+      expect(DEC.decode((await ws.shell('jobs')).stdout)).toBe(
+        '[1]+  Running                 train 1 &\n',
+      )
     } finally {
       box.finish()
       await ws.close()
@@ -535,7 +559,7 @@ describe('MachineTable scans', () => {
     try {
       await ws.shell('timeout 30 train 1 &')
       await started(box)
-      const listed = DEC.decode((await ws.shell('ps -o pgid=,mpid=')).stdout)
+      const listed = DEC.decode((await ws.shell('ps -o pgid=,pid=')).stdout)
       const group = listed
         .split('\n')
         .map((line) => line.trim().split(/\s+/))
@@ -553,7 +577,7 @@ describe('MachineTable scans', () => {
     const ws = sleepers({ a: box })
     try {
       expect((await ws.shell('train 1')).exitCode).toBe(0)
-      const listed = DEC.decode((await ws.shell('ps -o pgid=,mpid=')).stdout)
+      const listed = DEC.decode((await ws.shell('ps -o pgid=,pid=')).stdout)
       const group = listed
         .split('\n')
         .map((line) => line.trim().split(/\s+/))
@@ -624,7 +648,9 @@ describe('MachineTable scans', () => {
         await vi.advanceTimersByTimeAsync(12_000)
         for (let left = 20; left > 0; left--) await turn()
         expect(done).toBe(false)
-        expect(new Set(box.sent.map(([, signum]) => signum))).toEqual(new Set([3]))
+        expect(new Set(box.sent.map(([, signum]) => signum))).toEqual(
+          new Set(how === '' ? [3, 18] : [3]),
+        )
         box.finish()
         vi.useRealTimers()
         expect((await run).exitCode).toBe(124)
@@ -654,7 +680,9 @@ describe('MachineTable scans', () => {
     try {
       const said = await ws.shell(`timeout ${how}-s WINCH 0.1 train 1`)
       expect(said.exitCode).toBe(124)
-      expect(new Set(box.sent.map(([, signum]) => signum))).toEqual(new Set([28]))
+      expect(new Set(box.sent.map(([, signum]) => signum))).toEqual(
+        new Set(how === '' ? [28, 18] : [28]),
+      )
     } finally {
       box.finish()
       await ws.close()
@@ -682,11 +710,11 @@ describe('MachineTable scans', () => {
       await ws.shell('train 2 &', { machine: 'b' })
       await started(a)
       await started(b)
-      const said = DEC.decode((await ws.shell('ps -o machine=,mpid=,args=')).stdout)
+      const said = DEC.decode((await ws.shell('ps -o machine=,pid=,args=')).stdout)
       const found = said
         .split('\n')
         .map((line) => line.trim().split(/\s+/).slice(0, 2))
-        .filter((row) => row.length === 2 && row[1] !== '-')
+        .filter((row) => row.length === 2 && row[0] !== 'mirage')
       expect(found.sort()).toEqual([
         ['box:a', '412'],
         ['box:a', '413'],

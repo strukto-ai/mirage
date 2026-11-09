@@ -59,7 +59,7 @@ def read_template(path: Path) -> dict[str, Any]:
     Returns:
         dict[str, Any]: its ``description`` and ``config``.
     """
-    from mirage.config import (  # noqa: PLC0415 - cold start
+    from mirage.config import (
         _absolutize_scripts,
     )
 

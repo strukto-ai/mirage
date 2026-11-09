@@ -1,0 +1,550 @@
+{
+  "cases": [
+    {
+      "id": "sees_its_own_numbers",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "ids": "import os\nprint(os.getpid(), os.getppid())\n",
+              "spin": "open('/ram/ready', 'w').close()\nwhile True:\n    pass\n",
+              "gap": "import time\nstart = time.monotonic()\nlast = start\nworst = 0.0\nopen('/ram/ready', 'w').close()\nwhile last - start < 4.0:\n    now = time.monotonic()\n    if now - last > worst:\n        worst = now - last\n    last = now\nprint('held' if worst > 1.0 else 'ran')\n",
+              "term": "import signal, sys, time\ndef handle(number, frame):\n    print('caught', number, flush=True)\n    sys.exit(7)\nsignal.signal(signal.SIGTERM, handle)\nsignal.signal(signal.SIGUSR1, handle)\nopen('/ram/ready', 'w').close()\nwhile True:\n    time.sleep(0.05)\n",
+              "ignore": "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nopen('/ram/ready', 'w').close()\ntime.sleep(2)\nprint('survived', flush=True)\n",
+              "waiter": "import signal, subprocess, sys\ndef handle(number, frame):\n    print('stopping', flush=True)\n    child.kill()\n    child.wait()\n    sys.exit(5)\nsignal.signal(signal.SIGTERM, handle)\nchild = subprocess.Popen(['sleep', '40'])\nopen('/ram/ready', 'w').close()\nchild.wait()\nprint('not reached', flush=True)\n",
+              "children": "import os, signal, subprocess, time\nchild = subprocess.Popen(['sleep', '40'])\nchild.send_signal(signal.SIGSTOP)\ntime.sleep(0.2)\nchild.send_signal(signal.SIGCONT)\nchild.send_signal(signal.SIGUSR1)\nprint(child.wait())\nchild = subprocess.Popen(['sleep', '40'])\nos.kill(child.pid, signal.SIGTERM)\nprint(child.wait())\ntry:\n    os.kill(4000000, 0)\nexcept ProcessLookupError:\n    print('no such process')\n",
+              "suicide": "import os, signal\nsignal.signal(signal.SIGUSR2, lambda number, frame: print('handled', number, flush=True))\nos.kill(os.getpid(), signal.SIGUSR2)\nsignal.raise_signal(signal.SIGUSR2)\nos.kill(os.getpid(), 0)\nos.kill(os.getpid(), signal.SIGTERM)\nprint('not reached', flush=True)\n",
+              "reader": "import sys\nopen('/ram/ready', 'w').close()\nprint(len(sys.stdin.read()))\n",
+              "catches": "import time\nopen('/ram/ready', 'w').close()\ntry:\n    while True:\n        time.sleep(0.05)\nexcept BaseException as error:\n    print('caught', type(error).__name__, flush=True)\n    raise\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /ram/ids > /ram/out & p=$!; wait $p; [ \"$(cat /ram/out)\" = \"$p $$\" ] && echo same",
+          "expect": {
+            "exit": 0,
+            "stdout": "same\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "term_ends_a_program_without_a_word",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "ids": "import os\nprint(os.getpid(), os.getppid())\n",
+              "spin": "open('/ram/ready', 'w').close()\nwhile True:\n    pass\n",
+              "gap": "import time\nstart = time.monotonic()\nlast = start\nworst = 0.0\nopen('/ram/ready', 'w').close()\nwhile last - start < 4.0:\n    now = time.monotonic()\n    if now - last > worst:\n        worst = now - last\n    last = now\nprint('held' if worst > 1.0 else 'ran')\n",
+              "term": "import signal, sys, time\ndef handle(number, frame):\n    print('caught', number, flush=True)\n    sys.exit(7)\nsignal.signal(signal.SIGTERM, handle)\nsignal.signal(signal.SIGUSR1, handle)\nopen('/ram/ready', 'w').close()\nwhile True:\n    time.sleep(0.05)\n",
+              "ignore": "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nopen('/ram/ready', 'w').close()\ntime.sleep(2)\nprint('survived', flush=True)\n",
+              "waiter": "import signal, subprocess, sys\ndef handle(number, frame):\n    print('stopping', flush=True)\n    child.kill()\n    child.wait()\n    sys.exit(5)\nsignal.signal(signal.SIGTERM, handle)\nchild = subprocess.Popen(['sleep', '40'])\nopen('/ram/ready', 'w').close()\nchild.wait()\nprint('not reached', flush=True)\n",
+              "children": "import os, signal, subprocess, time\nchild = subprocess.Popen(['sleep', '40'])\nchild.send_signal(signal.SIGSTOP)\ntime.sleep(0.2)\nchild.send_signal(signal.SIGCONT)\nchild.send_signal(signal.SIGUSR1)\nprint(child.wait())\nchild = subprocess.Popen(['sleep', '40'])\nos.kill(child.pid, signal.SIGTERM)\nprint(child.wait())\ntry:\n    os.kill(4000000, 0)\nexcept ProcessLookupError:\n    print('no such process')\n",
+              "suicide": "import os, signal\nsignal.signal(signal.SIGUSR2, lambda number, frame: print('handled', number, flush=True))\nos.kill(os.getpid(), signal.SIGUSR2)\nsignal.raise_signal(signal.SIGUSR2)\nos.kill(os.getpid(), 0)\nos.kill(os.getpid(), signal.SIGTERM)\nprint('not reached', flush=True)\n",
+              "reader": "import sys\nopen('/ram/ready', 'w').close()\nprint(len(sys.stdin.read()))\n",
+              "catches": "import time\nopen('/ram/ready', 'w').close()\ntry:\n    while True:\n        time.sleep(0.05)\nexcept BaseException as error:\n    print('caught', type(error).__name__, flush=True)\n    raise\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /ram/spin & p=$!; until [ -e /ram/ready ]; do sleep 0.05; done; kill $p; wait $p; echo $?; ps -p $p -o pid= | wc -l",
+          "expect": {
+            "exit": 0,
+            "stdout": "143\n0\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "kill_ends_a_program_that_catches_everything",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "ids": "import os\nprint(os.getpid(), os.getppid())\n",
+              "spin": "open('/ram/ready', 'w').close()\nwhile True:\n    pass\n",
+              "gap": "import time\nstart = time.monotonic()\nlast = start\nworst = 0.0\nopen('/ram/ready', 'w').close()\nwhile last - start < 4.0:\n    now = time.monotonic()\n    if now - last > worst:\n        worst = now - last\n    last = now\nprint('held' if worst > 1.0 else 'ran')\n",
+              "term": "import signal, sys, time\ndef handle(number, frame):\n    print('caught', number, flush=True)\n    sys.exit(7)\nsignal.signal(signal.SIGTERM, handle)\nsignal.signal(signal.SIGUSR1, handle)\nopen('/ram/ready', 'w').close()\nwhile True:\n    time.sleep(0.05)\n",
+              "ignore": "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nopen('/ram/ready', 'w').close()\ntime.sleep(2)\nprint('survived', flush=True)\n",
+              "waiter": "import signal, subprocess, sys\ndef handle(number, frame):\n    print('stopping', flush=True)\n    child.kill()\n    child.wait()\n    sys.exit(5)\nsignal.signal(signal.SIGTERM, handle)\nchild = subprocess.Popen(['sleep', '40'])\nopen('/ram/ready', 'w').close()\nchild.wait()\nprint('not reached', flush=True)\n",
+              "children": "import os, signal, subprocess, time\nchild = subprocess.Popen(['sleep', '40'])\nchild.send_signal(signal.SIGSTOP)\ntime.sleep(0.2)\nchild.send_signal(signal.SIGCONT)\nchild.send_signal(signal.SIGUSR1)\nprint(child.wait())\nchild = subprocess.Popen(['sleep', '40'])\nos.kill(child.pid, signal.SIGTERM)\nprint(child.wait())\ntry:\n    os.kill(4000000, 0)\nexcept ProcessLookupError:\n    print('no such process')\n",
+              "suicide": "import os, signal\nsignal.signal(signal.SIGUSR2, lambda number, frame: print('handled', number, flush=True))\nos.kill(os.getpid(), signal.SIGUSR2)\nsignal.raise_signal(signal.SIGUSR2)\nos.kill(os.getpid(), 0)\nos.kill(os.getpid(), signal.SIGTERM)\nprint('not reached', flush=True)\n",
+              "reader": "import sys\nopen('/ram/ready', 'w').close()\nprint(len(sys.stdin.read()))\n",
+              "catches": "import time\nopen('/ram/ready', 'w').close()\ntry:\n    while True:\n        time.sleep(0.05)\nexcept BaseException as error:\n    print('caught', type(error).__name__, flush=True)\n    raise\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /ram/catches 2>/dev/null & p=$!; until [ -e /ram/ready ]; do sleep 0.05; done; kill -9 $p; wait $p 2>/dev/null; echo $?",
+          "expect": {
+            "exit": 0,
+            "stdout": "137\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_handler_runs_and_sets_the_status",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "ids": "import os\nprint(os.getpid(), os.getppid())\n",
+              "spin": "open('/ram/ready', 'w').close()\nwhile True:\n    pass\n",
+              "gap": "import time\nstart = time.monotonic()\nlast = start\nworst = 0.0\nopen('/ram/ready', 'w').close()\nwhile last - start < 4.0:\n    now = time.monotonic()\n    if now - last > worst:\n        worst = now - last\n    last = now\nprint('held' if worst > 1.0 else 'ran')\n",
+              "term": "import signal, sys, time\ndef handle(number, frame):\n    print('caught', number, flush=True)\n    sys.exit(7)\nsignal.signal(signal.SIGTERM, handle)\nsignal.signal(signal.SIGUSR1, handle)\nopen('/ram/ready', 'w').close()\nwhile True:\n    time.sleep(0.05)\n",
+              "ignore": "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nopen('/ram/ready', 'w').close()\ntime.sleep(2)\nprint('survived', flush=True)\n",
+              "waiter": "import signal, subprocess, sys\ndef handle(number, frame):\n    print('stopping', flush=True)\n    child.kill()\n    child.wait()\n    sys.exit(5)\nsignal.signal(signal.SIGTERM, handle)\nchild = subprocess.Popen(['sleep', '40'])\nopen('/ram/ready', 'w').close()\nchild.wait()\nprint('not reached', flush=True)\n",
+              "children": "import os, signal, subprocess, time\nchild = subprocess.Popen(['sleep', '40'])\nchild.send_signal(signal.SIGSTOP)\ntime.sleep(0.2)\nchild.send_signal(signal.SIGCONT)\nchild.send_signal(signal.SIGUSR1)\nprint(child.wait())\nchild = subprocess.Popen(['sleep', '40'])\nos.kill(child.pid, signal.SIGTERM)\nprint(child.wait())\ntry:\n    os.kill(4000000, 0)\nexcept ProcessLookupError:\n    print('no such process')\n",
+              "suicide": "import os, signal\nsignal.signal(signal.SIGUSR2, lambda number, frame: print('handled', number, flush=True))\nos.kill(os.getpid(), signal.SIGUSR2)\nsignal.raise_signal(signal.SIGUSR2)\nos.kill(os.getpid(), 0)\nos.kill(os.getpid(), signal.SIGTERM)\nprint('not reached', flush=True)\n",
+              "reader": "import sys\nopen('/ram/ready', 'w').close()\nprint(len(sys.stdin.read()))\n",
+              "catches": "import time\nopen('/ram/ready', 'w').close()\ntry:\n    while True:\n        time.sleep(0.05)\nexcept BaseException as error:\n    print('caught', type(error).__name__, flush=True)\n    raise\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /ram/term & p=$!; until [ -e /ram/ready ]; do sleep 0.05; done; kill $p; wait $p; echo $?",
+          "expect": {
+            "exit": 0,
+            "stdout": "caught 15\n7\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_handler_takes_usr1",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "ids": "import os\nprint(os.getpid(), os.getppid())\n",
+              "spin": "open('/ram/ready', 'w').close()\nwhile True:\n    pass\n",
+              "gap": "import time\nstart = time.monotonic()\nlast = start\nworst = 0.0\nopen('/ram/ready', 'w').close()\nwhile last - start < 4.0:\n    now = time.monotonic()\n    if now - last > worst:\n        worst = now - last\n    last = now\nprint('held' if worst > 1.0 else 'ran')\n",
+              "term": "import signal, sys, time\ndef handle(number, frame):\n    print('caught', number, flush=True)\n    sys.exit(7)\nsignal.signal(signal.SIGTERM, handle)\nsignal.signal(signal.SIGUSR1, handle)\nopen('/ram/ready', 'w').close()\nwhile True:\n    time.sleep(0.05)\n",
+              "ignore": "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nopen('/ram/ready', 'w').close()\ntime.sleep(2)\nprint('survived', flush=True)\n",
+              "waiter": "import signal, subprocess, sys\ndef handle(number, frame):\n    print('stopping', flush=True)\n    child.kill()\n    child.wait()\n    sys.exit(5)\nsignal.signal(signal.SIGTERM, handle)\nchild = subprocess.Popen(['sleep', '40'])\nopen('/ram/ready', 'w').close()\nchild.wait()\nprint('not reached', flush=True)\n",
+              "children": "import os, signal, subprocess, time\nchild = subprocess.Popen(['sleep', '40'])\nchild.send_signal(signal.SIGSTOP)\ntime.sleep(0.2)\nchild.send_signal(signal.SIGCONT)\nchild.send_signal(signal.SIGUSR1)\nprint(child.wait())\nchild = subprocess.Popen(['sleep', '40'])\nos.kill(child.pid, signal.SIGTERM)\nprint(child.wait())\ntry:\n    os.kill(4000000, 0)\nexcept ProcessLookupError:\n    print('no such process')\n",
+              "suicide": "import os, signal\nsignal.signal(signal.SIGUSR2, lambda number, frame: print('handled', number, flush=True))\nos.kill(os.getpid(), signal.SIGUSR2)\nsignal.raise_signal(signal.SIGUSR2)\nos.kill(os.getpid(), 0)\nos.kill(os.getpid(), signal.SIGTERM)\nprint('not reached', flush=True)\n",
+              "reader": "import sys\nopen('/ram/ready', 'w').close()\nprint(len(sys.stdin.read()))\n",
+              "catches": "import time\nopen('/ram/ready', 'w').close()\ntry:\n    while True:\n        time.sleep(0.05)\nexcept BaseException as error:\n    print('caught', type(error).__name__, flush=True)\n    raise\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /ram/term & p=$!; until [ -e /ram/ready ]; do sleep 0.05; done; kill -USR1 $p; wait $p; echo $?",
+          "expect": {
+            "exit": 0,
+            "stdout": "caught 10\n7\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "an_ignored_signal_changes_nothing",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "ids": "import os\nprint(os.getpid(), os.getppid())\n",
+              "spin": "open('/ram/ready', 'w').close()\nwhile True:\n    pass\n",
+              "gap": "import time\nstart = time.monotonic()\nlast = start\nworst = 0.0\nopen('/ram/ready', 'w').close()\nwhile last - start < 4.0:\n    now = time.monotonic()\n    if now - last > worst:\n        worst = now - last\n    last = now\nprint('held' if worst > 1.0 else 'ran')\n",
+              "term": "import signal, sys, time\ndef handle(number, frame):\n    print('caught', number, flush=True)\n    sys.exit(7)\nsignal.signal(signal.SIGTERM, handle)\nsignal.signal(signal.SIGUSR1, handle)\nopen('/ram/ready', 'w').close()\nwhile True:\n    time.sleep(0.05)\n",
+              "ignore": "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nopen('/ram/ready', 'w').close()\ntime.sleep(2)\nprint('survived', flush=True)\n",
+              "waiter": "import signal, subprocess, sys\ndef handle(number, frame):\n    print('stopping', flush=True)\n    child.kill()\n    child.wait()\n    sys.exit(5)\nsignal.signal(signal.SIGTERM, handle)\nchild = subprocess.Popen(['sleep', '40'])\nopen('/ram/ready', 'w').close()\nchild.wait()\nprint('not reached', flush=True)\n",
+              "children": "import os, signal, subprocess, time\nchild = subprocess.Popen(['sleep', '40'])\nchild.send_signal(signal.SIGSTOP)\ntime.sleep(0.2)\nchild.send_signal(signal.SIGCONT)\nchild.send_signal(signal.SIGUSR1)\nprint(child.wait())\nchild = subprocess.Popen(['sleep', '40'])\nos.kill(child.pid, signal.SIGTERM)\nprint(child.wait())\ntry:\n    os.kill(4000000, 0)\nexcept ProcessLookupError:\n    print('no such process')\n",
+              "suicide": "import os, signal\nsignal.signal(signal.SIGUSR2, lambda number, frame: print('handled', number, flush=True))\nos.kill(os.getpid(), signal.SIGUSR2)\nsignal.raise_signal(signal.SIGUSR2)\nos.kill(os.getpid(), 0)\nos.kill(os.getpid(), signal.SIGTERM)\nprint('not reached', flush=True)\n",
+              "reader": "import sys\nopen('/ram/ready', 'w').close()\nprint(len(sys.stdin.read()))\n",
+              "catches": "import time\nopen('/ram/ready', 'w').close()\ntry:\n    while True:\n        time.sleep(0.05)\nexcept BaseException as error:\n    print('caught', type(error).__name__, flush=True)\n    raise\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /ram/ignore & p=$!; until [ -e /ram/ready ]; do sleep 0.05; done; kill $p; wait $p; echo $?",
+          "expect": {
+            "exit": 0,
+            "stdout": "survived\n0\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "stop_holds_a_busy_loop",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "ids": "import os\nprint(os.getpid(), os.getppid())\n",
+              "spin": "open('/ram/ready', 'w').close()\nwhile True:\n    pass\n",
+              "gap": "import time\nstart = time.monotonic()\nlast = start\nworst = 0.0\nopen('/ram/ready', 'w').close()\nwhile last - start < 4.0:\n    now = time.monotonic()\n    if now - last > worst:\n        worst = now - last\n    last = now\nprint('held' if worst > 1.0 else 'ran')\n",
+              "term": "import signal, sys, time\ndef handle(number, frame):\n    print('caught', number, flush=True)\n    sys.exit(7)\nsignal.signal(signal.SIGTERM, handle)\nsignal.signal(signal.SIGUSR1, handle)\nopen('/ram/ready', 'w').close()\nwhile True:\n    time.sleep(0.05)\n",
+              "ignore": "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nopen('/ram/ready', 'w').close()\ntime.sleep(2)\nprint('survived', flush=True)\n",
+              "waiter": "import signal, subprocess, sys\ndef handle(number, frame):\n    print('stopping', flush=True)\n    child.kill()\n    child.wait()\n    sys.exit(5)\nsignal.signal(signal.SIGTERM, handle)\nchild = subprocess.Popen(['sleep', '40'])\nopen('/ram/ready', 'w').close()\nchild.wait()\nprint('not reached', flush=True)\n",
+              "children": "import os, signal, subprocess, time\nchild = subprocess.Popen(['sleep', '40'])\nchild.send_signal(signal.SIGSTOP)\ntime.sleep(0.2)\nchild.send_signal(signal.SIGCONT)\nchild.send_signal(signal.SIGUSR1)\nprint(child.wait())\nchild = subprocess.Popen(['sleep', '40'])\nos.kill(child.pid, signal.SIGTERM)\nprint(child.wait())\ntry:\n    os.kill(4000000, 0)\nexcept ProcessLookupError:\n    print('no such process')\n",
+              "suicide": "import os, signal\nsignal.signal(signal.SIGUSR2, lambda number, frame: print('handled', number, flush=True))\nos.kill(os.getpid(), signal.SIGUSR2)\nsignal.raise_signal(signal.SIGUSR2)\nos.kill(os.getpid(), 0)\nos.kill(os.getpid(), signal.SIGTERM)\nprint('not reached', flush=True)\n",
+              "reader": "import sys\nopen('/ram/ready', 'w').close()\nprint(len(sys.stdin.read()))\n",
+              "catches": "import time\nopen('/ram/ready', 'w').close()\ntry:\n    while True:\n        time.sleep(0.05)\nexcept BaseException as error:\n    print('caught', type(error).__name__, flush=True)\n    raise\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /ram/gap > /ram/out & p=$!; until [ -e /ram/ready ]; do sleep 0.05; done; kill -STOP $p; sleep 0.2; ps -o stat= -p $p | cut -c1; sleep 1.5; kill -CONT $p; wait $p; echo $?; cat /ram/out",
+          "expect": {
+            "exit": 0,
+            "stdout": "T\n0\nheld\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "term_waits_for_cont",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "ids": "import os\nprint(os.getpid(), os.getppid())\n",
+              "spin": "open('/ram/ready', 'w').close()\nwhile True:\n    pass\n",
+              "gap": "import time\nstart = time.monotonic()\nlast = start\nworst = 0.0\nopen('/ram/ready', 'w').close()\nwhile last - start < 4.0:\n    now = time.monotonic()\n    if now - last > worst:\n        worst = now - last\n    last = now\nprint('held' if worst > 1.0 else 'ran')\n",
+              "term": "import signal, sys, time\ndef handle(number, frame):\n    print('caught', number, flush=True)\n    sys.exit(7)\nsignal.signal(signal.SIGTERM, handle)\nsignal.signal(signal.SIGUSR1, handle)\nopen('/ram/ready', 'w').close()\nwhile True:\n    time.sleep(0.05)\n",
+              "ignore": "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nopen('/ram/ready', 'w').close()\ntime.sleep(2)\nprint('survived', flush=True)\n",
+              "waiter": "import signal, subprocess, sys\ndef handle(number, frame):\n    print('stopping', flush=True)\n    child.kill()\n    child.wait()\n    sys.exit(5)\nsignal.signal(signal.SIGTERM, handle)\nchild = subprocess.Popen(['sleep', '40'])\nopen('/ram/ready', 'w').close()\nchild.wait()\nprint('not reached', flush=True)\n",
+              "children": "import os, signal, subprocess, time\nchild = subprocess.Popen(['sleep', '40'])\nchild.send_signal(signal.SIGSTOP)\ntime.sleep(0.2)\nchild.send_signal(signal.SIGCONT)\nchild.send_signal(signal.SIGUSR1)\nprint(child.wait())\nchild = subprocess.Popen(['sleep', '40'])\nos.kill(child.pid, signal.SIGTERM)\nprint(child.wait())\ntry:\n    os.kill(4000000, 0)\nexcept ProcessLookupError:\n    print('no such process')\n",
+              "suicide": "import os, signal\nsignal.signal(signal.SIGUSR2, lambda number, frame: print('handled', number, flush=True))\nos.kill(os.getpid(), signal.SIGUSR2)\nsignal.raise_signal(signal.SIGUSR2)\nos.kill(os.getpid(), 0)\nos.kill(os.getpid(), signal.SIGTERM)\nprint('not reached', flush=True)\n",
+              "reader": "import sys\nopen('/ram/ready', 'w').close()\nprint(len(sys.stdin.read()))\n",
+              "catches": "import time\nopen('/ram/ready', 'w').close()\ntry:\n    while True:\n        time.sleep(0.05)\nexcept BaseException as error:\n    print('caught', type(error).__name__, flush=True)\n    raise\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /ram/spin & p=$!; until [ -e /ram/ready ]; do sleep 0.05; done; kill -STOP $p; kill $p; sleep 0.2; ps -o stat= -p $p | cut -c1; kill -CONT $p; wait $p; echo $?",
+          "expect": {
+            "exit": 0,
+            "stdout": "T\n143\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "kill_ends_a_stopped_program",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "ids": "import os\nprint(os.getpid(), os.getppid())\n",
+              "spin": "open('/ram/ready', 'w').close()\nwhile True:\n    pass\n",
+              "gap": "import time\nstart = time.monotonic()\nlast = start\nworst = 0.0\nopen('/ram/ready', 'w').close()\nwhile last - start < 4.0:\n    now = time.monotonic()\n    if now - last > worst:\n        worst = now - last\n    last = now\nprint('held' if worst > 1.0 else 'ran')\n",
+              "term": "import signal, sys, time\ndef handle(number, frame):\n    print('caught', number, flush=True)\n    sys.exit(7)\nsignal.signal(signal.SIGTERM, handle)\nsignal.signal(signal.SIGUSR1, handle)\nopen('/ram/ready', 'w').close()\nwhile True:\n    time.sleep(0.05)\n",
+              "ignore": "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nopen('/ram/ready', 'w').close()\ntime.sleep(2)\nprint('survived', flush=True)\n",
+              "waiter": "import signal, subprocess, sys\ndef handle(number, frame):\n    print('stopping', flush=True)\n    child.kill()\n    child.wait()\n    sys.exit(5)\nsignal.signal(signal.SIGTERM, handle)\nchild = subprocess.Popen(['sleep', '40'])\nopen('/ram/ready', 'w').close()\nchild.wait()\nprint('not reached', flush=True)\n",
+              "children": "import os, signal, subprocess, time\nchild = subprocess.Popen(['sleep', '40'])\nchild.send_signal(signal.SIGSTOP)\ntime.sleep(0.2)\nchild.send_signal(signal.SIGCONT)\nchild.send_signal(signal.SIGUSR1)\nprint(child.wait())\nchild = subprocess.Popen(['sleep', '40'])\nos.kill(child.pid, signal.SIGTERM)\nprint(child.wait())\ntry:\n    os.kill(4000000, 0)\nexcept ProcessLookupError:\n    print('no such process')\n",
+              "suicide": "import os, signal\nsignal.signal(signal.SIGUSR2, lambda number, frame: print('handled', number, flush=True))\nos.kill(os.getpid(), signal.SIGUSR2)\nsignal.raise_signal(signal.SIGUSR2)\nos.kill(os.getpid(), 0)\nos.kill(os.getpid(), signal.SIGTERM)\nprint('not reached', flush=True)\n",
+              "reader": "import sys\nopen('/ram/ready', 'w').close()\nprint(len(sys.stdin.read()))\n",
+              "catches": "import time\nopen('/ram/ready', 'w').close()\ntry:\n    while True:\n        time.sleep(0.05)\nexcept BaseException as error:\n    print('caught', type(error).__name__, flush=True)\n    raise\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /ram/spin 2>/dev/null & p=$!; until [ -e /ram/ready ]; do sleep 0.05; done; kill -STOP $p; kill -9 $p; wait $p 2>/dev/null; echo $?",
+          "expect": {
+            "exit": 0,
+            "stdout": "137\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_handler_runs_while_the_program_waits_for_a_child",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "ids": "import os\nprint(os.getpid(), os.getppid())\n",
+              "spin": "open('/ram/ready', 'w').close()\nwhile True:\n    pass\n",
+              "gap": "import time\nstart = time.monotonic()\nlast = start\nworst = 0.0\nopen('/ram/ready', 'w').close()\nwhile last - start < 4.0:\n    now = time.monotonic()\n    if now - last > worst:\n        worst = now - last\n    last = now\nprint('held' if worst > 1.0 else 'ran')\n",
+              "term": "import signal, sys, time\ndef handle(number, frame):\n    print('caught', number, flush=True)\n    sys.exit(7)\nsignal.signal(signal.SIGTERM, handle)\nsignal.signal(signal.SIGUSR1, handle)\nopen('/ram/ready', 'w').close()\nwhile True:\n    time.sleep(0.05)\n",
+              "ignore": "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nopen('/ram/ready', 'w').close()\ntime.sleep(2)\nprint('survived', flush=True)\n",
+              "waiter": "import signal, subprocess, sys\ndef handle(number, frame):\n    print('stopping', flush=True)\n    child.kill()\n    child.wait()\n    sys.exit(5)\nsignal.signal(signal.SIGTERM, handle)\nchild = subprocess.Popen(['sleep', '40'])\nopen('/ram/ready', 'w').close()\nchild.wait()\nprint('not reached', flush=True)\n",
+              "children": "import os, signal, subprocess, time\nchild = subprocess.Popen(['sleep', '40'])\nchild.send_signal(signal.SIGSTOP)\ntime.sleep(0.2)\nchild.send_signal(signal.SIGCONT)\nchild.send_signal(signal.SIGUSR1)\nprint(child.wait())\nchild = subprocess.Popen(['sleep', '40'])\nos.kill(child.pid, signal.SIGTERM)\nprint(child.wait())\ntry:\n    os.kill(4000000, 0)\nexcept ProcessLookupError:\n    print('no such process')\n",
+              "suicide": "import os, signal\nsignal.signal(signal.SIGUSR2, lambda number, frame: print('handled', number, flush=True))\nos.kill(os.getpid(), signal.SIGUSR2)\nsignal.raise_signal(signal.SIGUSR2)\nos.kill(os.getpid(), 0)\nos.kill(os.getpid(), signal.SIGTERM)\nprint('not reached', flush=True)\n",
+              "reader": "import sys\nopen('/ram/ready', 'w').close()\nprint(len(sys.stdin.read()))\n",
+              "catches": "import time\nopen('/ram/ready', 'w').close()\ntry:\n    while True:\n        time.sleep(0.05)\nexcept BaseException as error:\n    print('caught', type(error).__name__, flush=True)\n    raise\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /ram/waiter & p=$!; until [ -e /ram/ready ]; do sleep 0.05; done; kill $p; wait $p; echo $?",
+          "expect": {
+            "exit": 0,
+            "stdout": "stopping\n5\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_term_reaches_a_program_waiting_for_input",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "ids": "import os\nprint(os.getpid(), os.getppid())\n",
+              "spin": "open('/ram/ready', 'w').close()\nwhile True:\n    pass\n",
+              "gap": "import time\nstart = time.monotonic()\nlast = start\nworst = 0.0\nopen('/ram/ready', 'w').close()\nwhile last - start < 4.0:\n    now = time.monotonic()\n    if now - last > worst:\n        worst = now - last\n    last = now\nprint('held' if worst > 1.0 else 'ran')\n",
+              "term": "import signal, sys, time\ndef handle(number, frame):\n    print('caught', number, flush=True)\n    sys.exit(7)\nsignal.signal(signal.SIGTERM, handle)\nsignal.signal(signal.SIGUSR1, handle)\nopen('/ram/ready', 'w').close()\nwhile True:\n    time.sleep(0.05)\n",
+              "ignore": "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nopen('/ram/ready', 'w').close()\ntime.sleep(2)\nprint('survived', flush=True)\n",
+              "waiter": "import signal, subprocess, sys\ndef handle(number, frame):\n    print('stopping', flush=True)\n    child.kill()\n    child.wait()\n    sys.exit(5)\nsignal.signal(signal.SIGTERM, handle)\nchild = subprocess.Popen(['sleep', '40'])\nopen('/ram/ready', 'w').close()\nchild.wait()\nprint('not reached', flush=True)\n",
+              "children": "import os, signal, subprocess, time\nchild = subprocess.Popen(['sleep', '40'])\nchild.send_signal(signal.SIGSTOP)\ntime.sleep(0.2)\nchild.send_signal(signal.SIGCONT)\nchild.send_signal(signal.SIGUSR1)\nprint(child.wait())\nchild = subprocess.Popen(['sleep', '40'])\nos.kill(child.pid, signal.SIGTERM)\nprint(child.wait())\ntry:\n    os.kill(4000000, 0)\nexcept ProcessLookupError:\n    print('no such process')\n",
+              "suicide": "import os, signal\nsignal.signal(signal.SIGUSR2, lambda number, frame: print('handled', number, flush=True))\nos.kill(os.getpid(), signal.SIGUSR2)\nsignal.raise_signal(signal.SIGUSR2)\nos.kill(os.getpid(), 0)\nos.kill(os.getpid(), signal.SIGTERM)\nprint('not reached', flush=True)\n",
+              "reader": "import sys\nopen('/ram/ready', 'w').close()\nprint(len(sys.stdin.read()))\n",
+              "catches": "import time\nopen('/ram/ready', 'w').close()\ntry:\n    while True:\n        time.sleep(0.05)\nexcept BaseException as error:\n    print('caught', type(error).__name__, flush=True)\n    raise\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "sleep 30 | python3 /ram/reader & p=$!; until [ -e /ram/ready ]; do sleep 0.05; done; kill $p; wait $p; echo $?",
+          "expect": {
+            "exit": 0,
+            "stdout": "143\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_program_signals_its_children",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "ids": "import os\nprint(os.getpid(), os.getppid())\n",
+              "spin": "open('/ram/ready', 'w').close()\nwhile True:\n    pass\n",
+              "gap": "import time\nstart = time.monotonic()\nlast = start\nworst = 0.0\nopen('/ram/ready', 'w').close()\nwhile last - start < 4.0:\n    now = time.monotonic()\n    if now - last > worst:\n        worst = now - last\n    last = now\nprint('held' if worst > 1.0 else 'ran')\n",
+              "term": "import signal, sys, time\ndef handle(number, frame):\n    print('caught', number, flush=True)\n    sys.exit(7)\nsignal.signal(signal.SIGTERM, handle)\nsignal.signal(signal.SIGUSR1, handle)\nopen('/ram/ready', 'w').close()\nwhile True:\n    time.sleep(0.05)\n",
+              "ignore": "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nopen('/ram/ready', 'w').close()\ntime.sleep(2)\nprint('survived', flush=True)\n",
+              "waiter": "import signal, subprocess, sys\ndef handle(number, frame):\n    print('stopping', flush=True)\n    child.kill()\n    child.wait()\n    sys.exit(5)\nsignal.signal(signal.SIGTERM, handle)\nchild = subprocess.Popen(['sleep', '40'])\nopen('/ram/ready', 'w').close()\nchild.wait()\nprint('not reached', flush=True)\n",
+              "children": "import os, signal, subprocess, time\nchild = subprocess.Popen(['sleep', '40'])\nchild.send_signal(signal.SIGSTOP)\ntime.sleep(0.2)\nchild.send_signal(signal.SIGCONT)\nchild.send_signal(signal.SIGUSR1)\nprint(child.wait())\nchild = subprocess.Popen(['sleep', '40'])\nos.kill(child.pid, signal.SIGTERM)\nprint(child.wait())\ntry:\n    os.kill(4000000, 0)\nexcept ProcessLookupError:\n    print('no such process')\n",
+              "suicide": "import os, signal\nsignal.signal(signal.SIGUSR2, lambda number, frame: print('handled', number, flush=True))\nos.kill(os.getpid(), signal.SIGUSR2)\nsignal.raise_signal(signal.SIGUSR2)\nos.kill(os.getpid(), 0)\nos.kill(os.getpid(), signal.SIGTERM)\nprint('not reached', flush=True)\n",
+              "reader": "import sys\nopen('/ram/ready', 'w').close()\nprint(len(sys.stdin.read()))\n",
+              "catches": "import time\nopen('/ram/ready', 'w').close()\ntry:\n    while True:\n        time.sleep(0.05)\nexcept BaseException as error:\n    print('caught', type(error).__name__, flush=True)\n    raise\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /ram/children",
+          "expect": {
+            "exit": 0,
+            "stdout": "-10\n-15\nno such process\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_program_signals_itself",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "ids": "import os\nprint(os.getpid(), os.getppid())\n",
+              "spin": "open('/ram/ready', 'w').close()\nwhile True:\n    pass\n",
+              "gap": "import time\nstart = time.monotonic()\nlast = start\nworst = 0.0\nopen('/ram/ready', 'w').close()\nwhile last - start < 4.0:\n    now = time.monotonic()\n    if now - last > worst:\n        worst = now - last\n    last = now\nprint('held' if worst > 1.0 else 'ran')\n",
+              "term": "import signal, sys, time\ndef handle(number, frame):\n    print('caught', number, flush=True)\n    sys.exit(7)\nsignal.signal(signal.SIGTERM, handle)\nsignal.signal(signal.SIGUSR1, handle)\nopen('/ram/ready', 'w').close()\nwhile True:\n    time.sleep(0.05)\n",
+              "ignore": "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nopen('/ram/ready', 'w').close()\ntime.sleep(2)\nprint('survived', flush=True)\n",
+              "waiter": "import signal, subprocess, sys\ndef handle(number, frame):\n    print('stopping', flush=True)\n    child.kill()\n    child.wait()\n    sys.exit(5)\nsignal.signal(signal.SIGTERM, handle)\nchild = subprocess.Popen(['sleep', '40'])\nopen('/ram/ready', 'w').close()\nchild.wait()\nprint('not reached', flush=True)\n",
+              "children": "import os, signal, subprocess, time\nchild = subprocess.Popen(['sleep', '40'])\nchild.send_signal(signal.SIGSTOP)\ntime.sleep(0.2)\nchild.send_signal(signal.SIGCONT)\nchild.send_signal(signal.SIGUSR1)\nprint(child.wait())\nchild = subprocess.Popen(['sleep', '40'])\nos.kill(child.pid, signal.SIGTERM)\nprint(child.wait())\ntry:\n    os.kill(4000000, 0)\nexcept ProcessLookupError:\n    print('no such process')\n",
+              "suicide": "import os, signal\nsignal.signal(signal.SIGUSR2, lambda number, frame: print('handled', number, flush=True))\nos.kill(os.getpid(), signal.SIGUSR2)\nsignal.raise_signal(signal.SIGUSR2)\nos.kill(os.getpid(), 0)\nos.kill(os.getpid(), signal.SIGTERM)\nprint('not reached', flush=True)\n",
+              "reader": "import sys\nopen('/ram/ready', 'w').close()\nprint(len(sys.stdin.read()))\n",
+              "catches": "import time\nopen('/ram/ready', 'w').close()\ntry:\n    while True:\n        time.sleep(0.05)\nexcept BaseException as error:\n    print('caught', type(error).__name__, flush=True)\n    raise\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /ram/suicide; echo $?",
+          "expect": {
+            "exit": 0,
+            "stdout": "handled 12\nhandled 12\n143\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "timeout_gives_a_handler_its_term",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "ids": "import os\nprint(os.getpid(), os.getppid())\n",
+              "spin": "open('/ram/ready', 'w').close()\nwhile True:\n    pass\n",
+              "gap": "import time\nstart = time.monotonic()\nlast = start\nworst = 0.0\nopen('/ram/ready', 'w').close()\nwhile last - start < 4.0:\n    now = time.monotonic()\n    if now - last > worst:\n        worst = now - last\n    last = now\nprint('held' if worst > 1.0 else 'ran')\n",
+              "term": "import signal, sys, time\ndef handle(number, frame):\n    print('caught', number, flush=True)\n    sys.exit(7)\nsignal.signal(signal.SIGTERM, handle)\nsignal.signal(signal.SIGUSR1, handle)\nopen('/ram/ready', 'w').close()\nwhile True:\n    time.sleep(0.05)\n",
+              "ignore": "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nopen('/ram/ready', 'w').close()\ntime.sleep(2)\nprint('survived', flush=True)\n",
+              "waiter": "import signal, subprocess, sys\ndef handle(number, frame):\n    print('stopping', flush=True)\n    child.kill()\n    child.wait()\n    sys.exit(5)\nsignal.signal(signal.SIGTERM, handle)\nchild = subprocess.Popen(['sleep', '40'])\nopen('/ram/ready', 'w').close()\nchild.wait()\nprint('not reached', flush=True)\n",
+              "children": "import os, signal, subprocess, time\nchild = subprocess.Popen(['sleep', '40'])\nchild.send_signal(signal.SIGSTOP)\ntime.sleep(0.2)\nchild.send_signal(signal.SIGCONT)\nchild.send_signal(signal.SIGUSR1)\nprint(child.wait())\nchild = subprocess.Popen(['sleep', '40'])\nos.kill(child.pid, signal.SIGTERM)\nprint(child.wait())\ntry:\n    os.kill(4000000, 0)\nexcept ProcessLookupError:\n    print('no such process')\n",
+              "suicide": "import os, signal\nsignal.signal(signal.SIGUSR2, lambda number, frame: print('handled', number, flush=True))\nos.kill(os.getpid(), signal.SIGUSR2)\nsignal.raise_signal(signal.SIGUSR2)\nos.kill(os.getpid(), 0)\nos.kill(os.getpid(), signal.SIGTERM)\nprint('not reached', flush=True)\n",
+              "reader": "import sys\nopen('/ram/ready', 'w').close()\nprint(len(sys.stdin.read()))\n",
+              "catches": "import time\nopen('/ram/ready', 'w').close()\ntry:\n    while True:\n        time.sleep(0.05)\nexcept BaseException as error:\n    print('caught', type(error).__name__, flush=True)\n    raise\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "timeout 6 python3 /ram/term; echo $?",
+          "expect": {
+            "exit": 0,
+            "stdout": "caught 15\n124\n",
+            "stderr": ""
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -39,7 +39,7 @@ from mirage.commands.spec.types import (
     UsageStyle,
 )
 from mirage.errors.types import FsCondition
-from mirage.execution.process.view import ProcessView
+from mirage.execution.process.session import SessionProcesses
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, CommandOutput
@@ -292,7 +292,7 @@ class CLIContext:
     entries: list[Runtime[Any]] | None = None
     vfs: Files | None = None
     session: SessionView | None = None
-    processes: ProcessView | None = None
+    processes: SessionProcesses | None = None
     routing: RouteDecision[RuntimeIdentity] | None = None
     settle: Callable[[Runtime[Any]], Awaitable[None]] | None = None
     ids: IdSource = field(default_factory=SystemIdSource)

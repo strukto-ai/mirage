@@ -52,7 +52,7 @@ def resolve_config(path: Path) -> dict[str, Any]:
     compiler-set ``mount`` field, which the document grammar refuses
     as never typed).
     """
-    from mirage.config import load_config  # noqa: PLC0415 - cold start
+    from mirage.config import load_config
 
     try:
         load_config(path)
@@ -72,7 +72,7 @@ def _load_config_argument(path: Path) -> dict[str, Any]:
     the config module the same way so a spawn that loads no config
     never pays for it.
     """
-    from mirage.config import (  # noqa: PLC0415 - cold start
+    from mirage.config import (
         _absolutize_scripts,
         _interpolate_env,
     )
@@ -99,7 +99,7 @@ def load_profile_argument(path: Path) -> dict[str, Any]:
     Args:
         path (Path): the profile document.
     """
-    from mirage.config import (  # noqa: PLC0415 - cold start
+    from mirage.config import (
         _absolutize_scripts,
         _interpolate_env,
     )

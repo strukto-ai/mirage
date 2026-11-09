@@ -101,7 +101,7 @@ def mcp_cmd(
     else:
         path = None
     # Load the protocol server only for this CLI verb.
-    from mirage.server.mcp.relay import relay_stdio  # noqa: PLC0415
+    from mirage.server.mcp.relay import relay_stdio
 
     relay_workspace(
         path, workspace_id, session_id, "mcp", relay_stdio, all_calls

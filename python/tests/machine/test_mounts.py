@@ -40,6 +40,7 @@ from mirage.machine.constants import (
     MOUNT_GUARD,
     PIPE_SERVER_HINT,
     SSHFS_OPTIONS,
+    is_run,
 )
 from mirage.machine.handle import MachineHandle
 from mirage.machine.mixin import PipeTransportMixin
@@ -106,6 +107,8 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
         return None
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        if is_run(argv):
+            argv = argv[7:]
         if argv[2:3] == (MOUNT_GUARD,):
             checked = await self.run_guard(argv)
             if checked.exit_code != 0:

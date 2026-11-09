@@ -20,9 +20,13 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
-from mirage.machine.constants import PROCESS
+from mirage.machine.constants import (
+    EXEC_PRELUDE,
+    run_argv,
+    run_status_path,
+)
 from mirage.machine.microsandbox import MicrosandboxMachine
-from mirage.machine.microsandbox.constants import TAGGED_PRELUDE
+from mirage.machine.microsandbox.constants import own_session
 from mirage.machine.registry import build_machine
 from mirage.runtime.machine import MachineRuntime
 from mirage.runtime.types import RunResult
@@ -156,11 +160,12 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch, stdin, stream):
                 "--",
                 "/bin/sh",
                 "-c",
-                TAGGED_PRELUDE,
+                EXEC_PRELUDE,
                 "sh",
                 "/work",
-                f"{PROCESS}=run",
-                *words,
+                *own_session(
+                    run_argv("run", run_status_path("run"), (), words)
+                ),
             ],
             stdin,
         ),

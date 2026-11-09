@@ -21,14 +21,10 @@ from mirage.context import (
 from mirage.execution.job import JobHandle, JobTable
 from mirage.execution.process.constants import FIRST_PID
 from mirage.execution.process.types import ProcessState
-from mirage.execution.process.view import ProcessView
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
-from mirage.shell.constants import (
-    SIGSTOP,
-    SIGTERM,
-)
+from mirage.shell.constants import SIGTERM
 from mirage.shell.signals import (
     listed_signal,
     signal_number,
@@ -38,13 +34,13 @@ from mirage.shell.voice import shell_voice
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import MAX_PID_OPERAND
 from mirage.workspace.executor.builtins.jobspec import (
-    job_numbered,
+    grants_of,
+    job_of_spec,
     job_result,
     machine_process,
-    process_view,
+    on_machine,
     session_of,
 )
-from mirage.workspace.executor.builtins.kill.constants import KEPT_SIGNALS
 from mirage.workspace.executor.builtins.shared import builtin_usage
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
@@ -98,10 +94,9 @@ def _kill_pid(jobs: list[JobHandle], operand: str) -> tuple[int | None, str]:
     if operand == "":
         return None, "`': not a pid or valid job spec"
     if operand.startswith("%"):
-        raw = operand[1:]
-        job = job_numbered(jobs, int(raw)) if raw.isdigit() else None
+        job, refusal = job_of_spec(jobs, operand)
         if job is None:
-            return None, f"{operand}: no such job"
+            return None, refusal
         if job.process is None:
             return None, f"({job.pid}) - No such process"
         return job.pid, ""
@@ -124,10 +119,8 @@ async def handle_kill(
     """Signal managed runners with bash's kill surface.
 
     The signal comes from ``-s``/``-n``, or from the first ``-sigspec``;
-    ``0`` probes, a program on a machine gets any other as sent (it ends
-    when it exits), a signal a process takes and goes on (``KEPT_SIGNALS``)
-    leaves every other runner as it is, and every other runner is
-    cancelled with the rest. A
+    ``0`` probes, and each process does what the signal does
+    (``ProcessTable.signal``). A
     number under ``FIRST_PID`` is a machine pid (``machine_process``).
     Every
     operand is tried and each failure is named in bash's words; the
@@ -148,6 +141,7 @@ async def handle_kill(
     signal = SIGTERM
     words = parts[1:]
     saw_signal = False
+    machine: str | None = None
     voice = shell_voice() if session is None else session_voice(session)
     if words[:1] in (["-l"], ["-L"]):
         return _kill_list(cmd_str, words[1:], voice)
@@ -161,6 +155,15 @@ async def handle_kill(
                     1,
                 )
             spec, words = words[1], words[2:]
+        elif word == "-m":
+            if len(words) < 2:
+                return job_result(
+                    cmd_str,
+                    f"{voice}kill: -m: option requires an argument\n",
+                    1,
+                )
+            machine, words = words[1], words[2:]
+            continue
         elif word == "--":
             words = words[1:]
             break
@@ -181,68 +184,69 @@ async def handle_kill(
                 f"{voice}kill: {spec}: invalid signal specification\n",
                 1,
             )
-        if number == SIGSTOP:
-            return job_result(
-                cmd_str, f"{voice}kill: {spec}: not supported\n", 1
-            )
         signal, saw_signal = number, True
     if not words:
         return job_result(cmd_str, builtin_usage("kill"), 2)
-    processes = process_view(job_table, session)
+    processes = job_table.processes
     errors: list[str] = []
     signalled = False
     await job_table.sync(sid)
     for operand in words:
         jobs = job_table.list_jobs(sid)
         pid, refusal = _kill_pid(jobs, operand)
+        shown = {job.pid: job.shown_pid for job in jobs}
         if pid is not None and 0 < pid < FIRST_PID and operand.isdigit():
-            found_process, ambiguous = await machine_process(processes, pid)
+            found_process, ambiguous = await machine_process(
+                processes, session, pid, machine
+            )
             if ambiguous:
                 errors.append(f"{voice}kill: {operand}: ambiguous job spec")
                 continue
             pid = found_process.pid if found_process is not None else None
             refusal = f"({operand}) - No such process"
+        elif pid is not None and -FIRST_PID < pid < 0:
+            leader, ambiguous = await machine_process(
+                processes, session, -pid, machine
+            )
+            if ambiguous:
+                errors.append(f"{voice}kill: {operand}: ambiguous job spec")
+                continue
+            pid = -leader.group if leader is not None else None
+            refusal = f"({operand}) - No such process"
+        elif pid is not None and pid > 0 and machine is not None:
+            await processes.scan()
+            if not any(
+                info.pid == pid and on_machine(info, machine)
+                for info in processes.visible(sid, grants_of(session))
+            ):
+                refusal = f"({operand}) - No such process"
+                pid = None
         if pid is None:
             errors.append(f"{voice}kill: {refusal}")
             continue
         if operand.startswith("-"):
             try:
                 found = await _kill_group(
-                    job_table, processes, jobs, -pid, signal, sid
+                    job_table, session, jobs, -pid, signal
                 )
             except PermissionError:
                 errors.append(
-                    f"{voice}kill: ({pid}) - Operation not permitted"
+                    f"{voice}kill: ({operand}) - Operation not permitted"
                 )
                 continue
             if not found:
-                errors.append(f"{voice}kill: ({pid}) - No such process")
+                errors.append(f"{voice}kill: ({operand}) - No such process")
                 continue
             signalled = True
             continue
+        named = operand if operand.isdigit() else shown.get(pid, pid)
         try:
-            if signal in KEPT_SIGNALS:
-                kept = None if signal == 0 else processes.send(pid, signal)
-                found = processes.probe(pid) if kept is None else await kept
-            elif (sending := processes.send(pid, signal)) is not None:
-                found = await sending
-            else:
-                found = processes.terminate(pid, signal)
-                job = next(
-                    (
-                        j
-                        for j in jobs
-                        if j.process is not None and j.pid == pid
-                    ),
-                    None,
-                )
-                if found and job is not None:
-                    await job_table.kill(job.id, sid, signal)
+            found = await _signal_one(job_table, session, jobs, pid, signal)
         except PermissionError:
-            errors.append(f"{voice}kill: ({pid}) - Operation not permitted")
+            errors.append(f"{voice}kill: ({named}) - Operation not permitted")
             continue
         if not found:
-            errors.append(f"{voice}kill: ({pid}) - No such process")
+            errors.append(f"{voice}kill: ({named}) - No such process")
             continue
         signalled = True
     runner = current_caller().process
@@ -256,50 +260,80 @@ async def handle_kill(
     return None, IOResult(exit_code=code, stderr=err or None), node
 
 
-async def _kill_group(
+async def _signal_one(
     job_table: JobTable,
-    processes: ProcessView,
+    session: SessionState | None,
     jobs: list[JobHandle],
-    group: int,
+    pid: int,
     signal: int,
-    session_id: str,
 ) -> bool:
-    """Signal a process group as killpg(2) does, its jobs Mirage stops
-    recorded as killed by the signal; a program on a machine gets it as
-    sent, a kept signal (``KEPT_SIGNALS``) too, which leaves Mirage's own
-    runners as they are.
+    """Signal one process the session may reach (``ProcessTable.signal``),
+    its job recorded as killed if that stopped it.
 
     Args:
         job_table (JobTable): the session's jobs.
-        processes (ProcessView): the session's view of the runners.
+        session (SessionState | None): the shell session, if any.
         jobs (list[JobHandle]): the jobs the builtin can see.
-        group (int): the group.
-        signal (int): the signal; a kept one probes.
-        session_id (str): the calling session.
+        pid (int): the process, by Mirage's own number for it.
+        signal (int): the signal.
 
     Returns:
-        bool: whether the group had a runner the view sees; for a kept
-        signal, one of Mirage's own or a program that took it.
+        bool: whether the process was there to signal.
     """
-    if signal in KEPT_SIGNALS:
-        if signal == 0 or not processes.probe_group(group):
-            return processes.probe_group(group)
-        await processes.scan()
-        sending = [
-            processes.send(record.pid, signal)
-            for record in processes.list()
-            if record.group == group
-        ]
-        sent = await asyncio.gather(*(s for s in sending if s is not None))
-        return any(s is None for s in sending) or any(sent)
-    if not processes.probe_group(group):
+    processes = job_table.processes
+    sid = session_of(session)
+    handle = processes.target(pid, sid, grants_of(session))
+    if handle is None:
         return False
-    found = await processes.signal_group(group, signal)
+    found = await processes.signal(handle, signal)
+    job = next(
+        (j for j in jobs if j.process is not None and j.pid == pid), None
+    )
+    if (
+        found
+        and job is not None
+        and handle.record.state == ProcessState.STOPPING
+    ):
+        await job_table.kill(job.id, sid, handle.signal or signal)
+    return found
+
+
+async def _kill_group(
+    job_table: JobTable,
+    session: SessionState | None,
+    jobs: list[JobHandle],
+    group: int,
+    signal: int,
+) -> bool:
+    """Signal a process group the session may reach as killpg(2) does,
+    its jobs Mirage stops recorded as killed by the signal.
+
+    Args:
+        job_table (JobTable): the session's jobs.
+        session (SessionState | None): the shell session, if any.
+        jobs (list[JobHandle]): the jobs the builtin can see.
+        group (int): the group.
+        signal (int): the signal; 0 only probes.
+
+    Returns:
+        bool: whether the group had a runner the session sees.
+    """
+    processes = job_table.processes
+    sid = session_of(session)
+    granted = grants_of(session)
+    if processes.group(group, sid, granted) is None:
+        return False
+    if signal == 0:
+        return True
+    await processes.scan()
+    await processes.signal_members(
+        processes.group(group, sid, granted) or [], signal
+    )
     for job in jobs:
         if (
             job.process is not None
             and job.process.record.group == group
             and job.process.record.state == ProcessState.STOPPING
         ):
-            await job_table.kill(job.id, session_id, signal)
-    return found
+            await job_table.kill(job.id, sid, job.process.signal or signal)
+    return True

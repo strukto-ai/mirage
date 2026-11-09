@@ -14,10 +14,11 @@
 
 import { UNKNOWN_NAME } from '../../../../commands/builtin/utils/identity.ts'
 import { gnuStrftime } from '../../../../commands/builtin/utils/strftime.ts'
-import type { RedirectResult } from '../../../../context/session_context.ts'
+import { currentCaller, type RedirectResult } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { Process } from '../../../../execution/process/types.ts'
+import { shownMachine, shownPid, type Process } from '../../../../execution/process/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { ProcessId } from '../../../../execution/types.ts'
 import type { JobTable } from '../../../../execution/job/index.ts'
 import { systemNow } from '../../../../utils/clock.ts'
 import { LOCAL_ZONE, zoneFromEnv } from '../../../../utils/timezone.ts'
@@ -25,9 +26,8 @@ import type { SessionView } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { MAX_PID_OPERAND } from '../constants.ts'
-import { jobResult, processView, sessionOf } from '../jobspec.ts'
+import { grantsOf, jobResult, sessionOf } from '../jobspec.ts'
 import * as constants from './constants.ts'
-import { FIRST_PID } from '../../../../execution/process/constants.ts'
 import type { PsContext, PsOptions } from './types.ts'
 
 /** One `-p` list, refused in procps's words. */
@@ -164,28 +164,37 @@ function started(fact: string, info: Process, ctx: PsContext): string {
  * the session's profile, names in the id columns too, as `id` does, and `-`
  * where nobody claimed one or the runner is another session's, whose profile
  * this one cannot name. A runner of the calling session belongs to the
- * session `$$` leads; another session's to its own group. The machine
- * columns name the machine a program runs on and its pid there, `-` for a
- * process that is Mirage's own. `branch` is what a forest draws before its
+ * session `$$` leads; another session's to its own group. The machine column
+ * names the machine a program runs on, `mirage` for a process that is
+ * Mirage's own, and each pid column shows what the agent knows it by: a
+ * program's pid on its machine. `branch` is what a forest draws before its
  * command.
  */
 function psCell(key: string, info: Process, ctx: PsContext, branch: string): string {
   const fact = constants.COLUMNS[key]?.[3] ?? ''
   const fixed = constants.FIXED[fact]
   if (fixed !== undefined) return fixed
-  if (fact === 'machine')
-    return info.runtime !== null || info.machinePid !== null ? info.machine.toString() : '-'
-  if (fact === 'mpid') return info.machinePid !== null ? String(info.machinePid.pid) : '-'
+  if (fact === 'machine') return shownMachine(info)
   const session =
     info.sessionId === ctx.sessionId && ctx.shellPid !== null
       ? ctx.shellPid
       : info.group || info.id.pid
-  if (fact === 'pid') return String(info.id.pid)
-  if (fact === 'ppid') return info.parent ? String(info.parent) : '0'
-  if (fact === 'pgid') return String(info.group || info.id.pid)
-  if (fact === 'sid') return String(session)
+  if (fact === 'pid') return String(shownPid(info))
+  // What outlives its parent is init's, as on any machine.
+  if (fact === 'ppid') {
+    if (info.parent) return String(ctx.shown.get(info.parent) ?? 1)
+    return info.machinePid !== null ? '1' : '0'
+  }
+  if (fact === 'pgid') {
+    const group = info.group || info.id.pid
+    return String(ctx.shown.get(group) ?? group)
+  }
+  if (fact === 'sid') return String(ctx.shown.get(session) ?? session)
   if (fact === 'stat' || fact === 'state') {
-    return constants.STATES[info.state] + (fact === 'stat' && info.id.pid === session ? 's' : '')
+    const state =
+      info.shownState ??
+      (info.id.pid === ctx.running && info.state === 'running' ? 'R' : constants.STATES[info.state])
+    return state + (fact === 'stat' && info.id.pid === session ? 's' : '')
   }
   if (fact === 'comm') {
     const head = info.command.split(/\s+/).find((w) => w !== '') ?? ''
@@ -206,6 +215,44 @@ function psCell(key: string, info: Process, ctx: PsContext, branch: string): str
  * siblings by pid, a process whose parent is not listed a root; each with
  * what goes before its command. Mirrors Python's `_forest`.
  */
+/**
+ * The processes as bash runs them. A background pipeline's stages are its
+ * shell's children, with nothing between them, and `ps` is a program of its
+ * own: run last on a line, the shell replaced itself with it; run before more
+ * of the line, it is the shell's child. Answers the processes to list and the
+ * one to show running. Mirrors Python's `_as_bash_runs_them`.
+ */
+function asBashRunsThem(
+  listed: readonly Process[],
+  own: string,
+  running: Process | null,
+  nextPid: number,
+): [readonly Process[], Process | null] {
+  const jobs = new Map(
+    listed
+      .filter((info) => (info.stages?.length ?? 0) > 0)
+      .map((info) => [info.id.pid, info.parent]),
+  )
+  const rows = listed
+    .filter((info) => (info.stages?.length ?? 0) === 0)
+    .map((info) => {
+      const above = info.parent === null ? undefined : jobs.get(info.parent)
+      return above === undefined ? info : { ...info, parent: above }
+    })
+  if (running === null || !/[;&|\n]/.test(running.command)) return [rows, running]
+  if (running.command.replace(/["']/g, '').trimEnd().endsWith(own)) {
+    const shown = { ...running, command: own }
+    return [rows.map((row) => (row.id.pid === shown.id.pid ? shown : row)), shown]
+  }
+  const child = {
+    ...running,
+    id: new ProcessId(running.id.workspaceId, nextPid),
+    parent: running.id.pid,
+    command: own,
+  }
+  return [[...rows, child], child]
+}
+
 function forest(rows: readonly Process[]): [Process, string][] {
   const listed = new Set(rows.map((info) => info.id.pid))
   const children = new Map<number | null, Process[]>()
@@ -229,12 +276,12 @@ function forest(rows: readonly Process[]): [Process, string][] {
 /**
  * List processes with procps's selection and `-o` columns. The machines are
  * scanned first, so what a program started there shows as processes of its
- * own. Without `-o` the columns are `PID MACHINE MPID CMD`
+ * own. Without `-o` the columns are `PID MACHINE CMD`
  * (`constants.PLAIN`); `-o` lays out procps-ng 4.0.4's columns, every key a
- * process can answer (`constants.COLUMNS`), `machine` and `mpid` among them;
+ * process can answer (`constants.COLUMNS`), `machine` among them;
  * a header row prints unless every header is empty. BSD `f` and `--forest`
- * draw each command under its parent's. A `-p` number under `FIRST_PID` is
- * a machine pid. Selecting nothing (`-p` of an absent PID) exits 1, as
+ * draw each command under its parent's. A `-p` number is a pid as `ps` shows
+ * it. Selecting nothing (`-p` of an absent PID) exits 1, as
  * procps does, and an option error is procps's message and usage. A process
  * has no CPU, RSS or TTY accounting, and ps never broadens the profile's
  * view.
@@ -256,20 +303,15 @@ export async function handlePs(
     return jobResult(cmdStr, `error: ${(err as Error).message}\n${constants.USAGE}`, 1)
   }
   const sid = sessionOf(session)
-  const processes = processView(jobTable, session)
-  await processes.scan()
+  await jobTable.processes.scan()
   const every = options.all || options.pids.size === 0
-  const rows = processes
-    .list()
-    .filter(
-      (info) =>
-        every ||
-        options.pids.has(info.id.pid) ||
-        (info.machinePid !== null &&
-          info.machinePid.exited == null &&
-          info.machinePid.pid < FIRST_PID &&
-          options.pids.has(info.machinePid.pid)),
-    )
+  const [listed, running] = asBashRunsThem(
+    jobTable.processes.visible(sid, grantsOf(session)),
+    cmdStr,
+    currentCaller().process?.record ?? null,
+    jobTable.processes.lastPid + 1,
+  )
+  const rows = listed.filter((info) => every || options.pids.has(shownPid(info)))
   const columns = options.columns.length > 0 ? options.columns : constants.PLAIN
   const keys = columns.map(([key]) => key)
   const ctx: PsContext = {
@@ -278,6 +320,8 @@ export async function handlePs(
     group: session?.profile ?? null,
     sessionId: sid,
     shellPid: session?.shellPid ?? null,
+    running: running?.id.pid ?? null,
+    shown: new Map(listed.map((info) => [info.id.pid, shownPid(info)])),
   }
   const drawn: [Process, string][] = options.forest
     ? forest(rows)

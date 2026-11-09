@@ -241,7 +241,7 @@ describe('man', () => {
       .trimEnd()
       .split('\n')
       .map((line) => line.split(' ')[0])
-    expect(names).toEqual(['disown', 'fg', 'jobs', 'kill', 'wait'])
+    expect(names).toEqual(['bg', 'disown', 'fg', 'jobs', 'kill', 'wait'])
     expect((await man(['-k', 'zzzz'], mkRegistry())).code).toBe(16)
   })
 

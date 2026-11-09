@@ -91,8 +91,8 @@ def shell_cmd(
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
         # Imported here, so other commands load no stream code.
-        from mirage.cli.stream import stream_shell  # noqa: PLC0415
-        from mirage.shell.constants import (  # noqa: PLC0415
+        from mirage.cli.stream import stream_shell
+        from mirage.shell.constants import (
             INTERRUPTED_STATUS,
             SIGPIPE_STATUS,
         )

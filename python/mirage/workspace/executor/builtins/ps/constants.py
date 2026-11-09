@@ -120,17 +120,14 @@ COLUMNS: dict[str, tuple[str, int, bool, str]] = {
     "nwchan": ("WCHAN", 6, True, "dash"),
     "label": ("LABEL", 31, False, "dash"),
     "machine": ("MACHINE", 31, False, "machine"),
-    "mpid": ("MPID", 7, True, "mpid"),
 }
 
 
-# What ps prints without -o: each process's pid, the machine its program
-# runs on with that program's pid there (``-`` for Mirage's own), and
-# its command.
+# What ps prints without -o: each process's pid, the machine it runs on
+# (``mirage`` for Mirage's own) and its command.
 PLAIN = (
     ("pid", "PID"),
     ("machine", "MACHINE"),
-    ("mpid", "MPID"),
     ("cmd", "CMD"),
 )
 
@@ -159,11 +156,12 @@ FIXED = {
 }
 
 
-# A runner's state letter: live, being cancelled (still unwinding), or
-# exited and not yet reaped.
+# A runner's state letter: live and waiting, being cancelled (still
+# unwinding), or exited and not yet reaped. The one running ps is ``R``,
+# and one paused or on a machine shows what it is doing.
 STATES = {
-    ProcessState.RUNNING: "R",
-    ProcessState.STOPPING: "R",
+    ProcessState.RUNNING: "S",
+    ProcessState.STOPPING: "S",
     ProcessState.EXITED: "Z",
 }
 

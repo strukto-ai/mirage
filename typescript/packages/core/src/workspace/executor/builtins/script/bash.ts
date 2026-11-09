@@ -33,7 +33,7 @@ import { ExitSignal } from '../../../../shell/errors.ts'
 import type { JobTable } from '../../../../execution/job/index.ts'
 import { parseOptionWord } from '../../../../shell/options.ts'
 import { EvaluationContext } from '../../../evaluation.ts'
-import { setPositionalParams } from '../../../session/state.ts'
+import { seedParent, setPositionalParams } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { ended } from '../../control.ts'
 import { reportReaped, startShell } from '../../background.ts'
@@ -272,10 +272,12 @@ export async function handleBash(
     const runner = currentCaller().process
     if (runner !== null) {
       session.shellPid = runner.record.id.pid
+      seedParent(session, runner.record.parent ?? 0)
       if (jobTable !== undefined) context.frame.shell = runner
     }
     io = await run()
   } else {
+    seedParent(session, parentPid ?? 0)
     io = await inProcess(jobTable, context, caller, parentPid, label, run)
   }
   return [io.stdout, io, new ExecutionNode({ command: label, exitCode: io.exitCode })]

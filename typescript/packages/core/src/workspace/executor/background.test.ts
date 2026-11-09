@@ -77,7 +77,9 @@ describe('& inside a compound body', () => {
   it('leaves loop-body jobs running when the loop ends', async () => {
     const ws = buildWs()
     const io = await ws.shell('for i in 1 2; do sleep 0.3 & done; jobs')
-    expect(stdoutStr(io)).toBe('[1] running sleep 0.3\n[2] running sleep 0.3\n')
+    expect(stdoutStr(io)).toBe(
+      '[1]-  Running                 sleep 0.3 &\n[2]+  Running                 sleep 0.3 &\n',
+    )
     await ws.shell('wait')
     expect(stdoutStr(await ws.shell('jobs'))).toBe('')
   })
@@ -331,7 +333,7 @@ describe('job builtins honor the process profile', () => {
       })
       expect(io.exitCode).toBe(254)
       expect(stdoutStr(await ws.shell('echo $n; jobs', { sessionId: 'capped' }))).toBe(
-        '2\n[1] running sleep 30\n[2] running sleep 30\n',
+        '2\n[1]-  Running                 sleep 30 &\n[2]+  Running                 sleep 30 &\n',
       )
     } finally {
       await ws.close()
@@ -523,4 +525,140 @@ it("releases a never-run job's readers before its mounts close", async () => {
   }
   expect(order).toContain('released')
   expect(order.at(-1)).toBe('closed')
+})
+
+describe('a job as bash runs it', () => {
+  const build = (): Workspace =>
+    new Workspace({ '/m': [new RAMVFS(), MountMode.WRITE] }, { mode: MountMode.WRITE })
+
+  it('is its stages when it is a pipeline', async () => {
+    const ws = build()
+    try {
+      const said = await ws.shell(
+        'sleep 30 | cat & echo $!; echo $$; ps -o pid=,ppid=,cmd=; jobs -l; jobs -p',
+      )
+      const [last = '', shell = '', ...rest] = stdoutStr(said).trimEnd().split('\n')
+      const first = String(Number(last) - 1)
+      const rows = rest.slice(0, 4).map((line) => line.trim().split(/\s+/))
+      expect(rows.slice(1, 3)).toEqual([
+        [first, shell, 'sleep', '30'],
+        [last, shell, 'cat'],
+      ])
+      expect(rest.slice(4)).toEqual([
+        `[1]+ ${first} Running                 sleep 30`,
+        `     ${last}                       | cat &`,
+        first,
+      ])
+      expect(stdoutStr(await ws.shell(`kill ${last}; wait ${last}; echo $?; jobs`))).toBe('143\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('answers for the pipeline under pipefail when its last stage is waited for', async () => {
+    const ws = build()
+    try {
+      const io = await ws.shell("set -o pipefail; sh -c 'exit 4' | sleep 0.1 & wait $!; echo $?")
+      expect(stdoutStr(io)).toBe('4\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('answers a second wait for a pid with its status', async () => {
+    const ws = build()
+    try {
+      const io = await ws.shell("sh -c 'exit 3' & p=$!; wait $p; echo $?; wait $p; echo $?")
+      expect(stdoutStr(io)).toBe('3\n3\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('names jobs by the specs bash takes', async () => {
+    const ws = build()
+    try {
+      await ws.shell('sleep 30 & sleep 31 &')
+      const one = '[1]-  Running                 sleep 30 &\n'
+      const two = '[2]+  Running                 sleep 31 &\n'
+      expect(
+        stdoutStr(await ws.shell("jobs %%; jobs %+; jobs %; jobs %-; jobs '%sleep 30'; jobs %?31")),
+      ).toBe(two.repeat(3) + one.repeat(2) + two)
+      const refused = await ws.shell('jobs %sleep; echo $?; kill %nope; echo $?')
+      expect(stdoutStr(refused)).toBe('1\n1\n')
+      expect(new TextDecoder().decode(refused.stderr)).toBe(
+        'bash: line 1: jobs: sleep: ambiguous job spec\n' +
+          'bash: line 1: jobs: %sleep: no such job\n' +
+          'bash: line 1: kill: %nope: no such job\n',
+      )
+      expect(stdoutStr(await ws.shell('kill %?31 %-; wait; echo $?; jobs'))).toBe(
+        '0\n[2]   Terminated              sleep 31\n',
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('marks what jobs lists, and jobs -n shows what it has not', async () => {
+    const ws = build()
+    try {
+      expect(stdoutStr(await ws.shell('sleep 30 & true & sleep 0.2; jobs; jobs -n'))).toBe(
+        '[1]-  Running                 sleep 30 &\n[2]+  Done                    true\n',
+      )
+    } finally {
+      await ws.shell('kill %1')
+      await ws.close()
+    }
+  })
+
+  it('is its stages when its pipeline is redirected', async () => {
+    const ws = build()
+    try {
+      expect(stdoutStr(await ws.shell('sleep 30 | cat > /m/out & jobs -l | wc -l'))).toBe('2\n')
+    } finally {
+      await ws.shell('kill %1')
+      await ws.close()
+    }
+  })
+
+  it('holds a TERM while stopped, until it goes on', async () => {
+    const ws = build()
+    try {
+      const said = await ws.shell(
+        'sleep 30 & kill -STOP %1; kill %1; ps -o stat= -p $!; jobs; kill -CONT %1; wait %1; echo $?',
+      )
+      expect(stdoutStr(said)).toBe('T\n[1]+  Running                 sleep 30 &\n143\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('moves no bytes while its pipeline is stopped', async () => {
+    const ws = build()
+    try {
+      const said = await ws.shell(
+        'seq 1 300000 | cat > /m/out & kill -STOP %1; sleep 0.3; jobs; kill -CONT %1; wait %1; echo $?; wc -l < /m/out',
+      )
+      expect(stdoutStr(said)).toBe(
+        '[1]+  Running                 seq 1 300000 | cat > /m/out &\n0\n300000\n',
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('sees the shell that started it as $PPID', async () => {
+    const ws = build()
+    try {
+      const said = await ws.shell("echo $PPID; (echo $PPID); echo $$; bash -c 'echo $PPID'")
+      const [top, sub, shell, nested] = stdoutStr(said).trim().split('\n')
+      expect([top, sub, nested]).toEqual(['0', '0', shell])
+      const refused = await ws.shell('PPID=5')
+      expect(new TextDecoder().decode(refused.stderr)).toBe(
+        'bash: line 1: PPID: readonly variable\n',
+      )
+    } finally {
+      await ws.close()
+    }
+  })
 })

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RedirectResult } from '../../context/session_context.ts'
-import { runWithEvaluation } from '../../context/session_context.ts'
+import { currentCaller, runWithEvaluation, whilePaused } from '../../context/session_context.ts'
 import { CAPACITY } from '../../io/pipe.ts'
 import { asyncChain, closeQuietly, discardIo, discardStreams } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -105,7 +105,9 @@ export async function handlePipe(
   // the parent. An exemption belongs to the preceding statement only;
   // the caller applies this pipeline's own negation after it finishes.
   session.errexitImmune = false
-  const pipes = commands.map((_, i) => new PipeConsole(stderrFlags[i] === true, bufferBytes))
+  const pipes = commands.map(
+    (_, i) => new PipeConsole(stderrFlags[i] === true, bufferBytes, whilePaused),
+  )
   const ios: IOResult[] = commands.map(() => new IOResult())
   // A stage the top shell forks for a simple command is that command's
   // shell; one a child shell forks is a child of a child.
@@ -241,6 +243,8 @@ export async function handlePipe(
     commands.forEach((cmd, i) => {
       tasks.push(launch(cmd, i))
     })
+    const job = currentCaller().process
+    if (job?.pipeline === true) job.setStages(stages.filter((stage) => stage !== null))
     const completed = Promise.all(tasks)
     // Attach the rejection handler before reading the last segment: an
     // upstream failure must settle the pipeline even if nobody reads it.

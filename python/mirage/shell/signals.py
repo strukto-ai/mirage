@@ -142,7 +142,7 @@ def signal_table() -> str:
     return "\n".join(lines) + tail + "\n"
 
 
-def _process_status(code: int, signal: int | None) -> str:
+def process_status(code: int, signal: int | None) -> str:
     """How bash's report names how a process ended: the signal's
     description, ``Done`` or ``Exit N``.
 
@@ -198,7 +198,7 @@ def signal_report(
     lines = []
     before = None
     for pid, code, ended, command in processes:
-        status = _process_status(code, ended)
+        status = process_status(code, ended)
         if before is None:
             lines.append(f"{voice}{pid:5d} {status:<24}{command}")
         elif status == before:

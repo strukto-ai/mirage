@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ProcessHandle } from '../process/handle.ts'
+import { shownPid } from '../process/types.ts'
 import { JobId, type LineId } from '../types.ts'
 import type { IOResult } from '../../io/types.ts'
 import type { ExecutionNode } from '../../workspace/types.ts'
@@ -93,7 +94,11 @@ export class JobHandle {
   exitCode = 0
   signal: number | null = null
   endedAt: number | null = null
+  ending = 0
+  private static endings = 0
   reported = false
+  /** A `jobs` has shown it, which `jobs -n` leaves out while it goes on running. */
+  listed = false
 
   constructor(init: {
     id: number
@@ -167,6 +172,22 @@ export class JobHandle {
   }
 
   /**
+   * The pid the agent sees for it: `$!`, `jobs -l` and `jobs -p`, `wait -p`
+   * and the reports of how it ended. Its program's on its machine, else
+   * `pid`. A pipeline's is its first stage's. Mirrors Python's `shown_pid`.
+   */
+  get shownPid(): number {
+    if (this.process === null) return this.id
+    return shownPid((this.process.stages[0] ?? this.process).record)
+  }
+
+  /** The pid `$!` names: a pipeline's last stage, else `shownPid`. */
+  get lastPid(): number {
+    const last = this.process?.stages.at(-1)
+    return last === undefined ? this.shownPid : shownPid(last.record)
+  }
+
+  /**
    * The id of the process the job runs as, as text: its runner's here, its
    * console's for a job restored or run elsewhere.
    */
@@ -185,6 +206,7 @@ export class JobHandle {
     if (this.state === 'exited') return
     this.state = 'exited'
     this.endedAt = this.now()
+    this.ending = ++JobHandle.endings
   }
 
   /**

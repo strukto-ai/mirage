@@ -13,10 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import itertools
 import logging
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Iterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 from mirage.execution.job.constants import (
     KILLED_EXIT_CODE,
@@ -83,7 +84,8 @@ class JobHandle:
     the console under, which tells apart two jobs a reused number gave
     the same id. A ``reported`` job's shell printed the report of the
     signal that ended it, so ``jobs`` and a ``%N`` no longer name it,
-    and its pid still answers ``wait``.
+    and its pid still answers ``wait``. A ``listed`` job is one a ``jobs``
+    has shown, which ``jobs -n`` leaves out while it goes on running.
 
     A job a ``kill`` reached is ``stopping`` until its console ends, the
     one record of how it ended, which every daemon reads: the first
@@ -98,6 +100,7 @@ class JobHandle:
     exit_code: int = 0
     signal: int | None = None
     ended_at: float | None = None
+    ending: int = 0
     console: JobConsole = field(default_factory=JobConsole)
     session_id: str = ""
     process: ProcessHandle | None = None
@@ -105,6 +108,7 @@ class JobHandle:
     owner: str = ""
     console_name: str = ""
     reported: bool = False
+    listed: bool = False
     workspace_id: str = ""
     line: LineId | None = None
     group: int | None = None
@@ -112,6 +116,7 @@ class JobHandle:
         default_factory=lambda: SystemClock().now, repr=False
     )
     ended: Callable[[Job], None] | None = field(default=None, repr=False)
+    _endings: ClassVar[Iterator[int]] = itertools.count(1)
 
     @property
     def record(self) -> Job:
@@ -154,6 +159,23 @@ class JobHandle:
         """
         return self.process.record.pid if self.process is not None else self.id
 
+    @property
+    def shown_pid(self) -> int:
+        """The pid the agent sees for it: `$!`, `jobs -l` and `jobs -p`,
+        `wait -p` and the reports of how it ended. Its program's on its
+        machine, else `pid`. A pipeline's is its first stage's."""
+        if self.process is None:
+            return self.id
+        stages = self.process.stages
+        return (stages[0] if stages else self.process).record.shown_pid
+
+    @property
+    def last_pid(self) -> int:
+        """The pid `$!` names: a pipeline's last stage, else `shown_pid`."""
+        if self.process is None or not self.process.stages:
+            return self.shown_pid
+        return self.process.stages[-1].record.shown_pid
+
     def take(self, outcome: str) -> None:
         """Take how the job ended from its console's ending.
 
@@ -167,6 +189,7 @@ class JobHandle:
         """Mark the job ended, now, unless it already was."""
         if self.state != JobState.EXITED:
             self.state, self.ended_at = JobState.EXITED, self.now()
+            self.ending = next(JobHandle._endings)
 
     def _tell_ended(self) -> None:
         """Tell ``ended`` the job's record once, as it ended; a hook

@@ -136,17 +136,17 @@
       }
     },
     {
-      "id": "console_ps_names_each_process_machine_and_machine_pid",
+      "id": "console_ps_names_each_process_machine",
       "seq": 509018,
       "targets": [
         "ram",
         "opfs",
         "console-redis"
       ],
-      "command": "ps | head -1; ps -o machine,mpid -p $$",
+      "command": "ps | head -1; ps -o machine -p $$",
       "expect": {
         "exit": 0,
-        "stdout": "    PID MACHINE                            MPID CMD\nMACHINE                            MPID\n-                                     -\n",
+        "stdout": "    PID MACHINE                         CMD\nMACHINE\nmirage\n",
         "stderr": ""
       }
     },
@@ -178,6 +178,306 @@
         "exit": 0,
         "stdout": "mirage\nkill=1\nprobe=1\nwait=127\nps=1\n",
         "stderr": "bash: line 1: kill: (412) - No such process\nbash: line 1: kill: (412) - No such process\nbash: line 1: wait: pid 412 is not a child of this shell\n"
+      }
+    },
+    {
+      "id": "console_jobs_marks_the_newest_two",
+      "seq": 509024,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "sleep 8 & sleep 9 & jobs; kill %1 %2",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1]-  Running                 sleep 8 &\n[2]+  Running                 sleep 9 &\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_a_background_pipeline_is_its_stages",
+      "seq": 509026,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "sleep 8 | cat & p=$!; [ \"$(ps -o cmd= -p $p)\" = cat ] && echo last; jobs -l | sed -E 's/[0-9]{7}/N/'; ps -o ppid= -p $p | grep -c \"^ *$$\\$\"; kill %1",
+      "expect": {
+        "exit": 0,
+        "stdout": "last\n[1]+ N Running                 sleep 8\n     N                       | cat &\n1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_kill_stop_holds_a_job_until_cont",
+      "seq": 509028,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "sleep 8 & kill -STOP %1; ps -o stat= -p $!; kill %1; jobs; kill -CONT %1; wait %1; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "T\n[1]+  Running                 sleep 8 &\n143\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_ppid_names_the_parent_shell",
+      "seq": 509030,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "echo $PPID; bash -c \"[ \\$PPID = $$ ] && echo parent\"; PPID=1",
+      "expect": {
+        "exit": 1,
+        "stdout": "0\nparent\n",
+        "stderr": "bash: line 1: PPID: readonly variable\n"
+      }
+    },
+    {
+      "id": "console_ps_last_on_a_line_is_the_shell",
+      "seq": 509032,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "echo a; ps -o cmd=",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nps -o cmd=\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_ps_before_more_of_a_line_is_a_child",
+      "seq": 509034,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "ps -o cmd=; echo b",
+      "expect": {
+        "exit": 0,
+        "stdout": "ps -o cmd=; echo b\nps -o cmd=\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_job_specs_name_the_newest_jobs",
+      "seq": 509036,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "sleep 30 & sleep 31 & jobs %%; jobs %-; kill %+ %-; wait; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "[2]+  Running                 sleep 31 &\n[1]-  Running                 sleep 30 &\n0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_job_specs_name_a_command",
+      "seq": 509038,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "sleep 30 & jobs %sleep; jobs %?30; kill %?30; wait; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1]+  Running                 sleep 30 &\n[1]+  Running                 sleep 30 &\n0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_a_second_wait_answers_the_status",
+      "seq": 509040,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "sh -c 'exit 3' & p=$!; wait $p; echo $?; wait $p; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_jobs_marks_finished_jobs",
+      "seq": 509042,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "sleep 30 & true & sleep 0.2; jobs; kill %1",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1]-  Running                 sleep 30 &\n[2]+  Done                    true\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_jobs_stopped_timeout_holds_its_deadline",
+      "seq": 509043,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "timeout 0.3 sleep 30 & p=$!; sleep 0.1; kill -STOP $p; sleep 0.6; ps -o stat= -p $p | cut -c1; kill -CONT $p; wait $p; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "T\n124\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_jobs_timeout_stop_ends_at_kill",
+      "seq": 509044,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "timeout --foreground -s STOP -k 0.2 0.2 sleep 5; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "137\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_jobs_held_term_answers_as_term",
+      "seq": 509045,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "sleep 30 & p=$!; sleep 0.1; kill -STOP $p; sleep 0.1; kill $p; ps -o stat= -p $p | cut -c1; kill -CONT $p; wait $p; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "T\n143\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_bare_wait_leaves_the_last_ended_job",
+      "seq": 509046,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "false & sleep 0.1; wait; jobs; echo --; jobs",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1]+  Exit 1                  false\n--\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_bare_wait_forgets_the_job_it_ended_on",
+      "seq": 509052,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "sleep 0.2 & sleep 0.05 & wait; jobs; echo --; sleep 0.05 & sleep 0.2 & wait; jobs; echo --",
+      "expect": {
+        "exit": 0,
+        "stdout": "[2]   Done                    sleep 0.05\n--\n--\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_jobs_marks_leave_with_a_marked_job",
+      "seq": 509047,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "true & p=$!; false & sleep 0.1; wait $p; jobs; echo --",
+      "expect": {
+        "exit": 0,
+        "stdout": "[2]   Exit 1                  false\n--\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_jobs_marks_go_to_a_running_job",
+      "seq": 509048,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "true & p=$!; sleep 0.3 & wait $p; jobs; echo --; wait",
+      "expect": {
+        "exit": 0,
+        "stdout": "[2]+  Running                 sleep 0.3 &\n--\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_disowned_running_job_waits_as_zero",
+      "seq": 509049,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "sleep 1 & p=$!; disown %1; wait $p; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_disowned_ended_job_keeps_its_status",
+      "seq": 509050,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "false & p=$!; sleep 0.1; disown; wait $p; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_timeout_killed_is_reported",
+      "seq": 509051,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "{ timeout -s KILL 0.1 sleep 1; echo $?; } 2>&1 | sed -E 's/: +[0-9]+ Killed +/: /'",
+      "expect": {
+        "exit": 0,
+        "stdout": "bash: line 1: timeout -s KILL 0.1 sleep 1\n137\n",
+        "stderr": ""
       }
     }
   ]

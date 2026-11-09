@@ -2663,7 +2663,7 @@ def test_bg_sleep_kill_and_jobs_cleanup():
     # when `jobs` lists it. After the listing, pop_completed removes it.
     io = _exec(ws, "sleep 10 & kill %1; jobs")
     out = _stdout(io)
-    assert b"killed" in out
+    assert b"Terminated" in out
 
     io = _exec(ws, "jobs")
     out = _stdout(io)

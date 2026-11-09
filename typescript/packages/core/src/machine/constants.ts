@@ -178,6 +178,11 @@ export const STOP_GRACE_SECONDS = 1
 // PID names another process, which a stop leaves alone.
 export const HOST_START_SLACK_SECONDS = 2
 
+// The state letters `ps` prints on a host that has others than Linux's: an
+// idle process is a sleeping one, and macOS's U is Linux's D. Mirrors
+// Python's `HOST_STATES`.
+export const HOST_STATES: Readonly<Record<string, string>> = Object.freeze({ I: 'S', U: 'D' })
+
 // How often a stop in its grace checks whether the signalled group ended.
 export const STOP_POLL_SECONDS = 0.02
 
@@ -186,6 +191,39 @@ export const STOP_POLL_SECONDS = 0.02
 export const TOOLS_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 
 // Output as base64 lines per read, status on fd 3, for an exec that returns text.
+// How often something waiting for a run looks for its end on the machine,
+// and how long a run's output gets to arrive once its program has exited
+// while what the program left running keeps the exec open.
+export const RUN_WATCH_SECONDS = 2
+export const RUN_DRAIN_SECONDS = 0.5
+
+// How long a background run may take to report its pid, which `$!` waits for.
+export const RUN_START_WAIT_SECONDS = 10
+
+// Where a run reports on its machine, then the workspace and the process.
+export const RUN_STATUS_PREFIX = '/tmp/.mirage-run-'
+
+// Every program runs as a child of this wrapper, which outlives it to say
+// how it ended, since an exec holds on while anything the program started
+// keeps its output open (E2B, msb). `$1` is the file it reports in, which it
+// creates only if nothing is there; `$2` the tag's assignment, exported for
+// the program alone so the wrapper shows in no scan and takes no signal by
+// tag; `$3` the reports of earlier runs to remove; then the program. The
+// subshell execs it, so the pid written first is the program's, with its
+// start in clock ticks; its exit status follows on the next line. A shell
+// reports a child a signal ended on its stderr, so the wrapper's goes nowhere
+// and the program gets the real one back. It needs only a POSIX shell at
+// `/bin/sh`. Mirrors Python's `RUN_WRAPPER`.
+export const RUN_WRAPPER =
+  'f=$1; t=$2; o=$3; shift 3; ' +
+  `[ -z "$o" ] || PATH=${TOOLS_PATH} rm -f $o 2>/dev/null; ` +
+  'exec 6>&2 2>/dev/null; ' +
+  'set -C; if >"$f"; then g=$f; else g=/dev/null; fi; set +C; ' +
+  "( /bin/sh -c 'read -r s </proc/$PPID/stat; set -- ${s##*)}; " +
+  'echo "$PPID ${20}"\' >>"$g"; ' +
+  'export "$t"; exec 2>&6 6>&-; exec "$@" ); ' +
+  's=$?; echo "$s" >>"$g"; exit "$s"'
+
 export const ENCODE_PRELUDE =
   `e() { PATH=${TOOLS_PATH}; ` +
   'while c=$(dd bs=65536 count=1 2>/dev/null | base64) && [ -n "$c" ]; ' +
@@ -312,32 +350,101 @@ export function stopLine(process: string, signum = 15): string {
 export const SCAN_WAIT_SECONDS = 10
 
 // What each row a scan prints starts with, so a provider that mixes the
-// line's stderr into its stdout (Daytona) never passes a message for one.
+// line's stderr into its stdout (Daytona) never passes a message for one: a
+// process, or a run's report.
 export const SCAN_MARK = 'M'
+export const SCAN_RUN_MARK = 'R'
+
+/** `text` as part of a report's file name, which a scan's glob and an unquoted `rm` both read as one word. */
+function reportName(text: string): string {
+  return text.replace(/[^A-Za-z0-9_.-]/g, '_')
+}
+
+/**
+ * The file the run `tag` names reports in on its machine. Mirrors Python's
+ * `run_status_path`.
+ *
+ * @param tag the run's tag, `<workspace>:<process>`.
+ */
+export function runStatusPath(tag: string): string {
+  const at = tag.lastIndexOf(':')
+  const name = at > 0 ? `${reportName(tag.slice(0, at))}-${tag.slice(at + 1)}` : reportName(tag)
+  return `${RUN_STATUS_PREFIX}${name}`
+}
+
+/**
+ * `argv` under the wrapper every program runs in (`RUN_WRAPPER`). Mirrors
+ * Python's `run_argv`.
+ *
+ * @param tag the run's tag.
+ * @param status the file it reports in (`runStatusPath`).
+ * @param spent the reports of runs that have ended.
+ * @param argv the program and its arguments.
+ */
+export function runArgv(
+  tag: string,
+  status: string,
+  spent: readonly string[],
+  argv: readonly string[],
+): string[] {
+  return ['/bin/sh', '-c', RUN_WRAPPER, 'sh', status, `${PROCESS}=${tag}`, spent.join(' '), ...argv]
+}
+
+/**
+ * Whether `argv` is a program's run, which a stop by its tag ends, not one
+ * of Mirage's own lines (`runArgv`). Mirrors Python's `is_run`.
+ */
+export function isRun(argv: readonly string[]): boolean {
+  return argv.length > 2 && argv[2] === RUN_WRAPPER
+}
+
+/** The tag a program's run carries (`runArgv`). Mirrors Python's `run_tag`. */
+export function runTag(argv: readonly string[]): string {
+  return (argv[5] ?? '').slice(PROCESS.length + 1)
+}
+
+/** The shell line that prints one run's report, nothing while there is none. */
+export function statusLine(status: string): string {
+  return `PATH=${TOOLS_PATH}; cat ${singleQuote(status)} 2>/dev/null; true`
+}
+
+/** The shell line that removes the reports of runs that have ended. */
+export function removeLine(spent: readonly string[]): string {
+  return `PATH=${TOOLS_PATH}; rm -f ${spent.join(' ')}`
+}
 
 /**
  * The shell line that lists every process the runs of `workspace` started
  * on a machine. Each process whose `PROCESS` tag names one of the
  * workspace's processes, found through `/proc`, prints one row:
  * `SCAN_MARK`, the tag, its pid, its parent's pid, when it started in clock
- * ticks after boot (`stat`'s 22nd field) and its arguments, space
- * separated. A process that exits mid-scan is skipped, and nothing else is
- * printed. It needs what `stopLine` does. Mirrors Python's `scan_line`.
+ * ticks after boot (`stat`'s 22nd field), its state letter (`stat`'s third)
+ * and its arguments, space separated. A process that exits mid-scan is
+ * skipped. Each run's report prints one row as well: `SCAN_RUN_MARK`, the
+ * process it is, then the report's first line and its second after a `;`.
+ * Nothing else is printed. It needs what `stopLine` does. Mirrors Python's
+ * `scan_line`.
  *
  * @param workspace the workspace's id, which every tag starts with.
  */
 export function scanLine(workspace: string): string {
   const mark = singleQuote(`${PROCESS}=${workspace}:`)
+  const reports = `${RUN_STATUS_PREFIX}${reportName(workspace)}-`
   return (
     `PATH=${TOOLS_PATH}; m=${mark}; ` +
+    `for f in ${reports}*; do ` +
+    '[ -f "$f" ] || continue; a=; b=; ' +
+    '{ read -r a; read -r b; } <"$f"; ' +
+    `printf '${SCAN_RUN_MARK} %s %s;%s\\n' "\${f##*-}" "$a" "$b"; ` +
+    'done; ' +
     'for p in /proc/[0-9]*; do ' +
     "t=$(tr '\\000' '\\n' 2>/dev/null < \"$p/environ\" " +
     `| grep -m1 '^${PROCESS}=') || continue; ` +
     'case $t in "$m"*) ;; *) continue ;; esac; ' +
     's=$(cat "$p/stat" 2>/dev/null) || continue; ' +
     'set -- ${s##*)}; ' +
-    `printf '${SCAN_MARK} %s %s %s %s %s\\n' ` +
-    `"\${t#${PROCESS}=}" "\${p#/proc/}" "$2" "\${20}" ` +
+    `printf '${SCAN_MARK} %s %s %s %s %s %s\\n' ` +
+    `"\${t#${PROCESS}=}" "\${p#/proc/}" "$2" "\${20}" "$1" ` +
     '"$(tr \'\\000\\n\' \'  \' 2>/dev/null < "$p/cmdline")"; ' +
     'done; true'
   )

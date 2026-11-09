@@ -16,28 +16,51 @@ import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { processStatus } from '../../../../shell/signals.ts'
 import type { JobHandle, JobTable } from '../../../../execution/job/index.ts'
+import { shownPid } from '../../../../execution/process/types.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { builtinUsage } from '../shared.ts'
 import * as constants from './constants.ts'
-import { jobNumbered, sessionOf } from '../jobspec.ts'
+import { AMBIGUOUS_SPEC, jobOfSpec, sessionOf } from '../jobspec.ts'
 
-/** One `jobs` line; `-l` includes the managed PID. */
-function jobRow(job: JobHandle, long: boolean): string {
-  const id = job.id.toString()
-  const status = job.state === 'running' ? 'running' : job.signal !== null ? 'killed' : 'completed'
-  return long
-    ? `[${id}] ${String(job.pid)} ${status} ${job.command}`
-    : `[${id}] ${status} ${job.command}`
+/** How bash's `jobs` words where a job stands. */
+function jobStatus(job: JobHandle): string {
+  return job.state === 'running'
+    ? 'Running'
+    : processStatus(job.exitCode, job.signal ?? job.process?.endedBy ?? null)
 }
 
 /**
- * List jobs, with bash's flags applied to mirage's row shape.
+ * One `jobs` line, in bash's layout; `-l` includes its pid. `mark` is `+` for
+ * the newest job, `-` for the one before it, else a space.
+ */
+function jobRow(job: JobHandle, long: boolean, mark: string): string {
+  const id = job.id.toString()
+  const status = jobStatus(job).padEnd(24)
+  const running = job.state === 'running' ? ' &' : ''
+  const stages = job.process?.stages ?? []
+  const [first, ...rest] = stages.map((stage) => stage.record)
+  if (long && first !== undefined) {
+    const lead = `[${id}]${mark} ${String(shownPid(first)).padStart(5)} ${status}${first.command}`
+    const more = rest.map(
+      (r) => `${' '.repeat(5)}${String(shownPid(r)).padStart(5)} ${' '.repeat(22)}| ${r.command}`,
+    )
+    return [lead, ...more].join('\n') + running
+  }
+  const command = job.command + running
+  return long
+    ? `[${id}]${mark} ${String(job.shownPid).padStart(5)} ${status}${command}`
+    : `[${id}]${mark}  ${status}${command}`
+}
+
+/**
+ * List jobs as bash does, the machines looked at first.
  *
- * `-p` prints the managed PID; `-s` lists nothing because suspended
- * processes are unsupported. `-r` keeps running jobs, `-l` adds the PID, and
+ * `-p` prints the PID; `-s` lists nothing because a non-interactive shell
+ * reports no job as stopped. `-r` keeps running jobs, `-l` adds the PID, and
  * `-n` lists only the jobs whose status changed since the last `jobs`
  * (which is every completed one not yet reaped, since reaping is what a
  * listing does). A jobspec operand (`%2` or `2`) filters to that job;
@@ -75,14 +98,22 @@ export async function handleJobs(
   }
   for (let table: JobTable | null = jobTable; table !== null; table = table.parent)
     await table.sync(sid)
+  await jobTable.processes.scan()
   let jobs = jobTable.listing(sid).filter((j) => !j.reported)
+  const [current, previous] = jobTable.jobMarks(sid)
+  const marks = new Map([
+    [current, '+'],
+    [previous, '-'],
+  ])
   if (specs.length > 0) {
     const picked: JobHandle[] = []
     for (const spec of specs) {
-      const raw = spec.replace(/^%+/, '')
-      const job = /^\d+$/.test(raw) ? jobNumbered(jobs, Number(raw)) : null
+      const [job, refusal] = jobOfSpec(jobs, spec.startsWith('%') ? spec : `%${spec}`)
       if (job === null) {
-        const err = encodeText(`${shellVoice()}jobs: ${spec}: no such job\n`)
+        const said = `${shellVoice()}jobs: ${spec}: no such job\n`
+        const err = encodeText(
+          refusal.endsWith(AMBIGUOUS_SPEC) ? `${shellVoice()}jobs: ${refusal}\n${said}` : said,
+        )
         return [
           null,
           new IOResult({ exitCode: 1, stderr: err }),
@@ -95,10 +126,13 @@ export async function handleJobs(
   }
   if (flags.has('r')) jobs = jobs.filter((j) => j.state === 'running')
   if (flags.has('s')) jobs = []
-  if (flags.has('n')) jobs = jobs.filter((j) => j.state !== 'running')
+  if (flags.has('n')) jobs = jobs.filter((j) => !j.listed || j.state !== 'running')
   const lines = flags.has('p')
-    ? jobs.map((j) => String(j.pid))
-    : jobs.map((j) => jobRow(j, flags.has('l')))
+    ? jobs.map((j) => String(j.shownPid))
+    : jobs.map((j) => {
+        j.listed = true
+        return jobRow(j, flags.has('l'), marks.get(j.id) ?? ' ')
+      })
   await jobTable.popCompleted(sid)
   const out = lines.length > 0 ? encodeText(`${lines.join('\n')}\n`) : new Uint8Array()
   return [out, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]

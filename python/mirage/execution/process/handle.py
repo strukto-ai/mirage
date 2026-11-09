@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Sequence
 from concurrent.futures import Future
 from dataclasses import replace
 from threading import RLock
@@ -15,6 +15,7 @@ from mirage.execution.process.types import (
     ProcessState,
 )
 from mirage.execution.types import MachineId, MachinePid
+from mirage.shell.constants import SIGTERM
 from mirage.utils.clock import system_now
 
 logger = logging.getLogger(__name__)
@@ -80,11 +81,25 @@ class ProcessHandle:
         # What the program that takes it (``take``) ignores as well: a
         # job's INT and QUIT, never what only a shell ignores.
         self.program_ignores: frozenset[int] = frozenset()
+        self._holds: dict[Callable[[bool], None], bool] = {}
+        self._expired: int | None = None
         # The host stopped it (its table stopped, its session closed),
         # which ends whoever waits for it as well.
         self.revoked = False
         # Told the record each time it changes, as its table keeps it.
         self.noted: Callable[[Process], None] | None = None
+        # It belongs to a background job, so nothing waits on it unless
+        # something asks to.
+        self.background = False
+        # What a ``kill -STOP`` holds, its table's, by pid: each entry is
+        # done at the ``kill -CONT``.
+        self.pauses: dict[int, Future[None]] = {}
+        # Done once ``$!`` can name it: its program's pid is known, its
+        # pipeline's stages have started, or it has ended.
+        self._placed: Future[None] = Future()
+        # It runs a pipeline (``cmd | cmd &``), whose stages are the job.
+        self.pipeline = False
+        self.stages: tuple[ProcessHandle, ...] = ()
 
     def start(self, eager: bool = False) -> None:
         """Start the runner.
@@ -147,7 +162,7 @@ class ProcessHandle:
         with self._lock:
             return next(
                 (sent for sent in self._programs.values() if sent is not None),
-                None,
+                self._expired,
             )
 
     @property
@@ -204,6 +219,113 @@ class ProcessHandle:
         with self._lock:
             self._record = replace(self._record, machine_pid=machine_pid)
             self._tell()
+            if not self._placed.done():
+                self._placed.set_result(None)
+
+    def set_stages(self, stages: Sequence[ProcessHandle]) -> None:
+        """Note the stages of the pipeline this job runs, which ``$!``
+        and ``jobs -l`` name.
+
+        Args:
+            stages (Sequence[ProcessHandle]): the stages, in order.
+        """
+        with self._lock:
+            self.stages = tuple(stages)
+            pids = tuple(stage.record.pid for stage in stages)
+            self._record = replace(self._record, stages=pids)
+            if not self._placed.done():
+                self._placed.set_result(None)
+
+    def show_state(self, state: str | None) -> None:
+        """Note what a scan found the program doing, or that a ``kill``
+        paused it, which is ``ps``'s to show and no store's to keep.
+
+        Args:
+            state (str | None): its state letter; None for none known.
+        """
+        with self._lock:
+            self._record = replace(self._record, shown_state=state)
+
+    @property
+    def paused(self) -> bool:
+        """Whether a ``kill -STOP`` holds this process or one above it."""
+        return self._held_by() is not None
+
+    def _held_by(self) -> Future[None] | None:
+        if not self.pauses:
+            return None
+        record = self._record
+        return next(
+            (
+                self.pauses[pid]
+                for pid in (record.pid, *record.ancestors)
+                if pid in self.pauses
+            ),
+            None,
+        )
+
+    def on_hold(self, hold: Callable[[bool], None]) -> Callable[[], None]:
+        """Tell a program that goes on between the calls it makes to
+        Mirage, and has a way of its own to stop, when a ``kill -STOP``
+        holds this process. One already held is told at once.
+
+        Args:
+            hold (Callable[[bool], None]): told True as the process is
+                held and False as it goes on.
+
+        Returns:
+            Callable[[], None]: what forgets ``hold``, letting a program
+            still held go.
+        """
+        with self._lock:
+            self._holds[hold] = False
+
+        def forget() -> None:
+            with self._lock:
+                told = self._holds.pop(hold, False)
+            if told:
+                hold(False)
+
+        self.tell_held()
+        return forget
+
+    def tell_held(self) -> None:
+        """Tell each program waiting to hear (``on_hold``) whether this
+        process is held now."""
+        held = self.paused
+        with self._lock:
+            changed = [h for h, told in self._holds.items() if told != held]
+            self._holds.update(dict.fromkeys(changed, held))
+        for hold in changed:
+            hold(held)
+
+    def expire(self) -> None:
+        """Note that a deadline (``@line``) is past: what the runner runs
+        takes TERM as a ``kill`` would have it send, with a program's grace
+        to finish (``interrupted``), and a ``kill -STOP`` no longer holds
+        it. The runner's own status stays the deadline's.
+        """
+        self._expired = SIGTERM
+        held = self.pauses.pop(self.record.pid, None)
+        if held is not None:
+            held.set_result(None)
+        self.tell_held()
+
+    async def resumed(self) -> None:
+        """Wait out a ``kill -STOP`` of this process or one above it."""
+        while (held := self._held_by()) is not None:
+            await asyncio.shield(asyncio.wrap_future(held))
+
+    async def placed(self, seconds: float) -> None:
+        """Wait until ``$!`` can name the program this runs: its pid on
+        its machine is known or it has ended, for at most ``seconds``.
+
+        Args:
+            seconds (float): how long to wait.
+        """
+        await asyncio.wait(
+            {asyncio.wrap_future(self._placed)}, timeout=seconds
+        )
 
     def program_exited(self, code: int) -> None:
         """Record that a program the runner started handled the stop
@@ -364,6 +486,8 @@ class ProcessHandle:
             )
             self._tell()
             record = self._record
+            if not self._placed.done():
+                self._placed.set_result(None)
         self._finished(record.pid)
         self._completion.set_result(record)
 

@@ -25,8 +25,10 @@ import {
   PROCESS,
   FAKETIME_PROBE_SECONDS,
   faketimeProbe,
+  isRun,
   NOT_RUNNING_STATUS,
   MACHINE_STOP_WAIT_SECONDS,
+  runTag,
   stopLine,
 } from './constants.ts'
 import { LanguageRuntime } from '../runtime/language.ts'
@@ -43,7 +45,8 @@ const DEC = new TextDecoder()
 
 // The argv a sandbox runs, as the line the fakes answer.
 function lineOf(argv: readonly string[]): string {
-  return argv[0] === '/bin/sh' && argv[1] === '-c' ? (argv[2] ?? '') : shellJoin(argv)
+  const run = isRun(argv) ? argv.slice(7) : argv
+  return run[0] === '/bin/sh' && run[1] === '-c' ? (run[2] ?? '') : shellJoin(run)
 }
 
 class RecordingMachine extends MachineHandle {
@@ -78,7 +81,8 @@ class RecordingMachine extends MachineHandle {
     env: Record<string, string>,
     cwd: string,
   ): Promise<RunResult> {
-    return this.execLine(lineOf(argv), stdin === null ? null : await materialize(stdin), env, cwd)
+    const given = isRun(argv) ? { ...env, [PROCESS]: runTag(argv) } : env
+    return this.execLine(lineOf(argv), stdin === null ? null : await materialize(stdin), given, cwd)
   }
 }
 
@@ -392,17 +396,17 @@ describe('MachineHandle', () => {
     ])
   })
 
-  it('lists a job whose connection dropped as killed', async () => {
+  it('lists a job whose connection dropped as hung up', async () => {
     const box = new DroppedBox({ captures: ['train'] })
     const ws = sandboxWorkspace(box)
     try {
       await ws.shell('train &')
-      let rows = 'running'
-      while (rows.includes('running')) {
+      let rows = 'Running'
+      while (rows.includes('Running')) {
         await new Promise((resolve) => setTimeout(resolve, 10))
         rows = DEC.decode((await ws.shell('jobs')).stdout)
       }
-      expect(rows.endsWith('[1] killed train\n')).toBe(true)
+      expect(rows.endsWith('[1]+  Hangup                  train\n')).toBe(true)
     } finally {
       await ws.close()
     }

@@ -18,6 +18,7 @@ from functools import partial
 from typing import Any, Protocol
 
 from mirage._rs import Shell, ShellNode, ShellTask
+from mirage.context import while_paused
 from mirage.io.errors import MemoryExhausted
 from mirage.io.yield_budget import task_turn
 from mirage.policy.errors import PolicyDenied
@@ -208,6 +209,7 @@ async def drive(
                     )
                 case ("pause", _):
                     await task_turn()
+                    await while_paused()
                     answer = task.answer_resumed
         except BaseException as exc:
             failure = exc

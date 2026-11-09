@@ -123,7 +123,7 @@ bash integ/runtime/cli.sh python/.venv/bin/mirage "node typescript/packages/cli/
 ```
 
 `INTEG_RUNTIMES=e2b` keeps only the named runtimes' variants; CI's
-`integ-e2b` job runs `sandbox` that way.
+`integ-e2b` and `integ-microsandbox` jobs run `sandbox` that way.
 
 | Needs                                        | For                                                 |
 | -------------------------------------------- | --------------------------------------------------- |

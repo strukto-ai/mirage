@@ -125,7 +125,7 @@ export function signalTable(): string {
  * How bash's report names how a process ended: the signal's description,
  * `Done` or `Exit N`. Mirrors Python's _process_status.
  */
-function processStatus(code: number, signal: number | null): string {
+export function processStatus(code: number, signal: number | null): string {
   if (signal !== null) {
     const described = signalDescription(signal)
     if (described !== null) return described

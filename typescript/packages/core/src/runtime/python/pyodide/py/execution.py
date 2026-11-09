@@ -8,8 +8,10 @@ import logging
 import operator
 import os
 import shutil
+import signal
 import subprocess
 import sys
+import time
 import traceback
 import types
 import warnings
@@ -17,14 +19,30 @@ from contextlib import contextmanager
 
 import _mirage_exit
 import _mirage_process
+import _mirage_signal
 import _mirage_stdio
 import _mirage_xattr
-from pyodide.ffi import to_js
+from pyodide.ffi import JsException, to_js
 
 _process_active = False
 _inherited_inputs = {}
 _process_stdio = None
 _exit_status = None
+_taking_signals = False
+# What a signal's handler raised while the program waited on the host.
+_handler_raised = None
+_on_host = False
+# The signal number the host carries sent signals under.
+SIGNAL_CARRIER = 64
+# How long one nap of ``time.sleep`` is: C's sleep hears no signal.
+SLEEP_SLICE_SECONDS = 0.05
+# What a program does nothing about unless it set a handler.
+IGNORED_BY_DEFAULT = (
+    signal.SIGCHLD,
+    signal.SIGCONT,
+    signal.SIGURG,
+    signal.SIGWINCH,
+)
 # The most of the run's input one read asks the host for, and the most of
 # its output one write hands over: the bridge's own buffer.
 STDIO_CHUNK = 64 * 1024
@@ -72,9 +90,157 @@ def program_exit(code):
     raise ProgramExit(_exit_status)
 
 
+def end_on_signal(number):
+    """End the run as a signal ends a process, with nothing more of it
+    reaching the mount or its output.
+
+    Args:
+        number (int): the signal.
+    """
+    _mirage_signal.ended(number)
+    program_exit(128 + number)
+
+
+def act_on_signal(number, frame):
+    """What a program does with a signal: its handler, if it set one,
+    and otherwise what the signal does by default.
+
+    Args:
+        number (int): the signal.
+        frame (types.FrameType | None): where the program was.
+    """
+    handler = signal.getsignal(number)
+    if callable(handler):
+        handler(number, frame)
+    elif handler != signal.SIG_IGN and number not in IGNORED_BY_DEFAULT:
+        end_on_signal(number)
+
+
+def take_signals(frame=None):
+    """Act on what was sent to the program, as the kernel does on the
+    way back into it: a ``kill -STOP`` holds it here until it goes on.
+
+    Args:
+        frame (types.FrameType | None): where the program was.
+    """
+    while _taking_signals:
+        _mirage_signal.hold()
+        number = _mirage_signal.take()
+        if number == 0:
+            return
+        act_on_signal(number, frame)
+
+
+def carried(_number, frame):
+    """The carrier's handler, for a program running: one waiting on the
+    host takes its signals from there (``take_signals_waiting``).
+
+    Args:
+        _number (int): the carrier.
+        frame (types.FrameType | None): where the program was.
+    """
+    if not _on_host:
+        take_signals(frame)
+
+
+signal.signal(SIGNAL_CARRIER, carried)
+
+
+def take_signals_waiting():
+    """Act on what was sent to a program waiting on the host. What a
+    handler raises cannot cross the host's frames, so it waits for the
+    call to end (``_waiting``).
+
+    Returns:
+        bool: whether a handler raised, which ends the call.
+    """
+    global _handler_raised
+    try:
+        take_signals()
+    except BaseException as e:
+        _handler_raised = e
+        return True
+    return False
+
+
+def _waiting(call, *args):
+    """Make a call the host may take its time over, raising what a
+    signal's handler raised while it waited.
+
+    Args:
+        call (Callable): the host's function.
+        *args: its arguments.
+    """
+    global _handler_raised, _on_host
+    was_on_host = _on_host
+    _on_host = True
+    try:
+        result = call(*args)
+    except JsException:
+        raised, _handler_raised = _handler_raised, None
+        if raised is None:
+            raise
+        raise raised from None
+    finally:
+        _on_host = was_on_host
+    if not was_on_host:
+        take_signals()
+    return result
+
+
+def program_kill(pid, number):
+    """``os.kill`` inside a run, whose only processes are the program
+    and the children it started.
+
+    Args:
+        pid (int): the process.
+        number (int): the signal.
+    """
+    number = operator.index(number)
+    if operator.index(pid) != os.getpid() or number == signal.SIGSTOP:
+        _process_call("kill", pid=pid, signal=number)
+    if operator.index(pid) != os.getpid() or number in (0, signal.SIGCONT):
+        return
+    if number == signal.SIGSTOP:
+        _mirage_signal.hold()
+    elif number == signal.SIGKILL:
+        end_on_signal(number)
+    else:
+        act_on_signal(number, sys._getframe(1))
+
+
+def program_sleep(seconds, sleep=time.sleep):
+    """``time.sleep`` inside a run, which a signal can reach.
+
+    Args:
+        seconds (float): how long to sleep.
+        sleep (Callable): the interpreter's own sleep.
+    """
+    if not isinstance(seconds, (int, float)) or seconds <= 0:
+        sleep(seconds)
+        return
+    ends = time.monotonic() + seconds
+    while (left := ends - time.monotonic()) > 0:
+        take_signals(sys._getframe(1))
+        if _mirage_signal.halted():
+            raise KeyboardInterrupt
+        sleep(min(left, SLEEP_SLICE_SECONDS))
+
+
+def program_raise(number):
+    """``signal.raise_signal`` inside a run.
+
+    Args:
+        number (int): the signal.
+    """
+    program_kill(os.getpid(), number)
+
+
 def _process_call(op, **params):
     global _process_active
-    result = json.loads(_mirage_process.run(json.dumps(dict(op=op, **params))))
+    result = json.loads(
+        _waiting(_mirage_process.run, json.dumps(dict(op=op, **params)))
+    )
     if "error" in result:
         raise OSError(
             getattr(errno, result["code"], errno.EIO), result["error"]
@@ -396,11 +562,9 @@ class MiragePopen:
         self._release()
         return self._output
 
-    def send_signal(self, signal):
-        if signal not in (9, 15):
-            raise NotImplementedError("only termination signals are supported")
+    def send_signal(self, number):
         if self.returncode is None:
-            _process_call("kill", pid=self.pid, signal=int(signal))
+            _process_call("kill", pid=self.pid, signal=int(number))
 
     def terminate(self):
         self.send_signal(15)
@@ -471,7 +635,7 @@ class PipeInput(io.BufferedIOBase):
     def _pull(self):
         # Numbers, not a buffer: Pyodide's buffer conversion slices with
         # signed wasm32 addresses, so above 2 GiB it reads the wrong bytes.
-        data = bytes(_mirage_stdio.read(STDIO_CHUNK).to_py())
+        data = bytes(_waiting(_mirage_stdio.read, STDIO_CHUNK).to_py())
         if data:
             self.held.extend(data)
         else:
@@ -578,7 +742,7 @@ class OutputCapture(io.RawIOBase):
         for start in range(0, len(data), STDIO_CHUNK):
             # Numbers, not a buffer, for the reason PipeInput reads them.
             piece = to_js(list(data[start : start + STDIO_CHUNK]))
-            if _mirage_stdio.write(self.fd, piece) < 0:
+            if _waiting(_mirage_stdio.write, self.fd, piece) < 0:
                 raise BrokenPipeError(errno.EPIPE, os.strerror(errno.EPIPE))
 
     def diagnostic(self, text):
@@ -714,7 +878,7 @@ def interpreter_state(flags, filename, script, stderr):
 
 
 def run(request, arm_interrupt, disarm_interrupt):
-    global _process_stdio, _process_active, _exit_status
+    global _process_stdio, _process_active, _exit_status, _taking_signals
     _exit_status = None
     user_code = request["code"]
     init_flags = request["flags"]
@@ -729,6 +893,13 @@ def run(request, arm_interrupt, disarm_interrupt):
     saved_cwd = saved_getcwd()
     saved_chdir = os.chdir
     saved_exit = os._exit
+    saved_getpid = os.getpid
+    saved_getppid = os.getppid
+    saved_kill = os.kill
+    saved_raise = signal.raise_signal
+    saved_sleep = time.sleep
+    pid = request["pid"]
+    ppid = request["ppid"]
     saved_env = dict(os.environ)
     saved_stdin = sys.stdin
     saved_stdout = sys.stdout
@@ -780,8 +951,17 @@ def run(request, arm_interrupt, disarm_interrupt):
                         stdin=stdin_pipe.rest() if piped else None,
                     )
                 os._exit = program_exit
+                if pid is not None:
+                    os.getpid = lambda: pid
+                if ppid is not None:
+                    os.getppid = lambda: ppid
+                os.kill = program_kill
+                signal.raise_signal = program_raise
+                time.sleep = program_sleep
+                stopped = False
                 try:
                     try:
+                        _taking_signals = True
                         arm_interrupt()
                         if cwd != "":
                             saved_chdir(cwd)
@@ -795,7 +975,8 @@ def run(request, arm_interrupt, disarm_interrupt):
                             user_globals,
                         )
                     finally:
-                        disarm_interrupt()
+                        _taking_signals = False
+                        stopped = disarm_interrupt()
                 except SystemExit as e:
                     code = e.code
                     if code is None:
@@ -810,13 +991,15 @@ def run(request, arm_interrupt, disarm_interrupt):
                 except ProgramExit as e:
                     exit_code = e.code
                 except BaseException as e:
-                    err_bytes.diagnostic(
-                        "".join(
-                            traceback.format_exception(
-                                type(e), e, e.__traceback__.tb_next
+                    # A program something stopped ends without a word.
+                    if not stopped:
+                        err_bytes.diagnostic(
+                            "".join(
+                                traceback.format_exception(
+                                    type(e), e, e.__traceback__.tb_next
+                                )
                             )
                         )
-                    )
                     exit_code = 1
         finally:
             if had_main:
@@ -842,6 +1025,11 @@ def run(request, arm_interrupt, disarm_interrupt):
             os.chdir = saved_chdir
             os.getcwd = saved_getcwd
             os._exit = saved_exit
+            os.getpid = saved_getpid
+            os.getppid = saved_getppid
+            os.kill = saved_kill
+            signal.raise_signal = saved_raise
+            time.sleep = saved_sleep
             saved_chdir(saved_cwd)
         # CPython flushes stdout as it exits, and a flush that fails is
         # reported and makes the exit status 120, whatever the program's.

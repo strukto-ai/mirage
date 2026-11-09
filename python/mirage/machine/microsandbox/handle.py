@@ -15,13 +15,13 @@
 import asyncio
 
 from mirage.io.types import ByteSource
-from mirage.machine.constants import PROCESS, not_running_hint
+from mirage.machine.constants import EXEC_PRELUDE, not_running_hint
 from mirage.machine.microsandbox.config import MicrosandboxConfig
 from mirage.machine.microsandbox.constants import (
     INSPECT_TIMEOUT_SECONDS,
     MICROSANDBOX_HINT,
     RUNNING_STATE,
-    TAGGED_PRELUDE,
+    own_session,
 )
 from mirage.machine.program import (
     exec_args,
@@ -94,20 +94,14 @@ class MicrosandboxMachine(ProgramMachine):
         # Piped stdin skips --stream: msb fails more runs that close it early.
         words, tail = self.exec_words()
         head = words if stdin is not None else (*words, "--stream")
-        tag = env.get(PROCESS)
-        args = exec_args(head, tail, env, cwd, argv)
-        if tag is not None:
-            rest = {key: value for key, value in env.items() if key != PROCESS}
-            command = (f"{PROCESS}={tag}", *argv)
-            args = exec_args(
+        return await self._exec_program(
+            exec_args(
                 head,
                 tail,
-                rest,
+                env,
                 None,
-                ("/bin/sh", "-c", TAGGED_PRELUDE, "sh", cwd, *command),
-            )
-        return await self._exec_program(
-            args,
+                ("/bin/sh", "-c", EXEC_PRELUDE, "sh", cwd, *own_session(argv)),
+            ),
             stdin=stdin,
             output=output,
             errors=errors,

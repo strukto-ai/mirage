@@ -16,14 +16,15 @@ import type { Context } from '../commands/config.ts'
 import { currentCaller } from '../context/session_context.ts'
 import { HANGUP_EXIT_CODE } from '../execution/job/constants.ts'
 import type { MachineProcess } from '../execution/machine/types.ts'
+import type { ProcessHandle } from '../execution/process/handle.ts'
 import { MachineId, type MachinePid } from '../execution/types.ts'
 import type { ByteSource } from '../io/types.ts'
 import type { WorkspaceBinding } from '../runtime/binding.ts'
 import { coerceRuntimeConfig, type ConfigFields } from '../runtime/config.ts'
-import type { MountType } from './types.ts'
+import type { MountType, RunStatus } from './types.ts'
 import type { OutputFn, RunResult } from '../runtime/types.ts'
 import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
-import { abortable } from '../utils/abort.ts'
+import { abortable, hasAborted, mergeSignals, settledWithin, sleep } from '../utils/abort.ts'
 import { concat } from '../utils/bytes.ts'
 import { boundSystemClock } from '../utils/clock.ts'
 import { rstripSlash } from '../utils/slash.ts'
@@ -40,7 +41,14 @@ import {
   FAKETIME_PROBE_SECONDS,
   faketimeEnv,
   faketimeProbe,
-  PROCESS,
+  RUN_DRAIN_SECONDS,
+  RUN_START_WAIT_SECONDS,
+  RUN_WATCH_SECONDS,
+  SCAN_RUN_MARK,
+  removeLine,
+  runArgv,
+  runStatusPath,
+  statusLine,
   NOT_RUNNING_STATUS,
   MACHINE_STOP_WAIT_SECONDS,
   stopLine,
@@ -94,6 +102,14 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   // The runs executing here right now; a scan asks only a machine with
   // one, or with processes an earlier scan found.
   private runs = 0
+  // Each executing run's end and what finishes with it, by tag, for a look
+  // at its report to settle while its exec stays open.
+  private readonly ended = new Map<
+    string,
+    { settle: (code: number) => void; finished: Promise<unknown> }
+  >()
+  // The reports of runs that have ended, which the next run removes.
+  private spent: string[] = []
 
   /**
    * @param name the machine's name, its key under `machines:`.
@@ -185,18 +201,39 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     // outside a process gets a tag of its own.
     const runner = currentCaller().process
     const tag = runner?.record.id.toString() ?? crypto.randomUUID().replaceAll('-', '')
-    let done: RunResult
+    const status = runStatusPath(tag)
+    const spent = this.spent
+    this.spent = []
+    const kept: [Uint8Array[], Uint8Array[]] = [[], []]
+    const letGo = new AbortController()
+    let settle: (code: number) => void = () => undefined
+    const ended = new Promise<number>((resolve) => {
+      settle = resolve
+    })
+    let finished: () => void = () => undefined
+    const left = new Promise<void>((resolve) => {
+      finished = resolve
+    })
+    this.ended.set(tag, { settle, finished: runner?.join() ?? left })
     this.runs += 1
+    const execution = this.execArgv(
+      runArgv(tag, status, spent, run),
+      ctx.stdin,
+      { ...given, ...clock },
+      ctx.cwd.virtual,
+      output ?? ((data) => Promise.resolve(void kept[0].push(data))),
+      errors ?? ((data) => Promise.resolve(void kept[1].push(data))),
+      mergeSignals(ctx.signal, letGo.signal),
+    )
+    const background = runner?.background === true
+    const watching = new AbortController()
+    const watcher = background
+      ? this.reportStart(runner, status, execution)
+      : this.watch(status, settle, watching.signal)
+    let done: RunResult
     try {
-      done = await this.execArgv(
-        run,
-        ctx.stdin,
-        { ...given, ...clock, [PROCESS]: tag },
-        ctx.cwd.virtual,
-        output,
-        errors,
-        ctx.signal,
-      )
+      done = await this.outcome(execution, ended, letGo)
+      if (background) await watcher
     } catch (error) {
       if (ctx.signal?.aborted === true) {
         await this.stop(tag, runner?.signal ?? runner?.interrupted ?? 15)
@@ -212,7 +249,21 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
         exitCode: HANGUP_EXIT_CODE,
       }
     } finally {
+      watching.abort()
       this.runs -= 1
+      this.ended.delete(tag)
+      this.spent.push(status)
+      finished()
+    }
+    done = {
+      stdout: done.stdout.byteLength > 0 ? done.stdout : concat(kept[0]),
+      stderr:
+        done.stderr !== null && done.stderr.byteLength > 0
+          ? done.stderr
+          : kept[1].length > 0
+            ? concat(kept[1])
+            : done.stderr,
+      exitCode: done.exitCode,
     }
     if (done.exitCode === CANNOT_EXECUTE_STATUS) this.mounts?.forget()
     // sshfs acknowledged the writes before they landed.
@@ -224,6 +275,96 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       stdout: done.stdout,
       stderr: concat([done.stderr ?? new Uint8Array(), said]),
       exitCode: done.exitCode || 1,
+    }
+  }
+
+  /**
+   * How a run ended: its exec's answer, or, when a look at its report found
+   * its program gone while the exec stays open because something the program
+   * left running holds its output, the status the report gave. That exec is
+   * let go after a moment for the output still arriving, and what the
+   * program left running stays. Mirrors Python's `_outcome`.
+   */
+  private async outcome(
+    execution: Promise<RunResult>,
+    ended: Promise<number>,
+    letGo: AbortController,
+  ): Promise<RunResult> {
+    const closed = execution.then(
+      () => null,
+      () => null,
+    )
+    const code = await Promise.race([ended, closed])
+    if (code === null) return execution
+    if (await settledWithin(execution, RUN_DRAIN_SECONDS)) return execution
+    letGo.abort()
+    await settledWithin(closed, RUN_DRAIN_SECONDS)
+    return { stdout: new Uint8Array(), stderr: null, exitCode: code }
+  }
+
+  /** One run's report as it stands, null when it wrote none. */
+  private async readStatus(status: string): Promise<RunStatus | null> {
+    const done = await this.connectedLine(statusLine(status), SCAN_WAIT_SECONDS)
+    const lines = new TextDecoder().decode(done.stdout).split('\n')
+    return parseStatus(lines[0] ?? '', lines[1] ?? '')
+  }
+
+  /**
+   * Look for the end of a foreground run, which someone waits on, every
+   * `RUN_WATCH_SECONDS`. A look that fails is tried again. Mirrors Python's
+   * `_watch`.
+   */
+  private async watch(
+    status: string,
+    settle: (code: number) => void,
+    signal: AbortSignal,
+  ): Promise<void> {
+    while (!signal.aborted) {
+      try {
+        await sleep(RUN_WATCH_SECONDS * 1000, signal)
+        const found = await this.readStatus(status)
+        if (found?.exitCode != null) {
+          settle(found.exitCode)
+          return
+        }
+      } catch (error) {
+        if (!hasAborted(signal)) console.debug(`${this.id.toString()}: run not read:`, error)
+      }
+    }
+  }
+
+  /**
+   * Give a background run's process its program's pid as soon as the program
+   * has started, which `$!` waits for. One that ended at once still reported
+   * it. Mirrors Python's `_report_start`.
+   */
+  private async reportStart(
+    runner: ProcessHandle,
+    status: string,
+    execution: Promise<RunResult>,
+  ): Promise<void> {
+    const run = { ended: false }
+    const finished = (): void => {
+      run.ended = true
+    }
+    execution.then(finished, finished)
+    let delay = 0.01
+    for (let waited = 0; waited < RUN_START_WAIT_SECONDS;) {
+      let found: RunStatus | null = null
+      try {
+        found = await this.readStatus(status)
+      } catch (error) {
+        console.debug(`${this.id.toString()}: run not read:`, error)
+      }
+      if (found?.pid != null) {
+        if (found.started !== null)
+          runner.setMachinePid({ pid: found.pid, started: found.started, exited: null })
+        return
+      }
+      if (run.ended) return
+      await sleep(delay * 1000)
+      waited += delay
+      delay = Math.min(delay * 2, 0.5)
     }
   }
 
@@ -258,7 +399,17 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     const done = await this.connectedLine(scanLine(workspace), SCAN_WAIT_SECONDS)
     if (done.exitCode !== 0)
       throw new Error(`${this.id.toString()}: scan exited ${String(done.exitCode)}`)
-    return parseScanRows(done.stdout)
+    const [rows, reports] = parseScan(done.stdout, workspace)
+    const finishing: Promise<unknown>[] = []
+    for (const [tag, report] of reports) {
+      const running = this.ended.get(tag)
+      if (report.exitCode === null || running === undefined) continue
+      running.settle(report.exitCode)
+      finishing.push(running.finished)
+    }
+    // So whoever asked sees those runs as ended, not as about to.
+    if (finishing.length > 0) await settledWithin(Promise.all(finishing), RUN_DRAIN_SECONDS + 1)
+    return rows
   }
 
   /**
@@ -340,6 +491,17 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   }
 
   /** Connect, then run one of Mirage's own lines, within `seconds` in all. */
+  /** Remove the reports no later run will, leaving them when the machine does not answer. */
+  private async removeSpent(): Promise<void> {
+    const spent = this.spent
+    this.spent = []
+    try {
+      await this.connectedLine(removeLine(spent), MACHINE_STOP_WAIT_SECONDS)
+    } catch (error) {
+      console.debug(`${this.id.toString()}: reports not removed:`, error)
+    }
+  }
+
   private async connectedLine(line: string, seconds: number): Promise<RunResult> {
     const deadline = AbortSignal.timeout(seconds * 1000)
     await this.ensureConnected(deadline)
@@ -450,6 +612,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    */
   async close(): Promise<void> {
     try {
+      if (this.spent.length > 0) await this.removeSpent()
       await this.mounts?.close()
     } finally {
       this.disconnected()
@@ -457,28 +620,65 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   }
 }
 
+/** A run's report from its two lines (`RUN_WRAPPER`), null when it wrote nothing yet. */
+function parseStatus(first: string, second: string): RunStatus | null {
+  const digits = /^[0-9]+$/
+  const [pid = '', started = ''] = first.trim().split(/\s+/)
+  if (!digits.test(pid)) return null
+  const code = second.trim()
+  return {
+    pid: Number(pid),
+    started: digits.test(started) ? Number(started) : null,
+    exitCode: digits.test(code) ? Number(code) : null,
+  }
+}
+
 /**
- * The rows a scan printed (`scanLine`), each one a process; a line without
- * the mark, or with a field that is not a number, is a message the provider
- * mixed in.
- *
- * @param stdout what the scan printed.
+ * What a scan printed (`scanLine`): each process, knowing the program its
+ * run reported, and each run's report by tag. A line without a mark, or with
+ * a field that is not a number, is a message the provider mixed in. Mirrors
+ * Python's `_parse_scan`.
  */
-function parseScanRows(stdout: Uint8Array | null): MachineProcess[] {
+function parseScan(
+  stdout: Uint8Array | null,
+  workspace: string,
+): [MachineProcess[], Map<string, RunStatus>] {
   const found: MachineProcess[] = []
+  const reports = new Map<string, RunStatus>()
   const digits = /^[0-9]+$/
   for (const line of new TextDecoder().decode(stdout ?? new Uint8Array()).split('\n')) {
+    if (line.startsWith(`${SCAN_RUN_MARK} `)) {
+      const rest = line.slice(2)
+      const space = rest.indexOf(' ')
+      const number = rest.slice(0, space)
+      const text = rest.slice(space + 1)
+      const at = text.indexOf(';')
+      const report = parseStatus(
+        at < 0 ? text : text.slice(0, at),
+        at < 0 ? '' : text.slice(at + 1),
+      )
+      if (space > 0 && digits.test(number) && report !== null)
+        reports.set(`${workspace}:${number}`, report)
+      continue
+    }
     const fields = line.split(' ')
-    if (fields.length < 6 || fields[0] !== SCAN_MARK) continue
-    const [, tag = '', pid = '', ppid = '', started = ''] = fields
+    if (fields.length < 7 || fields[0] !== SCAN_MARK) continue
+    const [, tag = '', pid = '', ppid = '', started = '', state = ''] = fields
     if (!digits.test(pid) || !digits.test(ppid) || !digits.test(started)) continue
     found.push({
       tag,
       pid: Number(pid),
       ppid: Number(ppid),
       started: Number(started),
-      args: fields.slice(5).join(' ').trim(),
+      args: fields.slice(6).join(' ').trim(),
+      state,
     })
   }
-  return found
+  return [
+    found.map((row) => {
+      const report = reports.get(row.tag)
+      return report === undefined ? row : { ...row, program: report.pid }
+    }),
+    reports,
+  ]
 }

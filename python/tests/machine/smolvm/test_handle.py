@@ -20,7 +20,11 @@ import pytest
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.io.types import materialize
-from mirage.machine.constants import EXEC_PRELUDE, PROCESS
+from mirage.machine.constants import (
+    EXEC_PRELUDE,
+    run_argv,
+    run_status_path,
+)
 from mirage.machine.smolvm import SmolvmMachine
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.types import RunResult
@@ -179,15 +183,13 @@ async def test_process_preserves_argv_and_shares_the_shell_connection(
             "/",
             "-e",
             "E=request",
-            "-e",
-            f"{PROCESS}=run",
             "--",
             "/bin/sh",
             "-c",
             EXEC_PRELUDE,
             "sh",
             "/work",
-            *argv,
+            *run_argv("run", run_status_path("run"), (), argv),
         ],
         b"input",
     )

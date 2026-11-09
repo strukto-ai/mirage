@@ -18,6 +18,7 @@ import type { PathSpec } from '../../../types.ts'
 import { Activity } from '../../../utils/activity.ts'
 import { asyncContextIsolatesTasks } from '../../../utils/async_context.ts'
 import { ConcurrencyLimiter } from '../../../concurrency/limiter.ts'
+import { isAborting } from '../../../errors/fs.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { PythonRuntime } from '../base.ts'
 import type { OutputFn, Program, RunResult, RuntimeReach } from '../../types.ts'
@@ -29,6 +30,7 @@ import { memoryLimit, type ConfigFields, type RuntimeOptions } from '../../confi
 import type { WorkspaceBinding } from '../../binding.ts'
 import {
   createPyodideInterrupter,
+  guestSignals,
   type ArmedInterrupt,
   type PyodideInterrupter,
 } from './interrupt.ts'
@@ -48,7 +50,7 @@ import { errnoError } from './fs/errors.ts'
 import { decodeBase64, encodeBase64 } from '../../../utils/base64.ts'
 import { FIELDS, type PyodideConfig } from './config.ts'
 import { PyodideWorkerClient } from './worker/client.ts'
-import type { HostStdio } from './worker/types.ts'
+import type { HostStdio, ProgramIds } from './worker/types.ts'
 import { CANNOT_EXECUTE_STATUS } from '../../../shell/constants.ts'
 import { boundSystemClock, systemNow } from '../../../utils/clock.ts'
 
@@ -74,6 +76,8 @@ function hostStdio(
     read: (size, stop) =>
       input === null ? Promise.resolve(new Uint8Array()) : abortable(input.read1(size), stop),
     write: async (fd, bytes, stop) => {
+      // What a stopped program still writes goes nowhere.
+      if (stop.aborted) return true
       const sink = fd === 1 ? output : errors
       if (sink === undefined) {
         ;(fd === 1 ? kept[0] : kept[1]).push(bytes)
@@ -83,7 +87,7 @@ function hostStdio(
         await abortable(sink(bytes), stop)
         return true
       } catch (error) {
-        if (stop.aborted) throw error
+        if (isAborting(error)) return true
         // A reader that went away fails the guest's write with EPIPE.
         console.debug(`pyodide: the reader went away: ${String(error)}`)
         return false
@@ -188,6 +192,15 @@ function maximalPrefixes(prefixes: readonly string[]): string[] {
 }
 
 /**
+ * The numbers the program the caller runs sees for itself and its parent,
+ * none where no process runs it.
+ */
+function programIds(): ProgramIds {
+  const record = currentCaller().process?.record
+  return { pid: record?.id.pid ?? null, ppid: record === undefined ? null : (record.parent ?? 0) }
+}
+
+/**
  * Rewrite top-level imports of denied packages so Pyodide's
  * `loadPackagesFromImports` skips fetching them. The rewritten code is only
  * fed to the auto-loader's import scanner — user code still runs unchanged,
@@ -261,6 +274,10 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
   // interrupt buffer can stop a busy loop (see interrupt.ts); null
   // where SharedArrayBuffer/workers are unavailable (runs unbounded).
   private interrupter: PyodideInterrupter | null = null
+  // In the worker, the numbers the main thread found for the program.
+  ids: ProgramIds | null = null
+  // The runtime of this run, which each run builds afresh.
+  private running: PyodideRuntime | null = null
   private interrupterTried = false
   private worker: Promise<PyodideWorkerClient | PyodideUnavailableError> | null = null
   private readonly maxMemory: number | null
@@ -375,11 +392,14 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
   }
 
   private createRuntime(): PyodideRuntime {
-    return new PyodideRuntime(
+    const runtime = new PyodideRuntime(
       { config: this.config as PyodideConfig },
       this.sync,
       this.interruptBuffer,
     )
+    runtime.ids = this.ids
+    this.running = runtime
+    return runtime
   }
 
   private async withFreshRuntime<T>(execute: (runtime: PyodideRuntime) => Promise<T>): Promise<T> {
@@ -715,6 +735,9 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
       () => {
         this.journal.seal()
       },
+      guestSignals(
+        this.interruptBuffer === undefined ? undefined : new Int32Array(this.interruptBuffer),
+      ),
     )
     return this.guest
   }
@@ -750,6 +773,11 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
     } catch (err) {
       return JSON.stringify({ code: (err as { code?: unknown }).code ?? classify(err) ?? 'EIO' })
     }
+  }
+
+  /** Have the running guest act on the signals sent to it; answers whether that ends its call. */
+  takeSignals(): boolean {
+    return this.running?.guest?.takeSignals() ?? false
   }
 
   private takeSeedNotices(): string[] {
@@ -864,6 +892,7 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
               cwd: ctx.cwd.virtual,
               env: { ...ctx.env },
               flags: ctx.flags,
+              ids: programIds(),
               ...(ctx.timeoutSeconds !== undefined ? { timeoutSeconds: ctx.timeoutSeconds } : {}),
               ...(boundSystemClock() !== null ? { offset: systemNow() - Date.now() / 1000 } : {}),
             },
@@ -908,9 +937,12 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
     const write = this.sync?.output?.bind(this.sync)
     const streams: GuestStdio | undefined =
       read !== undefined && write !== undefined ? { read, write } : undefined
+    const ids = this.ids ?? programIds()
     const request = {
       code: program.code,
       argv,
+      pid: ids.pid,
+      ppid: ids.ppid,
       env: { ...ctx.env },
       stdin:
         streams !== undefined || program.stdin === null
@@ -937,9 +969,7 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
         slot.armed = this.interrupter.arm(ctx.timeoutSeconds ?? null, ctx.signal)
       }
     }
-    const disarm = (): void => {
-      slot.armed?.disarm()
-    }
+    const disarm = (): boolean => (slot.armed?.disarm() ?? null) !== null
     try {
       const arr = this.guestModule(pyodide).run(request, arm, disarm, streams)
       if (slot.armed?.disarm() === 'deadline' && ctx.timeoutSeconds !== undefined) {

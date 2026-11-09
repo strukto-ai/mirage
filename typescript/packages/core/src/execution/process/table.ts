@@ -1,11 +1,13 @@
 import { DEFAULT_PROCESS_PERMISSIONS, type ProcessPermissions } from './config.ts'
-import { FIRST_PID } from './constants.ts'
+import { FIRST_PID, KEPT_SIGNALS } from './constants.ts'
 import { underCeiling, type PathSpec, type ProcessScope } from '../../types.ts'
-import { ProcessHandle, type ExecutionBind } from './handle.ts'
+import { newPauseGate, ProcessHandle, type ExecutionBind, type PauseGate } from './handle.ts'
 import type { Process, ProcessRunner } from './types.ts'
-import type { ProcessView } from './view.ts'
+import type { SessionProcesses } from './session.ts'
 import { HISTORY_MAX_RECORDS, HISTORY_SECONDS, LOCAL_MACHINE } from '../constants.ts'
 import { type LineId, type MachineId, ProcessId } from '../types.ts'
+import { SIGCONT, SIGKILL, SIGSTOP } from '../../shell/constants.ts'
+import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { systemNow } from '../../utils/clock.ts'
 
 /**
@@ -13,7 +15,7 @@ import { systemNow } from '../../utils/clock.ts'
  * the program it runs right now, any other stops with it. Mirrors Python's
  * deliver.
  */
-export function deliver(handle: ProcessHandle, signal: number): void {
+function deliver(handle: ProcessHandle, signal: number): void {
   if (handle.ignores.has(signal)) handle.interrupt(signal)
   else handle.terminate(signal, false)
 }
@@ -32,6 +34,9 @@ export class ProcessTable {
   private readonly ancestors = new Map<number, readonly number[]>()
   private readonly generations = new Map<string, number>()
   private stopped = false
+  // What `kill -STOP` holds, by pid, and the signal each was sent meanwhile.
+  private readonly pauses = new Map<number, PauseGate>()
+  private readonly heldSignals = new Map<number, number>()
   /**
    * The host's ceiling on any session's limit, a lifted one included,
    * whatever profile, snapshot or store set it. Mirrors Python's `ceiling`.
@@ -123,6 +128,7 @@ export class ProcessTable {
     machine?: MachineId | null
     runtime?: string | null
     oneCommand?: boolean
+    background?: boolean
     programIgnores?: ReadonlySet<number>
   }): ProcessHandle {
     if (this.stopped) throw new Error('process table is stopped')
@@ -174,6 +180,7 @@ export class ProcessTable {
         this.history.delete(id)
         this.history.set(id, { generation: entry.generation, record: handle.record })
         this.prune()
+        this.resume(handle)
         try {
           this.ended?.(handle.record)
         } catch (err) {
@@ -188,6 +195,8 @@ export class ProcessTable {
       this.now,
     )
     handle.oneCommand = init.oneCommand === true
+    handle.pauses = this.pauses
+    handle.background = init.background === true || above?.handle.background === true
     handle.programIgnores = init.programIgnores ?? new Set()
     const eager = init.started !== undefined && !this.queued()
     this.runners.set(pid, { generation: this.generations.get(init.sessionId) ?? 0, handle })
@@ -243,38 +252,236 @@ export class ProcessTable {
    * (`deliver`). Mirrors Python's `send`.
    */
   send(handle: ProcessHandle, signal: number): Promise<boolean> | null {
-    if (this.sender === null || handle.ignores.has(signal)) return null
-    return this.sender(handle, signal)
+    if (handle.ignores.has(signal)) return null
+    if (handle.takeSignal(signal)) {
+      if (signal === SIGCONT) this.resume(handle)
+      return Promise.resolve(true)
+    }
+    return this.sender === null ? null : this.sender(handle, signal)
   }
 
   /**
-   * Send a signal a process takes and goes on to every program on a machine
-   * in a process group as `send` does, leaving Mirage's own runners as they
-   * are. The machines are scanned first, so what a program started there is
-   * in the group. Mirrors Python's `send_group`.
+   * Hold a process Mirage runs itself, and what it started, at their next
+   * wait, as `kill -STOP` holds a program. Mirrors Python's `pause`.
    */
-  async sendGroup(groupId: number, signal: number): Promise<void> {
-    await this.scan()
-    const sending = [...this.members(groupId)].reverse().map((member) => this.send(member, signal))
-    await Promise.all(sending.filter((sent) => sent !== null))
+  pause(handle: ProcessHandle): void {
+    const pid = handle.record.id.pid
+    if (!this.pauses.has(pid)) this.pauses.set(pid, newPauseGate())
+    for (const member of [handle, ...this.under(pid)]) {
+      member.showState('T')
+      member.tellHeld()
+    }
   }
 
   /**
-   * Deliver a signal to every live runner of a process group, as killpg(2)
-   * does: a program on a machine gets it as sent (`send`), a runner that
-   * ignores it (a shell) hands it to the program it runs right now
-   * (`ProcessHandle.interrupt`), and any other stops with it and leaves the
-   * rest of the group to their own delivery. The deepest runners hear it
-   * first, so a native program knows the signal before the shell that waits
-   * for it stops. The machines are scanned first, so what a program started
-   * there is in the group. Returns whether the group had a live runner.
-   * Mirrors Python's signal_group.
+   * Let a held process go on, as `kill -CONT` does. Answers the signal it
+   * was sent while held, which it takes now, null for none. Mirrors Python's
+   * `resume`.
+   */
+  resume(handle: ProcessHandle): number | null {
+    const pid = handle.record.id.pid
+    const held = this.pauses.get(pid)
+    const signal = this.heldSignals.get(pid) ?? null
+    this.pauses.delete(pid)
+    this.heldSignals.delete(pid)
+    if (held !== undefined) {
+      held.resolve()
+      for (const member of [handle, ...this.under(pid)]) {
+        member.showState(null)
+        member.tellHeld()
+      }
+    }
+    return signal
+  }
+
+  /**
+   * Keep a signal for a held process, which takes it when it goes on: only
+   * KILL ends a stopped program. Answers whether the process is held.
+   * Mirrors Python's `hold_signal`.
+   */
+  holdSignal(handle: ProcessHandle, signal: number): boolean {
+    const pid = handle.record.id.pid
+    if (!this.pauses.has(pid)) return false
+    this.heldSignals.set(pid, signal)
+    return true
+  }
+
+  /**
+   * Signal one process, the one way `kill` and `timeout` do: a program on a
+   * machine gets it as sent, and what Mirage runs itself does what the signal
+   * does (`signalOwn`). Answers whether the process was there to signal, null
+   * where a STOP cannot hold it: a runtime that cannot tell which task is
+   * calling. Mirrors Python's `signal`.
+   *
+   * @param handle the process.
+   * @param signal the signal; 0 only probes.
+   * @param group it gets the signal as one of a group would.
+   */
+  async signal(handle: ProcessHandle, signal: number, group = false): Promise<boolean | null> {
+    const sending = signal === 0 ? null : this.send(handle, signal)
+    if (sending !== null) return sending
+    return this.signalOwn(handle, signal, group)
+  }
+
+  /**
+   * What a signal does to a process Mirage runs itself. It pauses at STOP and
+   * goes on at CONT, taking then the signal it was sent while paused, since
+   * only KILL ends a stopped program; a kept signal leaves it as it is, and
+   * any other stops it. One of a group leaves what it started to their own
+   * delivery and, if it ignores the signal, hands it to the program it runs
+   * right now (`deliver`); one signalled alone stops what it started too, and
+   * if it ignores the signal nothing happens. Mirrors Python's `_signal_own`.
+   */
+  private signalOwn(handle: ProcessHandle, signal: number, group: boolean): boolean | null {
+    if (KEPT_SIGNALS.has(signal)) {
+      if (signal === SIGSTOP) {
+        if (!asyncContextIsolatesTasks) return null
+        this.pause(handle)
+      } else if (signal === SIGCONT) {
+        const held = this.resume(handle)
+        if (held !== null) return this.signalOwn(handle, held, group)
+      }
+      return true
+    }
+    if (signal !== SIGKILL && this.holdSignal(handle, signal)) return true
+    let found = true
+    if (group) deliver(handle, signal)
+    else
+      found = handle.ignores.has(signal) || handle.terminate(signal, handle.record.parent !== null)
+    this.resume(handle)
+    return found
+  }
+
+  /**
+   * Signal every live runner of a process group, as killpg(2) does. The
+   * machines are scanned first, so what a program started there is in the
+   * group. Returns whether the group had a live runner. Mirrors Python's
+   * signal_group.
    */
   async signalGroup(groupId: number, signal: number): Promise<boolean> {
     await this.scan()
     const members = this.members(groupId)
-    await signalMembers(this, members, signal)
+    await this.signalMembers(members, signal)
     return members.length > 0
+  }
+
+  /**
+   * Signal each runner of a group: the programs on machines as sent, a parent
+   * before its children so a shell does not see its child die first, and
+   * Mirage's own at once (`signalOwn`), deepest first, so a native program
+   * knows the signal before the shell that waits for it stops. A runner that
+   * ignores it, a shell, hands it to the program it runs right now, unless a
+   * process of that program, a child a scan found, got it as sent. Mirrors
+   * Python's `signal_members`.
+   *
+   * @param members the runners, deepest first.
+   * @param signal the signal; 0 only probes.
+   */
+  async signalMembers(members: readonly ProcessHandle[], signal: number): Promise<void> {
+    if (signal === 0) return
+    const sending = new Map(
+      [...members].reverse().map((member) => [member.record.id.pid, this.send(member, signal)]),
+    )
+    const reached = new Set([...sending].filter(([, sent]) => sent !== null).map(([pid]) => pid))
+    for (const member of members) {
+      if (
+        !reached.has(member.record.id.pid) &&
+        (!member.ignores.has(signal) ||
+          !members.some(
+            (other) =>
+              other.record.parent === member.record.id.pid && reached.has(other.record.id.pid),
+          ))
+      )
+        this.signalOwn(member, signal, true)
+    }
+    await Promise.all([...sending.values()].filter((sent) => sent !== null))
+  }
+
+  private sees(
+    handle: ProcessHandle,
+    sessionId: string,
+    scope: ProcessScope,
+    generation: number,
+  ): boolean {
+    const entry = this.runners.get(handle.record.id.pid)
+    return (
+      (this.generations.get(sessionId) ?? 0) === generation &&
+      (handle.record.sessionId !== sessionId ||
+        entry === undefined ||
+        entry.generation === generation) &&
+      (scope === 'workspace' || handle.record.sessionId === sessionId)
+    )
+  }
+
+  /**
+   * The live processes a session's profile lets it see. Seeing one grants no
+   * output access. Mirrors Python's `visible`.
+   *
+   * @param sessionId the session asking.
+   * @param permissions what its profile grants.
+   */
+  visible(
+    sessionId: string,
+    permissions: ProcessPermissions = DEFAULT_PROCESS_PERMISSIONS,
+  ): readonly Process[] {
+    const generation = this.generations.get(sessionId) ?? 0
+    return Object.freeze(
+      [...this.runners.values()]
+        .filter(({ handle }) => this.sees(handle, sessionId, permissions.list, generation))
+        .map(({ handle }) => handle.record),
+    )
+  }
+
+  /**
+   * The process a session names to signal, null for one absent or one the
+   * session does not see; it throws EPERM for one it sees but may not stop.
+   * Mirrors Python's `target`.
+   *
+   * @param pid the process, by Mirage's own number for it.
+   * @param sessionId the session asking.
+   * @param permissions what its profile grants.
+   * @param generation the session's incarnation the asker belongs to; the one
+   *   now when absent.
+   */
+  target(
+    pid: number,
+    sessionId: string,
+    permissions: ProcessPermissions = DEFAULT_PROCESS_PERMISSIONS,
+    generation: number = this.generations.get(sessionId) ?? 0,
+  ): ProcessHandle | null {
+    const entry = this.runners.get(pid)
+    if (entry === undefined || !this.sees(entry.handle, sessionId, permissions.list, generation))
+      return null
+    if (permissions.kill !== 'workspace' && entry.handle.record.sessionId !== sessionId)
+      throw Object.assign(new Error('Operation not permitted'), { code: 'EPERM' })
+    return entry.handle
+  }
+
+  /**
+   * The members of a process group a session sees, deepest first, null for no
+   * member it sees; it throws EPERM for a member it may not stop. Mirrors
+   * Python's `group`.
+   *
+   * @param groupId the group.
+   * @param sessionId the session asking.
+   * @param permissions what its profile grants.
+   */
+  group(
+    groupId: number,
+    sessionId: string,
+    permissions: ProcessPermissions = DEFAULT_PROCESS_PERMISSIONS,
+  ): ProcessHandle[] | null {
+    const generation = this.generations.get(sessionId) ?? 0
+    const members = this.members(groupId).filter((handle) =>
+      this.sees(handle, sessionId, permissions.list, generation),
+    )
+    if (members.length === 0) return null
+    if (
+      permissions.kill !== 'workspace' &&
+      members.some((handle) => handle.record.sessionId !== sessionId)
+    )
+      throw Object.assign(new Error('Operation not permitted'), { code: 'EPERM' })
+    return members
   }
 
   private members(groupId: number): ProcessHandle[] {
@@ -290,72 +497,28 @@ export class ProcessTable {
     )
   }
 
-  view(
+  /**
+   * What a command's handler gets of a session's processes, good for the
+   * session as it is now: one closed or re-profiled since sees nothing and
+   * starts nothing.
+   *
+   * @param sessionId the session.
+   * @param permissions what its profile grants, read at each use.
+   */
+  forSession(
     sessionId: string,
     permissions: () => ProcessPermissions = () => DEFAULT_PROCESS_PERMISSIONS,
-  ): ProcessView {
+  ): SessionProcesses {
     const generation = this.generations.get(sessionId) ?? 0
-    const valid = () => (this.generations.get(sessionId) ?? 0) === generation
-    const allowed = (scope: ProcessScope, handle: ProcessHandle) =>
-      scope === 'workspace' || handle.record.sessionId === sessionId
-    const visible = (handle: ProcessHandle) => {
-      const entry = this.runners.get(handle.record.id.pid)
-      if (
-        handle.record.sessionId === sessionId &&
-        entry !== undefined &&
-        entry.generation !== generation
-      )
-        return null
-      if (!valid() || !allowed(permissions().list, handle)) return null
-      return handle.record
-    }
-    const signalTarget = (pid: number): ProcessHandle | null => {
-      const entry = this.runners.get(pid)
-      if (entry === undefined || visible(entry.handle) === null) return null
-      if (!allowed(permissions().kill, entry.handle))
-        throw Object.assign(new Error('Operation not permitted'), { code: 'EPERM' })
-      return entry.handle
-    }
-    const group = (groupId: number): ProcessHandle[] | null => {
-      const members = this.members(groupId).filter((handle) => visible(handle) !== null)
-      if (members.length === 0) return null
-      if (!members.every((handle) => allowed(permissions().kill, handle)))
-        throw Object.assign(new Error('Operation not permitted'), { code: 'EPERM' })
-      return members
-    }
     return Object.freeze({
-      list: () =>
-        Object.freeze(
-          [...this.runners.values()].flatMap(({ handle }) => {
-            const info = visible(handle)
-            return info === null ? [] : [info]
-          }),
-        ),
       checkSpawn: () => {
-        if (!valid())
+        if ((this.generations.get(sessionId) ?? 0) !== generation)
           throw Object.assign(new Error('process spawn is not permitted'), { code: 'EACCES' })
       },
-      probe: (pid: number) => signalTarget(pid) !== null,
-      // A session's shell leaves its jobs running, as bash's do when it dies.
-      terminate: (pid: number, signal: number) => {
-        const handle = signalTarget(pid)
-        return (
-          handle !== null &&
-          (handle.ignores.has(signal) || handle.terminate(signal, handle.record.parent !== null))
-        )
-      },
-      permissions: () => (valid() ? permissions() : null),
-      probeGroup: (groupId: number) => group(groupId) !== null,
-      signalGroup: async (groupId: number, signal: number) => {
-        await this.scan()
-        const members = group(groupId)
-        await signalMembers(this, members ?? [], signal)
-        return members !== null
-      },
-      scan: () => this.scan(),
-      send: (pid: number, signal: number) => {
-        const handle = signalTarget(pid)
-        return handle === null ? null : this.send(handle, signal)
+      probe: (pid: number) => this.target(pid, sessionId, permissions(), generation) !== null,
+      signal: async (pid: number, signal: number) => {
+        const handle = this.target(pid, sessionId, permissions(), generation)
+        return handle === null ? false : ((await this.signal(handle, signal)) ?? false)
       },
     })
   }
@@ -457,37 +620,4 @@ export class ProcessTable {
     }
     if (errors.length > 0) throw new AggregateError(errors, 'process cancellation failed')
   }
-}
-
-/**
- * Deliver a signal to each runner of a group, in order: the programs on
- * machines as sent, Mirage's own at once (`deliver`). A runner that ignores
- * it, a shell, hands it to the program it runs right now, unless a process
- * of that program, a child a scan found, already got it as sent.
- *
- * @param table the table the runners run in.
- * @param members the runners, deepest first.
- * @param signal the signal.
- */
-async function signalMembers(
-  table: ProcessTable,
-  members: readonly ProcessHandle[],
-  signal: number,
-): Promise<void> {
-  const sending = new Map(
-    [...members].reverse().map((member) => [member.record.id.pid, table.send(member, signal)]),
-  )
-  const reached = new Set([...sending].filter(([, sent]) => sent !== null).map(([pid]) => pid))
-  for (const member of members) {
-    if (
-      !reached.has(member.record.id.pid) &&
-      (!member.ignores.has(signal) ||
-        !members.some(
-          (other) =>
-            other.record.parent === member.record.id.pid && reached.has(other.record.id.pid),
-        ))
-    )
-      deliver(member, signal)
-  }
-  await Promise.all([...sending.values()].filter((sent) => sent !== null))
 }

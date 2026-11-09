@@ -17,7 +17,12 @@ from collections.abc import Awaitable, Callable
 from functools import partial
 from typing import Any
 
-from mirage.context import reset_current_session, set_current_evaluation
+from mirage.context import (
+    current_caller,
+    reset_current_session,
+    set_current_evaluation,
+    while_paused,
+)
 from mirage.execution.job import JobTable, JobWaits
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
@@ -127,7 +132,11 @@ async def handle_pipe(
     # the caller applies this pipeline's own negation after it finishes.
     session.errexit_immune = False
     pipes = [
-        PipeConsole(i < len(stderr_flags) and stderr_flags[i], buffer_bytes)
+        PipeConsole(
+            i < len(stderr_flags) and stderr_flags[i],
+            buffer_bytes,
+            while_paused,
+        )
         for i in range(len(commands))
     ]
     ios: list[IOResult] = [IOResult() for _ in commands]
@@ -256,6 +265,9 @@ async def handle_pipe(
                 None if _shell_stage(cmd, session) else process
             )
             tasks.append(process.task)
+        job = current_caller().process
+        if job is not None and job.pipeline:
+            job.set_stages([stage for stage in stages if stage is not None])
         last = pipes[-1].stream()
         output_task = asyncio.create_task(
             materialize(last)

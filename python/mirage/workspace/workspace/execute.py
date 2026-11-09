@@ -23,6 +23,7 @@ from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.context import (
     bind_caller,
     current_caller,
+    expire_caller,
     get_current_evaluation,
     reset_caller,
     set_current_evaluation,
@@ -61,6 +62,7 @@ from mirage.shell.constants import (
     FORK_FAILED,
     FORK_FAILED_STATUS,
     INTERRUPTED_STATUS,
+    PPID,
     SHELL_IGNORED_SIGNALS,
 )
 from mirage.shell.errors import DiscardSignal, ExitSignal
@@ -111,7 +113,11 @@ from mirage.workspace.session import (
 )
 from mirage.workspace.session.budget import run_with_env_limit
 from mirage.workspace.session.manager import SessionManager
-from mirage.workspace.session.state import deciding, visible_env
+from mirage.workspace.session.state import (
+    deciding,
+    seed_parent,
+    visible_env,
+)
 from mirage.workspace.snapshot import ContentDriftError
 from mirage.workspace.snapshot.drift import DriftQueue
 from mirage.workspace.types import StatusWriter
@@ -753,6 +759,8 @@ async def _run_as_shell(
 
     def started(process: ProcessHandle) -> None:
         session.process_id = session.shell_pid = process.record.pid
+        if PPID not in session.vars:
+            seed_parent(session, 0)
 
     try:
         process = ws.processes.start(
@@ -1197,6 +1205,7 @@ async def _run_limited(
                     timeout,
                     LINE_NAME,
                     budget_start,
+                    expire_caller,
                 ),
                 body=ws.registry.body_limit,
             ),

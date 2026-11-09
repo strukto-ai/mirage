@@ -119,12 +119,11 @@ async def test_cancel_does_not_claim_exit_before_finally_finishes():
         cwd=PathSpec.from_str_path("/"),
         run=run,
     )
-    view = processes.view("a")
     await entered.wait()
     assert process.terminate()
     assert not process.terminate()
     await cleaning.wait()
-    [info] = view.list()
+    [info] = processes.visible("a", ProcessPermissions())
     assert info.state == ProcessState.STOPPING
     assert info.exit is None
     waiter = asyncio.create_task(process.join())
@@ -146,7 +145,9 @@ async def test_cancel_does_not_claim_exit_before_finally_finishes():
     result = await process.join()
     assert result.state == ProcessState.EXITED
     assert (result.exit, result.signal) == (137, 9)
-    assert result.pid not in [i.pid for i in view.list()]
+    assert result.pid not in [
+        i.pid for i in processes.visible("a", ProcessPermissions())
+    ]
     assert not process.terminate()
 
 
@@ -165,17 +166,21 @@ async def test_views_are_immutable_scoped_and_revoked_on_session_reuse():
     b = processes.start(
         session_id="b", command="b", cwd=PathSpec.from_str_path("/"), run=run
     )
-    old_view = processes.view("a")
-    assert old_view.list() == (a.record,)
+    old_grants = processes.for_session("a")
+    assert old_grants.probe(a.record.pid)
     with pytest.raises(FrozenInstanceError):
         a.record.command = "changed"
     processes.revoke_session("a")
-    new_view = processes.view("a")
+    new_grants = processes.for_session("a")
     replacement = processes.start(
         session_id="a", command="new", cwd=PathSpec.from_str_path("/"), run=run
     )
-    assert old_view.list() == ()
-    assert new_view.list() == (replacement.record,)
+    assert not old_grants.probe(replacement.record.pid)
+    assert new_grants.probe(replacement.record.pid)
+    assert not new_grants.probe(a.record.pid)
+    assert processes.visible("a", ProcessPermissions()) == (
+        replacement.record,
+    )
     assert len({a.record.pid, b.record.pid, replacement.record.pid}) == 3
     release.set()
     assert [
@@ -299,18 +304,16 @@ async def test_workspace_list_does_not_grant_kill():
         run=run,
     )
     grants = ProcessPermissions(list="workspace")
-    view = processes.view("observer", lambda: grants)
-    [info] = view.list()
+    scoped = processes.for_session("observer", lambda: grants)
+    [info] = processes.visible("observer", grants)
     assert info.pid == child.record.pid and info.command == "secret argument"
     with pytest.raises(PermissionError) as denied:
-        view.terminate(child.record.pid, 15)
+        scoped.probe(child.record.pid)
     assert denied.value.errno == errno.EPERM
-    assert view.permissions() == grants
     processes.revoke_session("observer")
     with pytest.raises(PermissionError):
-        view.check_spawn()
-    assert view.list() == ()
-    assert view.permissions() is None
+        scoped.check_spawn()
+    assert not scoped.probe(child.record.pid)
     release.set()
     await child.join()
 
@@ -782,3 +785,77 @@ async def test_a_tree_keeps_a_live_grandchild_whose_parent_lapsed():
         release.set()
         for handle in (root, grandchild, other):
             await handle.join()
+
+
+async def _sleeper(processes, group=False):
+    gate = asyncio.Event()
+
+    async def run():
+        await gate.wait()
+        return 0
+
+    return processes.start(
+        session_id="a",
+        command="work",
+        cwd=PathSpec.from_str_path("/"),
+        run=run,
+        own_group=group,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", [False, True])
+async def test_signal_holds_what_a_stopped_process_is_sent(group):
+    processes = ProcessTable()
+    process = await _sleeper(processes, group)
+    await asyncio.sleep(0)
+
+    async def send(number):
+        if group:
+            return await processes.signal_group(process.record.group, number)
+        return await processes.signal(process, number)
+
+    assert await send(19)
+    assert process.record.shown_state == "T"
+    assert await send(15)
+    assert process.record.state == ProcessState.RUNNING
+    assert await send(18)
+    ended = await process.join()
+    assert (ended.exit, ended.signal) == (143, 15)
+
+
+@pytest.mark.asyncio
+async def test_signal_kill_ends_a_stopped_process():
+    processes = ProcessTable()
+    process = await _sleeper(processes)
+    await asyncio.sleep(0)
+    assert await processes.signal(process, 19)
+    assert await processes.signal(process, 9)
+    ended = await process.join()
+    assert (ended.exit, ended.signal) == (137, 9)
+    assert not process.paused
+
+
+@pytest.mark.asyncio
+async def test_signal_a_kept_one_leaves_it_running():
+    processes = ProcessTable()
+    process = await _sleeper(processes)
+    await asyncio.sleep(0)
+    for number in (0, 17, 18, 20, 23, 28):
+        assert await processes.signal(process, number)
+    assert process.record.state == ProcessState.RUNNING
+    assert process.record.shown_state is None
+    process.terminate()
+    await process.join()
+
+
+@pytest.mark.asyncio
+async def test_an_ended_process_lets_go_of_what_it_held():
+    processes = ProcessTable()
+    process = await _sleeper(processes)
+    await asyncio.sleep(0)
+    processes.pause(process)
+    assert process.paused
+    process.terminate(15)
+    await process.join()
+    assert not process.paused

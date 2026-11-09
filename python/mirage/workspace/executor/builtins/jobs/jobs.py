@@ -17,11 +17,13 @@ from mirage.execution.job import JobHandle, JobState, JobTable
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
+from mirage.shell.signals import process_status
 from mirage.shell.voice import shell_voice
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.jobs import constants
 from mirage.workspace.executor.builtins.jobspec import (
-    job_numbered,
+    AMBIGUOUS_SPEC,
+    job_of_spec,
     session_of,
 )
 from mirage.workspace.executor.builtins.shared import builtin_usage
@@ -29,23 +31,43 @@ from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 
-def _job_row(job: JobHandle, long: bool) -> str:
-    """One `jobs` line in mirage's own row shape.
+def _job_status(job: JobHandle) -> str:
+    """How bash's ``jobs`` words where a job stands.
 
     Args:
         job (JobHandle): the job.
-        long (bool): `-l`, which includes the managed process id.
     """
-    status = (
-        "running"
-        if job.state == JobState.RUNNING
-        else "killed"
-        if job.signal is not None
-        else "completed"
-    )
+    if job.state == JobState.RUNNING:
+        return "Running"
+    ended = job.signal
+    if ended is None and job.process is not None:
+        ended = job.process.ended_by
+    return process_status(job.exit_code, ended)
+
+
+def _job_row(job: JobHandle, long: bool, mark: str) -> str:
+    """One `jobs` line, in bash's layout.
+
+    Args:
+        job (JobHandle): the job.
+        long (bool): `-l`, which includes its pid.
+        mark (str): `+` for the newest job, `-` for the one before it,
+            else a space.
+    """
+    status = f"{_job_status(job):<24}"
+    running = " &" if job.state == JobState.RUNNING else ""
+    stages = () if job.process is None else job.process.stages
+    if long and stages:
+        first, *rest = [stage.record for stage in stages]
+        rows = [
+            f"[{job.id}]{mark} {first.shown_pid:5d} {status}{first.command}"
+        ]
+        rows += [f"{'':5}{r.shown_pid:5d} {'':22}| {r.command}" for r in rest]
+        return "\n".join(rows) + running
+    command = job.command + running
     if long:
-        return f"[{job.id}] {job.pid} {status} {job.command}"
-    return f"[{job.id}] {status} {job.command}"
+        return f"[{job.id}]{mark} {job.shown_pid:5d} {status}{command}"
+    return f"[{job.id}]{mark}  {status}{command}"
 
 
 async def handle_jobs(
@@ -54,13 +76,13 @@ async def handle_jobs(
     session: SessionState | None = None,
     view: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """List jobs, with bash's flags applied to mirage's row shape.
+    """List jobs as bash does, the machines looked at first.
 
-    `-p` prints the managed PID; `-s` lists nothing because suspended
-    processes are unsupported. `-r` keeps running jobs, `-l` adds the PID, and
-    `-n` lists only the jobs whose status changed since the last `jobs`
-    (which is every completed one not yet reaped, since reaping is what
-    a listing does). A jobspec operand (`%2` or `2`) filters to that
+    `-p` prints the PID; `-s` lists nothing because a non-interactive
+    shell reports no job as stopped. `-r` keeps running jobs, `-l` adds the PID, and
+    `-n` lists only the jobs whose status changed since a `jobs` last
+    showed them: one never shown, and every completed one not yet reaped,
+    since reaping is what a listing does. A jobspec operand filters to that
     job; one that names no job is `no such job`, exit 1. `-x` is not
     carried, and an unknown letter is GNU's usage line, exit 2.
 
@@ -94,15 +116,22 @@ async def handle_jobs(
     while table is not None:
         await table.sync(sid)
         table = table.parent
+    await job_table.processes.scan()
     jobs = [j for j in job_table.listing(sid) if not j.reported]
+    current, previous = job_table.job_marks(sid)
+    marks = {current: "+", previous: "-"}
     if specs:
         picked: list[JobHandle] = []
         for spec in specs:
-            raw = spec.lstrip("%")
-            job = job_numbered(jobs, int(raw)) if raw.isdigit() else None
+            job, refusal = job_of_spec(
+                jobs, spec if spec.startswith("%") else f"%{spec}"
+            )
             if job is None:
+                said = f"{shell_voice()}jobs: {spec}: no such job\n"
                 err = encode_text(
-                    f"{shell_voice()}jobs: {spec}: no such job\n"
+                    f"{shell_voice()}jobs: {refusal}\n{said}"
+                    if refusal.endswith(AMBIGUOUS_SPEC)
+                    else said
                 )
                 return (
                     None,
@@ -116,11 +145,13 @@ async def handle_jobs(
     if "s" in flags:
         jobs = []
     if "n" in flags:
-        jobs = [j for j in jobs if j.state != JobState.RUNNING]
+        jobs = [j for j in jobs if not j.listed or j.state != JobState.RUNNING]
     if "p" in flags:
-        lines = [str(j.pid) for j in jobs]
+        lines = [str(j.shown_pid) for j in jobs]
     else:
-        lines = [_job_row(j, "l" in flags) for j in jobs]
+        lines = [_job_row(j, "l" in flags, marks.get(j.id, " ")) for j in jobs]
+        for j in jobs:
+            j.listed = True
     await job_table.pop_completed(sid)
     out = encode_text("\n".join(lines) + "\n") if lines else b""
     return out, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)

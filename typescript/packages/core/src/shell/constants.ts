@@ -62,6 +62,7 @@ export const BASH_LINENO = 'BASH_LINENO'
 export const RANDOM = 'RANDOM'
 export const LINENO = 'LINENO'
 export const BASHPID = 'BASHPID'
+export const PPID = 'PPID'
 // What the shell calls itself when no script is running, bash's "bash".
 // A nested `bash`/`sh` overrides it through SessionState.scriptName, and
 // `SessionState.argv0` is the one place the two are folded together.
@@ -334,7 +335,6 @@ export const BUILTIN_GROUP: ReadonlyMap<ShellBuiltin, BuiltinGroup> = new Map<
   [ShellBuiltin.MAN, BuiltinGroup.MANUALS_AND_HISTORY],
   [ShellBuiltin.HISTORY, BuiltinGroup.MANUALS_AND_HISTORY],
   [ShellBuiltin.WAIT, BuiltinGroup.JOB_CONTROL],
-  [ShellBuiltin.FG, BuiltinGroup.JOB_CONTROL],
   [ShellBuiltin.KILL, BuiltinGroup.JOB_CONTROL],
   [ShellBuiltin.JOBS, BuiltinGroup.JOB_CONTROL],
   [ShellBuiltin.DISOWN, BuiltinGroup.JOB_CONTROL],
@@ -438,6 +438,7 @@ export const SIGTERM = 15
 export const SIGKILL = 9
 export const SIGCHLD = 17
 export const SIGSTOP = 19
+export const SIGCONT = 18
 
 // Signals whose default action leaves a process running.
 export const CONTINUE_SIGNALS: ReadonlySet<number> = new Set([0, SIGCHLD, 18, 23, 28])

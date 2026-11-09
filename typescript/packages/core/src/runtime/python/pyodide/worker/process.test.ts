@@ -51,7 +51,15 @@ function spawned(ending: number): ChildProcess {
 // program on PATH.
 function guestTable(child: ChildProcess): GuestProcessTable {
   const ctx = {
-    processes: { checkSpawn: () => undefined, spawn: () => child },
+    processes: {
+      checkSpawn: () => undefined,
+      probe: () => true,
+      signal: (_pid: number, signal: number) => {
+        child.terminate(signal)
+        return Promise.resolve(true)
+      },
+      spawn: () => child,
+    },
   } as unknown as Context
   const files = {
     stat: (path: string) => Promise.resolve({ isDir: path === '/', mode: 0o755 }),

@@ -678,17 +678,16 @@ it('keeps a disowned process visible until its cancelled runner really exits', a
   await Promise.resolve()
   const process = job.process
   if (process === null) throw new Error('missing process')
-  const view = table.processes.view('a')
   expect(await table.disown(job.id, 'a')).toBe(true)
   expect(table.listJobs('a')).toEqual([])
-  expect(view.list().map((info) => info.id.pid)).toEqual([process.record.id.pid])
+  expect(table.processes.visible('a').map((info) => info.id.pid)).toEqual([process.record.id.pid])
   await table.killAll()
   expect(job.signal).not.toBeNull()
-  expect(view.list().map((info) => info.state)).toEqual(['stopping'])
+  expect(table.processes.visible('a').map((info) => info.state)).toEqual(['stopping'])
   if (release.fire === undefined) throw new Error('runner did not start')
   release.fire()
   expect(await process.join()).toMatchObject({ exit: 0, signal: null })
-  expect(view.list()).toEqual([])
+  expect(table.processes.visible('a')).toEqual([])
 })
 
 it('does not restart process IDs with shell job numbers', async () => {
@@ -1736,14 +1735,14 @@ describe('JobTable process plane', () => {
     })
     await until(async () => a.daemon in (await b.remoteProcesses()))
     const every = { list: 'workspace', kill: 'workspace', max: null } as const
-    const view = b.processes.view('t', () => every)
+    let revoked = false
     const listing = store.processes.bind(store)
     const spy = vi.spyOn(store, 'processes').mockImplementation(() => {
-      b.processes.revokeSession('t')
+      revoked = true
       return listing()
     })
     try {
-      expect(await b.signalRemote(job.pid, 15, 't', view.permissions)).toBe(false)
+      expect(await b.signalRemote(job.pid, 15, 't', () => (revoked ? null : every))).toBe(false)
     } finally {
       spy.mockRestore()
     }

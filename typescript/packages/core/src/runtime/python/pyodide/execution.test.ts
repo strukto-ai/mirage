@@ -386,7 +386,7 @@ small = [str(i).encode() for i in range(100000)]
             stdin: null,
           },
           () => undefined,
-          () => undefined,
+          () => false,
         )
         expect(run[2]).toBe(0)
         expect(run[0]).toEqual(expected)
@@ -418,7 +418,7 @@ small = [str(i).encode() for i in range(100000)]
             stdin: null,
           },
           () => undefined,
-          () => undefined,
+          () => false,
         )
         expect(new TextDecoder().decode(result[0])).toBe('submission result\n')
         expect(new TextDecoder().decode(result[1])).toBe('')
@@ -457,7 +457,7 @@ small = [str(i).encode() for i in range(100000)]
           piped: true,
         },
         () => undefined,
-        () => undefined,
+        () => false,
         {
           read: () => {
             log.push('read')
@@ -503,7 +503,7 @@ small = [str(i).encode() for i in range(100000)]
           stdin: null,
         },
         () => undefined,
-        () => undefined,
+        () => false,
         {
           read: () => new Uint8Array(),
           write: (fd, bytes) => {
@@ -538,7 +538,7 @@ small = [str(i).encode() for i in range(100000)]
           stdin: null,
         },
         () => undefined,
-        () => undefined,
+        () => false,
         {
           read: () => new Uint8Array(),
           write: (fd, bytes) => {
@@ -593,7 +593,7 @@ ${ending}`,
             stdin: null,
           },
           () => undefined,
-          () => undefined,
+          () => false,
         )
         expect(new TextDecoder().decode(result[0])).toBe('main identity works\n')
         expect(result[2]).toBe(exitCode)
@@ -630,7 +630,7 @@ ${ending}`,
             stdin: null,
           },
           () => undefined,
-          () => undefined,
+          () => false,
         )
         expect(new TextDecoder().decode(result[1])).toBe('')
         expect(result[2]).toBe(0)
@@ -668,7 +668,7 @@ saved_state = process_state()
           stdin: null,
         },
         () => undefined,
-        () => undefined,
+        () => false,
       )
       expect(result[2]).toBe(1)
       expect(new TextDecoder().decode(result[0])).toBe('saved\n')
@@ -735,7 +735,7 @@ print(sys.flags.optimize, __debug__, sys.flags.safe_path, '' in sys.path)
             stdin: null,
           },
           () => undefined,
-          () => undefined,
+          () => false,
         )
         expect(new TextDecoder().decode(result[1])).toBe('')
         expect(result[2]).toBe(0)
@@ -782,7 +782,7 @@ print(optimize_helper.debug)`,
             stdin: null,
           },
           () => undefined,
-          () => undefined,
+          () => false,
         )
         expect(new TextDecoder().decode(result[0])).toBe(stdout)
         expect(result[2]).toBe(exitCode)
@@ -834,7 +834,7 @@ ${code}`,
             stdin: null,
           },
           () => undefined,
-          () => undefined,
+          () => false,
         )
         expect(result[2]).toBe(exitCode)
         expect(
@@ -870,7 +870,7 @@ sys._xoptions is saved_options and warnings.filters is saved_filters and \
             stdin: null,
           },
           () => undefined,
-          () => undefined,
+          () => false,
         )
       for (const operation of [
         'sys.stdout.close(); sys.stderr.close()',
@@ -932,7 +932,7 @@ sys._xoptions is saved_options and warnings.filters is saved_filters and \
           stdin: null,
         },
         () => undefined,
-        () => undefined,
+        () => false,
       )
       expect(new TextDecoder().decode(probe[0])).toBe('False\n')
       // The first proxy owns the module; each later proxy is a call argument.
@@ -1190,7 +1190,7 @@ it.each(tracebackCases)(
           stdin: null,
         },
         () => undefined,
-        () => undefined,
+        () => false,
       )
       expect(result[2]).toBe(1)
       expect(new TextDecoder().decode(result[1])).toBe(stderr)

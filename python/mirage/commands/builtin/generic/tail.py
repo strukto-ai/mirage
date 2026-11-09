@@ -30,7 +30,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import enoent, fs_strerror
-from mirage.execution.process.view import ProcessView
+from mirage.execution.process.session import SessionProcesses
 from mirage.io.cooperative import CHUNK_SIZE, chunks
 from mirage.io.memory import check_memory
 from mirage.io.stream import async_chain, close_quietly
@@ -696,7 +696,7 @@ async def _follow(
         [PathSpec, int, float], Awaitable[AsyncIterator[bytes] | None]
     ]
     | None = None,
-    processes: ProcessView | None = None,
+    processes: SessionProcesses | None = None,
 ) -> AsyncIterator[bytes]:
     """Print each operand's tail, then keep printing what it gains.
 
@@ -783,7 +783,7 @@ async def _follow(
             Awaitable[AsyncIterator[bytes] | None]] | None): the mount's
             ``follow``; None, or an answer of None, polls. A line with a
             ``--pid`` polls, since only a poll can look for the process.
-        processes (ProcessView | None): the session's processes, which
+        processes (SessionProcesses | None): the session's processes, which
             ``--pid`` is looked up in.
     """
     writer = flags.pid or None
@@ -964,13 +964,13 @@ async def _follow(
     io.exit_code = 1
 
 
-def _writer_runs(processes: ProcessView | None, pid: int) -> bool:
+def _writer_runs(processes: SessionProcesses | None, pid: int) -> bool:
     """Whether ``--pid``'s process still runs, as ``kill(pid, 0)``
     answers: one the session cannot see is gone, and one it sees but may
     not signal still runs.
 
     Args:
-        processes (ProcessView | None): the session's processes.
+        processes (SessionProcesses | None): the session's processes.
         pid (int): the process.
     """
     if processes is None:

@@ -30,6 +30,7 @@ from mirage.execution.job.constants import (
     LIST_CHECK_SECONDS,
     LIST_MAX_RETRIES,
     PUBLISH_SECONDS,
+    SAVED_STATUSES,
     STOP_WAIT_SECONDS,
 )
 from mirage.execution.job.handle import JobHandle, JobRunner, mark_killed
@@ -180,6 +181,8 @@ class JobTable:
         # claim or another daemon tries them again.
         self._left: dict[str, RecordFields] = {}
         self._jobs: dict[str, dict[int, JobHandle]] = {}
+        self._statuses: dict[str, dict[int, int]] = {}
+        self._marks: dict[str, tuple[int | None, int | None]] = {}
         # Jobs `disown` removed from the table while they still run, and
         # ones another job's number displaced. The shell no longer lists,
         # waits for or reports them, but the workspace still owns their
@@ -380,6 +383,7 @@ class JobTable:
             ignores=IGNORED_SIGNALS,
             one_command=simple,
             program_ignores=IGNORED_SIGNALS,
+            background=True,
         )
         line, group = process.record.line, process.record.group
         try:
@@ -433,6 +437,7 @@ class JobTable:
             raise
         job.process = process
         self._jobs.setdefault(session_id, {})[job_id] = job
+        self._job_added(session_id, job_id)
         ready.set()
         plane, pid = self._plane, process.record.pid
         plane._job_tables[pid] = self
@@ -469,6 +474,7 @@ class JobTable:
             job.session_id, job.id, _entry(job.record, job.owner)
         )
         self._jobs.setdefault(job.session_id, {})[job.id] = job
+        self._job_added(job.session_id, job.id)
 
     async def sync(self, session_id: str = "") -> None:
         """Bring a session's list up to date with the store.
@@ -637,12 +643,14 @@ class JobTable:
             job_id (int): the job to drop.
             session_id (str): the session whose list names it.
         """
+        self._jobs_leaving(session_id, {job_id})
         job = self._jobs.get(session_id, {}).pop(job_id, None)
         if job is None:
             return False
         running = job.state == JobState.RUNNING
         if job.process is not None and running:
             self._disowned.append(job)
+        self._keep_statuses(session_id, [job], running_status=0)
         await self._remove(session_id, {job.console_name}, disowned=running)
         return True
 
@@ -680,6 +688,7 @@ class JobTable:
                     )
             if await self.store.delete(session_id, generation_of(fields)):
                 self._jobs.pop(session_id, None)
+                self._marks.pop(session_id, None)
                 self.processes.revoke_session(session_id)
                 return list(stopped.values())
         raise RuntimeError(
@@ -821,11 +830,96 @@ class JobTable:
             job_id (int): the job to remove.
             session_id (str): the session whose list names it.
         """
+        self._jobs_leaving(session_id, {job_id})
         job = self._jobs.get(session_id, {}).pop(job_id, None)
         if job is not None:
+            self._keep_statuses(session_id, [job])
             await self._remove(session_id, {job.console_name})
 
-    async def pop_completed(self, session_id: str = "") -> list[JobHandle]:
+    def _keep_statuses(
+        self,
+        session_id: str,
+        jobs: list[JobHandle],
+        running_status: int | None = None,
+    ) -> None:
+        """Keep how ended jobs ended under the pids that name them, which
+        a later ``wait`` answers from once the job has left the list.
+
+        Args:
+            session_id (str): the session whose jobs they are.
+            jobs (list[JobHandle]): the jobs leaving its list.
+            running_status (int | None): what a job still running answers
+                once it has left, as a disowned one does; None keeps
+                nothing for it.
+        """
+        kept = self._statuses.setdefault(session_id, {})
+        for job in jobs:
+            code = (
+                running_status
+                if job.state == JobState.RUNNING
+                else job.exit_code
+            )
+            if code is not None:
+                kept[job.pid] = kept[job.shown_pid] = code
+                kept[job.last_pid] = code
+        for pid in list(kept)[: max(0, len(kept) - SAVED_STATUSES)]:
+            del kept[pid]
+
+    def saved_status(self, session_id: str, pid: int) -> int | None:
+        """How the job a pid named ended, once it has left the list.
+
+        Args:
+            session_id (str): the session whose job it was.
+            pid (int): the pid.
+
+        Returns:
+            int | None: its status, None for a pid no ended job had.
+        """
+        return self._statuses.get(session_id, {}).get(pid)
+
+    def job_marks(self, session_id: str = "") -> tuple[int | None, int | None]:
+        """The jobs ``jobs`` marks ``+`` and ``-``: the newest two, until
+        one of those leaves the list, when the marks go to the newest
+        running ones, and a job started after that takes ``+``.
+
+        Args:
+            session_id (str): the session whose list it is.
+        """
+        kept = self._marks.get(session_id)
+        if kept is not None:
+            return kept
+        if self.parent is not None and not self._jobs.get(session_id):
+            return self.parent.job_marks(session_id)
+        newest = sorted(self._jobs.get(session_id, {}), reverse=True)
+        return (
+            newest[0] if newest else None,
+            newest[1] if len(newest) > 1 else None,
+        )
+
+    def _job_added(self, session_id: str, job_id: int) -> None:
+        kept = self._marks.get(session_id)
+        if kept is not None:
+            self._marks[session_id] = (job_id, kept[0])
+
+    def _jobs_leaving(self, session_id: str, ids: set[int]) -> None:
+        if not ids.intersection(self.job_marks(session_id)):
+            return
+        running = sorted(
+            (
+                job.id
+                for job in self._jobs.get(session_id, {}).values()
+                if job.state == JobState.RUNNING and job.id not in ids
+            ),
+            reverse=True,
+        )
+        self._marks[session_id] = (
+            running[0] if running else None,
+            running[1] if len(running) > 1 else None,
+        )
+
+    async def pop_completed(
+        self, session_id: str = "", keep: int | None = None
+    ) -> list[JobHandle]:
         """Return a session's completed/killed jobs and remove them from
         its list.
 
@@ -834,11 +928,18 @@ class JobTable:
 
         Args:
             session_id (str): the session whose list is pruned.
+            keep (int | None): a job that stays listed all the same.
         """
         jobs = self._jobs.get(session_id, {})
-        completed = [j for j in jobs.values() if j.state != JobState.RUNNING]
+        completed = [
+            j
+            for j in jobs.values()
+            if j.state != JobState.RUNNING and j.id != keep
+        ]
+        self._jobs_leaving(session_id, {j.id for j in completed})
         for j in completed:
             del jobs[j.id]
+        self._keep_statuses(session_id, completed)
         if completed:
             await self._remove(session_id, {j.console_name for j in completed})
         return completed

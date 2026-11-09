@@ -23,6 +23,7 @@ from mirage.commands.builtin.utils.limit import (
     run_with_timeout,
 )
 from mirage.commands.config import Context
+from mirage.context import expire_caller
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, materialize
 from mirage.policy import (
@@ -118,6 +119,7 @@ async def run_whole_line(
                 timeout,
                 LINE_NAME,
                 start,
+                expire_caller,
             )
         finally:
             await registry.settle(runtime)

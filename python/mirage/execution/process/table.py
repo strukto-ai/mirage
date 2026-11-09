@@ -2,6 +2,7 @@ import asyncio
 import errno
 import logging
 from collections.abc import Awaitable, Callable
+from concurrent.futures import Future
 from threading import RLock
 
 from mirage.execution.constants import (
@@ -10,18 +11,19 @@ from mirage.execution.constants import (
     LOCAL_MACHINE,
 )
 from mirage.execution.process.config import ProcessPermissions, ProcessScope
-from mirage.execution.process.constants import FIRST_PID
+from mirage.execution.process.constants import FIRST_PID, KEPT_SIGNALS
 from mirage.execution.process.handle import ExecutionBind, ProcessHandle
+from mirage.execution.process.session import SessionProcesses
 from mirage.execution.process.types import Process, ProcessRunner, ProcessState
-from mirage.execution.process.view import ProcessView
 from mirage.execution.types import LineId, MachineId, ProcessId
+from mirage.shell.constants import SIGCONT, SIGKILL, SIGSTOP
 from mirage.types import PathSpec, under_ceiling
 from mirage.utils.clock import system_now
 
 logger = logging.getLogger(__name__)
 
 
-def deliver(handle: ProcessHandle, signal: int) -> None:
+def _deliver(handle: ProcessHandle, signal: int) -> None:
     """Deliver a signal to one runner of a group: one that ignores it
     hands it to the program it runs right now, any other stops with it.
 
@@ -86,6 +88,10 @@ class ProcessTable:
         self._generations: dict[str, int] = {}
         self._lock = RLock()
         self._stopped = False
+        # What ``kill -STOP`` holds, by pid, each done at the
+        # ``kill -CONT``, and the signal each was sent meanwhile.
+        self._pauses: dict[int, Future[None]] = {}
+        self._held_signals: dict[int, int] = {}
         # The host's ceiling on any session's limit, a lifted one
         # included, whatever profile, snapshot or store set it.
         self.ceiling: int | None = None
@@ -119,6 +125,7 @@ class ProcessTable:
         runtime: str | None = None,
         one_command: bool = False,
         program_ignores: frozenset[int] = frozenset(),
+        background: bool = False,
     ) -> ProcessHandle:
         """Track a runner; its caller owns admission before command effects.
 
@@ -161,6 +168,8 @@ class ProcessTable:
                 program it is (``ProcessHandle.take``).
             program_ignores (frozenset[int]): what that program ignores
                 as well, where ``ignores`` is more than a shell's.
+            background (bool): it is a background job, as what it starts
+                is too.
 
         Raises:
             BlockingIOError: the session already holds ``limit``
@@ -227,7 +236,11 @@ class ProcessTable:
                 self._now,
             )
             handle.one_command = one_command
+            handle.pauses = self._pauses
             handle.program_ignores = program_ignores
+            handle.background = background or (
+                above is not None and above[1].background
+            )
             eager = started is not None and not self.queued()
             self._live[pid] = (self._generations.get(session_id, 0), handle)
             self._ancestors[pid] = ancestry
@@ -280,6 +293,58 @@ class ProcessTable:
         if self.scanner is not None:
             await self.scanner()
 
+    def pause(self, handle: ProcessHandle) -> None:
+        """Hold a process Mirage runs itself, and what it started, at
+        their next wait, as ``kill -STOP`` holds a program.
+
+        Args:
+            handle (ProcessHandle): the process.
+        """
+        with self._lock:
+            self._pauses.setdefault(handle.record.pid, Future())
+        for member in (handle, *self._under(handle.record.pid)):
+            member.show_state("T")
+            member.tell_held()
+
+    def resume(self, handle: ProcessHandle) -> int | None:
+        """Let a held process go on, as ``kill -CONT`` does.
+
+        Args:
+            handle (ProcessHandle): the process.
+
+        Returns:
+            int | None: the signal it was sent while held, which it
+            takes now; None for none.
+        """
+        pid = handle.record.pid
+        with self._lock:
+            held = self._pauses.pop(pid, None)
+            signal = self._held_signals.pop(pid, None)
+        if held is not None:
+            held.set_result(None)
+            for member in (handle, *self._under(pid)):
+                member.show_state(None)
+                member.tell_held()
+        return signal
+
+    def hold_signal(self, handle: ProcessHandle, signal: int) -> bool:
+        """Keep a signal for a held process, which takes it when it goes
+        on: only KILL ends a stopped program.
+
+        Args:
+            handle (ProcessHandle): the process.
+            signal (int): the signal.
+
+        Returns:
+            bool: whether the process is held.
+        """
+        pid = handle.record.pid
+        with self._lock:
+            if pid not in self._pauses:
+                return False
+            self._held_signals[pid] = signal
+            return True
+
     def send(
         self, handle: ProcessHandle, signal: int
     ) -> Awaitable[bool] | None:
@@ -299,43 +364,229 @@ class ProcessTable:
             return None
         return self.sender(handle, signal)
 
-    async def send_group(self, group_id: int, signal: int) -> None:
-        """Send a signal a process takes and goes on to every program on
-        a machine in a process group as ``send`` does, leaving Mirage's
-        own runners as they are. The machines are scanned first, so what
-        a program started there is in the group.
+    async def signal(
+        self, handle: ProcessHandle, signal: int, group: bool = False
+    ) -> bool:
+        """Signal one process, the one way ``kill`` and ``timeout`` do: a
+        program on a machine gets it as sent, and what Mirage runs itself
+        does what the signal does (``_signal_own``).
 
         Args:
-            group_id (int): the group.
-            signal (int): the signal.
+            handle (ProcessHandle): the process.
+            signal (int): the signal; 0 only probes.
+            group (bool): it gets the signal as one of a group would.
+
+        Returns:
+            bool: whether the process was there to signal.
         """
-        await self.scan()
-        members = self._members(group_id)
-        sending = [self.send(member, signal) for member in reversed(members)]
-        await asyncio.gather(*(sent for sent in sending if sent is not None))
+        sending = None if signal == 0 else self.send(handle, signal)
+        if sending is not None:
+            return await sending
+        return self._signal_own(handle, signal, group)
+
+    def _signal_own(
+        self, handle: ProcessHandle, signal: int, group: bool
+    ) -> bool:
+        """What a signal does to a process Mirage runs itself. It pauses
+        at STOP and goes on at CONT, taking then the signal it was sent
+        while paused, since only KILL ends a stopped program; a kept
+        signal leaves it as it is, and any other stops it. One of a group
+        leaves what it started to their own delivery and, if it ignores
+        the signal, hands it to the program it runs right now
+        (``_deliver``); one signalled alone stops what it started too,
+        and if it ignores the signal nothing happens.
+
+        Args:
+            handle (ProcessHandle): the process.
+            signal (int): the signal.
+            group (bool): it gets the signal as one of a group would.
+
+        Returns:
+            bool: whether the process was there to signal.
+        """
+        if signal in KEPT_SIGNALS:
+            if signal == SIGSTOP:
+                self.pause(handle)
+            elif signal == SIGCONT:
+                held = self.resume(handle)
+                if held is not None:
+                    return self._signal_own(handle, held, group)
+            return True
+        if signal != SIGKILL and self.hold_signal(handle, signal):
+            return True
+        if group:
+            _deliver(handle, signal)
+            found = True
+        else:
+            found = signal in handle.ignores or handle.terminate(
+                signal, children=handle.record.parent is not None
+            )
+        self.resume(handle)
+        return found
 
     async def signal_group(self, group_id: int, signal: int) -> bool:
-        """Deliver a signal to every live runner of a process group, as
-        killpg(2) does: a program on a machine gets it as sent
-        (``send``), a runner that ignores it (a shell) hands it to the
-        program it runs right now (``ProcessHandle.interrupt``), and any
-        other stops with it and leaves the rest of the group to their own
-        delivery. The deepest runners hear it first, so a native program
-        knows the signal before the shell that waits for it stops. The
-        machines are scanned first, so what a program started there is
-        in the group.
+        """Signal every live runner of a process group, as killpg(2)
+        does. The machines are scanned first, so what a program started
+        there is in the group.
 
         Args:
             group_id (int): the group.
-            signal (int): the signal.
+            signal (int): the signal; 0 only probes.
 
         Returns:
             bool: whether the group had a live runner.
         """
         await self.scan()
         members = self._members(group_id)
-        await _signal_members(self, members, signal)
+        await self.signal_members(members, signal)
         return bool(members)
+
+    async def signal_members(
+        self, members: list[ProcessHandle], signal: int
+    ) -> None:
+        """Signal each runner of a group: the programs on machines as
+        sent, a parent before its children so a shell does not see its
+        child die first, and Mirage's own at once (``_signal_own``),
+        deepest first, so a native program knows the signal before the
+        shell that waits for it stops. A runner that ignores it, a shell,
+        hands it to the program it runs right now, unless a process of
+        that program, a child a scan found, got it as sent.
+
+        Args:
+            members (list[ProcessHandle]): the runners, deepest first.
+            signal (int): the signal; 0 only probes.
+        """
+        if signal == 0:
+            return
+        sending = {
+            member.record.pid: self.send(member, signal)
+            for member in reversed(members)
+        }
+        reached = {pid for pid, sent in sending.items() if sent is not None}
+        for member in members:
+            if member.record.pid not in reached and (
+                signal not in member.ignores
+                or not any(
+                    other.record.parent == member.record.pid
+                    and other.record.pid in reached
+                    for other in members
+                )
+            ):
+                self._signal_own(member, signal, True)
+        await asyncio.gather(*(s for s in sending.values() if s is not None))
+
+    def _sees(
+        self,
+        handle: ProcessHandle,
+        session_id: str,
+        scope: ProcessScope,
+        generation: int,
+    ) -> bool:
+        entry = self._live.get(handle.record.pid)
+        return (
+            self._generations.get(session_id, 0) == generation
+            and (
+                handle.record.session_id != session_id
+                or entry is None
+                or entry[0] == generation
+            )
+            and (
+                scope == "workspace" or handle.record.session_id == session_id
+            )
+        )
+
+    def visible(
+        self, session_id: str, permissions: ProcessPermissions
+    ) -> tuple[Process, ...]:
+        """The live processes a session's profile lets it see. Seeing one
+        grants no output access.
+
+        Args:
+            session_id (str): the session asking.
+            permissions (ProcessPermissions): what its profile grants.
+        """
+        with self._lock:
+            generation = self._generations.get(session_id, 0)
+            return tuple(
+                handle.record
+                for _, handle in self._live.values()
+                if self._sees(handle, session_id, permissions.list, generation)
+            )
+
+    def target(
+        self,
+        pid: int,
+        session_id: str,
+        permissions: ProcessPermissions,
+        generation: int | None = None,
+    ) -> ProcessHandle | None:
+        """The process a session names to signal.
+
+        Args:
+            pid (int): the process, by Mirage's own number for it.
+            session_id (str): the session asking.
+            permissions (ProcessPermissions): what its profile grants.
+            generation (int | None): the session's incarnation the asker
+                belongs to; None for the one now.
+
+        Returns:
+            ProcessHandle | None: the process, None for one absent or
+            one the session does not see.
+
+        Raises:
+            PermissionError: the session sees it but may not stop it.
+        """
+        with self._lock:
+            entry = self._live.get(pid)
+            current = self._generations.get(session_id, 0)
+            if entry is None or not self._sees(
+                entry[1],
+                session_id,
+                permissions.list,
+                current if generation is None else generation,
+            ):
+                return None
+            if (
+                permissions.kill != "workspace"
+                and entry[1].record.session_id != session_id
+            ):
+                raise PermissionError(errno.EPERM, "Operation not permitted")
+            return entry[1]
+
+    def group(
+        self,
+        group_id: int,
+        session_id: str,
+        permissions: ProcessPermissions,
+    ) -> list[ProcessHandle] | None:
+        """The members of a process group a session sees, deepest first.
+
+        Args:
+            group_id (int): the group.
+            session_id (str): the session asking.
+            permissions (ProcessPermissions): what its profile grants.
+
+        Returns:
+            list[ProcessHandle] | None: the members, None for no member
+            the session sees.
+
+        Raises:
+            PermissionError: it sees a member it may not stop.
+        """
+        with self._lock:
+            generation = self._generations.get(session_id, 0)
+            members = [
+                handle
+                for handle in self._members(group_id)
+                if self._sees(handle, session_id, permissions.list, generation)
+            ]
+        if not members:
+            return None
+        if permissions.kill != "workspace" and any(
+            handle.record.session_id != session_id for handle in members
+        ):
+            raise PermissionError(errno.EPERM, "Operation not permitted")
+        return members
 
     def _members(self, group_id: int) -> list[ProcessHandle]:
         with self._lock:
@@ -367,118 +618,39 @@ class ProcessTable:
             self._ended.pop(pid, None)
             self._ended[pid] = (entry[0], handle.record)
             self._prune()
+        self.resume(handle)
         if self._ended_hook is not None:
             try:
                 self._ended_hook(handle.record)
             except Exception as exc:
                 logger.debug("process %d: ended hook failed: %s", pid, exc)
 
-    def view(
+    def for_session(
         self,
         session_id: str,
         permissions: Callable[[], ProcessPermissions] = ProcessPermissions,
-    ) -> ProcessView:
+    ) -> SessionProcesses:
+        """What a command's handler gets of a session's processes, good for
+        the session as it is now: one closed or re-profiled since sees
+        nothing and starts nothing.
+
+        Args:
+            session_id (str): the session.
+            permissions (Callable[[], ProcessPermissions]): what its
+                profile grants, read at each use.
+        """
         with self._lock:
             generation = self._generations.get(session_id, 0)
 
-        def valid() -> bool:
-            return self._generations.get(session_id, 0) == generation
-
-        def allowed(scope: ProcessScope, handle: ProcessHandle) -> bool:
-            return (
-                scope == "workspace" or handle.record.session_id == session_id
-            )
-
-        def visible(handle: ProcessHandle) -> Process | None:
-            entry = self._live.get(handle.record.pid)
-            if (
-                handle.record.session_id == session_id
-                and entry is not None
-                and entry[0] != generation
-            ):
-                return None
-            if not valid() or not allowed(permissions().list, handle):
-                return None
-            return handle.record
-
-        def list_visible() -> tuple[Process, ...]:
-            with self._lock:
-                return tuple(
-                    info
-                    for _, handle in self._live.values()
-                    if (info := visible(handle)) is not None
-                )
-
         def check_spawn() -> None:
-            if not valid():
+            if self._generations.get(session_id, 0) != generation:
                 raise PermissionError("process spawn is not permitted")
 
-        def signal_target(pid: int) -> ProcessHandle | None:
-            entry = self._live.get(pid)
-            if entry is None or visible(entry[1]) is None:
-                return None
-            if not allowed(permissions().kill, entry[1]):
-                raise PermissionError(errno.EPERM, "Operation not permitted")
-            return entry[1]
-
         def probe(pid: int) -> bool:
-            with self._lock:
-                return signal_target(pid) is not None
+            found = self.target(pid, session_id, permissions(), generation)
+            return found is not None
 
-        def terminate(pid: int, signal: int) -> bool:
-            with self._lock:
-                handle = signal_target(pid)
-                # A session's shell leaves its jobs running, as bash's do
-                # when it dies.
-                return handle is not None and (
-                    signal in handle.ignores
-                    or handle.terminate(
-                        signal, children=handle.record.parent is not None
-                    )
-                )
-
-        def group(group_id: int) -> list[ProcessHandle] | None:
-            members = [
-                handle
-                for handle in self._members(group_id)
-                if visible(handle) is not None
-            ]
-            if not members:
-                return None
-            if not all(allowed(permissions().kill, h) for h in members):
-                raise PermissionError(errno.EPERM, "Operation not permitted")
-            return members
-
-        def probe_group(group_id: int) -> bool:
-            return group(group_id) is not None
-
-        def send(pid: int, signal: int) -> Awaitable[bool] | None:
-            with self._lock:
-                handle = signal_target(pid)
-            if handle is None:
-                return None
-            return self.send(handle, signal)
-
-        async def signal_group(group_id: int, signal: int) -> bool:
-            await self.scan()
-            members = group(group_id)
-            await _signal_members(self, members or [], signal)
-            return members is not None
-
-        def granted() -> ProcessPermissions | None:
-            return permissions() if valid() else None
-
-        return ProcessView(
-            list=list_visible,
-            check_spawn=check_spawn,
-            probe=probe,
-            terminate=terminate,
-            permissions=granted,
-            probe_group=probe_group,
-            signal_group=signal_group,
-            scan=self.scan,
-            send=send,
-        )
+        return SessionProcesses(check_spawn=check_spawn, probe=probe)
 
     def revoke_session(self, session_id: str) -> None:
         """Revoke the session's views and cancel its runners.
@@ -614,36 +786,3 @@ class ProcessTable:
                 errors.append(exc)
         if errors:
             raise ExceptionGroup("process cancellation failed", errors)
-
-
-async def _signal_members(
-    table: ProcessTable, members: list[ProcessHandle], signal: int
-) -> None:
-    """Deliver a signal to each runner of a group: the programs on
-    machines as sent, a parent before its children so a shell does not
-    see its child die first, and Mirage's own at once (``deliver``),
-    deepest first. A runner that ignores it, a shell, hands it to the
-    program it runs right now, unless a process of that program, a child
-    a scan found, got it as sent.
-
-    Args:
-        table (ProcessTable): the table the runners run in.
-        members (list[ProcessHandle]): the runners, deepest first.
-        signal (int): the signal.
-    """
-    sending = {
-        member.record.pid: table.send(member, signal)
-        for member in reversed(members)
-    }
-    reached = {pid for pid, sent in sending.items() if sent is not None}
-    for member in members:
-        if member.record.pid not in reached and (
-            signal not in member.ignores
-            or not any(
-                other.record.parent == member.record.pid
-                and other.record.pid in reached
-                for other in members
-            )
-        ):
-            deliver(member, signal)
-    await asyncio.gather(*(s for s in sending.values() if s is not None))

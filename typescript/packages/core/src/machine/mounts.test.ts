@@ -35,7 +35,7 @@ import type { MachinePipe, MountType } from './types.ts'
 import type { OutputFn, RunResult } from '../runtime/types.ts'
 import { MachineHandle } from './handle.ts'
 import { PIPE_TRANSPORT, type PipeTransport } from './mixin.ts'
-import { MOUNT_GUARD, SSHFS_OPTIONS } from './constants.ts'
+import { isRun, MOUNT_GUARD, SSHFS_OPTIONS } from './constants.ts'
 import {
   mountTable,
   registerPipeServer,
@@ -98,11 +98,11 @@ class FakeMachine extends MachineHandle implements PipeTransport {
     _errors: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    let run = argv
-    if (argv[2] === MOUNT_GUARD) {
-      const checked = this.runGuard(argv)
+    let run = isRun(argv) ? argv.slice(7) : argv
+    if (run[2] === MOUNT_GUARD) {
+      const checked = this.runGuard(run)
       if (checked.exitCode !== 0) return checked
-      run = argv.slice(argv.indexOf('--', 5) + 1)
+      run = run.slice(run.indexOf('--', 5) + 1)
     }
     const data = stdin === null ? null : await materialize(stdin)
     return this.execLine(lineOf(run), data, env, cwd, signal)

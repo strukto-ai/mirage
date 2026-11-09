@@ -21,7 +21,8 @@ import type { Item, Outcome, Shell } from '../../rs/shell.ts'
 import { arrayGet, ShellArray } from '../../shell/array.ts'
 import { joinBytes } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
-import type { ShellValue, VarAttr } from '../../shell/variable.ts'
+import { PPID } from '../../shell/constants.ts'
+import { VarAttr, type ShellValue } from '../../shell/variable.ts'
 import type { SessionView } from '../../view/types.ts'
 import {
   argsBytes,
@@ -583,6 +584,17 @@ export function seedVar(session: SessionState, name: string, value: ShellValue):
  */
 export function bindLastWord(session: SessionState, words: readonly string[]): void {
   seedVar(session, '_', words[words.length - 1] ?? '')
+}
+
+/**
+ * Start a shell's `$PPID`, which no line of it can change: 0 for a top shell,
+ * whose parent is nothing Mirage runs, as `ps` shows it. Mirrors Python's
+ * seed_parent.
+ */
+export function seedParent(session: SessionState, pid: number): void {
+  seedVar(session, PPID, String(pid))
+  setAttr(session, PPID, VarAttr.Integer)
+  setAttr(session, PPID, VarAttr.Readonly)
 }
 
 /**

@@ -43,8 +43,8 @@ describe('handleJobs', () => {
     await jt.wait(j.id)
     const [out] = await handleJobs(jt, ['jobs'])
     const text = decode(out as Uint8Array)
-    expect(text).toMatch(/\[1\] completed foo/)
-    expect(text).toMatch(/\[2\] running bar/)
+    expect(text).toContain('[1]-  Done                    foo\n')
+    expect(text).toContain('[2]+  Running                 bar &\n')
   })
 
   it('removes completed jobs from the table', async () => {

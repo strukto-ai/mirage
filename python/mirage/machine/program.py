@@ -17,6 +17,7 @@ import errno
 import json
 import logging
 import os
+import signal
 import stat
 import sys
 import time
@@ -37,8 +38,10 @@ from mirage.machine.constants import (
     EXEC_PRELUDE,
     FAKETIME_LIBRARIES,
     HOST_START_SLACK_SECONDS,
+    HOST_STATES,
     PIPE_DIAGNOSTIC_BYTES,
     PIPE_DIAGNOSTIC_WAIT_SECONDS,
+    RUN_DRAIN_SECONDS,
     STOP_GRACE_SECONDS,
     STOP_POLL_SECONDS,
     faketime_env,
@@ -47,7 +50,7 @@ from mirage.machine.constants import (
 from mirage.machine.errors import ConnectionLostError
 from mirage.machine.types import MachinePipe
 from mirage.runtime.types import OutputFn, RunResult
-from mirage.shell.constants import CANNOT_EXECUTE_STATUS
+from mirage.shell.constants import CANNOT_EXECUTE_STATUS, SIGNALS
 from mirage.utils.clock import bound_system_clock
 
 logger = logging.getLogger(__name__)
@@ -159,8 +162,10 @@ async def run_program(
     loop = asyncio.get_running_loop()
     runner = current_caller().process
     machine_pid: MachinePid | None = None
+    ended = asyncio.Event()
 
     def exited() -> None:
+        ended.set()
         if machine_pid is not None and runner is not None:
             runner.set_machine_pid(replace(machine_pid, exited=time.time()))
 
@@ -193,6 +198,16 @@ async def run_program(
             if process.returncode is not None:
                 exited()
     assert process.stdout is not None and process.stderr is not None
+
+    async def let_go() -> None:
+        # What a direct program left running can hold its output open for
+        # as long as it likes, and the program's own end is what a `wait`
+        # reports, so its output gets a moment and no more.
+        await ended.wait()
+        await asyncio.sleep(RUN_DRAIN_SECONDS)
+        transport.close()
+
+    letting_go = asyncio.create_task(let_go()) if direct else None
 
     writer = process.stdin
 
@@ -247,6 +262,8 @@ async def run_program(
             runner.program_exited(code)
         raise
     finally:
+        if letting_go is not None:
+            letting_go.cancel()
         for task in (feeding, reading, erring, waiting):
             if not task.done():
                 task.cancel()
@@ -262,13 +279,51 @@ async def run_program(
         raise ConnectionLostError(
             f"{executable} ended on signal {-code}", stdout, stderr or None
         )
-    if direct and runner is not None and code < 0:
-        runner.program_signaled(-code)
+    killed_by = mirage_signal(-code) if code < 0 else None
+    if direct and runner is not None and killed_by is not None:
+        runner.program_signaled(killed_by)
     return RunResult(
         stdout=stdout,
         stderr=stderr or None,
-        exit_code=128 - code if code < 0 else code,
+        exit_code=128 + killed_by if killed_by is not None else code,
     )
+
+
+def host_signal(number: int) -> int | None:
+    """The number this host gives a signal, which Mirage numbers as
+    Linux does: others differ (USR1 is 30 on macOS, and 10 is BUS there).
+
+    Args:
+        number (int): the signal, as Linux numbers it.
+
+    Returns:
+        int | None: the host's number, None for a signal it lacks.
+    """
+    if number == 0 or sys.platform == "linux":
+        return number
+    name = SIGNALS.get(number)
+    found = None if name is None else getattr(signal, f"SIG{name}", None)
+    return None if found is None else int(found)
+
+
+def _nearest_signal(number: int) -> int:
+    native = host_signal(number)
+    return int(signal.SIGTERM) if native is None else native
+
+
+def mirage_signal(number: int) -> int:
+    """The number Mirage gives a signal this host reported.
+
+    Args:
+        number (int): the signal, as this host numbers it.
+    """
+    if sys.platform == "linux":
+        return number
+    try:
+        name = signal.Signals(number).name[3:]
+    except ValueError:
+        return number
+    return next((n for n, known in SIGNALS.items() if known == name), number)
 
 
 async def _ps(*args: str) -> str:
@@ -359,10 +414,10 @@ async def scan_host(
         return []
     found: list[tuple[int, MachineProcess]] = []
     reused: set[int] = set()
-    text = await _ps("-A", "-o", "pid=,ppid=,pgid=,lstart=,args=")
+    text = await _ps("-A", "-o", "pid=,ppid=,pgid=,stat=,lstart=,args=")
     for line in text.splitlines():
-        fields = line.split(None, 8)
-        if len(fields) < 8 or not fields[2].isdigit():
+        fields = line.split(None, 9)
+        if len(fields) < 9 or not fields[2].isdigit():
             continue
         group = int(fields[2])
         held = groups.get(group)
@@ -370,7 +425,7 @@ async def scan_host(
             continue
         tag, began = held
         try:
-            started = _lstart(" ".join(fields[3:8]))
+            started = _lstart(" ".join(fields[4:9]))
         except ValueError as exc:
             logger.debug("process %s: no start: %s", fields[0], exc)
             continue
@@ -385,7 +440,8 @@ async def scan_host(
                     pid,
                     int(fields[1]),
                     started,
-                    fields[8] if len(fields) > 8 else "",
+                    fields[9] if len(fields) > 9 else "",
+                    HOST_STATES.get(fields[3][0], fields[3][0]),
                 ),
             )
         )
@@ -408,7 +464,8 @@ async def signal_host(target: MachinePid, signum: int) -> bool:
     Raises:
         OSError: the host has no ``ps``, or refused the signal.
     """
-    if sys.platform == "win32":
+    native = host_signal(signum)
+    if sys.platform == "win32" or native is None:
         return False
     started = await _started_at(target.pid)
     if (
@@ -417,7 +474,7 @@ async def signal_host(target: MachinePid, signum: int) -> bool:
     ):
         return False
     try:
-        os.kill(target.pid, signum)
+        os.kill(target.pid, native)
     except ProcessLookupError:
         return False
     return True
@@ -481,7 +538,7 @@ async def stop_host_run(
         ):
             return False
     try:
-        os.killpg(pid, signum)
+        os.killpg(pid, _nearest_signal(signum))
         async with asyncio.timeout(STOP_GRACE_SECONDS):
             while True:
                 await asyncio.sleep(STOP_POLL_SECONDS)
@@ -786,7 +843,7 @@ def kill_tree(process: asyncio.subprocess.Process, signum: int = 9) -> None:
             process.kill()
         return
     try:
-        os.killpg(process.pid, signum)
+        os.killpg(process.pid, _nearest_signal(signum))
     except (ProcessLookupError, PermissionError):
         logger.debug("process group %d has already exited", process.pid)
 

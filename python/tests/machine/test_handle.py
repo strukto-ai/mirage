@@ -30,6 +30,7 @@ from mirage.machine.constants import (
     NOT_RUNNING_STATUS,
     PROCESS,
     faketime_probe,
+    is_run,
     stop_line,
 )
 from mirage.machine.errors import ConnectionLostError
@@ -56,6 +57,9 @@ class RecordingMachine(MachineHandle):
         self.connected += 1
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        if is_run(argv):
+            env = {**env, PROCESS: argv[5].partition("=")[2]}
+            argv = argv[7:]
         line = argv[2] if argv[:2] == ("/bin/sh", "-c") else shlex.join(argv)
         data = await materialize(stdin) if stdin is not None else None
         return await self.exec_line(line, data, env, cwd)
@@ -350,16 +354,16 @@ async def test_another_connection_family_error_is_not_a_lost_connection():
 
 
 @pytest.mark.asyncio
-async def test_a_job_whose_connection_dropped_is_listed_as_killed():
+async def test_a_job_whose_connection_dropped_is_listed_as_hung_up():
     box = DroppedBox(captures=("train",))
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
     try:
         await ws.shell("train &")
-        rows = b"running"
-        while b"running" in rows:
+        rows = b"Running"
+        while b"Running" in rows:
             await asyncio.sleep(0.01)
             rows = await materialize((await ws.shell("jobs")).stdout)
-        assert rows.endswith(b"[1] killed train\n")
+        assert rows.endswith(b"[1]+  Hangup                  train\n")
     finally:
         await ws.close()
 

@@ -27,6 +27,7 @@ from mirage.execution.job.types import JobState
 from mirage.execution.process.config import ProcessPermissions
 from mirage.execution.process.constants import FIRST_PID
 from mirage.execution.process.table import ProcessTable
+from mirage.execution.process.types import Process
 from mirage.execution.ram import RAMExecutionStore
 from mirage.execution.types import LineId
 from mirage.io import IOResult
@@ -99,6 +100,10 @@ async def _submit_gated(table: JobTable, gate: asyncio.Event) -> JobHandle:
     job = await table.submit(command="deaf", run=_run_forever, cwd="/")
     job.console = JobConsole(store=_GatedStore(gate))
     return job
+
+
+def _seen(table: JobTable) -> tuple[Process, ...]:
+    return table.processes.visible("a", ProcessPermissions())
 
 
 @pytest.mark.asyncio
@@ -408,17 +413,16 @@ async def test_disowned_job_keeps_process_identity_until_runner_really_exits():
     await entered.wait()
     process = job.process
     assert process is not None
-    view = table.processes.view("a")
     assert await table.disown(job.id, "a")
     assert table.list_jobs("a") == []
-    assert [i.pid for i in view.list()] == [process.record.pid]
+    assert [i.pid for i in _seen(table)] == [process.record.pid]
     await table.kill_all()
     assert job.signal is not None
-    assert [i.state for i in view.list()] == ["stopping"]
+    assert [i.state for i in _seen(table)] == ["stopping"]
     release.set()
     result = await process.join()
     assert result.exit == 0
-    assert view.list() == ()
+    assert _seen(table) == ()
 
 
 @pytest.mark.asyncio
@@ -1404,15 +1408,18 @@ async def test_a_remote_signal_reads_the_grants_after_the_store(monkeypatch):
 
     await _until(listed)
     every = ProcessPermissions(list="workspace", kill="workspace")
-    view = b.processes.view("t", lambda: every)
+    revoked: list[bool] = []
     listing = store.processes
 
+    def granted() -> ProcessPermissions | None:
+        return None if revoked else every
+
     async def revoking() -> dict[str, dict[str, RecordFields]]:
-        b.processes.revoke_session("t")
+        revoked.append(True)
         return await listing()
 
     monkeypatch.setattr(store, "processes", revoking)
-    assert not await b.signal_remote(job.pid, 15, "t", view.permissions)
+    assert not await b.signal_remote(job.pid, 15, "t", granted)
     assert await store.take_stops(a.daemon) == []
     assert job.state == JobState.RUNNING
     await a.close()

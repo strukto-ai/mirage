@@ -78,7 +78,6 @@ import { fanOutTraversal, runWithFanout, shouldFanOut } from '../fanout.ts'
 import { applyFindActions, openFindFiles, runListedFind } from '../find_action_dispatch.ts'
 import { resolveNewerRefs } from '../find_refs.ts'
 import { handleDisown } from '../builtins/disown/disown.ts'
-import { handleFg } from '../builtins/fg/fg.ts'
 import { handleJobs } from '../builtins/jobs/jobs.ts'
 import { handleKill } from '../builtins/kill/kill.ts'
 import { handlePs } from '../builtins/ps/ps.ts'
@@ -120,7 +119,6 @@ const JOB_HANDLERS: Record<
   ) => RedirectResult | Promise<RedirectResult>
 > = {
   wait: handleWait,
-  fg: handleFg,
   kill: handleKill,
   jobs: handleJobs,
   disown: handleDisown,
@@ -792,7 +790,9 @@ export async function handleCommand(
   const cmdStr = parts.map((p) => (typeof p === 'string' ? p : p.virtual)).join(' ')
 
   if (JOB_BUILTINS.has(cmdName) && jobTable !== null) {
-    const textParts = parts.map((p) => (typeof p === 'string' ? p : p.virtual))
+    const textParts = parts.map((p) =>
+      typeof p === 'string' ? p : p.rawPath !== '' ? p.rawPath : p.virtual,
+    )
     if (cmdName === 'ps') {
       return handlePs(jobTable, textParts, session, view)
     }
@@ -848,7 +848,9 @@ export async function handleCommand(
       ids: registry.ids,
       vfs,
       session: view,
-      ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),
+      ...(registry.sessionProcesses === undefined
+        ? {}
+        : { processes: registry.sessionProcesses(session) }),
     }
   }
 

@@ -63,21 +63,21 @@
           "command": "sleep 1; jobs; ps -o machine | sort -u",
           "expect": {
             "exit": 0,
-            "stdout": "[1] running dash -c 'exec sleep 30'\n[2] running dash -c 'exec sleep 31'\n-\nMACHINE\ndocker:docker\ndocker:second\n"
+            "stdout": "[1]-  Running                 dash -c 'exec sleep 30' &\n[2]+  Running                 dash -c 'exec sleep 31' &\nMACHINE\ndocker:docker\ndocker:second\nmirage\n"
           }
         },
         {
           "command": "kill %1; wait %1; echo rc=$?; jobs; ps -o machine | sort -u",
           "expect": {
             "exit": 0,
-            "stdout": "rc=143\n[2] running dash -c 'exec sleep 31'\n-\nMACHINE\ndocker:second\n"
+            "stdout": "rc=143\n[2]+  Running                 dash -c 'exec sleep 31' &\nMACHINE\ndocker:second\nmirage\n"
           }
         },
         {
           "command": "kill %2; wait %2; echo rc=$?; jobs; ps -o machine | sort -u",
           "expect": {
             "exit": 0,
-            "stdout": "rc=143\n-\nMACHINE\n"
+            "stdout": "rc=143\nMACHINE\nmirage\n"
           }
         }
       ]
@@ -95,7 +95,7 @@
       },
       "steps": [
         {
-          "command": "dash -c 'trap \"echo usr1\" USR1; while :; do sleep 0.2; done' & p=$!; sleep 1; kill -USR1 $p; sleep 1; kill -0 $p && echo alive; m=$(ps -o mpid= -p $p | tr -d ' '); [ \"$m\" -lt 4194305 ] && echo mpid; kill \"$m\"; wait $p 2>/dev/null; echo rc=$?",
+          "command": "dash -c 'trap \"echo usr1\" USR1; while :; do sleep 0.2; done' & p=$!; sleep 1; kill -USR1 $p; sleep 1; kill -0 $p && echo alive; [ \"$p\" -lt 4194305 ] && echo mpid; kill \"$p\"; wait $p 2>/dev/null; echo rc=$?",
           "expect": {
             "exit": 0,
             "stdout": "usr1\nalive\nmpid\nrc=143\n"

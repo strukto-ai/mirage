@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { expireCaller } from '../../context/session_context.ts'
 import { runOutput } from '../../commands/builtin/general/interpreter.ts'
 import { guardIO, guardOutput, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import type { Context } from '../../commands/config.ts'
@@ -113,7 +114,10 @@ export async function runWholeLine(
     } catch (err) {
       // A run past its deadline is stopped before its runtime settles,
       // which may wait for the run.
-      if (err instanceof CommandTimeoutError) deadline.abort()
+      if (err instanceof CommandTimeoutError) {
+        expireCaller()
+        deadline.abort()
+      }
       throw err
     } finally {
       await registry.settle(runtime)

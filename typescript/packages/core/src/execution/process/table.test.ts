@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import { ProcessTable } from './table.ts'
 import { HISTORY_SECONDS } from '../constants.ts'
@@ -134,12 +134,11 @@ it('does not claim exit before finally completes', async () => {
       return 0
     },
   })
-  const view = processes.view('a')
   await entered.promise
   expect(process.terminate()).toBe(true)
   expect(process.terminate()).toBe(false)
   await cleaning.promise
-  expect(view.list()).toMatchObject([{ state: 'stopping', exit: null }])
+  expect(processes.visible('a')).toMatchObject([{ state: 'stopping', exit: null }])
   let joined = false
   const joining = process.join().then((info) => {
     joined = true
@@ -154,7 +153,7 @@ it('does not claim exit before finally completes', async () => {
     exit: 137,
     signal: 9,
   })
-  expect(view.list()).toEqual([])
+  expect(processes.visible('a')).toEqual([])
   expect(process.terminate()).toBe(false)
 })
 
@@ -174,15 +173,17 @@ it('scopes immutable views and revokes them when a session ID is reused', async 
     })
   const a = start('a'),
     b = start('b')
-  const oldView = processes.view('a')
-  expect(oldView.list()).toEqual([a.record])
+  const oldGrants = processes.forSession('a')
+  expect(oldGrants.probe(a.record.id.pid)).toBe(true)
   expect(Object.isFrozen(a.record)).toBe(true)
-  expect(Object.isFrozen(oldView.list())).toBe(true)
+  expect(Object.isFrozen(processes.visible('a'))).toBe(true)
   processes.revokeSession('a')
-  const newView = processes.view('a'),
+  const newGrants = processes.forSession('a'),
     replacement = start('a')
-  expect(oldView.list()).toEqual([])
-  expect(newView.list()).toEqual([replacement.record])
+  expect(oldGrants.probe(replacement.record.id.pid)).toBe(false)
+  expect(newGrants.probe(replacement.record.id.pid)).toBe(true)
+  expect(newGrants.probe(a.record.id.pid)).toBe(false)
+  expect(processes.visible('a')).toEqual([replacement.record])
   expect(new Set([a.record.id.pid, b.record.id.pid, replacement.record.id.pid]).size).toBe(3)
   release.release()
   expect(
@@ -269,24 +270,19 @@ it('a workspace list grants no kill', async () => {
       return 0
     },
   })
-  const view = processes.view('observer', () => ({
-    list: 'workspace',
-    kill: 'session',
-    max: null,
-  }))
-  expect(view.list()).toMatchObject([
+  const grants = { list: 'workspace', kill: 'session', max: null } as const
+  const scoped = processes.forSession('observer', () => grants)
+  expect(processes.visible('observer', grants)).toMatchObject([
     { id: { pid: child.record.id.pid }, command: 'secret argument' },
   ])
-  expect(() => view.terminate(child.record.id.pid, 15)).toThrow(
+  expect(() => scoped.probe(child.record.id.pid)).toThrow(
     expect.objectContaining({ code: 'EPERM' }),
   )
-  expect(view.permissions()).toEqual({ list: 'workspace', kill: 'session', max: null })
   processes.revokeSession('observer')
   expect(() => {
-    view.checkSpawn()
+    scoped.checkSpawn()
   }).toThrow('not permitted')
-  expect(view.list()).toEqual([])
-  expect(view.permissions()).toBeNull()
+  expect(scoped.probe(child.record.id.pid)).toBe(false)
   release.release()
   await child.join()
 })
@@ -713,4 +709,72 @@ it('keeps a live grandchild in the tree once its parent has lapsed', async () =>
     release.release()
     await Promise.all([root.join(), grandchild.join(), other.join()])
   }
+})
+
+function parked(processes: ProcessTable, ownGroup = false) {
+  return processes.start({
+    sessionId: 'a',
+    command: 'work',
+    cwd: PathSpec.fromStrPath('/'),
+    ownGroup,
+    cancel: () => undefined,
+    run: () => new Promise<number>(() => undefined),
+  })
+}
+
+describe('signal', () => {
+  it.each([false, true])('holds what a stopped process is sent (group %s)', async (group) => {
+    const processes = new ProcessTable()
+    const cancelled: number[] = []
+    const process: ProcessHandle = processes.start({
+      sessionId: 'a',
+      command: 'work',
+      cwd: PathSpec.fromStrPath('/'),
+      ownGroup: group,
+      cancel: () => cancelled.push(process.signal ?? 0),
+      run: () => new Promise<number>(() => undefined),
+    })
+    const send = (number: number) =>
+      group
+        ? processes.signalGroup(process.record.group, number)
+        : processes.signal(process, number)
+    expect(await send(19)).toBe(true)
+    expect(process.record.shownState).toBe('T')
+    expect(await send(15)).toBe(true)
+    expect(process.record.state).toBe('running')
+    expect(await send(18)).toBe(true)
+    expect(process.record.state).toBe('stopping')
+    expect(cancelled).toEqual([15])
+    expect(process.paused).toBe(false)
+  })
+
+  it('lets KILL end a stopped process', async () => {
+    const processes = new ProcessTable()
+    const process = parked(processes)
+    await processes.signal(process, 19)
+    expect(await processes.signal(process, 9)).toBe(true)
+    expect(process.signal).toBe(9)
+    expect(process.paused).toBe(false)
+  })
+
+  it('lets a program that takes CONT itself go on', async () => {
+    const processes = new ProcessTable()
+    const process = parked(processes)
+    await processes.signal(process, 19)
+    process.oneCommand = true
+    const taken: number[] = []
+    process.onSignal((number) => taken.push(number))
+    expect(await processes.signal(process, 18)).toBe(true)
+    expect(taken).toEqual([18])
+    expect(process.paused).toBe(false)
+  })
+
+  it('leaves a process as it is for a kept signal', async () => {
+    const processes = new ProcessTable()
+    const process = parked(processes)
+    for (const number of [0, 17, 18, 20, 23, 28])
+      expect(await processes.signal(process, number)).toBe(true)
+    expect(process.record.state).toBe('running')
+    expect(process.record.shownState ?? null).toBeNull()
+  })
 })

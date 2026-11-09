@@ -26,6 +26,7 @@ import {
   LIST_MAX_RETRIES,
   PUBLISH_SECONDS,
   STOP_WAIT_SECONDS,
+  SAVED_STATUSES,
 } from './constants.ts'
 import type { ExecutionStore } from '../base.ts'
 import { WorkspaceHeldError } from '../errors.ts'
@@ -144,6 +145,8 @@ export class JobTable {
   // daemon tries them again.
   private left: Record<string, RecordFields> = {}
   private jobs = new Map<string, Map<number, JobHandle>>()
+  private readonly statuses = new Map<string, Map<number, number>>()
+  private readonly marks = new Map<string, [number | null, number | null]>()
   // Jobs `disown` removed while still running, and ones another job's
   // number displaced: the shell forgets them, the workspace still owns
   // their tasks so teardown can stop them; each leaves once it finishes.
@@ -385,6 +388,7 @@ export class JobTable {
       limit: init.limit ?? null,
       ignores: IGNORED_SIGNALS,
       oneCommand: init.simple === true,
+      background: true,
       programIgnores: IGNORED_SIGNALS,
     })
     const { line, group } = process.record
@@ -444,6 +448,7 @@ export class JobTable {
     }
     job.process = process
     this.sessionJobs(sessionId).set(job.id, job)
+    this.jobAdded(sessionId, job.id)
     ready()
     const plane = this.plane
     const pid = process.record.id.pid
@@ -483,6 +488,7 @@ export class JobTable {
     job.workspaceId = this.processes.workspaceId
     job.id = await this.insert(job.sessionId, job.id, listEntry(job.record, job.owner))
     this.sessionJobs(job.sessionId).set(job.id, job)
+    this.jobAdded(job.sessionId, job.id)
   }
 
   /**
@@ -626,9 +632,11 @@ export class JobTable {
     const jobs = this.jobs.get(sessionId)
     const job = jobs?.get(jobId)
     if (jobs === undefined || job === undefined) return false
+    this.jobsLeaving(sessionId, new Set([jobId]))
     jobs.delete(jobId)
     const running = job.state === 'running'
     if (job.process !== null && running) this.disowned.push(job)
+    this.keepStatuses(sessionId, [job], 0)
     await this.remove(sessionId, new Set([job.consoleName]), false, running)
     return true
   }
@@ -668,6 +676,7 @@ export class JobTable {
           )
       if (await this.store.delete(sessionId, generationOf(fields))) {
         this.jobs.delete(sessionId)
+        this.marks.delete(sessionId)
         this.processes.revokeSession(sessionId)
         return [...stopped.values()]
       }
@@ -817,8 +826,35 @@ export class JobTable {
   async reap(jobId: number, sessionId = ''): Promise<void> {
     const job = this.get(jobId, sessionId)
     if (job === null) return
+    this.jobsLeaving(sessionId, new Set([jobId]))
     this.jobs.get(sessionId)?.delete(jobId)
+    this.keepStatuses(sessionId, [job])
     await this.remove(sessionId, new Set([job.consoleName]))
+  }
+
+  /** Keep how ended jobs ended, under the pids that name them, for a later `wait`. */
+  private keepStatuses(
+    sessionId: string,
+    jobs: readonly JobHandle[],
+    runningStatus: number | null = null,
+  ): void {
+    let kept = this.statuses.get(sessionId)
+    if (kept === undefined) {
+      kept = new Map()
+      this.statuses.set(sessionId, kept)
+    }
+    for (const job of jobs) {
+      const code = job.state === 'running' ? runningStatus : job.exitCode
+      if (code === null) continue
+      for (const pid of [job.pid, job.shownPid, job.lastPid]) kept.set(pid, code)
+    }
+    for (const pid of [...kept.keys()].slice(0, Math.max(0, kept.size - SAVED_STATUSES)))
+      kept.delete(pid)
+  }
+
+  /** How the job a pid named ended, once it has left the list; null for none. */
+  savedStatus(sessionId: string, pid: number): number | null {
+    return this.statuses.get(sessionId)?.get(pid) ?? null
   }
 
   /**
@@ -828,11 +864,44 @@ export class JobTable {
    * A reader holding a job's console keeps reading it: the console
    * outlives its table entry and dies with its last reader.
    */
-  async popCompleted(sessionId = ''): Promise<JobHandle[]> {
+  /**
+   * The jobs `jobs` marks `+` and `-`: the newest two, until one of those
+   * leaves the list, when the marks go to the newest running ones, and a job
+   * started after that takes `+`. Mirrors Python's `job_marks`.
+   *
+   * @param sessionId the session whose list it is.
+   */
+  jobMarks(sessionId = ''): [number | null, number | null] {
+    const kept = this.marks.get(sessionId)
+    if (kept !== undefined) return kept
+    if (this.parent !== null && (this.jobs.get(sessionId)?.size ?? 0) === 0)
+      return this.parent.jobMarks(sessionId)
+    const newest = [...(this.jobs.get(sessionId)?.keys() ?? [])].sort((a, b) => b - a)
+    return [newest[0] ?? null, newest[1] ?? null]
+  }
+
+  private jobAdded(sessionId: string, jobId: number): void {
+    const kept = this.marks.get(sessionId)
+    if (kept !== undefined) this.marks.set(sessionId, [jobId, kept[0]])
+  }
+
+  private jobsLeaving(sessionId: string, ids: ReadonlySet<number>): void {
+    const [current, previous] = this.jobMarks(sessionId)
+    if (!(current !== null && ids.has(current)) && !(previous !== null && ids.has(previous))) return
+    const running = [...(this.jobs.get(sessionId)?.values() ?? [])]
+      .filter((job) => job.state === 'running' && !ids.has(job.id))
+      .map((job) => job.id)
+      .sort((a, b) => b - a)
+    this.marks.set(sessionId, [running[0] ?? null, running[1] ?? null])
+  }
+
+  async popCompleted(sessionId = '', keep: number | null = null): Promise<JobHandle[]> {
     const jobs = this.jobs.get(sessionId)
     if (jobs === undefined) return []
-    const completed = [...jobs.values()].filter((j) => j.state !== 'running')
+    const completed = [...jobs.values()].filter((j) => j.state !== 'running' && j.id !== keep)
+    this.jobsLeaving(sessionId, new Set(completed.map((j) => j.id)))
     for (const j of completed) jobs.delete(j.id)
+    this.keepStatuses(sessionId, completed)
     if (completed.length > 0)
       await this.remove(sessionId, new Set(completed.map((j) => j.consoleName)))
     return completed

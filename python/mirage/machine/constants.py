@@ -191,6 +191,10 @@ CHECK_WAIT_SECONDS = 10.0
 # KILL, for its handlers to clean up: the stop line's same second.
 STOP_GRACE_SECONDS = 1.0
 
+# The state letters ``ps`` prints on a host that has others than Linux's:
+# an idle process is a sleeping one, and macOS's U is Linux's D.
+HOST_STATES = {"I": "S", "U": "D"}
+
 # How far a host process's start, as ``ps`` prints it to the second, may
 # be from when a run recorded starting it and still be that run's: past
 # it the PID names another process, which a stop leaves alone.
@@ -202,6 +206,41 @@ STOP_POLL_SECONDS = 0.02
 # Where the stop line finds tr, grep and sleep: the config's PATH is for
 # the programs it runs and may name none of the system's directories.
 TOOLS_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# How often something waiting for a run looks for its end on the machine,
+# and how long a run's output gets to arrive once its program has exited
+# while what the program left running keeps the exec open.
+RUN_WATCH_SECONDS = 2.0
+RUN_DRAIN_SECONDS = 0.5
+
+# How long a background run may take to report its pid, which ``$!`` waits
+# for.
+RUN_START_WAIT_SECONDS = 10.0
+
+# Where a run reports on its machine, then the workspace and the process.
+RUN_STATUS_PREFIX = "/tmp/.mirage-run-"
+
+# Every program runs as a child of this wrapper, which outlives it to say
+# how it ended, since an exec holds on while anything the program started
+# keeps its output open (E2B, msb). ``$1`` is the file it reports in, which
+# it creates only if nothing is there; ``$2`` the tag's assignment, exported
+# for the program alone so the wrapper shows in no scan and takes no signal
+# by tag; ``$3`` the reports of earlier runs to remove; then the program.
+# The subshell execs it, so the pid written first is the program's, with
+# its start in clock ticks; its exit status follows on the next line.
+# A shell reports a child a signal ended on its stderr, so the wrapper's
+# goes nowhere and the program gets the real one back. It needs only a
+# POSIX shell at ``/bin/sh``.
+RUN_WRAPPER = (
+    "f=$1; t=$2; o=$3; shift 3; "
+    f'[ -z "$o" ] || PATH={TOOLS_PATH} rm -f $o 2>/dev/null; '
+    "exec 6>&2 2>/dev/null; "
+    'set -C; if >"$f"; then g=$f; else g=/dev/null; fi; set +C; '
+    "( /bin/sh -c 'read -r s </proc/$PPID/stat; set -- ${s##*)}; "
+    """echo "$PPID ${20}"' >>"$g"; """
+    'export "$t"; exec 2>&6 6>&-; exec "$@" ); '
+    's=$?; echo "$s" >>"$g"; exit "$s"'
+)
 
 # Output as base64 lines per read, status on fd 3, for an exec that returns text.
 ENCODE_PRELUDE = (
@@ -336,8 +375,92 @@ def stop_line(process: str, signum: int = 15) -> str:
 SCAN_WAIT_SECONDS = 10.0
 
 # What each row a scan prints starts with, so a provider that mixes the
-# line's stderr into its stdout (Daytona) never passes a message for one.
+# line's stderr into its stdout (Daytona) never passes a message for one:
+# a process, or a run's report.
 SCAN_MARK = "M"
+SCAN_RUN_MARK = "R"
+
+
+def _report_name(text: str) -> str:
+    """``text`` as part of a report's file name, which a scan's glob and
+    an unquoted ``rm`` both read as one word.
+
+    Args:
+        text (str): the workspace id, or a whole tag.
+    """
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", text)
+
+
+def run_status_path(tag: str) -> str:
+    """The file the run ``tag`` names reports in on its machine.
+
+    Args:
+        tag (str): the run's tag, ``<workspace>:<process>``.
+    """
+    head, _, number = tag.rpartition(":")
+    name = f"{_report_name(head)}-{number}" if head else _report_name(tag)
+    return f"{RUN_STATUS_PREFIX}{name}"
+
+
+def run_argv(
+    tag: str, status: str, spent: Sequence[str], argv: Sequence[str]
+) -> tuple[str, ...]:
+    """``argv`` under the wrapper every program runs in (``RUN_WRAPPER``).
+
+    Args:
+        tag (str): the run's tag.
+        status (str): the file it reports in (``run_status_path``).
+        spent (Sequence[str]): the reports of runs that have ended.
+        argv (Sequence[str]): the program and its arguments.
+    """
+    return (
+        "/bin/sh",
+        "-c",
+        RUN_WRAPPER,
+        "sh",
+        status,
+        f"{PROCESS}={tag}",
+        " ".join(spent),
+        *argv,
+    )
+
+
+def is_run(argv: Sequence[str]) -> bool:
+    """Whether ``argv`` is a program's run, which a stop by its tag ends,
+    not one of Mirage's own lines (``run_argv``).
+
+    Args:
+        argv (Sequence[str]): what an exec is given.
+    """
+    return len(argv) > 2 and argv[2] == RUN_WRAPPER
+
+
+def run_tag(argv: Sequence[str]) -> str:
+    """The tag a program's run carries (``run_argv``).
+
+    Args:
+        argv (Sequence[str]): what ``run_argv`` built.
+    """
+    return argv[5].partition("=")[2]
+
+
+def status_line(status: str) -> str:
+    """The shell line that prints one run's report, nothing while there
+    is none.
+
+    Args:
+        status (str): the file it reports in.
+    """
+    return f"PATH={TOOLS_PATH}; cat {single_quote(status)} 2>/dev/null; true"
+
+
+def remove_line(spent: Sequence[str]) -> str:
+    """The shell line that removes the reports of runs that have ended.
+
+    Args:
+        spent (Sequence[str]): their files.
+    """
+    return f"PATH={TOOLS_PATH}; rm -f {' '.join(spent)}"
 
 
 def scan_line(workspace: str) -> str:
@@ -347,25 +470,34 @@ def scan_line(workspace: str) -> str:
     Each process whose ``PROCESS`` tag names one of the workspace's
     processes, found through ``/proc``, prints one row: ``SCAN_MARK``,
     the tag, its pid, its parent's pid, when it started in clock ticks
-    after boot (``stat``'s 22nd field) and its arguments, space
-    separated. A process that exits mid-scan is skipped, and nothing else
-    is printed. It needs what ``stop_line`` does.
+    after boot (``stat``'s 22nd field), its state letter (``stat``'s
+    third) and its arguments, space separated. A process that exits
+    mid-scan is skipped. Each run's report prints one row as well:
+    ``SCAN_RUN_MARK``, the process it is, then the report's first line and
+    its second after a ``;``. Nothing else is printed. It needs what
+    ``stop_line`` does.
 
     Args:
         workspace (str): the workspace's id, which every tag starts
             with.
     """
     mark = single_quote(f"{PROCESS}={workspace}:")
+    reports = f"{RUN_STATUS_PREFIX}{_report_name(workspace)}-"
     return (
         f"PATH={TOOLS_PATH}; m={mark}; "
+        f"for f in {reports}*; do "
+        '[ -f "$f" ] || continue; a=; b=; '
+        '{ read -r a; read -r b; } <"$f"; '
+        f'printf \'{SCAN_RUN_MARK} %s %s;%s\\n\' "${{f##*-}}" "$a" "$b"; '
+        "done; "
         "for p in /proc/[0-9]*; do "
         "t=$(tr '\\000' '\\n' 2>/dev/null < \"$p/environ\" "
         f"| grep -m1 '^{PROCESS}=') || continue; "
         'case $t in "$m"*) ;; *) continue ;; esac; '
         's=$(cat "$p/stat" 2>/dev/null) || continue; '
         "set -- ${s##*)}; "
-        f"printf '{SCAN_MARK} %s %s %s %s %s\\n' "
-        f'"${{t#{PROCESS}=}}" "${{p#/proc/}}" "$2" "${{20}}" '
+        f"printf '{SCAN_MARK} %s %s %s %s %s %s\\n' "
+        f'"${{t#{PROCESS}=}}" "${{p#/proc/}}" "$2" "${{20}}" "$1" '
         "\"$(tr '\\000\\n' '  ' 2>/dev/null < \"$p/cmdline\")\"; "
         "done; true"
     )
