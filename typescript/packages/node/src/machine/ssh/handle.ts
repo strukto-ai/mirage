@@ -194,7 +194,7 @@ export class SSHMachine extends MachineHandle<SSHMachineConfig> implements PipeT
             c ??
             (signalName
               ? 128 + constants.signals[`SIG${signalName.replace(/^SIG/, '')}` as NodeJS.Signals]
-              : 1)
+              : null)
         })
         stream.on('close', () => {
           state.closed = true
@@ -202,11 +202,19 @@ export class SSHMachine extends MachineHandle<SSHMachineConfig> implements PipeT
             if (state.done) return
             state.done = true
             signal?.removeEventListener('abort', abort)
+            if (code === null) {
+              rejectFn(
+                Object.assign(new Error('the channel closed with no exit status'), {
+                  name: 'ConnectionError',
+                }),
+              )
+              return
+            }
             const stderr = Buffer.concat(errs)
             resolveFn({
               stdout: new Uint8Array(Buffer.concat(out)),
               stderr: stderr.length > 0 ? new Uint8Array(stderr) : null,
-              exitCode: code ?? 1,
+              exitCode: code,
             })
           })
         })

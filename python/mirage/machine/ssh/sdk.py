@@ -19,9 +19,13 @@ from mirage.runtime.constants import sdk_install_hint
 ASYNCSSH_HINT = sdk_install_hint("ssh", "asyncssh")
 
 connect: Any
+DisconnectError: Any
 try:
+    from asyncssh import DisconnectError as _DisconnectError
     from asyncssh import connect as _connect
 except ImportError:
     connect = None
+    DisconnectError = None
 else:
     connect = _connect
+    DisconnectError = _DisconnectError

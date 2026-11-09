@@ -341,6 +341,11 @@
     "SandboxException": "Python's guarded SDK import names each class it uses; TypeScript loads the e2b module and reads SandboxError off it."
    }
   },
+  "machine/ssh/sdk": {
+   "python_only": {
+    "DisconnectError": "asyncssh raises its own error when a connection drops mid-line, which the handle maps to a lost connection; ssh2 reports the same drop as a channel that closed with no exit status, so TypeScript names no error class."
+   }
+  },
   "machine/mixin": {
    "python_only": {
     "PipeTransportMixin": "Python detects the pipe transport by mixin inheritance; TypeScript uses a nominal symbol, interface and type guard."

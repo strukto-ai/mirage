@@ -373,6 +373,45 @@ class LostProcess(HungProcess):
         raise ConnectionResetError("connection lost")
 
 
+class EndedProcess(HungProcess):
+    """A remote command whose channel ended with this exit status, or
+    whose wait raised this error."""
+
+    def __init__(
+        self, returncode: int | None, error: Exception | None = None
+    ) -> None:
+        super().__init__()
+        self.done.set()
+        self.returncode = returncode
+        self.error = error
+
+    async def wait(self, check: bool = False) -> "EndedProcess":
+        if self.error is not None:
+            raise self.error
+        return self
+
+
+# A channel that closed with no exit status, or a connection asyncssh saw
+# drop, lost the remote command's end; a reported exit keeps it.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error", [None, asyncssh.ConnectionLost("Connection lost")]
+)
+async def test_a_dropped_channel_is_a_lost_connection(error):
+    runtime = SSHMachine("box", config={"host": "box"})
+    runtime._conn = HungConn(EndedProcess(None, error))
+    with pytest.raises(ConnectionError, match="closed"):
+        await runtime._ssh("true", None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("returncode,code", [(0, 0), (3, 3), (-15, 143)])
+async def test_a_reported_exit_keeps_its_status(returncode, code):
+    runtime = SSHMachine("box", config={"host": "box"})
+    runtime._conn = HungConn(EndedProcess(returncode))
+    assert (await runtime._ssh("true", None)).exit_code == code
+
+
 @pytest.mark.asyncio
 async def test_a_failed_line_still_closes_its_channel():
     process = LostProcess()

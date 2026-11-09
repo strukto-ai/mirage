@@ -161,13 +161,17 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
             if not tagged or stop_signal(current_caller().process) is None:
                 process.kill()
             raise
+        except sdk.DisconnectError as exc:
+            raise ConnectionError(f"the connection closed: {exc}") from exc
         finally:
             if not feeding.done():
                 feeding.cancel()
             await asyncio.gather(feeding, return_exceptions=True)
             process.close()
         await process.wait_closed()
-        code = result.returncode if result.returncode is not None else 1
+        if result.returncode is None:
+            raise ConnectionError("the channel closed with no exit status")
+        code = result.returncode
         return RunResult(
             stdout=stdout,
             stderr=stderr or None,

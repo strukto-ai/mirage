@@ -346,6 +346,31 @@ describe('SSHMachine cancellation', () => {
     expect([runtime.channel.signals, runtime.channel.closed]).toEqual([signals, true])
   })
 
+  // A channel that closed with no exit status and no signal lost the remote
+  // command's end; one that reported either keeps it.
+  it('treats a channel closed without an exit as a lost connection', async () => {
+    const runtime = new HungRuntime()
+    const started = new Promise((resolve) => runtime.channel.once('eof', resolve))
+    const running = runtime.line('true', new AbortController().signal)
+    await started
+    runtime.channel.emit('close')
+    await expect(running).rejects.toMatchObject({ name: 'ConnectionError' })
+  })
+
+  it.each([
+    [0, undefined, 0],
+    [3, undefined, 3],
+    [null, 'TERM', 143],
+  ])('keeps a reported exit %s %s as %s', async (code, signalName, exitCode) => {
+    const runtime = new HungRuntime()
+    const started = new Promise((resolve) => runtime.channel.once('eof', resolve))
+    const running = runtime.line('true', new AbortController().signal)
+    await started
+    runtime.channel.emit('exit', code, signalName)
+    runtime.channel.emit('close')
+    await expect(running).resolves.toMatchObject({ exitCode })
+  })
+
   it('closes its channel and stops listening when the channel fails', async () => {
     const runtime = new HungRuntime()
     const controller = new AbortController()
