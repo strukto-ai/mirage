@@ -5,6 +5,7 @@ from unittest.mock import Mock
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.types import MountBackend
 from mirage.vfs.ram import RAMVFS
 
 
@@ -25,6 +26,10 @@ def _fake_mount(monkeypatch):
     )
 
 
+def _refuse(*_args, **_kwargs):
+    raise RuntimeError("no fuse")
+
+
 def _ws():
     return Workspace({"/a/": RAMVFS(), "/b/": RAMVFS()}, mode=MountMode.WRITE)
 
@@ -41,6 +46,9 @@ def test_register_one_mount_exposes_singular(monkeypatch):
         ws.add_fuse_mount("/a/", "/tmp/mp-a")
         assert ws.fuse_mountpoints == {"/a/": "/tmp/mp-a"}
         assert ws.fuse_mountpoint == "/tmp/mp-a"
+        assert ws.kernel_backends == {"/a/": MountBackend.FUSE}
+        ws.remove_fuse_mount("/a/")
+        assert ws.kernel_backends == {}
 
 
 def test_register_two_distinct_paths_singular_raises(monkeypatch):
@@ -59,6 +67,17 @@ def test_register_colliding_path_raises(monkeypatch):
         ws.add_fuse_mount("/a/", "/tmp/same")
         with pytest.raises(ValueError):
             ws.add_fuse_mount("/b/", "/tmp/same")
+
+
+def test_a_failed_replacement_forgets_the_backend(monkeypatch):
+    _fake_mount(monkeypatch)
+    with _ws() as ws:
+        ws.add_fuse_mount("/a/", "/tmp/mp-a")
+        monkeypatch.setattr("mirage.workspace.fuse.mount_background", _refuse)
+        with pytest.raises(RuntimeError, match="no fuse"):
+            ws.add_fuse_mount("/a/", "/tmp/mp-a2")
+        assert ws.fuse_mountpoints == {}
+        assert ws.kernel_backends == {}
 
 
 def test_deregister_removes_entry(monkeypatch):

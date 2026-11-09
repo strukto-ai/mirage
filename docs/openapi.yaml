@@ -98,9 +98,7 @@ paths:
               example:
                 id: demo
                 status: running
-                mode: write
                 created_at: 1794009600
-                fuse_mountpoints: {}
                 system_time: null
                 sessions:
                   - session_id: 01a1b425-ec80-7038-86e0-75b597344043
@@ -110,6 +108,8 @@ paths:
                     vfs: ram
                     mode: write
                     description: ''
+                    backend: workspace
+                    mountpoint: null
                 internals: null
         '201':
           description: Created
@@ -120,9 +120,7 @@ paths:
               example:
                 id: demo
                 status: running
-                mode: write
                 created_at: 1794009600
-                fuse_mountpoints: {}
                 system_time: null
                 sessions:
                   - session_id: 01a1b425-ec80-7038-86e0-75b597344043
@@ -132,6 +130,8 @@ paths:
                     vfs: ram
                     mode: write
                     description: ''
+                    backend: workspace
+                    mountpoint: null
                 internals: null
         '401':
           $ref: '#/components/responses/401'
@@ -174,15 +174,9 @@ paths:
               example:
                 - id: demo
                   status: running
-                  mode: write
-                  mount_count: 1
-                  session_count: 1
                   created_at: 1794009600
                 - id: notes
                   status: stopped
-                  mode: read
-                  mount_count: 1
-                  session_count: 0
                   created_at: 1793923200
         '401':
           $ref: '#/components/responses/401'
@@ -192,7 +186,7 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
-      description: List workspaces available to the authenticated account.
+      description: Running workspaces first, then stopped ones, which keep only their config and state until a start.
   /v1/workspaces/{workspace_id}:
     get:
       summary: Get workspace
@@ -6593,6 +6587,17 @@ components:
           type: string
           title: Description
           default: ''
+        backend:
+          $ref: '#/components/schemas/MountBackend'
+          default: workspace
+        mountpoint:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Mountpoint
+          description: Where the server exposes this mount on its own host, the generated
+            path when the config named none; null for a workspace mount, and while the
+            workspace is stopped.
       type: object
       required:
         - prefix
@@ -7363,15 +7368,6 @@ components:
           title: Status
           description: running while the server holds the workspace in memory; stopped while
             it keeps only its config and state, until a start.
-        mode:
-          type: string
-          title: Mode
-        mount_count:
-          type: integer
-          title: Mount Count
-        session_count:
-          type: integer
-          title: Session Count
         created_at:
           type: number
           title: Created At
@@ -7383,9 +7379,6 @@ components:
       required:
         - id
         - status
-        - mode
-        - mount_count
-        - session_count
         - created_at
       title: WorkspaceBrief
     WorkspaceConfig:
@@ -7571,9 +7564,6 @@ components:
           title: Status
           description: running while the server holds the workspace in memory; stopped while
             it keeps only its config and state, until a start.
-        mode:
-          type: string
-          title: Mode
         created_at:
           type: number
           title: Created At
@@ -7581,11 +7571,6 @@ components:
             Creation time as Unix seconds. For example, 1794009600 is
             2026-11-07T00:00:00Z. Fractional values include sub-second precision.
           example: 1794009600
-        fuse_mountpoints:
-          additionalProperties:
-            type: string
-          type: object
-          title: Fuse Mountpoints
         system_time:
           anyOf:
             - type: string
@@ -7609,7 +7594,6 @@ components:
       required:
         - id
         - status
-        - mode
         - created_at
       title: WorkspaceDetail
     WorkspaceInternals:

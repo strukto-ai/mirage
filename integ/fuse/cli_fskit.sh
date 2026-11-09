@@ -37,7 +37,7 @@ if [ "$(uname)" != "Darwin" ]; then
   exit 0
 fi
 
-points() { jq -r '.fuse_mountpoints // .fuseMountpoints'; }
+points() { jq -r '[.mounts[] | select(.mountpoint != null) | {key: .prefix, value: .mountpoint}] | from_entries'; }
 
 mount_row() { mount | grep -F "$1" | head -1; }
 
@@ -71,7 +71,7 @@ YML
 
   local detail mp i
   detail="$($cli workspace get cfk </dev/null)"
-  mp="$(printf '%s' "$detail" | points | jq -r '."/data" // empty')"
+  mp="$(printf '%s' "$detail" | points | jq -r '."/data/" // empty')"
 
   # The daemon mounts asynchronously; wait for the seeded file via the OS.
   for i in $(seq 1 75); do

@@ -17,6 +17,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from mirage.config import WorkspaceConfig
+from mirage.types import MountBackend
 
 
 class MountSummary(BaseModel):
@@ -24,6 +25,8 @@ class MountSummary(BaseModel):
     vfs: str
     mode: str
     description: str = ""
+    backend: MountBackend = MountBackend.WORKSPACE
+    mountpoint: str | None = None
 
 
 class SessionSummary(BaseModel):
@@ -52,18 +55,13 @@ WorkspaceStatus = Literal["running", "stopped"]
 class WorkspaceBrief(BaseModel):
     id: str
     status: WorkspaceStatus
-    mode: str
-    mount_count: int
-    session_count: int
     created_at: float
 
 
 class WorkspaceDetail(BaseModel):
     id: str
     status: WorkspaceStatus
-    mode: str
     created_at: float
-    fuse_mountpoints: dict[str, str] = Field(default_factory=dict)
     system_time: str | None = None
     sessions: list[SessionSummary] = Field(default_factory=list)
     mounts: list[MountSummary] = Field(default_factory=list)

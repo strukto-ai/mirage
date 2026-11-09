@@ -15,22 +15,53 @@
 import { describe, expect, it } from 'vitest'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { MountMode } from '@struktoai/mirage-core/types'
+import { MountBackend, MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '@struktoai/mirage-node'
 import { WorkspaceRegistry } from './registry.ts'
-import { describeVfs, makeBrief, makeDetail } from './summary.ts'
+import { describeVfs, makeBrief, makeDetail, makeStoppedDetail } from './summary.ts'
 
 describe('summary', () => {
-  it('makeBrief reports prefix count + workspace mode', () => {
+  it('makeBrief reports id, status and creation time only', () => {
     const r = new WorkspaceRegistry()
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     const entry = r.add(ws, 'ws-x')
-    const brief = makeBrief(entry)
-    expect(brief.id).toBe('ws-x')
-    expect(brief.mode).toBe('write')
-    // /data/ plus the empty root anchor the workspace adds at / (no user /
-    // mount). /dev and the history view are auto-prefixes and filtered out.
-    expect(brief.mount_count).toBe(2)
+    expect(makeBrief(entry)).toEqual({
+      id: 'ws-x',
+      status: 'running',
+      created_at: entry.createdAt,
+    })
+  })
+
+  it('makeDetail names each mount backend and mountpoint', async () => {
+    const r = new WorkspaceRegistry()
+    const ws = new Workspace(
+      { '/data': new RAMVFS(), '/notes': new RAMVFS() },
+      { mode: MountMode.WRITE },
+    )
+    Object.defineProperty(ws, 'fuseMountpoints', { value: { '/data': '/tmp/mp-data' } })
+    Object.defineProperty(ws, 'kernelBackends', { value: { '/data': MountBackend.FUSE } })
+    const detail = await makeDetail(r.add(ws, 'ws-k'))
+    const got = Object.fromEntries(detail.mounts.map((m) => [m.prefix, [m.backend, m.mountpoint]]))
+    expect(got['/data/']).toEqual([MountBackend.FUSE, '/tmp/mp-data'])
+    expect(got['/notes/']).toEqual([MountBackend.WORKSPACE, null])
+  })
+
+  it('makeStoppedDetail names the backend with no mountpoint', () => {
+    const detail = makeStoppedDetail(
+      'w',
+      {
+        mounts: {
+          '/data': { vfs: 'ram', backend: 'fuse', mountpoint: '/x' },
+          '/notes': { vfs: 'ram' },
+        },
+      },
+      0,
+    )
+    const got = Object.fromEntries(detail.mounts.map((m) => [m.prefix, [m.backend, m.mountpoint]]))
+    expect(got).toEqual({
+      '/data/': [MountBackend.FUSE, null],
+      '/notes/': [MountBackend.WORKSPACE, null],
+    })
   })
 
   it('makeDetail emits mounts + sessions', async () => {

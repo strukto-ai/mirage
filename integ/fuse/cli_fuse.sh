@@ -16,7 +16,7 @@ PY_CLI="${1:?python mirage cli command}"
 TS_CLI="${2:?typescript mirage cli command}"
 fail=0
 
-points() { jq -r '.fuse_mountpoints // .fuseMountpoints'; }
+points() { jq -r '[.mounts[] | select(.mountpoint != null) | {key: .prefix, value: .mountpoint}] | from_entries'; }
 
 # Run the full CLI battery against one CLI; emit one "key=value" line per probe.
 # Every touch of a kernel mountpoint below is bounded: a wedged mount
@@ -121,9 +121,9 @@ YML
 
   local detail data_mp logs_mp auto_mp
   detail="$($cli workspace get cf </dev/null)"
-  data_mp="$(printf '%s' "$detail" | points | jq -r '."/data" // empty')"
-  logs_mp="$(printf '%s' "$detail" | points | jq -r '."/logs" // empty')"
-  auto_mp="$(printf '%s' "$detail" | points | jq -r '."/auto" // empty')"
+  data_mp="$(printf '%s' "$detail" | points | jq -r '."/data/" // empty')"
+  logs_mp="$(printf '%s' "$detail" | points | jq -r '."/logs/" // empty')"
+  auto_mp="$(printf '%s' "$detail" | points | jq -r '."/auto/" // empty')"
 
   # The generated mount got a temp mountpoint Mirage picked; exercise it through
   # the kernel the same way as the pinned mounts.
@@ -220,7 +220,7 @@ expect "data_cat" "alpha"
 expect "logs_cat" "beta"
 expect "auto_cat" "gamma"
 expect "logs_size" "5"
-expect "mount_keys" "/auto,/data,/logs"
+expect "mount_keys" "/auto/,/data/,/logs/"
 expect "data_pinned" "yes"
 expect "logs_pinned" "yes"
 expect "auto_generated" "yes"
