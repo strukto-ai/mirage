@@ -476,10 +476,6 @@ async function runLine(
   return new ExecuteResult(stdout, stderr, result.exitCode, result.refusal)
 }
 
-/**
- * Run a line on the session it acquired, after admission is published.
- * Both paths of `runLine`, inside the managed process or not, end here.
- */
 /** End a line bash cannot read, as where it was read says. Mirrors Python's `_unreadable_line`. */
 async function unreadableLine(
   env: ExecuteEnv,
@@ -773,6 +769,10 @@ function recurse(
   return executeFn
 }
 
+/**
+ * Run a line on the session it acquired, after admission is published.
+ * Both paths of `runLine`, inside the managed process or not, end here.
+ */
 async function runPreparedLine(
   env: ExecuteEnv,
   command: string,
