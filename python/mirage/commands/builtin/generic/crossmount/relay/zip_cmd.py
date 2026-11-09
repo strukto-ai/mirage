@@ -41,6 +41,7 @@ async def run_zip(
     flag_kwargs: dict[str, FlagValue],
     dispatch: DispatchFn,
     vfs: Files | None,
+    cwd: str = "/",
     stdin: ByteSource | None = None,
 ) -> CrossResult:
     """Run a zip whose archive and operands span mounts.
@@ -57,6 +58,7 @@ async def run_zip(
         dispatch (DispatchFn): Workspace operation dispatcher.
         vfs (Files | None): The symlinks and mount boundaries the
             scan merges into each walk.
+        cwd (str): The directory a name ``-@`` reads resolves against.
         stdin (ByteSource | None): What ``-@``, ``-c`` and ``-z`` read.
     """
     prim = transfer_primitives(dispatch)
@@ -75,7 +77,7 @@ async def run_zip(
         flat_scopes(scopes),
         stream=normalized_read(prim["read_bytes"]),
         dispatch=dispatch,
-        cwd=PathSpec.from_str_path("/"),
+        cwd=PathSpec.from_str_path(cwd),
         stat=prim["stat"],
         walk=relay_walk_of(
             dispatch,

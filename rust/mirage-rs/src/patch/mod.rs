@@ -941,9 +941,30 @@ async fn save_rejects(
     if config.reject.is_some() {
         return files.create(path, text).await;
     }
-    if files.write(path, text).await {
+    let mode = WriteMode::Whole;
+    let name = path.clone();
+    let (reply, _) = files
+        .host
+        .ask(Request::Write {
+            path,
+            mode,
+            data: text,
+        })
+        .await;
+    // A `.rej` beside a file in a directory that is not there goes unsaid.
+    if !failed(&reply) || reply.names(&["ENOENT"]) {
         Ok(())
     } else {
+        files.host.warn(
+            &[
+                b"patch: ",
+                &name[..],
+                b": ",
+                &crate::request::failure_text(&reply),
+                b"\n",
+            ]
+            .concat(),
+        );
         Err(1)
     }
 }

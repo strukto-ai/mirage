@@ -212,6 +212,7 @@ export async function zipGeneric(
     update: flags.update,
     freshen: flags.freshen,
     refresh_all: (flags.update || flags.freshen) && operands.length === 0,
+    store_links: flags.storeLinks,
     delete: flags.delete,
     patterns: flags.delete ? operands.map((path) => byteView(path.rawPath)) : [],
     move_files: flags.moveFiles,

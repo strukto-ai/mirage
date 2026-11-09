@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../../io/types.ts'
-import type { PathSpec } from '../../../../../types.ts'
+import { PathSpec } from '../../../../../types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import { relayWalkOf } from '../../../generic_bind/archive_io.ts'
 import { dispatchedReadTree } from '../../../generic_bind/files.ts'
@@ -38,6 +38,8 @@ export async function runZip(
   dispatch: DispatchFn,
   // The symlinks and mount boundaries the scan merges into each walk.
   vfs?: Files,
+  // The directory a name -@ reads resolves against.
+  cwd = '/',
   // What -@, -c and -z read.
   stdin: ByteSource | null = null,
 ): Promise<CrossResult> {
@@ -55,6 +57,7 @@ export async function runZip(
     flatScopes(scopes),
     {
       ...crossOpts(flagKwargs),
+      cwd: PathSpec.fromStrPath(cwd),
       stdin,
       vfs: vfs ?? new Files(dispatch, null, null, { ledger: false }).servedBy(null),
     },

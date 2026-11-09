@@ -67,6 +67,15 @@ it('deletes a member named like a mount root', async () => {
 
 it('carries names on stdin into a zip across mounts', async () => {
   const line =
-    'echo a > /m/f; echo b > /m/g; echo /m/f | zip -q -@ /data/o.zip /m/g; unzip -Z1 /data/o.zip | sort'
-  expect((await mounted(line))[1]).toBe('m/f\nm/g\n')
+    'cd /data; echo a > f; echo b > /m/g; echo f | zip -q -@ /data/o.zip /m/g; unzip -Z1 /data/o.zip | sort'
+  expect((await mounted(line))[1]).toBe('f\nm/g\n')
+})
+
+it('keeps the root refusal for a d inside a temp path', async () => {
+  const line = 'zip -r -bd /data/o.zip /m; echo rc=$?'
+  expect(await mounted(line)).toEqual([
+    0,
+    'rc=1\n',
+    "zip: cannot read '/m': Device or resource busy\n",
+  ])
 })

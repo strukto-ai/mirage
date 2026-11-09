@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isoToEpoch } from '../../../utils/dates.ts'
+import { statEpoch } from '../../../utils/dates.ts'
 import type { util } from 'zod'
 import { currentCaller } from '../../../context/session_context.ts'
 import { classify } from '../../../errors/classify.ts'
@@ -531,7 +531,7 @@ export class StreamHost {
     return {
       reply: {
         kind: row.type === FileType.DIRECTORY ? 'dir' : 'file',
-        mtime: row.modified === null ? null : isoToEpoch(row.modified),
+        mtime: statEpoch(row.modified),
       },
     }
   }

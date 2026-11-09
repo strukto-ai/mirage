@@ -44,7 +44,7 @@ from mirage.types import (
     ReadStreamFn,
     StatFn,
 )
-from mirage.utils.dates import iso_to_epoch, parse_date_expr_async
+from mirage.utils.dates import parse_date_expr_async, stat_epoch
 from mirage.utils.timezone import zone_from_env
 from mirage.view.types import LinkView, MountView
 
@@ -389,9 +389,7 @@ async def _stored_time(
                     ]
                 ),
             )
-        return (
-            0 if row.modified is None else iso_to_epoch(row.modified)
-        ), None
+        return (stat_epoch(row.modified) or 0), None
     placed = await parse_date_expr_async(text, zone)
     if placed is None:
         warning = (

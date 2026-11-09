@@ -596,3 +596,19 @@ fn a_nul_anywhere_marks_a_member_binary() {
     let listing = unzip(&mut host, "z.zip", json!({"Z": true})).1;
     assert!(listing.contains(" b- "), "{listing}");
 }
+
+#[test]
+fn a_refresh_under_y_leaves_a_stored_link_alone() {
+    let mut host = Host::with(&[("target", "t\n"), ("link", "t\n")], "");
+    let link = json!({"spelled": "link", "kind": "link", "target": "target", "mtime": YEAR_2001});
+    assert_eq!(zip(&mut host, "z.zip", json!([link])).0, 0);
+    host.mtimes.insert("link".into(), YEAR_2001 + 100);
+    let refresh = json!({
+        "archive": "z.zip",
+        "output": "z.zip",
+        "update": true,
+        "refresh_all": true,
+        "store_links": true,
+    });
+    assert_eq!(run(&mut host, "zip", refresh).0, 12);
+}

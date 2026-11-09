@@ -30,6 +30,32 @@ import { ebusy, eexist, einval, eisdir } from '../../errors/fs.ts'
 const LN_VALUED_SHORTS = 'tS'
 const LN_VALUED_LONGS: ReadonlySet<string> = new Set(['--target-directory', '--suffix'])
 
+// Whether a zip line deletes members, by raw token scan: the policy fires
+// before flag parsing. A `d` inside the value of -b, -x or -i is that value,
+// and a word after one of them is not read.
+export function zipDeletes(argv: readonly string[]): boolean {
+  let skip = false
+  for (const tok of argv) {
+    if (skip) {
+      skip = false
+    } else if (tok === '--') {
+      return false
+    } else if (tok === '--delete') {
+      return true
+    } else if (tok.startsWith('-') && !tok.startsWith('--')) {
+      for (let pos = 1; pos < tok.length; pos += 1) {
+        const letter = tok.charAt(pos)
+        if (letter === 'd') return true
+        if ('bxi'.includes(letter)) {
+          skip = pos === tok.length - 1
+          break
+        }
+      }
+    }
+  }
+  return false
+}
+
 // Whether ln's raw argv carries one short flag or its long spelling. The
 // scan is option-aware so an operand cannot pose as a flag: it stops at
 // `--`, skips the value of a valued option (`-t DIR`, `-S SUF`, their
@@ -317,9 +343,7 @@ export class MountRootPolicy implements Policy {
       // The first operand is the archive being written, not a source;
       // only what follows it is read. Under -d they name members of the
       // archive, not paths.
-      const root = lnFlagPresent(ctx.argv, 'd', '--delete')
-        ? null
-        : firstRoot(this.registry, operands.slice(1))
+      const root = zipDeletes(ctx.argv) ? null : firstRoot(this.registry, operands.slice(1))
       if (root !== null) {
         return deny(`cannot read '${root.rawPath}': Device or resource busy`, ebusy(root))
       }

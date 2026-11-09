@@ -51,6 +51,13 @@ export function isoToEpoch(iso: string): number {
   return Math.floor(Date.parse(text) / 1000)
 }
 
+/** A stat's modification time in epoch seconds, null where it holds no date. */
+export function statEpoch(modified: string | null): number | null {
+  if (modified === null || modified === '') return null
+  const epoch = isoToEpoch(modified)
+  return Number.isNaN(epoch) ? null : epoch
+}
+
 // A date the user typed, as an epoch second, or null when it is not a date at
 // all. Mirrors Python's isoTimestamp: an offset-less stamp is read as UTC and
 // anything unparseable is null rather than NaN, so a caller can tell "not a

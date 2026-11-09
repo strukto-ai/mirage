@@ -23,7 +23,7 @@ import {
 import { mountKey } from '../../../../utils/key_prefix.ts'
 import { isFsError, isRefusal } from '../../../../errors/fs.ts'
 import { classify } from '../../../../errors/classify.ts'
-import { isoToEpoch } from '../../../../utils/dates.ts'
+import { statEpoch } from '../../../../utils/dates.ts'
 import { CycleError } from '../../../../utils/path.ts'
 import { posixMode } from '../../../../utils/stat_view.ts'
 import { rstripSlash, stripSlash } from '../../../../utils/slash.ts'
@@ -302,6 +302,5 @@ export async function recordedStamp(
     console.debug(`no stamp for ${path.virtual}: ${String(err)}`)
     return [null, null]
   }
-  const mtime = row.modified === null ? null : isoToEpoch(row.modified)
-  return [mtime, posixMode(row) & 0o7777]
+  return [statEpoch(row.modified), posixMode(row) & 0o7777]
 }

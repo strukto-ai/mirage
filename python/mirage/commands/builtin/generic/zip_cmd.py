@@ -234,6 +234,7 @@ async def zip_generic(
         "update": flags.update,
         "freshen": flags.freshen,
         "refresh_all": (flags.update or flags.freshen) and not operands,
+        "store_links": flags.store_links,
         "delete": flags.delete,
         "patterns": [byte_view(path.raw_path) for path in operands]
         if flags.delete

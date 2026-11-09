@@ -56,7 +56,7 @@ from mirage.types import (
     PathSpec,
     ReadStreamFn,
 )
-from mirage.utils.dates import iso_to_epoch
+from mirage.utils.dates import stat_epoch
 from mirage.utils.path import CycleError
 from mirage.view.types import LinkView, MountView
 
@@ -493,9 +493,7 @@ class StreamHost:
         if op != "stat" or found is None:
             return Served({})
         kind = "dir" if found.type == FileType.DIRECTORY else "file"
-        mtime = (
-            None if found.modified is None else iso_to_epoch(found.modified)
-        )
+        mtime = stat_epoch(found.modified)
         return Served({"kind": kind, "mtime": mtime})
 
     def _where(self, path: PathSpec) -> str:

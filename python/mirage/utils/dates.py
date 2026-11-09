@@ -11,8 +11,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import json
+import logging
 import math
 import time
 from collections.abc import Generator, Mapping
@@ -25,6 +25,8 @@ from mirage.shell.bytes import byte_view
 from mirage.types import JsonValue
 from mirage.utils.clock import system_date, system_now
 from mirage.utils.timezone import posix_transitions, resolve_tz
+
+logger = logging.getLogger(__name__)
 
 
 def _date_request(
@@ -361,3 +363,19 @@ def iso_to_epoch(iso: str) -> int:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return math.floor(dt.timestamp())
+
+
+def stat_epoch(modified: str | None) -> int | None:
+    """A stat's modification time in epoch seconds, None where it holds no
+    date; a backend can answer with an empty string.
+
+    Args:
+        modified (str | None): the stat's ``modified`` field.
+    """
+    if not modified:
+        return None
+    try:
+        return iso_to_epoch(modified)
+    except ValueError as exc:
+        logger.debug("no date in %r: %s", modified, exc)
+        return None

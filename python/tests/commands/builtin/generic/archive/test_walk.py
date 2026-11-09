@@ -338,7 +338,9 @@ async def test_a_directory_the_walk_could_not_open_is_one_unreadable_problem():
 async def _stamped(path: PathSpec) -> FileStat:
     if path.virtual == "/gone":
         raise fs_error(path, FsCondition.ENOENT)
-    modified = None if path.virtual == "/timeless" else "2001-09-09T01:46:40Z"
+    modified = {"/timeless": None, "/blank": ""}.get(
+        path.virtual, "2001-09-09T01:46:40Z"
+    )
     return FileStat(
         name="f", type=FileType.FILE, modified=modified, mode=0o100640
     )
@@ -350,10 +352,11 @@ async def _stamped(path: PathSpec) -> FileStat:
     [
         ("/f", (1_000_000_000, 0o640)),
         ("/timeless", (None, 0o640)),
+        ("/blank", (None, 0o640)),
         ("/gone", (None, None)),
         (None, (None, None)),
     ],
-    ids=["time_and_bits", "no_time", "unreadable", "not_a_file"],
+    ids=["time_and_bits", "no_time", "empty_time", "unreadable", "not_a_file"],
 )
 async def test_recorded_stamp(
     path: str | None, expected: tuple[int | None, int | None]

@@ -116,6 +116,8 @@ pub(super) struct Config {
     freshen: bool,
     /// `-u` or `-f` with no file named: what the archive holds is refreshed.
     refresh_all: bool,
+    /// `-y`: a link is stored as a link.
+    store_links: bool,
     /// -d: the operands are patterns of members to remove.
     delete: bool,
     #[serde(deserialize_with = "crate::latin1_list")]
@@ -783,7 +785,7 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
         return create_error(&reply, false);
     };
     let stored = if config.refresh_all {
-        stored_files(&host, old.as_ref()).await
+        stored_files(&host, old.as_ref(), &config).await
     } else {
         Vec::new()
     };
@@ -981,11 +983,15 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
 }
 
 /// What `-u` or `-f` with no file named looks at: each file the archive
-/// holds that still stands under its stored name.
-async fn stored_files(host: &Host, old: Option<&Original>) -> Vec<Found> {
+/// holds that still stands under its stored name, the archive itself left
+/// out. Under `-y` a stored link
+/// stays as it is, the time of what it points at being no reason to change it.
+async fn stored_files(host: &Host, old: Option<&Original>, config: &Config) -> Vec<Found> {
     let mut stored = Vec::new();
     for record in old.map_or(&[][..], |old| &old.records[..]) {
-        if record.name.ends_with(b"/") {
+        let link = u32_at(&record.central, 38) >> 16 & 0o170000 == 0o120000;
+        let own = record.name == relative(&config.archive);
+        if record.name.ends_with(b"/") || (config.store_links && link) || own {
             continue;
         }
         if let Some((kind, mtime)) = host.stat_time(&record.name).await {

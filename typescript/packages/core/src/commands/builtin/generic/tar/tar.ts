@@ -21,7 +21,7 @@ import { openStreamSync } from '../../../../rs/stream.ts'
 import { byteView, decodeText } from '../../../../shell/bytes.ts'
 import type { ReadStreamFn, StatFn } from '../../../../types.ts'
 import { Follow, LineFacts, PathSpec } from '../../../../types.ts'
-import { isoToEpoch, parseDateExprAsync } from '../../../../utils/dates.ts'
+import { parseDateExprAsync, statEpoch } from '../../../../utils/dates.ts'
 import { mountKey } from '../../../../utils/key_prefix.ts'
 import { LOCAL_ZONE, zoneFromEnv } from '../../../../utils/timezone.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
@@ -326,7 +326,7 @@ async function storedTime(
   if (text.startsWith('/') || text.startsWith('.')) {
     try {
       const row = await stat(PathSpec.fromStrPath(text, undefined, ctx.cwd))
-      return [row.modified === null ? 0 : isoToEpoch(row.modified), null]
+      return [statEpoch(row.modified) ?? 0, null]
     } catch (err) {
       if (!isFsError(err)) throw err
       return new IOResult({

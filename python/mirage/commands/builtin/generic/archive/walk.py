@@ -13,7 +13,7 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec, StatFn
-from mirage.utils.dates import iso_to_epoch
+from mirage.utils.dates import stat_epoch
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import CycleError
 from mirage.utils.stat_view import posix_mode
@@ -387,5 +387,4 @@ async def recorded_stamp(
     except FS_ERRORS as exc:
         logger.debug("no stamp for %s: %s", path.virtual, exc)
         return None, None
-    mtime = None if row.modified is None else iso_to_epoch(row.modified)
-    return mtime, posix_mode(row) & 0o7777
+    return stat_epoch(row.modified), posix_mode(row) & 0o7777

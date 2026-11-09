@@ -148,7 +148,17 @@ async def test_a_member_named_like_a_mount_root_can_be_deleted():
 @pytest.mark.asyncio
 async def test_names_on_stdin_reach_a_zip_across_mounts():
     line = (
-        "echo a > /m/f; echo b > /m/g; "
-        "echo /m/f | zip -q -@ /data/o.zip /m/g; unzip -Z1 /data/o.zip | sort"
+        "cd /data; echo a > f; echo b > /m/g; "
+        "echo f | zip -q -@ /data/o.zip /m/g; unzip -Z1 /data/o.zip | sort"
     )
-    assert (await _mounted(line))[1] == b"m/f\nm/g\n"
+    assert (await _mounted(line))[1] == b"f\nm/g\n"
+
+
+@pytest.mark.asyncio
+async def test_a_d_inside_a_temp_path_does_not_lift_the_root_refusal():
+    line = "zip -r -bd /data/o.zip /m; echo rc=$?"
+    assert await _mounted(line) == (
+        0,
+        b"rc=1\n",
+        b"zip: cannot read '/m': Device or resource busy\n",
+    )

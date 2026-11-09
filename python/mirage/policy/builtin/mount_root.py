@@ -84,6 +84,32 @@ def has_symlink_flag(argv: tuple[str, ...]) -> bool:
     return ln_flag_present(argv, "s", "--symbolic")
 
 
+def zip_deletes(argv: tuple[str, ...]) -> bool:
+    """Whether a zip line deletes members, by raw token scan: the policy
+    fires before flag parsing. A ``d`` inside the value of ``-b``, ``-x``
+    or ``-i`` is that value, and a word after one of them is not read.
+
+    Args:
+        argv (tuple[str, ...]): raw argv after the command name.
+    """
+    skip = False
+    for tok in argv:
+        if skip:
+            skip = False
+        elif tok == "--":
+            return False
+        elif tok == "--delete":
+            return True
+        elif tok.startswith("-") and not tok.startswith("--"):
+            for pos, letter in enumerate(tok[1:], 1):
+                if letter == "d":
+                    return True
+                if letter in "bxi":
+                    skip = pos == len(tok) - 1
+                    break
+    return False
+
+
 def has_no_target_flag(argv: tuple[str, ...]) -> bool:
     """Spot ln's -T/--no-target-directory by raw token scan.
 
@@ -385,7 +411,7 @@ class MountRootPolicy(Policy):
             # members of the archive, not paths.
             root = (
                 None
-                if ln_flag_present(ctx.argv, "d", "--delete")
+                if zip_deletes(ctx.argv)
                 else first_root(self._registry, operands[1:])
             )
             if root is not None:

@@ -64,13 +64,15 @@ describe('scanOperand', () => {
   it.each<[string, string | null, [number | null, number | null]]>([
     ['time and bits', '/f', [1_000_000_000, 0o640]],
     ['no time', '/timeless', [null, 0o640]],
+    ['empty time', '/blank', [null, 0o640]],
     ['unreadable', '/gone', [null, null]],
     ['not a file', null, [null, null]],
   ])('records a stamp: %s', async (_name, path, expected) => {
     const stat = async (p: PathSpec): Promise<FileStat> => {
       await Promise.resolve()
       if (p.virtual === '/gone') throw fsError(p, 'ENOENT')
-      const modified = p.virtual === '/timeless' ? null : '2001-09-09T01:46:40Z'
+      const modified =
+        p.virtual === '/timeless' ? null : p.virtual === '/blank' ? '' : '2001-09-09T01:46:40Z'
       return new FileStat({ name: 'f', type: FileType.FILE, modified, mode: 0o100640 })
     }
     const spec = path === null ? null : PathSpec.fromStrPath(path)
