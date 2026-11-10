@@ -5,7 +5,7 @@ description: Run captured programs in containers under Apple's container tool on
 ---
 
 The `apple_container` machine provider reaches a running container under
-Apple's `container` tool, and the `machine` runtime runs captured programs in
+Apple's `container` tool, and the `remote` runtime runs captured programs in
 it. You start the containers; Mirage only runs programs in them. Needs Apple silicon and macOS 26 or later. Python SDK and Node.
 
 ## Installation
@@ -19,9 +19,12 @@ brew install container
 container system start
 container build -f docker/sandbox/Dockerfile --target fuse \
   -t mirage-python-fuse .
-container run -d --cap-add SYS_ADMIN \
+container run -d --init --cap-add SYS_ADMIN \
   --name my-sandbox mirage-python-fuse sleep infinity
 ```
+
+`--init` gives the container a process that collects what ends; without it a
+program that is killed stays behind as a zombie.
 
 ## Usage
 
@@ -35,27 +38,27 @@ container a machine of its own and send each session to its machine with a
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.runtime.machine import MachineRuntime
+    from mirage.runtime.machine import RemoteRuntime
 
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
         machines={"box": {"provider": "apple_container", "container": "my-sandbox"}},
-        runtimes=[MachineRuntime(["@python", "@external"], machine="box")],
+        runtimes=[RemoteRuntime(["@python", "@external"], machine="box")],
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { MountMode, MachineRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { MountMode, RemoteRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
         machines: { box: { provider: 'apple_container', container: 'my-sandbox' } },
-        runtimes: [new MachineRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+        runtimes: [new RemoteRuntime({ captures: ['@python', '@external'], machine: 'box' })],
       },
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
@@ -69,7 +72,7 @@ container a machine of its own and send each session to its machine with a
         provider: apple_container
         container: my-sandbox
     runtimes:
-      - name: machine
+      - name: remote
         captures: ["@python", "@external"]
         machine: box
     mounts:

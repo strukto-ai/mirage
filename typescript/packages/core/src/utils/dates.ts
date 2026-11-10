@@ -18,7 +18,7 @@ import { YieldBudget } from '../io/yield_budget.ts'
 import { openStreamSync } from '../rs/stream.ts'
 import { byteView, encodeText, decodeText } from '../shell/bytes.ts'
 import { concat } from './bytes.ts'
-import { LOCAL_ZONE, posixTransitions, resolveTz, type Zone } from './timezone.ts'
+import { posixTransitions, resolveTz, type Zone } from './timezone.ts'
 import { systemDate } from './clock.ts'
 
 /** The UTC day `ts` (epoch milliseconds) falls on, as `YYYY-MM-DD`. */
@@ -84,26 +84,16 @@ export function inMtimeWindow(
   return true
 }
 
-const WALL = z.tuple([
-  z.number().int(),
-  z.number().int(),
-  z.number().int(),
-  z.number().int(),
-  z.number().int(),
-  z.number().int(),
-])
 const REQUEST = z.object({
   op: z.literal('date'),
   zone: z.string().nullable(),
   instant: z.number().int().optional(),
   year: z.number().int().optional(),
-  wall: WALL.optional(),
 })
 const PLACEMENT = z
   .object({
     epoch: z.number().int(),
     nanos: z.number().int().nonnegative().max(999999999),
-    wall: WALL.nullable(),
   })
   .nullable()
 
@@ -118,13 +108,6 @@ function dateRequest(
     const known = zones.get(request.zone)
     selected = known ?? resolveTz(request.zone)
     zones.set(request.zone, selected)
-  }
-  if (request.wall !== undefined) {
-    const [year, month, day, hour, minute, second] = request.wall
-    return (
-      selected.fromWall({ year, month: month - 1, day, hour, minute, second, ms: 0 }).getTime() /
-      1000
-    )
   }
   if (request.year !== undefined) return posixTransitions(selected, request.year) ?? []
   if (request.instant === undefined) throw new TypeError('missing date instant')
@@ -170,7 +153,6 @@ function* dateSteps(
     mode,
     now: current,
     nanos: (ms - current * 1000) * 1000000,
-    local: zone === LOCAL_ZONE,
   })
   const zones = new Map<string, Zone>()
   try {

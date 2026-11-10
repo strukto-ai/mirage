@@ -22,7 +22,7 @@ from mirage.policy.types import Outcome, Scope
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.language import LanguageRuntime
-from mirage.runtime.machine import MachineRuntime
+from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.types import RunResult
 from mirage.shell.parse import parse, syntax_refusal
@@ -386,7 +386,7 @@ async def test_an_outside_wrapper_runs_where_its_program_is_routed(machine):
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
         machines={"a": Named("a"), "b": Named("b")},
-        runtimes=[MachineRuntime(["hostname"], machine="a"), "workspace"],
+        runtimes=[RemoteRuntime(["hostname"], machine="a"), "workspace"],
         policies=[HostnameOn(machine)],
     )
     try:
@@ -415,7 +415,7 @@ def _routed(routes: dict[str, Route]) -> Workspace:
         mode=MountMode.EXEC,
         machines={"a": Named("a"), "b": Named("b")},
         runtimes=[
-            MachineRuntime(["find", "hostname"], machine="a"),
+            RemoteRuntime(["find", "hostname"], machine="a"),
             "workspace",
         ],
         policies=[Routes(routes)],

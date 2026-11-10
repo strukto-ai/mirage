@@ -186,8 +186,8 @@ def test_human_dates_hide_the_readers_own_offset():
 def test_the_clock_reads_gits_test_variable_and_tz():
     clock = date_clock({"GIT_TEST_DATE_NOW": "1234 rest", "TZ": "UTC"})
     assert clock.now == 1234
-    assert clock.zone is not None
     assert date_clock({"GIT_TEST_DATE_NOW": "x"}).now == 0
+    assert date_clock({}).zone is timezone.utc
 
 
 @pytest.mark.parametrize(
@@ -465,23 +465,17 @@ def test_a_padded_epoch_in_the_last_southern_summer_a_datetime_holds(zone):
     assert show_date(253398283200, 0, mode) == "253398247200"
 
 
-def test_a_padded_epoch_reads_a_named_host_zone_as_tzdata(monkeypatch):
-    # Without TZ in the session, a host running under America/New_York is
-    # read as that tzdata zone: the same dates as a session that names it,
-    # its summers searched a day at a time and kept. The zone is the shared
-    # ZoneInfo, whose summers other tests may have kept already, so the
-    # count starts from an empty table.
+def test_a_padded_epoch_searches_a_named_zone_a_day_at_a_time(monkeypatch):
+    # A session's America/New_York has its summers searched a day at a
+    # time and kept. The zone is the shared ZoneInfo, whose summers other
+    # tests may have kept already, so the count starts from an empty table.
     monkeypatch.setattr(dates, "STRETCHES", weakref.WeakKeyDictionary())
-    monkeypatch.setenv("TZ", "America/New_York")
-    host = parse_date_mode("format:%12s", date_clock({}))
     named = parse_date_mode(
         "format:%12s", date_clock({"TZ": "America/New_York"})
     )
-    zone = dates._session_zone(host)
+    zone = named.zone
     assert isinstance(zone, ZoneInfo) and zone.key == "America/New_York"
     monkeypatch.delitem(dates.STRETCHES, zone, raising=False)
-    stamps = [1420070400 + i * 315619 for i in range(1000)]
-    assert [show_date(stamp, 0, host) for stamp in stamps] == [
-        show_date(stamp, 0, named) for stamp in stamps
-    ]
+    for stamp in [1420070400 + i * 315619 for i in range(1000)]:
+        show_date(stamp, 0, named)
     assert len(dates.STRETCHES[zone]) == 10

@@ -85,7 +85,8 @@
           "/ram": {
             "vfs": "ram"
           }
-        }
+        },
+        "max_memory": null
       },
       "steps": [
         {

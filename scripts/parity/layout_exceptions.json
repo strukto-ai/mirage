@@ -191,6 +191,7 @@
     "slab": "Puts wasmtime-py's process-wide callback slab behind a lock; a JS host has no wasmtime."
    },
    "typescript_only": {
+    "limit": "Holds a guest module's linear memory to a limit by editing the module, the only way a JS host has; Python sets it on wasmtime's Store (WasmExecution._run_sync).",
     "transport": "The blocking bridge a worker guest calls the host through (shared memory, or the page's service worker), which Pyodide uses too. Python's guest runs on a thread whose calls wait on the event loop directly.",
     "worker": "The worker entry a guest runs on, its WasiFs answered across the bridge. Python runs the guest on a thread (WasmExecution._run_sync).",
     "guest": "The guest's view over the worker's blocking bridge its calls cross. Python's guest calls the host's view directly on its thread."

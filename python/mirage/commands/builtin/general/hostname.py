@@ -15,6 +15,7 @@
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.constants import HOSTNAME
 from mirage.commands.config import Context, command
+from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.synopsis import SYNOPSES
@@ -55,6 +56,10 @@ async def hostname(
     exit 255, where hostname dumps its whole help.
     """
     fl = FlagView(ctx.flags, spec=SPECS["hostname"])
+    machine = fl.as_str("machine")
+    if machine is not None and machine != HOSTNAME:
+        line = f"hostname: {quote_text(machine)}: no such machine\n"
+        return None, IOResult(exit_code=1, stderr=line.encode())
     typed = fl.typed_order(*DISPLAY)
     if len(texts) > 1 or (texts and typed):
         return None, IOResult(

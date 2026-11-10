@@ -13,6 +13,20 @@
         "stdout": "1\n1\n1\n4\n2\n1\n1\nrc=1\nrc=1\n",
         "stderr": "nproc: invalid number: 'x'\nnproc: extra operand 'a'\nTry 'nproc --help' for more information.\n"
       }
+    },
+    {
+      "id": "free_has_no_size_without_a_max_memory",
+      "seq": 16200009,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "free -m | head -n 1; free -m | awk '/^Mem:/{print $2, $5, $6}'; free -m | awk '/^Swap:/{print $2, $3, $4}'; free --machine nosuch; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "               total        used        free      shared  buff/cache   available\n- - -\n- - -\nrc=1\n",
+        "stderr": "free: nosuch: no such machine\n"
+      }
     }
   ]
 }

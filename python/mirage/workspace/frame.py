@@ -46,6 +46,7 @@ class ExecutionFrame:
         Callable[[TSNodeLike, ProcessSubLine], Awaitable[str]] | None
     ) = None
     routing: RouteDecision[RuntimeIdentity] | None = None
+    runs_on_machine: Callable[..., bool] | None = None
     line_timeout: float | None = None
     shell: ProcessHandle | None = None
     substitution: bool = False
@@ -65,6 +66,7 @@ class ExecutionFrame:
         """
         return ExecutionFrame(
             routing=self.routing,
+            runs_on_machine=self.runs_on_machine,
             line_timeout=self.line_timeout,
             shell=self.shell,
             substitution=self.substitution,

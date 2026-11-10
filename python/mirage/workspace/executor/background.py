@@ -285,6 +285,20 @@ def program_word(left: TSNodeLike, session: SessionState) -> str | None:
         left (TSNodeLike): the job's command.
         session (SessionState): the session the job is forked from.
     """
+    words = _program_words(left, session)
+    return words[0] if words else None
+
+
+def _program_words(
+    left: TSNodeLike, session: SessionState
+) -> list[str | None] | None:
+    """``program_word``'s word and the words after it, None when the job
+    is not one program.
+
+    Args:
+        left (TSNodeLike): the job's command.
+        session (SessionState): the session the job is forked from.
+    """
     if not simple_command(left):
         return None
     invocations = command_invocations(left)
@@ -306,22 +320,25 @@ def program_word(left: TSNodeLike, session: SessionState) -> str | None:
         or head in session.functions
     ):
         return None
-    return head
+    return words
 
 
 def _on_a_machine(left: TSNodeLike, context: EvaluationContext) -> bool:
     """Whether a job is one program a runtime past the workspace runs,
-    which has a pid of its own there.
+    which has a pid of its own there (``runs_on_machine``).
 
     Args:
         left (TSNodeLike): the job's command.
         context (EvaluationContext): the line's evaluation.
     """
-    head = program_word(left, context.session)
+    session = context.session
     routing = context.frame.routing
-    if head is None or routing is None:
+    words = _program_words(left, session)
+    if not words or routing is None:
         return False
-    runtime = routing.bindings.get(head, routing.fallback)
+    if context.frame.runs_on_machine is not None:
+        return context.frame.runs_on_machine(words, session, routing)
+    runtime = routing.bindings.get(str(words[0]), routing.fallback)
     return getattr(runtime, "reach", "workspace") != "workspace"
 
 

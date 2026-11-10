@@ -27,12 +27,15 @@ class PsOptions:
         columns (tuple[tuple[str, str], ...]): ``-o`` keys and headers.
         forest (bool): BSD ``f`` or ``--forest``, which draws each
             command under its parent's.
+        machine (str | None): ``--machine``, which keeps that machine's
+            processes; None keeps every one.
     """
 
     pids: frozenset[int]
     all: bool
     columns: tuple[tuple[str, str], ...]
     forest: bool = False
+    machine: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,7 +44,7 @@ class PsContext:
 
     Args:
         now (float): the moment ps runs, epoch seconds.
-        zone (tzinfo | None): the zone times print in, the session's TZ.
+        zone (tzinfo): the zone times print in, the session's TZ.
         group (str | None): the session's profile, its runners' owner
             and group.
         session_id (str): the calling session.
@@ -52,7 +55,7 @@ class PsContext:
     """
 
     now: float
-    zone: tzinfo | None
+    zone: tzinfo
     group: str | None
     session_id: str
     shell_pid: int | None

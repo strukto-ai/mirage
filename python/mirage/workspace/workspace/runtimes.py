@@ -20,7 +20,7 @@ from mirage.execution.machine.table import MachineTable
 from mirage.runtime.base import Runtime
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.language import LanguageRuntime
-from mirage.runtime.machine import MachineRuntime
+from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.table import (
     DEFAULT_ENTRIES,
     bind_commands,
@@ -199,12 +199,12 @@ class Runtimes:
                 or another workspace holds the entry.
         """
         if (
-            isinstance(entry, MachineRuntime)
+            isinstance(entry, RemoteRuntime)
             and entry.default_machine is not None
         ):
             self._machines.get(entry.default_machine)
         entry.bind(self._binding)
-        if isinstance(entry, MachineRuntime):
+        if isinstance(entry, RemoteRuntime):
             entry.bind_machines(self._machines)
 
     def _install(

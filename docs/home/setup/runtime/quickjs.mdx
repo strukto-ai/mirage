@@ -85,6 +85,13 @@ Name QuickJS in `runtimes` to run `node` on it once its engine is found:
   </Tab>
 </Tabs>
 
+## Memory
+
+A run holds no more than its workspace's
+[`max_memory`](/home/core/output-limits#limit-a-workspaces-memory) has left,
+96 MB by default. A program that needs more gets `InternalError: out of
+memory`.
+
 ## JavaScript compatibility
 
 `std` and `os` are globals, as `qjs --std` gives them. Examples assume a
@@ -244,7 +251,7 @@ the program writes are stamped from the same clock. `performance.now()` and
   <Accordion title="Limitations" id="date-limitations">
     | API or behavior | Limitation |
     | --- | --- |
-    | Local times | UTC. |
+    | Local times | UTC. `TZ` does not change them. |
   </Accordion>
 </AccordionGroup>
 

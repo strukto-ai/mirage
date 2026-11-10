@@ -227,6 +227,11 @@ export function oneProgram(left: TSNodeLike, session: SessionState): boolean {
 
 /** The word naming the program a job is, null when it is not one (`oneProgram`). */
 export function programWord(left: TSNodeLike, session: SessionState): string | null {
+  return programWords(left, session)?.[0] ?? null
+}
+
+/** `programWord`'s word and the words after it, null when the job is not one program. */
+function programWords(left: TSNodeLike, session: SessionState): (string | null)[] | null {
   if (!simpleCommand(left)) return null
   const invocations = commandInvocations(left)
   const first = invocations[0]
@@ -248,17 +253,21 @@ export function programWord(left: TSNodeLike, session: SessionState): string | n
     Object.hasOwn(session.functions, head)
   )
     return null
-  return head
+  return words
 }
 
 /**
  * Whether a job is one program a runtime past the workspace runs, which has
- * a pid of its own there. Mirrors Python's `_on_a_machine`.
+ * a pid of its own there (`runsOnMachine`). Mirrors Python's `_on_a_machine`.
  */
 function onAMachine(left: TSNodeLike, context: EvaluationContext): boolean {
-  const head = programWord(left, context.session)
+  const session = context.session
   const routing = context.frame.routing
-  if (head === null || routing === undefined) return false
+  const words = programWords(left, session)
+  const head = words?.[0]
+  if (words === null || head === undefined || head === null || routing === undefined) return false
+  if (context.frame.runsOnMachine !== undefined)
+    return context.frame.runsOnMachine(words, session, routing)
   const runtime = Object.hasOwn(routing.bindings, head) ? routing.bindings[head] : routing.fallback
   return (
     runtime !== null &&

@@ -21,6 +21,7 @@ import { pathVisible } from '../../../../utils/hidden.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
+import { UNLISTED_MOUNTS } from '../constants.ts'
 import { fail, ok, parseLine } from '../shared.ts'
 
 // The mount options a mode reads as: the ladder's READ cannot write and only
@@ -88,7 +89,11 @@ export function handleMount(
   const types = fl.asStr('types')
   const lines = [...registry.visibleMounts()]
     .sort((a, b) => compareCodePoints(a.prefix, b.prefix))
-    .filter((m) => pathVisible(session.visibility, m.prefix.replace(/\/+$/, '') || '/'))
+    .filter(
+      (m) =>
+        !UNLISTED_MOUNTS.has(m.prefix) &&
+        pathVisible(session.visibility, m.prefix.replace(/\/+$/, '') || '/'),
+    )
     .filter((m) => types === undefined || matchType(m.vfs.name, types))
     .map(
       (m) =>

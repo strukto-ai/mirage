@@ -354,6 +354,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-s', '--short'], { action: 'store_true', help: 'Short host name.' }),
       new Argument(['-y', '--yp'], { action: 'store_true', help: 'NIS/YP domain name.' }),
       new Argument('--nis', { action: 'store_true', help: 'NIS/YP domain name.' }),
+      new Argument('--machine', { help: 'Answer for this machine only.' }),
       TEXTS_OPERAND,
     ],
   }),
@@ -466,6 +467,7 @@ export const SPECS: Record<string, CommandSpec> = {
     arguments: [
       new Argument('--all', { action: 'store_true' }),
       new Argument('--ignore'),
+      new Argument('--machine', { help: 'Answer for this machine only.' }),
       TEXTS_OPERAND,
     ],
   }),

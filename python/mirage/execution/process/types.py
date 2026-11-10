@@ -15,12 +15,28 @@ class ProcessState(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class ProcessUsage:
+    """What a scan read of a program's use of its machine: ``cpu_seconds``
+    of CPU time so far, ``cpu_percent`` that time over the time it has
+    run, ``memory_percent`` its resident memory over the machine's, and
+    ``rss`` and ``vsz`` its resident and virtual size in KiB.
+    """
+
+    cpu_seconds: float
+    cpu_percent: float
+    memory_percent: float
+    rss: int
+    vsz: int
+
+
+@dataclass(frozen=True, slots=True)
 class Process:
     """One managed runner, as every instance on its store reads it: not
     an OS process or a shell job number. Its machine is where its
     program runs and its runtime what Mirage runs it with; a native
     program's own pid there is ``machine_pid``, and the letter ``ps``
-    shows for what it is doing, when something knows, is ``shown_state``.
+    shows for what it is doing, when something knows, is ``shown_state``,
+    and what the last scan read of its use of the machine ``usage``.
 
     ``ended_at`` is set exactly when ``state`` is final, with ``exit``
     the status, ``signal`` the signal that ended it, if one did, and
@@ -50,6 +66,7 @@ class Process:
     ancestors: tuple[int, ...] = ()
     shown_state: str | None = None
     stages: tuple[int, ...] = ()
+    usage: ProcessUsage | None = None
 
     @property
     def pid(self) -> int:

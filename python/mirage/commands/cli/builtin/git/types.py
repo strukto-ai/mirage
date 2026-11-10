@@ -14,7 +14,7 @@
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import tzinfo
+from datetime import timezone, tzinfo
 from enum import StrEnum
 
 from dulwich.index import ConflictedIndexEntry, IndexEntry
@@ -260,15 +260,15 @@ class DateMode:
         strftime (str): the ``format:`` template, empty otherwise.
         now (int): the moment ``relative`` and ``human`` count from, in
             epoch seconds, read once per invocation.
-        zone (tzinfo | None): the session's ``TZ``, None for the host's
-            own zone, which is what a ``-local`` style shows.
+        zone (tzinfo): the session's ``TZ``, UTC without one, which is
+            what a ``-local`` style shows.
     """
 
     kind: DateKind = DateKind.NORMAL
     local: bool = False
     strftime: str = ""
     now: int = 0
-    zone: tzinfo | None = None
+    zone: tzinfo = timezone.utc
 
 
 @dataclass(frozen=True, slots=True)

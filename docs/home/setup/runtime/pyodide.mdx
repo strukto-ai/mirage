@@ -123,8 +123,11 @@ runtimes:
 
 A run starts at about 50M. One that passes the cap fails with
 `MemoryError`, and the next run starts fresh. Node stops the run when it
-passes the cap; browsers check the cap when the run ends. There is no cap
-by default.
+passes the cap; browsers check the cap when the run ends.
+
+Without its own `max_memory`, a run may grow by what its workspace's
+[`max_memory`](/home/core/output-limits#limit-a-workspaces-memory) has left,
+96 MB by default, past what the interpreter and its packages take to start.
 
 ## Python compatibility
 
@@ -334,7 +337,7 @@ clock. `time.monotonic()` and `time.perf_counter()` measure elapsed time.
   <Accordion title="Limitations" id="time-limitations">
     | API or behavior | Limitation |
     | --- | --- |
-    | Local times | The host's time zone. `TZ` does not change them. |
+    | Local times | The session's `TZ`, UTC without one. `time.tzname` spells a zone as its offset, such as `UTC+0900`. |
   </Accordion>
 </AccordionGroup>
 

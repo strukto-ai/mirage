@@ -168,7 +168,7 @@ export interface WorkspaceOptions {
   /**
    * The machines its programs run on, by name: each a handle, or its
    * provider plus how to reach it (`{ provider: 'docker', container:
-   * 'tools' }`). A machine runtime entry's `machine` names one. Mirrors
+   * 'tools' }`). A remote runtime entry's `machine` names one. Mirrors
    * Python's `machines`.
    */
   machines?: Record<string, MachineHandle | Record<string, unknown>>

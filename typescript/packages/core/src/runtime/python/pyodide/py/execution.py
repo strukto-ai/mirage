@@ -9,6 +9,7 @@ import operator
 import os
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -34,6 +35,8 @@ _handler_raised = None
 _on_host = False
 # The signal number the host carries sent signals under.
 SIGNAL_CARRIER = 64
+# The name the workspace's ``hostname`` prints.
+HOSTNAME = "mirage"
 # How long one nap of ``time.sleep`` is: C's sleep hears no signal.
 SLEEP_SLICE_SECONDS = 0.05
 # What a program does nothing about unless it set a handler.
@@ -1194,3 +1197,15 @@ def install_xattrs():
 
 
 install_xattrs()
+
+
+def install_hostname():
+    """Answer the workspace's name where Emscripten says ``emscripten``,
+    the rest of ``os.uname`` staying its own, as packages read it."""
+    system, _, release, version, machine = os.uname()
+    named = os.uname_result((system, HOSTNAME, release, version, machine))
+    os.uname = lambda: named
+    socket.gethostname = lambda: HOSTNAME
+
+
+install_hostname()

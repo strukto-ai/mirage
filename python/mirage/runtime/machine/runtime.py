@@ -27,7 +27,7 @@ from mirage.runtime.types import OutputFn, RunResult, RuntimeReach
 from mirage.types import PathSpec
 
 
-class MachineRuntime(
+class RemoteRuntime(
     Runtime[None], LineExecutorMixin[None], ProcessExecutorMixin[None]
 ):
     """Run a machine's own programs through that machine's exec.
@@ -47,7 +47,7 @@ class MachineRuntime(
             names none.
     """
 
-    name = "machine"
+    name = "remote"
     # Programs execute on the machine and act on its world (its
     # filesystem, its network); the workspace gate never sees those
     # effects, however well isolated the machine itself is.

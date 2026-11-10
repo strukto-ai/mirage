@@ -74,3 +74,69 @@ export interface MachinePid {
   readonly started: number
   readonly exited?: number | null
 }
+
+/**
+ * What a machine's processors spent a moment on, in percent, each null where
+ * the machine does not say. Mirrors Python's `CpuShares`.
+ */
+export interface CpuShares {
+  readonly user: number
+  readonly system: number
+  readonly idle: number
+  readonly nice: number | null
+  readonly wait: number | null
+  readonly hardware: number | null
+  readonly software: number | null
+  readonly stolen: number | null
+}
+
+/**
+ * How many processes a machine holds, by what they are doing. Mirrors
+ * Python's `TaskCounts`.
+ */
+export interface TaskCounts {
+  readonly total: number
+  readonly running: number
+  readonly sleeping: number
+  readonly stopped: number
+  readonly zombie: number
+}
+
+/**
+ * What one machine holds right now, in bytes where it is memory: `machine`
+ * as `ps` shows it, `cpus` the processors a program there may use and
+ * `allCpus` those it has. A memory figure is null where the machine has no
+ * such thing; `tasks` and `cpu` are read only when asked for. Mirrors
+ * Python's `MachineResources`.
+ */
+export interface MachineResources {
+  readonly machine: string
+  readonly cpus: number
+  readonly allCpus: number
+  readonly epoch: number
+  readonly clock: string
+  readonly offset: string
+  readonly upSeconds: number
+  readonly load: readonly [number, number, number]
+  readonly users: number
+  readonly memTotal: number
+  readonly memFree: number
+  readonly memAvailable: number
+  readonly swapTotal: number
+  readonly swapFree: number
+  readonly shared: number | null
+  readonly buffers: number | null
+  readonly cached: number | null
+  readonly commitLimit: number | null
+  readonly committed: number | null
+  readonly lowTotal: number | null
+  readonly lowFree: number | null
+  readonly highTotal: number | null
+  readonly highFree: number | null
+  readonly tasks: TaskCounts | null
+  readonly cpu: CpuShares | null
+  /** The name it calls itself. */
+  readonly hostname: string
+  /** What `lscpu` prints there, empty where it has none. */
+  readonly cpuInfo: string
+}

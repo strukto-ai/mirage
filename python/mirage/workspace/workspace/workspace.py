@@ -98,7 +98,12 @@ from mirage.io.network import NetworkSetting, network_rule, run_with_network
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.machine.handle import MachineHandle
-from mirage.machine.program import scan_host, signal_host, stop_host_run
+from mirage.machine.program import (
+    host_resources,
+    scan_host,
+    signal_host,
+    stop_host_run,
+)
 from mirage.observe.log_entry import EVENT_COMMAND, EVENT_RESULT, EVENT_VFS
 from mirage.observe.observer import Observer
 from mirage.observe.store import ObserverStore
@@ -670,7 +675,7 @@ class Workspace:
             self.process_table,
         )
         self.machine_table = MachineTable(
-            machines, scan_host, signal_host, stop_host_run
+            machines, scan_host, signal_host, stop_host_run, host_resources
         )
         self._wire_machines()
         self._runtimes = Runtimes(
@@ -876,6 +881,10 @@ class Workspace:
         self.process_table.sender = lambda handle, signum: (
             self.machine_table.send(self.process_table, handle, signum)
         )
+        self.process_table.machine_ids = lambda: [
+            str(handle.id) for handle in self.machine_table.handles()
+        ]
+        self.process_table.machine_resources = self.machine_table.resources
 
     def _start_installs(
         self,
@@ -3586,7 +3595,7 @@ class Workspace:
                 argument overrides policy, never capability. Raises
                 ValueError for a name that is not a workspace entry.
             machine: Explicit machine for this line, by its ``machines:``
-                name: the machine runtime runs what it serves on it, over
+                name: the remote runtime runs what it serves on it, over
                 its entry's own machine, for this line only (nested evals
                 inherit it). Raises ValueError for a name that is not a
                 workspace machine.

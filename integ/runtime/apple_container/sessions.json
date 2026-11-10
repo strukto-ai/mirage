@@ -16,7 +16,7 @@
         },
         "runtimes": [
           {
-            "name": "machine",
+            "name": "remote",
             "captures": [
               "printenv"
             ],

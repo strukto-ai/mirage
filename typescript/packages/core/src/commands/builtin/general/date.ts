@@ -36,7 +36,7 @@ import { extraOperandError, usageExitCode, usageHint } from '../../spec/usage.ts
 import { UsageError } from '../../errors.ts'
 import { CommandName } from '../../spec/types.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { LOCAL_ZONE, UTC_ZONE, zoneFromEnv, type Zone } from '../../../utils/timezone.ts'
+import { UTC_ZONE, zoneFromEnv, type Zone } from '../../../utils/timezone.ts'
 import { systemDate } from '../../../utils/clock.ts'
 import { byteView, encodeText } from '../../../shell/bytes.ts'
 
@@ -264,7 +264,7 @@ async function date(
   } else if (setting !== null && chosen.some(Boolean)) {
     throw lacksPlusError(setting)
   }
-  const zone = (u ? UTC_ZONE : zoneFromEnv(ctx.env)) ?? LOCAL_ZONE
+  const zone = u ? UTC_ZONE : zoneFromEnv(ctx.env)
   if (datefile !== null) return eachLine(ctx, datefile, zone, formats[0] ?? DEFAULT_FORMAT)
   // Times here are kept to the nanosecond, the resolution GNU reports for a
   // filesystem that keeps them so.

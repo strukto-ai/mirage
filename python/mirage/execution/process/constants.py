@@ -1,6 +1,6 @@
 # The live processes a session holds when no block names a cap: at the
-# 125 to 235 KiB each one costs, about what `max_memory`'s 32 MB default
-# holds, so a fork bomb meets the cap before it meets the host's memory.
+# 125 to 235 KiB each one costs, at most about 30 MB, so a fork bomb meets
+# the cap before it meets the host's memory.
 from mirage.shell.constants import CONTINUE_SIGNALS, STOP_SIGNALS
 
 MAX_PROCESSES = 128

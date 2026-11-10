@@ -32,7 +32,7 @@ from websockets.exceptions import ConnectionClosedError
 from mirage import Context, Limit, MountMode, PathSpec, Workspace
 from mirage.machine.e2b import E2BMachine
 from mirage.machine.ssh import SSHMachine
-from mirage.runtime.machine import MachineRuntime
+from mirage.runtime.machine import RemoteRuntime
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.ssh import SSHVFS, SSHConfig
 
@@ -86,7 +86,7 @@ async def relay(reader, writer, url):
 
 
 def run_line(machine, line, stdin, env, cwd):
-    """Run one raw line on a machine, as the machine runtime runs an
+    """Run one raw line on a machine, as the remote runtime runs an
     ``@line`` capture there."""
     ctx = Context(stdin=stdin, env=env, cwd=PathSpec.from_str_path(cwd))
     return machine.run(("/bin/sh", "-c", line), ctx, None, None, None)
@@ -163,7 +163,7 @@ async def exercise_cancellation(machine):
         command_limits={"@line": Limit(timeout_seconds=5)},
         machines={machine.name: machine},
         runtimes=[
-            MachineRuntime(["@line"], machine=machine.name),
+            RemoteRuntime(["@line"], machine=machine.name),
             "workspace",
         ],
     )
@@ -303,7 +303,7 @@ async def main():
                 mode=MountMode.EXEC,
                 machines={"ssh": machine},
                 runtimes=[
-                    MachineRuntime(["python3"], machine="ssh"),
+                    RemoteRuntime(["python3"], machine="ssh"),
                     "workspace",
                 ],
             )

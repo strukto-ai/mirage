@@ -26,18 +26,20 @@ import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
 import {
   CAPTURABLE_BUILTINS,
+  DEFAULT_NICENESS,
   EXEC_WRAPPERS,
   INTERPRETER_NAMES,
   KEYWORDS,
-  NAMESPACE_COMMANDS,
-  DEFAULT_NICENESS,
   LOWEST_PRIORITY,
+  MACHINE_ONLY_BUILTINS,
+  MACHINE_VIEW,
+  NAMESPACE_COMMANDS,
   PROGRAM_WRAPPERS,
   ROUTED_COMMANDS,
   RUNNERS,
-  niceAdjustment,
   SHELL_NAMES,
   SHELL_ONLY_BUILTINS,
+  niceAdjustment,
   readWrapper,
 } from './constants.ts'
 import { Consumer, WrapperAnswer } from './types.ts'
@@ -57,6 +59,63 @@ import { compareCodePoints } from '../../utils/sort.ts'
 export function isTool(name: string, session: SessionState): boolean {
   if (name.includes('/')) return false
   return !(name in session.functions && !SHELL_NAMES.has(name))
+}
+
+/**
+ * Whether a job's one program runs past the workspace, with a pid of its own
+ * there: what the executor answers when it runs the word, so a wrapper or any
+ * program no layer of the workspace holds counts as one a name captures does.
+ * Mirrors Python's `runs_on_machine`.
+ */
+export function runsOnMachine(
+  registry: MountRegistry,
+  words: readonly (string | null)[],
+  session: SessionState,
+  routing: RouteDecision<Runtime>,
+): boolean {
+  const head = words[0] ?? ''
+  const named = Object.hasOwn(routing.bindings, head)
+  let runtime: unknown = named ? routing.bindings[head] : routing.fallback
+  const args = words.slice(1).filter((word) => word !== null)
+  if (
+    !named &&
+    args.length === words.length - 1 &&
+    mirageProgramAt(head, args, session, registry, routing) === null
+  ) {
+    const [consumer, placed] = routedConsumer(head, args, session, registry, routing)
+    if (consumer === Consumer.EXTERNAL && placed !== undefined)
+      runtime = Object.hasOwn(placed.bindings, head)
+        ? placed.bindings[head]
+        : placed.bindings[EXTERNAL_COMMANDS]
+  }
+  return (
+    runtime !== null &&
+    runtime !== undefined &&
+    (runtime as { reach?: string }).reach !== 'workspace'
+  )
+}
+
+/**
+ * Whether a command's words are at most one `--machine`, all that a view of
+ * its machines reads; any other option is the program's. Mirrors Python's
+ * `picks_machine`.
+ */
+export function picksMachine(words: readonly string[]): boolean {
+  return (
+    words.length === 0 ||
+    (words.length === 1 && words[0]?.startsWith('--machine=') === true) ||
+    (words.length === 2 && words[0] === '--machine')
+  )
+}
+
+/**
+ * Whether a line's placement runs programs anywhere past the workspace: a
+ * machine, or the host. Mirrors Python's `runs_programs`.
+ */
+export function runsPrograms(bindings: Readonly<Record<string, unknown>>): boolean {
+  return Object.values(bindings).some(
+    (runtime) => ((runtime as { reach?: string } | null)?.reach ?? 'workspace') !== 'workspace',
+  )
 }
 
 /** Whether routing explicitly refused the external runtime for `name`. */
@@ -99,6 +158,14 @@ export function routedConsumer(
   registry: MountRegistry,
   routing: RouteDecision<Runtime> | undefined,
 ): [Consumer, RouteDecision<Runtime> | undefined] {
+  if (
+    name === MACHINE_VIEW &&
+    routing !== undefined &&
+    !Object.hasOwn(routing.bindings, name) &&
+    runsPrograms(routing.bindings) &&
+    picksMachine(args)
+  )
+    return [Consumer.SESSION, routing]
   const consumer = lookup(name, session, registry, routing)
   if (routing === undefined || !outsideMirage(consumer)) return [consumer, routing]
   const program = wrapped(name, args, routing.bindings)
@@ -331,7 +398,7 @@ function* layers(
   const bound = Object.hasOwn(bindings, name) ? bindings[name] : undefined
   const native = isNative(bound, name)
   const refused = runtimeRefused(name, session, registry, routing)
-  if (SHELL_NAMES.has(name)) {
+  if (SHELL_NAMES.has(name) && (!MACHINE_ONLY_BUILTINS.has(name) || runsPrograms(bindings))) {
     found = true
     yield (native || refused) && CAPTURABLE_BUILTINS.has(name)
       ? Consumer.EXTERNAL

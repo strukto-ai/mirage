@@ -17,7 +17,7 @@ import type { Context } from '../../commands/config.ts'
 import { MachineHandle } from '../../machine/handle.ts'
 import { Runtime } from '../../runtime/base.ts'
 import { LINE_EXECUTOR, type LineExecutorMixin } from '../../runtime/mixin.ts'
-import { MachineRuntime } from '../../runtime/machine/runtime.ts'
+import { RemoteRuntime } from '../../runtime/machine/runtime.ts'
 import { PythonRuntime } from '../../runtime/python/base.ts'
 import type { Program, RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
@@ -284,7 +284,7 @@ describe('shadowed captures', () => {
   })
 
   it('leaves a native entry another workspace holds on its own machines', async () => {
-    const runtime = new MachineRuntime({ captures: ['uname'], machine: 'box' })
+    const runtime = new RemoteRuntime({ captures: ['uname'], machine: 'box' })
     const first = new Idle('box')
     const ws = new Workspace(
       { '/d': new RAMVFS() },

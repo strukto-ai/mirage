@@ -354,6 +354,7 @@ export const SCAN_WAIT_SECONDS = 10
 // process, or a run's report.
 export const SCAN_MARK = 'M'
 export const SCAN_RUN_MARK = 'R'
+export const SCAN_FACTS_MARK = 'F'
 
 /** `text` as part of a report's file name, which a scan's glob and an unquoted `rm` both read as one word. */
 function reportName(text: string): string {
@@ -438,16 +439,113 @@ export function scanLine(workspace: string): string {
     '{ read -r a; read -r b; } <"$f"; ' +
     `printf '${SCAN_RUN_MARK} %s %s;%s\\n' "\${f##*-}" "$a" "$b"; ` +
     'done; ' +
+    'read -r u _ 2>/dev/null </proc/uptime; ' +
+    'h=$(getconf CLK_TCK 2>/dev/null) || h=100; ' +
+    'b=$(getconf PAGESIZE 2>/dev/null) || b=4096; ' +
+    "k=$(grep -m1 '^MemTotal:' /proc/meminfo 2>/dev/null); " +
+    'set -- $k; ' +
+    `printf '${SCAN_FACTS_MARK} %s %s %s %s\\n' ` +
+    '"$u" "$h" "$b" "$2"; ' +
     'for p in /proc/[0-9]*; do ' +
     "t=$(tr '\\000' '\\n' 2>/dev/null < \"$p/environ\" " +
     `| grep -m1 '^${PROCESS}=') || continue; ` +
     'case $t in "$m"*) ;; *) continue ;; esac; ' +
     's=$(cat "$p/stat" 2>/dev/null) || continue; ' +
     'set -- ${s##*)}; ' +
-    `printf '${SCAN_MARK} %s %s %s %s %s %s\\n' ` +
+    `printf '${SCAN_MARK} %s %s %s %s %s %s %s %s %s %s\\n' ` +
     `"\${t#${PROCESS}=}" "\${p#/proc/}" "$2" "\${20}" "$1" ` +
+    '"${12}" "${13}" "${21}" "${22}" ' +
     '"$(tr \'\\000\\n\' \'  \' 2>/dev/null < "$p/cmdline")"; ' +
     'done; true'
+  )
+}
+
+/** Marks the rows `resourcesLine` prints, so what a provider mixes in is left out. */
+export const RESOURCE_MARK = 'X'
+
+/** How long a machine has to say what it holds. */
+export const RESOURCE_WAIT_SECONDS = 10
+
+/** How far apart the two reads of the processors' time are. */
+export const CPU_SAMPLE_SECONDS = 1
+
+/**
+ * The shell line that prints what a Linux machine holds, a row each,
+ * `RESOURCE_MARK` first, `lscpu`'s among them where the machine has it. Asked for `cpu` it also reads the processors' time
+ * twice `CPU_SAMPLE_SECONDS` apart, as one read says nothing of now, and each
+ * process's state letter. Mirrors Python's `resources_line`.
+ *
+ * @param cpu read the processors' time and the process states.
+ */
+export function resourcesLine(cpu: boolean): string {
+  const mark = RESOURCE_MARK
+  const sample = cpu
+    ? 'read -r a 2>/dev/null </proc/stat; ' +
+      `sleep ${String(CPU_SAMPLE_SECONDS)}; ` +
+      'read -r b 2>/dev/null </proc/stat; ' +
+      `printf '${mark} before %s\\n' "$a"; ` +
+      `printf '${mark} after %s\\n' "$b"; ` +
+      't=; for f in /proc/[0-9]*/stat; do ' +
+      'IFS= read -r s 2>/dev/null <"$f" || continue; ' +
+      's=${s##*) }; t=$t${s%% *}; done; ' +
+      `printf '${mark} states %s\\n' "$t"; `
+    : ''
+  return (
+    `PATH=${TOOLS_PATH}; ` +
+    'read -r h 2>/dev/null </proc/sys/kernel/hostname; ' +
+    `printf '${mark} host %s\\n' "$h"; ` +
+    'LC_ALL=C lscpu 2>/dev/null | while IFS= read -r c; do ' +
+    `printf '${mark} lscpu %s\\n' "$c"; done; ` +
+    'n=$(nproc 2>/dev/null) || n=$(grep -c ^processor /proc/cpuinfo); ' +
+    'a=$(nproc --all 2>/dev/null) || a=$n; ' +
+    `printf '${mark} cpus %s %s\\n' "$n" "$a"; ` +
+    `printf '${mark} clock %s\\n' "$(date '+%s %H:%M:%S %z')"; ` +
+    'read -r l 2>/dev/null </proc/loadavg; ' +
+    `printf '${mark} load %s\\n' "$l"; ` +
+    'read -r u _ 2>/dev/null </proc/uptime; ' +
+    `printf '${mark} up %s\\n' "$u"; ` +
+    `printf '${mark} users %s\\n' "$(who 2>/dev/null | grep -c .)"; ` +
+    'while read -r k v _; do ' +
+    `printf '${mark} mem %s %s\\n' "$k" "$v"; ` +
+    'done </proc/meminfo; ' +
+    sample +
+    'true'
+  )
+}
+
+/**
+ * The shell line that prints what a Mac holds, which has no `/proc`, a row
+ * each as `resourcesLine` does. Mirrors Python's `darwin_resources_line`.
+ *
+ * @param cpu read the processors' time and the process counts.
+ */
+export function darwinResourcesLine(cpu: boolean): string {
+  const mark = RESOURCE_MARK
+  const sample = cpu
+    ? `top -l 2 -n 0 -s ${String(CPU_SAMPLE_SECONDS)} 2>/dev/null | ` +
+      "grep -E '^(Processes|CPU usage)' | tail -n 2 | " +
+      'while IFS= read -r l; do ' +
+      `printf '${mark} top %s\\n' "$l"; done; `
+    : ''
+  return (
+    'PATH=/usr/bin:/bin:/usr/sbin:/sbin; ' +
+    'n=$(sysctl -n hw.ncpu); ' +
+    `printf '${mark} host %s\\n' "$(hostname)"; ` +
+    `printf '${mark} lscpu %-41s%s\\n' Architecture: "$(uname -m)"; ` +
+    `printf '${mark} lscpu %-41s%s\\n' 'CPU(s):' "$n"; ` +
+    `printf '${mark} lscpu %-41s%s\\n' 'Model name:' ` +
+    '"$(sysctl -n machdep.cpu.brand_string)"; ' +
+    `printf '${mark} cpus %s %s\\n' "$n" "$n"; ` +
+    `printf '${mark} clock %s\\n' "$(date '+%s %H:%M:%S %z')"; ` +
+    `printf '${mark} load %s\\n' "$(sysctl -n vm.loadavg)"; ` +
+    `printf '${mark} boot %s\\n' "$(sysctl -n kern.boottime)"; ` +
+    `printf '${mark} users %s\\n' "$(who 2>/dev/null | grep -c .)"; ` +
+    `printf '${mark} memsize %s\\n' "$(sysctl -n hw.memsize)"; ` +
+    `printf '${mark} swap %s\\n' "$(sysctl -n vm.swapusage)"; ` +
+    'vm_stat | while IFS= read -r l; do ' +
+    `printf '${mark} vm %s\\n' "$l"; done; ` +
+    sample +
+    'true'
   )
 }
 

@@ -5,7 +5,7 @@ description: Run captured programs in an E2B cloud sandbox you created.
 ---
 
 The `e2b` machine provider reaches a running [E2B](https://e2b.dev)
-sandbox, by ID, and the `machine` runtime runs captured programs in it. You create the sandbox from a template; Mirage only runs programs in
+sandbox, by ID, and the `remote` runtime runs captured programs in it. You create the sandbox from a template; Mirage only runs programs in
 it. Python SDK, Node and browsers.
 
 ## Installation
@@ -39,7 +39,7 @@ Python in the sandbox too.
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.runtime.machine import MachineRuntime
+    from mirage.runtime.machine import RemoteRuntime
 
     ws = Workspace(
         {"/data": RAMVFS()},
@@ -51,21 +51,21 @@ Python in the sandbox too.
                 "mount_type": "ssh",
             }
         },
-        runtimes=[MachineRuntime(["@python", "@external"], machine="box")],
+        runtimes=[RemoteRuntime(["@python", "@external"], machine="box")],
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { MountMode, MachineRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { MountMode, RemoteRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
         machines: { box: { provider: 'e2b', sandboxId: 'sandbox-id', mountType: 'ssh' } },
-        runtimes: [new MachineRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+        runtimes: [new RemoteRuntime({ captures: ['@python', '@external'], machine: 'box' })],
       },
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
@@ -84,7 +84,7 @@ Python in the sandbox too.
         sandbox_id: ${E2B_SANDBOX_ID}
         mount_type: ssh
     runtimes:
-      - name: machine
+      - name: remote
         captures: ["@python", "@external"]
         machine: box
     mounts:

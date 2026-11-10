@@ -126,11 +126,15 @@ export async function handleKill(
         return jobResult(cmdStr, `${voice}kill: ${word}: option requires an argument\n`, 1)
       spec = words[1] ?? ''
       words = words.slice(2)
-    } else if (word === '-m') {
+    } else if (word === '-m' || word === '--machine') {
       if (words.length < 2)
-        return jobResult(cmdStr, `${voice}kill: -m: option requires an argument\n`, 1)
+        return jobResult(cmdStr, `${voice}kill: ${word}: option requires an argument\n`, 1)
       machine = words[1] ?? ''
       words = words.slice(2)
+      continue
+    } else if (word.startsWith('--machine=')) {
+      machine = word.slice('--machine='.length)
+      words = words.slice(1)
       continue
     } else if (word === '--') {
       words = words.slice(1)
@@ -245,7 +249,7 @@ export async function handleKill(
  * there to signal, null where a STOP cannot hold it. Mirrors Python's
  * _signal_one.
  */
-async function signalOne(
+export async function signalOne(
   jobTable: JobTable,
   session: SessionState | null,
   jobs: JobHandle[],

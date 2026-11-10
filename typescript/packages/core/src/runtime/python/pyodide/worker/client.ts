@@ -221,12 +221,13 @@ export class PyodideWorkerClient {
     const handles = new Set<number>()
     const cap = request.config.maxMemory ?? null
     const limit = memoryLimit(cap)
-    const unwatch =
+    const stopOver = (shown: string) => (): void => {
+      this.port.terminate()
+      this.fail(new PyodideMemoryError(shown))
+    }
+    let unwatch =
       limit !== null && cap !== null && this.port.memory !== undefined
-        ? watchMemory(this.port.memory, limit, () => {
-            this.port.terminate()
-            this.fail(new PyodideMemoryError(String(cap)))
-          })
+        ? watchMemory(this.port.memory, limit, stopOver(String(cap)))
         : null
     const cells = this.interruptBuffer === null ? null : new Int32Array(this.interruptBuffer)
     if (cells !== null) {
@@ -287,6 +288,11 @@ export class PyodideWorkerClient {
           console.warn(message.message)
           continue
         }
+        if (message.kind === 'started') {
+          if (cap === null && request.room !== undefined)
+            unwatch = await this.watchGrowth(request.room, stopOver(String(request.room)))
+          continue
+        }
         if (message.kind === 'vfs') {
           const response = this.answer(message, () =>
             runWithCaller(caller, () =>
@@ -331,6 +337,22 @@ export class PyodideWorkerClient {
           console.debug(`pyodide: landing an open file failed: ${String(error)}`)
         }
       }
+    }
+  }
+
+  /**
+   * Stop a run that grows `room` bytes past what its worker holds now, the
+   * interpreter and its packages being no charge on the workspace.
+   */
+  private async watchGrowth(room: number, stop: () => void): Promise<(() => void) | null> {
+    const memory = this.port.memory
+    if (memory === undefined) return null
+    try {
+      return watchMemory(memory, (await memory()) + room, stop)
+    } catch (err) {
+      // The worker is gone or going; whatever stopped it reports why.
+      console.debug(`pyodide memory read failed: ${String(err)}`)
+      return null
     }
   }
 

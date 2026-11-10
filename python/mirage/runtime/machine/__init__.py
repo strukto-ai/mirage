@@ -17,12 +17,12 @@ from typing import TYPE_CHECKING
 from mirage.utils.loader import lazy_exports
 
 if TYPE_CHECKING:
-    from mirage.runtime.machine.runtime import MachineRuntime
+    from mirage.runtime.machine.runtime import RemoteRuntime
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
-    "mirage.runtime.machine.runtime": ("MachineRuntime",),
+    "mirage.runtime.machine.runtime": ("RemoteRuntime",),
 }
 
-__all__ = ["MachineRuntime"]
+__all__ = ["RemoteRuntime"]
 
 __getattr__ = lazy_exports(__name__, _EXPORTS)

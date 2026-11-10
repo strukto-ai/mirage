@@ -16,6 +16,7 @@ from mirage.commands.spec.usage import usage_hint
 from mirage.shell.bytes import encode_text
 from mirage.types import MountMode, PathSpec
 from mirage.utils.hidden import path_visible
+from mirage.workspace.executor.builtins.constants import UNLISTED_MOUNTS
 from mirage.workspace.executor.builtins.shared import fail, ok, parse_line
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.registry import MountRegistry
@@ -102,7 +103,8 @@ async def handle_mount(
         f"{m.vfs.name} on {m.prefix.rstrip('/') or '/'} type {m.vfs.name} "
         f"({MODE_OPTIONS[m.effective_mode()]})\n"
         for m in sorted(registry.visible_mounts(), key=lambda m: m.prefix)
-        if path_visible(session.visibility, m.prefix.rstrip("/") or "/")
+        if m.prefix not in UNLISTED_MOUNTS
+        and path_visible(session.visibility, m.prefix.rstrip("/") or "/")
         and (types is None or match_type(m.vfs.name, types))
     ]
     return ok("mount", encode_text("".join(lines)) if lines else None)

@@ -36,7 +36,7 @@
       "command": "mount -t nosuch | grep -c ' on /ro '; mount -t such | wc -l; mount -t RAM | grep -c ' on /res '; mount -t noram | grep -c ' type ram '; mount -l -t history,bin",
       "expect": {
         "exit": 0,
-        "stdout": "1\n0\n1\n0\nhistory on /.bash_history type history (ro,noexec)\nbin on /usr/bin type bin (ro,noexec)\n",
+        "stdout": "1\n0\n1\n0\n",
         "stderr": ""
       }
     },

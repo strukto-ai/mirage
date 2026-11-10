@@ -546,42 +546,46 @@ async def test_math_builtins_run_in_jq_eval():
 
 
 @pytest.mark.asyncio
-async def test_dates_and_the_clock_stay_on_the_loops_thread(monkeypatch):
-    monkeypatch.setenv("TZ", "EST5EDT,M3.2.0,M11.1.0")
-    out, io = await _run(
-        [],
-        "1425599507 | todate, (localtime | .[3]), (now | type)",
-        null_input=True,
-    )
-    assert (out, io.exit_code) == (
-        b'"2015-03-05T23:51:47Z"\n18\n"number"\n',
-        0,
-    )
-
-
-@pytest.mark.asyncio
-async def test_local_time_reads_the_sessions_zone_from_the_tz_database(
-    monkeypatch,
-):
-    monkeypatch.setenv("TZ", "/usr/share/zoneinfo/Europe/Paris")
-    program = (
-        '1690000000 | strflocaltime("%H:%M %Z %z"), strftime("%Z"), '
-        "(1 | debug | (0 | localtime) | .[3])"
-    )
-    out, io = await _run([], program, null_input=True)
-    assert (out, io.exit_code) == (b'"06:26 CEST +0200"\n"GMT"\n1\n', 0)
-    assert await materialize(io.stderr) == b'["DEBUG:",1]\n'
+async def test_dates_and_the_clock_stay_on_the_loops_thread():
+    program = "1425599507 | todate, (localtime | .[3]), (now | type)"
     bag = parse_to_kwargs(
         parse_command(SPECS["jq"], ["-n", program], "/", "jq")
     )
     source, _ = await jq_generic(
         [],
         [program],
-        Context(flags=bag, env={"TZ": "Asia/Kolkata"}),
+        Context(flags=bag, env={"TZ": "EST5EDT,M3.2.0,M11.1.0"}),
         _read_stream,
     )
     assert source is not None
-    assert await materialize(source) == b'"09:56 IST +0530"\n"GMT"\n5\n'
+    assert (
+        await materialize(source) == b'"2015-03-05T23:51:47Z"\n18\n"number"\n'
+    )
+
+
+@pytest.mark.asyncio
+async def test_local_time_reads_the_sessions_zone_from_the_tz_database():
+    program = (
+        '1690000000 | strflocaltime("%H:%M %Z %z"), strftime("%Z"), '
+        "(1 | debug | (0 | localtime) | .[3])"
+    )
+    bag = parse_to_kwargs(
+        parse_command(SPECS["jq"], ["-n", program], "/", "jq")
+    )
+    for zone, expected in [
+        (
+            "/usr/share/zoneinfo/Europe/Paris",
+            b'"06:26 CEST +0200"\n"GMT"\n1\n',
+        ),
+        ("Asia/Kolkata", b'"09:56 IST +0530"\n"GMT"\n5\n'),
+    ]:
+        source, _ = await jq_generic(
+            [], [program], Context(flags=bag, env={"TZ": zone}), _read_stream
+        )
+        assert source is not None
+        assert await materialize(source) == expected
+    out, io = await _run([], program, null_input=True)
+    assert (out, io.exit_code) == (b'"04:26 UTC +0000"\n"GMT"\n0\n', 0)
 
 
 @pytest.mark.asyncio

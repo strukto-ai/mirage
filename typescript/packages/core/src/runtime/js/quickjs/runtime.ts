@@ -14,6 +14,7 @@
 
 import type { Context } from '../../../commands/config.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
+import { memoryRoom } from '../../../io/memory.ts'
 import {
   HOME_CONFIG_FIELDS,
   resolveHome,
@@ -181,6 +182,7 @@ export class QuickJsRuntime extends JsRuntime<WasmExecution> {
         output,
         errors,
         stop,
+        memoryRoom(),
       )
       return { stdout, stderr, exitCode }
     } catch (err) {

@@ -323,19 +323,14 @@ def age_bounds(
     return edge, _before(edge + MINUTE)
 
 
-def next_midnight(now: float, zone: tzinfo | None) -> float:
+def next_midnight(now: float, zone: tzinfo) -> float:
     """``-daystart``'s origin: the midnight that ends today.
 
     Args:
         now (float): the clock, epoch seconds.
-        zone (tzinfo | None): the session's ``TZ``, None for the host's
-            local zone.
+        zone (tzinfo): the session's ``TZ``, UTC without one.
     """
-    here = (
-        datetime.fromtimestamp(now, zone)
-        if zone is not None
-        else datetime.fromtimestamp(now).astimezone()
-    )
+    here = datetime.fromtimestamp(now, zone)
     tomorrow = here.date() + timedelta(days=1)
     return datetime.combine(tomorrow, time(0), tzinfo=here.tzinfo).timestamp()
 
@@ -418,7 +413,7 @@ def _action_kind(kind: str) -> ActionKind:
 class _Binding:
     refs: Sequence[float]
     now: float
-    zone: tzinfo | None = None
+    zone: tzinfo = timezone.utc
     utf8: bool = False
     profile: str | None = None
     window: tuple[float | None, float | None] | None = None

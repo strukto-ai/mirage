@@ -72,6 +72,11 @@ import { makeAbortError } from '../../utils/abort.ts'
 declare module '../frame.ts' {
   interface ExecutionFrame {
     routing?: RouteDecision<Runtime>
+    runsOnMachine?: (
+      words: readonly (string | null)[],
+      session: SessionState,
+      routing: RouteDecision<Runtime>,
+    ) => boolean
   }
 }
 

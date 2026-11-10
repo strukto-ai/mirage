@@ -349,9 +349,8 @@ def test_widths_pad_a_composite_whole(fmt: str, expected: str):
     assert gnu_strftime(SEPTEMBER, fmt) == expected
 
 
-def test_naive_moment_takes_the_local_zone():
-    off = MOMENT.astimezone().strftime("%z")
-    assert gnu_strftime(MOMENT, "%:z") == off[:3] + ":" + off[3:]
+def test_naive_moment_is_utc():
+    assert gnu_strftime(MOMENT, "%:z %Z") == "+00:00 UTC"
 
 
 @pytest.mark.parametrize(

@@ -2,7 +2,7 @@ import logging
 import posixpath
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from datetime import tzinfo
+from datetime import timezone, tzinfo
 
 from mirage.commands.builtin.generic.archive.extract import extract_dest
 from mirage.commands.builtin.generic.archive.walk import DirProbe, WalkFn
@@ -357,7 +357,7 @@ def _codec_of(archive: PathSpec) -> tuple[str | None, str | None]:
 
 
 async def _stored_time(
-    text: str, stat: StatFn, cwd: PathSpec, zone: tzinfo | None
+    text: str, stat: StatFn, cwd: PathSpec, zone: tzinfo
 ) -> tuple[int, str | None] | IOResult:
     """What ``--mtime`` records: the time of the file it names when it
     starts with ``/`` or ``.``, otherwise the date it spells.
@@ -366,8 +366,7 @@ async def _stored_time(
         text (str): the option's value.
         stat (StatFn): backend stat.
         cwd (PathSpec): what a relative file resolves against.
-        zone (tzinfo | None): the zone a date is read in; None is the
-            host's.
+        zone (tzinfo): the zone a date is read in.
 
     Returns:
         tuple[int, str | None] | IOResult: the time and a warning about
@@ -414,7 +413,7 @@ async def tar(
     mounts: MountView | None = None,
     relay: bool = False,
     chmod: Callable[[PathSpec, int], Awaitable[None]] | None = None,
-    zone: tzinfo | None = None,
+    zone: tzinfo = timezone.utc,
 ) -> tuple[ByteSource | None, IOResult]:
     """Plan what the host decides and run mirage-rs's tar over it: ``-c``,
     ``-r`` and ``-u`` walk their operands and check every ``-C`` here,
@@ -441,7 +440,7 @@ async def tar(
         relay (bool): the reads route by full virtual path.
         chmod (Callable[[PathSpec, int], Awaitable[None]] | None): sets
             the mode ``-p`` restores.
-        zone (tzinfo | None): the zone ``--mtime`` is read in.
+        zone (tzinfo): the zone ``--mtime`` is read in.
     """
     # With no -f the archive is standard input or output, which is GNU
     # tar's compiled-in default (no TAPE in the environment).

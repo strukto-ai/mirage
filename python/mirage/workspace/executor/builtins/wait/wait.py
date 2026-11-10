@@ -103,7 +103,7 @@ async def handle_wait(
     the id of the job whose status is answered, and unsets VAR when
     none is (which is the bare form, since it reports no one job);
     `-f` is accepted, since waiting already lasts until a job ends;
-    `-m MACHINE` reads a pid as that machine's.
+    `-m MACHINE` or `--machine MACHINE` reads a pid as that machine's.
 
     `-p` stores the PID `$!` and `jobs -p` show. While it waits it looks
     at the machines every couple of seconds, so a program whose exec
@@ -133,6 +133,21 @@ async def handle_wait(
         if word == "--":
             specs.extend(parts[i + 1 :])
             break
+        if word.startswith("--machine="):
+            machine = word.partition("=")[2]
+            i += 1
+            continue
+        if word == "--machine":
+            if i + 1 >= len(parts):
+                return job_result(
+                    cmd_str,
+                    f"{shell_voice()}wait: --machine: option requires an "
+                    f"argument\n{builtin_usage('wait')}",
+                    2,
+                )
+            machine = parts[i + 1]
+            i += 2
+            continue
         j = 1
         while j < len(word):
             ch = word[j]

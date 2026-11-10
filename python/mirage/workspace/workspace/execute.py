@@ -88,6 +88,7 @@ from mirage.workspace.executor.statement import (
 )
 from mirage.workspace.executor.traps import finish_shell, inherit_traps
 from mirage.workspace.history.line import LineHistory
+from mirage.workspace.lookup.lookup import runs_on_machine
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.node.explain import (
@@ -307,6 +308,9 @@ async def recurse(
                     # substitution; the read runs on its child's copy.
                     context = child_context(context, records)
                 context.frame.routing = routing_decision
+                context.frame.runs_on_machine = partial(
+                    runs_on_machine, ws.registry
+                )
                 evaluate = partial(
                     recurse,
                     ws,
@@ -1504,6 +1508,9 @@ async def run_prepared_line(
             # The walker reads it off the frame, which a child evaluation
             # forks with it: nested lines never re-route.
             context.frame.routing = decision
+            context.frame.runs_on_machine = partial(
+                runs_on_machine, ws.registry
+            )
             # Bound by keyword so the walker can rebind it per node: a
             # background job's nested lines run without the caller's
             # event, as the job itself does.

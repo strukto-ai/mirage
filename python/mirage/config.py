@@ -658,10 +658,10 @@ def _build_runtime_entries(
         name = options.pop("name", None)
         if not isinstance(name, str) or not name:
             raise ValueError("runtime entry needs a non-empty 'name'")
-        if "machine" in options and name in NAMED and name != "machine":
+        if "machine" in options and name in NAMED and name != "remote":
             raise ValueError(
                 f"runtime {name!r} runs on the workspace's machine; a"
-                " machine takes the machine runtime"
+                " machine takes the remote runtime"
             )
         try:
             out.append(
@@ -764,7 +764,7 @@ class WorkspaceConfig(BaseModel):
     # config, which a refusal of it masks.
     _runtime_secrets: tuple[tuple[str, ...], ...] = PrivateAttr(default=())
     # The machines programs run on, by name: each a provider plus how to
-    # reach it ({provider: docker, container: tools}). A machine runtime
+    # reach it ({provider: docker, container: tools}). A remote runtime
     # entry's `machine` names one. Unset = none.
     machines: dict[str, dict[str, Any]] | None = None
     # Per machine, the values `resolve_secrets` read into its entry,

@@ -285,24 +285,20 @@ def posix_transitions(zone: tzinfo, year: int) -> tuple[int, int] | None:
     return zone.transitions(year) if isinstance(zone, PosixZone) else None
 
 
-def zone_from_env(env: Mapping[str, str] | None) -> tzinfo | None:
+def zone_from_env(env: Mapping[str, str] | None) -> tzinfo:
     """The zone a command environment's ``TZ`` names.
 
-    None when ``TZ`` is unset (or there is no environment), which means
-    the host's local zone, the way a naive ``datetime`` does. The value
-    is read from the command's own environment, never from the process
+    UTC when ``TZ`` is unset (or there is no environment), so the
+    server's own zone never shows in a workspace. The value is read from
+    the command's own environment, never from the process
     (``os.environ``, ``time.tzset``), so two workspaces running at once
     each see their own ``TZ`` and neither moves the host's clock.
 
     Args:
         env (Mapping[str, str] | None): the command environment.
     """
-    if env is None:
-        return None
-    spec = env.get(TZ_VAR)
-    if spec is None:
-        return None
-    return resolve_tz(spec)
+    spec = None if env is None else env.get(TZ_VAR)
+    return timezone.utc if spec is None else resolve_tz(spec)
 
 
 def resolve_tz(spec: str) -> tzinfo:

@@ -19,7 +19,11 @@ from mirage.commands.builtin.utils.identity import UNKNOWN_NAME
 from mirage.commands.builtin.utils.strftime import gnu_strftime
 from mirage.context import current_caller
 from mirage.execution.job import JobTable
-from mirage.execution.process.types import Process, ProcessState
+from mirage.execution.process.types import (
+    Process,
+    ProcessState,
+    ProcessUsage,
+)
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
@@ -31,6 +35,7 @@ from mirage.workspace.executor.builtins.constants import MAX_PID_OPERAND
 from mirage.workspace.executor.builtins.jobspec import (
     grants_of,
     job_result,
+    on_machine,
     session_of,
 )
 from mirage.workspace.executor.builtins.ps import constants
@@ -90,7 +95,7 @@ def _parse_ps(words: list[str]) -> PsOptions:
     """Parse the procps selection and output options a runner answers.
 
     SysV letters after one dash, BSD letters with none, and the
-    ``--pid``/``--format``/``--forest`` long forms; ``-p`` and ``-o``
+    ``--pid``/``--format``/``--forest``/``--machine`` long forms; ``-p`` and ``-o``
     repeat and accumulate. BSD ``f`` and ``--forest`` draw the forest;
     ``-f`` and BSD ``u``/``w`` pick a layout the processes do not have,
     so they leave the plain one.
@@ -102,6 +107,7 @@ def _parse_ps(words: list[str]) -> PsOptions:
     columns: list[tuple[str, str]] = []
     select_all = False
     forest = False
+    machine: str | None = None
     at = 0
     while at < len(words):
         word = words[at]
@@ -111,12 +117,14 @@ def _parse_ps(words: list[str]) -> PsOptions:
             continue
         if word.startswith("--"):
             option, equal, attached = word.partition("=")
-            if option not in ("--pid", "--format"):
+            if option not in ("--pid", "--format", "--machine"):
                 raise ValueError("unknown gnu long option")
             if not equal:
                 attached = words[at] if at < len(words) else ""
                 at += 1
-            if option == "--pid":
+            if option == "--machine":
+                machine = attached
+            elif option == "--pid":
                 pids |= _ps_pids(attached, option)
             else:
                 columns += _ps_columns(attached, option)
@@ -145,7 +153,9 @@ def _parse_ps(words: list[str]) -> PsOptions:
                 pids |= _ps_pids(value, "-p")
             else:
                 columns += _ps_columns(value, "-o")
-    return PsOptions(frozenset(pids), select_all, tuple(columns), forest)
+    return PsOptions(
+        frozenset(pids), select_all, tuple(columns), forest, machine
+    )
 
 
 def _ps_row(keys: list[str], cells: list[str]) -> str:
@@ -230,6 +240,8 @@ def _ps_cell(key: str, info: Process, ctx: PsContext, branch: str) -> str:
     fact = constants.COLUMNS[key][3]
     if fact in constants.FIXED:
         return constants.FIXED[fact]
+    if fact in constants.USAGE_FACTS:
+        return _usage_cell(fact, info.usage)
     if fact == "machine":
         return info.shown_machine
     session = (
@@ -270,6 +282,32 @@ def _ps_cell(key: str, info: Process, ctx: PsContext, branch: str) -> str:
     if fact in ("lstart", "start", "stime", "bsdstart"):
         return _started(fact, info, ctx)
     return branch + info.command
+
+
+def _usage_cell(fact: str, usage: ProcessUsage | None) -> str:
+    """One usage column of a program a scan read; what procps prints for
+    nothing used where there is no reading, as for Mirage's own.
+
+    Args:
+        fact (str): the column's fact (``constants.USAGE_FACTS``).
+        usage (ProcessUsage | None): what the scan read.
+    """
+    if usage is None:
+        return constants.USAGE_FACTS[fact]
+    if fact == "cpu_percent":
+        return f"{usage.cpu_percent:.1f}"
+    if fact == "mem_percent":
+        return f"{usage.memory_percent:.1f}"
+    if fact == "rss":
+        return str(usage.rss)
+    if fact == "vsz":
+        return str(usage.vsz)
+    total = int(usage.cpu_seconds)
+    days, rest = divmod(total, 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes, seconds = divmod(rest, 60)
+    clock = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{days}-{clock}" if days else clock
 
 
 def _as_bash_runs_them(
@@ -367,8 +405,10 @@ async def handle_ps(
     ``--forest`` draw each command under its parent's. A ``-p`` number
     is a pid as ``ps`` shows it. Selecting nothing (``-p`` of
     an absent PID) exits 1, as procps does, and an option error is
-    procps's message and usage. A process has no CPU, RSS or TTY
-    accounting, and ps never broadens the profile's view.
+    procps's message and usage. A program's CPU and memory columns are
+    what the scan read of it (``USAGE_FACTS``); Mirage's own processes
+    have no such accounting and no process has a TTY. ps never broadens
+    the profile's view.
 
     The daemon running the line holds the workspace's lease, so its
     processes are every one the workspace has.
@@ -396,12 +436,17 @@ async def handle_ps(
         job_table.processes.last_pid + 1,
         node is not None and ends_line(node),
     )
-    rows = [info for info in listed if every or info.shown_pid in options.pids]
+    rows = [
+        info
+        for info in listed
+        if (every or info.shown_pid in options.pids)
+        and on_machine(info, options.machine)
+    ]
     columns = options.columns or constants.PLAIN
     keys = [key for key, _ in columns]
     ctx = PsContext(
         now=system_now(),
-        zone=zone_from_env(session.env) if session is not None else None,
+        zone=zone_from_env(session.env if session is not None else None),
         group=session.profile if session is not None else None,
         session_id=sid,
         shell_pid=session.shell_pid if session is not None else None,

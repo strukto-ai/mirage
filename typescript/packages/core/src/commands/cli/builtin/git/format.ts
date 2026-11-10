@@ -17,6 +17,7 @@ import { showDate } from './dates.ts'
 import { mappedIdentity } from './mailmap.ts'
 import { DateKind, Decoration, type DateMode, type MailmapEntry } from './types.ts'
 import { byteChar } from '../../../../shell/bytes.ts'
+import { UTC_ZONE } from '../../../../utils/timezone.ts'
 import { BadPrettyError, UnsupportedPrettyError } from './errors.ts'
 
 const SHORT_SHA = 7
@@ -29,7 +30,7 @@ export const DEFAULT_DATE: DateMode = {
   local: false,
   strftime: '',
   now: 0,
-  zone: null,
+  zone: UTC_ZONE,
 }
 const RAW_DATE: DateMode = { ...DEFAULT_DATE, kind: DateKind.RAW }
 

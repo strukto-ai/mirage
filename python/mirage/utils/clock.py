@@ -256,11 +256,10 @@ def system_now() -> float:
     return time.time() if clock is None else clock.now()
 
 
-def system_date(tz: tzinfo | None = timezone.utc) -> datetime:
+def system_date(tz: tzinfo = timezone.utc) -> datetime:
     """``system_now`` as an aware ``datetime`` in ``tz``.
 
     Args:
-        tz (tzinfo | None): the zone it is shown in; None for the host's
-            local zone, as ``datetime.now()`` is.
+        tz (tzinfo): the zone it is shown in.
     """
     return datetime.fromtimestamp(system_now(), tz)

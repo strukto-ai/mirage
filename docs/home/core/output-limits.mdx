@@ -7,7 +7,7 @@ icon: gauge
 
 Mirage keeps large results from flooding an agent. `cat`, `grep`, `rg`, `head`,
 and `tail` return at most 2,000 lines by default, a line stops after 600
-seconds, a workspace holds at most 32 MB in memory, and a walk stops at its
+seconds, a workspace holds at most 96 MB in memory, and a walk stops at its
 mount's `walk_limit`.
 
 ## Set Limits
@@ -105,8 +105,8 @@ limit from those mounts.
 A workspace's `max_memory`, a [size](/home/configuration#sizes), bounds what it
 holds in memory: the files in its RAM mounts, and each object a command builds
 while it runs, such as a `$( )` capture, a `read` value, a file read whole, a
-`jq -s` input or a `python3` run's heap. Such an object must fit in what the RAM
-files leave. It is 32 MB unless the workspace sets it, and `None` (`null` in
+`jq -s` input or a Monty, Pyodide or QuickJS program's memory. Such an object must fit in what the RAM
+files leave. It is 96 MB unless the workspace sets it, and `None` (`null` in
 TypeScript and YAML) lifts it. The read cache keeps its own
 [limit](/home/configuration#cache-index-and-store). Commands running at the same moment can
 each take close to what is left, so it bounds each object, not their sum.
@@ -128,7 +128,8 @@ max_memory: 64MB
 A write that would pass it fails with `Disk quota exceeded`. A command whose own
 object passes it fails with `<command>: memory exhausted` and the line goes on;
 when a capture or a `read` passes it, the line ends with `line: memory
-exhausted` and exit 1. A `python3` run raises `MemoryError`.
+exhausted` and exit 1. A `python3` run raises `MemoryError`, and a `node` run
+gets `InternalError: out of memory`.
 
 ## Handle a Reached Limit
 

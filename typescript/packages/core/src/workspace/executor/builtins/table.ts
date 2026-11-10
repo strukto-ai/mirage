@@ -60,8 +60,9 @@ import { xargsBuiltin } from './xargs/xargs.ts'
 
 // The one map from an executor-run builtin word to its handler; the
 // dispatcher does a single lookup here instead of one arm per word. Two
-// ShellBuiltin groups are deliberately absent: the job builtins (wait, fg,
-// kill, jobs, disown, ps) route through JOB_HANDLERS in
+// ShellBuiltin groups are deliberately absent: the machine builtins (free,
+// uptime, top) route through MACHINE_HANDLERS and the job builtins (wait, fg,
+// kill, jobs, disown, ps, pgrep, pkill, pidof, killall) through JOB_HANDLERS in
 // executor/command/command.ts because they need the job table, and
 // python/python3/node/js are general mount commands
 // (commands/builtin/general), reserved in ShellBuiltin only so no CLI can

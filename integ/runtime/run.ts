@@ -1478,7 +1478,7 @@ const OPTIONAL_RUNTIMES = new Set([
   'apple_container',
   'kubernetes',
 ])
-// A machine provider's variant runs the machine runtime on a machine of that
+// A machine provider's variant runs the remote runtime on a machine of that
 // provider, its config the machine's `machines:` entry. Mirrors run.py
 // `MACHINE_PROVIDERS`.
 const MACHINE_PROVIDERS = new Set([
@@ -1608,7 +1608,7 @@ function forRuntime(testCase: Case, runtime: string): Case | null {
           { provider: runtime, ...(config as Record<string, unknown>) },
         ]),
       )
-      entry = { ...rest, name: 'machine', machine: runtime }
+      entry = { ...rest, name: 'remote', machine: runtime }
     }
     world.runtimes = [entry, 'workspace']
   }

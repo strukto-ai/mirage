@@ -162,14 +162,17 @@ async def handle_kill(
                     1,
                 )
             spec, words = words[1], words[2:]
-        elif word == "-m":
+        elif word in ("-m", "--machine"):
             if len(words) < 2:
                 return job_result(
                     cmd_str,
-                    f"{voice}kill: -m: option requires an argument\n",
+                    f"{voice}kill: {word}: option requires an argument\n",
                     1,
                 )
             machine, words = words[1], words[2:]
+            continue
+        elif word.startswith("--machine="):
+            machine, words = word.partition("=")[2], words[1:]
             continue
         elif word == "--":
             words = words[1:]
@@ -250,7 +253,7 @@ async def handle_kill(
             continue
         named = operand if operand.isdigit() else shown.get(pid, pid)
         try:
-            found = await _signal_one(job_table, session, jobs, pid, signal)
+            found = await signal_one(job_table, session, jobs, pid, signal)
         except PermissionError:
             errors.append(f"{voice}kill: ({named}) - Operation not permitted")
             continue
@@ -269,7 +272,7 @@ async def handle_kill(
     return None, IOResult(exit_code=code, stderr=err or None), node
 
 
-async def _signal_one(
+async def signal_one(
     job_table: JobTable,
     session: SessionState | None,
     jobs: list[JobHandle],

@@ -14,6 +14,7 @@
 
 import { PathSpec } from '../../../types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
+import { memoryBudget } from '../../../io/memory.ts'
 import { IOResult } from '../../../io/types.ts'
 import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -25,6 +26,7 @@ const ENC = new TextEncoder()
 const USAGE =
   'Usage: getconf [-v specification] variable_name [pathname]\n' + '       getconf -a [pathname]\n'
 const UNDEFINED = 'undefined'
+const PAGE_SIZE = 4096
 
 // The table `getconf -a` prints, in Mirage's order: POSIX.1-2024's
 // tables first, then earlier standards, then Linux's names. null is
@@ -424,6 +426,18 @@ function variable(name: string): readonly [string, string | null] | undefined {
   )
 }
 
+/**
+ * A variable's answer: the memory ones are the workspace's `max_memory` and
+ * what it has left, in pages, and undefined with no cap; the rest are the
+ * table's.
+ */
+function liveValue(name: string, value: string | null): string | null {
+  const budget = memoryBudget()
+  if (budget === null || (name !== '_PHYS_PAGES' && name !== '_AVPHYS_PAGES')) return value
+  const size = name === '_PHYS_PAGES' ? budget.limit : budget.room()
+  return String(Math.floor(size / PAGE_SIZE))
+}
+
 /** Whether the PATH operand names something pathconf could open. */
 async function pathExists(ctx: Context, word: string): Promise<boolean> {
   const statPath = vfsStatPath(ctx.vfs)
@@ -448,7 +462,9 @@ async function getconf(
     const found = await pathExists(ctx, texts[0] ?? '/')
     const lines = GETCONF_VARIABLES.map(
       ([name, value]) =>
-        name.padEnd(35) + (found || !PATH_VARIABLES.has(name) ? (value ?? '') : '') + '\n',
+        name.padEnd(35) +
+        (found || !PATH_VARIABLES.has(name) ? (liveValue(name, value) ?? '') : '') +
+        '\n',
     )
     return [ENC.encode(lines.join('')), new IOResult()]
   }
@@ -459,7 +475,8 @@ async function getconf(
     const err = `getconf: Unrecognized variable \`${asked}'\n`
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(err) })]
   }
-  const [name, value] = row
+  const [name] = row
+  const value = liveValue(...row)
   const path = texts[1]
   if (PATH_VARIABLES.has(name) !== (path !== undefined)) return usage
   if (path !== undefined && !(await pathExists(ctx, path))) {

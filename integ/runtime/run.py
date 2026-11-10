@@ -145,7 +145,7 @@ RUNTIME_REQUIRES: dict[str, list[str]] = {
 }
 # The world entry a runtime is built from, before a case's own `entry`
 # narrows its captures or adds config. A machine provider's variant runs
-# the machine runtime on a machine of that provider, reached through the
+# the remote runtime on a machine of that provider, reached through the
 # config the job provides, which becomes the machine's `machines:` entry;
 # a name missing here is built by name alone.
 RUNTIME_ENTRY: dict[str, dict[str, Any]] = {
@@ -1505,7 +1505,7 @@ def _for_runtime(case: dict[str, Any], runtime: str) -> dict[str, Any] | None:
                 name: {"provider": runtime, **config}
                 for name in (runtime, *case.get("also_machines", []))
             }
-            entry = {**entry, "name": "machine", "machine": runtime}
+            entry = {**entry, "name": "remote", "machine": runtime}
         world["runtimes"] = [entry, "workspace"]
     variant = {
         **case,

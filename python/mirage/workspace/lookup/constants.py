@@ -95,7 +95,30 @@ KEYWORDS = frozenset(
 )
 
 # ShellBuiltin subset handled through the job table in the executor.
-JOB_BUILTINS = frozenset({"wait", "kill", "jobs", "disown", "ps"})
+JOB_BUILTINS = frozenset(
+    {
+        "wait",
+        "kill",
+        "jobs",
+        "disown",
+        "ps",
+        "pgrep",
+        "pkill",
+        "pidof",
+        "killall",
+    }
+)
+
+# Builtins that report on the machines programs run on.
+MACHINE_BUILTINS = frozenset({"free", "uptime", "top"})
+
+# Those with nothing to say of the workspace itself, so a workspace that
+# runs programs on no machine has no such command.
+MACHINE_ONLY_BUILTINS = frozenset({"uptime", "top"})
+
+# A program of each machine's that Mirage also answers for all of them, when
+# the line asks nothing the program alone can say.
+MACHINE_VIEW = "lscpu"
 
 SHELL_NAMES = frozenset(str(b) for b in ShellBuiltin) | UNSUPPORTED_BUILTINS
 
@@ -229,10 +252,14 @@ INTERPRETER_NAMES = frozenset(
     if group is BuiltinGroup.INTERPRETERS
 )
 
-# Shell words a machine runtime's captures can take from the session: the
+# Shell words a remote runtime's captures can take from the session: the
 # interpreters, and the process tools whose host programs see that
 # runtime's own processes rather than mirage's managed runners.
-CAPTURABLE_BUILTINS = INTERPRETER_NAMES | frozenset({"ps", "kill"})
+CAPTURABLE_BUILTINS = (
+    INTERPRETER_NAMES
+    | frozenset({"ps", "kill", "pgrep", "pkill", "pidof", "killall"})
+    | MACHINE_BUILTINS
+)
 
 # Options whose argument is a program, so the words after it are that
 # program's argv rather than the command's own: python3's -c and -m

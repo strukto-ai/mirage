@@ -47,7 +47,7 @@ import { compareCodePoints } from '../../../utils/sort.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
 import { shellQuote } from '../../../utils/quote.ts'
 import { contextTime, fullIsoTime } from '../utils/formatting.ts'
-import { UTC_ZONE, zoneFromEnv, type Zone } from '../../../utils/timezone.ts'
+import { zoneFromEnv, type Zone } from '../../../utils/timezone.ts'
 import { linksOf, dispatchOf } from '../utils/links.ts'
 import { vfsStatPath } from '../utils/paths.ts'
 import { systemDate } from '../../../utils/clock.ts'
@@ -673,7 +673,7 @@ export async function diffGeneric(
         .map((word) => ` ${shellQuote(word)}`)
         .join(''),
       statPath: vfsStatPath(ctx.vfs) ?? null,
-      zone: zoneFromEnv(ctx.env) ?? UTC_ZONE,
+      zone: zoneFromEnv(ctx.env),
       trouble,
       real: links === undefined ? null : (virtual: string) => links.resolve(virtual),
       sizeOf,

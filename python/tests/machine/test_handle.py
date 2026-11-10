@@ -36,7 +36,7 @@ from mirage.machine.constants import (
 from mirage.machine.errors import ConnectionLostError
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.language import LanguageRuntime
-from mirage.runtime.machine import MachineRuntime
+from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.types import RunResult
 from mirage.types import FileStat, FileType, Limit, PathSpec
@@ -526,7 +526,7 @@ async def test_remote_line_invalidates_local_read_caches():
 
 
 def test_reach_is_remote():
-    assert MachineRuntime.reach == "remote"
+    assert RemoteRuntime.reach == "remote"
 
 
 class FaketimeBox(RecordingMachine):

@@ -71,7 +71,7 @@ runtimes:
 
 A run that needs more raises `MemoryError`. A run also holds no more than its
 workspace's [`max_memory`](/home/core/output-limits#limit-a-workspaces-memory)
-has left, 32 MB by default.
+has left, 96 MB by default.
 
 ## Python compatibility
 
@@ -332,7 +332,7 @@ clock. `time.monotonic()` and `time.perf_counter()` measure elapsed time.
   <Accordion title="Limitations" id="time-limitations">
     | API or behavior | Limitation |
     | --- | --- |
-    | Local times | UTC. `TZ` does not change them. |
+    | Local times | The session's `TZ`, UTC without one. |
   </Accordion>
 </AccordionGroup>
 

@@ -671,7 +671,6 @@ impl Clock {
                 zone: self.zone.clone(),
                 instant: Some(instant),
                 year: None,
-                wall: None,
             })
             .await;
         if reply.error.is_some() {
@@ -731,7 +730,6 @@ impl Clock {
                 zone: self.zone.clone(),
                 instant: None,
                 year: Some(year),
-                wall: None,
             })
             .await;
         if reply.error.is_some() {
@@ -957,19 +955,12 @@ struct Config {
     mode: Mode,
     now: i64,
     nanos: u32,
-    local: bool,
 }
 
 #[derive(serde::Serialize)]
 struct Placement {
     epoch: i64,
     nanos: u32,
-    wall: Option<[i64; 6]>,
-}
-
-fn wall_array(wall: i128) -> [i64; 6] {
-    let (y, m, d, h, min, s) = fields(wall);
-    [y as i64, m as i64, d as i64, h as i64, min as i64, s as i64]
 }
 
 /// One free-form expression read against clocks the caller keeps.
@@ -1011,7 +1002,6 @@ async fn parse(config: Config, host: Host) -> Answer<Placement> {
         return Err(());
     }
     let mut outer = Clock::new(host.clone(), None);
-    let mut local_wall = None;
     let placed = match config.mode {
         Mode::Expr => {
             let nanos = i128::from(config.nanos);
@@ -1053,29 +1043,8 @@ async fn parse(config: Config, host: Host) -> Answer<Placement> {
             }
             let wall = days(year, month, day) * DAY + hour * 3600 + minute * 60 + second.min(59);
             let leap = i128::from(second == 60);
-            if config.local {
-                let (reply, data) = host
-                    .ask(Request::Date {
-                        zone: None,
-                        instant: None,
-                        year: None,
-                        wall: Some(wall_array(wall)),
-                    })
-                    .await;
-                if reply.error.is_some() {
-                    return Err(());
-                }
-                let instant: i64 = serde_json::from_slice(&data).map_err(|_| ())?;
-                let shown = wall_array(wall + leap);
-                if !(1..=9999).contains(&shown[0]) {
-                    return Err(());
-                }
-                local_wall = Some(shown);
-                (i128::from(instant) + leap, 0)
-            } else {
-                let shown = outer.readings(wall).await?;
-                (shown.last().copied().ok_or(())? + leap, 0)
-            }
+            let shown = outer.readings(wall).await?;
+            (shown.last().copied().ok_or(())? + leap, 0)
         }
     };
     if !(FIRST..=LAST).contains(&placed.0) {
@@ -1084,7 +1053,6 @@ async fn parse(config: Config, host: Host) -> Answer<Placement> {
     Ok(Placement {
         epoch: placed.0 as i64,
         nanos: placed.1 as u32,
-        wall: local_wall,
     })
 }
 
@@ -1429,8 +1397,7 @@ mod tests {
 
     fn run(text: &str, mode: &str, dst: bool) -> (Value, usize) {
         let now = days(2026, 8, 16) * DAY + 13 * 3600 + 45 * 60 + 30;
-        let config =
-            json!({"text":text,"mode":mode,"now":now as i64,"nanos":123456789,"local":false});
+        let config = json!({"text":text,"mode":mode,"now":now as i64,"nanos":123456789});
         let mut stream = open(&serde_json::to_vec(&config).unwrap()).unwrap();
         let mut out = Vec::new();
         let mut turns = 0;
@@ -1465,7 +1432,7 @@ mod tests {
     fn epoch_fractions_calendar_shifts_and_posix_operands_keep_exact_values() {
         assert_eq!(
             run("@-0.0000000001", "expr", false).0,
-            json!({"epoch":-1,"nanos":999999999,"wall":null})
+            json!({"epoch":-1,"nanos":999999999})
         );
         let exact = run(
             "2026-01-15 12:00:01 285426750 years -9007198249190400 seconds",
@@ -1473,7 +1440,7 @@ mod tests {
             false,
         )
         .0;
-        assert_eq!(exact, json!({"epoch":1768478401i64,"nanos":0,"wall":null}));
+        assert_eq!(exact, json!({"epoch":1768478401i64,"nanos":0}));
         assert_eq!(
             run("081613452026.30", "posix", false).0["epoch"],
             (days(2026, 8, 16) * DAY + 13 * 3600 + 45 * 60 + 30) as i64

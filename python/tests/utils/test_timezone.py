@@ -430,8 +430,8 @@ def test_rule_days_and_dst_state_as_gnu_shows_them(
 
 
 def test_zone_from_env_reads_only_the_command_environment() -> None:
-    assert zone_from_env(None) is None
-    assert zone_from_env({}) is None
+    assert zone_from_env(None) is timezone.utc
+    assert zone_from_env({}) is timezone.utc
     assert (
         zone_from_env({"TZ": "UTC"}) is timezone.utc
         or str(zone_from_env({"TZ": "UTC"})) == "UTC"

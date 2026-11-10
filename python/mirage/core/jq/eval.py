@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-import os
 import re
 from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass
@@ -42,20 +41,14 @@ COMPILE_REPORT = re.compile(r"(?:\A|\n)jq: [0-9]+ compile errors?\Z")
 MEMORY_REPORT = "jq memory limit of {} bytes exceeded"
 
 
-def local_zone(env: Mapping[str, str] | None) -> str | None:
+def local_zone(env: Mapping[str, str] | None) -> str:
     """The time zone jq's local time reads, as a `TZ` value: the command
-    environment's, else the process's, else the tz database zone
-    /etc/localtime links to; None for a host zone with no name, which
-    jq_eval reads as UTC.
+    environment's, UTC without one.
 
     Args:
         env (Mapping[str, str] | None): the command's environment.
     """
-    for zone in ((env or {}).get(TZ_VAR), os.environ.get(TZ_VAR)):
-        if zone is not None:
-            return zone
-    _, marker, key = os.path.realpath("/etc/localtime").partition("/zoneinfo/")
-    return key if marker else None
+    return (env or {}).get(TZ_VAR, "UTC")
 
 
 @dataclass
@@ -120,13 +113,13 @@ class Engine:
         self._budget = YieldBudget()
 
     @classmethod
-    def open(cls, expr: str, env: str, zone: str | None) -> "Engine":
+    def open(cls, expr: str, env: str, zone: str) -> "Engine":
         """Compile `expr`.
 
         Args:
             expr (str): jq program text, as typed.
             env (str): the environment `$ENV` and `env` read, as text.
-            zone (str | None): the `TZ` local time reads (local_zone).
+            zone (str): the `TZ` local time reads (local_zone).
 
         Raises:
             JqCompileError: a program jq itself refuses, with jq's report.

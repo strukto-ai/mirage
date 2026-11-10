@@ -26,7 +26,7 @@ import { MicrosandboxMachine, MountMode, PathSpec, RAMVFS, Workspace } from '@st
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import type { OutputFn } from '@struktoai/mirage-core/runtime/types'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
-import { MachineRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
+import { RemoteRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
 
 const sandbox = process.env.MIRAGE_E2E_SANDBOX!
 assert.ok(sandbox, 'set MIRAGE_E2E_SANDBOX')
@@ -124,7 +124,7 @@ async function modeChecks(mountType: 'ssh' | 'fuse' | 'both') {
     mode: MountMode.EXEC,
     machines: { msb: runtime },
     runtimes: [
-      new MachineRuntime({ captures: ['python3', 'dash', 'sleep'], machine: 'msb' }),
+      new RemoteRuntime({ captures: ['python3', 'dash', 'sleep'], machine: 'msb' }),
       'workspace',
     ],
     profiles: { hidden: { paths: { hide: [prefix + '/secret.txt'] } } },
@@ -277,7 +277,7 @@ async function cycles() {
       {
         mode: MountMode.EXEC,
         machines: { msb: new MicrosandboxMachine('msb', { sandbox, mountType: 'ssh' }) },
-        runtimes: [new MachineRuntime({ captures: ['python3'], machine: 'msb' }), 'workspace'],
+        runtimes: [new RemoteRuntime({ captures: ['python3'], machine: 'msb' }), 'workspace'],
       },
     )
     try {
@@ -495,7 +495,7 @@ async function lifecycleChecks() {
       {
         mode: MountMode.EXEC,
         machines: { msb: new MicrosandboxMachine('msb', { sandbox, mountType: 'ssh' }) },
-        runtimes: [new MachineRuntime({ captures: ['python3'], machine: 'msb' }), 'workspace'],
+        runtimes: [new RemoteRuntime({ captures: ['python3'], machine: 'msb' }), 'workspace'],
       },
     )
     const moved = await raw(

@@ -225,6 +225,7 @@ class WasmExecution:
         fs: WasmView,
         output: OutputFn | None = None,
         errors: OutputFn | None = None,
+        max_memory: int | None = None,
     ) -> tuple[bytes, bytes | None, int]:
         """Run the module once and return (stdout, stderr, exit_code).
 
@@ -242,6 +243,8 @@ class WasmExecution:
             output (OutputFn | None): receives stdout as the guest writes
                 it; None returns it.
             errors (OutputFn | None): the same for stderr.
+            max_memory (int | None): the linear memory this run may grow
+                to, in bytes, on top of the engine's own cap.
         """
         reader = None if stdin is None else AsyncLineIterator(stdin)
         compilation = asyncio.create_task(asyncio.to_thread(self._checkout))
@@ -304,6 +307,7 @@ class WasmExecution:
                 canceled,
                 emitter(output),
                 emitter(errors),
+                max_memory,
             )
         )
         try:
@@ -349,15 +353,18 @@ class WasmExecution:
         canceled: threading.Event,
         output: Callable[[bytes], None] | None,
         errors: Callable[[bytes], None] | None,
+        max_memory: int | None,
     ) -> tuple[bytes, bytes | None, int]:
+        caps = [c for c in (self._max_memory, max_memory) if c is not None]
+        cap = min(caps) if caps else None
         with (
             wasmtime.Linker(engine) as linker,
             wasmtime.Store(engine) as store,
         ):
             linker.define_wasi()
             store.set_epoch_deadline(1)
-            if self._max_memory is not None:
-                store.set_limits(memory_size=self._max_memory)
+            if cap is not None:
+                store.set_limits(memory_size=cap)
             if canceled.is_set():
                 return b"", None, INTERRUPTED_STATUS
             wasi_fs = WasiFs(fs, stdin, canceled, output, errors)
@@ -369,11 +376,11 @@ class WasmExecution:
             try:
                 instance = linker.instantiate(store, module)
             except wasmtime.WasmtimeError as exc:
-                if self._max_memory is None:
+                if cap is None:
                     raise
                 msg = (
                     f"{self._trap_prefix}: cannot start within max_memory "
-                    f"({self._max_memory} bytes): {exc}\n"
+                    f"({cap} bytes): {exc}\n"
                 )
                 return b"", msg.encode(), 1
             wasi_fs._memory = instance.exports(store).get("memory")

@@ -16,12 +16,13 @@ import type { Context } from '../commands/config.ts'
 import { currentCaller } from '../context/session_context.ts'
 import { HANGUP_EXIT_CODE } from '../execution/job/constants.ts'
 import type { MachineProcess } from '../execution/machine/types.ts'
+import type { ProcessUsage } from '../execution/process/types.ts'
 import type { ProcessHandle } from '../execution/process/handle.ts'
-import { MachineId, type MachinePid } from '../execution/types.ts'
+import { MachineId, type MachinePid, type MachineResources } from '../execution/types.ts'
 import type { ByteSource } from '../io/types.ts'
 import type { WorkspaceBinding } from '../runtime/binding.ts'
 import { coerceRuntimeConfig, type ConfigFields } from '../runtime/config.ts'
-import type { MountType, RunStatus } from './types.ts'
+import type { MountType, RunStatus, ScanFacts } from './types.ts'
 import type { OutputFn, RunResult } from '../runtime/types.ts'
 import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
 import { abortable, hasAborted, mergeSignals, settledWithin, sleep } from '../utils/abort.ts'
@@ -39,24 +40,28 @@ import {
   CHECK_MARK,
   CHECK_WAIT_SECONDS,
   FAKETIME_PROBE_SECONDS,
-  faketimeEnv,
-  faketimeProbe,
+  MACHINE_STOP_WAIT_SECONDS,
+  NOT_RUNNING_STATUS,
+  RESOURCE_WAIT_SECONDS,
   RUN_DRAIN_SECONDS,
   RUN_START_WAIT_SECONDS,
   RUN_WATCH_SECONDS,
+  SCAN_FACTS_MARK,
+  SCAN_MARK,
   SCAN_RUN_MARK,
+  SCAN_WAIT_SECONDS,
+  faketimeEnv,
+  faketimeProbe,
   removeLine,
+  resourcesLine,
   runArgv,
   runStatusPath,
-  statusLine,
-  NOT_RUNNING_STATUS,
-  MACHINE_STOP_WAIT_SECONDS,
-  stopLine,
-  SCAN_MARK,
-  SCAN_WAIT_SECONDS,
   scanLine,
   signalLine,
+  statusLine,
+  stopLine,
 } from './constants.ts'
+import { parseResources } from './resources.ts'
 import { ConnectionLostError } from './errors.ts'
 import { isPipeTransport } from './mixin.ts'
 import { MachineMounts } from './mounts.ts'
@@ -413,6 +418,19 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   }
 
   /**
+   * What the machine holds now (`resourcesLine`), within
+   * `RESOURCE_WAIT_SECONDS`. Mirrors Python's `resources`.
+   *
+   * @param cpu read the processors' time and the process states too.
+   */
+  async resources(cpu: boolean): Promise<MachineResources> {
+    const done = await this.connectedLine(resourcesLine(cpu), RESOURCE_WAIT_SECONDS)
+    if (done.exitCode !== 0)
+      throw new Error(`${this.id.toString()}: read exited ${String(done.exitCode)}`)
+    return parseResources(new TextDecoder().decode(done.stdout), this.id.toString())
+  }
+
+  /**
    * Send `signum` to one process on the machine, as `kill` sent it
    * (`signalLine`): the program a run's tag names, or the process a machine
    * pid names while it is the one that started then. Connecting and sending
@@ -639,6 +657,41 @@ function parseStatus(first: string, second: string): RunStatus | null {
  * a field that is not a number, is a message the provider mixed in. Mirrors
  * Python's `_parse_scan`.
  */
+/** What `SCAN_FACTS_MARK`'s row says, null if it is not numbers. */
+function parseFacts(text: string): ScanFacts | null {
+  const fields = text.trim().split(/\s+/)
+  if (fields.length !== 4 || fields.some((field) => !/^[0-9.]+$/.test(field))) {
+    console.debug('scan facts unread:', text)
+    return null
+  }
+  const [up, ticks, page, memory] = fields.map(Number) as [number, number, number, number]
+  return { upSeconds: up, ticks, page, memory }
+}
+
+/**
+ * A process's use of its machine, as `ps` works it out: CPU time over the
+ * whole seconds it has run, and resident memory over the machine's, each in
+ * truncated tenths of a percent. Mirrors Python's `_usage_of`.
+ */
+function usageOf(
+  facts: ScanFacts | null,
+  started: number,
+  ticks: readonly string[],
+): ProcessUsage | null {
+  if (facts === null || !ticks.every((field) => /^[0-9]+$/.test(field))) return null
+  const [user, system, vsize, pages] = ticks.map(Number) as [number, number, number, number]
+  const cpuSeconds = (user + system) / facts.ticks
+  const elapsed = Math.trunc(facts.upSeconds - started / facts.ticks)
+  const rss = Math.floor((pages * facts.page) / 1024)
+  return {
+    cpuSeconds,
+    cpuPercent: elapsed > 0 ? Math.min(Math.trunc((cpuSeconds * 1000) / elapsed), 9990) / 10 : 0,
+    memoryPercent: facts.memory > 0 ? Math.trunc((rss * 1000) / facts.memory) / 10 : 0,
+    rss,
+    vsz: Math.floor(vsize / 1024),
+  }
+}
+
 function parseScan(
   stdout: Uint8Array | null,
   workspace: string,
@@ -646,7 +699,12 @@ function parseScan(
   const found: MachineProcess[] = []
   const reports = new Map<string, RunStatus>()
   const digits = /^[0-9]+$/
+  let facts: ScanFacts | null = null
   for (const line of new TextDecoder().decode(stdout ?? new Uint8Array()).split('\n')) {
+    if (line.startsWith(`${SCAN_FACTS_MARK} `)) {
+      facts = parseFacts(line.slice(2))
+      continue
+    }
     if (line.startsWith(`${SCAN_RUN_MARK} `)) {
       const rest = line.slice(2)
       const space = rest.indexOf(' ')
@@ -662,7 +720,7 @@ function parseScan(
       continue
     }
     const fields = line.split(' ')
-    if (fields.length < 7 || fields[0] !== SCAN_MARK) continue
+    if (fields.length < 11 || fields[0] !== SCAN_MARK) continue
     const [, tag = '', pid = '', ppid = '', started = '', state = ''] = fields
     if (!digits.test(pid) || !digits.test(ppid) || !digits.test(started)) continue
     found.push({
@@ -670,8 +728,9 @@ function parseScan(
       pid: Number(pid),
       ppid: Number(ppid),
       started: Number(started),
-      args: fields.slice(6).join(' ').trim(),
+      args: fields.slice(10).join(' ').trim(),
       state,
+      usage: usageOf(facts, Number(started), fields.slice(6, 10)),
     })
   }
   return [

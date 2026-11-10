@@ -12,11 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import functools
 import logging
-import os
 import re
-import time
 import weakref
 from bisect import bisect_right, insort
 from calendar import timegm
@@ -24,7 +21,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone, tzinfo
 from typing import NamedTuple
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo
 
 from mirage.commands.builtin.utils.constants import MONTHS
 from mirage.commands.builtin.utils.strftime import gnu_strftime, winning_pad
@@ -36,7 +33,6 @@ from mirage.commands.cli.builtin.git.types import DateKind, DateMode
 from mirage.utils.clock import system_now
 from mirage.utils.timezone import (
     posix_transitions,
-    resolve_tz,
     zone_from_env,
 )
 
@@ -124,10 +120,8 @@ NEGATIVE_DST: dict[str, tuple[tuple[int, int | None, int], ...]] = {
 # The longest step the search for where a tzdata zone's reading changes
 # takes, and how far it looks, in seconds. No tzdata 2026c zone holds a
 # reading for less than 166 hours after 1970, so a day's step never
-# passes one. A POSIX TZ string is read off its rules instead, and the
-# host's zone, which nothing bounds, an hour at a time.
+# passes one. A POSIX TZ string is read off its rules instead.
 STANDARD_SCAN_STEP = 86400
-HOST_SCAN_STEP = 3600
 STANDARD_SCAN_LIMIT = 800 * 86400
 # The UTC years either side of an instant a POSIX TZ string's daylight
 # saving windows are laid out over, past STANDARD_SCAN_LIMIT.
@@ -201,14 +195,12 @@ def zone_text(offset: int) -> str:
 
 
 def _local_moment(timestamp: int, mode: DateMode) -> datetime:
-    """A moment on the session's clock: its ``TZ``, or the host's zone.
+    """A moment on the session's clock: its ``TZ``, UTC without one.
 
     Args:
         timestamp (int): seconds since the epoch.
         mode (DateMode): carries the zone.
     """
-    if mode.zone is None:
-        return datetime.fromtimestamp(timestamp).astimezone()
     return datetime.fromtimestamp(timestamp, mode.zone)
 
 
@@ -298,12 +290,10 @@ class DaylightStretch(NamedTuple):
 
 
 # The daylight saving stretches found so far, per zone, sorted by start,
-# so a later date in one costs a lookup; the host's zone, which has no
-# tzinfo to key by, under its names.
+# so a later date in one costs a lookup.
 STRETCHES: weakref.WeakKeyDictionary[tzinfo, list[DaylightStretch]] = (
     weakref.WeakKeyDictionary()
 )
-HOST_STRETCHES: dict[tuple[str, ...], list[DaylightStretch]] = {}
 
 
 class Wall(NamedTuple):
@@ -542,52 +532,15 @@ def _padded_conversion(
     return text.rjust(width, "0" if pad == "0" else " ")
 
 
-@functools.cache
-def _host_zone(tz: str | None) -> tzinfo | None:
-    """The host's zone, as its name gives it: the ``TZ`` the process runs
-    under, read as a session's would be, else the tzdata zone
-    /etc/localtime links to; None when neither names one.
-
-    Args:
-        tz (str | None): the process's ``TZ``, None when unset.
-    """
-    if tz is not None:
-        return resolve_tz(tz)
-    _, marker, key = os.path.realpath("/etc/localtime").partition("/zoneinfo/")
-    if not marker:
-        return None
-    try:
-        return ZoneInfo(key)
-    except (ZoneInfoNotFoundError, ValueError) as exc:
-        logger.debug("host zone %r is not a tzdata zone: %s", key, exc)
-        return None
-
-
-def _session_zone(mode: DateMode) -> tzinfo | None:
-    """The zone a session reads its dates in: its ``TZ``'s, else the
-    host's when it can be named, None for a host zone only the C library
-    knows.
-
-    Args:
-        mode (DateMode): carries the session's zone, None for the host's.
-    """
-    if mode.zone is not None:
-        return mode.zone
-    return _host_zone(os.environ.get("TZ"))
-
-
 def _zone_reading(instant: int, mode: DateMode) -> tuple[int, bool]:
     """The session zone's offset at an instant, and whether tzdata calls
     it standard time there.
 
     Args:
         instant (int): seconds since the epoch.
-        mode (DateMode): carries the session's zone, None for the host's.
+        mode (DateMode): carries the session's zone.
     """
-    zone = _session_zone(mode)
-    if zone is None:
-        local = time.localtime(instant)
-        return local.tm_gmtoff, local.tm_isdst <= 0
+    zone = mode.zone
     moment = datetime.fromtimestamp(instant, zone)
     offset = _offset_of(moment)
     name = zone.key if isinstance(zone, ZoneInfo) else ""
@@ -612,11 +565,6 @@ def _reading_edge(
         reading (tuple[int, bool]): the zone's reading at ``instant``.
         mode (DateMode): carries the session's zone.
     """
-    longest = (
-        STANDARD_SCAN_STEP
-        if isinstance(_session_zone(mode), ZoneInfo)
-        else HOST_SCAN_STEP
-    )
     same = instant
     step = 3600
     while abs(same - instant) < STANDARD_SCAN_LIMIT:
@@ -630,7 +578,7 @@ def _reading_edge(
                     probe = middle
             return same if direction < 0 else probe
         same = probe
-        step = min(2 * step, longest)
+        step = min(2 * step, STANDARD_SCAN_STEP)
     return None
 
 
@@ -648,9 +596,7 @@ def _posix_stretch(
         offset (int): the zone's offset then, seconds east of UTC.
         mode (DateMode): carries the session's zone.
     """
-    zone = _session_zone(mode)
-    if zone is None:
-        return None
+    zone = mode.zone
     year = datetime.fromtimestamp(instant, timezone.utc).year
     first, last = year - POSIX_SCAN_YEARS, year + POSIX_SCAN_YEARS
     windows: list[list[int]] = []
@@ -715,13 +661,10 @@ def _stretches_of(mode: DateMode) -> list[DaylightStretch]:
     """The daylight saving stretches found so far in the session's zone.
 
     Args:
-        mode (DateMode): carries the session's zone, None for the host's.
+        mode (DateMode): carries the session's zone.
     """
-    zone = _session_zone(mode)
-    if zone is None:
-        return HOST_STRETCHES.setdefault(tuple(time.tzname), [])
     try:
-        return STRETCHES.setdefault(zone, [])
+        return STRETCHES.setdefault(mode.zone, [])
     except TypeError:
         # A fixed offset (datetime.timezone) cannot be weakly keyed, and
         # has no daylight saving time to search.

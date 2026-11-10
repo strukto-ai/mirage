@@ -95,6 +95,56 @@ const SOURCE = new CommandSpec({
 // is its summary, the epilog its exit status. The wrapper builtins and `read`
 // and `mapfile` scan their options from it too. Null prototype: `help` and
 // `man` look names up as typed, so `toString` must miss.
+const SEARCH_OPTIONS: readonly Argument[] = [
+  new Argument(['-f', '--full'], {
+    action: 'store_true',
+    help: 'Match the whole command line.',
+  }),
+  new Argument(['-g', '--pgroup'], { help: 'Only these process groups.' }),
+  new Argument(['-i', '--ignore-case'], { action: 'store_true', help: 'Ignore case.' }),
+  new Argument(['-n', '--newest'], {
+    action: 'store_true',
+    help: 'Pick the most recently started.',
+  }),
+  new Argument(['-o', '--oldest'], {
+    action: 'store_true',
+    help: 'Pick the least recently started.',
+  }),
+  new Argument(['-O', '--older'], { help: 'Only older than N seconds.' }),
+  new Argument(['-P', '--parent'], { help: 'Only children of these.' }),
+  new Argument(['-s', '--session'], { help: 'Only these sessions.' }),
+  new Argument(['-u', '--euid'], { help: 'Accepted.' }),
+  new Argument(['-U', '--uid'], { help: 'Accepted.' }),
+  new Argument(['-x', '--exact'], { action: 'store_true', help: 'Match the name exactly.' }),
+  new Argument(['-r', '--runstates'], { help: 'Only these state letters.' }),
+  new Argument(['-A', '--ignore-ancestors'], { action: 'store_true', help: 'Accepted.' }),
+  new Argument('--machine', { help: 'Answer for this machine only.' }),
+  new Argument(['-h', '--help'], { action: 'store_true', help: 'Show help.' }),
+  new Argument(['-V', '--version'], { action: 'store_true', help: 'Show the version.' }),
+  new Argument('texts', { nargs: '*', metavar: '' }),
+]
+
+const PGREP_ONLY_OPTIONS: readonly Argument[] = [
+  new Argument(['-d', '--delimiter'], { help: 'Separate pids with this.' }),
+  new Argument(['-l', '--list-name'], { action: 'store_true', help: 'Show each name too.' }),
+  new Argument(['-a', '--list-full'], {
+    action: 'store_true',
+    help: 'Show each command line too.',
+  }),
+  new Argument(['-v', '--inverse'], {
+    action: 'store_true',
+    help: 'Pick what does not match.',
+  }),
+  new Argument(['-w', '--lightweight'], { action: 'store_true', help: 'Accepted.' }),
+  new Argument(['-c', '--count'], { action: 'store_true', help: 'Print how many.' }),
+]
+
+const PKILL_ONLY_OPTIONS: readonly Argument[] = [
+  new Argument('--signal', { help: 'The signal to send.' }),
+  new Argument(['-e', '--echo'], { action: 'store_true', help: 'Say what was killed.' }),
+  new Argument(['-c', '--count'], { action: 'store_true', help: 'Print how many.' }),
+]
+
 export const SHELL_SPECS = Object.freeze(
   Object.assign(Object.create(null) as Record<string, CommandSpec | undefined>, {
     xargs: new CommandSpec({
@@ -165,6 +215,140 @@ export const SHELL_SPECS = Object.freeze(
         VERSION_OPTION,
         HELP_OPTION,
         new Argument('texts', { metavar: '', nargs: '*' }),
+      ],
+    }),
+    free: new CommandSpec({
+      description: 'Show the memory of the machines programs run on.',
+      arguments: [
+        new Argument(['-b', '--bytes'], { action: 'store_true', help: 'Show bytes.' }),
+        new Argument('--kilo', { action: 'store_true', help: 'Show kilobytes.' }),
+        new Argument('--mega', { action: 'store_true', help: 'Show megabytes.' }),
+        new Argument('--giga', { action: 'store_true', help: 'Show gigabytes.' }),
+        new Argument('--tera', { action: 'store_true', help: 'Show terabytes.' }),
+        new Argument('--peta', { action: 'store_true', help: 'Show petabytes.' }),
+        new Argument(['-k', '--kibi'], { action: 'store_true', help: 'Show KiB.' }),
+        new Argument(['-m', '--mebi'], { action: 'store_true', help: 'Show MiB.' }),
+        new Argument(['-g', '--gibi'], { action: 'store_true', help: 'Show GiB.' }),
+        new Argument('--tebi', { action: 'store_true', help: 'Show TiB.' }),
+        new Argument('--pebi', { action: 'store_true', help: 'Show PiB.' }),
+        new Argument(['-h', '--human'], {
+          action: 'store_true',
+          help: 'Pick a readable unit for each figure.',
+        }),
+        new Argument('--si', { action: 'store_true', help: 'Count in powers of 1000.' }),
+        new Argument(['-l', '--lohi'], {
+          action: 'store_true',
+          help: 'Add low and high memory rows.',
+        }),
+        new Argument(['-L', '--line'], { action: 'store_true', help: 'Print one line.' }),
+        new Argument(['-t', '--total'], { action: 'store_true', help: 'Add a total row.' }),
+        new Argument(['-v', '--committed'], {
+          action: 'store_true',
+          help: 'Add a row for committed memory.',
+        }),
+        new Argument(['-s', '--seconds'], { help: 'Print again every N seconds.' }),
+        new Argument(['-c', '--count'], { help: 'Print N times.' }),
+        new Argument(['-w', '--wide'], {
+          action: 'store_true',
+          help: 'Separate buffers from cache.',
+        }),
+        new Argument('--machine', { help: 'Answer for this machine only.' }),
+        HELP_OPTION,
+        new Argument(['-V', '--version'], { action: 'store_true', help: 'Show the version.' }),
+        new Argument('texts', { nargs: '*', metavar: '' }),
+      ],
+    }),
+    uptime: new CommandSpec({
+      description: 'Show how long machines have been up and their load.',
+      arguments: [
+        new Argument(['-p', '--pretty'], {
+          action: 'store_true',
+          help: 'Say the uptime in words.',
+        }),
+        new Argument(['-s', '--since'], {
+          action: 'store_true',
+          help: 'Say when the machine booted.',
+        }),
+        new Argument('--machine', { help: 'Answer for this machine only.' }),
+        new Argument(['-h', '--help'], { action: 'store_true', help: 'Show help.' }),
+        new Argument(['-V', '--version'], { action: 'store_true', help: 'Show the version.' }),
+        new Argument('texts', { nargs: '*', metavar: '' }),
+      ],
+    }),
+    top: new CommandSpec({
+      description: 'Show how busy machines are and what runs on them.',
+      arguments: [
+        new Argument('-b', { action: 'store_true', help: 'Print frames as text; required here.' }),
+        new Argument('-n', { help: 'Stop after N frames.' }),
+        new Argument('-d', { help: 'Seconds between frames.' }),
+        new Argument('-c', { action: 'store_true', help: 'Show whole command lines.' }),
+        new Argument('-w', { help: 'Line width.' }),
+        new Argument('-E', { help: 'Memory unit: k m g t p or e.' }),
+        new Argument('-o', { help: 'Field to sort rows by.' }),
+        new Argument('-p', { help: 'Only these comma-separated pids.' }),
+        new Argument('--machine', { help: 'Answer for this machine only.' }),
+        new Argument('-h', { action: 'store_true', help: 'Show help.' }),
+        new Argument('texts', { nargs: '*', metavar: '' }),
+      ],
+    }),
+    pgrep: new CommandSpec({
+      description: 'Find running processes by name or command line.',
+      arguments: [...SEARCH_OPTIONS, ...PGREP_ONLY_OPTIONS],
+    }),
+    pkill: new CommandSpec({
+      description: 'Signal running processes found by name or command line.',
+      arguments: [...SEARCH_OPTIONS, ...PKILL_ONLY_OPTIONS],
+    }),
+    pidof: new CommandSpec({
+      description: 'Print the pids of running programs by name.',
+      arguments: [
+        new Argument('-s', { action: 'store_true', help: 'Print one pid only.' }),
+        new Argument('-q', { action: 'store_true', help: 'Print nothing.' }),
+        new Argument('-d', { help: 'Separate pids with this.' }),
+        new Argument('-o', { help: 'Leave out these pids.' }),
+        new Argument('-c', { action: 'store_true', help: 'Accepted.' }),
+        new Argument('-n', { action: 'store_true', help: 'Accepted.' }),
+        new Argument('-x', { action: 'store_true', help: 'Accepted.' }),
+        new Argument('-z', { action: 'store_true', help: 'Accepted.' }),
+        new Argument('-V', { action: 'store_true', help: 'Show the version.' }),
+        new Argument('--machine', { help: 'Answer for this machine only.' }),
+        new Argument('texts', { nargs: '*', metavar: '' }),
+      ],
+    }),
+    killall: new CommandSpec({
+      description: 'Signal every running process with a given name.',
+      arguments: [
+        new Argument(['-e', '--exact'], {
+          action: 'store_true',
+          help: 'Match names longer than 15 characters in full.',
+        }),
+        new Argument(['-I', '--ignore-case'], {
+          action: 'store_true',
+          help: 'Ignore case in names.',
+        }),
+        new Argument(['-q', '--quiet'], {
+          action: 'store_true',
+          help: 'Say nothing of a name that matches nothing.',
+        }),
+        new Argument(['-r', '--regexp'], {
+          action: 'store_true',
+          help: 'Read names as extended regular expressions.',
+        }),
+        new Argument(['-s', '--signal'], { help: 'The signal to send.' }),
+        new Argument(['-v', '--verbose'], {
+          action: 'store_true',
+          help: 'Report each signal sent.',
+        }),
+        new Argument(['-w', '--wait'], {
+          action: 'store_true',
+          help: 'Wait until the processes have ended.',
+        }),
+        new Argument(['-l', '--list'], { action: 'store_true', help: 'List the signal names.' }),
+        new Argument(['-u', '--user'], { help: 'Accepted.' }),
+        new Argument('--machine', { help: 'Answer for this machine only.' }),
+        HELP_OPTION,
+        new Argument(['-V', '--version'], { action: 'store_true', help: 'Show the version.' }),
+        new Argument('texts', { nargs: '*', metavar: '' }),
       ],
     }),
     timeout: new CommandSpec({

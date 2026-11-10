@@ -20,7 +20,7 @@ your machine (control plane)                 Daytona sandbox (yours)
 ```
 
 1. The workspace declares `/data` as an `S3VFS` and the sandbox as a
-   `daytona` machine; the `machine` runtime captures `python3` lines and runs
+   `daytona` machine; the `remote` runtime captures `python3` lines and runs
    them there; everything else stays on the local vfs.
 1. Mirage never creates, provisions, or deletes sandboxes: you create one
    (below), provision the workspace inside it (`create_sandbox.py` does both:

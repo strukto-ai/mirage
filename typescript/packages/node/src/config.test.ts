@@ -15,7 +15,7 @@ import { CLI } from '@struktoai/mirage-core/commands/cli/types'
 import { Runtime } from '@struktoai/mirage-core/runtime/base'
 import { PyodideRuntime } from '@struktoai/mirage-core/runtime/python/pyodide/runtime'
 import { E2BMachine } from '@struktoai/mirage-core/machine/e2b/handle'
-import { MachineRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
+import { RemoteRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { MountMode, ReadPolicy, WritePolicy } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
@@ -399,7 +399,7 @@ describe('configToWorkspaceArgs', () => {
     loadWorkspaceConfig({
       mounts: { '/data': { vfs: 'ram' } },
       machines: { box: { provider, sandbox_id: 'sbx-1', api_key: apiKey } },
-      runtimes: [{ name: 'machine', machine: 'box' }, 'workspace'],
+      runtimes: [{ name: 'remote', machine: 'box' }, 'workspace'],
       ...extra,
     })
 
@@ -419,8 +419,8 @@ describe('configToWorkspaceArgs', () => {
         sandboxId: 'sbx-1',
       })
       const [native, workspace] = args.options.runtimes ?? []
-      expect(native).toBeInstanceOf(MachineRuntime)
-      expect((native as MachineRuntime).defaultMachine).toBe('box')
+      expect(native).toBeInstanceOf(RemoteRuntime)
+      expect((native as RemoteRuntime).defaultMachine).toBe('box')
       expect((workspace as { name: string }).name).toBe('workspace')
     } finally {
       vi.unstubAllEnvs()

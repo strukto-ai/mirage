@@ -240,12 +240,11 @@ export interface DateMode {
   readonly strftime: string
   /** The moment `relative` and `human` count from, epoch seconds. */
   readonly now: number
-  /** The session's `TZ`, null for the host's own zone. */
-  readonly zone: Zone | null
+  /** The session's `TZ`, UTC without one. */
+  readonly zone: Zone
   /**
-   * The session's `TZ` as typed, its leading colon dropped, or without one the
-   * name Intl gives the host's zone: Intl reads a zone's daylight saving time
-   * only by its name, where Python's tzinfo carries it.
+   * The session's `TZ` as typed, its leading colon dropped: Intl reads a zone's
+   * daylight saving time only by its name, where Python's tzinfo carries it.
    */
   readonly zoneName?: string
 }

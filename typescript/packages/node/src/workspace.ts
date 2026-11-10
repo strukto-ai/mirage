@@ -26,9 +26,13 @@ import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { savedVfsBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
 import { buildVfs, knownVfsNames } from './vfs/registry.ts'
-import { scanHost, stopHostRun, signalHost } from './machine/program.ts'
+import { hostResources, scanHost, stopHostRun, signalHost } from './machine/program.ts'
 import type { MachineProcess } from '@struktoai/mirage-core/execution/machine/types'
-import { MachineId, type MachinePid } from '@struktoai/mirage-core/execution/types'
+import {
+  MachineId,
+  type MachinePid,
+  type MachineResources,
+} from '@struktoai/mirage-core/execution/types'
 import { hostname } from 'node:os'
 import { watch } from './io/gateway.ts'
 import { releaseNetwork, watchNetwork } from './io/network.ts'
@@ -59,6 +63,11 @@ export class Workspace extends CoreWorkspace {
     signum: number,
   ): Promise<boolean> {
     return stopHostRun(machinePid, seenAt, signum)
+  }
+
+  /** What this host holds now. */
+  protected override hostResources(machine: string, cpu: boolean): Promise<MachineResources> {
+    return hostResources(machine, cpu)
   }
 
   /** The host programs' process groups, as this host's `ps` lists them. */

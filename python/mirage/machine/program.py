@@ -31,7 +31,8 @@ import aiofiles.os
 from mirage.context.session_context import current_caller
 from mirage.execution.machine.types import MachineProcess
 from mirage.execution.process.handle import ProcessHandle
-from mirage.execution.types import MachinePid
+from mirage.execution.process.types import ProcessUsage
+from mirage.execution.types import MachinePid, MachineResources
 from mirage.io.stream import close_quietly, feed
 from mirage.io.types import ByteSource
 from mirage.machine.constants import (
@@ -44,10 +45,16 @@ from mirage.machine.constants import (
     RUN_DRAIN_SECONDS,
     STOP_GRACE_SECONDS,
     STOP_POLL_SECONDS,
+    darwin_resources_line,
     faketime_env,
+    resources_line,
     stop_signal,
 )
 from mirage.machine.errors import ConnectionLostError
+from mirage.machine.resources import (
+    parse_darwin_resources,
+    parse_resources,
+)
 from mirage.machine.types import MachinePipe
 from mirage.runtime.types import OutputFn, RunResult
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS, SIGNALS
@@ -413,6 +420,33 @@ async def _group_started(group: int) -> list[float]:
     return starts
 
 
+def _host_usage(fields: Sequence[str]) -> ProcessUsage | None:
+    """A host process's use of the host, from ``ps``'s ``%cpu``,
+    ``%mem``, ``rss``, ``vsz`` and ``time`` columns.
+
+    Args:
+        fields (Sequence[str]): those columns, in that order.
+    """
+    try:
+        cpu, memory, rss, vsz = (
+            float(fields[0]),
+            float(fields[1]),
+            int(fields[2]),
+            int(fields[3]),
+        )
+    except ValueError as exc:
+        logger.debug("host usage unread: %s", exc)
+        return None
+    head, _, rest = fields[4].rpartition(":")
+    days, _, clock = head.rpartition("-")
+    seconds = float(rest) if rest else 0.0
+    for part, scale in zip(reversed(clock.split(":")), (60, 3600)):
+        seconds += int(part) * scale
+    if days:
+        seconds += int(days) * 86400
+    return ProcessUsage(seconds, cpu, memory, rss, vsz)
+
+
 async def scan_host(
     groups: Mapping[int, tuple[str, float]],
 ) -> list[MachineProcess]:
@@ -435,10 +469,14 @@ async def scan_host(
         return []
     found: list[tuple[int, MachineProcess]] = []
     reused: set[int] = set()
-    text = await _ps("-A", "-o", "pid=,ppid=,pgid=,stat=,lstart=,args=")
+    text = await _ps(
+        "-A",
+        "-o",
+        "pid=,ppid=,pgid=,stat=,lstart=,%cpu=,%mem=,rss=,vsz=,time=,args=",
+    )
     for line in text.splitlines():
-        fields = line.split(None, 9)
-        if len(fields) < 9 or not fields[2].isdigit():
+        fields = line.split(None, 14)
+        if len(fields) < 14 or not fields[2].isdigit():
             continue
         group = int(fields[2])
         held = groups.get(group)
@@ -461,12 +499,44 @@ async def scan_host(
                     pid,
                     int(fields[1]),
                     started,
-                    fields[9] if len(fields) > 9 else "",
+                    fields[14] if len(fields) > 14 else "",
                     HOST_STATES.get(fields[3][0], fields[3][0]),
+                    usage=_host_usage(fields[9:14]),
                 ),
             )
         )
     return [row for group, row in found if group not in reused]
+
+
+async def host_resources(machine: str, cpu: bool) -> MachineResources:
+    """What the host holds now, through the line its system answers
+    (``resources_line``, or ``darwin_resources_line`` on a Mac). Mirrors
+    TypeScript's ``hostResources``.
+
+    Args:
+        machine (str): the host, as ``ps`` shows it.
+        cpu (bool): read the processors' time and the process counts.
+
+    Raises:
+        OSError: the host has no such line to run.
+    """
+    if sys.platform == "win32":
+        raise OSError("this host says nothing of its resources")
+    darwin = sys.platform == "darwin"
+    line = darwin_resources_line(cpu) if darwin else resources_line(cpu)
+    shell = await asyncio.create_subprocess_exec(
+        "/bin/sh",
+        "-c",
+        line,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+        env={**os.environ, "LC_ALL": "C"},
+    )
+    out, _ = await shell.communicate()
+    text = out.decode(errors="replace")
+    if darwin:
+        return parse_darwin_resources(text, machine)
+    return parse_resources(text, machine)
 
 
 async def signal_host(target: MachinePid, signum: int) -> bool:

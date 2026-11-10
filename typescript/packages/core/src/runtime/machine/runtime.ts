@@ -41,13 +41,13 @@ export interface MachineOptions extends RuntimeOptions {
  * machine its route names (`execute({ machine })`, a policy's Route), else
  * to this entry's `machine`. Captures default to `@external`, the programs
  * nothing in Mirage resolves; an explicit `@line` sends whole lines, run as
- * `/bin/sh -c`. Mirrors Python's `MachineRuntime`.
+ * `/bin/sh -c`. Mirrors Python's `RemoteRuntime`.
  */
-export class MachineRuntime
+export class RemoteRuntime
   extends Runtime<undefined>
   implements LineExecutorMixin<undefined>, ProcessExecutorMixin<undefined>
 {
-  readonly name = 'machine'
+  readonly name = 'remote'
   // Programs execute on the machine and act on its world (its filesystem,
   // its network); the workspace gate never sees those effects, however well
   // isolated the machine itself is.

@@ -71,7 +71,13 @@ import { ProcessTable } from '../../execution/process/table.ts'
 import type { Process, ProcessState, SpawnRequest } from '../../execution/process/types.ts'
 import { LINE_STOP_SIGNAL, LOCAL_MACHINE } from '../../execution/constants.ts'
 import type { ProcessId } from '../../execution/types.ts'
-import { type JobId, type LineId, type MachineId, type MachinePid } from '../../execution/types.ts'
+import {
+  type JobId,
+  type LineId,
+  type MachineId,
+  type MachinePid,
+  type MachineResources,
+} from '../../execution/types.ts'
 import type { SessionProcesses } from '../../execution/process/session.ts'
 import { DiffPool } from '../../rs/diff_pool.ts'
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
@@ -628,6 +634,7 @@ export class Workspace {
       (groups) => this.scanHost(groups),
       (target, signum) => this.signalHost(target, signum),
       (target, seenAt, signum) => this.stopHostRun(target, seenAt, signum),
+      (machine, cpu) => this.hostResources(machine, cpu),
     )
     this.wireMachines()
     this.runtimeWorld = new Runtimes({
@@ -787,6 +794,8 @@ export class Workspace {
     this.processTable.scanner = () => this.machineTable.scan(this.processTable, this.workspaceId)
     this.processTable.sender = (handle, signum) =>
       this.machineTable.send(this.processTable, handle, signum)
+    this.processTable.machineIds = () => this.machineTable.handles().map((h) => h.id.toString())
+    this.processTable.machineResources = (machine, cpu) => this.machineTable.resources(machine, cpu)
   }
 
   /**
@@ -840,6 +849,14 @@ export class Workspace {
     _signum: number,
   ): Promise<boolean> {
     return Promise.resolve(false)
+  }
+
+  /**
+   * What the host holds now. A host this package cannot read (a browser)
+   * says nothing; Node's workspace does.
+   */
+  protected hostResources(_machine: string, _cpu: boolean): Promise<MachineResources> {
+    return Promise.reject(new Error('this host says nothing of its resources'))
   }
 
   /**

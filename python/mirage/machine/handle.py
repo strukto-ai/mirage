@@ -23,7 +23,8 @@ from mirage.context.session_context import current_caller
 from mirage.execution.job.constants import HANGUP_EXIT_CODE
 from mirage.execution.machine.types import MachineProcess
 from mirage.execution.process.handle import ProcessHandle
-from mirage.execution.types import MachineId, MachinePid
+from mirage.execution.process.types import ProcessUsage
+from mirage.execution.types import MachineId, MachinePid, MachineResources
 from mirage.io.types import ByteSource
 from mirage.machine.config import MachineConfig, check_mount_type
 from mirage.machine.constants import (
@@ -33,15 +34,18 @@ from mirage.machine.constants import (
     FAKETIME_PROBE_SECONDS,
     MACHINE_STOP_WAIT_SECONDS,
     NOT_RUNNING_STATUS,
+    RESOURCE_WAIT_SECONDS,
     RUN_DRAIN_SECONDS,
     RUN_START_WAIT_SECONDS,
     RUN_WATCH_SECONDS,
+    SCAN_FACTS_MARK,
     SCAN_MARK,
     SCAN_RUN_MARK,
     SCAN_WAIT_SECONDS,
     faketime_env,
     faketime_probe,
     remove_line,
+    resources_line,
     run_argv,
     run_status_path,
     scan_line,
@@ -52,7 +56,8 @@ from mirage.machine.constants import (
 from mirage.machine.errors import ConnectionLostError
 from mirage.machine.mixin import PipeTransportMixin
 from mirage.machine.mounts import MachineMounts
-from mirage.machine.types import RunStatus
+from mirage.machine.resources import parse_resources
+from mirage.machine.types import RunStatus, ScanFacts
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.types import OutputFn, RunResult
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
@@ -439,6 +444,27 @@ class MachineHandle:
             await asyncio.wait(finishing, timeout=RUN_DRAIN_SECONDS + 1)
         return rows
 
+    async def resources(self, cpu: bool) -> MachineResources:
+        """What the machine holds now (``resources_line``), within
+        ``RESOURCE_WAIT_SECONDS``.
+
+        Args:
+            cpu (bool): read the processors' time and the process
+                states too, which takes ``CPU_SAMPLE_SECONDS``.
+
+        Raises:
+            Exception: the machine could not be reached, or what it
+                printed does not read.
+        """
+        done = await self._connected_line(
+            resources_line(cpu), RESOURCE_WAIT_SECONDS
+        )
+        if done.exit_code != 0:
+            raise RuntimeError(f"{self.id}: read exited {done.exit_code}")
+        return parse_resources(
+            (done.stdout or b"").decode(errors="replace"), str(self.id)
+        )
+
     async def signal(self, target: str | MachinePid, signum: int) -> bool:
         """Send ``signum`` to one process on the machine, as ``kill``
         sent it (``signal_line``): the program a run's tag names, or the
@@ -671,6 +697,48 @@ def _parse_status(first: str, second: str) -> RunStatus | None:
     )
 
 
+def _parse_facts(text: str) -> ScanFacts | None:
+    """What ``SCAN_FACTS_MARK``'s row says, None if it is not numbers.
+
+    Args:
+        text (str): the row after its mark.
+    """
+    try:
+        up, ticks, page, memory = text.split()
+        return ScanFacts(float(up), int(ticks), int(page), int(memory))
+    except ValueError as exc:
+        logger.debug("scan facts unread: %s", exc)
+        return None
+
+
+def _usage_of(
+    facts: ScanFacts | None, started: float, ticks: list[str]
+) -> ProcessUsage | None:
+    """A process's use of its machine, as ``ps`` works it out: CPU time
+    over the whole seconds it has run, and resident memory over the
+    machine's, each in truncated tenths of a percent.
+
+    Args:
+        facts (ScanFacts | None): the scan's facts, None if it had none.
+        started (float): when it started, in clock ticks after boot.
+        ticks (list[str]): its user and system time in clock ticks, its
+            virtual size in bytes and its resident pages.
+    """
+    if facts is None or not all(field.isdigit() for field in ticks):
+        return None
+    user, system, vsize, pages = (int(field) for field in ticks)
+    cpu_seconds = (user + system) / facts.ticks
+    elapsed = int(facts.up_seconds - started / facts.ticks)
+    rss = pages * facts.page // 1024
+    return ProcessUsage(
+        cpu_seconds,
+        min(int(cpu_seconds * 1000 / elapsed), 9990) / 10 if elapsed else 0.0,
+        int(rss * 1000 / facts.memory) / 10 if facts.memory else 0.0,
+        rss,
+        vsize // 1024,
+    )
+
+
 def _parse_scan(
     stdout: bytes | None, workspace: str
 ) -> tuple[list[MachineProcess], dict[str, RunStatus]]:
@@ -685,8 +753,12 @@ def _parse_scan(
     """
     found: list[MachineProcess] = []
     reports: dict[str, RunStatus] = {}
+    facts: ScanFacts | None = None
     for line in (stdout or b"").decode(errors="replace").splitlines():
         mark, _, rest = line.partition(" ")
+        if mark == SCAN_FACTS_MARK:
+            facts = _parse_facts(rest)
+            continue
         if mark == SCAN_RUN_MARK:
             number, _, text = rest.partition(" ")
             first, _, second = text.partition(";")
@@ -694,15 +766,21 @@ def _parse_scan(
             if number.isdigit() and report is not None:
                 reports[f"{workspace}:{number}"] = report
             continue
-        fields = rest.split(" ", 5)
-        if mark != SCAN_MARK or len(fields) < 6:
+        fields = rest.split(" ", 9)
+        if mark != SCAN_MARK or len(fields) < 10:
             continue
-        tag, pid, ppid, started, state, args = fields
+        tag, pid, ppid, started, state, *ticks, args = fields
         if not (pid.isdigit() and ppid.isdigit() and started.isdigit()):
             continue
         found.append(
             MachineProcess(
-                tag, int(pid), int(ppid), float(started), args.strip(), state
+                tag,
+                int(pid),
+                int(ppid),
+                float(started),
+                args.strip(),
+                state,
+                usage=_usage_of(facts, float(started), ticks),
             )
         )
     return [

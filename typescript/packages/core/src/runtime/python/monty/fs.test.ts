@@ -374,6 +374,13 @@ describe('MontyFs clock and lexical entry points', () => {
     expect(naive.offsetSeconds).toBeUndefined()
   })
 
+  it('reads a naive datetime.now in the session zone', () => {
+    const access = accessOn(noop, { TZ: 'Asia/Tokyo' })
+    const naive = access.handle('datetime.now', [null]) as Record<string, number>
+    expect(naive.hour).toBe((new Date().getUTCHours() + 9) % 24)
+    expect(naive.offsetSeconds).toBeUndefined()
+  })
+
   it('answers an aware datetime.now in the asked timezone', () => {
     const marker = { __monty_type__: 'TimeZone', offsetSeconds: 0, name: 'UTC' }
     const aware = accessOn(noop).handle('datetime.now', [marker]) as Record<string, unknown>

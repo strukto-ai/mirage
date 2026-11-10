@@ -12,6 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { BIN_PREFIX } from '../../../shell/constants.ts'
+import { HISTORY_PREFIX } from '../../../vfs/history/history.ts'
+
+// Mirage's own views of its programs and its history: paths, as they are on
+// any machine, and no filesystem for `df` or `mount` to list.
+export const UNLISTED_MOUNTS: ReadonlySet<string> = new Set([
+  `${BIN_PREFIX}/`,
+  `${HISTORY_PREFIX}/`,
+])
+
 export const IDENTIFIER_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
 // A number as bash's builtins read one: strtoimax's leading whitespace and
 // sign, then the trailing blanks bash skips itself.

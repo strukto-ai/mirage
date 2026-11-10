@@ -166,6 +166,75 @@ _SOURCE = CommandSpec(
 # `NAME --help` and `man` say of it: the first paragraph of the
 # description is its summary, the epilog its exit status. The wrapper
 # builtins and `read` and `mapfile` scan their options from it too.
+SEARCH_OPTIONS = (
+    Argument(
+        "-f",
+        "--full",
+        action="store_true",
+        help="Match the whole command line.",
+    ),
+    Argument("-g", "--pgroup", type="str", help="Only these process groups."),
+    Argument("-i", "--ignore-case", action="store_true", help="Ignore case."),
+    Argument(
+        "-n",
+        "--newest",
+        action="store_true",
+        help="Pick the most recently started.",
+    ),
+    Argument(
+        "-o",
+        "--oldest",
+        action="store_true",
+        help="Pick the least recently started.",
+    ),
+    Argument("-O", "--older", type="str", help="Only older than N seconds."),
+    Argument("-P", "--parent", type="str", help="Only children of these."),
+    Argument("-s", "--session", type="str", help="Only these sessions."),
+    Argument("-u", "--euid", type="str", help="Accepted."),
+    Argument("-U", "--uid", type="str", help="Accepted."),
+    Argument(
+        "-x", "--exact", action="store_true", help="Match the name exactly."
+    ),
+    Argument(
+        "-r", "--runstates", type="str", help="Only these state letters."
+    ),
+    Argument(
+        "-A", "--ignore-ancestors", action="store_true", help="Accepted."
+    ),
+    Argument("--machine", type="str", help="Answer for this machine only."),
+    Argument("-h", "--help", action="store_true", help="Show help."),
+    Argument("-V", "--version", action="store_true", help="Show the version."),
+    Argument("texts", nargs="*", metavar=""),
+)
+
+PGREP_ONLY_OPTIONS = (
+    Argument("-d", "--delimiter", type="str", help="Separate pids with this."),
+    Argument(
+        "-l", "--list-name", action="store_true", help="Show each name too."
+    ),
+    Argument(
+        "-a",
+        "--list-full",
+        action="store_true",
+        help="Show each command line too.",
+    ),
+    Argument(
+        "-v",
+        "--inverse",
+        action="store_true",
+        help="Pick what does not match.",
+    ),
+    Argument("-w", "--lightweight", action="store_true", help="Accepted."),
+    Argument("-c", "--count", action="store_true", help="Print how many."),
+)
+
+PKILL_ONLY_OPTIONS = (
+    Argument("--signal", type="str", help="The signal to send."),
+    Argument("-e", "--echo", action="store_true", help="Say what was killed."),
+    Argument("-c", "--count", action="store_true", help="Print how many."),
+)
+
+
 SHELL_SPECS: dict[str, CommandSpec] = {
     "xargs": CommandSpec(
         description="Build and run command lines from standard input.",
@@ -291,6 +360,215 @@ SHELL_SPECS: dict[str, CommandSpec] = {
             ),
             VERSION_OPTION,
             HELP_OPTION,
+            Argument("texts", nargs="*", metavar=""),
+        ),
+    ),
+    "free": CommandSpec(
+        description="Show the memory of the machines programs run on.",
+        arguments=(
+            Argument("-b", "--bytes", action="store_true", help="Show bytes."),
+            Argument("--kilo", action="store_true", help="Show kilobytes."),
+            Argument("--mega", action="store_true", help="Show megabytes."),
+            Argument("--giga", action="store_true", help="Show gigabytes."),
+            Argument("--tera", action="store_true", help="Show terabytes."),
+            Argument("--peta", action="store_true", help="Show petabytes."),
+            Argument("-k", "--kibi", action="store_true", help="Show KiB."),
+            Argument("-m", "--mebi", action="store_true", help="Show MiB."),
+            Argument("-g", "--gibi", action="store_true", help="Show GiB."),
+            Argument("--tebi", action="store_true", help="Show TiB."),
+            Argument("--pebi", action="store_true", help="Show PiB."),
+            Argument(
+                "-h",
+                "--human",
+                action="store_true",
+                help="Pick a readable unit for each figure.",
+            ),
+            Argument(
+                "--si", action="store_true", help="Count in powers of 1000."
+            ),
+            Argument(
+                "-l",
+                "--lohi",
+                action="store_true",
+                help="Add low and high memory rows.",
+            ),
+            Argument(
+                "-L", "--line", action="store_true", help="Print one line."
+            ),
+            Argument(
+                "-t", "--total", action="store_true", help="Add a total row."
+            ),
+            Argument(
+                "-v",
+                "--committed",
+                action="store_true",
+                help="Add a row for committed memory.",
+            ),
+            Argument(
+                "-s",
+                "--seconds",
+                type="str",
+                help="Print again every N seconds.",
+            ),
+            Argument("-c", "--count", type="str", help="Print N times."),
+            Argument(
+                "-w",
+                "--wide",
+                action="store_true",
+                help="Separate buffers from cache.",
+            ),
+            Argument(
+                "--machine", type="str", help="Answer for this machine only."
+            ),
+            HELP_OPTION,
+            Argument(
+                "-V",
+                "--version",
+                action="store_true",
+                help="Show the version.",
+            ),
+            Argument("texts", nargs="*", metavar=""),
+        ),
+    ),
+    "uptime": CommandSpec(
+        description="Show how long machines have been up and their load.",
+        arguments=(
+            Argument(
+                "-p",
+                "--pretty",
+                action="store_true",
+                help="Say the uptime in words.",
+            ),
+            Argument(
+                "-s",
+                "--since",
+                action="store_true",
+                help="Say when the machine booted.",
+            ),
+            Argument(
+                "--machine", type="str", help="Answer for this machine only."
+            ),
+            Argument("-h", "--help", action="store_true", help="Show help."),
+            Argument(
+                "-V",
+                "--version",
+                action="store_true",
+                help="Show the version.",
+            ),
+            Argument("texts", nargs="*", metavar=""),
+        ),
+    ),
+    "top": CommandSpec(
+        description="Show how busy machines are and what runs on them.",
+        arguments=(
+            Argument(
+                "-b",
+                action="store_true",
+                help="Print frames as text; required here.",
+            ),
+            Argument("-n", type="str", help="Stop after N frames."),
+            Argument("-d", type="str", help="Seconds between frames."),
+            Argument(
+                "-c",
+                action="store_true",
+                help="Show whole command lines.",
+            ),
+            Argument("-w", type="str", help="Line width."),
+            Argument("-E", type="str", help="Memory unit: k m g t p or e."),
+            Argument("-o", type="str", help="Field to sort rows by."),
+            Argument(
+                "-p", type="str", help="Only these comma-separated pids."
+            ),
+            Argument(
+                "--machine", type="str", help="Answer for this machine only."
+            ),
+            Argument("-h", action="store_true", help="Show help."),
+            Argument("texts", nargs="*", metavar=""),
+        ),
+    ),
+    "pgrep": CommandSpec(
+        description="Find running processes by name or command line.",
+        arguments=(*SEARCH_OPTIONS, *PGREP_ONLY_OPTIONS),
+    ),
+    "pkill": CommandSpec(
+        description="Signal running processes found by name or command line.",
+        arguments=(*SEARCH_OPTIONS, *PKILL_ONLY_OPTIONS),
+    ),
+    "pidof": CommandSpec(
+        description="Print the pids of running programs by name.",
+        arguments=(
+            Argument("-s", action="store_true", help="Print one pid only."),
+            Argument("-q", action="store_true", help="Print nothing."),
+            Argument("-d", type="str", help="Separate pids with this."),
+            Argument("-o", type="str", help="Leave out these pids."),
+            Argument("-c", action="store_true", help="Accepted."),
+            Argument("-n", action="store_true", help="Accepted."),
+            Argument("-x", action="store_true", help="Accepted."),
+            Argument("-z", action="store_true", help="Accepted."),
+            Argument("-V", action="store_true", help="Show the version."),
+            Argument(
+                "--machine", type="str", help="Answer for this machine only."
+            ),
+            Argument("texts", nargs="*", metavar=""),
+        ),
+    ),
+    "killall": CommandSpec(
+        description="Signal every running process with a given name.",
+        arguments=(
+            Argument(
+                "-e",
+                "--exact",
+                action="store_true",
+                help="Match names longer than 15 characters in full.",
+            ),
+            Argument(
+                "-I",
+                "--ignore-case",
+                action="store_true",
+                help="Ignore case in names.",
+            ),
+            Argument(
+                "-q",
+                "--quiet",
+                action="store_true",
+                help="Say nothing of a name that matches nothing.",
+            ),
+            Argument(
+                "-r",
+                "--regexp",
+                action="store_true",
+                help="Read names as extended regular expressions.",
+            ),
+            Argument("-s", "--signal", type="str", help="The signal to send."),
+            Argument(
+                "-v",
+                "--verbose",
+                action="store_true",
+                help="Report each signal sent.",
+            ),
+            Argument(
+                "-w",
+                "--wait",
+                action="store_true",
+                help="Wait until the processes have ended.",
+            ),
+            Argument(
+                "-l",
+                "--list",
+                action="store_true",
+                help="List the signal names.",
+            ),
+            Argument("-u", "--user", type="str", help="Accepted."),
+            Argument(
+                "--machine", type="str", help="Answer for this machine only."
+            ),
+            HELP_OPTION,
+            Argument(
+                "-V",
+                "--version",
+                action="store_true",
+                help="Show the version.",
+            ),
             Argument("texts", nargs="*", metavar=""),
         ),
     ),

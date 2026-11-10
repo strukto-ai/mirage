@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "note": "rmdir(2) refuses a non-empty directory, and the refusal has to come from the op, not from the command builder. The shell battery cannot see this: `rmdir` the builtin checks emptiness itself before it calls the op, so it passes on a backend whose op deletes the whole subtree. The facade is the surface FUSE, ws.vfs and the machine runtimes share, and it calls the op directly.",
+      "note": "rmdir(2) refuses a non-empty directory, and the refusal has to come from the op, not from the command builder. The shell battery cannot see this: `rmdir` the builtin checks emptiness itself before it calls the op, so it passes on a backend whose op deletes the whole subtree. The facade is the surface FUSE, ws.vfs and the remote runtimes share, and it calls the op directly.",
       "id": "rmdir_refuses_a_nonempty_directory",
       "world": {
         "mounts": {

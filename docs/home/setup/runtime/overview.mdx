@@ -35,7 +35,7 @@ machines:
     mount_type: ssh
 runtimes:
   - monty
-  - name: machine
+  - name: remote
     machine: box
   - workspace
 ```
@@ -113,7 +113,7 @@ machines:
     provider: docker
     container: my-sandbox
 runtimes:
-  - name: machine
+  - name: remote
     captures: ["@python", "@external"]
     machine: box
 ```

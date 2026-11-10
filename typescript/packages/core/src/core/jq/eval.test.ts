@@ -404,15 +404,14 @@ describe('the engine gh --jq runs', () => {
     expect(() => readFrames(frame(9, ''), [])).toThrow()
   })
 
-  it("reads the zone from the session's TZ, else the process's, else the runtime's", () => {
+  it("reads the zone from the session's TZ, else UTC", () => {
     const saved = process.env.TZ
     process.env.TZ = 'EST5EDT'
     try {
       expect(localZone({ TZ: ':Asia/Tokyo' })).toBe(':Asia/Tokyo')
       expect(localZone({ TZ: '' })).toBe('')
-      expect(localZone({})).toBe('EST5EDT')
-      delete process.env.TZ
-      expect(localZone(undefined)).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone)
+      expect(localZone({})).toBe('UTC')
+      expect(localZone(undefined)).toBe('UTC')
     } finally {
       if (saved === undefined) delete process.env.TZ
       else process.env.TZ = saved

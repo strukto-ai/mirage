@@ -448,7 +448,7 @@ def run_config(
     expr: str,
     options: Mapping[str, JsonValue],
     env: str,
-    zone: str | None,
+    zone: str,
     origin: str | None,
     inputs: Sequence[str],
 ) -> dict[str, JsonValue]:
@@ -459,7 +459,7 @@ def run_config(
         options (Mapping[str, JsonValue]): what the option loop decided
             (read_options).
         env (str): the environment `$ENV` and `env` read, as text.
-        zone (str | None): the `TZ` local time reads (local_zone).
+        zone (str): the `TZ` local time reads (local_zone).
         origin (str | None): the directory `get_prog_origin` answers.
         inputs (Sequence[str]): the inputs' names as jq reports them.
     """
