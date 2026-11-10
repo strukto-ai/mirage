@@ -27,3 +27,16 @@ EXIT_PREFIX = b"command terminated with exit code "
 # What can follow EXIT_PREFIX while the report arrives: kubectl reads the
 # status as one byte, so at most three digits, then the newline.
 EXIT_STATUS = re.compile(rb"[0-9]{0,3}|[0-9]{1,3}\n")
+
+
+def own_stdin(command: str) -> str:
+    """``command`` with a stdin of its own, for a helper that sees the
+    exec's stdin end at once when it reads it directly, as sshfs does.
+    ``cat`` feeds it through a pipe. The shell ends with the command, so
+    the exec does too; ``cat`` would otherwise hold it open until the
+    client closes its input.
+
+    Args:
+        command (str): the shell command.
+    """
+    return f'cat 2>/dev/null | {{ ({command}); kill "$$"; }}'

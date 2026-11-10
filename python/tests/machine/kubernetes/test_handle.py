@@ -328,7 +328,7 @@ async def test_a_pipe_holds_kubectl_exec_open_byte_for_byte(monkeypatch):
             "--",
             "/bin/sh",
             "-c",
-            "exec sshfs x y",
+            'cat 2>/dev/null | { (exec sshfs x y); kill "$$"; }',
         )
     ]
     payload = bytes(range(256))

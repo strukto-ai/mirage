@@ -31,3 +31,16 @@ export const EXIT_PREFIX = Buffer.from('command terminated with exit code ')
  * status as one byte, so at most three digits, then the newline.
  */
 export const EXIT_STATUS = /^(?:[0-9]{0,3}|[0-9]{1,3}\n)$/
+
+/**
+ * `command` with a stdin of its own, for a helper that sees the exec's
+ * stdin end at once when it reads it directly, as sshfs does. `cat` feeds
+ * it through a pipe. The shell ends with the command, so the exec does
+ * too; `cat` would otherwise hold it open until the client closes its
+ * input.
+ *
+ * @param command the shell command.
+ */
+export function ownStdin(command: string): string {
+  return `cat 2>/dev/null | { (${command}); kill "$$"; }`
+}
