@@ -75,220 +75,13 @@
   }
  },
  "invalid_workspace_configs": [
-   {
-     "id": "missing_mounts",
-     "config": {},
-     "expect": {
-       "status": 422,
-       "detail": [
-         {
-           "type": "missing",
-           "loc": [
-             "body",
-             "config",
-             "mounts"
-           ],
-           "msg": "Field required",
-           "input": {}
-         }
-       ]
-     }
-   },
-   {
-     "id": "unknown_key",
-     "config": {
-       "mounts": {},
-       "unknown_setting": true
-     },
-     "expect": {
-       "status": 422,
-       "detail": [
-         {
-           "type": "extra_forbidden",
-           "loc": [
-             "body",
-             "config",
-             "unknown_setting"
-           ],
-           "msg": "Extra inputs are not permitted",
-           "input": true
-         }
-       ]
-     }
-   },
-   {
-     "id": "missing_mounts_and_unknown_key",
-     "config": {
-       "unknown_setting": true
-     },
-     "expect": {
-       "status": 422,
-       "detail": [
-         {
-           "type": "missing",
-           "loc": [
-             "body",
-             "config",
-             "mounts"
-           ],
-           "msg": "Field required",
-           "input": {
-             "unknown_setting": true
-           }
-         },
-         {
-           "type": "extra_forbidden",
-           "loc": [
-             "body",
-             "config",
-             "unknown_setting"
-           ],
-           "msg": "Extra inputs are not permitted",
-           "input": true
-         }
-       ]
-     }
-   },
-   {
-     "id": "invalid_field_type",
-     "config": {
-       "mounts": {},
-       "system_time": 123
-     },
-     "expect": {
-       "status": 422,
-       "detail": [
-         {
-           "type": "string_type",
-           "loc": [
-             "body",
-             "config",
-             "system_time"
-           ],
-           "msg": "Input should be a valid string",
-           "input": 123
-         }
-       ]
-     }
-   },
-   {
-     "id": "missing_unknown_and_invalid_type",
-     "config": {
-       "system_time": 123,
-       "unknown_setting": true
-     },
-     "expect": {
-       "status": 422,
-       "detail": [
-         {
-           "type": "missing",
-           "loc": [
-             "body",
-             "config",
-             "mounts"
-           ],
-           "msg": "Field required",
-           "input": {
-             "system_time": 123,
-             "unknown_setting": true
-           }
-         },
-         {
-           "type": "string_type",
-           "loc": [
-             "body",
-             "config",
-             "system_time"
-           ],
-           "msg": "Input should be a valid string",
-           "input": 123
-         },
-         {
-           "type": "extra_forbidden",
-           "loc": [
-             "body",
-             "config",
-             "unknown_setting"
-           ],
-           "msg": "Extra inputs are not permitted",
-           "input": true
-         }
-       ]
-     }
-   },
-   {
-     "id": "invalid_field_value",
-     "config": {
-       "mounts": {},
-       "system_time": "tomorrow"
-     },
-     "expect": {
-       "status": 422,
-       "detail": [
-         {
-           "type": "value_error",
-           "loc": [
-             "body",
-             "config",
-             "system_time"
-           ],
-           "msg": "Value error, system_time is not an ISO 8601 instant with an offset from 1970 through 2261, as 2026-03-02T09:00:00Z",
-           "input": "tomorrow",
-           "ctx": {
-             "error": {}
-           }
-         }
-       ]
-     }
-   },
-   {
-     "id": "missing_unknown_and_invalid_value",
-     "config": {
-       "system_time": "tomorrow",
-       "unknown_setting": true
-     },
-     "expect": {
-       "status": 422,
-       "detail": [
-         {
-           "type": "missing",
-           "loc": [
-             "body",
-             "config",
-             "mounts"
-           ],
-           "msg": "Field required",
-           "input": {
-             "system_time": "tomorrow",
-             "unknown_setting": true
-           }
-         },
-         {
-           "type": "value_error",
-           "loc": [
-             "body",
-             "config",
-             "system_time"
-           ],
-           "msg": "Value error, system_time is not an ISO 8601 instant with an offset from 1970 through 2261, as 2026-03-02T09:00:00Z",
-           "input": "tomorrow",
-           "ctx": {
-             "error": {}
-           }
-         },
-         {
-           "type": "extra_forbidden",
-           "loc": [
-             "body",
-             "config",
-             "unknown_setting"
-           ],
-           "msg": "Extra inputs are not permitted",
-           "input": true
-         }
-       ]
-     }
-   }
+  {"id": "missing_mounts", "config": {}, "expect": {"status": 400, "error": {"code": "missing_field", "message": "config.mounts is required", "param": "config.mounts"}}},
+  {"id": "unknown_key", "config": {"mounts": {}, "unknown_setting": true}, "expect": {"status": 400, "error": {"code": "unknown_field", "message": "config.unknown_setting is not a known field", "param": "config.unknown_setting"}}},
+  {"id": "missing_mounts_and_unknown_key", "config": {"unknown_setting": true}, "expect": {"status": 400, "error": {"code": "missing_field", "message": "config.mounts is required", "param": "config.mounts"}}},
+  {"id": "invalid_field_type", "config": {"mounts": {}, "system_time": 123}, "expect": {"status": 400, "error": {"code": "invalid_value", "message": "config.system_time must be a string", "param": "config.system_time"}}},
+  {"id": "missing_unknown_and_invalid_type", "config": {"system_time": 123, "unknown_setting": true}, "expect": {"status": 400, "error": {"code": "missing_field", "message": "config.mounts is required", "param": "config.mounts"}}},
+  {"id": "invalid_field_value", "config": {"mounts": {}, "system_time": "tomorrow"}, "expect": {"status": 400, "error": {"code": "invalid_value", "message": "system_time is not an ISO 8601 instant with an offset from 1970 through 2261, as 2026-03-02T09:00:00Z", "param": "config.system_time"}}},
+  {"id": "missing_unknown_and_invalid_value", "config": {"system_time": "tomorrow", "unknown_setting": true}, "expect": {"status": 400, "error": {"code": "missing_field", "message": "config.mounts is required", "param": "config.mounts"}}}
  ],
  "suites": [
   {
@@ -797,7 +590,26 @@
  "server": {
   "health_without_token": 200,
   "ready_without_token": [200, {"status": "ready"}],
-  "unknown_host": 400,
+  "unknown_host": 403,
+  "errors": [
+   {"id": "body_not_json", "request": {"method": "POST", "path": "/v1/workspaces/{seed}/shell", "content": "{\"command\":", "type": "application/json"}, "expect": {"status": 400, "code": "invalid_json"}},
+   {"id": "body_not_object", "request": {"method": "POST", "path": "/v1/workspaces/{seed}/shell", "json": [1]}, "expect": {"status": 400, "code": "invalid_request"}},
+   {"id": "missing_field", "request": {"method": "POST", "path": "/v1/workspaces/{seed}/shell", "json": {}}, "expect": {"status": 400, "code": "missing_field", "param": "command"}},
+   {"id": "unknown_field", "request": {"method": "POST", "path": "/v1/workspaces/{seed}/shell", "json": {"command": "true", "provision": true}}, "expect": {"status": 400, "code": "unknown_field", "param": "provision"}},
+   {"id": "invalid_value", "request": {"method": "POST", "path": "/v1/workspaces/{seed}/shell", "json": {"command": 5}}, "expect": {"status": 400, "code": "invalid_value", "param": "command"}},
+   {"id": "invalid_query", "request": {"method": "POST", "path": "/v1/workspaces/{seed}/shell?explain=maybe", "json": {"command": "true"}}, "expect": {"status": 400, "code": "invalid_value", "param": "explain"}},
+   {"id": "conflicting_options", "request": {"method": "POST", "path": "/v1/workspaces/{seed}/shell?stream=true&explain=true", "json": {"command": "true"}}, "expect": {"status": 400, "code": "invalid_request"}},
+   {"id": "unknown_runtime", "request": {"method": "POST", "path": "/v1/workspaces/{seed}/shell", "json": {"command": "true", "runtime": "no-such-runtime"}}, "expect": {"status": 400, "code": "invalid_value", "param": "runtime"}},
+   {"id": "json_sent_as_text", "request": {"method": "POST", "path": "/v1/workspaces/{seed}/shell", "content": "{\"command\": \"true\"}", "type": "text/plain"}, "expect": {"status": 200}},
+   {"id": "missing_workspace", "request": {"method": "POST", "path": "/v1/workspaces/no-such-workspace/shell", "json": {"command": "true"}}, "expect": {"status": 404, "code": "not_found"}},
+   {"id": "stopped_workspace", "request": {"method": "POST", "path": "/v1/workspaces/{stopped}/shell", "json": {"command": "true"}}, "expect": {"status": 409, "code": "workspace_stopped"}},
+   {"id": "errno_not_found", "request": {"method": "POST", "path": "/v1/workspaces/{seed}/vfs/read", "json": {"path": "/no-such-file.txt"}}, "expect": {"status": 404, "code": "not_found"}},
+   {"id": "errno_is_a_directory", "request": {"method": "POST", "path": "/v1/workspaces/{seed}/vfs/read", "json": {"path": "/"}}, "expect": {"status": 400, "code": "invalid_request"}},
+   {"id": "unknown_route", "request": {"method": "GET", "path": "/v1/no-such-route"}, "expect": {"status": 404, "code": "not_found"}},
+   {"id": "host_not_allowed", "request": {"method": "GET", "path": "/v1/health", "headers": {"Host": "evil.example"}, "auth": false}, "expect": {"status": 403, "code": "host_not_allowed"}},
+   {"id": "origin_not_allowed", "request": {"method": "POST", "path": "/v1/workspaces/{seed}/shell", "json": {"command": "true"}, "headers": {"Origin": "https://evil.example", "Sec-Fetch-Site": "cross-site"}}, "expect": {"status": 403, "code": "origin_not_allowed"}},
+   {"id": "unauthorized", "deployments": ["token", "jwt"], "request": {"method": "GET", "path": "/v1/workspaces", "auth": false}, "expect": {"status": 401, "code": "unauthorized"}}
+  ],
   "mcp_methods": {
    "get": 405,
    "delete": 405

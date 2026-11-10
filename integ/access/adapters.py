@@ -2399,7 +2399,7 @@ async def mcp_case(
         result = await client.call_tool(route(step, "_"), call_params(step))
         answer = json.loads(result.content[0].text)
         if result.is_error:
-            answer = {"errno": answer.get("errno", answer["detail"])}
+            answer = {"errno": answer.get("errno", answer["message"])}
         return bytes_answer(step, answer)
     elif op == "cancel":
         # The call is cancelled once its line has begun: MCP's cancel is a

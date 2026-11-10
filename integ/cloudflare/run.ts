@@ -505,7 +505,12 @@ function edgeWorkspace(base: string, id: string): ExecWorkspace {
       },
     })
     const text = await response.text()
-    let answer: { stdout?: string; stderr?: string; exit_code?: number; detail?: unknown }
+    let answer: {
+      stdout?: string
+      stderr?: string
+      exit_code?: number
+      error?: { message?: string }
+    }
     try {
       answer = JSON.parse(text) as typeof answer
     } catch {
@@ -513,7 +518,7 @@ function edgeWorkspace(base: string, id: string): ExecWorkspace {
       throw new Error(`${command}: ${String(response.status)} ${text.slice(0, 300)}`)
     }
     if (!response.ok)
-      throw new Error(`${command}: ${String(response.status)} ${JSON.stringify(answer.detail)}`)
+      throw new Error(`${command}: ${String(response.status)} ${String(answer.error?.message)}`)
     return {
       stdout: enc.encode(answer.stdout ?? ''),
       stderr: enc.encode(answer.stderr ?? ''),
