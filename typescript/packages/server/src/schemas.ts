@@ -69,7 +69,7 @@ export interface CreateWorkspaceRequest {
 
 /** A request config rejected by its schema, before operator-only runtime checks. */
 export class ConfigValidationError extends Error {
-  static time(value: string | null | undefined, ctx: z.RefinementCtx): void {
+  static time(this: void, value: string | null | undefined, ctx: z.RefinementCtx): void {
     if (value === undefined || value === null) return
     try {
       parseSystemTime(value)
