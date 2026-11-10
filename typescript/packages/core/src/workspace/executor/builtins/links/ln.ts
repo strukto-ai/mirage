@@ -450,6 +450,15 @@ export async function planLinks(
   return [operands.slice(0, -1).map((op) => into(op, resolved, wordText(last))), null]
 }
 
+// Whether a hard link's two names sit on different mounts, which link(2)
+// refuses with EXDEV. A name the session cannot see is left to the refusal
+// its own lookup meets.
+function crosses(links: NamespaceReader, source: string, name: string): boolean {
+  const here = links.mountOf(source)
+  const there = links.mountOf(name)
+  return here !== null && there !== null && here !== there
+}
+
 // The file a hard link copies, past the links leading to it, or the refusal in
 // ln's words.
 async function sourcePath(
@@ -755,6 +764,7 @@ async function attemptLink(
   let linkTarget: string | null = null
   let source: PathSpec | null = null
   let data: ByteSource | null = null
+  let crossing = false
   const refusal = await walkRefusal(links, dispatch, cwd, plan, flags)
   if (refusal !== null) {
     errors.push(refusal)
@@ -791,6 +801,7 @@ async function attemptLink(
       }
       source = found
     }
+    crossing = crosses(links, source !== null ? source.virtual : srcAbs, plan.linkAbs)
   }
   // A copy's bytes, staged once the name passed every check that refuses it
   // and before the first change there (a backup, -f's removal, the write).
@@ -822,9 +833,25 @@ async function attemptLink(
       return
     }
   }
-  const [refusing, standing] = await nameRefusal(links, dispatch, cwd, plan, flags, source !== null)
+  const [refusing, standing] = await nameRefusal(
+    links,
+    dispatch,
+    cwd,
+    plan,
+    flags,
+    source !== null || crossing,
+  )
   if (refusing !== null) {
     errors.push(refusing)
+    return
+  }
+  if (crossing) {
+    // link(2) meets an occupied name before the other filesystem, and -f and
+    // -b get as far as the link, which leaves the name as it was (coreutils
+    // 9.7 over a tmpfs).
+    errors.push(
+      `ln: failed to create ${kind} '${typed}' => '${targetTyped}': ${posixPhrase('EXDEV')}\n`,
+    )
     return
   }
   let occupied = standing

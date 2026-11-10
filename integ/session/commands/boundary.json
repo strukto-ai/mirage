@@ -69,6 +69,34 @@
       "note": "The policy reads sources as typed; /vault/al/inner reaches the mount root /vault/d/inner only once mv follows the link, so mv refuses that source before copying (the mount keeps sec.txt) while the other source still moves, as GNU's per-source EBUSY does."
     },
     {
+      "id": "boundary_mv_within_copies_past_the_nested_mount",
+      "seq": 923205,
+      "targets": [
+        "ram-commands"
+      ],
+      "command": "mv /vault/d /vault/vm; echo rc=$?; ls /vault/d; ls /vault/d/inner; find /vault/vm; mv /vault/vm/inner/sec.txt /vault/d/inner/ && mkdir /vault/d/sub && mv /vault/vm/sub/top.txt /vault/d/sub/ && rm -r /vault/vm",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\ninner\n/vault/vm\n/vault/vm/inner\n/vault/vm/inner/sec.txt\n/vault/vm/sub\n/vault/vm/sub/top.txt\n",
+        "stderr": "mv: cannot remove '/vault/d/inner': Device or resource busy\n"
+      },
+      "note": "A rename cannot carry a mirage mount, so a directory holding one moves as GNU mv moves it across devices (as on overlayfs, whose directory rename answers EXDEV): copy, then remove, and the busy mountpoint stays. The rename used to succeed and leave the mount behind at exit 0."
+    },
+    {
+      "id": "boundary_find_delete_refuses_what_the_mount_table_pins",
+      "seq": 923206,
+      "targets": [
+        "ram-commands"
+      ],
+      "command": "rm -r /vault/d/sub && find /vault/d /vault/d/inner -maxdepth 0 -delete; echo rc=$?; ls /vault/d /vault/d/inner; mkdir /vault/d/sub && echo public > /vault/d/sub/top.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n/vault/d:\ninner\n\n/vault/d/inner:\nsec.txt\n",
+        "stderr": "find: cannot delete '/vault/d': Directory not empty\nfind: cannot delete '/vault/d/inner': Device or resource busy\n"
+      },
+      "note": "coreutils 9.7 over a tmpfs: a directory holding a mountpoint is never empty, and the mountpoint is busy."
+    },
+    {
       "id": "boundary_hidden_mount_ls",
       "seq": 923210,
       "targets": [

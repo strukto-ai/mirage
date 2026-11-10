@@ -1,0 +1,87 @@
+{
+  "cases": [
+    {
+      "id": "chain_seed",
+      "seq": 15601000,
+      "targets": [
+        "ram-chain"
+      ],
+      "command": "mkdir -p /workspace/sub /workspace/workspace2/deep /another/sub && printf 'a\\n' > /workspace/a.txt && printf 'b\\n' > /workspace/sub/b.txt && printf 'c\\n' > /workspace/workspace2/c.txt && printf 'd\\n' > /workspace/workspace2/deep/d.txt && printf 'e\\n' > /another/e.txt && printf 'f\\n' > /another/sub/f.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chain_walks_reach_every_level",
+      "seq": 15601001,
+      "targets": [
+        "ram-chain"
+      ],
+      "command": "find /workspace /another | sort; grep -r . /workspace /another | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/another\n/another/e.txt\n/another/sub\n/another/sub/f.txt\n/workspace\n/workspace/a.txt\n/workspace/sub\n/workspace/sub/b.txt\n/workspace/workspace2\n/workspace/workspace2/c.txt\n/workspace/workspace2/deep\n/workspace/workspace2/deep/d.txt\n/another/e.txt:e\n/another/sub/f.txt:f\n/workspace/a.txt:a\n/workspace/sub/b.txt:b\n/workspace/workspace2/c.txt:c\n/workspace/workspace2/deep/d.txt:d\n",
+        "stderr": ""
+      },
+      "note": "The layout this target exists for: a root mount, a mount on it, a mount on that, and a sibling. Every walk reaches the third level."
+    },
+    {
+      "id": "chain_tree_draws_links_below_a_nested_mount",
+      "seq": 15601002,
+      "targets": [
+        "ram-chain"
+      ],
+      "command": "ln -s c.txt /workspace/workspace2/l && ln -s /another /workspace/workspace2/an && tree /workspace; tree -l /workspace; rm /workspace/workspace2/l /workspace/workspace2/an",
+      "expect": {
+        "exit": 0,
+        "stdout": "/workspace\n|-- a.txt\n|-- sub\n|   `-- b.txt\n`-- workspace2\n    |-- an -> /another\n    |-- c.txt\n    |-- deep\n    |   `-- d.txt\n    `-- l -> c.txt\n\n5 directories, 5 files\n/workspace\n|-- a.txt\n|-- sub\n|   `-- b.txt\n`-- workspace2\n    |-- an -> /another\n    |   |-- e.txt\n    |   `-- sub\n    |       `-- f.txt\n    |-- c.txt\n    |-- deep\n    |   `-- d.txt\n    `-- l -> c.txt\n\n6 directories, 7 files\n",
+        "stderr": ""
+      },
+      "note": "tree 2.2.1: a link is drawn as `name -> target` wherever it stands, and only -l goes through one. Past a mount boundary the row came from the dispatcher's stat, which follows a link, so `an` was drawn as `another` and walked without -l."
+    },
+    {
+      "id": "chain_tree_x_stops_at_a_crossed_mount",
+      "seq": 15601003,
+      "targets": [
+        "ram-chain"
+      ],
+      "command": "tree -x /workspace",
+      "expect": {
+        "exit": 0,
+        "stdout": "/workspace\n|-- a.txt\n|-- sub\n|   `-- b.txt\n`-- workspace2\n\n3 directories, 2 files\n",
+        "stderr": ""
+      },
+      "note": "tree 2.2.1 over tmpfs mounts: -x draws a mount point on another filesystem empty, the mount on it included."
+    },
+    {
+      "id": "chain_find_delete_meets_the_mount_roots",
+      "seq": 15601004,
+      "targets": [
+        "ram-chain"
+      ],
+      "command": "find /workspace -maxdepth 0 -delete; echo rc=$?; find /workspace/workspace2 -delete; echo rc=$?; find /workspace/workspace2; mkdir /workspace/workspace2/deep && printf 'c\\n' > /workspace/workspace2/c.txt && printf 'd\\n' > /workspace/workspace2/deep/d.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\n/workspace/workspace2\n",
+        "stderr": "find: cannot delete '/workspace': Device or resource busy\nfind: cannot delete '/workspace/workspace2': Device or resource busy\n"
+      },
+      "note": "coreutils 9.7 over a tmpfs: -delete removes a mount's contents and then fails the mount point's rmdir with EBUSY, exit 1. It used to skip the mount root without a word and exit 0."
+    },
+    {
+      "id": "chain_hard_links_stay_on_their_mount",
+      "seq": 15601005,
+      "targets": [
+        "ram-chain"
+      ],
+      "command": "ln /workspace/a.txt /workspace/workspace2/hl; echo rc=$?; cp -l /workspace/a.txt /workspace/workspace2/cl; echo rc=$?; cp -rl /workspace/sub /another/; echo rc=$?; ls /another/sub /workspace/workspace2; ln /workspace/a.txt /workspace/sub/hl && cat /workspace/sub/hl && rm /workspace/sub/hl",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\n/another/sub:\nf.txt\n\n/workspace/workspace2:\nc.txt\ndeep\na\n",
+        "stderr": "ln: failed to create hard link '/workspace/workspace2/hl' => '/workspace/a.txt': Invalid cross-device link\ncp: cannot create hard link '/workspace/workspace2/cl' to '/workspace/a.txt': Invalid cross-device link\ncp: cannot create hard link '/another/sub/b.txt' to '/workspace/sub/b.txt': Invalid cross-device link\n"
+      },
+      "note": "coreutils 9.7 over tmpfs mounts: a hard link cannot leave its source's filesystem, and a nested mount is one. Within a mount the link is still the byte copy mirage makes for one."
+    }
+  ]
+}

@@ -2136,6 +2136,59 @@ async def removed_first(
     return True
 
 
+async def hard_link_refused(
+    flags: CpFlags,
+    device_of: Callable[[str], str],
+    stat: StatFn,
+    unlink: Callable[[PathSpec], Awaitable[None]] | None,
+    errors: list[str],
+    lines: list[str] | None,
+    src: PathSpec,
+    dst: PathSpec,
+) -> bool:
+    """Refuse a ``-l`` copy whose hard link would leave its source's
+    mount, as link(2) does with EXDEV; False for one that stays.
+
+    GNU's order, pinned on coreutils 9.7 over a tmpfs: ``-n`` and
+    ``--update`` have skipped already, ``--remove-destination`` removes
+    the name first, an occupied name is ``File exists`` unless ``-f``,
+    ``-i`` or ``-b`` got past it (none of them touches it), and ``-v``
+    names the copy before the refusal.
+
+    Args:
+        flags (CpFlags): the parsed flags.
+        device_of (Callable[[str], str]): the mount a path lives on.
+        stat (StatFn): stats the destination.
+        unlink (Callable | None): ``--remove-destination``'s removal.
+        errors (list[str]): collects the error line.
+        lines (list[str] | None): verbose output.
+        src (PathSpec): the file.
+        dst (PathSpec): where its link would go.
+    """
+    if flags.link != "hard" or device_of(src.virtual) == device_of(
+        dst.virtual
+    ):
+        return False
+    why = FsCondition.EXDEV
+    if unlink is not None:
+        if not await removed_first(unlink, stat, dst, errors, lines):
+            return True
+    elif (
+        not (
+            flags.force or flags.interactive or backup_displaces(flags.backup)
+        )
+        and (await entry_kind(stat, dst))[0]
+    ):
+        why = FsCondition.EEXIST
+    if lines is not None:
+        lines.append(transfer_line(src, dst, None))
+    errors.append(
+        f"cp: cannot create hard link '{dst.raw_path}' to "
+        f"'{src.raw_path}': {posix_phrase(why)}"
+    )
+    return True
+
+
 async def transfer_file(
     strategy: PrimitiveCopy | PrimitiveMove,
     src: PathSpec,
@@ -2408,6 +2461,7 @@ async def copy_entries(
     remove_first: Callable[[PathSpec], Awaitable[None]] | None = None,
     aside: NativeMove | None = None,
     copied_lines: Sequence[str] = (),
+    refuse_link: Callable[[PathSpec, PathSpec], Awaitable[bool]] | None = None,
 ) -> bool:
     """Copy a walked source tree entry by entry with GNU per-entry errors.
 
@@ -2450,6 +2504,8 @@ async def copy_entries(
             at an entry's destination first.
         copied_lines (Sequence[str]): what follows each copied file's
             verbose line, ``--debug``'s report.
+        refuse_link (Callable | None): refuses a file whose ``-l`` link would
+            leave its mount, True when it did (``hard_link_refused``).
 
     Returns:
         bool: Whether every entry landed.
@@ -2552,6 +2608,9 @@ async def copy_entries(
             errors.append(refusal)
             copied_all = False
             continue
+        if refuse_link is not None and await refuse_link(entry, entry_dst):
+            copied_all = False
+            continue
         backup = root_backup if entry is src else None
         if policy is not None:
             backup, ok = await make_backup(
@@ -2600,6 +2659,7 @@ async def cp_generic(
     dispatch: DispatchFn | None = None,
     umask: int | None = None,
     cwd: str = "/",
+    device_of: Callable[[str], str] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Copy sources to a destination, fanning out into a directory.
 
@@ -2638,6 +2698,9 @@ async def cp_generic(
             when None.
         cwd (str): the working directory a typed ``--parents`` prefix
             resolves against.
+        device_of (Callable[[str], str] | None): the mount a path lives
+            on, which a ``-l`` link cannot leave; None where one mount
+            holds every path.
 
     Returns:
         tuple[ByteSource | None, IOResult]: Verbose output, with
@@ -2724,6 +2787,19 @@ async def cp_generic(
         or unlink is not None
     )
     lines: list[str] = []
+    refuse_link = (
+        partial(
+            hard_link_refused,
+            flags,
+            device_of,
+            stat,
+            unlink,
+            errors,
+            lines if flags.verbose else None,
+        )
+        if device_of is not None and flags.link == "hard"
+        else None
+    )
     warned = 0
     # Where each source's first copy went, by source and by link name.
     first_copy: dict[str, PathSpec] = {}
@@ -3026,6 +3102,7 @@ async def cp_generic(
                     aside=aside,
                     remove_first=unlink,
                     copied_lines=await _debug_line(flags, strategy, stat, src),
+                    refuse_link=refuse_link,
                 )
                 if copies is not None:
                     await copy_tree_links(
@@ -3200,6 +3277,8 @@ async def cp_generic(
             if flags.verbose:
                 lines.append(transfer_line(src, target, None))
             errors.append(refusal)
+            continue
+        if refuse_link is not None and await refuse_link(src, target):
             continue
         copier: CopyStrategy = strategy
         mover: CopyStrategy | NativeMove = aside or strategy

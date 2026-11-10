@@ -438,6 +438,35 @@
       }
     },
     {
+      "id": "ram-chain",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/",
+          "vfs": "ram",
+          "backend": "memory"
+        },
+        {
+          "path": "/workspace",
+          "vfs": "ram",
+          "backend": "memory"
+        },
+        {
+          "path": "/workspace/workspace2",
+          "vfs": "ram",
+          "backend": "memory"
+        },
+        {
+          "path": "/another",
+          "vfs": "ram",
+          "backend": "memory"
+        }
+      ]
+    },
+    {
       "id": "ram-history",
       "hosts": [
         "python",

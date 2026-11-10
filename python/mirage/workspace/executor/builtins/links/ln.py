@@ -518,6 +518,22 @@ async def plan_links(
     return [_into(op, resolved, word_text(last)) for op in operands[:-1]], None
 
 
+def _crosses(links: NamespaceReader, source: str, name: str) -> bool:
+    """Whether a hard link's two names sit on different mounts, which
+    link(2) refuses with EXDEV. A name the session cannot see is left to
+    the refusal its own lookup meets.
+
+    Args:
+        links (NamespaceReader): the link table and mounts as the session
+            sees them.
+        source (str): absolute virtual path linked to, as ln reaches it.
+        name (str): absolute virtual path of the new name.
+    """
+    here = links.mount_of(source)
+    there = links.mount_of(name)
+    return here is not None and there is not None and here != there
+
+
 async def _source_path(
     links: NamespaceReader,
     dispatch: DispatchFn,
@@ -896,6 +912,7 @@ async def _attempt_link(
     link_target: str | None = None
     source: PathSpec | None = None
     data: ByteSource | None = None
+    crossing = False
     refusal = await _walk_refusal(links, dispatch, cwd, plan, flags)
     if refusal is not None:
         errors.append(refusal)
@@ -928,6 +945,8 @@ async def _attempt_link(
             if refusal is not None:
                 errors.append(refusal)
                 return
+        reached = source.virtual if source is not None else src_abs
+        crossing = _crosses(links, reached, plan.link_abs)
 
     async def staged() -> bool:
         """Stage a copy's bytes once the name passed every check that
@@ -960,10 +979,19 @@ async def _attempt_link(
             return
     backup_note = ""
     refusal, occupied = await _name_refusal(
-        links, dispatch, cwd, plan, flags, source is not None
+        links, dispatch, cwd, plan, flags, source is not None or crossing
     )
     if refusal is not None:
         errors.append(refusal)
+        return
+    if crossing:
+        # link(2) meets an occupied name before the other filesystem, and
+        # -f and -b get as far as the link, which leaves the name as it
+        # was (coreutils 9.7 over a tmpfs).
+        errors.append(
+            f"ln: failed to create {kind} '{typed}' => '{target_typed}': "
+            f"{posix_phrase(FsCondition.EXDEV)}\n"
+        )
         return
     if occupied and backs:
         backup = await backup_target(

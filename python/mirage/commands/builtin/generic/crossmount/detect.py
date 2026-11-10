@@ -66,12 +66,14 @@ def is_cross_mount(
     # a scope outside any mount cannot make the command cross-mount
     mounts = {o.mount for o in operands if o.mount is not None}
     # A copy of a tree that holds a mount reads both filesystems, the way
-    # GNU cp -r copies across one, even from a single mount's operands.
-    # Only a source counts: the destination (-t's directory, else the last
+    # GNU cp -r copies across one, even from a single mount's operands. A
+    # move of one cannot be a rename, since the mount stays where it is,
+    # so it moves as GNU mv does across devices: copy, then remove. Only a
+    # source counts: the destination (-t's directory, else the last
     # operand) lands beside a mount and crosses nothing.
     landing = {s.virtual for s in flag_scopes} or {operands[-1].path.virtual}
     return len(mounts) > 1 or (
-        cmd_name == Cmd.CP
+        cmd_name in (Cmd.CP, Cmd.MV)
         and any(o.nests for o in operands if o.path.virtual not in landing)
     )
 

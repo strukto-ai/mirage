@@ -77,7 +77,8 @@ export async function runCp(
   const flat = flatScopes(scopes)
   const stat = statOp(dispatch)
   const fl = new FlagView(flagKwargs, specOf('cp'))
-  const mounts = fl.asBool('one_file_system') ? mountView(vfs) : undefined
+  const view = mountView(vfs)
+  const mounts = fl.asBool('one_file_system') ? view : undefined
   const starts = new Set(scopes.map((s) => s.virtual))
   const relayed = readdirOp(dispatch)
   const readdir: typeof relayed =
@@ -114,5 +115,6 @@ export async function runCp(
     dispatch,
     undefined,
     cwd,
+    view === undefined ? undefined : (path: string) => view.rootOf(path),
   )
 }

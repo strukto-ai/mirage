@@ -91,6 +91,8 @@ class Cmd(StrEnum):
     CMP = "cmp"
     AWK = "awk"
     BC = "bc"
+    LINK = "link"
+    SYNC = "sync"
     PASTE = "paste"
     COMM = "comm"
     JOIN = "join"

@@ -564,6 +564,41 @@ export async function removedFirst(
   return true
 }
 
+/**
+ * Refuse a -l copy whose hard link would leave its source's mount, as link(2)
+ * does with EXDEV; false for one that stays. GNU's order, pinned on coreutils
+ * 9.7 over a tmpfs: -n and --update have skipped already,
+ * --remove-destination removes the name first, an occupied name is `File
+ * exists` unless -f, -i or -b got past it (none of them touches it), and -v
+ * names the copy before the refusal. Mirrors Python's `hard_link_refused`.
+ */
+export async function hardLinkRefused(
+  flags: CpFlags,
+  deviceOf: (path: string) => string,
+  stat: StatFn,
+  unlink: ((path: PathSpec) => Promise<void>) | null,
+  errors: string[],
+  lines: string[] | undefined,
+  src: PathSpec,
+  dst: PathSpec,
+): Promise<boolean> {
+  if (flags.link !== 'hard' || deviceOf(src.virtual) === deviceOf(dst.virtual)) return false
+  let why: FsCondition = 'EXDEV'
+  if (unlink !== null) {
+    if (!(await removedFirst(unlink, stat, dst, errors, lines))) return true
+  } else if (
+    !(flags.force || flags.interactive || backupDisplaces(flags.backup)) &&
+    (await entryKind(stat, dst)).exists
+  ) {
+    why = 'EEXIST'
+  }
+  lines?.push(transferLine(src, dst, null))
+  errors.push(
+    `cp: cannot create hard link '${dst.rawPath}' to '${src.rawPath}': ${posixPhrase(why)}`,
+  )
+  return true
+}
+
 export function prompter(
   cmdName: string,
   stdin: ByteSource | null,
@@ -1737,6 +1772,9 @@ export async function copyEntries(
     aside?: NativeMove | null
     // What follows each copied file's verbose line, --debug's report.
     copiedLines?: readonly string[]
+    // Refuses a file whose -l link would leave its mount, true when it did
+    // (hardLinkRefused).
+    refuseLink?: ((src: PathSpec, dst: PathSpec) => Promise<boolean>) | null
   } = {},
 ): Promise<boolean> {
   const srcBase = rstripSlash(src.virtual)
@@ -1835,6 +1873,10 @@ export async function copyEntries(
     if (refusal !== null) {
       opts.lines?.push(transferLine(entrySpec, entryDstSpec, null, cmdName))
       errors.push(refusal)
+      copiedAll = false
+      continue
+    }
+    if (opts.refuseLink != null && (await opts.refuseLink(entrySpec, entryDstSpec))) {
       copiedAll = false
       continue
     }
@@ -1975,6 +2017,9 @@ export async function cpGeneric(
   umask?: number,
   // The working directory a typed --parents prefix resolves against.
   cwd = '/',
+  // The mount a path lives on, which a -l link cannot leave; undefined where
+  // one mount holds every path.
+  deviceOf?: (path: string) => string,
 ): Promise<[ByteSource | null, IOResult]> {
   const keyOf = backendKey ?? backendKeyDefault
   const [sources, dst] = splitOperands('cp', paths, flags.targetDir, flags.noTargetDir)
@@ -2060,6 +2105,20 @@ export async function cpGeneric(
     keeper !== null ||
     unlink !== null
   const lines: string[] = []
+  const refuseLink =
+    deviceOf !== undefined && flags.link === 'hard'
+      ? (src: PathSpec, dst: PathSpec): Promise<boolean> =>
+          hardLinkRefused(
+            flags,
+            deviceOf,
+            stat,
+            unlink,
+            errors,
+            flags.verbose ? lines : undefined,
+            src,
+            dst,
+          )
+      : null
   let warned = 0
   // Where each source's first copy went, by source and by link name.
   const firstCopy = new Map<string, PathSpec>()
@@ -2308,6 +2367,7 @@ export async function cpGeneric(
           removeFirst: unlink,
           aside,
           copiedLines: await debugLine(flags, strategy, stat, src),
+          refuseLink,
         })
         if (copies !== undefined) {
           await copyTreeLinks(
@@ -2468,6 +2528,7 @@ export async function cpGeneric(
       errors.push(refusal)
       continue
     }
+    if (refuseLink !== null && (await refuseLink(src, target))) continue
     let copier: CopyStrategy = strategy
     let mover: CopyStrategy | NativeMove = aside ?? strategy
     // A backup moves, and --remove-destination removes, a link standing at the

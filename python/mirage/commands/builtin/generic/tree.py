@@ -181,13 +181,23 @@ async def _not_crossed(path: PathSpec, limit: int | None = None) -> list[str]:
     return []
 
 
-async def _cross_stat(stat_path: StatPath, path: PathSpec) -> FileStat:
-    """Stat an entry that belongs to another mount.
+async def _cross_stat(
+    stat_path: StatPath, links: LinkView | None, path: PathSpec
+) -> FileStat:
+    """Stat an entry that belongs to another mount, a link as itself.
+
+    The dispatcher's stat follows a link, so a link is answered from the
+    namespace, as this mount's own stat answers it: drawn as
+    ``name -> target`` and gone through only under ``-l``.
 
     Args:
         stat_path (StatPath): dispatcher-backed stat.
+        links (LinkView | None): the namespace's symlink facts.
         path (PathSpec): the entry to stat.
     """
+    own = links.stat_at(path.virtual) if links is not None else None
+    if own is not None:
+        return own
     stat = await stat_path(path)
     if stat is None:
         raise enoent(path.virtual)
@@ -684,9 +694,11 @@ async def _open_dir(
     # one path whose children it could name for certain as unopenable.
     flags = opts.flags
     linked_mounts = _linked_mounts(opts, path.virtual)
+    # A mount point -x keeps the walk out of is drawn empty, the mounts on
+    # it included (tree 2.2.1).
     child_mounts = (
         _child_mounts(opts.mounts, path.virtual)
-        if linked_mounts is None
+        if linked_mounts is None and readdir is not _not_crossed
         else []
     )
     limit = opts.budget.listing_limit(path.virtual)
@@ -1285,7 +1297,9 @@ async def _rendered(
     if cross_readdir is not None and flags.one_file_system:
         cross_readdir = _not_crossed
     cross_stat = (
-        partial(_cross_stat, stat_path) if stat_path is not None else None
+        partial(_cross_stat, stat_path, links)
+        if stat_path is not None
+        else None
     )
     live = not (flags.json or flags.prune or flags.du)
     roots: list[_TreeNode] = []

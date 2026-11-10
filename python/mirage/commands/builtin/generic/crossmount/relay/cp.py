@@ -153,4 +153,5 @@ async def run_cp(
         stdin=stdin,
         dispatch=dispatch,
         cwd=cwd,
+        device_of=mounts.root_of if mounts is not None else None,
     )
