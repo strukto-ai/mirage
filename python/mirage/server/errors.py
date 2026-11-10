@@ -144,14 +144,6 @@ FRAMEWORK: dict[int, tuple[ErrorCode, str]] = {
     413: (ErrorCode.TOO_LARGE, "request body too large"),
 }
 
-# Where in a request a validator's ``loc`` starts.
-PLACES = ("path", "query", "body")
-
-# A union member's tag in a pydantic ``loc``, which names no field.
-UNION_TAG = re.compile(
-    r"^[a-z_]+\[.*\]$|^(str|int|float|bool|none|dict|list)$"
-)
-
 logger = logging.getLogger(__name__)
 
 
@@ -307,42 +299,6 @@ def param_of(loc: Sequence[str | int]) -> str:
     return path
 
 
-def untagged(
-    loc: Sequence[str | int], kind: str
-) -> tuple[Sequence[str | int], bool]:
-    """A pydantic ``loc`` without the union member's tag that follows a
-    field, and whether one was cut. A tag never leads, and the key a
-    missing or unknown field names is never one.
-
-    Args:
-        loc (Sequence[str | int]): the issue's place.
-        kind (str): the issue's type.
-    """
-    named = kind in ("missing", "extra_forbidden")
-    for i, key in enumerate(loc):
-        last = i == len(loc) - 1
-        if (
-            i > 0
-            and isinstance(key, str)
-            and UNION_TAG.match(key)
-            and not (last and named)
-        ):
-            return loc[:i], True
-    return loc, False
-
-
-def rank(issue: Mapping[str, Any]) -> tuple[int, int]:
-    """Where an issue falls in the order errors are reported: path and
-    query before body, unknown keys last.
-
-    Args:
-        issue (Mapping[str, Any]): one of pydantic's errors.
-    """
-    loc = tuple(issue["loc"])
-    place = PLACES.index(loc[0]) if loc and loc[0] in PLACES else 2
-    return place, int(issue["type"] == "extra_forbidden")
-
-
 def validation_error(
     issues: Sequence[Mapping[str, Any]], under: Sequence[str] = ()
 ) -> HttpError:
@@ -356,17 +312,40 @@ def validation_error(
             ``loc`` led by ``path``, ``query`` or ``body`` when FastAPI
             raised them.
         under (Sequence[str]): the request field the validated value
-            sits at, for a value checked on its own.
+            sits at, for a value checked on its own. A union member's tag,
+            which pydantic puts after a field, names no field and is cut.
     """
 
-    issue = sorted(issues, key=rank)[0]
+    places = ("path", "query", "body")
+    order = [
+        (
+            places.index(at[0]) if at and at[0] in places else 2,
+            int(each["type"] == "extra_forbidden"),
+            n,
+        )
+        for n, each in enumerate(issues)
+        for at in [tuple(each["loc"])]
+    ]
+    issue = issues[min(order)[2]]
     loc = tuple(issue["loc"])
     kind = issue["type"]
     if kind == "json_invalid":
         return HttpError(ErrorCode.INVALID_JSON, "body must be JSON")
-    below = loc[1:] if loc and loc[0] in PLACES else loc
-    field, union = untagged(below, kind)
-    param = param_of((*under, *field))
+    below = loc[1:] if loc and loc[0] in places else loc
+    union = False
+    for i, key in enumerate(below):
+        named = i == len(below) - 1 and kind in ("missing", "extra_forbidden")
+        if (
+            i > 0
+            and isinstance(key, str)
+            and re.fullmatch(
+                r"[a-z_]+\[.*\]|str|int|float|bool|none|dict|list", key
+            )
+            and not named
+        ):
+            below, union = below[:i], True
+            break
+    param = param_of((*under, *below))
     if not param:
         return HttpError(
             ErrorCode.INVALID_REQUEST, "body must be a JSON object"
