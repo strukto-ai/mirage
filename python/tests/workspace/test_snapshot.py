@@ -29,6 +29,8 @@ from mirage.commands.config import Context
 from mirage.commands.spec.types import CommandSpec
 from mirage.core.google.config import GoogleConfig
 from mirage.io import IOResult
+from mirage.runtime.python.monty.runtime import MontyRuntime
+from mirage.runtime.table import NAMED, register_runtime
 from mirage.runtime.types import ScriptSource
 from mirage.types import Limit, MountMode, ReadPolicy, ReadSpec
 from mirage.vfs.box import BoxConfig, BoxVFS
@@ -937,3 +939,27 @@ async def test_copy_keeps_the_runtimes_named_by_string():
     finally:
         await ws.close()
         await clone.close()
+
+
+class _AliasedMonty(MontyRuntime):
+    name = "aliased-monty"
+
+
+@pytest.mark.asyncio
+async def test_copy_rebuilds_a_runtime_by_the_key_it_was_named_by():
+    register_runtime("py-engine", _AliasedMonty)
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=["py-engine", "workspace"],
+    )
+    try:
+        clone = await ws.copy()
+        try:
+            io = await clone.shell("python3 -c 'print(6 * 7)'")
+            assert (io.exit_code, io.stdout) == (0, b"42\n")
+        finally:
+            await clone.close()
+    finally:
+        await ws.close()
+        NAMED.pop("py-engine", None)

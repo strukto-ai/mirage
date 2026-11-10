@@ -23,7 +23,7 @@ import {
 // script behaves identically across languages.
 describe('node/js: quickjs runtime', () => {
   it('uses the invoked alias in script errors', async () => {
-    const { ws } = makeWorkspace({ runtimes: ['quickjs', 'workspace'] })
+    const { ws } = makeWorkspace({ runtimes: ['monty', 'quickjs', 'workspace'] })
     try {
       for (const name of ['python', 'node']) {
         const io = await ws.shell(`${name} /missing-script`)

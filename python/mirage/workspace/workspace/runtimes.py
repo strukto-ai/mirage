@@ -25,6 +25,7 @@ from mirage.runtime.table import (
     DEFAULT_ENTRIES,
     bind_commands,
     build_runtime,
+    built_from,
     is_sandbox,
     shadowed_captures,
 )
@@ -60,7 +61,6 @@ class Runtimes:
         self._binding = binding
         self._machines = machines
         self._entries: list[Runtime[Any]] = []
-        self._by_name: list[Runtime[Any]] = []
         self._retiring: dict[int, asyncio.Task[None]] = {}
 
     @property
@@ -73,13 +73,12 @@ class Runtimes:
         return self._entries
 
     def named(self) -> list[str]:
-        """The names of the entries built from a name, in list order.
+        """The registry names of the entries built from one, in list order.
 
-        A copy rebuilds these; an instance the host built stays behind.
+        A copy rebuilds these; an entry built with options or by the host
+        stays behind.
         """
-        return [
-            e.name for e in self._entries if any(e is n for n in self._by_name)
-        ]
+        return [n for n in map(built_from, self._entries) if n is not None]
 
     def resolve(
         self, runtimes: list[Runtime[Any] | str] | None
@@ -96,12 +95,10 @@ class Runtimes:
             runtimes (list[Runtime | str] | None): user entries, or
                 None for the default set.
         """
-        entries: list[Runtime[Any]] = []
-        for given in DEFAULT_ENTRIES if runtimes is None else runtimes:
-            entry = build_runtime(given) if isinstance(given, str) else given
-            if isinstance(given, str):
-                self._by_name.append(entry)
-            entries.append(entry)
+        entries: list[Runtime[Any]] = [
+            build_runtime(entry) if isinstance(entry, str) else entry
+            for entry in (DEFAULT_ENTRIES if runtimes is None else runtimes)
+        ]
         if not any(entry.name == WorkspaceRuntime.name for entry in entries):
             entries.append(WorkspaceRuntime())
         bindings = bind_commands(entries)
@@ -144,8 +141,6 @@ class Runtimes:
         bindings = bind_commands(candidate)
         self._bind(entry)
         self._install(candidate, bindings)
-        if isinstance(runtime, str):
-            self._by_name.append(entry)
         return entry
 
     async def remove(self, name: str) -> None:
@@ -167,7 +162,6 @@ class Runtimes:
             raise ValueError(f"no runtime entry: {name!r}")
         remaining = [e for e in self._entries if e is not entry]
         self._install(remaining, bind_commands(remaining))
-        self._by_name = [e for e in self._by_name if e is not entry]
         identity = id(entry)
         closing = asyncio.create_task(_retire(entry))
         self._retiring[identity] = closing

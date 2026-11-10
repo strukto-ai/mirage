@@ -163,10 +163,20 @@ export function checkRuntimeOptions(name: string, options: Record<string, unknow
  * Construct a runtime by name, failing loud on unknown names (with a
  * cross-language hint for Python-only names) and on unknown options.
  */
+// The name each runtime built with no options came from, so a copy can build it again.
+const BUILT_FROM = new WeakMap<Runtime, string>()
+
 export function buildRuntime(name: string, options: Record<string, unknown> = {}): Runtime {
   const cls = runtimeClass(name)
   checkRuntimeOptions(name, options)
-  return new cls(options as RuntimeOptions<never>)
+  const runtime = new cls(options as RuntimeOptions<never>)
+  if (Object.keys(options).length === 0) BUILT_FROM.set(runtime, name)
+  return runtime
+}
+
+/** The registry name a runtime was built from with no options; undefined for one built with options or by the host. */
+export function builtFrom(runtime: Runtime): string | undefined {
+  return BUILT_FROM.get(runtime)
 }
 
 /**

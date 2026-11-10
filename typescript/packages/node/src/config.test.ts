@@ -125,6 +125,24 @@ describe('loadWorkspaceConfig', () => {
 })
 
 describe('configToWorkspaceArgs', () => {
+  it('keeps a named runtime through a copy', async () => {
+    const args = await configToWorkspaceArgs(
+      loadWorkspaceConfig({
+        mounts: { '/': { vfs: 'ram', mode: 'exec' } },
+        mode: 'exec',
+        runtimes: ['monty', 'workspace'],
+      }),
+    )
+    const ws = new Workspace(args.mounts, args.options)
+    const copied = await ws.copy()
+    try {
+      const io = await copied.shell("python3 -c 'print(6 * 7)'")
+      expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, '42\n'])
+    } finally {
+      await Promise.all([ws.close(), copied.close()])
+    }
+  })
+
   it('builds mounts + mode for Workspace constructor', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram', mode: 'write' } },

@@ -20,6 +20,7 @@ import { MachineRuntime } from '../../runtime/machine/runtime.ts'
 import {
   bindCommands,
   buildRuntime,
+  builtFrom,
   DEFAULT_ENTRIES,
   isSandbox,
   shadowedCaptures,
@@ -50,7 +51,6 @@ export class Runtimes {
   /** The machines a machine entry runs its programs on. */
   readonly machines: MachineTable
   private readonly retiring = new Map<Runtime, Promise<void>>()
-  private readonly byName = new WeakSet<Runtime>()
 
   constructor(init: {
     registry: MountRegistry
@@ -63,12 +63,9 @@ export class Runtimes {
     this.registry = init.registry
     this.binding = init.binding
     this.machines = init.machines
-    const entries: Runtime[] = (init.entries ?? DEFAULT_ENTRIES).map((given) => {
-      if (typeof given !== 'string') return given
-      const entry = buildRuntime(given)
-      this.byName.add(entry)
-      return entry
-    })
+    const entries: Runtime[] = (init.entries ?? DEFAULT_ENTRIES).map((entry) =>
+      typeof entry === 'string' ? buildRuntime(entry) : entry,
+    )
     if (!entries.some((entry) => entry.name === 'workspace')) {
       entries.push(new WorkspaceRuntime())
     }
@@ -98,13 +95,15 @@ export class Runtimes {
     const bindings = bindCommands(candidate)
     this.bindEntry(entry)
     this.install(candidate, bindings)
-    if (typeof runtime === 'string') this.byName.add(entry)
     return entry
   }
 
-  /** The names of the entries built from a name, in list order; a copy rebuilds these. */
+  /** The registry names of the entries built from one, in list order; a copy rebuilds these. */
   named(): string[] {
-    return this.entries.filter((entry) => this.byName.has(entry)).map((entry) => entry.name)
+    return this.entries.flatMap((entry) => {
+      const name = builtFrom(entry)
+      return name === undefined ? [] : [name]
+    })
   }
 
   /**
