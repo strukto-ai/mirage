@@ -305,7 +305,7 @@ export async function describe(
   const lines = await describeAll(repo, texts.length > 0 ? texts : ['HEAD'], fl, width)
   let suffix = ''
   if (marked && (await isDirty(ctx, fl))) {
-    suffix = mark(dirty !== undefined ? dirty : broken, DIRTY_MARK)
+    suffix = mark(dirty ?? broken, DIRTY_MARK)
   }
   return [ENC.encode(lines.map((line) => `${line}${suffix}\n`).join('')), new IOResult()]
 }

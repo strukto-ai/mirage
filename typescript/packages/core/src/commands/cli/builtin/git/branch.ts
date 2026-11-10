@@ -82,7 +82,15 @@ import {
 } from './ref_list.ts'
 import { configBool, repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
-import { COMMIT, noteAmbiguity, refsNamed, resolveCommit, resolveObject, trackingRef, unwrapped } from './revparse.ts'
+import {
+  COMMIT,
+  noteAmbiguity,
+  refsNamed,
+  resolveCommit,
+  resolveObject,
+  trackingRef,
+  unwrapped,
+} from './revparse.ts'
 import { append, entry, IDENTITY, logged, ZERO } from './reflog.ts'
 import {
   RefKind,

@@ -75,7 +75,7 @@ const REF_NAMESPACES = new Map([
   ['--tags', 'refs/tags/'],
   ['--remotes', 'refs/remotes/'],
 ])
-const GLOB_CHARS = '?*['
+const GLOB_CHARS = ['?', '*', '[']
 const PATH_ABSOLUTE = 'absolute'
 const PATH_RELATIVE = 'relative'
 const OBJECT_FORMAT_MODES = ['storage', 'input', 'output']
@@ -761,7 +761,7 @@ async function placeAnswer(
 }
 
 function impliedGlob(full: string, value: string): string {
-  if ([...GLOB_CHARS].some((char) => value.includes(char))) return full
+  if (GLOB_CHARS.some((char) => value.includes(char))) return full
   return full.endsWith('/') ? `${full}*` : `${full}/*`
 }
 

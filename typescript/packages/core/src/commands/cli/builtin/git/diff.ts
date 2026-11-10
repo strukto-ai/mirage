@@ -55,7 +55,7 @@ const ENC = new TextEncoder()
 
 type Tree = Map<string, TreeEntry>
 // What makes a word a pattern git reads as a path unseen.
-const WILDCARDS = '*?[\\'
+const WILDCARDS = ['*', '?', '[', '\\']
 
 /**
  * The two sides a diff compares, and any warning.
@@ -220,7 +220,7 @@ async function pathOperands(
 ): Promise<void> {
   const start = startPoint(fl).virtual
   for (const word of words) {
-    if ([...WILDCARDS].some((char) => word.includes(char))) continue
+    if (WILDCARDS.some((char) => word.includes(char))) continue
     if (await exists(repo.vfs, PathSpec.fromStrPath(absoluteOperand(start, word)))) continue
     await resolveObject(repo, word)
     throw new UsageError('', verbUsage(ctx))
