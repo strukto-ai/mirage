@@ -136,7 +136,7 @@ describe('ensureStream', () => {
   })
 })
 
-it('shares a lazy cursor across early exit and concurrent readers', async () => {
+it('keeps what a reader gave back and serializes concurrent readers', async () => {
   const pulls: string[] = []
   async function* source() {
     for (const chunk of ['', 'abc', '', 'def']) {
@@ -147,13 +147,13 @@ it('shares a lazy cursor across early exit and concurrent readers', async () => 
   }
   const shared = new SharedStdin(source())
   expect(pulls).toEqual([])
-  for await (const byte of shared) {
-    expect(new TextDecoder().decode(byte)).toBe('a')
-    break
-  }
+  expect(new TextDecoder().decode((await shared.next()).value as Uint8Array)).toBe('abc')
+  shared.lines.unread(new TextEncoder().encode('bc'))
   const other = shared[Symbol.asyncIterator]()
-  const bytes = await Promise.all(Array.from({ length: 5 }, () => other.next()))
-  expect(bytes.map((step) => new TextDecoder().decode(step.value)).join('')).toBe('bcdef')
+  const bytes = await Promise.all([other.next(), other.next()])
+  expect(bytes.map((step) => new TextDecoder().decode(step.value as Uint8Array)).join('')).toBe(
+    'bcdef',
+  )
   expect((await other.next()).done).toBe(true)
   expect((await shared[Symbol.asyncIterator]().next()).done).toBe(true)
   expect(pulls).toEqual(['', 'abc', '', 'def'])

@@ -4,13 +4,11 @@ use crate::number::{EOVERFLOW, ERANGE};
 use crate::regex::parse::Dialect;
 use crate::regex::posix::{Options, Posix};
 use crate::regex::{STEPS, Step};
-use crate::{Stream, StreamError, number, parse_config, quoted};
+use crate::{Stream, StreamError, constants::OUTPUT, number, parse_config, quoted};
 
 const INTMAX: i128 = i64::MAX as i128;
 const INTMAX_MIN: i128 = i64::MIN as i128;
 const HINT: &str = "Try 'nl --help' for more information.";
-/// The most a call writes past the line it starts.
-const OUTPUT: usize = 64 * 1024;
 
 type Bounds = (&'static str, &'static str, i128, Option<i128>, Option<i128>);
 

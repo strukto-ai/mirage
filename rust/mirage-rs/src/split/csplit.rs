@@ -9,21 +9,15 @@ use std::task::Poll;
 
 use serde::Deserialize;
 
+use crate::constants::{DRAIN_STEPS, MAX_HELD};
 use crate::printf::number::render_integer;
 use crate::regex::parse::Dialect;
 use crate::regex::posix::{Options, Posix};
 use crate::regex::{STEPS as REGEX_STEPS, Step};
-use crate::request::{Io, Opening, Refused, Reply, Request, WriteMode, bytes, read_failure};
+use crate::request::{Io, Opening, Refused, Request, WriteMode, bytes, read_failure};
 use crate::{Stream, StreamError, number, parse_config, quoted};
 
-use super::pieces::{Input, MAX_SUFFIX, Piece, STEPS, write_failure};
-
-/// The longest line csplit holds to test or look back over: past it the
-/// run ends as GNU's does once memory runs out.
-#[cfg(not(test))]
-const MAX_LEN: usize = 1 << 30;
-#[cfg(test)]
-pub(super) const MAX_LEN: usize = 1 << 12;
+use super::pieces::{Input, MAX_SUFFIX, Piece, write_failure};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -367,7 +361,7 @@ impl Lines {
                 Some(at) => (at + 1, true),
                 None => (rest.len(), false),
             };
-            if self.line.len() + end > MAX_LEN {
+            if self.line.len() + end > MAX_HELD {
                 return Err(Short::Memory);
             }
             self.line.extend_from_slice(&rest[..end]);
@@ -854,7 +848,7 @@ impl Csplit {
                     self.run.put(To::Piece(&mut self.current), &old);
                 }
             }
-            if self.looked_back > MAX_LEN {
+            if self.looked_back > MAX_HELD {
                 self.short(Short::Memory);
             }
             return;
@@ -898,10 +892,7 @@ impl Csplit {
     }
 
     fn answer(&mut self, reply: &[u8], data: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
-        let reply = Reply::decode(reply).map_err(StreamError::new)?;
-        let Some(request) = self.run.io.in_flight.take() else {
-            return Err(StreamError::new("no request is waiting"));
-        };
+        let (request, reply) = self.run.io.answer(reply).map_err(StreamError::new)?;
         if let Some(fatal) = &reply.fatal {
             self.run.io.requests.clear();
             self.fail([b"csplit: ", bytes(fatal).as_slice(), b"\n"].concat());
@@ -960,7 +951,7 @@ impl Stream for Csplit {
 
     fn drain(&mut self, _out: &mut Vec<u8>) -> Result<(), StreamError> {
         self.regex_budget = REGEX_STEPS;
-        for _ in 0..STEPS {
+        for _ in 0..DRAIN_STEPS {
             if !self.busy() || self.regex_budget == 0 {
                 break;
             }

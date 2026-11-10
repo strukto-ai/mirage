@@ -1329,6 +1329,41 @@
         "gdrive",
         "gdrive-folder"
       ]
+    },
+    {
+      "id": "array_subscript_runs_before_its_element_is_read",
+      "seq": 603007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "box",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "(sro_a=(1 2 3); echo \"${sro_a[$((sro_a[0]=9,0))]} ${sro_a[@]}\"; sro_b=(5 6 7); echo \"${sro_b[$((sro_b[2]=0,-1))]} ${#sro_b[@]}\"; sro_c=(x y); sro_i=0; echo \"${sro_c[$((sro_i=1))]} $sro_i\"; declare -A sro_m=([k]=v); echo \"${#sro_m[@]} ${#sro_c[*]}\"; sro_s=abc; echo \"${#sro_s[@]} ${sro_s[0]}\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "9 9 2 3\n0 3\ny 1\n1 2\n1 abc\n",
+        "stderr": ""
+      }
     }
   ]
 }

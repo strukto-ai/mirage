@@ -4,6 +4,7 @@ use memchr::{memchr, memchr_iter, memrchr};
 use serde::Deserialize;
 use serde_json::Value as Json;
 
+use crate::constants::MAX_HELD;
 use crate::number;
 use crate::regex::{Options, Regex, STEPS, Step, Syntax};
 use crate::scan::{self, Typed, Values};
@@ -157,6 +158,9 @@ struct Input {
     offset: u64,
     last_printed: u64,
     after_until: u64,
+    /// Where -m's last selected line ends: GNU leaves standard input read
+    /// from a file there, whatever trailing context it went on to print.
+    positioned: Option<u64>,
     before: VecDeque<Held>,
     notified: bool,
     /// A -P search gave up at the backtracking limit: the input ends
@@ -497,6 +501,9 @@ impl Grep {
         let hit = matched != config.invert && !capped;
         if hit {
             input.count += 1;
+            if config.max_count == Some(input.count) {
+                input.positioned = Some(input.offset);
+            }
             if config.quiet || config.files_without_match {
                 input.stop = Stop::Return;
                 return None;
@@ -948,6 +955,7 @@ impl Stream for Grep {
             offset: 0,
             last_printed: 0,
             after_until: 0,
+            positioned: None,
             before: VecDeque::new(),
             notified: false,
             failed: false,
@@ -988,6 +996,9 @@ impl Stream for Grep {
             }
         }
         let Some(last) = memrchr(term, &input.pending[start..]) else {
+            if input.pending.len() > MAX_HELD {
+                return Err(StreamError::refusal(b"grep: memory exhausted", 2));
+            }
             return Ok(());
         };
         input.scan = Some(Scan {
@@ -1048,6 +1059,17 @@ impl Stream for Grep {
 
     fn take_stderr(&mut self, err: &mut Vec<u8>) {
         err.append(&mut self.stderr);
+    }
+
+    /// `{"positioned": N}`: the byte past -m's last selected line, null
+    /// until -m is reached.
+    fn metadata(&self, out: &mut Vec<u8>) {
+        let positioned = self.input.as_ref().and_then(|input| input.positioned);
+        out.extend_from_slice(
+            serde_json::json!({ "positioned": positioned })
+                .to_string()
+                .as_bytes(),
+        );
     }
 }
 

@@ -65,11 +65,11 @@ pub(crate) struct Field {
 
 pub(crate) type FieldTable = Vec<(&'static str, Field)>;
 
-pub(crate) fn names(table: &FieldTable) -> Vec<&'static str> {
+pub(crate) fn names<T>(table: &[(&'static str, T)]) -> Vec<&'static str> {
     table.iter().map(|(name, _)| *name).collect()
 }
 
-fn spec<'a>(table: &'a FieldTable, name: &str) -> &'a Field {
+pub(crate) fn spec<'a, T>(table: &'a [(&'static str, T)], name: &str) -> &'a T {
     &table
         .iter()
         .find(|(field, _)| *field == name)
@@ -85,7 +85,7 @@ pub(crate) fn login() -> Shape {
     strukt(vec![("login", Shape::Str)])
 }
 
-fn user() -> Shape {
+pub(crate) fn user() -> Shape {
     strukt(vec![
         ("id", Shape::Str),
         ("login", Shape::Str),

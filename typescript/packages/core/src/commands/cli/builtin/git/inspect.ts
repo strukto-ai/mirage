@@ -63,6 +63,7 @@ import { GIT_LONG_OPTIONS } from '../../constants.ts'
 import { inGitDir, isBare } from './discover.ts'
 import type { RepoLocation } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
+import { GLOB_CHARS } from '../../../../utils/glob_walk.ts'
 
 const ENC = new TextEncoder()
 const SHOW_TOPLEVEL = '--show-toplevel'
@@ -75,7 +76,6 @@ const REF_NAMESPACES = new Map([
   ['--tags', 'refs/tags/'],
   ['--remotes', 'refs/remotes/'],
 ])
-const GLOB_CHARS = ['?', '*', '[']
 const PATH_ABSOLUTE = 'absolute'
 const PATH_RELATIVE = 'relative'
 const OBJECT_FORMAT_MODES = ['storage', 'input', 'output']

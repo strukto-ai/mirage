@@ -13,10 +13,6 @@ use crate::core::github::repo::{
     RepoRef, mutate, normalized_host, parse_repo, repo_host, repository_fields, view_repo,
 };
 
-fn full(repo: &RepoRef) -> String {
-    format!("{}/{}", repo.owner, repo.repo)
-}
-
 async fn set_archived(
     account: &Account,
     flags: &Flags,
@@ -120,7 +116,7 @@ pub(crate) async fn sync_cmd(account: &Account, flags: &Flags, texts: &[String])
     };
     let mut body = Obj::new();
     body.set("branch", branch.as_str());
-    let path = format!("/repos/{}/merge-upstream", full(&dest));
+    let path = format!("/repos/{}/merge-upstream", dest.full());
     match github_request(account, "POST", &path, Some(&Json::Obj(body))).await {
         Ok(_) => return Ok(Out::default()),
         Err(Failure::Api(error)) if matches!(error.status, 409 | 422) => {
@@ -140,7 +136,7 @@ pub(crate) async fn sync_cmd(account: &Account, flags: &Flags, texts: &[String])
         if parent.is_null() {
             return value(format!(
                 "can't determine source repository for {} because repository is not fork",
-                full(&dest)
+                dest.full()
             ));
         }
         source = Some(RepoRef {
@@ -153,7 +149,7 @@ pub(crate) async fn sync_cmd(account: &Account, flags: &Flags, texts: &[String])
     let latest = github_request(
         account,
         "GET",
-        &format!("/repos/{}/git/refs/heads/{reference}", full(&source)),
+        &format!("/repos/{}/git/refs/heads/{reference}", source.full()),
         None,
     )
     .await?;
@@ -163,7 +159,7 @@ pub(crate) async fn sync_cmd(account: &Account, flags: &Flags, texts: &[String])
     match github_request(
         account,
         "PATCH",
-        &format!("/repos/{}/git/refs/heads/{reference}", full(&dest)),
+        &format!("/repos/{}/git/refs/heads/{reference}", dest.full()),
         Some(&Json::Obj(update)),
     )
     .await
@@ -174,7 +170,7 @@ pub(crate) async fn sync_cmd(account: &Account, flags: &Flags, texts: &[String])
         ),
         Err(Failure::Api(error)) if error.message == "Reference does not exist" => value(format!(
             "{branch} branch does not exist on {} repository",
-            full(&dest)
+            dest.full()
         )),
         Err(failure) => Err(failure),
     }
@@ -190,7 +186,7 @@ pub(crate) async fn deploy_key_list_cmd(account: &Account, flags: &Flags) -> Res
     let repo = repo_for(account, flags)?;
     let keys = github_pages(
         account,
-        &format!("/repos/{}/keys", full(&repo)),
+        &format!("/repos/{}/keys", repo.full()),
         &[],
         i64::MAX,
         None,
@@ -250,7 +246,7 @@ pub(crate) async fn deploy_key_add_cmd(
     github_request(
         account,
         "POST",
-        &format!("/repos/{}/keys", full(&repo)),
+        &format!("/repos/{}/keys", repo.full()),
         Some(&Json::Obj(body)),
     )
     .await?;
@@ -269,7 +265,7 @@ pub(crate) async fn deploy_key_delete_cmd(
     github_request(
         account,
         "DELETE",
-        &format!("/repos/{}/keys/{id}", full(&repo)),
+        &format!("/repos/{}/keys/{id}", repo.full()),
         None,
     )
     .await?;
@@ -296,7 +292,7 @@ fn autolink_row(raw: &Json, fields: &[String]) -> Json {
 fn admin_rights(repo: &RepoRef, prefix: &str, tail: &str) -> String {
     format!(
         "{prefix}HTTP 404: Perhaps you are missing admin rights to the repository? (https://api.github.com/repos/{}/autolinks{tail})",
-        full(repo)
+        repo.full()
     )
 }
 
@@ -306,7 +302,7 @@ pub(crate) async fn autolink_list_cmd(account: &Account, flags: &Flags) -> Resul
     let links = match github_request(
         account,
         "GET",
-        &format!("/repos/{}/autolinks", full(&repo)),
+        &format!("/repos/{}/autolinks", repo.full()),
         None,
     )
     .await
@@ -362,7 +358,7 @@ pub(crate) async fn autolink_create_cmd(
     let created = github_request(
         account,
         "POST",
-        &format!("/repos/{}/autolinks", full(&repo)),
+        &format!("/repos/{}/autolinks", repo.full()),
         Some(&Json::Obj(body)),
     )
     .await
@@ -378,7 +374,7 @@ pub(crate) async fn autolink_create_cmd(
     Ok(Out::text(format!(
         "✓ Created repository autolink {} on {}\n",
         created.get("id").show(),
-        full(&repo)
+        repo.full()
     )))
 }
 
@@ -395,7 +391,7 @@ pub(crate) async fn autolink_view_cmd(
     let link = match github_request(
         account,
         "GET",
-        &format!("/repos/{}/autolinks/{id}", full(&repo)),
+        &format!("/repos/{}/autolinks/{id}", repo.full()),
         None,
     )
     .await
@@ -415,7 +411,7 @@ pub(crate) async fn autolink_view_cmd(
     }
     Ok(Out::text(format!(
         "Autolink in {}\n\nID: {}\nKey Prefix: {}\nURL Template: {}\nAlphanumeric: {}\n",
-        full(&repo),
+        repo.full(),
         link.get("id").show(),
         link.get("key_prefix").text(),
         link.get("url_template").text(),
@@ -435,7 +431,7 @@ pub(crate) async fn autolink_delete_cmd(
         return usage("--yes required when not running interactively");
     }
     let repo = repo_for(account, flags)?;
-    let path = format!("/repos/{}/autolinks/{id}", full(&repo));
+    let path = format!("/repos/{}/autolinks/{id}", repo.full());
     match github_request(account, "GET", &path, None).await {
         Err(Failure::Api(error)) if error.status == 404 => {
             return value(admin_rights(

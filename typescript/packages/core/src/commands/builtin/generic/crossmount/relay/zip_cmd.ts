@@ -18,7 +18,7 @@ import type { FlagValue } from '../../../../spec/types.ts'
 import { relayWalkOf } from '../../../generic_bind/archive_io.ts'
 import { dispatchedReadTree } from '../../../generic_bind/files.ts'
 import { zipGeneric } from '../../zip_cmd.ts'
-import { crossOpts, flatScopes, statOp, streamOp } from '../utils.ts'
+import { crossOpts, fileStreamOp, flatScopes, statOp } from '../utils.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
 import type { ByteSource } from '../../../../../io/types.ts'
 import { Files } from '../../../../../workspace/files.ts'
@@ -62,7 +62,7 @@ export async function runZip(
       vfs: vfs ?? new Files(dispatch, null, null, { ledger: false }).servedBy(null),
     },
     {
-      stream: streamOp(dispatch),
+      stream: fileStreamOp(dispatch),
       stat: statOp(dispatch),
       walk: relayWalkOf(dispatch, (dir: string) => owedNames(vfs, dir), 'zip', tree),
     },

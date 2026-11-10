@@ -6,12 +6,11 @@ use crate::calendar::{DAY, days, fields};
 use crate::request::Request;
 use crate::strftime::Strftime;
 use crate::task::{self, Host};
-use crate::{Stream, StreamError, parse_config};
+use crate::{Stream, StreamError, constants::WORK, number::BLANKS, parse_config};
 
 const FIRST: i128 = -62135596800;
 const LAST: i128 = 253402300799;
 const NANOS: i128 = 1_000_000_000;
-const BLANKS: &[u8] = b" \t\n\x0b\x0c\r";
 /// The zone facts a clock keeps; a run over more distinct moments asks again.
 const FACTS: usize = 1 << 12;
 /// The zones `-f` keeps a clock for.
@@ -48,13 +47,13 @@ struct Meter {
 
 impl Meter {
     fn new(host: Host) -> Self {
-        Self { host, work: 16384 }
+        Self { host, work: WORK }
     }
     async fn step(&mut self) {
         self.work -= 1;
         if self.work == 0 {
             self.host.pause().await;
-            self.work = 16384;
+            self.work = WORK;
         }
     }
 }
@@ -1118,28 +1117,6 @@ struct Lines {
     status: i32,
 }
 
-/// A refused word as a diagnostic quotes it: a byte at a time, what would
-/// be unreadable escaped.
-fn quoted_word(text: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(text.len());
-    for &byte in text {
-        match byte {
-            7 => out.extend_from_slice(b"\\a"),
-            8 => out.extend_from_slice(b"\\b"),
-            b'\t' => out.extend_from_slice(b"\\t"),
-            b'\n' => out.extend_from_slice(b"\\n"),
-            11 => out.extend_from_slice(b"\\v"),
-            12 => out.extend_from_slice(b"\\f"),
-            b'\r' => out.extend_from_slice(b"\\r"),
-            b'\'' => out.extend_from_slice(b"\\'"),
-            b'\\' => out.extend_from_slice(b"\\\\"),
-            0x20..=0x7e => out.push(byte),
-            _ => out.extend_from_slice(format!("\\{byte:03o}").as_bytes()),
-        }
-    }
-    out
-}
-
 impl Lines {
     /// Each read's lines are read against the time it came back, so lines
     /// that arrive apart name the moments they arrived at.
@@ -1207,7 +1184,7 @@ impl Lines {
         if printed.is_err() {
             self.status = 1;
             let mut message = b"date: invalid date '".to_vec();
-            message.extend_from_slice(&quoted_word(line));
+            message.extend_from_slice(crate::quoted(line).as_bytes());
             message.extend_from_slice(b"'\n");
             self.host.warn(&message);
         }

@@ -35,7 +35,7 @@ import { cell, formatSize, renderTable, row } from './table.ts'
 import { fetchSource } from './util.ts'
 
 const MAX_NAME_TRIES = 1024
-const PARSE_FAILURE = 'Failed to parse RFC 5322 message'
+export const PARSE_FAILURE = 'Failed to parse RFC 5322 message'
 const ENC = new TextEncoder()
 
 export interface AttachmentRow {

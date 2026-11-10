@@ -1,8 +1,10 @@
+import asyncio
 from dataclasses import replace
 
-from mirage.commands.builtin.find_printf import expand_printf
+from mirage.commands.builtin.find_printf import compile_printf, render_printf
 from mirage.commands.builtin.utils.identity import Identity
 from mirage.rs.find import parse_find_expression
+from mirage.shell.bytes import decode_text
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 
 
@@ -14,9 +16,9 @@ def _compiled(fmt):
 def _expand(fmt, row, search, st, warnings, target=None, identity=None):
     expr = parse_find_expression(["-printf", fmt])
     warnings.extend(expr.warnings)
-    return expand_printf(
-        expr.actions[0].parts, row, search, st, target, identity
-    )
+    engine = compile_printf(expr.actions[0].parts)
+    out = render_printf(engine, row, search, st, target, identity)
+    return decode_text(asyncio.run(out))
 
 
 def printf_needs_stat(fmt):

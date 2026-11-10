@@ -39,6 +39,7 @@ export const BUILDER: GenericCommand = {
   name: 'head',
   read: true,
   passThrough: true,
+  givesBack: true,
   aggregate: headerAggregate,
   fn: head,
 }

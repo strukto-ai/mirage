@@ -61,7 +61,7 @@ import { ExecutionNode } from '../types.ts'
 import { isControlFlowError } from '../workspace/failure.ts'
 
 /** Forward ordinary output while retaining chunks needing descriptor routing. */
-class StatementRecorder extends Recorder {
+export class StatementRecorder extends Recorder {
   constructor(
     private readonly session: SessionState,
     private readonly sink: JobConsole | null,

@@ -82,14 +82,21 @@ async function* aBlockThenAByte(): AsyncGenerator<Uint8Array> {
 
 describe('writeDescription', () => {
   it('leaves the offset after what landed when a later write fails', async () => {
-    const landed: [number, number][] = []
+    let landed = 3
     const dispatch: DispatchFn = async (op, _path, args, kwargs) => {
       if (kwargs?.admit_only === true) return [null, new IOResult()]
       await Promise.resolve()
+      if (op === 'stat') {
+        return [new FileStat({ name: 'f', size: landed, type: FileType.FILE }), new IOResult()]
+      }
       if (op === 'pwrite') {
-        if (landed.length > 0) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' })
-        const [part, offset] = args as [Uint8Array, number]
-        landed.push([offset, part.byteLength])
+        const [parts, offset] = args as [AsyncIterable<Uint8Array>, number]
+        expect(offset).toBe(3)
+        for await (const part of parts) {
+          if (landed === 3 + MEMORY_LIMIT)
+            throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' })
+          landed += part.byteLength
+        }
       }
       return [null, new IOResult()]
     }
@@ -99,13 +106,12 @@ describe('writeDescription', () => {
     await expect(
       writeDescription(dispatch, new SessionState({ sessionId: 's' }), file, aBlockThenAByte()),
     ).rejects.toThrow('ENOSPC')
-    expect(landed).toEqual([[3, MEMORY_LIMIT]])
-    expect(file.offset).toBe(3 + MEMORY_LIMIT)
+    expect([file.offset, landed]).toEqual([3 + MEMORY_LIMIT, 3 + MEMORY_LIMIT])
   })
 
   it.each([
     [0, ['stat', 'write']],
-    [5, ['stat', 'pwrite', 'pwrite']],
+    [5, ['stat', 'pwrite']],
   ])('lands a first write into a file of %i bytes as %j', async (size, ops) => {
     const calls: string[] = []
     const dispatch: DispatchFn = async (op, _path, args, kwargs) => {
@@ -114,7 +120,7 @@ describe('writeDescription', () => {
       if (op === 'stat') {
         return [new FileStat({ name: 'f', size, type: FileType.FILE }), new IOResult()]
       }
-      if (op === 'write') await materialize((args as [ByteSource])[0])
+      if (op === 'write' || op === 'pwrite') await materialize((args as [ByteSource])[0])
       return [null, new IOResult()]
     }
     const file = new FileDescription(SCOPE)
@@ -134,10 +140,8 @@ describe('writeDescription', () => {
       if (op === 'stat') {
         return [new FileStat({ name: 'f', size: 0, type: FileType.FILE }), new IOResult()]
       }
-      if (op === 'write') {
-        await released
-        await materialize((args as [ByteSource])[0])
-      }
+      if (op === 'write') await released
+      if (op === 'write' || op === 'pwrite') await materialize((args as [ByteSource])[0])
       return [null, new IOResult()]
     }
     const first = new FileDescription(SCOPE)

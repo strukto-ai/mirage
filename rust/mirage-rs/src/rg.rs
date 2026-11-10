@@ -9,9 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::rg_matcher::{CaptureRequirement, Matches, Options, Program, Search};
 use crate::utf8::Validator as Utf8;
-use crate::{Stream, StreamError, parse_config};
+use crate::{Stream, StreamError, constants::WORK, parse_config};
 
-const WORK: usize = 16 * 1024;
 const INPUT_LIMIT: usize = 96 * 1024;
 const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 

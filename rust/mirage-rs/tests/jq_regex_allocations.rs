@@ -1,43 +1,7 @@
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
+mod common;
 
-struct CountAlloc;
-static LIVE: AtomicUsize = AtomicUsize::new(0);
-static PEAK: AtomicUsize = AtomicUsize::new(0);
-static ALLOCATED: AtomicUsize = AtomicUsize::new(0);
-
-fn allocated(size: usize) {
-    ALLOCATED.fetch_add(size, Ordering::Relaxed);
-    let live = LIVE.fetch_add(size, Ordering::Relaxed) + size;
-    PEAK.fetch_max(live, Ordering::Relaxed);
-}
-
-unsafe impl GlobalAlloc for CountAlloc {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let ptr = unsafe { System.alloc(layout) };
-        if !ptr.is_null() {
-            allocated(layout.size());
-        }
-        ptr
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
-        unsafe { System.dealloc(ptr, layout) }
-    }
-
-    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, size: usize) -> *mut u8 {
-        let replacement = unsafe { System.realloc(ptr, layout, size) };
-        if !replacement.is_null() {
-            LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
-            allocated(size);
-        }
-        replacement
-    }
-}
-
-#[global_allocator]
-static ALLOCATOR: CountAlloc = CountAlloc;
+use common::{ALLOCATED, LIVE, PEAK};
+use std::sync::atomic::Ordering;
 
 fn runtime_compile_allocations(pattern: &str) -> (usize, usize) {
     let config = serde_json::json!({

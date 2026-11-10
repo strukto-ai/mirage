@@ -5,14 +5,15 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Stream, StreamError};
+use crate::{Stream, StreamError, constants::WORK};
 
 use super::eval::{self, DEBUG, ERROR, Eval, Formatting, HALT, PRINT, Position, STDERR};
 use super::format;
 use super::link::{Linked, Links, resolve};
 use super::meter::{self, Meter};
+use super::options::ERROR_SYSTEM;
 use super::parse::{Scanned, Scanner};
-use super::unicode::{Bytes, DecodeCursor, WORK};
+use super::unicode::{Bytes, DecodeCursor};
 use super::value::{List, Value};
 
 /// The most bytes one read of jq's input reader takes (util.c): fgets
@@ -36,10 +37,6 @@ const OK: f64 = 0.0;
 const OK_NULL_KIND: f64 = -1.0;
 const OK_NO_OUTPUT: f64 = -4.0;
 const ERROR_UNKNOWN: f64 = 5.0;
-
-/// jq's exit status when it could not read one of its inputs, whatever
-/// the runs answered.
-const ERROR_SYSTEM: i32 = 2;
 
 /// What the stream fails with once what jq holds outgrows the memory it
 /// was given, which the host reports as the workspace's own refusal.

@@ -81,7 +81,7 @@ export interface CommandFiles {
   readonly isWarm: (path: PathSpec) => Promise<boolean>
   readonly write: (path: PathSpec, data: ByteSource) => Promise<void>
   readonly append: (path: PathSpec, data: ByteSource) => Promise<void>
-  readonly pwrite: (path: PathSpec, data: Uint8Array, offset: number) => Promise<void>
+  readonly pwrite: (path: PathSpec, data: ByteSource, offset: number) => Promise<void>
   readonly mkdir: (path: PathSpec, parents?: boolean) => Promise<void>
   readonly unlink: (path: PathSpec) => Promise<void>
   readonly rmdir: (path: PathSpec) => Promise<void>
@@ -734,7 +734,7 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
     append: guard(async (path: PathSpec, data: ByteSource) => {
       await call('append', path, [data])
     }),
-    pwrite: guard(async (path: PathSpec, data: Uint8Array, offset: number) => {
+    pwrite: guard(async (path: PathSpec, data: ByteSource, offset: number) => {
       await call('pwrite', path, [data, offset])
     }),
     mkdir: guard(async (path: PathSpec, parents?: boolean) => {

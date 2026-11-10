@@ -14,10 +14,10 @@
 
 import type { GenericCommand } from '../adapter.ts'
 import * as awk from './awk.ts'
-import * as b2sum from './b2sum.ts'
 import * as base64 from './base64.ts'
 import * as basename from './basename.ts'
 import * as cat from './cat.ts'
+import * as checksums from './checksums.ts'
 import * as cmp from './cmp.ts'
 import * as column from './column.ts'
 import * as comm from './comm.ts'
@@ -43,7 +43,6 @@ import * as jq from './jq.ts'
 import * as look from './look.ts'
 import * as ls from './ls.ts'
 import * as md5 from './md5.ts'
-import * as md5sum from './md5sum.ts'
 import * as mkdir from './mkdir.ts'
 import * as mktemp from './mktemp.ts'
 import * as mv from './mv.ts'
@@ -59,11 +58,6 @@ import * as rg from './rg.ts'
 import * as rm from './rm.ts'
 import * as rmdir from './rmdir.ts'
 import * as sed from './sed.ts'
-import * as sha1sum from './sha1sum.ts'
-import * as sha224sum from './sha224sum.ts'
-import * as sha256sum from './sha256sum.ts'
-import * as sha384sum from './sha384sum.ts'
-import * as sha512sum from './sha512sum.ts'
 import * as shuf from './shuf.ts'
 import * as sort from './sort.ts'
 import * as split from './split.ts'
@@ -91,7 +85,6 @@ import * as zipCmd from './zip_cmd.ts'
 
 export const BUILDERS: readonly GenericCommand[] = [
   awk.BUILDER,
-  b2sum.BUILDER,
   base64.BUILDER,
   basename.BUILDER,
   cat.BUILDER,
@@ -121,7 +114,6 @@ export const BUILDERS: readonly GenericCommand[] = [
   ls.DIR_BUILDER,
   ls.VDIR_BUILDER,
   md5.BUILDER,
-  md5sum.BUILDER,
   mkdir.BUILDER,
   mktemp.BUILDER,
   mv.BUILDER,
@@ -137,11 +129,6 @@ export const BUILDERS: readonly GenericCommand[] = [
   rm.BUILDER,
   rmdir.BUILDER,
   sed.BUILDER,
-  sha1sum.BUILDER,
-  sha224sum.BUILDER,
-  sha256sum.BUILDER,
-  sha384sum.BUILDER,
-  sha512sum.BUILDER,
   shuf.BUILDER,
   sort.BUILDER,
   split.BUILDER,
@@ -163,6 +150,7 @@ export const BUILDERS: readonly GenericCommand[] = [
   wc.BUILDER,
   xxd.BUILDER,
   zcat.BUILDER,
+  ...checksums.BUILDERS,
   ...compressors.BUILDERS,
   ...zcompare.BUILDERS,
   zgrep.BUILDER,

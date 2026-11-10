@@ -8,7 +8,7 @@ use super::link::{Body, Dep, Unit};
 use super::syntax::{Ast, Def, Loc, Pattern, PatternKey, Update, locate};
 use super::value::Value;
 
-enum Bind {
+pub(super) enum Bind {
     Var(String),
     Func {
         name: String,
@@ -17,14 +17,14 @@ enum Bind {
     },
 }
 
-struct Scope {
-    bind: Bind,
-    next: Env,
+pub(super) struct Scope<B> {
+    pub(super) bind: B,
+    pub(super) next: Env<B>,
 }
 
-type Env = Option<Rc<Scope>>;
+pub(super) type Env<B = Bind> = Option<Rc<Scope<B>>>;
 
-impl Drop for Scope {
+impl<B> Drop for Scope<B> {
     fn drop(&mut self) {
         let mut next = self.next.take();
         while let Some(scope) = next {
@@ -36,7 +36,7 @@ impl Drop for Scope {
     }
 }
 
-fn with(env: &Env, bind: Bind) -> Env {
+pub(super) fn with<B>(env: &Env<B>, bind: B) -> Env<B> {
     Some(Rc::new(Scope {
         bind,
         next: env.clone(),

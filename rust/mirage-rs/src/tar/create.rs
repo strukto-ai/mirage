@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use super::header::{self, BLOCK, Kind, RECORD, Stamp, padding};
-use super::read::trimmed;
+use super::read::{FEED, trimmed};
 use super::transform::Scope;
 use super::{
     Config, Entry, FAILED, Planned, READ, TRAILER, WINDOW, escaped, lines, open_failure, read,
@@ -17,8 +17,6 @@ use crate::task::Host;
 
 /// The spool a member of unknown size is read into first.
 const SPOOL: u32 = 2;
-/// The most a codec stream takes a feed.
-const FEED: usize = 16 * 1024;
 
 /// The archive on its way out: through the compressor, gathered to a window,
 /// then to the host's file or the output.
@@ -339,7 +337,7 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
         let (mode, data) = (WriteMode::Create, Vec::new());
         let reply = match &config.unopened {
             Some(text) => Reply {
-                error: Some(text.iter().map(|&b| char::from(b)).collect()),
+                error: Some(crate::byte_text(text)),
                 ..Reply::default()
             },
             None => host.ask(Request::Write { path, mode, data }).await.0,

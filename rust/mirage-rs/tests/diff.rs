@@ -1,4 +1,4 @@
-use mirage_rs::{Stream, open};
+use mirage_rs::{Stream, drain_steps, open};
 
 fn compare(config: &str, old: &[u8], new: &[u8]) -> (Vec<u8>, Vec<u8>, i32, Vec<u8>) {
     let mut stream = open("diff", config.as_bytes()).expect("open diff");
@@ -14,8 +14,8 @@ fn compare(config: &str, old: &[u8], new: &[u8]) -> (Vec<u8>, Vec<u8>, i32, Vec<
     stream.finish(&mut output).unwrap();
     while stream.busy() {
         let start = output.len();
-        stream.drain(&mut output).unwrap();
-        assert!(output.len() - start <= 65536);
+        drain_steps(stream.as_mut(), &mut output).unwrap();
+        assert!(output.len() - start <= 64 << 10);
     }
     let mut stderr = Vec::new();
     stream.take_stderr(&mut stderr);
@@ -236,7 +236,8 @@ fn brief_preserves_normalization_newline_and_binary_rules() {
 
 #[test]
 fn large_output_drains_in_bounded_chunks() {
-    let old = vec![b'x'; 200000];
+    let mut old = b"a\n".repeat(3000);
+    old.extend(vec![b'x'; 200000]);
     let new = vec![b'y'; 200000];
     let result = compare("{}", &old, &new);
     assert!(result.0.len() > 400000);

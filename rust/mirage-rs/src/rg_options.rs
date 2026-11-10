@@ -206,9 +206,7 @@ fn all<'a>(options: &'a [Typed], name: &'a str) -> impl Iterator<Item = &'a [u8]
 
 /// Bytes as the host reads a byte view: one character per byte.
 fn text(bytes: Option<Vec<u8>>) -> Json {
-    bytes.map_or(Json::Null, |bytes| {
-        Json::from(bytes.into_iter().map(char::from).collect::<String>())
-    })
+    bytes.map_or(Json::Null, |bytes| Json::from(crate::byte_text(&bytes)))
 }
 
 /// ripgrep's refusal of an option value it cannot parse, exit 2.
@@ -621,7 +619,7 @@ mod tests {
     fn scan(options: &[(&str, &[u8])]) -> Result<Json, (String, i32)> {
         let options: Vec<(&str, String)> = options
             .iter()
-            .map(|(name, raw)| (*name, raw.iter().map(|&b| char::from(b)).collect()))
+            .map(|(name, raw)| (*name, crate::byte_text(raw)))
             .collect();
         let config = json!({"command": "rg", "options": options}).to_string();
         let mut stream = open("scan", config.as_bytes())

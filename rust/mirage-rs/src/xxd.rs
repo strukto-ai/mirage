@@ -9,11 +9,10 @@ use serde_json::{Value as Json, json};
 
 use crate::number;
 use crate::scan::{Typed, Values, last, unknown};
-use crate::{Stream, StreamError, parse_config};
+use crate::{Stream, StreamError, constants::OUTPUT, parse_config};
 
 const BACKWARDS: &str = "xxd: Sorry, cannot seek backwards.";
 // The most bytes one call emits while a dump's offset skips ahead.
-const WINDOW: usize = 64 * 1024;
 const LOWER: &[u8; 16] = b"0123456789abcdef";
 const UPPER: &[u8; 16] = b"0123456789ABCDEF";
 const CONFLICT: &str = "xxd: only one of -b, -e, -u, -p, -i can be used";
@@ -697,7 +696,7 @@ impl Reverse {
     }
 
     fn emit(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        let mut room = WINDOW;
+        let mut room = OUTPUT;
         while room > 0 {
             match self.pending.front_mut() {
                 Some(Piece::Gap(gap)) => {

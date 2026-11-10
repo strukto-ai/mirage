@@ -36,6 +36,23 @@ function nextToken(data: unknown): string | null {
   return typeof next === 'string' && next !== '' ? next : null
 }
 
+async function pages(
+  tokenManager: TokenManager,
+  url: string,
+  base: Record<string, string>,
+): Promise<[Record<string, JsonValue>[], Record<string, unknown>]> {
+  const items: Record<string, JsonValue>[] = []
+  let token: string | null = null
+  for (let i = 0; i < MAX_PAGES; i += 1) {
+    const page = token !== null ? { ...base, pageToken: token } : base
+    const data = await googleGet(tokenManager, url, page)
+    for (const item of rows(data)) items.push(item)
+    token = nextToken(data)
+    if (token === null) return [items, data as Record<string, unknown>]
+  }
+  throw new Error(PAGE_LIMIT)
+}
+
 /**
  * List the account's calendars.
  *
@@ -49,16 +66,7 @@ export async function listCalendars(
   const url = `${calendarBase(tokenManager)}/users/me/calendarList`
   const base: Record<string, string> = {}
   if (minAccessRole !== undefined && minAccessRole !== '') base.minAccessRole = minAccessRole
-  const items: Record<string, JsonValue>[] = []
-  let token: string | null = null
-  for (let i = 0; i < MAX_PAGES; i += 1) {
-    const page = token !== null ? { ...base, pageToken: token } : base
-    const data = await googleGet(tokenManager, url, page)
-    for (const item of rows(data)) items.push(item)
-    token = nextToken(data)
-    if (token === null) break
-  }
-  if (token !== null) throw new Error(PAGE_LIMIT)
+  const [items] = await pages(tokenManager, url, base)
   return items
 }
 
@@ -98,16 +106,7 @@ export async function listEvents(
   if (Number.isFinite(lo)) base.timeMin = new Date(Math.floor(lo) * 1000).toISOString()
   if (timeZone !== undefined && timeZone !== '') base.timeZone = timeZone
   if (query !== undefined) base.q = query
-  const items: Record<string, JsonValue>[] = []
-  let token: string | null = null
-  for (let i = 0; i < MAX_PAGES; i += 1) {
-    const page = token !== null ? { ...base, pageToken: token } : base
-    const data = await googleGet(tokenManager, url, page)
-    for (const item of rows(data)) items.push(item)
-    token = nextToken(data)
-    if (token === null) break
-  }
-  if (token !== null) throw new Error(PAGE_LIMIT)
+  const [items] = await pages(tokenManager, url, base)
   return scope.bounded
     ? items.filter((event) => {
         const span = eventSpan(event, timeZone ?? 'UTC')
@@ -145,19 +144,9 @@ export async function syncEvents(
   const base: Record<string, string> = { singleEvents: 'true', maxResults: '2500' }
   if (timeZone !== undefined && timeZone !== '') base.timeZone = timeZone
   if (syncToken !== null) base.syncToken = syncToken
-  const items: Record<string, JsonValue>[] = []
-  let token: string | null = null
-  for (let i = 0; i < MAX_PAGES; i += 1) {
-    const page = token !== null ? { ...base, pageToken: token } : base
-    const data = await googleGet(tokenManager, url, page)
-    for (const item of rows(data)) items.push(item)
-    token = nextToken(data)
-    if (token === null) {
-      const done = (data as Record<string, unknown>).nextSyncToken
-      return [items, typeof done === 'string' ? done : null]
-    }
-  }
-  throw new Error(PAGE_LIMIT)
+  const [items, last] = await pages(tokenManager, url, base)
+  const done = last.nextSyncToken
+  return [items, typeof done === 'string' ? done : null]
 }
 
 /** Delete one event. */

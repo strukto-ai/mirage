@@ -19,7 +19,7 @@ import { sendRaw } from './smtp.ts'
 
 const SENT_ATTRIBUTE = '\\sent'
 const DEFAULT_SENT_FOLDER = 'Sent'
-const SEEN_FLAG = '\\Seen'
+export const SEEN_FLAG = '\\Seen'
 
 /**
  * Names the mailbox a sent copy belongs in.

@@ -131,7 +131,7 @@ pub(crate) mod tests {
     pub(crate) fn scan(command: &str, options: &[(&str, &[u8])]) -> Result<Json, (Vec<u8>, i32)> {
         let options: Vec<(&str, String)> = options
             .iter()
-            .map(|(name, raw)| (*name, raw.iter().map(|&b| char::from(b)).collect()))
+            .map(|(name, raw)| (*name, crate::byte_text(raw)))
             .collect();
         let config = json!({"command": command, "options": options}).to_string();
         let mut stream = open("scan", config.as_bytes()).map_err(|e| (e.stderr(), e.status))?;

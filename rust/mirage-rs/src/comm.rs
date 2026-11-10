@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use serde::Deserialize;
 
 use crate::records::{Records, Take};
-use crate::{Stream, StreamError, parse_config};
+use crate::{Stream, StreamError, constants::WORK, parse_config};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -63,8 +63,6 @@ struct Comm {
     output: VecDeque<Emit>,
     busy: bool,
 }
-
-const WORK: usize = 16384;
 
 #[derive(Clone, Copy)]
 enum Phase {

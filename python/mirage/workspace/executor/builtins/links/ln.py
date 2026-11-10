@@ -41,7 +41,8 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import DotWalkLoop, FsCondition
-from mirage.io.stream import materialize
+from mirage.io.stream import discard_streams, ensure_stream, prime_stream
+from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import FileStat, FileType, PathSpec, word_text
@@ -523,8 +524,9 @@ async def _source_bytes(
     typed: str,
     link_typed: str,
     flags: LnFlags,
-) -> tuple[bytes | None, str | None]:
-    """The bytes a hard link copies, or the refusal in ln's words.
+) -> tuple[ByteSource | None, str | None]:
+    """The bytes a hard link copies, a stream already open, or the
+    refusal in ln's words.
 
     A source whose stat passes but whose read fails (a policy deny, a
     backend that answers stat but not read) is refused the way GNU
@@ -564,12 +566,12 @@ async def _source_bytes(
             )
         return None, f"ln: {typed}: hard link not allowed for directory\n"
     try:
-        data, _ = await dispatch("read", PathSpec.from_str_path(src_abs))
-        if not isinstance(data, bytes):
-            data = await materialize(data)
+        data, _ = await dispatch(
+            "read", PathSpec.from_str_path(src_abs), stream=True
+        )
+        return await prime_stream(ensure_stream(data)), None
     except FS_ERRORS as exc:
         return None, f"ln: failed to access '{typed}': {fs_strerror(exc)}\n"
-    return data, None
 
 
 async def make_link(
@@ -595,13 +597,18 @@ async def make_link(
         errors (list[str]): stderr lines, appended in place.
         out (list[str]): ``-v`` lines, appended in place.
     """
+    opened: list[ByteSource | None] = []
     try:
-        await _attempt_link(links, dispatch, cwd, plan, flags, errors, out)
+        await _attempt_link(
+            links, dispatch, cwd, plan, flags, errors, out, opened
+        )
     except PermissionError as exc:
         why = classify(exc) or FsCondition.EACCES
         errors.append(
             _refused(flags, plan.link_typed, word_text(plan.source), why)
         )
+    finally:
+        await discard_streams(*opened)
 
 
 async def _walk_refusal(
@@ -730,7 +737,7 @@ async def _create_link(
     dispatch: DispatchFn,
     link_spec: PathSpec,
     link_target: str | None,
-    data: bytes | None,
+    data: ByteSource | None,
     flags: LnFlags,
     typed: str,
     target_typed: str,
@@ -741,7 +748,7 @@ async def _create_link(
         dispatch (DispatchFn): op dispatcher.
         link_spec (PathSpec): the link's name.
         link_target (str | None): the symlink's target, None for a copy.
-        data (bytes | None): a copy's bytes.
+        data (ByteSource | None): a copy's bytes.
         flags (LnFlags): the parsed flags.
         typed (str): the name as typed.
         target_typed (str): the target as typed.
@@ -786,6 +793,7 @@ async def _attempt_link(
     flags: LnFlags,
     errors: list[str],
     out: list[str],
+    opened: list[ByteSource | None],
 ) -> None:
     """``make_link`` up to a refused stat of the name.
 
@@ -806,12 +814,14 @@ async def _attempt_link(
         flags (LnFlags): the parsed flags.
         errors (list[str]): stderr lines, appended in place.
         out (list[str]): ``-v`` lines, appended in place.
+        opened (list[ByteSource | None]): the copy's source once it is open,
+            for the caller to close however this returns.
     """
     kind = "symbolic link" if flags.symbolic else "hard link"
     typed = plan.link_typed
     target_typed = word_text(plan.source)
     link_target: str | None = None
-    data: bytes | None = None
+    data: ByteSource | None = None
     refusal = await _walk_refusal(links, dispatch, cwd, plan, flags)
     if refusal is not None:
         errors.append(refusal)
@@ -844,6 +854,7 @@ async def _attempt_link(
             if refusal is not None:
                 errors.append(refusal)
                 return
+            opened.append(data)
     if links.is_mount(plan.link_abs):
         errors.append(f"ln: failed to create {kind} '{typed}': File exists\n")
         return

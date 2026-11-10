@@ -43,6 +43,20 @@ const BODY_FILE = new Argument(['-F', '--body-file'], {
 const TITLE = new Argument(['-t', '--title'], { help: 'Set the new title.' })
 const REOPEN_COMMENT = new Argument(['-c', '--comment'], { help: 'Add a reopening comment' })
 const NUMBER = new Argument('NUMBER', { metavar: '[<number> | <url> | <branch>]' })
+const COMMENT_OPTIONS = [
+  new Argument(['-b', '--body'], { metavar: 'text', help: 'The comment body text' }),
+  BODY_FILE,
+  flag({
+    long: '--create-if-none',
+    description: 'Create a new comment if no comments are found. Can be used only with --edit-last',
+  }),
+  flag({ long: '--delete-last', description: 'Delete the last comment of the current user' }),
+  flag({ long: '--edit-last', description: 'Edit the last comment of the current user' }),
+  flag({
+    long: '--yes',
+    description: 'Skip the delete confirmation prompt when --delete-last is provided',
+  }),
+]
 
 // The grammar and request mapping consume the same setting definition.
 function repoEditOption(field: RepoEditField): Argument {
@@ -193,23 +207,8 @@ function issue(): CommandSpec {
         description: 'Add a comment to an issue',
         arguments: [
           REPO,
-          new Argument(['-b', '--body'], { metavar: 'text', help: 'The comment body text' }),
-          BODY_FILE,
           new Argument('NUMBER', { metavar: '{<number> | <url>}' }),
-          flag({
-            long: '--create-if-none',
-            description:
-              'Create a new comment if no comments are found. Can be used only with --edit-last',
-          }),
-          flag({
-            long: '--delete-last',
-            description: 'Delete the last comment of the current user',
-          }),
-          flag({ long: '--edit-last', description: 'Edit the last comment of the current user' }),
-          flag({
-            long: '--yes',
-            description: 'Skip the delete confirmation prompt when --delete-last is provided',
-          }),
+          ...COMMENT_OPTIONS,
         ],
       }),
       new CommandSpec({
@@ -488,26 +487,7 @@ function pr(): CommandSpec {
       new CommandSpec({
         name: 'comment',
         description: 'Add a comment to a pull request',
-        arguments: [
-          REPO,
-          new Argument(['-b', '--body'], { metavar: 'text', help: 'The comment body text' }),
-          BODY_FILE,
-          NUMBER,
-          flag({
-            long: '--create-if-none',
-            description:
-              'Create a new comment if no comments are found. Can be used only with --edit-last',
-          }),
-          flag({
-            long: '--delete-last',
-            description: 'Delete the last comment of the current user',
-          }),
-          flag({ long: '--edit-last', description: 'Edit the last comment of the current user' }),
-          flag({
-            long: '--yes',
-            description: 'Skip the delete confirmation prompt when --delete-last is provided',
-          }),
-        ],
+        arguments: [REPO, NUMBER, ...COMMENT_OPTIONS],
       }),
       new CommandSpec({
         name: 'diff',

@@ -293,12 +293,7 @@ describe('find actions', () => {
       await new Promise<void>(() => undefined)
     }
     const shared = new SharedStdin(endless())
-    const got: string[] = []
-    for await (const chunk of shared) {
-      got.push(new TextDecoder().decode(chunk))
-      if (got.length === 2) break
-    }
-    expect(got).toEqual(['a', 'b'])
+    expect(new TextDecoder().decode((await shared.next()).value as Uint8Array)).toBe('ab')
   })
 })
 

@@ -93,6 +93,7 @@ export class BoxVFS extends BaseVFS {
   } as const
   override vfsMd: string = VFS_MD
   override readonly wholeWordSearch: boolean = true
+  override readonly searchNeedsWalkLimit: boolean = true
   readonly config: BoxConfig
   override readonly accessor: BoxAccessor
 
@@ -204,15 +205,6 @@ export class BoxVFS extends BaseVFS {
     handed: Handed = {},
   ): Promise<void> {
     return boxTruncate(this.accessor, path, length, noCreate, handed)
-  }
-
-  /**
-   * Whether this VFS answers `name`; with no walk limit it reads every
-   * file rather than ask the service's search.
-   */
-  override supports(name: string): boolean {
-    if (name === 'files_containing' && this.walkLimit < 0) return false
-    return super.supports(name)
   }
 
   override filesContaining(

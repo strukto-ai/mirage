@@ -32,7 +32,7 @@ class StoredRAM(RAMVFS):
         return self.stored
 
 
-async def _sha224sum(vfs: StoredRAM, line: str) -> str:
+async def _run(vfs: StoredRAM, line: str) -> str:
     ws = Workspace({"/m/": vfs}, mode=MountMode.WRITE)
     await (await ws.shell("printf abc > /m/f")).materialize_stdout()
     io = await ws.shell(line)
@@ -40,14 +40,31 @@ async def _sha224sum(vfs: StoredRAM, line: str) -> str:
 
 
 @pytest.mark.asyncio
+async def test_b2sum_asks_the_mount_for_its_length():
+    vfs = StoredRAM(None)
+    out = await _run(vfs, "b2sum -l 256 /m/f; b2sum /m/f")
+    assert vfs.asked == ["blake2b-256", "blake2b"]
+    assert out == (
+        f"{hashlib.blake2b(b'abc', digest_size=32).hexdigest()}  /m/f\n"
+        f"{hashlib.blake2b(b'abc').hexdigest()}  /m/f\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_b2sum_prints_a_stored_digest_without_reading():
+    out = await _run(StoredRAM("ab" * 64), "b2sum /m/f")
+    assert out == f"{'ab' * 64}  /m/f\n"
+
+
+@pytest.mark.asyncio
 async def test_sha224sum_asks_the_mount_for_sha224():
     vfs = StoredRAM(None)
-    out = await _sha224sum(vfs, "sha224sum /m/f")
+    out = await _run(vfs, "sha224sum /m/f")
     assert vfs.asked == ["sha224"]
     assert out == f"{hashlib.sha224(b'abc').hexdigest()}  /m/f\n"
 
 
 @pytest.mark.asyncio
 async def test_sha224sum_prints_a_stored_digest_without_reading():
-    out = await _sha224sum(StoredRAM("cd" * 28), "sha224sum --tag /m/f")
+    out = await _run(StoredRAM("cd" * 28), "sha224sum --tag /m/f")
     assert out == f"SHA224 (/m/f) = {'cd' * 28}\n"

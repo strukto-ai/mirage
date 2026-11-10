@@ -141,7 +141,7 @@ class CommandFiles:
     is_warm: Callable[[PathSpec], Awaitable[bool]]
     write: Callable[[PathSpec, ByteSource], Awaitable[None]]
     append: Callable[[PathSpec, ByteSource], Awaitable[None]]
-    pwrite: Callable[[PathSpec, bytes, int], Awaitable[None]]
+    pwrite: Callable[[PathSpec, ByteSource, int], Awaitable[None]]
     mkdir: Callable[..., Awaitable[None]]
     unlink: Callable[[PathSpec], Awaitable[None]]
     rmdir: Callable[[PathSpec], Awaitable[None]]
@@ -913,7 +913,7 @@ def command_files(
     async def append(path: PathSpec, data: ByteSource) -> None:
         await call("append", path, data=data)
 
-    async def pwrite(path: PathSpec, data: bytes, offset: int) -> None:
+    async def pwrite(path: PathSpec, data: ByteSource, offset: int) -> None:
         await call("pwrite", path, data=data, offset=offset)
 
     async def mkdir(path: PathSpec, parents: bool = False) -> None:

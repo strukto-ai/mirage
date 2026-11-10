@@ -28,7 +28,6 @@ import {
   type Evicted,
   type ListResult,
   type LookupResult,
-  type SetDirOptions,
 } from './config.ts'
 import {
   CHILDREN_PREFIX,
@@ -1156,23 +1155,6 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     return [{ entries: children, version, window: window === '1' }, expiresAt]
   }
 
-  async setDir(
-    vfsPath: string,
-    entries: readonly [string, FileStat][],
-    expiredAt?: Date | null,
-    options: SetDirOptions = {},
-  ): Promise<Evicted[]> {
-    return this.storeDir(
-      vfsPath,
-      entries,
-      expiredAt,
-      false,
-      options.window !== true,
-      options.excluded ?? [],
-      options.version ?? null,
-    ).then((result) => result ?? [])
-  }
-
   override async setPartialDir(
     vfsPath: string,
     entries: readonly [string, FileStat][],
@@ -1181,7 +1163,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     await this.storeDir(vfsPath, entries, expiredAt, true, false)
   }
 
-  private storeDir(
+  protected override storeDir(
     vfsPath: string,
     entries: readonly [string, FileStat][],
     expiredAt: Date | null | undefined,
@@ -1295,25 +1277,6 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     }
     if (changed || this.listings.contradicts(paths)) this.listings.wrote()
     return changed
-  }
-
-  override refillDir(
-    path: string,
-    entries: readonly [string, FileStat][],
-    token: string,
-    expiredAt?: Date | null,
-    options: SetDirOptions & { partial?: boolean } = {},
-  ): Promise<Evicted[] | null> {
-    return this.storeDir(
-      path,
-      entries,
-      expiredAt,
-      options.partial === true,
-      options.partial !== true && options.window !== true,
-      options.excluded ?? [],
-      options.version ?? null,
-      token,
-    )
   }
 
   invalidateEntry(vfsPath: string): Promise<void> {

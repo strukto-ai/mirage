@@ -28,7 +28,6 @@ from mirage.commands.builtin.utils.links import (
     mount_view,
     owed_names,
 )
-from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
@@ -75,7 +74,7 @@ async def run_zip(
     )
     return await zip_generic(
         flat_scopes(scopes),
-        stream=normalized_read(prim["read_bytes"]),
+        stream=prim["read_stream"],
         dispatch=dispatch,
         cwd=PathSpec.from_str_path(cwd),
         stat=prim["stat"],

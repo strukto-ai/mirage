@@ -2,9 +2,7 @@ use serde::Deserialize;
 
 use crate::records::{Records, Take};
 use crate::utf8::previous_lossy as previous;
-use crate::{Stream, StreamError, parse_config};
-
-const WORK: usize = 16384;
+use crate::{Stream, StreamError, constants::WORK, parse_config};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

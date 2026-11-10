@@ -85,12 +85,22 @@ export abstract class IndexCacheStore {
    * row beneath it. Rows only `put` wrote were never named, so they stay. A
    * window evicts nothing. Resolves to the children that went.
    */
-  abstract setDir(
+  setDir(
     vfsPath: string,
     entries: readonly [string, FileStat][],
     expiredAt?: Date | null,
-    options?: SetDirOptions,
-  ): Promise<Evicted[]>
+    options: SetDirOptions = {},
+  ): Promise<Evicted[]> {
+    return this.storeDir(
+      vfsPath,
+      entries,
+      expiredAt,
+      false,
+      options.window !== true,
+      options.excluded ?? [],
+      options.version ?? null,
+    ).then((result) => result ?? [])
+  }
   /**
    * Hand children a re-list found gone to the mount's cleanup. A raw store
    * belongs to no mount, so there is nothing to clean.
@@ -108,13 +118,38 @@ export abstract class IndexCacheStore {
   }
   /** null rejects an older refill without reporting any deletions. */
   refillDir(
-    _path: string,
-    _entries: readonly [string, FileStat][],
-    _token: string,
-    _expiredAt?: Date | null,
-    _options: SetDirOptions & { partial?: boolean } = {},
+    path: string,
+    entries: readonly [string, FileStat][],
+    token: string,
+    expiredAt?: Date | null,
+    options: SetDirOptions & { partial?: boolean } = {},
   ): Promise<Evicted[] | null> {
-    throw new Error('refillDir is not implemented')
+    return this.storeDir(
+      path,
+      entries,
+      expiredAt,
+      options.partial === true,
+      options.partial !== true && options.window !== true,
+      options.excluded ?? [],
+      options.version ?? null,
+      token,
+    )
+  }
+  /**
+   * The one listing write setDir and refillDir go through; a stale `refill`
+   * token answers null.
+   */
+  protected storeDir(
+    _vfsPath: string,
+    _entries: readonly [string, FileStat][],
+    _expiredAt: Date | null | undefined,
+    _partial: boolean,
+    _evict: boolean,
+    _excluded?: readonly string[],
+    _version?: string | null,
+    _refill?: string | null,
+  ): Promise<Evicted[] | null> {
+    throw new Error('storeDir is not implemented')
   }
   /**
    * Drop a changed row and demote its parent listing to partial.

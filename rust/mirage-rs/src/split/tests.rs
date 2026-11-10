@@ -149,13 +149,13 @@ fn csplit_cuts_lines_that_cross_the_host_chunks() {
 
 #[test]
 fn csplit_holds_no_line_past_its_limit() {
-    let line = "a".repeat(super::csplit::MAX_LEN + 1);
+    let line = "a".repeat(crate::constants::MAX_HELD + 1);
     let (host, status) = run("csplit", json!({}), &["in", "/b/"], &line);
     assert_eq!(
         (host.err.as_slice(), status),
         (b"csplit: memory exhausted\n".as_slice(), 1)
     );
-    let lines = "a line of sixteen\n".repeat(super::csplit::MAX_LEN / 8);
+    let lines = "a line of sixteen\n".repeat(crate::constants::MAX_HELD / 16);
     let (host, _) = run("csplit", json!({}), &["in", "/b/-100000"], &lines);
     assert_eq!(host.err, b"csplit: memory exhausted\n");
     assert_eq!(host.files.len(), 1);

@@ -102,6 +102,7 @@ from mirage.commands.spec.types import (
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.fnmatch import fnmatch
+from mirage.utils.glob_walk import GLOB_CHARS
 from mirage.version import __version__
 from mirage.workspace.files import Files
 
@@ -115,7 +116,6 @@ REF_NAMESPACES = {
     "--tags": "refs/tags/",
     "--remotes": "refs/remotes/",
 }
-GLOB_CHARS = "?*["
 PATH_ABSOLUTE = "absolute"
 PATH_RELATIVE = "relative"
 OBJECT_FORMAT_MODES = ("storage", "input", "output")

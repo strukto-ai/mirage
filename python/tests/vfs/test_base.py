@@ -515,7 +515,7 @@ def test_search_off_without_a_walk_limit_is_not_answered():
         if cls.files_containing is BaseVFS.files_containing:
             continue
         guards = "walk_limit < 0" in inspect.getsource(cls.files_containing)
-        assert guards == (cls.supports is not BaseVFS.supports), name
+        assert guards == cls.search_needs_walk_limit, name
         if guards:
             vfs = cls.__new__(cls)
             BaseVFS.__init__(vfs)

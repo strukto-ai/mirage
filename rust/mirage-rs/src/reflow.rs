@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 use serde_json::Value as Json;
 
-use crate::number::{self, EOVERFLOW, ERANGE};
+use crate::number::{self, EOVERFLOW, ERANGE, is_space};
 use crate::scan::{Typed, Values, last, unknown};
 use crate::width::TAB_WIDTH;
 use crate::{Stream, StreamError, parse_config, quoted};
@@ -45,10 +45,6 @@ const LATER: i64 = 9;
 const CLOSERS: &[u8] = b")]'\"";
 const OPENERS: &[u8] = b"([`'\"";
 const STOPS: &[u8] = b".?!";
-
-fn is_space(byte: u8) -> bool {
-    matches!(byte, b' ' | b'\t' | b'\n' | 0x0B | 0x0C | b'\r')
-}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

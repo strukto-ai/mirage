@@ -5,14 +5,14 @@ use std::collections::{BTreeMap, VecDeque};
 use serde::Deserialize;
 
 use super::meter::{self, Charge};
-use super::unicode::{BLOCK, Bytes, DecodeCursor, JsonString, WORK, decode_slice};
+use super::unicode::{BLOCK, Bytes, DecodeCursor, JsonString, decode_slice};
 use super::value::{
-    Key, Keys, LITERAL, List, Number, NumberReading, Object, Retirement, Text, Value, number_token,
+    Key, Keys, LITERAL, List, MAX_DEPTH, Number, NumberReading, Object, Retirement, Text, Value,
+    number_token,
 };
-use crate::{Stream, StreamError};
+use crate::{Stream, StreamError, constants::WORK};
 use std::sync::Arc;
 
-const DEPTH: usize = 10000;
 /// The work freeing one block of a discarded token costs.
 const FREE: usize = BLOCK / 64;
 const RS: u8 = 0x1e;
@@ -1184,7 +1184,7 @@ impl Scanner {
     fn normal_token(&mut self, ch: u8) -> Result<(), &'static str> {
         match ch {
             b'[' | b'{' => {
-                if self.stack.len() >= DEPTH {
+                if self.stack.len() >= MAX_DEPTH {
                     return Err("Exceeds depth limit for parsing");
                 }
                 if self.next.is_some() {
@@ -1313,7 +1313,7 @@ impl Scanner {
 
     fn stream_token(&mut self, ch: u8) -> Result<(), &'static str> {
         let last = self.last;
-        if matches!(ch, b'[' | b'{') && self.path.len() >= DEPTH {
+        if matches!(ch, b'[' | b'{') && self.path.len() >= MAX_DEPTH {
             return Err("Exceeds depth limit for parsing");
         }
         match ch {
@@ -2397,18 +2397,18 @@ mod tests {
 
     #[test]
     fn normal_depth_counts_pending_object_keys() {
-        let arrays = "[".repeat(DEPTH + 1);
+        let arrays = "[".repeat(MAX_DEPTH + 1);
         assert_eq!(
             collect(arrays.as_bytes(), "{}", 4095, false),
             [(
                 "error".into(),
                 format!(
                     "Exceeds depth limit for parsing at line 1, column {}",
-                    DEPTH + 1
+                    MAX_DEPTH + 1
                 )
             )]
         );
-        let objects = "{\"a\":".repeat(DEPTH / 2 + 1);
+        let objects = "{\"a\":".repeat(MAX_DEPTH / 2 + 1);
         assert_eq!(
             collect(objects.as_bytes(), "{}", 4095, false),
             [(
@@ -2416,7 +2416,7 @@ mod tests {
                 "Exceeds depth limit for parsing at line 1, column 25001".into()
             )]
         );
-        let objects = "{\"a\":".repeat(DEPTH + 1);
+        let objects = "{\"a\":".repeat(MAX_DEPTH + 1);
         assert_eq!(
             collect(objects.as_bytes(), r#"{"streaming":true}"#, 4095, false),
             [(

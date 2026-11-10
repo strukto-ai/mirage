@@ -372,20 +372,17 @@ async def tail_multi(
 
 
 def _note(io: IOResult, message: str) -> None:
-    """Append a diagnostic raised while the output streams to the
-    result's stderr.
+    """Say a diagnostic raised while the output streams on the result.
 
     tail's stdout is a stream the caller drains, as the file grows when
-    it follows, and its stderr is the bytes on the result, which the
-    caller reads once the stream ends; a notice raised mid-stream lands
-    there.
+    it follows, and a notice raised mid-stream goes out among it
+    (``add_stderr``).
 
     Args:
         io (IOResult): the result handed back with the stream.
         message (str): the ``tail: ...`` line, newline included.
     """
-    prior = io.stderr if isinstance(io.stderr, bytes) else b""
-    io.stderr = prior + encode_text(message)
+    io.add_stderr(encode_text(message))
 
 
 async def _counted(source: Any, box: list[int]) -> AsyncGenerator[bytes, None]:

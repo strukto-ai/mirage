@@ -11,6 +11,7 @@ mod cmp;
 mod column;
 mod comm;
 mod compress;
+mod constants;
 #[cfg(feature = "gh")]
 mod core;
 mod cut;
@@ -93,6 +94,9 @@ mod xxd;
 mod zip;
 
 use std::fmt;
+
+use constants::KEPT;
+pub use constants::{PIECE, STEPS};
 
 pub(crate) use quote::shell_quoted;
 
@@ -469,12 +473,6 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     }
 }
 
-/// The output a host's `drain` call gathers before it hands back.
-pub const PIECE: usize = 16 * 1024;
-
-/// The bounded steps one host `drain` call runs at most.
-pub const STEPS: usize = 8;
-
 /// What a host's `drain` call runs: bounded steps of the work `busy`
 /// reports, until they have written a piece of output, the stream is no
 /// longer busy, or `STEPS` of them have run. A stream whose steps write a
@@ -539,7 +537,6 @@ pub(crate) fn drain_all(stream: &mut dyn Stream, out: &mut Vec<u8>) {
 /// Release a transient giant byte buffer once little of it remains. Keep
 /// ordinary working chunks to avoid an allocation on every record.
 pub fn release_capacity(buffer: &mut Vec<u8>) {
-    const KEPT: usize = 64 * 1024;
     let needed = buffer.len().max(KEPT);
     if buffer.capacity() / 4 > needed {
         buffer.shrink_to(needed);

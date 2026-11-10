@@ -28,14 +28,6 @@ MIME_SYMLINK = "inode/symlink; charset=binary"
 # How much of a file `file` sniffs: only its first bytes are read.
 FILE_HEADER_BYTES = 512
 
-# od, split and cmp all skip leading whitespace in a count and allow one
-# '+' before the digits, so `-b +10` and `-b " 10"` are valid while
-# `+ 10`, `++10`, `-10` and a trailing space are not.
-# `[0-9]` not `\d`: GNU is ASCII-only, while python's `\d` would accept other
-# Unicode decimal digits.
-UINTMAX = 2**64 - 1
-
-
 # The bytes C `isspace` accepts, which every gnulib scanner skips before
 # the sign. Spelled out rather than written `\s`: python's `\s` also
 # matches 0x1c-0x1f and JavaScript's matches every Unicode space, and GNU

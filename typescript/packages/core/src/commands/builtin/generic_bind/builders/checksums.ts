@@ -18,24 +18,28 @@ import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, dirAwareStat, dirAwareStream, resolveOrEmpty } from '../files.ts'
 
-const sha1sum: CommandFn = async (_accessor, paths, _texts, ctx) => {
-  const parsed = parseFlags(ctx.flags, 'sha1sum')
-  if (parsed instanceof IOResult) return [null, parsed]
-  const files = commandFiles(ctx, paths)
-  const resolved = await resolveOrEmpty(files, paths)
-  return checksumGeneric(
-    parsed,
-    resolved,
-    ctx,
-    dirAwareStream(files, ctx),
-    'sha1sum',
-    dirAwareStat(files, ctx),
-    files.answers('checksum') ? files.checksum : undefined,
-  )
+const NAMES = ['b2sum', 'md5sum', 'sha1sum', 'sha224sum', 'sha256sum', 'sha384sum', 'sha512sum']
+
+function checksum(command: string): CommandFn {
+  return async (_accessor, paths, _texts, ctx) => {
+    const parsed = parseFlags(ctx.flags, command)
+    if (parsed instanceof IOResult) return [null, parsed]
+    const files = commandFiles(ctx, paths)
+    const resolved = await resolveOrEmpty(files, paths)
+    return checksumGeneric(
+      parsed,
+      resolved,
+      ctx,
+      dirAwareStream(files, ctx),
+      command,
+      dirAwareStat(files, ctx),
+      files.answers('checksum') ? files.checksum : undefined,
+    )
+  }
 }
 
-export const BUILDER: GenericCommand = {
-  name: 'sha1sum',
+export const BUILDERS: readonly GenericCommand[] = NAMES.map((name) => ({
+  name,
   read: true,
-  fn: sha1sum,
-}
+  fn: checksum(name),
+}))

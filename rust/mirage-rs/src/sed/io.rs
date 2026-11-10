@@ -1,25 +1,12 @@
 use std::task::Poll;
 
+use crate::constants::{KEPT, MAX_HELD, MAX_LINKS};
 pub(super) use crate::request::Io;
 use crate::request::{Opening, Reply, Request, bytes};
-
-/// How much output, or what one file holds, waits before it goes to the
-/// host.
-pub(super) const LIMIT: usize = 64 * 1024;
-
-/// The longest line, pattern space or hold space sed holds: past it the
-/// run ends as GNU's does once memory runs out.
-#[cfg(not(test))]
-pub(super) const MAX_LEN: usize = 1 << 30;
-#[cfg(test)]
-pub(super) const MAX_LEN: usize = 1 << 18;
 
 /// The failures of opening an input, which sed reports and reads on past;
 /// any other is a read error that stops it.
 const OPEN_FAILURES: [&str; 6] = ["ENOENT", "EACCES", "EPERM", "EROFS", "ENOTDIR", "ELOOP"];
-/// The links --follow-symlinks crosses from one name, as the kernel
-/// crosses them; one more is a loop.
-const MAX_LINKS: usize = 40;
 
 /// A read the host could not serve, as its reply words it.
 pub(super) struct Failure {
@@ -137,7 +124,7 @@ impl LineReader {
         let from = self.scanned.max(self.start);
         let cut = memchr::memchr(self.delimiter, &self.buf[from..]).map(|at| from + at);
         // A line longer than sed holds is a read it cannot make.
-        if cut.unwrap_or(self.buf.len()) - self.start > MAX_LEN {
+        if cut.unwrap_or(self.buf.len()) - self.start > MAX_HELD {
             return Poll::Ready(Err(Failure::from(Reply {
                 error: Some("Cannot allocate memory".into()),
                 errno: Some("ENOMEM".into()),
@@ -194,7 +181,7 @@ impl LineReader {
 
     pub(super) fn recycle(&mut self, mut bytes: Vec<u8>) {
         bytes.clear();
-        if bytes.capacity() <= 64 * 1024 && bytes.capacity() > self.spare.capacity() {
+        if bytes.capacity() <= KEPT && bytes.capacity() > self.spare.capacity() {
             self.spare = bytes;
         }
     }

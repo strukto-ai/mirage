@@ -208,23 +208,11 @@ impl Parser<'_> {
             };
             return Ok(Syn::node("unary_expression", vec![op, operand]));
         }
-        let mut operand = self.test_operand(closer)?;
+        let operand = self.test_operand(closer)?;
         if closer.conditional() {
             return Ok(operand);
         }
-        loop {
-            let at = self.i;
-            let text = if self.starts(b"++") {
-                "++"
-            } else if self.starts(b"--") {
-                "--"
-            } else {
-                return Ok(operand);
-            };
-            self.i += 2;
-            let op = Syn::token(text, at, self.i).with_field("operator");
-            operand = Syn::node("postfix_expression", vec![operand, op]);
-        }
+        Ok(self.postfix(operand, false))
     }
 
     fn test_operand(&mut self, closer: Closer) -> R<Syn> {
@@ -299,22 +287,11 @@ impl Parser<'_> {
                     self.i += 1;
                     continue;
                 }
-                b'\\' => {
-                    self.i += 2;
-                    continue;
-                }
-                b'"' => self.string()?,
-                b'\'' => self.raw_string()?,
-                b'`' => self.backtick()?,
-                b'$' => self.dollar()?,
-                _ => {
-                    self.i += 1;
-                    continue;
-                }
+                _ => match self.quoted_piece()? {
+                    Some(piece) => piece,
+                    None => continue,
+                },
             };
-            if piece.is("$") {
-                continue;
-            }
             push_run(&mut pieces, "regex", run, at);
             pieces.push(piece);
             run = self.i;
@@ -382,22 +359,11 @@ impl Parser<'_> {
                     continue;
                 }
                 b'(' => break,
-                b'\\' => {
-                    self.i += 2;
-                    continue;
-                }
-                b'"' => self.string()?,
-                b'\'' => self.raw_string()?,
-                b'`' => self.backtick()?,
-                b'$' => self.dollar()?,
-                _ => {
-                    self.i += 1;
-                    continue;
-                }
+                _ => match self.quoted_piece()? {
+                    Some(piece) => piece,
+                    None => continue,
+                },
             };
-            if piece.is("$") {
-                continue;
-            }
             push_run(&mut pieces, "extglob_pattern", run, at);
             pieces.push(piece);
             run = self.i;

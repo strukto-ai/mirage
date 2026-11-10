@@ -551,6 +551,19 @@ export async function* runStream(
   yield* streamOutputChunks(stream, source, signal)
 }
 
+async function* drained(
+  stream: OpenStream,
+  budget: YieldBudget,
+  first: Uint8Array = new Uint8Array(),
+): AsyncGenerator<Uint8Array> {
+  if (first.byteLength > 0) yield first
+  while (stream.busy()) {
+    await budget.run()
+    const output = stream.drain()
+    if (output.byteLength > 0) yield output
+  }
+}
+
 /**
  * Feed a multi-input stream the input its `wants` names until it wants none,
  * handing on its output a bounded call at a time. Mirrors Python's
@@ -562,26 +575,16 @@ export async function* mergeOutput(
   signal?: AbortSignal,
 ): AsyncGenerator<Uint8Array> {
   const budget = new YieldBudget(signal)
+  let output: Uint8Array = new Uint8Array()
   for (;;) {
-    while (stream.busy()) {
-      await budget.run()
-      const output = stream.drain()
-      if (output.byteLength > 0) yield output
-    }
+    yield* drained(stream, budget, output)
     const index = stream.wants()
     if (index === null) break
     await budget.run()
     const chunk = await read(index)
-    const output = chunk === null ? stream.endInput(index) : stream.feedInput(index, chunk)
-    if (output.byteLength > 0) yield output
+    output = chunk === null ? stream.endInput(index) : stream.feedInput(index, chunk)
   }
-  const tail = stream.finish()
-  if (tail.byteLength > 0) yield tail
-  while (stream.busy()) {
-    await budget.run()
-    const output = stream.drain()
-    if (output.byteLength > 0) yield output
-  }
+  yield* drained(stream, budget, stream.finish())
 }
 
 /**
@@ -620,22 +623,10 @@ export async function* streamOutputChunks(
   const budget = new YieldBudget(signal)
   try {
     for await (const chunk of chunks(source, signal)) {
-      const output = stream.feed(chunk)
-      if (output.byteLength > 0) yield output
-      while (stream.busy()) {
-        await budget.run()
-        const output = stream.drain()
-        if (output.byteLength > 0) yield output
-      }
+      yield* drained(stream, budget, stream.feed(chunk))
       if (stream.done()) break
     }
-    const tail = stream.finish()
-    if (tail.byteLength > 0) yield tail
-    while (stream.busy()) {
-      await budget.run()
-      const output = stream.drain()
-      if (output.byteLength > 0) yield output
-    }
+    yield* drained(stream, budget, stream.finish())
   } finally {
     if (ownsStream) await closeStream(stream)
   }
@@ -645,13 +636,7 @@ export async function* streamOutputChunks(
 export async function closeStream(stream: OpenStream): Promise<void> {
   if (!stream.live) return
   try {
-    if (stream.cancel()) {
-      const budget = new YieldBudget()
-      while (stream.busy()) {
-        await budget.run()
-        stream.drain()
-      }
-    }
+    if (stream.cancel()) for await (const _ of drained(stream, new YieldBudget())) void _
   } finally {
     stream.close()
   }

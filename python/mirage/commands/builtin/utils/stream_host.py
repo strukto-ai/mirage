@@ -571,7 +571,7 @@ class StreamHost:
             await self.dispatch("copy", src, dst=dst)
         except OperationNotSupportedError as exc:
             logger.debug("%s copies through mirage: %s", src.virtual, exc)
-            data, _ = await self.dispatch("read", src)
+            data, _ = await self.dispatch("read", src, stream=True)
             await self.dispatch("write", dst, data=data)
         mode = None if original is None else original.mode
         if mode is None:

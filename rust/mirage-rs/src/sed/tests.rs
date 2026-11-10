@@ -804,7 +804,7 @@ fn a_failed_edit_stops_the_run() {
 #[test]
 fn a_space_past_the_longest_ends_the_run_as_memory_running_out() {
     for script in [":a;h;G;ba", ":a;s/x/xxxxxxxxxx/g;ba", "H;$!d;x"] {
-        let lines = "x\n".repeat(150_000);
+        let lines = "x\n".repeat(crate::constants::MAX_HELD / 2 + 1);
         let run = sed(script, &lines);
         assert_eq!(
             (run.err.as_str(), run.status),
@@ -813,7 +813,7 @@ fn a_space_past_the_longest_ends_the_run_as_memory_running_out() {
         );
     }
     for script in [":a;N;ba", ":a;a x\nba"] {
-        let run = sed(script, &"x\n".repeat(150_000));
+        let run = sed(script, &"x\n".repeat(crate::constants::MAX_HELD / 2 + 1));
         assert_eq!(
             (run.err.as_str(), run.status),
             ("sed: memory exhausted\n", 1),
@@ -826,7 +826,7 @@ fn a_space_past_the_longest_ends_the_run_as_memory_running_out() {
     let mut host = Host::with(&[], "x\n");
     let mut err = Vec::new();
     for _ in 0..200 {
-        while stream.busy() && err.len() < 2 * super::io::LIMIT {
+        while stream.busy() && err.len() < 2 * crate::constants::FLUSH {
             stream.drain(&mut host.out).expect("drains");
             stream.take_stderr(&mut err);
         }
@@ -839,9 +839,9 @@ fn a_space_past_the_longest_ends_the_run_as_memory_running_out() {
             .respond(reply.to_string().as_bytes(), &data, &mut host.out)
             .expect("answers");
     }
-    assert!(err.len() >= 2 * super::io::LIMIT);
+    assert!(err.len() >= 2 * crate::constants::FLUSH);
     assert!(err.starts_with(b"x\nx\n"));
-    let run = sed("p", &"a".repeat(super::io::MAX_LEN + 10));
+    let run = sed("p", &"a".repeat(crate::constants::MAX_HELD + 10));
     assert_eq!(
         (run.err.as_str(), run.status),
         ("sed: read error on stdin: Cannot allocate memory\n", 4)
@@ -865,7 +865,7 @@ fn script_files_named_dash_are_files() {
 
 #[test]
 fn every_way_a_space_grows_meets_the_cap() {
-    let max = super::io::MAX_LEN;
+    let max = crate::constants::MAX_HELD;
     let exhausted = ("sed: memory exhausted\n", 1);
     let line = format!("{}\n", "a".repeat(max / 4));
     let run = sed("s/.*/&&&&&&&&&&/", &line);
@@ -966,7 +966,7 @@ fn an_edit_opens_its_replacement_first_and_l_meets_the_cap() {
     );
     let run = sed(
         "l",
-        &format!("{}\n", "\u{1}".repeat(super::io::MAX_LEN / 2)),
+        &format!("{}\n", "\u{1}".repeat(crate::constants::MAX_HELD / 2)),
     );
     assert_eq!(
         (run.err.as_str(), run.status),

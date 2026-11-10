@@ -30,6 +30,8 @@ class _FileStore(Protocol):
     def __delitem__(self, key: str, /) -> None: ...
     def keys(self) -> Iterable[str]: ...
     def clear(self) -> None: ...
+    def size(self, key: str, /) -> int: ...
+    def splice(self, key: str, offset: int, data: bytes, /) -> None: ...
 
     @overload
     def get(self, key: str, /) -> bytes | None: ...
@@ -57,12 +59,17 @@ class RAMFiles(MutableMapping[str, bytes]):
     Counting here, rather than at each op, means no change to the table
     can miss the count; the workspace's ``max_memory`` sums ``held``. It
     does not refuse anything: an op checks growth with ``check_capacity``
-    before it stores, under ``RAMStore.lock``, as one step. Mirrors the
-    TS ``RAMFiles``.
+    before it stores, under ``RAMStore.lock``, as one step.
+
+    A file ``splice`` changed is a ``bytearray`` it grows and overwrites
+    where it lies, so a run of appends or pwrites copies nothing; a read
+    takes a ``bytes`` copy, kept in its place until the next change, so
+    a reader holds what was there when it read. Mirrors the TS
+    ``RAMFiles``.
     """
 
     def __init__(self, usage: StorageUsage | None = None) -> None:
-        self._data: dict[str, bytes] = {}
+        self._data: dict[str, bytes | bytearray] = {}
         self.usage = usage
         self.held = 0
 
@@ -71,12 +78,46 @@ class RAMFiles(MutableMapping[str, bytes]):
         if self.usage is not None:
             self.usage.land(0, delta)
 
+    def __contains__(self, key: _T) -> bool:
+        return key in self._data
+
     def __getitem__(self, key: str) -> bytes:
-        return self._data[key]
+        data = self._data[key]
+        if isinstance(data, bytearray):
+            data = self._data[key] = bytes(data)
+        return data
 
     def __setitem__(self, key: str, value: bytes) -> None:
-        self._count(len(value) - len(self._data.get(key, b"")))
-        self._data[key] = value
+        self._count(len(value) - self.size(key))
+        self._data[key] = bytes(value)
+
+    def size(self, key: str) -> int:
+        """A key's length without copying it, 0 for a missing one.
+
+        Args:
+            key (str): the store key.
+        """
+        return len(self._data.get(key, b""))
+
+    def splice(self, key: str, offset: int, data: bytes) -> None:
+        """Write ``data`` at ``offset`` of ``key`` in place, as pwrite(2)
+        leaves a file: a gap past its end reads as NULs, a missing key is
+        created, and writing nothing changes nothing.
+
+        Args:
+            key (str): the store key.
+            offset (int): where the bytes land.
+            data (bytes): the bytes to write.
+        """
+        buffer = self._data.setdefault(key, b"")
+        if not data:
+            return
+        if not isinstance(buffer, bytearray):
+            buffer = self._data[key] = bytearray(buffer)
+        before = len(buffer)
+        buffer.extend(bytes(max(offset - before, 0)))
+        buffer[offset : offset + len(data)] = data
+        self._count(len(buffer) - before)
 
     def __delitem__(self, key: str) -> None:
         self._count(-len(self._data[key]))

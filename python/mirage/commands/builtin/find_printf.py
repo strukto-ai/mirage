@@ -21,7 +21,7 @@ from mirage.commands.builtin.utils.identity import (
 from mirage.core.generic.find_eval import printf_kind
 from mirage.io.stream import materialize
 from mirage.rs.stream import OpenStream, open_stream, stream_output_chunks
-from mirage.shell.bytes import byte_view, decode_text
+from mirage.shell.bytes import byte_view
 from mirage.types import FileStat, JsonValue, PathSpec
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.stat_view import content_size
@@ -95,29 +95,3 @@ async def render_printf(
     return await materialize(
         stream_output_chunks(engine, b"", owns_stream=False)
     )
-
-
-def expand_printf(
-    parts: tuple[PrintfPart, ...],
-    row: str,
-    search: PathSpec,
-    st: FileStat | None,
-    target: FileStat | None = None,
-    identity: Identity | None = None,
-) -> str:
-    """Render one compiled format synchronously.
-
-    Args:
-        parts (tuple[PrintfPart, ...]): The compiled format.
-        row (str): The display path.
-        search (PathSpec): The walk's starting point.
-        st (FileStat | None): The row's stat when required.
-        target (FileStat | None): The resolved link target.
-        identity (Identity | None): The session identity.
-    """
-    engine = compile_printf(parts)
-    engine.begin(_facts(row, search, st, target, identity))
-    out = [engine.finish()]
-    while engine.busy():
-        out.append(engine.drain())
-    return decode_text(b"".join(out))

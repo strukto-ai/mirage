@@ -37,7 +37,6 @@ import { operandLines, reportFsError, say, splitOpened } from '../utils/operands
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { CHUNK_SIZE, chunks } from '../../../io/cooperative.ts'
 import { checkMemory } from '../../../io/memory.ts'
-import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 import { revisionFor } from '../../../observe/context.ts'
@@ -121,13 +120,11 @@ function countsOf(value: JsonValue | undefined): [number | null, number | null] 
   return value.from_start === true ? [null, value.count] : [value.count, null]
 }
 
-// Append a follow-time diagnostic to the result's stderr. A following
-// tail's stdout is a stream the caller drains as the file grows, and its
-// stderr is the bytes on the result, which the caller reads once the
-// stream ends; a notice raised mid-follow lands there.
+// Say a follow-time diagnostic on the result. A following tail's stdout is a
+// stream the caller drains as the file grows, and a notice raised mid-follow
+// goes out among it (`addStderr`).
 function note(io: IOResult, message: string): void {
-  const prior = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
-  io.stderr = concat([prior, encodeText(message)])
+  io.addStderr(encodeText(message))
 }
 
 // Sleep for the poll interval, or until the caller's signal fires.

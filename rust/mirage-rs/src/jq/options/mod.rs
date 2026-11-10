@@ -18,7 +18,7 @@ use serde::Deserialize;
 use serde_json::{Value as Json, json};
 
 use super::main::Config as RunConfig;
-use super::unicode::WORK;
+use crate::constants::WORK;
 use crate::{Stream, StreamError, latin1_bytes, parse_config};
 
 /// The tape name of an operand, and of an option the parser refused.
@@ -27,7 +27,7 @@ const REFUSED: &str = "?";
 
 /// jq's exit status for an option it refuses and a binding it cannot
 /// read.
-const ERROR_SYSTEM: i32 = 2;
+pub(super) const ERROR_SYSTEM: i32 = 2;
 
 const DEFAULT_INDENT: u8 = 2;
 

@@ -24,7 +24,7 @@ use crate::task::{File, Host};
 /// The archive's input.
 const ARCHIVE: u32 = 1;
 /// The most a codec stream takes a feed.
-const FEED: usize = 16 * 1024;
+pub(super) const FEED: usize = 16 * 1024;
 const NOT_TAR: &str = "tar: This does not look like a tar archive";
 const SKIPPING: &str = "tar: Skipping to next header";
 const UNEXPECTED_EOF: &str = "tar: Unexpected EOF in archive";
@@ -86,6 +86,29 @@ impl<'h> Raw<'h> {
             ended: false,
             error: None,
         }
+    }
+
+    /// The archive `config` names, its first blocks read. A backend that
+    /// keys files alone has no file where a directory is, so its ENOENT
+    /// there reads as EISDIR.
+    pub(super) async fn archive(host: &'h Host, config: &Config) -> Raw<'h> {
+        let opening = if config.archive == b"-" {
+            (b"-".to_vec(), Opening::Name)
+        } else {
+            (config.archive.clone(), Opening::Operand(1))
+        };
+        let mut raw = Raw::new(host, opening);
+        raw.gather(6).await;
+        if let Some(reply) = &mut raw.error {
+            if config.probe
+                && reply.names(&["ENOENT"])
+                && host.stat(&config.archive).await.as_deref() == Some("dir")
+            {
+                reply.error = Some("Is a directory".into());
+                reply.errno = Some("EISDIR".into());
+            }
+        }
+        raw
     }
 
     pub(super) fn unused(&self) -> &[u8] {
@@ -877,22 +900,8 @@ fn codec(config: &Config, first: &[u8]) -> Result<Option<Codec>, Vec<u8>> {
 }
 
 pub(super) async fn run(host: &Host, config: &Config) -> i32 {
-    let opening = if config.archive == b"-" {
-        (b"-".to_vec(), Opening::Name)
-    } else {
-        (config.archive.clone(), Opening::Operand(1))
-    };
-    let mut raw = Raw::new(host, opening);
-    raw.gather(6).await;
-    if let Some(mut reply) = raw.error.take() {
-        // A backend that keys files alone has no file where a directory is.
-        if config.probe
-            && reply.names(&["ENOENT"])
-            && host.stat(&config.archive).await.as_deref() == Some("dir")
-        {
-            reply.error = Some("Is a directory".into());
-            reply.errno = Some("EISDIR".into());
-        }
+    let mut raw = Raw::archive(host, config).await;
+    if let Some(reply) = raw.error.take() {
         host.warn(&open_failure(config, &reply, true));
         return FAILED;
     }

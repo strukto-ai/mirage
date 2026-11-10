@@ -48,6 +48,7 @@ export class EmailVFS extends BaseVFS {
   override readonly indexTtl: number = 86_400
   override vfsMd: string = VFS_MD
   // IMAP search names messages; an attachment is read as usual.
+  override readonly searchNeedsWalkLimit: boolean = true
   override readonly searchable: readonly string[] = ['*/*/*.email.json']
   override readonly handed = {
     readdir: ['entry'],
@@ -87,15 +88,6 @@ export class EmailVFS extends BaseVFS {
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
     return emailStat(this.accessor, path, handed?.entry)
-  }
-
-  /**
-   * Whether this VFS answers `name`; with no walk limit it reads every
-   * file rather than ask the service's search.
-   */
-  override supports(name: string): boolean {
-    if (name === 'files_containing' && this.walkLimit < 0) return false
-    return super.supports(name)
   }
 
   override filesContaining(

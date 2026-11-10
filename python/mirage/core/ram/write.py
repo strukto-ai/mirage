@@ -17,7 +17,7 @@ from contextlib import aclosing
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.dev.device import active_device, active_pipe
-from mirage.core.ram.constants import PUBLISH_BYTES, STREAM_PUBLISH_SECONDS
+from mirage.core.ram.constants import STREAM_PUBLISH_SECONDS
 from mirage.core.ram.dest import (
     check_capacity,
     check_dest_parents,
@@ -47,10 +47,8 @@ async def write(
     the file grow: what has arrived lands within
     ``STREAM_PUBLISH_SECONDS``, a writer gone quiet included, and at the
     end, appended to what the file holds then, so another appender's
-    bytes stay. Each landing copies the whole file, so past
-    ``PUBLISH_BYTES`` the wait grows in proportion to it; TypeScript
-    lands only the new bytes in a buffer it grows, and keeps the one
-    wait. Appending nothing opens the file (``true >> f``): it creates a
+    bytes stay. A landing writes only the new bytes, in place.
+    Appending nothing opens the file (``true >> f``): it creates a
     missing one and leaves an existing one as it was, modification time
     included. A device that discards writes (``/dev/null``) has its bytes
     counted as they arrive and kept nowhere.
@@ -99,10 +97,9 @@ async def write(
             if append and p in store.files:
                 if not whole:
                     return
-                check_capacity(
-                    store, path_spec, p, len(store.files[p]) + len(whole)
-                )
-                store.files[p] += whole
+                end = store.files.size(p)
+                check_capacity(store, path_spec, p, end + len(whole))
+                store.files.splice(p, end, whole)
             else:
                 check_capacity(store, path_spec, p, len(whole))
                 store.files[p] = whole
@@ -110,20 +107,19 @@ async def write(
         record(op, path_spec.virtual, "ram", len(whole), timer)
         return
     if not append or p not in store.files:
-        store.files[p] = b"" if not append else store.files.get(p, b"")
+        store.files[p] = b""
         store.modified[p] = now_iso()
     pending: list[bytes] = []
     position = 0
     loop = asyncio.get_running_loop()
     last = loop.time()
     later: asyncio.TimerHandle | None = None
-    interval = STREAM_PUBLISH_SECONDS
     usage = store.usage
     held = 0
     queued = 0
 
     def publish() -> None:
-        nonlocal position, last, later, held, queued, interval
+        nonlocal position, last, later, held, queued
         if later is not None:
             later.cancel()
             later = None
@@ -131,22 +127,15 @@ async def write(
         if not pending:
             return
         try:
-            arrived = sum(map(len, pending))
+            arrived = b"".join(pending)
             with store.lock:
-                current = store.files.get(p, b"")
-                start = len(current) if append else position
-                check_room(path_spec, max(start + arrived - len(current), 0))
-                if start >= len(current):
-                    gap = b"\0" * (start - len(current))
-                    store.files[p] = b"".join([current, gap, *pending])
-                else:
-                    data = b"".join(pending)
-                    store.files[p] = b"".join(
-                        [current[:start], data, current[start + arrived :]]
-                    )
-                position = start + arrived
-                landed = len(store.files[p])
-            interval = STREAM_PUBLISH_SECONDS * max(1, landed / PUBLISH_BYTES)
+                current = store.files.size(p)
+                position = current if append else position
+                check_room(
+                    path_spec, max(position + len(arrived) - current, 0)
+                )
+                store.files.splice(p, position, arrived)
+                position += len(arrived)
             store.modified[p] = now_iso()
         finally:
             pending.clear()
@@ -178,7 +167,7 @@ async def write(
                 pending.append(chunk)
                 queued += len(chunk)
                 size += len(chunk)
-                wait = interval - (loop.time() - last)
+                wait = STREAM_PUBLISH_SECONDS - (loop.time() - last)
                 if wait <= 0:
                     publish()
                 elif later is None:

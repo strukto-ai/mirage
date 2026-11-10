@@ -115,6 +115,7 @@ import {
   requireVfs,
 } from './util.ts'
 import { systemNow } from '../../../../utils/clock.ts'
+import { GLOB_CHARS } from '../../../../utils/glob_walk.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -127,7 +128,6 @@ const TRACK_WORDS: ReadonlyMap<string, Track> = new Map([
   ['inherit', Track.INHERIT],
 ])
 const LOCAL_REMOTE = '.'
-const GLOB_CHARS = ['*', '?', '[']
 const UPSTREAM_KEYS: ReadonlySet<string> = new Set(['remote', 'merge'])
 // The order git 2.56.0's --delete-merged deletes in, as pinned on up to 60
 // branches: names fall in FNV-1 buckets by their hash, 64 at first and four

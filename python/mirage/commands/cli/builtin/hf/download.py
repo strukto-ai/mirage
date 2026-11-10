@@ -42,7 +42,6 @@ from mirage.core.hf_hub.cache import (
 from mirage.core.hf_hub.client import HfHubError, hub_bytes, resolve_url
 from mirage.core.hf_hub.constants import (
     ABSENT_STATUSES,
-    GLOB_CHARS,
     MAX_DOWNLOAD_WORKERS,
 )
 from mirage.core.hf_hub.repo import (
@@ -60,6 +59,7 @@ from mirage.core.hf_hub.tree_entry import TreeEntry
 from mirage.errors.constants import MISS_ERRORS
 from mirage.io.types import ByteSource, IOResult, PathRecord
 from mirage.types import PathSpec
+from mirage.utils.glob_walk import GLOB_CHARS
 from mirage.workspace.files import Files
 
 logger = logging.getLogger(__name__)

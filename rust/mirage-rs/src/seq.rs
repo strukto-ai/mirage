@@ -8,9 +8,10 @@ use crate::printf::number::{
     Decimal, FloatKind, FloatToken, Rendered, render_decimal, render_hex, render_special,
     scan_float,
 };
-use crate::{Stream, StreamError, latin1, latin1_list, latin1_opt, parse_config, quoted};
+use crate::{
+    Stream, StreamError, constants::OUTPUT, latin1, latin1_list, latin1_opt, parse_config, quoted,
+};
 
-const OUTPUT: usize = 64 * 1024;
 // A run of one byte longer than this stays a count, so a wide field or a
 // long precision never sits whole in memory.
 const RUN: u64 = 64;

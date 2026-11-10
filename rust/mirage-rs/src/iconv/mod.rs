@@ -16,10 +16,8 @@ use encoding_rs::Encoding;
 use serde::Deserialize;
 
 use self::table::{Grammar, High, Multibyte, Single, Spec, Step};
-use crate::{Stream, StreamError, parse_config};
+use crate::{Stream, StreamError, byte_text, constants::OUTPUT, parse_config};
 
-/// The most output one step writes before it yields.
-const WINDOW: usize = 64 * 1024;
 const HINT: &str = "Try `iconv --help' or `iconv --usage' for more information.";
 const INCOMPLETE: &[u8] = b"iconv: incomplete character or shift sequence at end of buffer\n";
 
@@ -255,15 +253,14 @@ fn list_text() -> Vec<u8> {
 /// glibc's refusal of a charset it does not know, in a byte string of one
 /// character per byte, which the hosts turn back into the bytes.
 fn unsupported(from: &[u8], to: &[u8], from_ok: bool, to_ok: bool) -> StreamError {
-    let name = |name: &[u8]| name.iter().map(|&b| char::from(b)).collect::<String>();
     let line = match (from_ok, to_ok) {
         (false, false) => format!(
             "conversions from `{}' and to `{}' are not supported",
-            name(from),
-            name(to)
+            byte_text(from),
+            byte_text(to)
         ),
-        (false, true) => format!("conversion from `{}' is not supported", name(from)),
-        _ => format!("conversion to `{}' is not supported", name(to)),
+        (false, true) => format!("conversion from `{}' is not supported", byte_text(from)),
+        _ => format!("conversion to `{}' is not supported", byte_text(to)),
     };
     StreamError::new(format!("iconv: {line}\n{HINT}"))
 }
@@ -607,7 +604,7 @@ impl Iconv {
     /// Convert from the start of `raw` up to a full window, an incomplete
     /// character or its end; the bytes taken.
     fn run(&mut self, raw: &[u8], out: &mut Vec<u8>) -> Result<usize, StreamError> {
-        let limit = out.len() + WINDOW;
+        let limit = out.len() + OUTPUT;
         let mut at = 0;
         let little = match self
             .little

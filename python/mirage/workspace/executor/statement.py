@@ -723,23 +723,31 @@ async def interleaved(
     pieces: list[bytes] = []
     told = 0
     io.stderr_pieces = pieces
-    try:
-        async for chunk in stdout:
-            for piece in pieces[told:]:
-                told += 1
-                yield Channel.STDERR, piece
-            err = io.stderr
-            if (
-                isinstance(err, bytes)
-                and len(err) > max(len(sent), start)
-                and err.startswith(sent)
-            ):
-                yield Channel.STDERR, err[len(sent) :]
-                sent = err
-            yield Channel.STDOUT, chunk
+
+    def said() -> Iterator[tuple[Channel, bytes]]:
+        """What ``io`` gained, then what it was handed, since the last
+        chunk: a piece sends what it held first, as that came before it."""
+        nonlocal sent, told
+        err = io.stderr
+        least = 0 if told < len(pieces) else start
+        if (
+            isinstance(err, bytes)
+            and len(err) > max(len(sent), least)
+            and err.startswith(sent)
+        ):
+            grown, sent = err[len(sent) :], err
+            yield Channel.STDERR, grown
         for piece in pieces[told:]:
             told += 1
             yield Channel.STDERR, piece
+
+    try:
+        async for chunk in stdout:
+            for pair in said():
+                yield pair
+            yield Channel.STDOUT, chunk
+        for pair in said():
+            yield pair
     finally:
         io.stderr_pieces = None
         err = io.stderr

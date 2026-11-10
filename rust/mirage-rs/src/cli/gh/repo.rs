@@ -5,6 +5,7 @@ use super::accessor::{
     tsv, typed_out, web_host,
 };
 use super::constants::{EditKind, REPO_EDIT_FIELDS};
+use super::fields::{names, spec, user};
 use super::shape::{Shape, exported, list_of, pointer, strukt};
 use crate::core::github::client::{Account, Failure, Result, usage, value};
 use crate::core::github::json::{Json, Obj};
@@ -61,15 +62,6 @@ fn field(
 
 fn owner() -> Shape {
     strukt(vec![("id", Shape::Str), ("login", Shape::Str)])
-}
-
-fn user() -> Shape {
-    strukt(vec![
-        ("id", Shape::Str),
-        ("login", Shape::Str),
-        ("name", Shape::Str),
-        ("databaseId", Shape::Int),
-    ])
 }
 
 fn count() -> Shape {
@@ -294,18 +286,6 @@ fn repo_field_table() -> RepoTable {
         plain("visibility", Str),
         field("watchers", "watchers{totalCount}", count(), None),
     ]
-}
-
-fn names(table: &RepoTable) -> Vec<&'static str> {
-    table.iter().map(|(name, _)| *name).collect()
-}
-
-fn spec<'a>(table: &'a RepoTable, name: &str) -> &'a RepoField {
-    &table
-        .iter()
-        .find(|(field, _)| *field == name)
-        .expect("a field json_fields checked")
-        .1
 }
 
 fn selection(table: &RepoTable, fields: &[String]) -> String {

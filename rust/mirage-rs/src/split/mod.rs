@@ -13,10 +13,10 @@ mod tests;
 use serde::Deserialize;
 use serde_json::Value as Json;
 
-use crate::request::{Io, Opening, Refused, Reply, Request, WriteMode, bytes, read_failure};
-use crate::{Stream, StreamError, number, parse_config, quoted};
+use crate::request::{Io, Opening, Refused, Request, WriteMode, bytes, read_failure};
+use crate::{Stream, StreamError, constants::DRAIN_STEPS, number, parse_config, quoted};
 
-use self::pieces::{Input, MAX_SUFFIX, Piece, STEPS, write_failure};
+use self::pieces::{Input, MAX_SUFFIX, Piece, write_failure};
 
 const ALPHA: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
 const DECIMAL: &[u8] = b"0123456789";
@@ -890,7 +890,7 @@ impl Stream for Split {
     }
 
     fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        for _ in 0..STEPS {
+        for _ in 0..DRAIN_STEPS {
             if !self.busy() {
                 break;
             }
@@ -913,10 +913,7 @@ impl Stream for Split {
     }
 
     fn respond(&mut self, reply: &[u8], data: &[u8], _: &mut Vec<u8>) -> Result<(), StreamError> {
-        let reply = Reply::decode(reply).map_err(StreamError::new)?;
-        let Some(request) = self.io.in_flight.take() else {
-            return Err(StreamError::new("no request is waiting"));
-        };
+        let (request, reply) = self.io.answer(reply).map_err(StreamError::new)?;
         if let Some(fatal) = &reply.fatal {
             self.fail(&[b"split: ", bytes(fatal).as_slice(), b"\n"].concat());
             return Ok(());

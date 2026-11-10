@@ -2,13 +2,10 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use super::buffer::Buffer;
 use super::text::{RecordSearch, Regexes, take_record};
-use super::value::{MAX_LEN, Text};
+use super::value::Text;
 use super::vm::no_memory;
+use crate::constants::{FLUSH, KEPT, MAX_HELD};
 use crate::request::{Opening, Reply, Request, WriteMode, bytes};
-
-/// How much output, or what one file or pipe holds, waits before it goes
-/// to the host.
-pub(super) const LIMIT: usize = 64 * 1024;
 
 /// Values keyed by byte strings, in the order the keys were first inserted.
 pub(super) struct Ordered<T> {
@@ -220,6 +217,17 @@ impl Reader {
         )? {
             crate::regex::Step::Paused => return Ok(Next::Busy),
             crate::regex::Step::Done(Some((start, end, next))) => {
+                // A long record that begins the buffer and leaves little
+                // after it takes the buffer itself, so it is never held
+                // twice.
+                if start == 0 && end > KEPT && self.buf.len() - next <= KEPT {
+                    let rest = self.buf.values[next..].to_vec();
+                    let mut record = std::mem::replace(&mut self.buf.values, rest);
+                    record.truncate(end);
+                    self.start = 0;
+                    self.search.reset(0);
+                    return Ok(Next::Record(record.into()));
+                }
                 self.start = next;
                 self.search.reset(next);
                 self.copying = Some(RecordCopy {
@@ -235,7 +243,7 @@ impl Reader {
             (_, true) => Next::End,
             (Some(detail), _) => Next::Failed(detail.clone()),
             // A record past the longest string awk keeps ends the run.
-            _ if self.buf.len() - self.start > MAX_LEN => return Err(no_memory()),
+            _ if self.buf.len() - self.start > MAX_HELD => return Err(no_memory()),
             _ => Next::Pending,
         })
     }
@@ -291,11 +299,12 @@ impl Reader {
 
 /// A file awk prints to: what it holds back, and how much of that is
 /// settled (printed before the last record ended), which a reader or a
-/// command must see.
+/// command must see; `written` while the record has printed to it.
 #[derive(Default)]
 pub(super) struct OutFile {
     pub(super) buf: Vec<u8>,
     pub(super) settled: usize,
+    pub(super) written: bool,
 }
 
 pub(super) struct OutPipe {
@@ -319,6 +328,8 @@ pub(super) struct Io {
     pub(super) files_in: Ordered<Reader>,
     pub(super) pipes_in: Ordered<(Reader, f64)>,
     pub(super) files_out: Ordered<OutFile>,
+    /// The files the record has printed to, which alone its end settles.
+    pub(super) written: Vec<Text>,
     pub(super) pipes_out: Ordered<OutPipe>,
     pub(super) requests: VecDeque<Request>,
     pub(super) in_flight: Option<Request>,
@@ -369,18 +380,18 @@ impl Io {
     }
 
     pub(super) fn report(&mut self, work: &mut u64) {
-        while *work > 0 && self.err.len() < LIMIT {
+        while *work > 0 && self.err.len() < FLUSH {
             let Some(message) = self.diagnostics.front() else {
                 break;
             };
             let count = (message.len() - self.diagnostic_at)
                 .min(*work as usize)
-                .min(LIMIT - self.err.len());
+                .min(FLUSH - self.err.len());
             self.err
                 .extend_from_slice(&message[self.diagnostic_at..self.diagnostic_at + count]);
             self.diagnostic_at += count;
             *work -= count as u64;
-            if self.diagnostic_at == message.len() && *work > 0 && self.err.len() < LIMIT {
+            if self.diagnostic_at == message.len() && *work > 0 && self.err.len() < FLUSH {
                 self.err.push(b'\n');
                 self.diagnostics.pop_front();
                 self.diagnostic_at = 0;
@@ -486,8 +497,11 @@ impl Io {
     /// The end of a record: what files hold so far is settled, and held
     /// standard output goes once no output pipe is open.
     pub(super) fn settle(&mut self) {
-        for (_, file) in self.files_out.iter_mut() {
-            file.settled = file.buf.len();
+        for name in self.written.drain(..) {
+            if let Some(file) = self.files_out.get_mut(&name) {
+                file.settled = file.buf.len();
+                file.written = false;
+            }
         }
         if self.pipes_out.is_empty() {
             self.release();
@@ -521,7 +535,7 @@ impl Io {
             return;
         }
         self.held.extend_from_slice(body);
-        if self.held.len() >= LIMIT {
+        if self.held.len() >= FLUSH {
             let fd = match self.held_spool {
                 Some(fd) => fd,
                 None => {

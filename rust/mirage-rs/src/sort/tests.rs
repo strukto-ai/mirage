@@ -61,12 +61,12 @@ fn sorts_and_writes_a_run_in_bounded_steps() {
     while stream.busy() {
         let mut piece = Vec::new();
         stream.drain(&mut piece).unwrap();
-        assert!(piece.len() < super::PIECE + 16);
+        assert!(piece.len() < crate::constants::OUTPUT + 16);
         calls += 1;
         pieces += usize::from(!piece.is_empty());
         out.extend_from_slice(&piece);
     }
-    assert_eq!(pieces, input.len().div_ceil(super::PIECE));
+    assert_eq!(pieces, input.len().div_ceil(crate::constants::OUTPUT));
     assert!(calls > pieces);
     let want: Vec<u8> = (0..30000)
         .flat_map(|n| format!("{n:05}\n").into_bytes())

@@ -4,16 +4,10 @@ mod options;
 
 use serde::Deserialize;
 
-use crate::{Stream, StreamError, parse_config};
+use crate::{Stream, StreamError, constants::MAX_HELD, parse_config};
 
 /// The most a call does: names ranked, pairs linked or names placed.
 const STEPS: usize = 1 << 14;
-/// The most the graph may take: GNU runs out of memory past what it can
-/// get.
-#[cfg(not(test))]
-const MAX_HELD: usize = 1 << 30;
-#[cfg(test)]
-const MAX_HELD: usize = 1 << 12;
 /// What a name and a pair take besides a name's bytes, about.
 const NAME_COST: usize = 64;
 const PAIR_COST: usize = 32;
@@ -157,8 +151,12 @@ impl Tsort {
             self.stderr.push(b'\n');
         }
         self.status = 1;
-        self.trail.clear();
-        self.met.clear();
+        // Only the walk's own names, as a cleared map costs its whole
+        // capacity, which one long walk can leave large for every loop
+        // after it.
+        for member in self.trail.drain(..).chain(found.iter().copied()) {
+            self.met.remove(&member);
+        }
         self.release(found[found.len() - 1], found[0]);
     }
 
@@ -320,7 +318,7 @@ mod tests {
 
     #[test]
     fn a_graph_past_what_it_may_hold_runs_out_of_memory() {
-        let names: Vec<u8> = (0..200)
+        let names: Vec<u8> = (0..crate::constants::MAX_HELD / 64)
             .flat_map(|n| format!("n{n} n{}\n", n + 1).into_bytes())
             .collect();
         let mut stream = open("tsort", br#"{"operands":[]}"#).expect("opens");

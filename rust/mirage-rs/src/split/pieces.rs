@@ -1,19 +1,14 @@
 //! What split and csplit share: the input, read through the host a chunk
-//! at a time, and each piece written through it, held to `LIMIT` bytes
+//! at a time, and each piece written through it, held to `FLUSH` bytes
 //! before it goes.
 
+use crate::constants::FLUSH;
 use crate::request::{Io, Opening, Reply, Request, WriteMode, read_failure};
-
-/// How much of a piece waits before it goes to the host.
-pub(super) const LIMIT: usize = 64 * 1024;
 
 /// The longest suffix a piece's name takes: past it the run ends as GNU's
 /// does once memory runs out (GNU allocates up to the address space, then
 /// fails the open on the name's length).
 pub(super) const MAX_SUFFIX: usize = 1 << 16;
-
-/// The steps one `drain` runs before the host may yield.
-pub(super) const STEPS: usize = 20_000;
 
 /// One input and the bytes of its last chunk still unread.
 pub(super) struct Input {
@@ -88,7 +83,7 @@ impl Piece {
             name,
             created: false,
             held: Vec::new(),
-            limit: LIMIT,
+            limit: FLUSH,
             elide: false,
             touched: false,
             unbuffered: false,

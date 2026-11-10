@@ -419,6 +419,41 @@
         "stdout": "2c2\n< Ö\n---\n> ü\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "diff_shared_short_rows_then_a_long_line",
+      "seq": 9973012,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/diff_engine; seq 3000 | sed 's/.*/a/' > /data/diff_engine/a; head -c 200000 /dev/zero | tr '\\0' x >> /data/diff_engine/a; head -c 200000 /dev/zero | tr '\\0' y > /data/diff_engine/b; diff /data/diff_engine/a /data/diff_engine/b > /data/diff_engine/out; echo $?; wc -c < /data/diff_engine/out",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n412075\n",
+        "stderr": ""
+      }
     }
   ]
 }

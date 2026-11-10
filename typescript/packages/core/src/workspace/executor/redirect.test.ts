@@ -480,10 +480,11 @@ describe('handleRedirect 2>&1', () => {
   it('merges stderr into the file when 2>&1 follows the file redirect', async () => {
     // `cmd > f 2>&1` — fd2 follows fd1 into the file.
     const writes: { data: Uint8Array }[] = []
-    const dispatch = vi.fn<DispatchFn>((op, _p, args) => {
-      if ((op === 'write' || op === 'pwrite') && (args?.[0] as Uint8Array | undefined)?.byteLength)
-        writes.push({ data: args?.[0] as Uint8Array })
-      return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
+    const dispatch = vi.fn<DispatchFn>(async (op, _p, args) => {
+      if (op !== 'write' && op !== 'pwrite') return [null, new IOResult()]
+      const data = await materialize(args?.[0] as ByteSource)
+      if (data.byteLength > 0) writes.push({ data })
+      return [null, new IOResult()]
     })
     const execute: ExecuteNodeFn = () =>
       Promise.resolve([
@@ -539,10 +540,11 @@ describe('handleRedirect 2>&1', () => {
 describe('handleRedirect &> (both to file)', () => {
   it('writes stdout+stderr combined to the target', async () => {
     const writes: { data: Uint8Array; path: string }[] = []
-    const dispatch = vi.fn<DispatchFn>((op, p, args) => {
-      if ((op === 'write' || op === 'pwrite') && (args?.[0] as Uint8Array | undefined)?.byteLength)
-        writes.push({ path: p.virtual, data: args?.[0] as Uint8Array })
-      return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
+    const dispatch = vi.fn<DispatchFn>(async (op, p, args) => {
+      if (op !== 'write' && op !== 'pwrite') return [null, new IOResult()]
+      const data = await materialize(args?.[0] as ByteSource)
+      if (data.byteLength > 0) writes.push({ path: p.virtual, data })
+      return [null, new IOResult()]
     })
     const execute: ExecuteNodeFn = () =>
       Promise.resolve([encode('OUT'), new IOResult({ stderr: encode('ERR') }), new ExecutionNode()])

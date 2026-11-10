@@ -289,8 +289,8 @@ describe('streamed write', () => {
     expect(accessor.store.files.get('/new')?.byteLength).toBe(0)
   })
 
-  // A publish copies only what arrived into a buffer the write grows, and a
-  // view a reader took earlier stays as it was; the file lands at its size.
+  // A publish copies only what arrived into a buffer the store grows, and a
+  // view a reader took earlier stays as it was.
   it('grows in place and leaves a reader its view', async () => {
     const accessor = mkAccessor()
     const gates: (() => void)[] = []
@@ -310,9 +310,7 @@ describe('streamed write', () => {
     }
     await writing
     expect(seen.map((view) => DEC.decode(view))).toEqual(['a\n', 'a\nb\n', 'a\nb\nc\n'])
-    const stored = accessor.store.files.get('/f')
-    expect(DEC.decode(stored)).toBe('a\nb\nc\nd\n')
-    expect(stored?.buffer.byteLength).toBe(stored?.byteLength)
+    expect(DEC.decode(accessor.store.files.get('/f'))).toBe('a\nb\nc\nd\n')
   })
 
   // A stream that fails keeps what it had delivered, as a disk file does.

@@ -47,6 +47,7 @@ export const BUILDER: GenericCommand = {
   name: 'grep',
   facts: facts,
   read: true,
+  givesBack: true,
   aggregate: prefixAggregate,
   fn: grep,
 }

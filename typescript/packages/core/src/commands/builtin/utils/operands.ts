@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { closeQuietly } from '../../../io/stream.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import type { LinkView, MountView, StatPath } from '../../../view/types.ts'
@@ -281,12 +281,10 @@ export function operandLines(
   return lines
 }
 
-/** Put an operand's stderr line on `io` after what it holds. Mirrors Python's say. */
+/** Say an operand's stderr line on `io` after what it holds. Mirrors Python's say. */
 export async function say(io: IOResult, line: Uint8Array | string): Promise<void> {
-  io.stderr = concat([
-    await materialize(io.stderr),
-    typeof line === 'string' ? encodeText(line) : line,
-  ])
+  if (io.stderr !== null && !(io.stderr instanceof Uint8Array)) await io.materializeStderr()
+  io.addStderr(typeof line === 'string' ? encodeText(line) : line)
 }
 
 // IOResult carrying operand-split stderr lines: exit 1 when any operand
@@ -331,7 +329,7 @@ export async function reportFsError(
   path: PathSpec,
   err: unknown,
 ): Promise<void> {
-  io.stderr = concat([await materialize(io.stderr), encodeText(fsErrorLine(cmdName, path, err))])
+  await say(io, fsErrorLine(cmdName, path, err))
   io.exitCode = 1
 }
 

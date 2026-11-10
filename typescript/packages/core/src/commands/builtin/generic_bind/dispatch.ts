@@ -17,7 +17,8 @@ import type { IdSource } from '../../../utils/ids.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import type { FindExpr } from '../../../rs/find.ts'
 import { NOOPAccessor } from '../../../accessor/base.ts'
-import { materialize, IOResult } from '../../../io/types.ts'
+import { spooled } from '../../../io/spool.ts'
+import { IOResult } from '../../../io/types.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
@@ -53,7 +54,7 @@ export async function* callerStream(
  * lists the mounts below a directory itself, so no descendant is left to
  * avoid; where each mount begins stays for `--one-file-system`, and each
  * mount's du budget for a walk. `follow` is the line's operand resolution,
- * which its globs' matches take too. The output is read before this returns,
+ * which its globs' matches take too. The output is read into a spool before this returns,
  * inside the running command: a `fresh` mount trusts only the listings that
  * command made, so a lazy stream read after it ends would be served the
  * previous command's. A builder that `streams` only reads, and each read opens
@@ -93,6 +94,6 @@ export async function runDispatch(
     })
     if (result === null) return [null, new IOResult()]
     if (builder.streams === true) return result
-    return [await materialize(result[0]), result[1]]
+    return [await spooled(result[0]), result[1]]
   })
 }

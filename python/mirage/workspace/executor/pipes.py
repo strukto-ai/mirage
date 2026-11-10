@@ -90,6 +90,7 @@ from mirage.workspace.executor.traps import (
     run_err_trap,
     run_exit_trap,
 )
+from mirage.workspace.node.program import StatementRecorder
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
@@ -582,7 +583,7 @@ async def handle_subshell(
             i += 2
             continue
         i += 1
-        recorder = Recorder()
+        recorder = StatementRecorder(session, sink)
         recorder.output_file = diverted_file(session, sink)
         leave = record_jobs(session, recorder)
 

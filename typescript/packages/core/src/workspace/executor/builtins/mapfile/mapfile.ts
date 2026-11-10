@@ -26,6 +26,7 @@ import { concat } from '../../../../utils/bytes.ts'
 import { singleQuote } from '../../../../utils/quote.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
+import { envLimit } from '../../../session/budget.ts'
 import { sessionView, visibleArrays, visibleAssocs } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import {
@@ -122,6 +123,7 @@ export async function handleMapfile(
   // max_memory a few lines at a time.
   let held = 0
   for (const v of arr.elements.values()) held += SLOT + encodeText(v).byteLength
+  const maxEnv = envLimit()
   const outputs: Uint8Array[] = []
   const errs: Uint8Array[] = []
   while (buffer !== null && (limit === 0 || stored < limit)) {
@@ -160,7 +162,10 @@ export async function handleMapfile(
     arraySet(arr, index, text)
     stored++
     index++
-    if (!found) break
+    // Once the values alone pass max_env the write refuses whatever
+    // follows, so the rest is not read.
+    const over = maxEnv !== null && held - SLOT * arr.elements.size > maxEnv
+    if (!found || over) break
   }
   try {
     await view.set(name, arr)

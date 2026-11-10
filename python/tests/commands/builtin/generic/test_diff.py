@@ -29,7 +29,7 @@ from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.stream import OutputStream
 from mirage.io.types import IOResult, materialize
 from mirage.rs.diff_pool import DiffPool
-from mirage.rs.diff_types import PairResult
+from mirage.rs.diff_types import DiffOptions, PairResult
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.timezone import resolve_tz
 from mirage.workspace.executor.command.flags import (
@@ -68,7 +68,7 @@ async def test_brief_comparison_reads_inputs_larger_than_the_default_budget():
             stream=read,
             readdir_fn=_readdir,
             stat_fn=_stat,
-            flags=DiffFlags(brief=True),
+            flags=DiffFlags(DiffOptions(brief=True)),
         )
         assert await materialize(out) == b""
         assert io.exit_code == 0
@@ -99,7 +99,7 @@ async def test_brief_answers_from_sizes_and_stops_at_the_first_difference():
             stream=read,
             readdir_fn=_readdir,
             stat_fn=_stat,
-            flags=DiffFlags(brief=True),
+            flags=DiffFlags(DiffOptions(brief=True)),
             size_of=sizes,
         )
         assert (
@@ -224,7 +224,7 @@ async def test_unified_headers_carry_each_side_mtime():
         stream=read,
         readdir_fn=_readdir,
         stat_fn=stat,
-        flags=DiffFlags(mode="unified"),
+        flags=DiffFlags(DiffOptions(mode="unified")),
     )
     assert io.exit_code == 1
     out = await materialize(out)
@@ -237,7 +237,9 @@ async def test_unified_headers_carry_each_side_mtime():
         stream=read,
         readdir_fn=_readdir,
         stat_fn=stat,
-        flags=DiffFlags(mode="unified", new_file=True, new_first=True),
+        flags=DiffFlags(
+            DiffOptions(mode="unified"), new_file=True, new_first=True
+        ),
     )
     out = await materialize(out)
     assert out.splitlines()[1] == (
@@ -268,7 +270,7 @@ async def test_unified_headers_read_the_time_the_namespace_keeps():
         stream=read,
         readdir_fn=_readdir,
         stat_fn=stat,
-        flags=DiffFlags(mode="unified"),
+        flags=DiffFlags(DiffOptions(mode="unified")),
         stat_path=stat_path,
     )
     out = await materialize(out)
@@ -298,7 +300,9 @@ async def test_unified_headers_read_in_the_tz_zone_with_every_digit():
         stream=read,
         readdir_fn=_readdir,
         stat_fn=missing,
-        flags=DiffFlags(mode="unified", new_file=True, new_first=True),
+        flags=DiffFlags(
+            DiffOptions(mode="unified"), new_file=True, new_first=True
+        ),
         stat_path=stat_path,
         zone=resolve_tz("Asia/Hong_Kong"),
     )
@@ -378,7 +382,7 @@ def test_parse_flags_picks_one_style_and_its_context(
 ):
     parsed = _line_flags(argv)
     assert isinstance(parsed, DiffFlags)
-    assert (parsed.mode, parsed.context) == (mode, context)
+    assert (parsed.options.mode, parsed.options.context) == (mode, context)
 
 
 @pytest.mark.asyncio
@@ -404,21 +408,23 @@ async def test_recursive_side_by_side_heads_every_pair_it_shows():
     pair = [_operand("x", "/d/x"), _operand("y", "/d/y")]
     for flags, expected in (
         (
-            DiffFlags(mode="sides", widths=("20",), recursive=True),
+            DiffFlags(
+                DiffOptions(mode="sides", widths=("20",)), recursive=True
+            ),
             b"diff x/f y/f\nx     |\ty\ndiff x/g y/g\nsame\tsame\n",
         ),
         (
             DiffFlags(
-                mode="sides",
-                widths=("20",),
+                DiffOptions(
+                    mode="sides", widths=("20",), suppress_common=True
+                ),
                 recursive=True,
-                suppress_common=True,
             ),
             b"diff x/f y/f\nx     |\ty\n",
         ),
         (
             DiffFlags(
-                mode="unified",
+                DiffOptions(mode="unified"),
                 recursive=True,
                 labels=("A", "B"),
                 identical=True,

@@ -13,6 +13,5 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 // How often a streamed write shows what has arrived so far: a reader sees a
-// slow writer's file grow, and a fast one copies the bytes a few times at
-// most, since the store keeps each file whole.
+// slow writer's file grow, and each showing adds only the new bytes.
 export const STREAM_PUBLISH_SECONDS = 0.1

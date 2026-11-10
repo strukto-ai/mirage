@@ -15,11 +15,14 @@
 from typing import Any
 
 from mirage.accessor.email import EmailAccessor
+from mirage.commands.builtin.utils.constants import MONTHS
 from mirage.commands.cli.builtin.himalaya.attachment import (
+    PARSE_FAILURE,
     part_mime,
     part_name,
     part_payload,
 )
+from mirage.commands.cli.builtin.himalaya.deliver import SEEN_FLAG
 from mirage.commands.cli.builtin.himalaya.printer import notice
 from mirage.commands.cli.builtin.himalaya.table import format_size
 from mirage.commands.cli.builtin.himalaya.util import fetch_source
@@ -37,22 +40,6 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 DAYS = ("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
-MONTH_NAMES = (
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-)
-PARSE_FAILURE = "Failed to parse RFC 5322 message"
-SEEN_FLAG = "\\Seen"
 
 
 def _day_of_week(year: int, month: int, day: int) -> int:
@@ -70,7 +57,7 @@ def _rfc822(value: dict[str, Any]) -> str:
     )
     weekday = DAYS[_day_of_week(value["year"], value["month"], value["day"])]
     return (
-        f"{weekday}, {value['day']} {MONTH_NAMES[value['month'] - 1]} "
+        f"{weekday}, {value['day']} {MONTHS[value['month'] - 1]} "
         f"{value['year']:04d} {value['hour']:02d}:{value['minute']:02d}:"
         f"{value['second']:02d} {'-' if negative else '+'}"
         f"{value['tz_hour']:02d}{value['tz_minute']:02d}"

@@ -3,13 +3,10 @@ use serde::{Deserialize, Serialize};
 use super::parse::{self, Ast, Dialect};
 use super::posix::{self, Posix, Spans, Tally, Walk};
 use super::{EXCEEDED, Options as GrepOptions, Regex, STEPS, Step, Syntax};
-use crate::{Stream, StreamError, parse_config};
+use crate::{Stream, StreamError, constants::KEPT, parse_config};
 
 /// An offset that stands for a group with no part in the match.
 const UNSET: u32 = u32::MAX;
-
-/// The most subject bytes a stream keeps room for between requests.
-const KEPT_SUBJECT: usize = 1 << 16;
 
 #[derive(Deserialize)]
 #[serde(tag = "mode", rename_all = "lowercase", deny_unknown_fields)]
@@ -284,8 +281,8 @@ impl RegexStream {
         self.walk = Walk::default();
         self.tally = Tally::default();
         self.subject.clear();
-        if self.subject.capacity() > KEPT_SUBJECT {
-            self.subject.shrink_to(KEPT_SUBJECT);
+        if self.subject.capacity() > KEPT {
+            self.subject.shrink_to(KEPT);
         }
         match &mut self.matcher {
             Matcher::Posix(regex) => regex.release(),

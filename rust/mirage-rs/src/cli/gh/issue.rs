@@ -93,9 +93,9 @@ fn targets(account: &Account, texts: &[String], flags: &Flags) -> Result<(RepoRe
             continue;
         }
         let (repo, found) = repo_number(account, flags, text, "issue", "issues")?;
-        let name = format!("{}/{}", repo.owner, repo.repo);
+        let name = repo.full();
         if let Some(named) = &named {
-            let expected = format!("{}/{}", named.owner, named.repo);
+            let expected = named.full();
             if name.to_lowercase() != expected.to_lowercase() {
                 return value(format!(
                     "multiple issues must be in same repo: found {}, expected {}",
@@ -175,7 +175,7 @@ pub(crate) async fn list_cmd(account: &Account, flags: &Flags) -> Result<Out> {
                 search: keywords,
                 ..ListQuery::default()
             },
-            &format!("{}/{}", repo.owner, repo.repo),
+            &repo.full(),
             features.advanced,
         );
         search_issue_fields(
@@ -374,7 +374,7 @@ pub(crate) async fn create_cmd(account: &Account, flags: &Flags) -> Result<Out> 
     if !info.get("hasIssuesEnabled").truthy() {
         return value(format!(
             "the '{}' repository has disabled issues",
-            full(&repo)
+            repo.full()
         ));
     }
     let mut input = Obj::new();
@@ -476,7 +476,7 @@ pub(crate) async fn reopen_cmd(account: &Account, flags: &Flags, texts: &[String
     let node = find_subject(account, &repo, number, "id,number,title,state", "").await?;
     let name = format!(
         "{}#{} ({})",
-        full(&repo),
+        repo.full(),
         node.get("number").show(),
         node.get("title").text()
     );
@@ -585,10 +585,6 @@ pub(crate) async fn find_subject(
 
 const COPILOT_LOGIN: &str = "copilot-swe-agent";
 
-fn full(repo: &RepoRef) -> String {
-    format!("{}/{}", repo.owner, repo.repo)
-}
-
 fn is_pull(node: &Obj) -> bool {
     node.get("__typename").as_str() == Some("PullRequest")
 }
@@ -621,7 +617,7 @@ pub(crate) async fn close_cmd(account: &Account, flags: &Flags, texts: &[String]
     let node = find_subject(account, &repo, number, "id,number,title,state", "").await?;
     let name = format!(
         "{}#{} ({})",
-        full(&repo),
+        repo.full(),
         node.get("number").show(),
         node.get("title").text()
     );
@@ -660,7 +656,7 @@ pub(crate) async fn pin_cmd(account: &Account, flags: &Flags, texts: &[String]) 
     let node = find_subject(account, &repo, number, "id,number,title", "isPinned").await?;
     let name = format!(
         "{}#{} ({})",
-        full(&repo),
+        repo.full(),
         node.get("number").show(),
         node.get("title").text()
     );
@@ -686,7 +682,7 @@ pub(crate) async fn unpin_cmd(account: &Account, flags: &Flags, texts: &[String]
     let node = find_subject(account, &repo, number, "id,number,title", "isPinned").await?;
     let name = format!(
         "{}#{} ({})",
-        full(&repo),
+        repo.full(),
         node.get("number").show(),
         node.get("title").text()
     );
@@ -713,7 +709,7 @@ pub(crate) async fn delete_cmd(account: &Account, flags: &Flags, texts: &[String
     if is_pull(&node) {
         return value(format!(
             "issue {}#{} is a pull request and cannot be deleted",
-            full(&repo),
+            repo.full(),
             node.get("number").show()
         ));
     }
@@ -744,7 +740,7 @@ pub(crate) async fn transfer_cmd(
     if is_pull(&node) {
         return value(format!(
             "issue {}#{} is a pull request and cannot be transferred",
-            full(&repo),
+            repo.full(),
             node.get("number").show()
         ));
     }
@@ -807,9 +803,9 @@ pub(crate) async fn lock_run(
         return value(format!(
             "X {} {}#{number} not found, but found {} {}#{number}.  Use `gh {name} {verb} {number}` instead",
             kind(pull),
-            full(&repo),
+            repo.full(),
             kind(seen).to_lowercase(),
-            full(&repo),
+            repo.full(),
         ));
     }
     let id = node.get("id").text();
@@ -907,7 +903,7 @@ pub(crate) async fn status_cmd(account: &Account, flags: &Flags, texts: &[String
     if !repository.get("hasIssuesEnabled").truthy() {
         return value(format!(
             "the '{}' repository has disabled issues",
-            full(&repo)
+            repo.full()
         ));
     }
     if exported_fields.is_some() {
@@ -928,7 +924,7 @@ pub(crate) async fn status_cmd(account: &Account, flags: &Flags, texts: &[String
         row.set("mentioned", export(repository.get("mentioned")));
         return export_out(account, &Json::Obj(row), flags).await;
     }
-    let mut out = format!("\nRelevant issues in {}\n\n", full(&repo));
+    let mut out = format!("\nRelevant issues in {}\n\n", repo.full());
     status_section(
         &mut out,
         "Issues assigned to you",

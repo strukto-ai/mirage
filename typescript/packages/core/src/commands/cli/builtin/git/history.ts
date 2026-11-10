@@ -24,7 +24,7 @@ import {
   PatternCompileError,
   RevisionAndFilenameError,
 } from './errors.ts'
-import { HEAD, TEMPLATE_KINDS } from './constants.ts'
+import { HEAD, TEMPLATE_KINDS, WILDCARDS } from './constants.ts'
 
 import type { FlagView } from '../../../spec/flag_view.ts'
 import { isoTimestamp } from '../../../../utils/dates.ts'
@@ -406,9 +406,6 @@ export function parseFlags(
 // The `--diff-merges` values that diff a merge against its parents, one by one
 // or the first alone.
 const PARENT_DIFFS = new Set(['on', '1', 'm', 'separate', 'first-parent'])
-
-// What makes an operand a pattern git reads as a path unseen.
-const WILDCARDS = ['*', '?', '[', '\\']
 
 /**
  * A walk's operands as revisions and the patterns of the paths it is limited

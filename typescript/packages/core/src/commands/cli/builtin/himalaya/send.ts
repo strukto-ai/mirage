@@ -20,17 +20,12 @@ import { IOResult, materialize, type ByteSource } from '../../../../io/types.ts'
 import type { EmailAccessor } from '../../../../accessor/email.ts'
 import type { Files } from '../../../../workspace/files.ts'
 import { appendMessage } from './deliver.ts'
+import { IMAP_FLAGS } from './flag.ts'
 import { ChainedError, rendered } from './printer.ts'
 import { sendRaw } from './smtp.ts'
 import { finishMessage } from './util.ts'
 
 const EMPTY_MESSAGE = 'Message is empty'
-const IMAP_FLAGS: Record<string, string> = {
-  seen: '\\Seen',
-  answered: '\\Answered',
-  flagged: '\\Flagged',
-  draft: '\\Draft',
-}
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 

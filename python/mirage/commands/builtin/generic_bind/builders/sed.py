@@ -38,4 +38,6 @@ async def sed(
     )
 
 
-BUILDER = GenericCommand("sed", sed, write=True, read=True, facts=facts)
+BUILDER = GenericCommand(
+    "sed", sed, write=True, read=True, gives_back=True, facts=facts
+)

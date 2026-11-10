@@ -14,12 +14,8 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { parseFindExpression } from '../../rs/find.ts'
-import {
-  compilePrintf,
-  renderPrintf,
-  expandPrintf as render,
-  type PrintfStatFacts,
-} from './find_printf.ts'
+import { decodeText } from '../../shell/bytes.ts'
+import { compilePrintf, renderPrintf, type PrintfStatFacts } from './find_printf.ts'
 import type { Identity } from './utils/identity.ts'
 
 function compiled(fmt: string) {
@@ -29,24 +25,27 @@ function compiled(fmt: string) {
   return { action, warnings: expr.warnings }
 }
 
-function expandPrintf(
+async function expand(
   fmt: string,
   row: string,
   base: string,
   st: PrintfStatFacts | null,
   warnings: string[],
   identity: Identity | null = null,
-): string {
+): Promise<string> {
   const { action, warnings: found } = compiled(fmt)
   warnings.push(...found)
-  return render(action.parts, row, base, st, identity)
+  const engine = compilePrintf(action.parts)
+  const out = await renderPrintf(engine, row, base, st, identity)
+  engine.close()
+  return decodeText(out)
 }
 
 function printfNeedsStat(fmt: string): boolean {
   return compiled(fmt).action.stat
 }
 
-describe('expandPrintf', () => {
+describe('renderPrintf', () => {
   const stat = {
     size: 6,
     kind: 'f' as const,
@@ -57,39 +56,39 @@ describe('expandPrintf', () => {
     gid: null,
   }
 
-  it('expands the owner family from the identity', () => {
+  it('expands the owner family from the identity', async () => {
     const warnings: string[] = []
     const identity = { profile: 'admin' }
     // No uid/gid on the entry: the owner and the group are the session's
     // profile, the rule ls -l draws its columns by.
-    expect(expandPrintf('%u %U %g %G\n', '/data/a.txt', '/data', stat, warnings, identity)).toBe(
+    expect(await expand('%u %U %g %G\n', '/data/a.txt', '/data', stat, warnings, identity)).toBe(
       'admin admin admin admin\n',
     )
     // A reported owner wins; `-` when nothing names one.
     const owned = { ...stat, uid: 501, gid: 'staff' }
-    expect(expandPrintf('%u %g\n', '/data/a.txt', '/data', owned, warnings, identity)).toBe(
+    expect(await expand('%u %g\n', '/data/a.txt', '/data', owned, warnings, identity)).toBe(
       '501 staff\n',
     )
-    expect(expandPrintf('%u %g\n', '/data/a.txt', '/data', stat, warnings)).toBe('- -\n')
+    expect(await expand('%u %g\n', '/data/a.txt', '/data', stat, warnings)).toBe('- -\n')
     expect(printfNeedsStat('%u %g\n')).toBe(true)
     expect(warnings).toEqual([])
   })
 
-  it('expands the path family', () => {
+  it('expands the path family', async () => {
     const warnings: string[] = []
-    expect(expandPrintf('%p|%P|%f|%h|%d\n', '/data/sub/b.txt', '/data', null, warnings)).toBe(
+    expect(await expand('%p|%P|%f|%h|%d\n', '/data/sub/b.txt', '/data', null, warnings)).toBe(
       '/data/sub/b.txt|sub/b.txt|b.txt|/data/sub|2\n',
     )
     expect(warnings).toEqual([])
   })
 
-  it('expands the stat family', () => {
+  it('expands the stat family', async () => {
     const warnings: string[] = []
-    expect(expandPrintf('%s %y %m %M\n', '/data/a.txt', '/data', stat, warnings)).toBe(
+    expect(await expand('%s %y %m %M\n', '/data/a.txt', '/data', stat, warnings)).toBe(
       '6 f 644 -rw-r--r--\n',
     )
     expect(
-      expandPrintf(
+      await expand(
         '%y %m\n',
         '/data/sub',
         '/data',
@@ -99,13 +98,13 @@ describe('expandPrintf', () => {
     ).toBe('d 755\n')
   })
 
-  it('renders a reported mode over the per-kind default', () => {
+  it('renders a reported mode over the per-kind default', async () => {
     const warnings: string[] = []
     expect(
-      expandPrintf('%m %M\n', '/data/a.txt', '/data', { ...stat, mode: 0o600 }, warnings),
+      await expand('%m %M\n', '/data/a.txt', '/data', { ...stat, mode: 0o600 }, warnings),
     ).toBe('600 -rw-------\n')
     expect(
-      expandPrintf(
+      await expand(
         '%m %M\n',
         '/data/sub',
         '/data',
@@ -115,7 +114,7 @@ describe('expandPrintf', () => {
     ).toBe('700 drwx------\n')
   })
 
-  it('reports the target kind for %Y on a link, N when it dangles', () => {
+  it('reports the target kind for %Y on a link, N when it dangles', async () => {
     const warnings: string[] = []
     const link = {
       size: 5,
@@ -127,61 +126,61 @@ describe('expandPrintf', () => {
       gid: null,
     }
     expect(
-      expandPrintf('%y %Y\n', '/data/lnk', '/data', { ...link, targetKind: 'd' }, warnings),
+      await expand('%y %Y\n', '/data/lnk', '/data', { ...link, targetKind: 'd' }, warnings),
     ).toBe('l d\n')
     expect(
-      expandPrintf('%y %Y\n', '/data/lnk', '/data', { ...link, targetKind: 'N' }, warnings),
+      await expand('%y %Y\n', '/data/lnk', '/data', { ...link, targetKind: 'N' }, warnings),
     ).toBe('l N\n')
-    expect(expandPrintf('%y %Y\n', '/data/a.txt', '/data', stat, warnings)).toBe('f f\n')
+    expect(await expand('%y %Y\n', '/data/a.txt', '/data', stat, warnings)).toBe('f f\n')
   })
 
-  it('expands time directives in UTC', () => {
+  it('expands time directives in UTC', async () => {
     const warnings: string[] = []
-    expect(expandPrintf('%TY-%Tm-%Td\n', '/data/a.txt', '/data', stat, warnings)).toBe(
+    expect(await expand('%TY-%Tm-%Td\n', '/data/a.txt', '/data', stat, warnings)).toBe(
       '2026-08-16\n',
     )
-    expect(expandPrintf('%T@\n', '/data/a.txt', '/data', stat, warnings)).toBe(
+    expect(await expand('%T@\n', '/data/a.txt', '/data', stat, warnings)).toBe(
       '1786887930.0000000000\n',
     )
   })
 
-  it('takes a fraction before 1970 from the calendar second', () => {
+  it('takes a fraction before 1970 from the calendar second', async () => {
     const before = { ...stat, mtimeEpoch: -0.25 }
-    expect(expandPrintf('%T@|%TS|%T+\n', '/data/a.txt', '/data', before, [])).toBe(
+    expect(await expand('%T@|%TS|%T+\n', '/data/a.txt', '/data', before, [])).toBe(
       '-1.7500000000|59.7500000000|1969-12-31+23:59:59.7500000000\n',
     )
   })
 
-  it('keeps a fraction to its microseconds', () => {
+  it('keeps a fraction to its microseconds', async () => {
     const fractional = { ...stat, mtimeEpoch: Date.parse('2024-03-05T14:07:09.123Z') / 1000 }
-    expect(expandPrintf('%T@|%TS|%Ts\n', '/data/a.txt', '/data', fractional, [])).toBe(
+    expect(await expand('%T@|%TS|%Ts\n', '/data/a.txt', '/data', fractional, [])).toBe(
       '1709647629.1230000000|09.1230000000|1709647629\n',
     )
   })
 
-  it('keeps a year below 100 in the ISO week and the day of the year', () => {
+  it('keeps a year below 100 in the ISO week and the day of the year', async () => {
     const early = { ...stat, mtimeEpoch: -62008934400 }
-    expect(expandPrintf('%TF|%TG|%TV|%Tj|%Tg\n', '/data/a.txt', '/data', early, [])).toBe(
+    expect(await expand('%TF|%TG|%TV|%Tj|%Tg\n', '/data/a.txt', '/data', early, [])).toBe(
       '0005-01-06|5|01|006|05\n',
     )
     const first = { ...stat, mtimeEpoch: -62009366400 }
-    expect(expandPrintf('%TG|%TV\n', '/data/a.txt', '/data', first, [])).toBe('4|53\n')
+    expect(await expand('%TG|%TV\n', '/data/a.txt', '/data', first, [])).toBe('4|53\n')
   })
 
-  it('handles escapes and warns per unknown directive in GNU words', () => {
+  it('handles escapes and warns per unknown directive in GNU words', async () => {
     const warnings: string[] = []
-    expect(expandPrintf('A\\tB\\n', '/data/a.txt', '/data', null, warnings)).toBe('A\tB\n')
-    expect(expandPrintf('%Q\n', '/data/a.txt', '/data', null, warnings)).toBe('%Q\n')
-    expect(expandPrintf('%Q\n', '/data/a.txt', '/data', null, warnings)).toBe('%Q\n')
+    expect(await expand('A\\tB\\n', '/data/a.txt', '/data', null, warnings)).toBe('A\tB\n')
+    expect(await expand('%Q\n', '/data/a.txt', '/data', null, warnings)).toBe('%Q\n')
+    expect(await expand('%Q\n', '/data/a.txt', '/data', null, warnings)).toBe('%Q\n')
     expect(warnings).toEqual([
       "find: warning: unrecognized format directive `%Q'",
       "find: warning: unrecognized format directive `%Q'",
     ])
   })
 
-  it('renders the start row at depth 0', () => {
+  it('renders the start row at depth 0', async () => {
     const warnings: string[] = []
-    expect(expandPrintf('%P|%d|%f\n', '/data', '/data', null, warnings)).toBe('|0|data\n')
+    expect(await expand('%P|%d|%f\n', '/data', '/data', null, warnings)).toBe('|0|data\n')
   })
 })
 

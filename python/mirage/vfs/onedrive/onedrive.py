@@ -59,6 +59,7 @@ class OneDriveVFS(BaseVFS):
     # VFS.
     index_ttl: float = 86_400
     whole_word_search: bool = True
+    search_needs_walk_limit: bool = True
     supports_snapshot: bool = True
     # stat and every read that can fill the cache stamp the item's cTag,
     # the read taking it before the bytes, so the gate compares like with
@@ -131,17 +132,6 @@ class OneDriveVFS(BaseVFS):
         self, path: PathSpec, length: int, no_create: bool = False
     ) -> None:
         await _truncate(self.accessor, path, length, no_create)
-
-    def supports(self, name: str) -> bool:
-        """Whether this VFS answers ``name``; with no walk limit it reads
-        every file rather than ask the service's search.
-
-        Args:
-            name (str): the function name.
-        """
-        if name == "files_containing" and self.walk_limit < 0:
-            return False
-        return super().supports(name)
 
     async def files_containing(
         self,

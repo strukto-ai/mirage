@@ -226,28 +226,6 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
             window=vfs_path in self._windows,
         )
 
-    async def set_dir(
-        self,
-        vfs_path: str,
-        entries: Sequence[tuple[str, FileStat]],
-        expired_at: datetime | None = None,
-        *,
-        window: bool = False,
-        excluded: tuple[str, ...] = (),
-        version: str | None = None,
-    ) -> list[Evicted]:
-        result = await self._set_dir(
-            vfs_path,
-            entries,
-            expired_at,
-            partial=False,
-            evict=not window,
-            excluded=excluded,
-            version=version,
-        )
-        assert result is not None
-        return result
-
     async def set_partial_dir(
         self,
         vfs_path: str,
@@ -477,29 +455,6 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
                 changed = True
                 self._observation += 1
         return changed
-
-    async def refill_dir(
-        self,
-        vfs_path: str,
-        entries: Sequence[tuple[str, FileStat]],
-        token: str,
-        expired_at: datetime | None = None,
-        *,
-        partial: bool = False,
-        window: bool = False,
-        excluded: tuple[str, ...] = (),
-        version: str | None = None,
-    ) -> list[Evicted] | None:
-        return await self._set_dir(
-            vfs_path,
-            entries,
-            expired_at,
-            partial=partial,
-            evict=not partial and not window,
-            excluded=excluded,
-            version=version,
-            refill=token,
-        )
 
     async def invalidate_entry(self, vfs_path: str) -> None:
         folder = vfs_path.rsplit("/", 1)[0] or "/"

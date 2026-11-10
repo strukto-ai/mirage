@@ -24,32 +24,47 @@ from mirage.commands.builtin.generic_bind.files import (
     dir_aware_stream,
     resolve_or_empty,
 )
-from mirage.commands.config import Context
+from mirage.commands.config import CommandFn, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
-
-async def sha256sum(
-    accessor: Accessor,
-    paths: list[PathSpec],
-    texts: list[str],
-    ctx: Context,
-) -> tuple[ByteSource | None, IOResult]:
-    parsed = parse_flags(ctx.flags, "sha256sum")
-    if isinstance(parsed, IOResult):
-        return None, parsed
-    files = command_files(ctx, paths)
-    resolved = await resolve_or_empty(files, paths)
-    return await checksum_generic(
-        parsed,
-        resolved,
-        list(texts),
-        ctx,
-        dir_aware_stat(files, ctx),
-        dir_aware_stream(files, ctx),
-        name="sha256sum",
-        stored=(files.checksum if files.answers("checksum") else None),
-    )
+NAMES = (
+    "b2sum",
+    "md5sum",
+    "sha1sum",
+    "sha224sum",
+    "sha256sum",
+    "sha384sum",
+    "sha512sum",
+)
 
 
-BUILDER = GenericCommand("sha256sum", sha256sum, read=True)
+def _checksum(command: str) -> CommandFn:
+    async def checksum(
+        accessor: Accessor,
+        paths: list[PathSpec],
+        texts: list[str],
+        ctx: Context,
+    ) -> tuple[ByteSource | None, IOResult]:
+        parsed = parse_flags(ctx.flags, command)
+        if isinstance(parsed, IOResult):
+            return None, parsed
+        files = command_files(ctx, paths)
+        resolved = await resolve_or_empty(files, paths)
+        return await checksum_generic(
+            parsed,
+            resolved,
+            list(texts),
+            ctx,
+            dir_aware_stat(files, ctx),
+            dir_aware_stream(files, ctx),
+            name=command,
+            stored=(files.checksum if files.answers("checksum") else None),
+        )
+
+    return checksum
+
+
+BUILDERS = tuple(
+    GenericCommand(name, _checksum(name), read=True) for name in NAMES
+)

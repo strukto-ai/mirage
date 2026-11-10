@@ -1,11 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::records::{Records, Take};
-use crate::{Stream, StreamError, parse_config};
-
-/// Output is handed on in pieces of about this size while two groups of
-/// equal keys print their product.
-const CHUNK: usize = 1 << 16;
+use crate::{Stream, StreamError, constants::OUTPUT, parse_config};
 
 #[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -773,7 +769,7 @@ impl Join {
                     // are handed on as they fill.
                     if self.config.paired && !groups[1].is_empty() {
                         while i < groups[0].len() {
-                            if out.len() >= CHUNK {
+                            if out.len() >= OUTPUT {
                                 self.phase = Phase::Pairs { groups, i, j };
                                 return;
                             }
@@ -898,7 +894,7 @@ mod tests {
             while stream.busy() {
                 let mut piece = Vec::new();
                 stream.drain(&mut piece).unwrap();
-                assert!(piece.len() < CHUNK + 4096);
+                assert!(piece.len() < OUTPUT + 4096);
                 out.extend(piece);
             }
             let Some(side) = stream.wants() else { break };

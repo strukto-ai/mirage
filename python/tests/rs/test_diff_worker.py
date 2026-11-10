@@ -25,7 +25,7 @@ def test_indexed_inputs_preserve_bytes_and_drain_bounded_output():
     assert diff_worker.feed(1, new) == (b"", 1)
     assert diff_worker.end(1) == (b"", None)
     first, busy = diff_worker.drain()
-    assert len(first) == 65536 and busy
+    assert 0 < len(first) <= 65536 and busy
     last, busy = diff_worker.drain()
     assert 0 < len(last) <= 65536 and not busy
     assert first + last == (

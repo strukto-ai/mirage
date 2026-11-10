@@ -53,6 +53,7 @@ class EmailVFS(BaseVFS):
     # VFS.
     index_ttl: float = 86_400
     vfs_md: str = VFS_MD
+    search_needs_walk_limit: bool = True
     # IMAP search names messages; an attachment is read as usual.
     searchable = ("*/*/*.email.json",)
 
@@ -85,17 +86,6 @@ class EmailVFS(BaseVFS):
         self, path: PathSpec, entry: FileStat | None = None
     ) -> FileStat:
         return await _stat(self.accessor, path, entry)
-
-    def supports(self, name: str) -> bool:
-        """Whether this VFS answers ``name``; with no walk limit it reads
-        every file rather than ask the service's search.
-
-        Args:
-            name (str): the function name.
-        """
-        if name == "files_containing" and self.walk_limit < 0:
-            return False
-        return super().supports(name)
 
     async def files_containing(
         self,

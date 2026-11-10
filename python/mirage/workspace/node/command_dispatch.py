@@ -1035,14 +1035,15 @@ async def _run_argv(
             # the records that command made.
             node.exit_code = io.exit_code
             node.records.extend(mine)
-            late = io.stderr
+            late = b"" if io.stderr is None else io.stderr
             if (
                 node.stderr is saved
                 and isinstance(early, bytes)
                 and isinstance(late, bytes)
                 and late.startswith(early)
             ):
-                node.stderr += late[len(early) :]
+                said = b"".join(io.stderr_pieces or ())
+                node.stderr += late[len(early) :] + said
             if not judging:
                 return
             assert admitted is not None

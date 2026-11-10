@@ -5,18 +5,11 @@ use serde::Deserialize;
 use crate::task::{self, Host};
 use crate::utf8::next_lossy;
 use crate::width::{TAB_WIDTH, char_width, is_space};
-use crate::{Stream, StreamError, parse_config};
+use crate::{Stream, StreamError, constants::MAX_HELD, parse_config};
 
 const WIDTH: u64 = 80;
 const WORK: usize = 4096;
 const OUTPUT: usize = 16384;
-/// The most input column holds, with a row's cell for each line it lays
-/// out across or a width for each column of a table: past it the run fails
-/// as the real one does once memory runs out.
-#[cfg(not(test))]
-const MAX_HELD: usize = 1 << 30;
-#[cfg(test)]
-const MAX_HELD: usize = 1 << 18;
 const OUT_OF_MEMORY: &[u8] = b"column: read failed: Cannot allocate memory";
 /// The column a `-` or a 0 in a column list stands for: every one.
 const ALL_COLUMNS: &[u8] = b"-";

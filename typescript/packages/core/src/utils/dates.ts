@@ -229,7 +229,7 @@ export function parseDateExprAsync(
   return dateAsync(text, 'expr', zone, now, signal)
 }
 
-/** Parse a date operand, yielding between shared-core steps. */
+/** Parse a bare date operand, MMDDhhmm[[CC]YY][.ss], yielding between shared-core steps. */
 export function parsePosixTimeAsync(
   text: string,
   zone: Zone,
@@ -243,16 +243,6 @@ export function parsePosixTimeAsync(
 export function parseDateExpr(text: string, zone: Zone, now?: Date): Date | null {
   try {
     return dateResult(text, 'expr', zone, now)
-  } catch (err) {
-    if (err instanceof RangeError) return null
-    throw err
-  }
-}
-
-/** Parse a bare date operand, MMDDhhmm[[CC]YY][.ss]. */
-export function parsePosixTime(text: string, zone: Zone, now?: Date): Date | null {
-  try {
-    return dateResult(text, 'posix', zone, now)
   } catch (err) {
     if (err instanceof RangeError) return null
     throw err

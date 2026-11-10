@@ -9,7 +9,6 @@ use super::text::{Refusal, unit};
 /// The release whose behaviour this follows; `v` refuses a newer one.
 const VERSION: &[u8] = b"4.9";
 const BLANKS: &[u8] = b" \t";
-const SPACES: &[u8] = b" \t\n\x0b\x0c\r";
 const RECURSIVE: &str = "recursive escaping after \\c not allowed";
 const SANDBOXED: &str = "e/r/w commands disabled in sandbox mode";
 /// The commands --posix does not know.
@@ -911,7 +910,7 @@ impl Compiler {
         while self
             .src
             .peek()
-            .is_some_and(|ch| !SPACES.contains(&ch) && !b";}#".contains(&ch))
+            .is_some_and(|ch| !crate::number::BLANKS.contains(&ch) && !b";}#".contains(&ch))
         {
             self.src.pos += 1;
         }
@@ -1281,7 +1280,7 @@ impl Compiler {
         while self
             .src
             .peek()
-            .is_some_and(|ch| !SPACES.contains(&ch) && !b";}#".contains(&ch))
+            .is_some_and(|ch| !crate::number::BLANKS.contains(&ch) && !b";}#".contains(&ch))
         {
             self.src.pos += 1;
         }

@@ -49,5 +49,10 @@ async def head(
 
 
 BUILDER = GenericCommand(
-    "head", head, aggregate=header_aggregate, read=True, pass_through=True
+    "head",
+    head,
+    aggregate=header_aggregate,
+    read=True,
+    pass_through=True,
+    gives_back=True,
 )

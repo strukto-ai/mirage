@@ -3,9 +3,10 @@ use std::collections::VecDeque;
 use std::hash::{BuildHasher, RandomState};
 use std::ops::{Index, Range};
 
+use crate::cmp::indexed;
 use crate::regex::{Options as RegexOptions, Regex, STEPS, Step, Syntax};
 use crate::width::char_width;
-use crate::{Stream, StreamError, number};
+use crate::{PIECE, Stream, StreamError, number};
 use serde::Deserialize;
 use similar::{Algorithm, DiffOp, DiffTag, capture_diff, group_diff_ops, udiff::UnifiedHunkHeader};
 
@@ -22,6 +23,10 @@ const WIDEST: usize = 1 << 16;
 const FUNCTION_BYTES: usize = 40;
 /// What `-p` looks for: a line that opens with a letter, `$` or `_`.
 const C_FUNCTION: &[u8] = b"^[[:alpha:]$_]";
+/// The output one render step writes at most. A host's `drain_steps` call
+/// stops once it holds a `PIECE`, so what it hands the diff pool stays
+/// within the pool's 64 KiB chunk.
+const WINDOW: usize = (64 << 10) - PIECE;
 
 #[derive(Clone, Copy, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -210,6 +215,7 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         return Ok(Box::new(Brief {
             config,
             held: [Vec::new(), Vec::new()],
+            at: [0; 2],
             searched: [0; 2],
             ended: [false; 2],
             lines: if ignores { None } else { Some(false) },
@@ -1371,7 +1377,7 @@ impl Diff {
     }
 
     fn render(&mut self, out: &mut Vec<u8>) {
-        let end = out.len() + 65536;
+        let end = out.len() + WINDOW;
         let mut steps = 0;
         while out.len() < end && self.busy() && steps < 4096 {
             steps += 1;
@@ -1483,9 +1489,7 @@ impl Stream for Diff {
         input: &[u8],
         _: &mut Vec<u8>,
     ) -> Result<(), StreamError> {
-        if index > 1 || self.ended[index] {
-            return Err(StreamError::new("invalid or ended input"));
-        }
+        indexed(&self.ended, index)?;
         let bytes = &mut self.inputs[index];
         let wanted = bytes.len() + input.len();
         if wanted > bytes.capacity() {
@@ -1495,9 +1499,7 @@ impl Stream for Diff {
         Ok(())
     }
     fn end_input(&mut self, index: usize, _: &mut Vec<u8>) -> Result<(), StreamError> {
-        if index > 1 || self.ended[index] {
-            return Err(StreamError::new("invalid or ended input"));
-        }
+        indexed(&self.ended, index)?;
         self.ended[index] = true;
         if self.ended == [true, true] {
             self.compute();
@@ -1542,9 +1544,13 @@ impl Stream for Diff {
 /// read further.
 struct Brief {
     config: Config,
+    /// Each input's bytes not yet matched: `held` from `at` on. A side is
+    /// compacted only when it is fed, so matching a small read of one
+    /// side against a large one of the other costs the small one.
     held: [Vec<u8>; 2],
-    /// How far each held line is known to have no newline, or where its
-    /// newline is, so a long line is searched once.
+    at: [usize; 2],
+    /// How far into `held` each line is known to have no newline, or
+    /// where its newline is, so a long line is searched once.
     searched: [usize; 2],
     ended: [bool; 2],
     /// Whether lines' keys decide, None until the binary probe has run.
@@ -1594,18 +1600,23 @@ impl Brief {
         if differ.is_some() {
             self.differ = differ;
             self.held = [Vec::new(), Vec::new()];
+            self.at = [0; 2];
         }
     }
 
+    fn rest(&self, index: usize) -> &[u8] {
+        &self.held[index][self.at[index]..]
+    }
+
     fn settle_bytes(&mut self) -> Option<bool> {
-        let [old, new] = &mut self.held;
+        let (old, new) = (self.rest(0), self.rest(1));
         let common = old.len().min(new.len());
         if old[..common] != new[..common] {
             return Some(true);
         }
-        old.drain(..common);
-        new.drain(..common);
-        match (old.is_empty(), new.is_empty()) {
+        self.at[0] += common;
+        self.at[1] += common;
+        match (self.rest(0).is_empty(), self.rest(1).is_empty()) {
             (true, true) if self.ended == [true, true] => Some(false),
             (true, false) if self.ended[0] => Some(true),
             (false, true) if self.ended[1] => Some(true),
@@ -1614,7 +1625,7 @@ impl Brief {
     }
 
     fn settle_lines(&mut self) -> Option<bool> {
-        let mut at = [0, 0];
+        let mut at = self.at;
         let differ = loop {
             let old = line_end(&self.held[0], at[0], &mut self.searched[0], self.ended[0]);
             let new = line_end(&self.held[1], at[1], &mut self.searched[1], self.ended[1]);
@@ -1632,10 +1643,7 @@ impl Brief {
                 _ => break None,
             }
         };
-        for ((held, searched), at) in self.held.iter_mut().zip(&mut self.searched).zip(at) {
-            held.drain(..at);
-            *searched = searched.saturating_sub(at);
-        }
+        self.at = at;
         differ
     }
 }
@@ -1656,8 +1664,10 @@ impl Stream for Brief {
         }
         let short = |index: usize| match self.lines {
             None => !self.ready(index),
-            Some(false) => self.held[index].is_empty(),
-            Some(true) => !self.held[index][self.searched[index]..].contains(&b'\n'),
+            Some(false) => self.rest(index).is_empty(),
+            Some(true) => {
+                !self.held[index][self.searched[index].max(self.at[index])..].contains(&b'\n')
+            }
         };
         (0..2).find(|index| !self.ended[*index] && short(*index))
     }
@@ -1667,19 +1677,19 @@ impl Stream for Brief {
         input: &[u8],
         _: &mut Vec<u8>,
     ) -> Result<(), StreamError> {
-        if index > 1 || self.ended[index] {
-            return Err(StreamError::new("invalid or ended input"));
-        }
+        indexed(&self.ended, index)?;
         if self.differ.is_none() {
-            self.held[index].extend_from_slice(input);
+            let (held, at) = (&mut self.held[index], self.at[index]);
+            held.drain(..at);
+            self.searched[index] = self.searched[index].saturating_sub(at);
+            self.at[index] = 0;
+            held.extend_from_slice(input);
             self.settle();
         }
         Ok(())
     }
     fn end_input(&mut self, index: usize, _: &mut Vec<u8>) -> Result<(), StreamError> {
-        if index > 1 || self.ended[index] {
-            return Err(StreamError::new("invalid or ended input"));
-        }
+        indexed(&self.ended, index)?;
         self.ended[index] = true;
         if self.differ.is_none() {
             self.settle();

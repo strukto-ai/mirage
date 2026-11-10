@@ -7,7 +7,7 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import tzinfo
 from functools import partial
 
@@ -79,27 +79,8 @@ class DiffFlags:
     aside, and how lines are written; patterns and widths are spelled one
     character per byte, as the engine reads them."""
 
-    mode: DiffMode = "normal"
-    ignore_case: bool = False
-    ignore_all_space: bool = False
-    ignore_space_change: bool = False
-    ignore_tab_expansion: bool = False
-    ignore_trailing_space: bool = False
-    strip_trailing_cr: bool = False
-    ignore_blank_lines: bool = False
-    ignore_lines: tuple[str, ...] = ()
-    function_lines: tuple[str, ...] = ()
-    show_c_function: bool = False
-    expand_tabs: bool = False
-    initial_tab: bool = False
-    widths: tuple[str, ...] = ()
-    suppress_common: bool = False
-    left_column: bool = False
-    text: bool = False
+    options: DiffOptions = DiffOptions()
     labels: tuple[str, ...] = ()
-    utf8: bool = False
-    context: int = 3
-    brief: bool = False
     recursive: bool = False
     # -N reads a file missing on either side as empty, and
     # --unidirectional-new-file only one missing from the first.
@@ -205,7 +186,9 @@ async def _header_time(walk: _Walk, path: PathSpec, absent: bool) -> str:
         path (PathSpec): the side.
         absent (bool): whether -N reads it as absent.
     """
-    layout = context_time if walk.flags.mode == "context" else full_iso_time
+    layout = (
+        context_time if walk.flags.options.mode == "context" else full_iso_time
+    )
     if absent:
         return layout(None, walk.zone)
     if is_stdin(path):
@@ -315,7 +298,7 @@ async def _sizes_differ(
         paths (tuple[PathSpec, PathSpec]): the pair.
         absent (Absent): which side -N reads as empty.
     """
-    flags = walk.flags
+    flags = walk.flags.options
     if walk.size_of is None or (
         flags.ignore_case
         or flags.ignore_all_space
@@ -354,7 +337,7 @@ async def _diff_pair(
     flags = walk.flags
     name1 = _labelled(walk, path1, 0)
     name2 = _labelled(walk, path2, 1)
-    headed = flags.mode in ("unified", "context")
+    headed = flags.options.mode in ("unified", "context")
     headers = []
     for side, (path, gone) in enumerate(
         ((path1, absent[0]), (path2, absent[1]))
@@ -369,33 +352,16 @@ async def _diff_pair(
                 + "\t"
                 + await _header_time(walk, path, gone)
             )
-    options = DiffOptions(
-        mode=flags.mode,
-        context=flags.context,
-        ignore_case=flags.ignore_case,
-        ignore_all_space=flags.ignore_all_space,
-        ignore_space_change=flags.ignore_space_change,
-        ignore_tab_expansion=flags.ignore_tab_expansion,
-        ignore_trailing_space=flags.ignore_trailing_space,
-        strip_trailing_cr=flags.strip_trailing_cr,
-        ignore_blank_lines=flags.ignore_blank_lines,
-        ignore_lines=flags.ignore_lines,
-        function_lines=flags.function_lines,
-        show_c_function=flags.show_c_function,
-        expand_tabs=flags.expand_tabs,
-        initial_tab=flags.initial_tab,
-        widths=flags.widths,
-        suppress_common=flags.suppress_common,
-        left_column=flags.left_column,
-        text=flags.text,
-        brief=flags.brief,
-        utf8=flags.utf8,
+    options = replace(
+        flags.options,
         old_label=name1,
         new_label=name2,
         old_header=headers[0],
         new_header=headers[1],
     )
-    if flags.brief and await _sizes_differ(walk, (path1, path2), absent):
+    if flags.options.brief and await _sizes_differ(
+        walk, (path1, path2), absent
+    ):
         result = PairResult("different", (), 1, ())
     else:
         result = await walk.computer.compare(
@@ -403,7 +369,7 @@ async def _diff_pair(
             partial(_side, walk, path1, absent[0]),
             partial(_side, walk, path2, absent[1]),
         )
-    if result.outcome == "different" and flags.brief and result.status == 1:
+    if result.outcome == "different" and options.brief and result.status == 1:
         return PairResult(
             result.outcome,
             (f"Files {name1} and {name2} differ\n".encode(),),
@@ -549,9 +515,12 @@ async def _diff_dirs(
             differ = differ or result.outcome == "different"
             # Side by side shows an equal pair's common lines too, so its
             # header comes with every pair the lines are not suppressed for.
-            if not flags.brief and (
+            if not flags.options.brief and (
                 result.outcome == "different"
-                or (flags.mode == "sides" and not flags.suppress_common)
+                or (
+                    flags.options.mode == "sides"
+                    and not flags.options.suppress_common
+                )
             ):
                 header = (
                     f"diff{walk.switches} "
@@ -854,27 +823,29 @@ def parse_flags(
         return context
     new_file = fl.as_bool("new_file")
     return DiffFlags(
-        mode=mode,
-        ignore_case=fl.as_bool("ignore_case"),
-        ignore_all_space=fl.as_bool("ignore_all_space"),
-        ignore_space_change=fl.as_bool("ignore_space_change"),
-        ignore_tab_expansion=fl.as_bool("ignore_tab_expansion"),
-        ignore_trailing_space=fl.as_bool("ignore_trailing_space"),
-        strip_trailing_cr=fl.as_bool("strip_trailing_cr"),
-        ignore_blank_lines=fl.as_bool("ignore_blank_lines"),
-        ignore_lines=tuple(byte_view(text) for text in ignore_lines),
-        function_lines=tuple(byte_view(text) for text in function_lines),
-        show_c_function=show_c_function,
-        expand_tabs=fl.as_bool("expand_tabs"),
-        initial_tab=fl.as_bool("initial_tab"),
-        widths=tuple(byte_view(text) for text in widths),
-        suppress_common=fl.as_bool("suppress_common_lines"),
-        left_column=fl.as_bool("left_column"),
-        text=fl.as_bool("text"),
+        options=DiffOptions(
+            mode=mode,
+            ignore_case=fl.as_bool("ignore_case"),
+            ignore_all_space=fl.as_bool("ignore_all_space"),
+            ignore_space_change=fl.as_bool("ignore_space_change"),
+            ignore_tab_expansion=fl.as_bool("ignore_tab_expansion"),
+            ignore_trailing_space=fl.as_bool("ignore_trailing_space"),
+            strip_trailing_cr=fl.as_bool("strip_trailing_cr"),
+            ignore_blank_lines=fl.as_bool("ignore_blank_lines"),
+            ignore_lines=tuple(byte_view(text) for text in ignore_lines),
+            function_lines=tuple(byte_view(text) for text in function_lines),
+            show_c_function=show_c_function,
+            expand_tabs=fl.as_bool("expand_tabs"),
+            initial_tab=fl.as_bool("initial_tab"),
+            widths=tuple(byte_view(text) for text in widths),
+            suppress_common=fl.as_bool("suppress_common_lines"),
+            left_column=fl.as_bool("left_column"),
+            text=fl.as_bool("text"),
+            utf8=utf8,
+            context=context,
+            brief=fl.as_bool("brief"),
+        ),
         labels=labels,
-        utf8=utf8,
-        context=context,
-        brief=fl.as_bool("brief"),
         recursive=fl.as_bool("recursive"),
         new_file=new_file,
         new_first=new_file or fl.as_bool("unidirectional_new_file"),

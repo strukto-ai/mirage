@@ -66,12 +66,13 @@ async def _run_builder(
             exit_code=1,
             stderr=f"{builder.name}: no workspace files\n".encode(),
         )
-    # sed cuts a shared input itself, so what it hands back takes the rest
-    # of the chunk it stopped in.
+    # A builder that gives back what it leaves of a shared input cuts it
+    # itself, so what it hands back takes the rest of the chunk it stopped
+    # in.
     if (
         reading.split
         and ctx.stdin is not None
-        and not (builder.name == "sed" and isinstance(ctx.stdin, SharedInput))
+        and not (builder.gives_back and isinstance(ctx.stdin, SharedInput))
     ):
         # A RAM or cache read arrives as one whole chunk, over which a
         # scan that splits its buffer per line is quadratic and cannot be

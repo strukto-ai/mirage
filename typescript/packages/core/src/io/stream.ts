@@ -18,40 +18,26 @@ import { SharedInput } from './async_line_iterator.ts'
 import type { ByteSource, IOResult } from './types.ts'
 
 /**
- * One lazy byte cursor shared by commands inheriting an input descriptor.
- * Serializing reads prevents concurrent consumers from replaying bytes or
- * pulling the source simultaneously. A consumer stopping early leaves the
- * cursor open; byte-sized pulls preserve the unread suffix for its successor.
+ * One lazy cursor shared by the commands inheriting an input descriptor
+ * (xargs's and find's children). Pulls are serialized, so concurrent
+ * consumers neither replay bytes nor pull the source at once. Each pull hands
+ * over a whole chunk, and a command that stops early gives back what it left,
+ * as off a file (`seekable`), so its successor reads on from there; one that
+ * fails leaves the input to the next. Mirrors Python's SharedStdin.
  */
-export class SharedStdin implements AsyncIterable<Uint8Array> {
-  private chunks: AsyncIterator<Uint8Array> | null
-  private buffer: Uint8Array = new Uint8Array()
-  private pos = 0
+export class SharedStdin extends SharedInput {
   private readonly lock = new KeyLock()
 
   constructor(source: ByteSource) {
-    this.chunks = ensureStream(source)[Symbol.asyncIterator]()
+    super(source, null, true)
   }
 
-  [Symbol.asyncIterator](): AsyncIterator<Uint8Array, undefined> {
-    return {
-      next: () =>
-        this.lock.withLock('read', async () => {
-          while (this.pos >= this.buffer.byteLength) {
-            if (this.chunks === null) return { done: true, value: undefined }
-            const step = await this.chunks.next()
-            if (step.done === true) {
-              this.chunks = null
-              return { done: true, value: undefined }
-            }
-            this.buffer = step.value
-            this.pos = 0
-          }
-          const chunk = this.buffer.subarray(this.pos, this.pos + 1)
-          this.pos += 1
-          return { done: false, value: chunk }
-        }),
-    }
+  override next(): Promise<IteratorResult<Uint8Array>> {
+    return this.lock.withLock('read', () => super.next())
+  }
+
+  override discard(): Promise<void> {
+    return Promise.resolve()
   }
 }
 
@@ -184,7 +170,7 @@ async function delivered(
   }
 }
 
-export async function* yieldBytes(data: Uint8Array): AsyncIterable<Uint8Array> {
+export async function* yieldBytes(data: Uint8Array): AsyncGenerator<Uint8Array> {
   await Promise.resolve()
   yield data
 }

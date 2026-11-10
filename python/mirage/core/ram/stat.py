@@ -41,10 +41,9 @@ def key_stat(store: RAMStore, p: str) -> FileStat | None:
             atime=attrs.get("atime"),
         )
     if p in store.files:
-        data = store.files[p]
         return FileStat(
             name=p.rsplit("/", 1)[-1],
-            size=len(data),
+            size=store.files.size(p),
             modified=store.modified.get(p),
             type=FileType.FILE,
             content=content_type_for_path(p),

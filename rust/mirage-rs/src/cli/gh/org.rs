@@ -1,17 +1,14 @@
 // Follows gh 2.85.0's pkg/cmd/org (MIT; see licenses/third_party/gh.txt).
 
-use super::accessor::{Flags, Out};
-use crate::core::github::client::{Account, Result, usage};
+use super::accessor::{Flags, Out, limit_or_refuse};
+use crate::core::github::client::{Account, Result};
 use crate::core::github::json::Obj;
 use crate::core::github::repo::{current_login, graphql_data};
 
 const LIST_QUERY: &str = "query OrganizationList($user: String!, $limit: Int!, $endCursor: String) {\n\t\tuser(login: $user) {\n\t\t\tlogin\n\t\t\torganizations(first: $limit, after: $endCursor) {\n\t\t\t\ttotalCount\n\t\t\t\tnodes {\n\t\t\t\t\tlogin\n\t\t\t\t}\n\t\t\t\tpageInfo {\n\t\t\t\t\thasNextPage\n\t\t\t\t\tendCursor\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}";
 
 pub(crate) async fn list_cmd(account: &Account, flags: &Flags) -> Result<Out> {
-    let limit = flags.as_int("limit").unwrap_or(30);
-    if limit < 1 {
-        return usage(format!("invalid limit: {limit}"));
-    }
+    let limit = limit_or_refuse(flags, 30)?;
     let user = current_login(account).await?;
     let mut out = String::new();
     let mut count = 0;

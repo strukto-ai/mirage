@@ -29,7 +29,7 @@ import { type JobConsole, JobOutput } from '../../shell/console/index.ts'
 import { PipeConsole } from '../../shell/console/pipe.ts'
 import { Channel } from '../../shell/console/types.ts'
 import { SIGPIPE_STATUS } from '../../shell/constants.ts'
-import { Recorder } from '../../shell/descriptors.ts'
+import type { Recorder } from '../../shell/descriptors.ts'
 import { ExitSignal, PipeClosed, ReturnSignal } from '../../shell/errors.ts'
 import { type JobTable, JobWaits } from '../../execution/job/index.ts'
 import { simpleCommand } from '../../shell/node_kind.ts'
@@ -42,6 +42,7 @@ import { childContext, type EvaluationContext } from '../evaluation.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import type { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
+import { StatementRecorder } from '../node/program.ts'
 import { divertStatement, divertedFile } from './builtins/exec/index.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
@@ -533,7 +534,7 @@ export async function handleSubshell(
       continue
     }
     i += 1
-    const recorder = new Recorder()
+    const recorder = new StatementRecorder(session, sink)
     recorder.outputFile = divertedFile(session, sink)
     const leave = recordJobs(session, recorder)
     let io: IOResult

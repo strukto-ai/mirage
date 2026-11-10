@@ -1281,16 +1281,12 @@ export async function handleXargs(
     let stopped: number | null = null
     let failed = false
     const torn: IOResult[] = []
-    // Each run's stderr, joined onto `merged` only before the output that
-    // follows it, so a trace still precedes its command's output and a run of
-    // stderr with no output between costs one join.
-    let said = encodeText(plan.notes)
+    // Each run's stderr, said on `merged` only before the output that follows
+    // it, so a trace still precedes its command's output and a run of stderr
+    // with no output between is one piece.
     const pending: Uint8Array[] = []
     const publish = (): void => {
-      const joined = concat(pending.splice(0))
-      if (joined.byteLength === 0) return
-      said = concat([said, joined])
-      merged.stderr = said
+      merged.addStderr(concat(pending.splice(0)))
     }
     async function record(io: IOResult): Promise<boolean> {
       if (io.exitCode === 255 && stopped === null) stopped = 124

@@ -23,7 +23,6 @@ from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils.dates import now_iso
 from mirage.utils.path import norm
-from mirage.utils.ranges import splice_window
 
 
 async def pwrite(
@@ -56,10 +55,9 @@ async def pwrite(
     check_write_target(store, path_spec, p)
     if active_device(accessor, p) is None:
         with store.lock:
-            current = store.files.get(p, b"")
             if data:
-                end = max(len(current), offset + len(data))
+                end = max(store.files.size(p), offset + len(data))
                 check_capacity(store, path_spec, p, end)
-            store.files[p] = splice_window(current, offset, data)
+            store.files.splice(p, offset, data)
     store.modified[p] = now_iso()
     record("pwrite", path_spec.virtual, "ram", len(data), timer)

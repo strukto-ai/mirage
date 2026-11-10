@@ -379,6 +379,9 @@ pub(crate) struct Match {
 
 type Capture = Option<(usize, usize)>;
 
+/// A line's matches. `captures` holds every group of each match only when
+/// the pattern has groups past the whole match; otherwise group 0 is the
+/// row itself, so a line of many short matches keeps one span each.
 pub(crate) struct Matches {
     rows: Vec<Match>,
     captures: Vec<Capture>,
@@ -389,6 +392,10 @@ impl Matches {
     pub(crate) fn capture(&self, index: usize, group: usize) -> Capture {
         if group >= self.group_count {
             return None;
+        }
+        if self.group_count == 1 {
+            let row = self.rows[index];
+            return Some((row.start, row.end));
         }
         self.captures[index * self.group_count + group]
     }
@@ -688,8 +695,6 @@ impl Search {
             self.matches.values.push(Match { start, end });
             if self.group_count > 1 {
                 self.captures.values.extend(self.groups.iter().copied());
-            } else {
-                self.captures.values.push(Some((start, end)));
             }
             if !self.all {
                 self.phase = Phase::Done;
@@ -996,7 +1001,7 @@ impl Search {
                 self.phase = Phase::Byte;
             }
             Phase::Emit { group } => {
-                if group < program.nfa.group_info().group_len(PatternID::ZERO) {
+                if self.group_count > 1 && group < self.group_count {
                     let slot = program
                         .nfa
                         .group_info()

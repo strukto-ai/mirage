@@ -71,6 +71,7 @@ class RAMConsoleStore:
         chunks: list[ConsoleChunk] | None = None,
     ) -> None:
         self._chunks: list[ConsoleChunk] = list(chunks) if chunks else []
+        self._head = 0
         self._base_seq = self._chunks[0].seq if self._chunks else 0
         self._next_seq = self._chunks[-1].seq + 1 if self._chunks else 0
         self._bytes = sum(len(c.data) for c in self._chunks)
@@ -102,13 +103,13 @@ class RAMConsoleStore:
         self, seq: int, limit: int | None = None
     ) -> ReadResult:
         truncated = seq < self._base_seq
-        start = (
-            0 if truncated else min(seq - self._base_seq, len(self._chunks))
-        )
+        live = len(self._chunks) - self._head
+        start = 0 if truncated else min(seq - self._base_seq, live)
+        at = self._head + start
         window = (
-            self._chunks[start:]
+            self._chunks[at:]
             if limit is None
-            else self._chunks[start : start + limit]
+            else self._chunks[at : at + limit]
         )
         return window, self._base_seq + start + len(window), truncated
 
@@ -145,17 +146,23 @@ class RAMConsoleStore:
             self._schedule(loop, future)
 
     def _trim(self) -> None:
+        """Drop the oldest chunks past the budget by moving the head,
+        letting go of the dropped ones once they are half the list."""
         if self._max_bytes is None:
             return
-        while self._chunks and self._bytes > self._max_bytes:
-            if self._chunks[0].channel == Channel.CONTROL:
+        while self._head < len(self._chunks) and self._bytes > self._max_bytes:
+            dropped = self._chunks[self._head]
+            if dropped.channel == Channel.CONTROL:
                 # The terminal chunk is what releases wait_finished()
                 # and ends follow(); dropping it would leave both
                 # blocked forever, so it outranks the byte budget.
                 break
-            dropped = self._chunks.pop(0)
+            self._head += 1
             self._bytes -= len(dropped.data)
             self._base_seq += 1
+        if self._head * 2 >= len(self._chunks):
+            del self._chunks[: self._head]
+            self._head = 0
 
     def _wake(self) -> None:
         with self._lock:

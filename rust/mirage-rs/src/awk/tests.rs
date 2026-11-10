@@ -568,7 +568,10 @@ fn nested_match_and_record_searches_resume_within_the_vm_budget() {
             json!({"program":program,"assignments":[format!("s={long}"),format!("t={long}")]});
         let (out, turns) = drive(config, b"");
         assert_eq!(out, expected.as_bytes(), "{program}");
-        assert!(turns >= long.len() / super::STEPS, "{program}");
+        assert!(
+            turns >= long.len() / crate::constants::DRAIN_STEPS,
+            "{program}"
+        );
     }
     let config = json!({"program":"BEGIN{RS=\"a.*z|END\"} {print length($0)}"});
     let (out, turns) = drive(config, format!("{long}ENDtail").as_bytes());
@@ -595,7 +598,7 @@ fn formatted_output_yields_and_commits_each_argument_once() {
     while stream.busy() {
         let before = out.len();
         stream.drain(&mut out).unwrap();
-        assert!(out.len() - before <= super::STEPS + 16);
+        assert!(out.len() - before <= crate::constants::DRAIN_STEPS + 16);
         turns += 1;
         assert!(turns < 1000);
     }
@@ -683,7 +686,7 @@ fn array_snapshots_and_scope_cleanup_preserve_order_across_small_budgets() {
             print length(b)
         }
     "#;
-    for budget in [1, 7, 64, super::STEPS] {
+    for budget in [1, 7, 64, crate::constants::DRAIN_STEPS] {
         let code = super::compile::compile(&super::parser::parse(program).unwrap());
         let mut machine = super::vm::Machine::new(
             code,
@@ -742,7 +745,7 @@ fn large_numeric_values_prepare_before_reads_updates_and_formatting() {
         "0\n1\n1\n1\n1\n"
     );
     let program = r#"BEGIN { printf "%*.*f:%d\n",width,precision,1.25,n; print ++n; print n<4 }"#;
-    for budget in [1, 7, super::STEPS] {
+    for budget in [1, 7, crate::constants::DRAIN_STEPS] {
         let code = super::compile::compile(&super::parser::parse(program.as_bytes()).unwrap());
         let mut machine = super::vm::Machine::new(
             code,
@@ -802,7 +805,7 @@ fn control_formats_preserve_numeric_identity_and_assignment_results() {
             CONVFMT="%.2f"; printf a[1]; print ""; print sprintf(a[1])
         }
     "#;
-    for budget in [1, 7, super::STEPS] {
+    for budget in [1, 7, crate::constants::DRAIN_STEPS] {
         let code = super::compile::compile(&super::parser::parse(program).unwrap());
         let mut machine = super::vm::Machine::new(
             code,
@@ -854,7 +857,7 @@ fn malformed_large_format_retires_plans_and_emits_diagnostic_in_windows() {
         stream.drain(&mut out).unwrap();
         let before = err.len();
         stream.take_stderr(&mut err);
-        assert!(err.len() - before <= super::STEPS);
+        assert!(err.len() - before <= crate::constants::DRAIN_STEPS);
         turns += 1;
         assert!(turns < 1000);
     }

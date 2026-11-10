@@ -295,6 +295,19 @@ export class IOResult {
     return new TextDecoder('utf-8', { fatal: errors === 'strict' }).decode(bytes)
   }
 
+  /**
+   * Say `piece` on stderr after what the command said so far: handed to a
+   * reader keeping errors among the output (`stderrPieces`), which sends it
+   * before the next chunk, else joined onto `stderr`. A command saying many
+   * as it streams adds each here rather than rebuilding its whole stderr.
+   * Mirrors Python's add_stderr.
+   */
+  addStderr(piece: Uint8Array): void {
+    if (piece.byteLength === 0) return
+    if (this.stderrPieces !== null) this.stderrPieces.push(piece)
+    else this.stderr = this.stderr instanceof Uint8Array ? concat([this.stderr, piece]) : piece
+  }
+
   async merge(other: IOResult): Promise<IOResult> {
     const leftStderr = await materialize(this.stderr)
     const rightStderr = await materialize(other.stderr)

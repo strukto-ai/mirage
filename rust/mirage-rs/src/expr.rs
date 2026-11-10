@@ -11,11 +11,10 @@ use crate::regex::{
     posix::{Options, Posix},
 };
 use crate::task::{self, Host};
-use crate::{Stream, StreamError, parse_config, quoted};
+use crate::{Stream, StreamError, constants::WORK, parse_config, quoted};
 
 type Text = Arc<[u8]>;
 type Answer = Result<Text, String>;
-const WORK: usize = 16384;
 const MISSING: &str = "expr: missing operand\nTry 'expr --help' for more information.\n";
 
 #[derive(Deserialize)]

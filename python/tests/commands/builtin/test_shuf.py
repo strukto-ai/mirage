@@ -15,7 +15,6 @@ import asyncio
 
 import pytest
 
-from mirage.commands.builtin.constants import UINTMAX
 from mirage.commands.builtin.generic.shuf import (
     NO_WRITE_OP,
     emit_count,
@@ -27,6 +26,8 @@ from mirage.types import PathSpec
 from tests.commands.builtin.conftest import output_bytes as _bytes
 from tests.commands.builtin.conftest import ram_workspace as _ws
 from tests.commands.builtin.conftest import run_raw as _run_raw
+
+UINTMAX = 2**64 - 1
 
 
 def test_shuf_e():

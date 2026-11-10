@@ -6,10 +6,8 @@ use std::task::{Context, Poll};
 
 use serde::{Deserialize, Serialize};
 
-use super::nfs::{
-    fattr3, fileid3, filename3, ftype3, nfspath3, nfsstat3, nfstime3, sattr3, specdata3,
-};
-use super::vfs::{DirEntry, ReadDirResult, VFSCapabilities};
+use super::nfs::{fattr3, fileid3, filename3, ftype3, nfspath3, nfsstat3, nfstime3, specdata3};
+use super::vfs::{DirEntry, ReadDirResult};
 use crate::StreamError;
 
 pub const ROOT_ID: fileid3 = 1;
@@ -203,10 +201,6 @@ impl HostFs {
         self.generation
     }
 
-    pub fn capabilities(&self) -> VFSCapabilities {
-        VFSCapabilities::ReadOnly
-    }
-
     pub fn root_dir(&self) -> fileid3 {
         ROOT_ID
     }
@@ -256,10 +250,6 @@ impl HostFs {
         Ok(fattr(id, &attrs))
     }
 
-    pub async fn setattr(&self, _id: fileid3, _setattr: sattr3) -> Result<fattr3, nfsstat3> {
-        Err(nfsstat3::NFS3ERR_ROFS)
-    }
-
     pub async fn read(
         &self,
         id: fileid3,
@@ -277,64 +267,6 @@ impl HostFs {
             .await?;
         let eof = reply.data.len() < count as usize;
         Ok((reply.data, eof))
-    }
-
-    pub async fn write(
-        &self,
-        _id: fileid3,
-        _offset: u64,
-        _data: &[u8],
-    ) -> Result<fattr3, nfsstat3> {
-        Err(nfsstat3::NFS3ERR_ROFS)
-    }
-
-    pub async fn create(
-        &self,
-        _dirid: fileid3,
-        _filename: &filename3,
-        _attr: sattr3,
-    ) -> Result<(fileid3, fattr3), nfsstat3> {
-        Err(nfsstat3::NFS3ERR_ROFS)
-    }
-
-    pub async fn create_exclusive(
-        &self,
-        _dirid: fileid3,
-        _filename: &filename3,
-    ) -> Result<fileid3, nfsstat3> {
-        Err(nfsstat3::NFS3ERR_ROFS)
-    }
-
-    pub async fn mkdir(
-        &self,
-        _dirid: fileid3,
-        _dirname: &filename3,
-    ) -> Result<(fileid3, fattr3), nfsstat3> {
-        Err(nfsstat3::NFS3ERR_ROFS)
-    }
-
-    pub async fn remove(&self, _dirid: fileid3, _filename: &filename3) -> Result<(), nfsstat3> {
-        Err(nfsstat3::NFS3ERR_ROFS)
-    }
-
-    pub async fn rename(
-        &self,
-        _from_dirid: fileid3,
-        _from_filename: &filename3,
-        _to_dirid: fileid3,
-        _to_filename: &filename3,
-    ) -> Result<(), nfsstat3> {
-        Err(nfsstat3::NFS3ERR_ROFS)
-    }
-
-    pub async fn symlink(
-        &self,
-        _dirid: fileid3,
-        _linkname: &filename3,
-        _symlink: &nfspath3,
-        _attr: &sattr3,
-    ) -> Result<(fileid3, fattr3), nfsstat3> {
-        Err(nfsstat3::NFS3ERR_ROFS)
     }
 
     /// The entries after `start_after` (0 for the first), at most

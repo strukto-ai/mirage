@@ -12,7 +12,7 @@ from mirage.utils.dates import (
     ns_to_iso,
     parse_date_expr,
     parse_date_expr_async,
-    parse_posix_time,
+    parse_posix_time_async,
     timestamp_iso,
     to_iso_z,
 )
@@ -581,6 +581,10 @@ def test_a_long_sign_run_is_read_once():
 _NOW = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
 
 
+def _posix(text, **kwargs):
+    return asyncio.run(parse_posix_time_async(text, **kwargs))
+
+
 # A clock setting as coreutils 9.7 date reads it (`date
 # MMDDhhmm[[CC]YY][.ss]` as a user without the privilege to set the clock).
 # Mirrored in dates.test.ts.
@@ -597,7 +601,7 @@ _NOW = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
     ],
 )
 def test_posix_time_reads_a_clock_setting(text, expected):
-    assert parse_posix_time(text, tz=timezone.utc, now=_NOW) == expected
+    assert _posix(text, tz=timezone.utc, now=_NOW) == expected
 
 
 @pytest.mark.parametrize(
@@ -617,7 +621,7 @@ def test_posix_time_reads_a_clock_setting(text, expected):
     ],
 )
 def test_posix_time_refuses_what_gnu_calls_invalid(text):
-    assert parse_posix_time(text, tz=timezone.utc, now=_NOW) is None
+    assert _posix(text, tz=timezone.utc, now=_NOW) is None
 
 
 # mirage holds what datetime holds, years 1-9999 in UTC and on the wall
@@ -635,22 +639,22 @@ def test_posix_time_refuses_what_gnu_calls_invalid(text):
     ],
 )
 def test_posix_time_refuses_a_moment_datetime_cannot_hold(text, zone):
-    assert parse_posix_time(text, tz=ZoneInfo(zone)) is None
+    assert _posix(text, tz=ZoneInfo(zone)) is None
 
 
 def test_posix_time_reads_the_last_second_datetime_holds():
-    assert parse_posix_time("123123599999.59", tz=timezone.utc) == datetime(
+    assert _posix("123123599999.59", tz=timezone.utc) == datetime(
         9999, 12, 31, 23, 59, 59, tzinfo=timezone.utc
     )
-    assert parse_posix_time("123118599999.59", tz=NEW_YORK) == datetime(
+    assert _posix("123118599999.59", tz=NEW_YORK) == datetime(
         9999, 12, 31, 18, 59, 59, tzinfo=NEW_YORK
     )
 
 
 def test_posix_time_refuses_a_wall_clock_the_zone_skips():
     berlin = ZoneInfo("Europe/Berlin")
-    assert parse_posix_time("033002302025", tz=berlin) is None
-    assert parse_posix_time("033003302025", tz=berlin) == datetime(
+    assert _posix("033002302025", tz=berlin) is None
+    assert _posix("033003302025", tz=berlin) == datetime(
         2025, 3, 30, 3, 30, tzinfo=berlin
     )
 
@@ -666,9 +670,7 @@ def test_posix_time_refuses_a_wall_clock_the_zone_skips():
 def test_posix_time_reads_a_daylight_time_shorter_than_a_day(
     text, expected, name
 ):
-    placed = parse_posix_time(
-        text, tz=resolve_tz("STD0SUM-1,M4.1.0/0,M4.1.0/6")
-    )
+    placed = _posix(text, tz=resolve_tz("STD0SUM-1,M4.1.0/0,M4.1.0/6"))
     assert placed is not None
     assert (placed.timestamp(), placed.tzname()) == (expected, name)
 

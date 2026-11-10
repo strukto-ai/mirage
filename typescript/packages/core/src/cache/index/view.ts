@@ -225,13 +225,13 @@ export class IndexView extends IndexCacheStore {
     )
   }
 
-  setDir(
+  override setDir(
     path: string,
     entries: readonly [string, FileStat][],
     expiredAt?: Date | null,
     options: SetDirOptions = {},
   ): Promise<Evicted[]> {
-    return this.storeDir(
+    return this.storeOwned(
       path,
       entries,
       expiredAt,
@@ -250,10 +250,10 @@ export class IndexView extends IndexCacheStore {
     entries: readonly [string, FileStat][],
     expiredAt?: Date | null,
   ): Promise<void> {
-    return this.storeDir(path, entries, expiredAt, true, false).then(() => undefined)
+    return this.storeOwned(path, entries, expiredAt, true, false).then(() => undefined)
   }
 
-  private storeDir(
+  private storeOwned(
     path: string,
     entries: readonly [string, FileStat][],
     expiredAt: Date | null | undefined,

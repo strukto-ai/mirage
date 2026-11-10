@@ -3,10 +3,9 @@ use num_traits::{ToPrimitive, Zero};
 use serde::Deserialize;
 
 use crate::cut::{Interval, Mode, intervals};
+use crate::number::is_blank as blank;
 use crate::printf::number::render_float;
-use crate::{Stream, StreamError, latin1, latin1_list, parse_config, quoted};
-
-const OUTPUT: usize = 64 * 1024;
+use crate::{Stream, StreamError, constants::OUTPUT, latin1, latin1_list, parse_config, quoted};
 
 /// The most digits GNU prints an unscaled value with, its whole part and
 /// its decimals together (a scaled one it prints with any number): its long double's digits and one, 34 where that is
@@ -273,11 +272,6 @@ fn refusal(message: String) -> StreamError {
         message: format!("numfmt: {message}"),
         status: 2,
     }
-}
-
-/// A blank between fields: newline too, which only `-z` puts inside one.
-fn blank(byte: u8) -> bool {
-    matches!(byte, b' ' | b'\t' | b'\n')
 }
 
 /// GNU's two shapes of suffix complaint: an unusable first character

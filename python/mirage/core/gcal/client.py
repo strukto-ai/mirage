@@ -60,6 +60,23 @@ def _next_token(data: JsonValue) -> str | None:
     return nxt if isinstance(nxt, str) and nxt else None
 
 
+async def _pages(
+    token_manager: TokenManager, url: str, params: dict[str, str]
+) -> tuple[list[dict[str, JsonValue]], dict[str, JsonValue]]:
+    items: list[dict[str, JsonValue]] = []
+    token: str | None = None
+    for _ in range(MAX_PAGES):
+        page = dict(params)
+        if token:
+            page["pageToken"] = token
+        data = await google_get(token_manager, url, params=page)
+        items.extend(_rows(data))
+        token = _next_token(data)
+        if token is None:
+            return items, data
+    raise RuntimeError(PAGE_LIMIT)
+
+
 async def list_calendars(
     token_manager: TokenManager, min_access_role: str | None = None
 ) -> list[dict[str, JsonValue]]:
@@ -80,19 +97,7 @@ async def list_calendars(
     params: dict[str, str] = {}
     if min_access_role:
         params["minAccessRole"] = min_access_role
-    items: list[dict[str, JsonValue]] = []
-    token: str | None = None
-    for _ in range(MAX_PAGES):
-        page = dict(params)
-        if token:
-            page["pageToken"] = token
-        data = await google_get(token_manager, url, params=page)
-        items.extend(_rows(data))
-        token = _next_token(data)
-        if token is None:
-            break
-    else:
-        raise RuntimeError(PAGE_LIMIT)
+    items, _ = await _pages(token_manager, url, params)
     return items
 
 
@@ -160,19 +165,7 @@ async def list_events(
         params["timeZone"] = time_zone
     if query is not None:
         params["q"] = query
-    items: list[dict[str, JsonValue]] = []
-    token: str | None = None
-    for _ in range(MAX_PAGES):
-        page = dict(params)
-        if token:
-            page["pageToken"] = token
-        data = await google_get(token_manager, url, params=page)
-        items.extend(_rows(data))
-        token = _next_token(data)
-        if token is None:
-            break
-    else:
-        raise RuntimeError(PAGE_LIMIT)
+    items, _ = await _pages(token_manager, url, params)
     if scope.bounded:
         items = [
             event
@@ -227,19 +220,9 @@ async def sync_events(
         params["timeZone"] = time_zone
     if sync_token is not None:
         params["syncToken"] = sync_token
-    items: list[dict[str, JsonValue]] = []
-    token: str | None = None
-    for _ in range(MAX_PAGES):
-        page = dict(params)
-        if token:
-            page["pageToken"] = token
-        data = await google_get(token_manager, url, params=page)
-        items.extend(_rows(data))
-        token = _next_token(data)
-        if token is None:
-            done = data.get("nextSyncToken")
-            return items, done if isinstance(done, str) else None
-    raise RuntimeError(PAGE_LIMIT)
+    items, last = await _pages(token_manager, url, params)
+    done = last.get("nextSyncToken")
+    return items, done if isinstance(done, str) else None
 
 
 async def delete_event(

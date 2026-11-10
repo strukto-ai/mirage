@@ -71,6 +71,7 @@ export class GitHubVFS extends BaseVFS {
   override readonly listingsPin: string | null
   override readonly indexTtl: number = 86_400
   override readonly wholeWordSearch: boolean = true
+  override readonly searchNeedsWalkLimit: boolean = true
   readonly config: GitHubConfig
   override readonly accessor: GitHubAccessor
   override walkLimit: number = WALK_LIMIT
@@ -139,15 +140,6 @@ export class GitHubVFS extends BaseVFS {
 
   override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
     return githubTree(this.accessor, path)
-  }
-
-  /**
-   * Whether this VFS answers `name`; with no walk limit it reads every
-   * file rather than ask the service's search.
-   */
-  override supports(name: string): boolean {
-    if (name === 'files_containing' && this.walkLimit < 0) return false
-    return super.supports(name)
   }
 
   override filesContaining(

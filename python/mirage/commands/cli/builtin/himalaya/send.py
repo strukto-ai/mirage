@@ -14,6 +14,7 @@
 
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya.deliver import append_message
+from mirage.commands.cli.builtin.himalaya.flag import IMAP_FLAGS
 from mirage.commands.cli.builtin.himalaya.printer import (
     ChainedError,
     rendered,
@@ -27,12 +28,6 @@ from mirage.types import PathSpec
 from mirage.workspace.files import Files
 
 EMPTY_MESSAGE = "Message is empty"
-IMAP_FLAGS = {
-    "seen": "\\Seen",
-    "answered": "\\Answered",
-    "flagged": "\\Flagged",
-    "draft": "\\Draft",
-}
 
 
 def _crlf(text: bytes) -> bytes:
