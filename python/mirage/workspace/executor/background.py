@@ -73,17 +73,14 @@ from mirage.shell.constants import (
 )
 from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.shell.helpers import (
+    REDIRECT_NODE_TYPES,
     get_pipeline_stages,
     get_redirects,
     get_text,
     is_backgrounded,
 )
 from mirage.shell.node_kind import NodeKind, node_kind, simple_command
-from mirage.shell.parse.names import (
-    command_args,
-    command_invocations,
-    walk_named_outside_defs,
-)
+from mirage.shell.parse.names import command_args, command_invocations
 from mirage.shell.parse.program import retain_programs
 from mirage.shell.signals import (
     signal_report,
@@ -293,6 +290,26 @@ def program_word(left: TSNodeLike, session: SessionState) -> str | None:
     return words[0] if words else None
 
 
+def _statement_command(left: TSNodeLike) -> TSNodeLike | None:
+    """The command a statement is, through the redirects around it; None
+    for one that is not a command (an assignment alone, a compound one).
+
+    Args:
+        left (TSNodeLike): the statement.
+    """
+    body: TSNodeLike | None = left
+    if left.type == NT.REDIRECTED_STATEMENT:
+        body = next(
+            (
+                c
+                for c in left.named_children
+                if c.type not in REDIRECT_NODE_TYPES
+            ),
+            None,
+        )
+    return body if body is not None and body.type == NT.COMMAND else None
+
+
 def program_text(left: TSNodeLike, session: SessionState) -> str | None:
     """How ``ps`` shows a job or a pipeline stage that is one plain
     command: its words as typed from the command's name on, with none of
@@ -304,11 +321,9 @@ def program_text(left: TSNodeLike, session: SessionState) -> str | None:
         left (TSNodeLike): the job's or the stage's command.
         session (SessionState): the session it is forked from.
     """
-    if not simple_command(left) or len(command_invocations(left)) != 1:
+    command = _statement_command(left)
+    if command is None or len(command_invocations(left)) != 1:
         return None
-    command = next(
-        n for n in walk_named_outside_defs(left) if n.type == "command"
-    )
     name = command.child_by_field_name("name")
     if name is None:
         return None

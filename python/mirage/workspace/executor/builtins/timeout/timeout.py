@@ -77,6 +77,7 @@ from mirage.shell.types import TSNodeLike
 from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec
 from mirage.workspace.evaluation import EvaluationContext, child_context
+from mirage.workspace.executor.background import program_text
 from mirage.workspace.executor.builtins.timeout.constants import (
     FORK_FAILED,
     SELF_KILLING_SIGNALS,
@@ -90,6 +91,7 @@ from mirage.workspace.executor.statement import (
 )
 from mirage.workspace.lookup.lookup import execs
 from mirage.workspace.mount.registry import MountRegistry
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 logger = logging.getLogger(__name__)
@@ -404,7 +406,7 @@ async def _supervise(
         return _killed_report(context, syntax, process, number, foreground)
 
     def own_job() -> ProcessHandle | None:
-        return _own_job(processes, process, syntax)
+        return _own_job(processes, process, syntax, session)
 
     async def run() -> int:
         token = set_current_evaluation(child)
@@ -672,8 +674,10 @@ def _own_job(
     processes: ProcessTable,
     process: ProcessHandle,
     syntax: TSNodeLike | None,
+    session: SessionState,
 ) -> ProcessHandle | None:
-    # A job that is timeout alone is the process timeout is.
+    # A job that is timeout alone is the process timeout is, which shows
+    # the statement as its job started it (``program_text``).
     record = process.record
     job = (
         None
@@ -690,7 +694,8 @@ def _own_job(
         if above is not None and above.type == NT.REDIRECTED_STATEMENT
         else syntax
     )
-    return job if job.record.command == get_text(whole) else None
+    shown = program_text(whole, session) or get_text(whole)
+    return job if job.record.command == shown else None
 
 
 async def _signal(

@@ -62,7 +62,9 @@ import { concat } from '../../../../utils/bytes.ts'
 import { childContext, type EvaluationContext } from '../../../evaluation.ts'
 import { execs } from '../../../lookup/lookup.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
+import { programText } from '../../background.ts'
 import { redirectedBody, reportedCommand } from '../../statement.ts'
 import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
 import { FORK_FAILED, SELF_KILLING_SIGNALS, SIGNAL_ALIASES, TIMEOUT_NAMES } from './constants.ts'
@@ -428,7 +430,7 @@ export async function handleTimeout(
     const group = process.record.group
     await processes.signalGroup(group, number)
     if (number === SIGSTOP) {
-      const job = ownJob(processes, process, syntax)
+      const job = ownJob(processes, process, syntax, session)
       if (job !== null) processes.pause(job)
     } else if (number !== SIGKILL && number !== SIGCONT) await processes.signalGroup(group, SIGCONT)
   }
@@ -439,10 +441,10 @@ export async function handleTimeout(
     ignored: process.ignores.has(signal),
     onMachine: () => process.record.runtime !== null || process.takesSignals,
     held: () => {
-      const job = ownJob(processes, process, syntax)
+      const job = ownJob(processes, process, syntax, session)
       return job?.paused === true ? job.resumed() : null
     },
-    ownsJob: () => ownJob(processes, process, syntax) !== null,
+    ownsJob: () => ownJob(processes, process, syntax, session) !== null,
     killed: (number) => killedReport(context, syntax, process, number, foreground),
     preserve: parse.flags.p === true,
     verbose: parse.flags.v === true,
@@ -499,18 +501,20 @@ function killedReport(
   )
 }
 
-// A job that is timeout alone is the process timeout is.
+// A job that is timeout alone is the process timeout is, which shows the
+// statement as its job started it (`programText`).
 function ownJob(
   processes: ProcessTable,
   process: ProcessHandle,
   syntax: TSNodeLike | null,
+  session: SessionState,
 ): ProcessHandle | null {
   const { parent, sessionId } = process.record
   const job = parent === null ? null : processes.target(parent, sessionId)
   if (job?.background !== true || syntax === null) return null
   const above = syntax.parent
   const whole = above?.type === NT.REDIRECTED_STATEMENT ? above : syntax
-  return job.record.command === whole.text ? job : null
+  return job.record.command === (programText(whole, session) ?? whole.text) ? job : null
 }
 
 /**

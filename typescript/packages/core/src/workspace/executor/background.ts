@@ -43,11 +43,16 @@ import {
 } from '../../shell/constants.ts'
 import { signalReport, signalReported } from '../../shell/signals.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
-import { getPipelineStages, getRedirects, isBackgrounded } from '../../shell/helpers.ts'
+import {
+  getPipelineStages,
+  getRedirects,
+  isBackgrounded,
+  REDIRECT_NODE_TYPES,
+} from '../../shell/helpers.ts'
 import { ENDING_SIGNALS, STOP_WAIT_SECONDS } from '../../execution/job/constants.ts'
 import type { JobHandle, JobTable } from '../../execution/job/index.ts'
 import { NodeKind, nodeKind, simpleCommand } from '../../shell/node_kind.ts'
-import { commandArgs, commandInvocations, walkNamedOutsideDefs } from '../../shell/parse/names.ts'
+import { commandArgs, commandInvocations } from '../../shell/parse/names.ts'
 import { retainPrograms } from '../../shell/parse/program.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { PathSpec, type PolicyDecision } from '../../types.ts'
@@ -230,6 +235,16 @@ export function programWord(left: TSNodeLike, session: SessionState): string | n
   return programWords(left, session)?.[0] ?? null
 }
 
+// The command a statement is, through the redirects around it; null for one
+// that is not a command (an assignment alone, a compound one).
+function statementCommand(left: TSNodeLike): TSNodeLike | null {
+  const body =
+    left.type === NT.REDIRECTED_STATEMENT
+      ? (left.namedChildren.find((child) => !REDIRECT_NODE_TYPES.has(child.type)) ?? null)
+      : left
+  return body !== null && body.type === NT.COMMAND ? body : null
+}
+
 /**
  * How `ps` shows a job or a pipeline stage that is one plain command: its
  * words as typed from the command's name on, with none of the assignments or
@@ -238,16 +253,10 @@ export function programWord(left: TSNodeLike, session: SessionState): string | n
  * typed. Mirrors Python's `program_text`.
  */
 export function programText(left: TSNodeLike, session: SessionState): string | null {
-  if (!simpleCommand(left) || commandInvocations(left).length !== 1) return null
-  let command: TSNodeLike | undefined
-  for (const node of walkNamedOutsideDefs(left)) {
-    if (node.type === 'command') {
-      command = node
-      break
-    }
-  }
-  const name = command?.childForFieldName?.('name') ?? null
-  if (command === undefined || name === null) return null
+  const command = statementCommand(left)
+  if (command === null || commandInvocations(left).length !== 1) return null
+  const name = command.childForFieldName?.('name') ?? null
+  if (name === null) return null
   const typed = [name, ...commandArgs(command)]
   const words = programWords(left, session)
   return (words === null ? typed : typed.slice(typed.length - words.length))

@@ -384,6 +384,41 @@
         "stdout": "sleep(N): Invalid argument\nsleep: no process found\nalive\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "pgrep_skips_the_shell_an_assignment_runs_in",
+      "seq": 502442,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "X=$(sleep 1) & sleep 0.3; pgrep -c sleep; pidof sleep | wc -w; wait",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n1\n",
+        "stderr": ""
+      }
     }
   ]
 }
