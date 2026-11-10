@@ -247,13 +247,17 @@ function usageOf(fewest: number, most: number): string {
  * The test a value pattern puts each value to: `!` in front negates a pattern,
  * and `--fixed-value` compares the whole value instead.
  */
+function every(): boolean {
+  return true
+}
+
 function valueTest(
   pattern: string | undefined,
   fixed: boolean,
   utf8: boolean,
   signal: AbortSignal | undefined,
 ): (value: string | null) => Promise<boolean> | boolean {
-  if (pattern === undefined) return () => true
+  if (pattern === undefined) return every
   if (fixed) return (value) => value === pattern
   const negated = pattern.startsWith('!')
   const compiled = posixRegex(
