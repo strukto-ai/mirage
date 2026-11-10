@@ -62,19 +62,19 @@ describe('sessions router', () => {
       url: '/v1/workspaces/grants-ws/sessions',
       payload: { session_id: 'agent_l', mounts: ['/'] },
     })
-    expect(listForm.statusCode).toBe(422)
+    expect(listForm.statusCode).toBe(400)
     const bad = await app.inject({
       method: 'POST',
       url: '/v1/workspaces/grants-ws/sessions',
       payload: { session_id: 'agent_x', mounts: { '/': 'admin' } },
     })
-    expect(bad.statusCode).toBe(422)
+    expect(bad.statusCode).toBe(400)
     const unknownRole = await app.inject({
       method: 'POST',
       url: '/v1/workspaces/grants-ws/sessions',
       payload: { session_id: 'agent_p', profile: 'nope' },
     })
-    expect(unknownRole.statusCode).toBe(422)
+    expect(unknownRole.statusCode).toBe(400)
     await app.close()
   })
 
@@ -93,29 +93,48 @@ describe('sessions router', () => {
     await app.close()
   })
 
-  it('answers a bad body 422 in FastAPI shape, before the workspace', async () => {
+  it('answers a bad body 400 with one error, before the workspace', async () => {
     const app = buildApp()
     await createWs(app, 'sw-bad')
-    const cases: [string, string, unknown, unknown[]][] = [
-      ['POST', 'sw-bad/sessions', { session_id: 5 }, ['string_type', ['body', 'session_id'], 5]],
-      ['POST', 'nope/sessions', { mounts: ['/'] }, ['dict_type', ['body', 'mounts'], ['/']]],
-      ['PATCH', 'sw-bad/sessions/nope', {}, ['missing', ['body', 'profile'], {}]],
+    const cases: [string, string, unknown, Record<string, string>][] = [
+      [
+        'POST',
+        'sw-bad/sessions',
+        { session_id: 5 },
+        { code: 'invalid_value', message: 'session_id must be a string', param: 'session_id' },
+      ],
+      [
+        'POST',
+        'nope/sessions',
+        { mounts: ['/'] },
+        { code: 'invalid_value', message: 'mounts must be an object', param: 'mounts' },
+      ],
+      [
+        'PATCH',
+        'sw-bad/sessions/nope',
+        {},
+        { code: 'missing_field', message: 'profile is required', param: 'profile' },
+      ],
       [
         'PATCH',
         'nope/sessions/nope',
         { profile: null, x: 1 },
-        ['extra_forbidden', ['body', 'x'], 1],
+        { code: 'unknown_field', message: 'x is not a known field', param: 'x' },
+      ],
+      [
+        'PATCH',
+        'sw-bad/sessions/nope',
+        { profile: 42 },
+        { code: 'invalid_value', message: 'profile is not valid', param: 'profile' },
       ],
     ]
-    for (const [method, path, payload, issue] of cases) {
+    for (const [method, path, payload, error] of cases) {
       const res = await app.inject({
         method: method as 'POST' | 'PATCH',
         url: `/v1/workspaces/${path}`,
         payload: payload as Record<string, unknown>,
       })
-      expect(res.statusCode, path).toBe(422)
-      const { detail } = res.json<{ detail: { type: string; loc: unknown[]; input: unknown }[] }>()
-      expect(detail.map((d) => [d.type, d.loc, d.input])).toEqual([issue])
+      expect([res.statusCode, res.json()], path).toEqual([400, { error }])
     }
     await app.close()
   })
@@ -261,7 +280,7 @@ describe('session cancel and kill', () => {
         url: `/v1/workspaces/${id}/sessions/a`,
         payload: { profile: { commands: { bogus: [] } } },
       })
-      expect(refused.statusCode).toBe(422)
+      expect(refused.statusCode).toBe(400)
     } finally {
       await app.close()
     }
@@ -281,7 +300,9 @@ describe('max sessions', () => {
     expect((await create('a')).statusCode).toBe(201)
     const refused = await create('b')
     expect(refused.statusCode).toBe(429)
-    expect(refused.json()).toEqual({ detail: 'workspace is at max_sessions (2)' })
+    expect(refused.json()).toEqual({
+      error: { code: 'session_limit', message: 'workspace is at max_sessions (2)' },
+    })
     await app.inject({ method: 'DELETE', url: '/v1/workspaces/cap/sessions/a' })
     expect((await create('b')).statusCode).toBe(201)
     await app.close()

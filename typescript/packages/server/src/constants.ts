@@ -33,3 +33,6 @@ export const RESERVED_KWARGS: ReadonlySet<string> = new Set([
   'stream',
   'direct',
 ])
+
+/** Bodies read as sent, never as JSON: an upload, by its Content-Type. */
+export const RAW_BODIES = /^(multipart\/|application\/octet-stream)/i

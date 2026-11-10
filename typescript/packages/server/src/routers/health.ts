@@ -14,6 +14,7 @@
 
 import type { RouteApp } from '../routes.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
+import { errorResponse, HttpError } from '../errors.ts'
 
 export function registerHealthRoutes(
   app: RouteApp,
@@ -41,7 +42,10 @@ export function registerHealthRoutes(
   // The daemon serves every account, so an account may not stop it.
   app.post('/v1/daemon/shutdown', (req, reply) => {
     if (req.account !== null) {
-      return reply.status(403).send({ detail: 'an account may not shut the daemon down' })
+      return errorResponse(
+        reply,
+        new HttpError('forbidden', 'an account may not shut the server down'),
+      )
     }
     deps.exit()
     return { status: 'shutting_down', pid: process.pid }

@@ -57,9 +57,16 @@ it('lists a running job and finds it by id', async () => {
       const listed = await get(app, '/v1/workspaces/w/jobs?state=running')
       expect(listed.status).toBe(200)
       const lost = await get(app, '/v1/workspaces/nope/jobs?state=lost')
-      expect(lost.status).toBe(422)
-      const [issue] = (lost.body as { detail: { type: string; loc: string[] }[] }).detail
-      expect([issue?.type, issue?.loc]).toEqual(['enum', ['query', 'state']])
+      expect([lost.status, lost.body]).toEqual([
+        400,
+        {
+          error: {
+            code: 'invalid_value',
+            message: 'state must be one of running, stopping, exited',
+            param: 'state',
+          },
+        },
+      ])
       const [job] = listed.body as {
         id: string
         number: number
@@ -78,7 +85,10 @@ it('lists a running job and finds it by id', async () => {
       expect([found.status, found.body]).toEqual([200, { ...job, processes: [pid] }])
       const bare = (job?.id ?? '').replace('job_', '')
       const missing = await get(app, `/v1/workspaces/w/jobs/${bare}`)
-      expect([missing.status, missing.body]).toEqual([404, { detail: 'job not found' }])
+      expect([missing.status, missing.body]).toEqual([
+        404,
+        { error: { code: 'not_found', message: 'job not found' } },
+      ])
       expect((await get(app, `/v1/workspaces/w/jobs?line_id=${result.line_id}`)).body).toEqual([
         job,
       ])

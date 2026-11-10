@@ -255,6 +255,11 @@ jobs:
       - name: Core barrel surface
         run: ./python/.venv/bin/python scripts/check_barrel_surface.py
 
+      # Both servers answer only registered error codes; their two tables
+      # and the spec's Error.code must name the same codes and statuses.
+      - name: Error code registry
+        run: ./python/.venv/bin/python scripts/check_error_codes.py
+
       # `normalizeFields` already maps every unlisted key through
       # `snakeToCamel`, so a rename entry that restates that mapping is not
       # configuration -- it is a second place for one fact to be wrong, and it

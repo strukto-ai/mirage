@@ -39,8 +39,15 @@ export async function relayStdio(url: string, token: () => Promise<string>): Pro
     })
     if (response.status === 204) return
     if (response.status >= 400) {
-      const { detail } = (await response.json()) as { detail?: unknown }
-      throw new Error(`error ${String(response.status)}: ${String(detail)}`)
+      const text = await response.text()
+      let detail = text
+      try {
+        const message = (JSON.parse(text) as { error?: { message?: unknown } }).error?.message
+        if (typeof message === 'string') detail = message
+      } catch {
+        detail = text
+      }
+      throw new Error(`error ${String(response.status)}: ${detail}`)
     }
     write(await response.text())
   }

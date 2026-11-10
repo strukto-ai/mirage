@@ -15,7 +15,9 @@
 import { Outcome, Scope, type Decision } from '@struktoai/mirage-core/policy/index'
 import type { RouteApp } from '../routes.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
-import { failure, queryFlag } from './vfs.ts'
+import { z } from '@struktoai/mirage-core/vfs/secrets'
+import { HttpError, validationError } from '../errors.ts'
+import { requireEntry, sessionOf, queryFlag } from './vfs.ts'
 
 interface WsIdParams {
   wsId: string
@@ -31,11 +33,12 @@ interface ListAsksQuery {
   all?: string
 }
 
-interface AnswerAskRequest {
-  answer?: string
-  scope?: string
-  note?: string
-}
+/** An answer to one waiting ask. */
+const AnswerAskRequest = z.object({
+  answer: z.enum(['allow', 'deny']),
+  scope: z.enum(['once', 'session']).optional(),
+  note: z.string().optional(),
+})
 
 interface AskResponse {
   id: string
@@ -73,76 +76,53 @@ export function registerAsksRoutes(
 ): void {
   app.get<{ Params: WsIdParams; Querystring: ListAsksQuery }>(
     '/v1/workspaces/:wsId/asks',
-    async (req, reply) => {
+    async (req) => {
       // The workspace's asks: pending by default, every decision under
       // all=true. The ledger already serves both views from one store,
-      // so the entry point only picks which query to run.
-      const { wsId } = req.params
-      if (deps.registry.visible(wsId, req.account) === null) {
-        return reply.status(404).send({ detail: 'workspace not found' })
-      }
-      const ws = deps.registry.get(wsId).runner.ws
-      await ws.ensureSessionsLoaded()
+      // so the entry point only picks which query to run. A mistyped
+      // session filter is the caller's error, answered in the sessions
+      // router's voice rather than as a 500.
+      const settled = queryFlag(req.query, 'all').all
+      const ws = requireEntry(deps.registry, req.params.wsId, req.account).runner.ws
       const sessionId = req.query.session_id ?? ''
-      // The ledger reads a named session through SessionManager.get,
-      // which throws for an unknown id; a mistyped filter is the
-      // caller's error, answered in the sessions router's voice rather
-      // than as a 500.
-      if (sessionId !== '' && !ws.listSessions().some((s) => s.sessionId === sessionId)) {
-        return reply.status(404).send({ detail: 'session not found' })
-      }
-      let settled: boolean
-      try {
-        settled = queryFlag(req.query, 'all').all
-      } catch (e) {
-        return failure(reply, e)
-      }
+      await sessionOf(ws, sessionId)
       const records = settled ? ws.decisions.list(sessionId) : ws.decisions.pending(sessionId)
       return records.map(toResponse)
     },
   )
 
-  app.post<{ Params: WsAskParams; Body: AnswerAskRequest | undefined }>(
+  app.post<{ Params: WsAskParams; Body: unknown }>(
     '/v1/workspaces/:wsId/asks/:askId',
-    async (req, reply) => {
+    async (req) => {
       // Answer one waiting ask, allow or deny, and return the settled
       // record. A known id with nothing waiting is 409 rather than 404,
       // so an operator retrying a click reads "already answered", not
       // "not found".
       const { wsId, askId } = req.params
-      if (deps.registry.visible(wsId, req.account) === null) {
-        return reply.status(404).send({ detail: 'workspace not found' })
-      }
-      // Fastify's generic type does not validate at runtime: a POST
-      // with no JSON body reaches here with req.body undefined, and
-      // that is the caller's 422, not a 500.
-      const body: AnswerAskRequest = req.body ?? {}
+      const parsed = AnswerAskRequest.safeParse(req.body)
+      if (!parsed.success) throw validationError(parsed.error, req.body)
+      const body = parsed.data
       const answer = body.answer
-      if (answer !== 'allow' && answer !== 'deny') {
-        return reply.status(422).send({ detail: "answer must be 'allow' or 'deny'" })
-      }
       const scope = body.scope ?? 'once'
-      if (scope !== 'once' && scope !== 'session') {
-        return reply.status(422).send({ detail: "scope must be 'once' or 'session'" })
-      }
+      const ws = requireEntry(deps.registry, wsId, req.account).runner.ws
       if (answer === 'deny' && scope === 'session') {
         // covers() never lets a session-scoped deny answer anything: a
         // deny refuses the retry once, and asking again raises a new
         // record. Recording one would be a rule that can never speak.
-        return reply
-          .status(422)
-          .send({ detail: 'a deny answers once; asking again raises a new record' })
+        throw new HttpError(
+          'invalid_request',
+          'a deny answers once; asking again raises a new record',
+        )
       }
       const note = body.note ?? ''
-      const ws = deps.registry.get(wsId).runner.ws
       await ws.ensureSessionsLoaded()
       const held = ws.decisions.list()
       const waiting = held.find((r) => r.id === askId && r.outcome === null)
       if (waiting === undefined) {
         if (held.some((r) => r.id === askId)) {
-          return reply.status(409).send({ detail: `ask already answered: ${askId}` })
+          throw new HttpError('conflict', `ask already answered: ${askId}`)
         }
-        return reply.status(404).send({ detail: 'ask not found' })
+        throw new HttpError('not_found', 'ask not found')
       }
       const outcome = answer === 'allow' ? Outcome.ALLOW : Outcome.DENY
       const scopeValue = scope === 'once' ? Scope.ONCE : Scope.SESSION

@@ -609,7 +609,9 @@ describe('AuthMiddleware integration', () => {
             const response = await pending
             if (protocol === 'rpc_lookup' || protocol === 'rpc_before_lookup') {
               expect(response?.statusCode, response?.body).toBe(404)
-              expect(response?.json()).toEqual({ detail: 'workspace not found' })
+              expect(response?.json()).toEqual({
+                error: { code: 'not_found', message: 'workspace not found' },
+              })
             } else {
               expect(response?.json()).toHaveProperty('error')
             }

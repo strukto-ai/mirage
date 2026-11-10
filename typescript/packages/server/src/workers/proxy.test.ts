@@ -277,7 +277,7 @@ describe('WorkerProxy', () => {
       })
     }
     const refused = open('evil.example')
-    expect(await refused).toBe(400)
+    expect(await refused).toBe(403)
     const slow = open('localhost')
     await new Promise((resolve) => setTimeout(resolve, 100))
     expect((await call(`${d.url}/v1/workspaces`, 'POST', { id: 'a', config: CONFIG })).status).toBe(
@@ -286,8 +286,8 @@ describe('WorkerProxy', () => {
     slow.finish()
     expect(await slow).toBe(503)
     expect(ids(d).flat()).toEqual(['a'])
-    expect(await withHost(d.url, 'GET', '/v1/health', 'evil.example')).toBe(400)
-    expect(await withHost(d.url, 'GET', '/v1/daemon/ready', 'evil.example')).toBe(400)
+    expect(await withHost(d.url, 'GET', '/v1/health', 'evil.example')).toBe(403)
+    expect(await withHost(d.url, 'GET', '/v1/daemon/ready', 'evil.example')).toBe(403)
     expect(await withHost(d.url, 'GET', '/v1/workspaces/%E0', 'localhost')).toBe(400)
     const explained = await call(`${d.url}/v1/workspaces?explain=true`, 'POST', {
       id: 'b',
@@ -403,7 +403,10 @@ describe.each([WorkerType.Process, WorkerType.Thread])('%s workers', (type) => {
         workers: 1,
       })
       const gone = await call(`${url}/v1/workspaces/b/shell`, 'POST', { command: 'true' })
-      expect(gone.status).toBe(404)
+      expect([gone.status, gone.json]).toMatchObject([
+        409,
+        { error: { code: 'workspace_stopped' } },
+      ])
       const kept = await call(`${url}/v1/workspaces/a/shell`, 'POST', { command: 'true' })
       expect(kept.status).toBe(200)
       const made = await call(`${url}/v1/workspaces`, 'POST', { id: 'c', config: CONFIG })

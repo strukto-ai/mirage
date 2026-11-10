@@ -23,6 +23,7 @@ import type { ToolResult } from '@struktoai/mirage-core/workspace/tools/tool_ope
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import type { JsonValue } from '@struktoai/mirage-core/types'
+import { HttpError } from '../errors.ts'
 import { InFlight, rpcMessages } from '../inflight.ts'
 import { ioResultToDict } from '../io_serde.ts'
 import type { RequestTable } from '../requests.ts'
@@ -141,10 +142,16 @@ export class McpEndpoint {
   ): Promise<Response> {
     const url = new URL(request.url)
     if (!Object.hasOwn(CALLS, url.searchParams.get('calls') ?? 'tools')) {
-      return Response.json({ detail: 'calls must be tools or all' }, { status: 400 })
+      const refused = new HttpError('invalid_value', 'calls must be one of tools, all', {
+        param: 'calls',
+      })
+      return Response.json(refused.body(), { status: refused.status })
     }
     const target = await this.target(url, account)
-    if (typeof target === 'string') return Response.json({ detail: target }, { status: 404 })
+    if (typeof target === 'string') {
+      const missing = new HttpError('not_found', target)
+      return Response.json(missing.body(), { status: missing.status })
+    }
     const { handler, workspaceId, sessionId } = target
     const options = parsedBody === undefined ? {} : { parsedBody }
     const calls: string[] = []

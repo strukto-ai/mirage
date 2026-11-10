@@ -200,7 +200,10 @@ describe('createMirageMcpServer', () => {
     try {
       const result = await client.callTool({ name: 'vfs_read', arguments: { path: '/file' } })
       expect(result.isError).toBe(true)
-      expect(JSON.parse(firstText(result.content))).toEqual({ detail: 'internal server error' })
+      expect(JSON.parse(firstText(result.content))).toEqual({
+        code: 'internal',
+        message: 'internal server error',
+      })
       expect(diagnostics.mock.calls.map(([chunk]) => String(chunk)).join('')).toContain(err.stack)
       expect(protocolOutput).not.toHaveBeenCalled()
     } finally {

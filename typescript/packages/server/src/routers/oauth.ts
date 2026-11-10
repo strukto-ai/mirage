@@ -14,6 +14,7 @@
 
 import type { RouteApp } from '../routes.ts'
 import { PROTECTED_RESOURCE_PATH, type AuthConfig } from '../auth/config.ts'
+import { errorResponse, HttpError } from '../errors.ts'
 
 /**
  * Say where to log in, for `mirage login`: RFC 9728's protected resource
@@ -30,7 +31,7 @@ export function registerOAuthRoutes(
   app.get(PROTECTED_RESOURCE_PATH, (req, reply) => {
     const jwt = deps.auth.jwt
     if (jwt?.loginClientId === undefined || jwt.issuer === undefined) {
-      return reply.status(404).send({ detail: 'this server publishes no login' })
+      return errorResponse(reply, new HttpError('not_found', 'this server publishes no login'))
     }
     return {
       resource: `${req.protocol}://${req.host}`,

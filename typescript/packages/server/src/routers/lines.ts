@@ -19,7 +19,8 @@ import type { BytePipe } from '@struktoai/mirage-core/io/pipe'
 import type { RouteApp } from '../routes.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
 import type { RequestTable } from '../requests.ts'
-import { failure, HttpError, invalidChoice, requireEntry } from './vfs.ts'
+import { HttpError, oneOf, WorkspaceMissing } from '../errors.ts'
+import { failure, requireEntry } from './vfs.ts'
 
 const NOT_OPEN = "the line's stdin is not open"
 
@@ -81,8 +82,8 @@ function openStdin(
 ): BytePipe {
   requireEntry(registry, wsId, account)
   const job = jobs.get(new LineId(lineId))
-  if (job?.workspaceId !== wsId) throw new HttpError(404, 'line not found')
-  if (job.stdin === undefined) throw new HttpError(409, NOT_OPEN)
+  if (job?.workspaceId !== wsId) throw new HttpError('not_found', 'line not found')
+  if (job.stdin === undefined) throw new HttpError('conflict', NOT_OPEN)
   return job.stdin
 }
 
@@ -95,17 +96,17 @@ export function registerLinesRoutes(
 ): void {
   app.get<{ Params: WsIdParams; Querystring: ListLinesQuery }>(
     '/v1/workspaces/:wsId/lines',
-    async (req, reply) => {
+    async (req) => {
       // The lines the workspace keeps, oldest first: every one not ended
       // yet and the newest ended ones, a session's or those in a state
       // when named.
       const { wsId } = req.params
       const { session_id: sessionId, state } = req.query
       if (state !== undefined && !(STATES as readonly string[]).includes(state)) {
-        return failure(reply, invalidChoice(['query', 'state'], STATES, state))
+        throw new HttpError('invalid_value', `state must be ${oneOf(STATES)}`, { param: 'state' })
       }
       if (deps.registry.visible(wsId, req.account) === null) {
-        return reply.status(404).send({ detail: 'workspace not found' })
+        throw new WorkspaceMissing(wsId)
       }
       const ws = deps.registry.get(wsId).runner.ws
       const records = await ws.lines({
@@ -116,16 +117,16 @@ export function registerLinesRoutes(
     },
   )
 
-  app.get<{ Params: WsLineParams }>('/v1/workspaces/:wsId/lines/:lineId', async (req, reply) => {
+  app.get<{ Params: WsLineParams }>('/v1/workspaces/:wsId/lines/:lineId', async (req) => {
     // One line, with the ids of the jobs it started, the pids of the
     // processes it ran and the machines those ran on.
     const { wsId, lineId } = req.params
     if (deps.registry.visible(wsId, req.account) === null) {
-      return reply.status(404).send({ detail: 'workspace not found' })
+      throw new WorkspaceMissing(wsId)
     }
     const ws = deps.registry.get(wsId).runner.ws
     const record = await ws.line(new LineId(lineId))
-    if (record === null) return reply.status(404).send({ detail: 'line not found' })
+    if (record === null) throw new HttpError('not_found', 'line not found')
     const processes = await ws.processes({ lineId: record.id })
     const detail: LineDetailResponse = {
       ...toResponse(record),
@@ -152,7 +153,7 @@ export function registerLinesRoutes(
         // The rest of a refused body is left unread, so the connection closes
         // after the answer.
         reply.header('connection', 'close')
-        return failure(reply, err instanceof PipeClosed ? new HttpError(409, NOT_OPEN) : err)
+        return failure(reply, err instanceof PipeClosed ? new HttpError('conflict', NOT_OPEN) : err)
       }
       return reply.status(204).send()
     },

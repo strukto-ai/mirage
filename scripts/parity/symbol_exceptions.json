@@ -1,5 +1,5 @@
 {
- "baseline": 1633,
+ "baseline": 1632,
  "modules": {
   "server/app": {
    "python_only": {
@@ -501,7 +501,6 @@
   },
   "server/multipart": {
    "typescript_only": {
-    "MultipartError": "Python refuses a body with FastAPI's HTTPException.",
     "headerParam": "Python reads header parameters with python-multipart's parse_options_header."
    }
   },
@@ -600,7 +599,6 @@
   },
   "server/schemas": {
    "typescript_only": {
-    "ConfigValidationError": "FastAPI raises RequestValidationError for a request config before routing; Fastify needs a typed boundary to separate schema validation from operator-policy refusals."
    },
    "python_only": {
     "CancelLinesResponse": "A pydantic response model FastAPI validates the route's answer against; the Fastify route returns the same object literal.",
@@ -810,15 +808,12 @@
    "python_only": {
     "router": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "vfs_route": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
-    "json_body": "FastAPI hands a route the raw request, so the VFS and tool routes read their JSON object through json_body, bounded by MCP's size limit; Fastify parses and bounds the body itself (bodyLimit).",
     "streamed_read": "FastAPI has module-level route handlers; the matching Fastify handler streams a read inline in registerVfsRoutes.",
     "custom_function": "FastAPI has module-level route handlers; the matching Fastify handler is a closure in registerVfsRoutes."
    },
    "typescript_only": {
     "CallQuery": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
-    "HttpError": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "queryFlag": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
-    "invalidChoice": "FastAPI checks an enum query parameter against the enum itself; Fastify's routes check a state filter by hand and refuse it in pydantic's enum wording through invalidChoice.",
     "registerVfsRoutes": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access."
    }
   },
@@ -1434,8 +1429,7 @@
    "typescript_only": {
     "RefParams": "Fastify types a route's path params with an interface; FastAPI reads them from the handler's signature.",
     "registerTemplatesRoutes": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
-    "stored": "Each FastAPI handler maps a store refusal in its own try; the TypeScript routes share one wrapper because a refusal answers through the reply.",
-    "TEMPLATE_FIELDS": "Pydantic's extra='forbid' refuses unknown fields in Python; the TypeScript route checks them against this set."
+    "stored": "Each FastAPI handler maps a store refusal in its own try; the TypeScript routes share one wrapper that throws the mapped HttpError."
    }
   },
   "server/resources/files": {
@@ -1487,10 +1481,8 @@
    "typescript_only": {
     "RefParams": "Fastify types a route's path params with an interface; FastAPI reads them from the handler's signature.",
     "registerPoliciesRoutes": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
-    "stored": "Each FastAPI handler maps a store refusal in its own try; the TypeScript routes share one wrapper because a refusal answers through the reply.",
-    "Refusal": "Pydantic refuses a malformed body before the handler runs in Python; the TypeScript routes check the body themselves and answer with this status and detail.",
-    "bodyOf": "Pydantic refuses a malformed body before the handler runs in Python; the TypeScript routes check the body themselves and answer with this status and detail.",
-    "isRefusal": "Pydantic refuses a malformed body before the handler runs in Python; the TypeScript routes check the body themselves and answer with this status and detail."
+    "stored": "Each FastAPI handler maps a store refusal in its own try; the TypeScript routes share one wrapper that throws the mapped HttpError.",
+    "bodyOf": "Pydantic refuses a malformed body before the handler runs in Python; the TypeScript routes check the body themselves through validationError."
    }
   },
   "cli/policy": {

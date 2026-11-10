@@ -25,14 +25,8 @@ import type { JsonValue } from '@struktoai/mirage-core/types'
 import { VERSION } from '@struktoai/mirage-core/version'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import {
-  CallArgsError,
-  answered,
-  checked,
-  explanationToDict,
-  failureToDict,
-  ioResultToDict,
-} from '../io_serde.ts'
+import { CallArgsError, answered, checked, explanationToDict, ioResultToDict } from '../io_serde.ts'
+import { fsError } from '../errors.ts'
 import { InFlight } from '../inflight.ts'
 import { TOOLS } from '../mcp/server.ts'
 import {
@@ -246,9 +240,9 @@ export class MirageRpcServer {
         return errorResponse(requestId, RPC_REQUEST_CANCELLED, 'request cancelled')
       }
       logger.debug('rpc %s failed', method, err)
-      const data = failureToDict(err)
-      const code = data.errno === 'ENOENT' ? RPC_NOT_FOUND : RPC_INTERNAL_ERROR
-      return errorResponse(requestId, code, data.detail, data)
+      const error = fsError(err)
+      const code = error.errno === 'ENOENT' ? RPC_NOT_FOUND : RPC_INTERNAL_ERROR
+      return errorResponse(requestId, code, error.message, error.record())
     }
   }
 

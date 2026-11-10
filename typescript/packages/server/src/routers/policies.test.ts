@@ -71,7 +71,11 @@ describe('policies router', () => {
       app.inject({ method: 'POST', url: '/v1/policies', payload })
     const bare = await post({ name: 'guard', source: '' })
     expect(bare.statusCode).toBe(400)
-    expect(bare.json<{ detail: string }>().detail).toContain('end in .py')
+    expect(bare.json<{ error: { message: string } }>().error).toEqual({
+      code: 'invalid_value',
+      message: 'name must end in .py, such as guard.py',
+      param: 'name',
+    })
     expect((await post({ name: 'big.py', source: '#'.repeat(64 * 1024 + 1) })).statusCode).toBe(400)
     expect((await post({ name: 'a.py', source: '', x: 1 })).statusCode).toBe(400)
     expect((await post({ name: 'a.py' })).statusCode).toBe(400)

@@ -153,7 +153,7 @@ describe('execute router', () => {
       payload: { command: 'echo hi' },
     })
     expect(res.statusCode).toBe(404)
-    expect(res.json()).toEqual({ detail: 'session not found' })
+    expect(res.json()).toEqual({ error: { code: 'not_found', message: 'session not found' } })
     await app.close()
   })
 
@@ -168,7 +168,9 @@ describe('execute router', () => {
         payload: { command: 'echo hi' },
       })
       expect(res.statusCode).toBe(400)
-      expect(res.json()).toEqual({ detail: 'stream cannot be combined with explain' })
+      expect(res.json()).toEqual({
+        error: { code: 'invalid_request', message: 'stream cannot be combined with explain' },
+      })
       await app.close()
     },
   )
@@ -189,7 +191,7 @@ describe('execute router', () => {
     },
   )
 
-  it.each(['abc', '', '2', 'tru'])('answers 422 for the flag value %j', async (flag) => {
+  it.each(['abc', '', '2', 'tru'])('answers 400 for the flag value %j', async (flag) => {
     const app = buildApp()
     await createWs(app, 'badflag')
     for (const name of ['explain', 'stream']) {
@@ -198,16 +200,9 @@ describe('execute router', () => {
         url: `/v1/workspaces/badflag/shell?${name}=${flag}`,
         payload: { command: 'echo hi' },
       })
-      expect(res.statusCode).toBe(422)
+      expect(res.statusCode).toBe(400)
       expect(res.json()).toEqual({
-        detail: [
-          {
-            type: 'bool_parsing',
-            loc: ['query', name],
-            msg: 'Input should be a valid boolean, unable to interpret input',
-            input: flag,
-          },
-        ],
+        error: { code: 'invalid_value', message: `${name} must be a boolean`, param: name },
       })
     }
     await app.close()
@@ -241,7 +236,7 @@ describe('execute router', () => {
       payload: { command: 'echo hi' },
     })
     expect(refused.statusCode).toBe(409)
-    expect(refused.json<{ detail: string }>().detail).toContain("'elsewhere'")
+    expect(refused.json<{ error: { message: string } }>().error.message).toContain("'elsewhere'")
     await store.release('elsewhere')
     const ran = await app.inject({
       method: 'POST',
@@ -252,18 +247,28 @@ describe('execute router', () => {
     await app.close()
   })
 
-  // A body that reads but fails the schema is a 422 in FastAPI's shape,
-  // located under "body"; a body that does not read is a 400.
+  // A body that reads but fails the schema is a 400 naming its first bad
+  // field, declared fields before unknown ones.
   it.each([
     [
       { command: 'echo hello', provision: true },
-      [['extra_forbidden', ['body', 'provision'], true]],
+      { code: 'unknown_field', message: 'provision is not a known field', param: 'provision' },
     ],
-    [{}, [['missing', ['body', 'command'], {}]]],
-    [{ command: 5 }, [['string_type', ['body', 'command'], 5]]],
-    [{ command: 'echo hi', record: 1 }, [['bool_type', ['body', 'record'], 1]]],
-    [[1], [['model_attributes_type', ['body'], [1]]]],
-  ])('answers 422 for the body %j', async (payload, issues) => {
+    [{}, { code: 'missing_field', message: 'command is required', param: 'command' }],
+    [
+      { command: 5 },
+      { code: 'invalid_value', message: 'command must be a string', param: 'command' },
+    ],
+    [
+      { command: 'echo hi', record: 1 },
+      { code: 'invalid_value', message: 'record must be a boolean', param: 'record' },
+    ],
+    [
+      { provision: true, command: 5 },
+      { code: 'invalid_value', message: 'command must be a string', param: 'command' },
+    ],
+    [[1], { code: 'invalid_request', message: 'body must be a JSON object' }],
+  ])('answers 400 for the body %j', async (payload, error) => {
     const app = buildApp()
     await createWs(app, 'ew-strict')
     for (const explain of ['false', 'true']) {
@@ -272,10 +277,24 @@ describe('execute router', () => {
         url: `/v1/workspaces/ew-strict/shell?explain=${explain}`,
         payload,
       })
-      expect(res.statusCode).toBe(422)
-      const { detail } = res.json<{ detail: { type: string; loc: unknown[]; input: unknown }[] }>()
-      expect(detail.map((issue) => [issue.type, issue.loc, issue.input])).toEqual(issues)
+      expect([res.statusCode, res.json()]).toEqual([400, { error }])
     }
+    await app.close()
+  })
+
+  it('answers a JSON string body as not an object, whatever the media type case', async () => {
+    const app = buildApp()
+    await createWs(app, 'ew-string')
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/ew-string/shell',
+      headers: { 'content-type': 'Application/JSON' },
+      payload: '"echo hi"',
+    })
+    expect([res.statusCode, res.json()]).toEqual([
+      400,
+      { error: { code: 'invalid_request', message: 'body must be a JSON object' } },
+    ])
     await app.close()
   })
 
@@ -335,7 +354,7 @@ describe('execute router', () => {
   })
 
   // Query parameters are checked before the workspace, the body after the
-  // workspace and the session, as FastAPI orders them.
+  // workspace and the session.
   it('checks in the order the Python server does', async () => {
     const app = buildApp()
     await createWs(app, 'ew-order')
@@ -344,10 +363,9 @@ describe('execute router', () => {
       url: '/v1/workspaces/nope/shell?stream=abc&explain=xyz',
       payload: { command: 'echo hi' },
     })
-    expect(flags.statusCode).toBe(422)
-    expect(flags.json<{ detail: { loc: string[] }[] }>().detail.map((issue) => issue.loc)).toEqual([
-      ['query', 'explain'],
-      ['query', 'stream'],
+    expect([flags.statusCode, flags.json()]).toEqual([
+      400,
+      { error: { code: 'invalid_value', message: 'explain must be a boolean', param: 'explain' } },
     ])
     for (const url of [
       '/v1/workspaces/nope/shell',
@@ -380,18 +398,39 @@ describe('execute router', () => {
     await app.close()
   })
 
-  it('passes the runtime argument through to execution', async () => {
+  it('refuses a runtime or machine the workspace lacks', async () => {
     const app = buildApp()
     await createWs(app, 'ert')
-    // An unknown entry name fails loud inside Workspace.shell,
-    // proving the field reaches the runtime argument.
-    const res = await app.inject({
+    const runtime = await app.inject({
       method: 'POST',
       url: '/v1/workspaces/ert/shell',
       payload: { command: 'echo hi', runtime: 'no-such-runtime' },
     })
-    expect(res.statusCode).toBe(500)
-    expect(res.json<{ detail: string }>().detail).toContain('unknown runtime')
+    expect([runtime.statusCode, runtime.json()]).toEqual([
+      400,
+      {
+        error: {
+          code: 'invalid_value',
+          message: 'runtime must be one of monty, quickjs',
+          param: 'runtime',
+        },
+      },
+    ])
+    const machine = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/ert/shell',
+      payload: { command: 'echo hi', machine: '' },
+    })
+    expect([machine.statusCode, machine.json()]).toEqual([
+      400,
+      {
+        error: {
+          code: 'invalid_value',
+          message: 'machine must be unset: the workspace has no machines',
+          param: 'machine',
+        },
+      },
+    ])
     await app.close()
   })
 
@@ -403,7 +442,7 @@ describe('execute router', () => {
       url: '/v1/workspaces/estdin/shell',
       payload: { command: 'wc -l', stdinBase64: 'YQo=' },
     })
-    expect(res.statusCode).toBe(422)
+    expect(res.statusCode).toBe(400)
     await app.close()
   })
 
@@ -450,7 +489,7 @@ describe('execute router', () => {
     app.jobs.cancel(job.id)
     const res = await pending
     expect(res.statusCode).toBe(499)
-    expect(res.json()).toEqual({ detail: 'job canceled' })
+    expect(res.json()).toEqual({ error: { code: 'canceled', message: 'job canceled' } })
     await app.close()
   })
 })
@@ -588,7 +627,7 @@ describe('a foreground shell request', () => {
       const refused = await writeStdin(route, 'late')
       expect([refused.status, await refused.json()]).toEqual([
         409,
-        { detail: "the line's stdin is not open" },
+        { error: { code: 'conflict', message: "the line's stdin is not open" } },
       ])
     } finally {
       abort.abort()
@@ -658,7 +697,7 @@ describe('a foreground shell request', () => {
     }
   })
 
-  it('answers 422 for a bad request part and 400 for one that is not JSON', async () => {
+  it('answers 400 for a bad request part and for one that is not JSON', async () => {
     const app = buildApp()
     try {
       const base = await served(app, 'parts')
@@ -672,11 +711,21 @@ describe('a foreground shell request', () => {
         method: 'POST',
         body: form(JSON.stringify({ command: 'echo hi', provision: true })),
       })
-      expect(bad.status).toBe(422)
-      const { detail } = (await bad.json()) as { detail: { loc: string[] }[] }
-      expect(detail.map((issue) => issue.loc)).toEqual([['body', 'request', 'provision']])
+      expect([bad.status, await bad.json()]).toEqual([
+        400,
+        {
+          error: {
+            code: 'unknown_field',
+            message: 'provision is not a known field',
+            param: 'provision',
+          },
+        },
+      ])
       const unread = await fetch(route, { method: 'POST', body: form('{"command":') })
-      expect(unread.status).toBe(400)
+      expect([unread.status, await unread.json()]).toEqual([
+        400,
+        { error: { code: 'invalid_json', message: 'body must be JSON' } },
+      ])
     } finally {
       await app.close()
     }
@@ -802,7 +851,9 @@ describe('a foreground shell request', () => {
         body: `${requestPart('cat')}${part('stdin', 'stdin.bin')}abc`,
       })
       expect(res.status).toBe(400)
-      expect(((await res.json()) as { detail: string }).detail).toBe('multipart body ended early')
+      expect(((await res.json()) as { error: { message: string } }).error.message).toBe(
+        'multipart body ended early',
+      )
     } finally {
       await app.close()
     }
@@ -841,8 +892,8 @@ describe('a foreground shell request', () => {
         payload: `--${BOUNDARY}\r\nX-Pad: ${'x'.repeat(20000)}\r\n${requestPart('true').slice(`--${BOUNDARY}\r\n`.length)}${END.slice(2)}`,
       })
       expect(res.statusCode).toBe(400)
-      expect(res.json<{ detail: string }>().detail).toBe(
-        'bad multipart body: Maximum header size exceeded',
+      expect(res.json<{ error: { message: string } }>().error.message).toBe(
+        'multipart body is malformed',
       )
     } finally {
       await app.close()
@@ -861,7 +912,7 @@ describe('a foreground shell request', () => {
       })
       expect(res.statusCode).toBe(400)
       expect(res.headers.connection).toBe('close')
-      expect(res.json<{ detail: string }>().detail).toContain("before 'stdin'")
+      expect(res.json<{ error: { message: string } }>().error.message).toContain("before 'stdin'")
     } finally {
       await app.close()
     }
@@ -1023,7 +1074,9 @@ describe('shutdown', () => {
       payload: { command: 'echo late' },
     })
     expect(r.statusCode).toBe(503)
-    expect(r.json()).toEqual({ detail: 'server is shutting down' })
+    expect(r.json()).toEqual({
+      error: { code: 'shutting_down', message: 'server is shutting down' },
+    })
     await app.close()
   })
 })

@@ -67,19 +67,36 @@ export function exitCodeFromResponse(r: unknown): number {
   return 0
 }
 
-export async function handleResponse(r: Response): Promise<unknown> {
-  if (r.status >= 400) {
-    let detail = await r.text()
-    try {
-      const parsed: unknown = JSON.parse(detail)
-      if (parsed !== null && typeof parsed === 'object' && 'detail' in parsed) {
-        detail = typeof parsed.detail === 'string' ? parsed.detail : JSON.stringify(parsed.detail)
-      }
-    } catch {
-      // body wasn't JSON; fall through with the raw text as detail
-    }
-    fail(`error ${String(r.status)}: ${detail}`, 2)
+/**
+ * The `error` object of a daemon's error body, or null when the body is not
+ * one, such as a proxy's error page. Mirrors Python's `error_of`.
+ */
+export function errorOf(
+  text: string,
+): { message: string; errno?: string; refusal?: { reason: string } | null } | null {
+  let body: unknown
+  try {
+    body = JSON.parse(text)
+  } catch {
+    return null
   }
+  const error =
+    body !== null && typeof body === 'object' && !Array.isArray(body)
+      ? (body as { error?: unknown }).error
+      : undefined
+  if (error === null || typeof error !== 'object' || Array.isArray(error)) return null
+  return typeof (error as { message?: unknown }).message === 'string'
+    ? (error as { message: string; errno?: string; refusal?: { reason: string } | null })
+    : null
+}
+
+/** The message of a daemon's error body, or the body as it came. Mirrors Python's `error_message`. */
+export function errorMessage(text: string): string {
+  return errorOf(text)?.message ?? text
+}
+
+export async function handleResponse(r: Response): Promise<unknown> {
+  if (r.status >= 400) fail(`error ${String(r.status)}: ${errorMessage(await r.text())}`, 2)
   if (r.status === 204) return {}
   const text = await r.text()
   if (text === '') return {}

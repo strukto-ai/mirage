@@ -92,7 +92,7 @@ describe('UploadStdin', () => {
     try {
       await upload.feed(Buffer.from('ab'))
       await upload.feed(Buffer.from('cd'))
-      await expect(upload.feed(Buffer.from('e'))).rejects.toMatchObject({ statusCode: 413 })
+      await expect(upload.feed(Buffer.from('e'))).rejects.toMatchObject({ status: 413 })
       await upload.discard()
       await upload.feed(Buffer.from('ignored'))
       expect((await upload[Symbol.asyncIterator]().next()).done).toBe(true)

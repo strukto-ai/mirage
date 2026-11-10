@@ -166,7 +166,7 @@ describe('buildApp host header enforcement', () => {
     else process.env[ENV_ALLOWED_HOSTS] = originalEnv
   })
 
-  it('rejects unknown host with 400 under default allowlist', async () => {
+  it('rejects unknown host with 403 under default allowlist', async () => {
     const app = buildApp({})
     try {
       const res = await app.inject({
@@ -174,13 +174,13 @@ describe('buildApp host header enforcement', () => {
         url: '/v1/workspaces',
         headers: { host: 'attacker.example' },
       })
-      expect(res.statusCode).toBe(400)
+      expect(res.statusCode).toBe(403)
     } finally {
       await app.close()
     }
   })
 
-  it('rejects malformed bracketed IPv6 host with 400 under default allowlist', async () => {
+  it('rejects malformed bracketed IPv6 host with 403 under default allowlist', async () => {
     const app = buildApp({})
     try {
       const res = await app.inject({
@@ -188,7 +188,7 @@ describe('buildApp host header enforcement', () => {
         url: '/v1/workspaces',
         headers: { host: '[::1]evil' },
       })
-      expect(res.statusCode).toBe(400)
+      expect(res.statusCode).toBe(403)
     } finally {
       await app.close()
     }
@@ -225,7 +225,7 @@ describe('buildApp host header enforcement', () => {
         url: '/v1/workspaces',
         headers: { host: 'attacker.example' },
       })
-      expect(bad.statusCode).toBe(400)
+      expect(bad.statusCode).toBe(403)
     } finally {
       await app.close()
     }
@@ -254,7 +254,7 @@ describe('buildApp host header enforcement', () => {
         url: '/v1/workspaces',
         headers: { host: 'attacker.example' },
       })
-      expect(res.statusCode).toBe(400)
+      expect(res.statusCode).toBe(403)
       expect(warnSpy).toHaveBeenCalled()
       const joined = warnSpy.mock.calls.flat().join(' ')
       expect(joined).toContain('attacker.example')
@@ -291,8 +291,10 @@ describe('buildApp cross-origin refusal', () => {
           url: '/v1/workspaces',
           headers: { host: '127.0.0.1:8765', ...headers },
         })
-        expect(res.statusCode, JSON.stringify(headers)).toBe(400)
-        expect(res.json()).toEqual({ detail: 'Cross-origin request refused' })
+        expect(res.statusCode, JSON.stringify(headers)).toBe(403)
+        expect(res.json()).toEqual({
+          error: { code: 'origin_not_allowed', message: 'cross-origin request refused' },
+        })
       }
       const ok = await app.inject({
         method: 'GET',
@@ -319,7 +321,7 @@ describe('buildApp cross-origin refusal', () => {
         url: '/v1/workspaces',
         headers: { host: 'anything.example', origin: 'https://evil.example' },
       })
-      expect(res.statusCode).toBe(400)
+      expect(res.statusCode).toBe(403)
     } finally {
       await app.close()
     }

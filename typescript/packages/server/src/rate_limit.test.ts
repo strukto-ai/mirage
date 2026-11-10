@@ -86,7 +86,9 @@ describe('registerRateLimits', () => {
     expect((await get('/v1/workspaces')).statusCode).toBe(200)
     const refused = await get('/v1/workspaces')
     expect(refused.statusCode).toBe(429)
-    expect(refused.json()).toEqual({ detail: 'Too Many Requests' })
+    expect(refused.json()).toEqual({
+      error: { code: 'rate_limited', message: 'too many requests' },
+    })
     const wait = Number(refused.headers['retry-after'])
     expect(wait).toBeGreaterThanOrEqual(1)
     expect(wait).toBeLessThanOrEqual(60)
@@ -161,7 +163,9 @@ describe('registerRateLimits around sign-in', () => {
       }
       const refused = await get('right')
       expect(refused.statusCode).toBe(429)
-      expect(refused.json()).toEqual({ detail: 'Too Many Requests' })
+      expect(refused.json()).toEqual({
+        error: { code: 'rate_limited', message: 'too many requests' },
+      })
       expect(Number(refused.headers['retry-after'])).toBe(60)
       expect((await app.inject({ url: '/v1/health' })).statusCode).toBe(200)
       expect((await app.inject({ url: '/v1/daemon/ready' })).statusCode).toBe(200)

@@ -28,7 +28,7 @@ import {
 } from '@struktoai/mirage-server/vfs_calls'
 import { makeClient } from './client.ts'
 import { resolveWorkspace } from './settings.ts'
-import { emit, handleResponse } from './output.ts'
+import { emit, errorOf, handleResponse } from './output.ts'
 
 interface Target {
   /** The workspace; the current one when left out. */
@@ -72,16 +72,10 @@ export async function post(
  */
 export async function answer(r: Response): Promise<unknown> {
   if (r.status >= 400) {
-    const text = await r.clone().text()
-    let body: { detail?: string; errno?: string; refusal?: { reason: string } | null } = {}
-    try {
-      body = JSON.parse(text) as typeof body
-    } catch {
-      // not JSON: the generic handler reports the raw text
-    }
-    if (body.errno !== undefined) {
-      process.stderr.write(`${String(body.detail)} (${body.errno})\n`)
-      if (body.refusal) process.stderr.write(`policy denied: ${body.refusal.reason}\n`)
+    const error = errorOf(await r.clone().text())
+    if (error?.errno !== undefined) {
+      process.stderr.write(`${error.message} (${error.errno})\n`)
+      if (error.refusal) process.stderr.write(`policy denied: ${error.refusal.reason}\n`)
       process.exit(1)
     }
   }

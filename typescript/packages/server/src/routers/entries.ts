@@ -21,7 +21,8 @@ import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { WorkspaceRegistry } from '../registry.ts'
 import { typesOf } from '../resources/fields.ts'
 import { checkValues, storesOf } from '../resources/values.ts'
-import type { RouteApp, RouteReply, ServerHost } from '../routes.ts'
+import { HttpError } from '../errors.ts'
+import type { RouteApp, ServerHost } from '../routes.ts'
 import { requireOneAccount, storeRefusal } from './templates.ts'
 
 /** Each kind's route. */
@@ -37,17 +38,6 @@ const TYPES_ROUTE = 'types'
 
 /** A name that reads as an id, which no entry may take. */
 const ID_PREFIX = /^(ws|sec|pol|key|tpl|team|usr)_/
-
-/** A request answered with a 4xx and extra keys beside `detail`. */
-class Refused extends Error {
-  constructor(
-    readonly status: number,
-    detail: string,
-    readonly extra: Readonly<Record<string, JsonValue>> = {},
-  ) {
-    super(detail)
-  }
-}
 
 interface RefParams {
   ref: string
@@ -81,27 +71,34 @@ function present(kind: EntryKind, entry: Entry, usedBy?: number): Record<string,
 function requiredString(body: Record<string, unknown>, key: string): string {
   const value = body[key]
   if (value !== undefined && value !== null && typeof value !== 'string') {
-    throw new Refused(400, `${key} must be a string`)
+    throw new HttpError('invalid_value', `${key} must be a string`, { param: key })
   }
-  if (typeof value !== 'string' || value === '') throw new Refused(400, `${key} is required`)
+  if (typeof value !== 'string' || value === '') {
+    throw new HttpError('missing_field', `${key} is required`, { param: key })
+  }
   return value
 }
 
 function checkName(kind: EntryKind, name: string): string {
   if (!NAME.test(name) || ID_PREFIX.test(name)) {
-    throw new Refused(
-      400,
+    throw new HttpError(
+      'invalid_value',
       `${NOUN[kind]} name must be 1-63 of a-z 0-9 . _ -, start with a letter or digit, and not look like an id`,
+      { param: 'name' },
     )
   }
-  if (name === TYPES_ROUTE)
-    throw new Refused(400, `${TYPES_ROUTE} names the types route; pick another`)
+  if (name === TYPES_ROUTE) {
+    throw new HttpError('invalid_value', `${TYPES_ROUTE} names the types route; pick another`, {
+      param: 'name',
+    })
+  }
   return name
 }
 
 function jsonBody(body: unknown): Record<string, unknown> {
+  if (body === undefined) throw new HttpError('invalid_json', 'body must be JSON')
   if (body === null || typeof body !== 'object' || Array.isArray(body)) {
-    throw new Refused(400, 'body must be a JSON object')
+    throw new HttpError('invalid_request', 'body must be a JSON object')
   }
   return body as Record<string, unknown>
 }
@@ -112,7 +109,7 @@ async function entryNamed(store: ResourceStore, kind: EntryKind, ref: string): P
     return await store.getEntry(kind, ref)
   } catch (e) {
     if (e instanceof ResourceError && (e.code === 'not_found' || e.code === 'invalid')) {
-      throw new Refused(404, `${NOUN[kind]} not found`)
+      throw new HttpError('not_found', `${NOUN[kind]} not found`, { cause: e })
     }
     throw e
   }
@@ -123,7 +120,9 @@ async function requireStores(store: ResourceStore, config: Fields): Promise<void
   const saved = new Set((await store.listEntries('store')).map((e) => e.name))
   const missing = storesOf(config).filter((s) => !saved.has(s))
   if (missing.length > 0) {
-    throw new Refused(400, `add ${missing.join(', ')} under Secret stores first`, { missing })
+    throw new HttpError('invalid_request', `add ${missing.join(', ')} under Secret stores first`, {
+      missing,
+    })
   }
 }
 
@@ -137,21 +136,14 @@ function removedBy(given: unknown): Set<string> {
   )
 }
 
-/** Run a call; a refusal answers by its status, a store's by its code, anything else propagates. */
-async function answered<T>(
-  registry: WorkspaceRegistry,
-  reply: RouteReply,
-  run: () => Promise<T>,
-): Promise<T | RouteReply> {
-  const refused = requireOneAccount(registry)
-  if (refused !== null) return reply.status(refused.status).send({ detail: refused.detail })
+/** Run a call; a store's refusal answers by its code, anything else propagates. */
+async function answered<T>(registry: WorkspaceRegistry, run: () => Promise<T>): Promise<T> {
+  requireOneAccount(registry)
   try {
     return await run()
   } catch (e) {
-    if (e instanceof Refused) return reply.status(e.status).send({ detail: e.message, ...e.extra })
     if (!(e instanceof ResourceError)) throw e
-    const { status, detail } = storeRefusal(e)
-    return reply.status(status).send({ detail })
+    throw storeRefusal(e)
   }
 }
 
@@ -168,8 +160,8 @@ export function registerEntryRoutes(
   const { resources, registry, host } = deps
   const route = ROUTES[kind]
 
-  app.get<{ Querystring: ListQuery }>(route, (req, reply) =>
-    answered(registry, reply, async () => {
+  app.get<{ Querystring: ListQuery }>(route, (req) =>
+    answered(registry, async () => {
       const entries = await resources.listEntries(kind)
       const used = usesOf(await resources.listTemplates())
       const type = req.query.type ?? ''
@@ -182,12 +174,10 @@ export function registerEntryRoutes(
     }),
   )
 
-  app.get(`${route}/${TYPES_ROUTE}`, (_req, reply) =>
-    answered(registry, reply, () => typesOf(kind, host)),
-  )
+  app.get(`${route}/${TYPES_ROUTE}`, () => answered(registry, () => typesOf(kind, host)))
 
   app.post(route, (req, reply) =>
-    answered(registry, reply, async () => {
+    answered(registry, async () => {
       const body = jsonBody(req.body)
       const type = requiredString(body, 'type')
       const checked = checkValues(kind, type, body.fields, await typesOf(kind, host))
@@ -203,15 +193,15 @@ export function registerEntryRoutes(
     }),
   )
 
-  app.get<{ Params: RefParams }>(`${route}/:ref`, (req, reply) =>
-    answered(registry, reply, async () => {
+  app.get<{ Params: RefParams }>(`${route}/:ref`, (req) =>
+    answered(registry, async () => {
       const entry = await entryNamed(resources, kind, req.params.ref)
       return { ...present(kind, entry), sealed: [...entry.sealed] }
     }),
   )
 
-  app.put<{ Params: RefParams }>(`${route}/:ref`, (req, reply) =>
-    answered(registry, reply, async () => {
+  app.put<{ Params: RefParams }>(`${route}/:ref`, (req) =>
+    answered(registry, async () => {
       const body = jsonBody(req.body)
       const current = await entryNamed(resources, kind, req.params.ref)
       const given = body.fields
@@ -234,7 +224,7 @@ export function registerEntryRoutes(
   )
 
   app.delete<{ Params: RefParams }>(`${route}/:ref`, (req, reply) =>
-    answered(registry, reply, async () => {
+    answered(registry, async () => {
       const current = await entryNamed(resources, kind, req.params.ref)
       await resources.deleteEntry(kind, current.name)
       return reply.status(204).send()

@@ -20,16 +20,19 @@ import type { ShellExplanation } from '@struktoai/mirage-core/policy/types'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
+import { WorkspaceRuntime } from '@struktoai/mirage-core/runtime/workspace'
+import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import { errorResponse, HttpError, INTERNAL_MESSAGE, validationError } from '../errors.ts'
 import type { RouteApp, RouteReply, RouteRequest } from '../routes.ts'
 import { Buffer } from 'node:buffer'
 import { explanationToDict, ioResultToDict } from '../io_serde.ts'
 import type { LineRequest, RequestTable } from '../requests.ts'
 import { refused } from '../metrics.ts'
-import { MAX_REQUEST_PART, MultipartError, partEvents, type PartEvent } from '../multipart.ts'
+import { MAX_REQUEST_PART, partEvents, type PartEvent } from '../multipart.ts'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import { UploadStdin } from '../stdin.ts'
 import { shellResponse } from '../stream.ts'
-import { failure, HttpError, invalidBody, queryFlag, requireEntry, sessionOf } from './vfs.ts'
+import { failure, queryFlag, requireEntry, sessionOf } from './vfs.ts'
 
 export interface ShellRoutesDeps {
   registry: WorkspaceRegistry
@@ -76,41 +79,61 @@ interface ShellUpload {
   finish: () => Promise<void>
 }
 
-/** A multipart body's `request` part: 400 when it does not read, 422 when a field fails. */
+/**
+ * Refuse a runtime or machine the workspace does not have, before the line
+ * is submitted, naming the workspace's own choices. Mirrors Python's
+ * `_check_placement`.
+ */
+function checkPlacement(ws: Workspace, req: ShellRequest): void {
+  const named = [
+    [
+      'runtime',
+      req.runtime,
+      ws
+        .runtimes()
+        .filter((runtime) => !(runtime instanceof WorkspaceRuntime))
+        .map((runtime) => runtime.name),
+    ],
+    ['machine', req.machine, ws.machineTable.names()],
+  ] as const
+  for (const [param, given, names] of named) {
+    if (given !== undefined && !names.includes(given)) {
+      throw new HttpError(
+        'invalid_value',
+        names.length > 0
+          ? `${param} must be one of ${names.join(', ')}`
+          : `${param} must be unset: the workspace has no ${param}s`,
+        { param },
+      )
+    }
+  }
+}
+
+/** A shell request read from parsed JSON, else its first bad field. */
+function shellRequest(data: unknown): ShellRequest {
+  if (data === undefined) throw new HttpError('invalid_json', 'body must be JSON')
+  const parsed = ShellRequest.safeParse(data)
+  if (!parsed.success) throw validationError(parsed.error, data)
+  return parsed.data
+}
+
+/** A multipart body's `request` part. Mirrors Python's `_parse_request_part`. */
 function parseRequestPart(chunks: Uint8Array[]): ShellRequest {
   let data: JsonValue
   try {
     data = JSON.parse(Buffer.concat(chunks).toString()) as JsonValue
   } catch (error) {
-    throw new MultipartError(400, `bad request part: ${(error as Error).message}`)
+    throw new HttpError('invalid_json', 'body must be JSON', { cause: error })
   }
-  const parsed = ShellRequest.safeParse(data)
-  if (!parsed.success) throw invalidBody(parsed.error, data, 'request')
-  return parsed.data
+  return shellRequest(data)
 }
 
 /**
- * A JSON shell body: 400 when there is none or it does not read as JSON, 422
- * when a field fails. A body the host left unparsed, sent under another
- * content type, is read as JSON, as Python's `request.json()` reads any body.
- * Mirrors Python's `_parse_json_body`.
+ * A JSON shell body, which the host parsed once whatever its Content-Type
+ * said. Mirrors Python's `_parse_json_body`.
  */
 function parseJsonBody(req: RouteRequest): ShellRequest {
-  let data = req.body as JsonValue | undefined
-  if (
-    typeof data === 'string' &&
-    req.headers['content-type']?.startsWith('application/json') !== true
-  ) {
-    try {
-      data = JSON.parse(data) as JsonValue
-    } catch (error) {
-      throw new HttpError(400, `bad shell request: ${(error as Error).message}`)
-    }
-  }
-  if (data === undefined) throw new HttpError(400, 'bad shell request: the body is empty')
-  const parsed = ShellRequest.safeParse(data)
-  if (!parsed.success) throw invalidBody(parsed.error, data)
-  return parsed.data
+  return shellRequest(req.body)
 }
 
 /**
@@ -161,7 +184,7 @@ async function readShellBody(req: RouteRequest, capacity: number): Promise<Shell
       name = event.name
       if (name !== 'stdin') continue
       if (body === undefined) {
-        throw new MultipartError(400, "the 'request' part must come before 'stdin'")
+        throw new HttpError('invalid_request', "the 'request' part must come before 'stdin'")
       }
       const stdin = new UploadStdin(capacity)
       const failed = readPart(
@@ -184,7 +207,7 @@ async function readShellBody(req: RouteRequest, capacity: number): Promise<Shell
         finish: async () => {
           await stdin.discard()
           const error = await failed
-          if (error instanceof MultipartError) throw error
+          if (error instanceof HttpError) throw error
           if (error !== undefined) console.debug('shell upload ended early', error)
         },
       }
@@ -193,12 +216,14 @@ async function readShellBody(req: RouteRequest, capacity: number): Promise<Shell
     if (event.kind === 'data') {
       request.push(event.data)
       size += event.data.byteLength
-      if (size > MAX_REQUEST_PART) throw new MultipartError(413, 'request part too large')
+      if (size > MAX_REQUEST_PART) throw new HttpError('too_large', 'request part too large')
     } else {
       body = parseRequestPart(request)
     }
   }
-  if (body === undefined) throw new MultipartError(400, "multipart body missing 'request' part")
+  if (body === undefined) {
+    throw new HttpError('invalid_request', "multipart body missing 'request' part")
+  }
   return {
     body,
     stdin: undefined,
@@ -241,9 +266,6 @@ function refuse(req: RouteRequest, reply: RouteReply, error: unknown): RouteRepl
   if (req.headers['content-type']?.startsWith('multipart/') === true) {
     reply.header('connection', 'close')
   }
-  if (error instanceof MultipartError) {
-    return reply.status(error.statusCode).send({ detail: error.message })
-  }
   if (error instanceof HttpError) return failure(reply, error)
   throw error
 }
@@ -278,7 +300,10 @@ async function explained(
       body.machine !== undefined ||
       body.open_stdin === true
     ) {
-      throw new HttpError(400, 'explain takes the line alone: no stdin, cwd, runtime or machine')
+      throw new HttpError(
+        'invalid_request',
+        'explain takes the line alone: no stdin, cwd, runtime or machine',
+      )
     }
     const session = await sessionOf(entry.runner.ws, req.query.session_id)
     said = await session.explain.shell(body.command)
@@ -300,7 +325,7 @@ export function registerShellRoutes(app: RouteApp, deps: ShellRoutesDeps): void 
         streaming = flags.stream
         entry = requireEntry(deps.registry, wsId, req.account)
         if (streaming && flags.explain) {
-          throw new HttpError(400, 'stream cannot be combined with explain')
+          throw new HttpError('invalid_request', 'stream cannot be combined with explain')
         }
         if (flags.explain) return await explained(req, reply, deps)
       } catch (err) {
@@ -327,7 +352,20 @@ export function registerShellRoutes(app: RouteApp, deps: ShellRoutesDeps): void 
         } catch (error) {
           return refuse(req, reply, error)
         }
-        return reply.status(400).send({ detail: 'open_stdin takes stream=true and no stdin part' })
+        return errorResponse(
+          reply,
+          new HttpError('invalid_request', 'open_stdin takes stream=true and no stdin part'),
+        )
+      }
+      try {
+        checkPlacement(entry.runner.ws, body)
+      } catch (error) {
+        try {
+          await upload.finish()
+        } catch (finished) {
+          return refuse(req, reply, finished)
+        }
+        return refuse(req, reply, error)
       }
       const pipe =
         body.open_stdin === true
@@ -344,9 +382,9 @@ export function registerShellRoutes(app: RouteApp, deps: ShellRoutesDeps): void 
         }
         if (deps.jobs.draining) {
           refused('shutting_down')
-          return reply.status(503).send({ detail: 'server is shutting down' })
+          return errorResponse(reply, new HttpError('shutting_down', 'server is shutting down'))
         }
-        return reply.status(404).send({ detail: 'workspace not found' })
+        return errorResponse(reply, new HttpError('not_found', 'workspace not found'))
       }
       const table = entry.runner.ws.jobTable
       if (!table.claimed) {
@@ -362,7 +400,7 @@ export function registerShellRoutes(app: RouteApp, deps: ShellRoutesDeps): void 
           } catch (error) {
             return refuse(req, reply, error)
           }
-          return reply.status(409).send({ detail: err.message })
+          return errorResponse(reply, new HttpError('workspace_busy', err.message))
         }
       }
       let opened!: (execution: ShellExecution | null) => void
@@ -414,10 +452,11 @@ export function registerShellRoutes(app: RouteApp, deps: ShellRoutesDeps): void 
         return refuse(req, reply, error)
       }
       if (job.line.record.signal !== null) {
-        return reply.status(499).send({ detail: 'job canceled' })
+        return errorResponse(reply, new HttpError('canceled', 'job canceled'))
       }
       if (job.error !== null) {
-        return reply.status(500).send({ detail: job.error })
+        console.error(`mirage: line ${job.id.value} failed: ${job.error}`)
+        return errorResponse(reply, new HttpError('internal', INTERNAL_MESSAGE))
       }
       return job.result
     },

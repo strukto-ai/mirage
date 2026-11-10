@@ -155,7 +155,12 @@ describe('templates router', () => {
       payload: { config: named('gone') },
     })
     expect(gone.statusCode).toBe(400)
-    expect(gone.json()).toEqual({ detail: 'gone is not saved as a VFS, CLI, runtime or machine' })
+    expect(gone.json()).toEqual({
+      error: {
+        code: 'invalid_request',
+        message: 'gone is not saved as a VFS, CLI, runtime or machine',
+      },
+    })
     await app.close()
   })
 
@@ -244,7 +249,9 @@ describe('templates router', () => {
       payload: { template: 'base', config: RAM },
     })
     expect(both.statusCode).toBe(400)
-    expect(both.json()).toEqual({ detail: 'give a template or a config, not both' })
+    expect(both.json()).toEqual({
+      error: { code: 'invalid_request', message: 'give a template or a config, not both' },
+    })
     const neither = await app.inject({ method: 'POST', url: '/v1/workspaces', payload: {} })
     expect(neither.statusCode).toBe(400)
     const listed = await app.inject({

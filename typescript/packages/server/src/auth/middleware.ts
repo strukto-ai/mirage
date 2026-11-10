@@ -18,6 +18,7 @@ import { createRemoteJWKSet } from 'jose'
 
 import { AuthMode, PROTECTED_RESOURCE_PATH, type AuthConfig } from './config.ts'
 import { JWTVerificationError, verifyJwt } from './jwt.ts'
+import { errorResponse, HttpError } from '../errors.ts'
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -88,9 +89,11 @@ export function authenticator(
 }
 
 async function unauthorized(reply: FastifyReply, reason: string): Promise<void> {
-  reply.header('WWW-Authenticate', 'Bearer')
   console.warn(`rejecting request from ${reply.request.ip}: ${reason}`)
-  await reply.code(401).send({ detail: 'Unauthorized' })
+  await errorResponse(
+    reply,
+    new HttpError('unauthorized', 'unauthorized', { headers: { 'WWW-Authenticate': 'Bearer' } }),
+  )
 }
 
 export function registerAuth(app: FastifyInstance, config: AuthConfig): void {

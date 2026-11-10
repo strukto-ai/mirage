@@ -16,9 +16,10 @@ import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
 import { ResourceError, type ResourceErrorCode } from '@struktoai/mirage-core/resources/errors'
 import type { Template } from '@struktoai/mirage-core/resources/types'
 import type { JsonValue } from '@struktoai/mirage-core/types'
+import { type ErrorCode, HttpError, loaderError, validationError } from '../errors.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
-import type { RouteApp, RouteReply } from '../routes.ts'
-import { checkConfig, type CreateTemplateRequest, type TemplateResponse } from '../schemas.ts'
+import type { RouteApp } from '../routes.ts'
+import { checkConfig, CreateTemplateRequest, type TemplateResponse } from '../schemas.ts'
 
 interface RefParams {
   ref: string
@@ -31,18 +32,15 @@ interface RefParams {
 export const NO_WORKSPACE_ID =
   "a template's config cannot set workspace_id; give the id when you create from it"
 
-/** The fields a saved template takes, as the Python server's model forbids any other. */
-const TEMPLATE_FIELDS: ReadonlySet<string> = new Set(['name', 'description', 'config'])
-
-const STATUS: Readonly<Record<ResourceErrorCode, number>> = {
-  not_found: 404,
-  conflict: 409,
-  invalid: 400,
+const CODE: Readonly<Record<ResourceErrorCode, ErrorCode>> = {
+  not_found: 'not_found',
+  conflict: 'conflict',
+  invalid: 'invalid_request',
 }
 
-/** The answer for a store's refusal: 404, 409 or 400 by its code. */
-export function storeRefusal(e: ResourceError): { status: number; detail: string } {
-  return { status: STATUS[e.code], detail: e.message }
+/** The answer for a store's refusal, by its code. Mirrors Python's `store_refusal`. */
+export function storeRefusal(e: ResourceError): HttpError {
+  return new HttpError(CODE[e.code], e.message, { cause: e })
 }
 
 function present(template: Template): TemplateResponse {
@@ -51,30 +49,22 @@ function present(template: Template): TemplateResponse {
 
 /**
  * Refuse templates on a server of many accounts: its one store would let each
- * account read and use the others'. Null when the server has one account.
+ * account read and use the others'. Mirrors Python's `require_one_account`.
  */
-export function requireOneAccount(
-  registry: WorkspaceRegistry,
-): { status: number; detail: string } | null {
-  return registry.accountsRequired
-    ? { status: 501, detail: 'templates are kept only on a server of one account' }
-    : null
+export function requireOneAccount(registry: WorkspaceRegistry): void {
+  if (registry.accountsRequired) {
+    throw new HttpError('not_supported', 'templates are kept only on a server of one account')
+  }
 }
 
 /** Run a store call; a refusal answers by its code, anything else propagates. */
-async function stored<T>(
-  registry: WorkspaceRegistry,
-  reply: RouteReply,
-  run: () => Promise<T>,
-): Promise<T | RouteReply> {
-  const refused = requireOneAccount(registry)
-  if (refused !== null) return reply.status(refused.status).send({ detail: refused.detail })
+async function stored<T>(registry: WorkspaceRegistry, run: () => Promise<T>): Promise<T> {
+  requireOneAccount(registry)
   try {
     return await run()
   } catch (e) {
     if (!(e instanceof ResourceError)) throw e
-    const { status, detail } = storeRefusal(e)
-    return reply.status(status).send({ detail })
+    throw storeRefusal(e)
   }
 }
 
@@ -86,38 +76,35 @@ export function registerTemplatesRoutes(
   },
 ): void {
   const { resources, registry } = deps
-  app.get('/v1/templates', (_req, reply) =>
-    stored(registry, reply, async () => ({
+  app.get('/v1/templates', () =>
+    stored(registry, async () => ({
       items: (await resources.listTemplates()).map(present),
     })),
   )
 
   // A whole workspace config, checked as a create checks one, and kept as
-  // written. A name already saved is a 409.
-  app.post<{ Body: CreateTemplateRequest }>('/v1/templates', async (req, reply) => {
-    const refused = requireOneAccount(registry)
-    if (refused !== null) return reply.status(refused.status).send({ detail: refused.detail })
-    const body = req.body as Partial<CreateTemplateRequest> | null
-    if (body === null || typeof body !== 'object' || typeof body.name !== 'string') {
-      return reply.status(400).send({ detail: 'name must be a string' })
+  // written. A name already saved is a 409. The declared fields are
+  // checked before an unknown key, the config's own fields among them.
+  app.post('/v1/templates', async (req, reply) => {
+    requireOneAccount(registry)
+    const body = req.body
+    const parsed = CreateTemplateRequest.safeParse(body)
+    if (!parsed.success && parsed.error.issues.some((i) => i.code !== 'unrecognized_keys')) {
+      throw validationError(parsed.error, body)
     }
-    const unknown = Object.keys(body).filter((k) => !TEMPLATE_FIELDS.has(k))
-    if (unknown.length > 0) {
-      return reply.status(400).send({ detail: `unknown fields: ${unknown.join(', ')}` })
-    }
-    const { name, description } = body
-    if (description !== undefined && description !== null && typeof description !== 'string') {
-      return reply.status(400).send({ detail: 'description must be a string' })
-    }
+    const config = (body as { config: Record<string, JsonValue> }).config
+    let checked
     try {
-      if ((checkConfig(body.config).workspaceId ?? null) !== null) {
-        return reply.status(400).send({ detail: NO_WORKSPACE_ID })
-      }
+      checked = checkConfig(config)
     } catch (e) {
-      return reply.status(400).send({ detail: (e as Error).message })
+      throw loaderError(e, ['config'], config)
     }
-    const config = body.config as Record<string, JsonValue>
-    return stored(registry, reply, async () => {
+    if (!parsed.success) throw validationError(parsed.error, body)
+    if ((checked.workspaceId ?? null) !== null) {
+      throw new HttpError('invalid_request', NO_WORKSPACE_ID)
+    }
+    const { name, description } = parsed.data
+    return stored(registry, async () => {
       const saved = await resources.createTemplate({
         name,
         description: description ?? null,
@@ -127,19 +114,19 @@ export function registerTemplatesRoutes(
     })
   })
 
-  app.get<{ Params: RefParams }>('/v1/templates/:ref', (req, reply) =>
-    stored(registry, reply, async () => present(await resources.getTemplate(req.params.ref))),
+  app.get<{ Params: RefParams }>('/v1/templates/:ref', (req) =>
+    stored(registry, async () => present(await resources.getTemplate(req.params.ref))),
   )
 
   // Deleted, not wiped: restore brings it back.
   app.delete<{ Params: RefParams }>('/v1/templates/:ref', (req, reply) =>
-    stored(registry, reply, async () => {
+    stored(registry, async () => {
       await resources.deleteTemplate(req.params.ref)
       return reply.status(204).send()
     }),
   )
 
-  app.post<{ Params: RefParams }>('/v1/templates/:ref/restore', (req, reply) =>
-    stored(registry, reply, async () => present(await resources.restoreTemplate(req.params.ref))),
+  app.post<{ Params: RefParams }>('/v1/templates/:ref/restore', (req) =>
+    stored(registry, async () => present(await resources.restoreTemplate(req.params.ref))),
   )
 }

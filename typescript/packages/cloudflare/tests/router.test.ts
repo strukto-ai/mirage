@@ -89,9 +89,9 @@ describe('WebRoutes', () => {
 
   it('answers a malformed path escape with 400', async () => {
     const response = await routes().fetch(new Request('http://edge.test/items/%ZZ'), null)
-    expect([response.status, ((await response.json()) as { code: string }).code]).toEqual([
+    expect([response.status, await response.json()]).toEqual([
       400,
-      'FST_ERR_BAD_URL',
+      { error: { code: 'invalid_request', message: 'path is not percent-encoded' } },
     ])
   })
 

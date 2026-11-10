@@ -113,6 +113,10 @@
       "types": "./dist/routes.d.ts",
       "import": "./dist/routes.js"
     },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js"
+    },
     "./registry": {
       "types": "./dist/registry.d.ts",
       "import": "./dist/registry.js"

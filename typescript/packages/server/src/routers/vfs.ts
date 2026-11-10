@@ -14,14 +14,13 @@
 
 import { DEFAULT_MAX_REQUEST_BODY_SIZE } from '@modelcontextprotocol/server'
 import { classify } from '@struktoai/mirage-core/errors/classify'
-import type { FsCondition } from '@struktoai/mirage-core/errors/types'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import type { z } from '@struktoai/mirage-core/vfs/secrets'
 import { stderr } from 'node:process'
 import { format } from 'node:util'
-import { answered, CallArgsError, checked, customAnswer, failureToDict } from '../io_serde.ts'
+import { errorOf, errorResponse, fsError, HttpError, WorkspaceMissing } from '../errors.ts'
+import { answered, CallArgsError, checked, customAnswer } from '../io_serde.ts'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import { streamOf, type RouteApp, type RouteReply } from '../routes.ts'
 import { VFS_CALLS } from '../vfs_calls.ts'
@@ -39,150 +38,13 @@ interface CallQuery {
   explain?: string
 }
 
-const STATUS: Record<FsCondition, number> = {
-  ENOENT: 404,
-  NO_XATTR: 404,
-  EACCES: 403,
-  EPERM: 403,
-  EROFS: 403,
-  EEXIST: 409,
-  ENOTEMPTY: 409,
-  EBUSY: 409,
-  STALE_WRITE: 409,
-  ENOTDIR: 400,
-  EISDIR: 400,
-  EINVAL: 400,
-  EXDEV: 400,
-  ELOOP: 400,
-  ENOTSUP: 400,
-  EFBIG: 400,
-  EDQUOT: 507,
-  EIO: 500,
-  EPIPE: 500,
-  EBADF: 500,
-}
-
-/**
- * One field that failed validation, an entry of an `HTTPValidationError`'s
- * `detail`: `loc` says where it is, such as `['query', 'stream']` or
- * `['body', 'command']`. Mirrors Python's `ValidationIssue`.
- */
-export interface ValidationIssue {
-  type: string
-  loc: (string | number)[]
-  msg: string
-  input: JsonValue
-  ctx?: Record<string, JsonValue>
-}
-
-/**
- * Thrown for a request the route answers with a fixed status and detail: a
- * message, or the fields that failed validation. Mirrors FastAPI's
- * `HTTPException`.
- */
-export class HttpError extends Error {
-  constructor(
-    readonly status: number,
-    readonly detail: string | ValidationIssue[],
-  ) {
-    super(typeof detail === 'string' ? detail : detail.map((issue) => issue.msg).join('; '))
-  }
-}
-
-/**
- * A 422 for fields that failed validation, in the shape FastAPI answers the
- * ones it checks itself. Mirrors Python's `invalid`.
- */
-export function invalid(issues: ValidationIssue[]): HttpError {
-  return new HttpError(422, issues)
-}
-
-/**
- * A 422 for a value outside its choices, worded as pydantic words an enum.
- * Python's routes declare the enum and FastAPI answers it.
- */
-export function invalidChoice(
-  loc: (string | number)[],
-  choices: readonly string[],
-  input: string,
-): HttpError {
-  const quoted = choices.map((choice) => `'${choice}'`)
-  const expected =
-    quoted.length < 2
-      ? quoted.join('')
-      : `${quoted.slice(0, -1).join(', ')} or ${quoted[quoted.length - 1] ?? ''}`
-  return invalid([
-    { type: 'enum', loc, msg: `Input should be ${expected}`, input, ctx: { expected } },
-  ])
-}
-
-/**
- * A body a route validates itself, refused as FastAPI refuses one it
- * validates: each `loc` starts at `body` (then `part`, for the multipart
- * part that carried it), and each `type` is pydantic's for the same failure.
- * Mirrors Python's `invalid_body`.
- */
-export function invalidBody(error: z.ZodError, body: JsonValue, part?: string): HttpError {
-  const where: (string | number)[] = part === undefined ? ['body'] : ['body', part]
-  const at = (path: readonly PropertyKey[]): JsonValue | undefined => {
-    let value: JsonValue | undefined = body
-    for (const key of path) {
-      if (value === null || typeof value !== 'object') return undefined
-      value = (value as Record<string, JsonValue | undefined>)[String(key)]
-    }
-    return value
-  }
-  const named: Record<string, [string, string]> = {
-    string: ['string_type', 'Input should be a valid string'],
-    boolean: ['bool_type', 'Input should be a valid boolean'],
-    number: ['float_type', 'Input should be a valid number'],
-    record: ['dict_type', 'Input should be a valid dictionary'],
-    object: ['dict_type', 'Input should be a valid dictionary'],
-  }
-  return invalid(
-    error.issues.flatMap((issue): ValidationIssue[] => {
-      const path = issue.path.filter((key) => typeof key !== 'symbol')
-      const loc = [...where, ...path]
-      if (issue.code === 'unrecognized_keys') {
-        return issue.keys.map((key) => ({
-          type: 'extra_forbidden',
-          loc: [...loc, key],
-          msg: 'Extra inputs are not permitted',
-          input: at([...path, key]) ?? null,
-        }))
-      }
-      const input = at(path)
-      if (input === undefined) {
-        return [
-          { type: 'missing', loc, msg: 'Field required', input: at(path.slice(0, -1)) ?? null },
-        ]
-      }
-      if (issue.code === 'invalid_type' && path.length === 0) {
-        return [
-          {
-            type: 'model_attributes_type',
-            loc,
-            msg: 'Input should be a valid dictionary or object to extract fields from',
-            input,
-          },
-        ]
-      }
-      const [type, msg] = (issue.code === 'invalid_type' ? named[issue.expected] : undefined) ?? [
-        issue.code,
-        issue.message,
-      ]
-      return [{ type, loc, msg, input }]
-    }),
-  )
-}
-
 /** The workspace a route names, as the caller may see it. Mirrors Python's `require_entry`. */
 export function requireEntry(
   registry: WorkspaceRegistry,
   wsId: string,
   account: string | null,
 ): WorkspaceEntry {
-  if (registry.visible(wsId, account) === null) throw new HttpError(404, 'workspace not found')
+  if (registry.visible(wsId, account) === null) throw new WorkspaceMissing(wsId)
   return registry.get(wsId)
 }
 
@@ -194,7 +56,7 @@ export async function sessionOf(ws: Workspace, sessionId: string | undefined): P
     sessionId !== '' &&
     !ws.listSessions().some((s) => s.sessionId === sessionId)
   ) {
-    throw new HttpError(404, 'session not found')
+    throw new HttpError('not_found', 'session not found')
   }
   return new Session(ws, sessionId === undefined || sessionId === '' ? null : sessionId)
 }
@@ -202,45 +64,53 @@ export async function sessionOf(ws: Workspace, sessionId: string | undefined): P
 /**
  * Whether each named boolean query flag is set. Accepts what a FastAPI `bool`
  * does (`true`/`false`, `1`/`0`, `yes`/`no`, `on`/`off`, `t`/`f`, `y`/`n`, any
- * case); anything else, an empty value included, is a 422 naming every bad
- * flag, in the order named. A flag given more than once, which a host hands
- * over as a list, takes its last value, as FastAPI does. Absent is false.
+ * case); anything else, an empty value included, is refused naming the first
+ * bad flag, in the order named. A flag given more than once, which a host
+ * hands over as a list, takes its last value, as FastAPI does. Absent is false.
  */
 export function queryFlag<K extends string>(
   query: Partial<Record<K, string | string[]>>,
   ...names: K[]
 ): Record<K, boolean> {
   const flags = {} as Record<K, boolean>
-  const issues: ValidationIssue[] = []
   for (const name of names) {
     const given: string | string[] | undefined = query[name]
     const value = typeof given === 'object' ? given.at(-1) : given
     const spelled = value?.toLowerCase() ?? 'false'
     flags[name] = ['true', '1', 'yes', 'on', 't', 'y'].includes(spelled)
     if (!flags[name] && !['false', '0', 'no', 'off', 'f', 'n'].includes(spelled)) {
-      issues.push({
-        type: 'bool_parsing',
-        loc: ['query', name],
-        msg: 'Input should be a valid boolean, unable to interpret input',
-        input: value ?? null,
-      })
+      throw new HttpError('invalid_value', `${name} must be a boolean`, { param: name })
     }
   }
-  if (issues.length > 0) throw invalid(issues)
   return flags
 }
 
 /**
- * A call's failure as the HTTP entry points answer it: the errno it names picks
- * the status, and the body carries the errno, the text and, for a policy's
- * refusal, its record. Mirrors Python's `failure`.
+ * The JSON object a route reads as its body: an empty body is not JSON, and
+ * JSON that is not an object is refused. Bytes that do not parse answer
+ * `invalid_json` before the route runs. Mirrors Python's `json_body`.
+ */
+export function jsonBody(body: unknown): Record<string, unknown> {
+  if (body === undefined) throw new HttpError('invalid_json', 'body must be JSON')
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    throw new HttpError('invalid_request', 'body must be a JSON object')
+  }
+  return body as Record<string, unknown>
+}
+
+/**
+ * A call's failure as the HTTP entry points answer it: an `HttpError` as it
+ * is, an argument refusal as its own, a named errno by its code (with a
+ * policy's refusal record), anything else `internal`, its cause logged. A
+ * missing workspace is thrown on, for the app to tell a stopped one from an
+ * unknown one. Mirrors Python's `failure`.
  */
 export function failure(reply: RouteReply, err: unknown): RouteReply {
-  if (err instanceof HttpError) return reply.status(err.status).send({ detail: err.detail })
-  if (err instanceof CallArgsError) return reply.status(400).send({ detail: err.message })
-  const condition = classify(err)
-  const status = condition === null ? 500 : STATUS[condition]
-  return reply.status(status).send(failureToDict(err))
+  if (err instanceof WorkspaceMissing) throw err
+  if (err instanceof CallArgsError) return errorResponse(reply, err.error())
+  if (!(err instanceof HttpError) && classify(err) !== null)
+    return errorResponse(reply, fsError(err))
+  return errorResponse(reply, errorOf(err))
 }
 
 /**
@@ -265,10 +135,12 @@ export function registerVfsRoutes(
         try {
           const { explain } = queryFlag(req.query, 'explain')
           const ws = requireEntry(deps.registry, req.params.wsId, req.account).runner.ws
-          const params = (req.body ?? {}) as Record<string, unknown>
+          const params = jsonBody(req.body)
           const asked = call.name === 'read' && params.stream !== undefined
           const stream = asked ? params.stream : false
-          if (typeof stream !== 'boolean') throw new HttpError(400, 'stream must be a boolean')
+          if (typeof stream !== 'boolean') {
+            throw new HttpError('invalid_value', 'stream must be a boolean', { param: 'stream' })
+          }
           const args = await checked(
             call,
             asked
@@ -303,10 +175,11 @@ export function registerVfsRoutes(
     async (req, reply) => {
       try {
         const ws = requireEntry(deps.registry, req.params.wsId, req.account).runner.ws
+        const params = jsonBody(req.body)
         const session = await sessionOf(ws, req.query.session_id)
         return reply
           .type('application/json; charset=utf-8')
-          .send(JSON.stringify(await customAnswer(session, req.params.name, req.body)))
+          .send(JSON.stringify(await customAnswer(session, req.params.name, params)))
       } catch (err) {
         logger.debug('vfs/%s failed', req.params.name, err)
         return failure(reply, err)

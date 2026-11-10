@@ -19,7 +19,7 @@ import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/works
 import type { RouteApp } from '../routes.ts'
 import { refused } from '../metrics.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
-import { failure, invalidBody } from './vfs.ts'
+import { HttpError, loaderError, validationError, WorkspaceMissing } from '../errors.ts'
 
 interface WsIdParams {
   wsId: string
@@ -68,9 +68,9 @@ export function registerSessionsRoutes(
     async (req, reply) => {
       const { wsId } = req.params
       const parsed = CreateSessionRequest.safeParse(req.body)
-      if (!parsed.success) return failure(reply, invalidBody(parsed.error, req.body))
+      if (!parsed.success) throw validationError(parsed.error, req.body)
       if (deps.registry.visible(wsId, req.account) === null) {
-        return reply.status(404).send({ detail: 'workspace not found' })
+        throw new WorkspaceMissing(wsId)
       }
       const named = parsed.data.session_id ?? ''
       const sid =
@@ -81,12 +81,12 @@ export function registerSessionsRoutes(
       await ws.ensureSessionsLoaded()
       const held = ws.listSessions()
       if (held.some((s) => s.sessionId === sid)) {
-        return reply.status(409).send({ detail: `session id already exists: ${sid}` })
+        throw new HttpError('already_exists', 'session id already exists')
       }
       const cap = deps.registry.maxSessions
       if (cap !== null && held.length >= cap) {
         refused('max_sessions')
-        return reply.status(429).send({ detail: `workspace is at max_sessions (${String(cap)})` })
+        throw new HttpError('session_limit', `workspace is at max_sessions (${String(cap)})`)
       }
       const mounts = parsed.data.mounts ?? null
       const profile = parsed.data.profile ?? null
@@ -97,17 +97,17 @@ export function registerSessionsRoutes(
           ...(profile !== null ? { profile } : {}),
         })
       } catch (err) {
-        return reply.status(422).send({ detail: err instanceof Error ? err.message : String(err) })
+        throw loaderError(err, ['profile'], profile)
       }
       await ws.flushSessions()
       return reply.status(201).send({ session_id: sess.sessionId, cwd: sess.cwd })
     },
   )
 
-  app.get<{ Params: WsIdParams }>('/v1/workspaces/:wsId/sessions', async (req, reply) => {
+  app.get<{ Params: WsIdParams }>('/v1/workspaces/:wsId/sessions', async (req) => {
     const { wsId } = req.params
     if (deps.registry.visible(wsId, req.account) === null) {
-      return reply.status(404).send({ detail: 'workspace not found' })
+      throw new WorkspaceMissing(wsId)
     }
     const ws = deps.registry.get(wsId).runner.ws
     await ws.ensureSessionsLoaded()
@@ -116,9 +116,8 @@ export function registerSessionsRoutes(
 
   app.delete<{ Params: WsSessionParams }>(
     '/v1/workspaces/:wsId/sessions/:sessionId',
-    async (req, reply) => {
+    async (req) => {
       const ws = await sessionWorkspace(req.params, req.account)
-      if (typeof ws === 'string') return reply.status(404).send({ detail: ws })
       await ws.closeSession(req.params.sessionId)
       return { session_id: req.params.sessionId }
     },
@@ -127,11 +126,10 @@ export function registerSessionsRoutes(
   /** Replace the session's profile; its cwd, env and history stay. */
   app.patch<{ Params: WsSessionParams; Body: JsonValue }>(
     '/v1/workspaces/:wsId/sessions/:sessionId',
-    async (req, reply) => {
+    async (req) => {
       const parsed = UpdateSessionRequest.safeParse(req.body)
-      if (!parsed.success) return failure(reply, invalidBody(parsed.error, req.body))
+      if (!parsed.success) throw validationError(parsed.error, req.body)
       const ws = await sessionWorkspace(req.params, req.account)
-      if (typeof ws === 'string') return reply.status(404).send({ detail: ws })
       const asked = parsed.data.profile
       try {
         const profile =
@@ -141,7 +139,7 @@ export function registerSessionsRoutes(
         const session = await ws.setSessionProfile(req.params.sessionId, profile)
         return { session_id: session.sessionId, cwd: session.cwd }
       } catch (err) {
-        return reply.status(422).send({ detail: err instanceof Error ? err.message : String(err) })
+        throw loaderError(err, ['profile'], asked)
       }
     },
   )
@@ -152,9 +150,8 @@ export function registerSessionsRoutes(
    */
   app.post<{ Params: WsSessionParams }>(
     '/v1/workspaces/:wsId/sessions/:sessionId/cancel',
-    async (req, reply) => {
+    async (req) => {
       const ws = await sessionWorkspace(req.params, req.account)
-      if (typeof ws === 'string') return reply.status(404).send({ detail: ws })
       return { canceled: await ws.cancel(req.params.sessionId) }
     },
   )
@@ -162,24 +159,23 @@ export function registerSessionsRoutes(
   /** Kill the session's background jobs and runners; it stays open. */
   app.post<{ Params: WsSessionParams }>(
     '/v1/workspaces/:wsId/sessions/:sessionId/kill',
-    async (req, reply) => {
+    async (req) => {
       const ws = await sessionWorkspace(req.params, req.account)
-      if (typeof ws === 'string') return reply.status(404).send({ detail: ws })
       return { killed: await ws.kill(req.params.sessionId) }
     },
   )
 
-  /** The workspace holding the session, or what is missing. */
+  /** The workspace holding the session; throws when either is missing. */
   async function sessionWorkspace(
     params: WsSessionParams,
     account: string | null,
-  ): Promise<Workspace | string> {
+  ): Promise<Workspace> {
     const entry = deps.registry.visible(params.wsId, account)
-    if (entry === null) return 'workspace not found'
+    if (entry === null) throw new WorkspaceMissing(params.wsId)
     const ws = entry.runner.ws
     await ws.ensureSessionsLoaded()
     if (!ws.listSessions().some((s) => s.sessionId === params.sessionId)) {
-      return 'session not found'
+      throw new HttpError('not_found', 'session not found')
     }
     return ws
   }

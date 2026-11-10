@@ -14,7 +14,8 @@
 import { Buffer } from 'node:buffer'
 import { Readable } from 'node:stream'
 import { describe, expect, it } from 'vitest'
-import { MultipartError, partEvents, type PartEvent } from './multipart.ts'
+import { HttpError } from './errors.ts'
+import { partEvents, type PartEvent } from './multipart.ts'
 
 const BOUNDARY = 'b0undary'
 const CONTENT_TYPE = `multipart/form-data; boundary=${BOUNDARY}`
@@ -70,14 +71,14 @@ describe('partEvents', () => {
     [
       [Buffer.from(`--${BOUNDARY}\r\nX-Pad: ${'x'.repeat(5000)}\r\n\r\n`), END],
       CONTENT_TYPE,
-      'bad multipart body: Maximum header size exceeded',
+      'multipart body is malformed',
     ],
   ])('refuses a bad body', async (parts, contentType, detail) => {
     const reading = async (): Promise<void> => {
       for await (const _ of partEvents(chunks(...parts), contentType)) void _
     }
     const error = await reading().catch((e: unknown) => e)
-    expect(error).toBeInstanceOf(MultipartError)
-    expect(error).toMatchObject({ statusCode: 400, message: detail })
+    expect(error).toBeInstanceOf(HttpError)
+    expect(error).toMatchObject({ status: 400, message: detail })
   })
 })

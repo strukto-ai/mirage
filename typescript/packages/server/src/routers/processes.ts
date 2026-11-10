@@ -16,7 +16,7 @@ import type { Process, ProcessState } from '@struktoai/mirage-core/execution/pro
 import { JobId, LineId, MachineId, ProcessId } from '@struktoai/mirage-core/execution/types'
 import type { RouteApp } from '../routes.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
-import { failure, invalid, invalidChoice } from './vfs.ts'
+import { HttpError, oneOf, WorkspaceMissing } from '../errors.ts'
 
 interface WsIdParams {
   wsId: string
@@ -98,7 +98,7 @@ export function registerProcessesRoutes(
 ): void {
   app.get<{ Params: WsIdParams; Querystring: ListProcessesQuery }>(
     '/v1/workspaces/:wsId/processes',
-    async (req, reply) => {
+    async (req) => {
       // The processes the workspace keeps, by pid: every live one and the
       // newest ended ones, a session's, those in a state, those a line
       // ran, those a job ran or those run on a machine (`provider:name`)
@@ -106,26 +106,19 @@ export function registerProcessesRoutes(
       const { wsId } = req.params
       const { session_id: sessionId, state, line_id: lineId, job_id: jobId, machine } = req.query
       if (state !== undefined && !(STATES as readonly string[]).includes(state)) {
-        return failure(reply, invalidChoice(['query', 'state'], STATES, state))
+        throw new HttpError('invalid_value', `state must be ${oneOf(STATES)}`, { param: 'state' })
       }
       if (deps.registry.visible(wsId, req.account) === null) {
-        return reply.status(404).send({ detail: 'workspace not found' })
+        throw new WorkspaceMissing(wsId)
       }
       let where: MachineId | null = null
       try {
         where = machine !== undefined && machine !== '' ? MachineId.parse(machine) : null
       } catch (err) {
-        return failure(
-          reply,
-          invalid([
-            {
-              type: 'value_error',
-              loc: ['query', 'machine'],
-              msg: `Value error, ${(err as Error).message}`,
-              input: machine ?? null,
-            },
-          ]),
-        )
+        throw new HttpError('invalid_value', 'machine must be provider:name', {
+          param: 'machine',
+          cause: err,
+        })
       }
       const ws = deps.registry.get(wsId).runner.ws
       const records = await ws.processes({
@@ -139,31 +132,18 @@ export function registerProcessesRoutes(
     },
   )
 
-  app.get<{ Params: WsProcessParams }>(
-    '/v1/workspaces/:wsId/processes/:pid',
-    async (req, reply) => {
-      // One process, by its pid.
-      const { wsId, pid } = req.params
-      if (!/^\d+$/.test(pid)) {
-        return failure(
-          reply,
-          invalid([
-            {
-              type: 'int_parsing',
-              loc: ['path', 'pid'],
-              msg: 'Input should be a valid integer, unable to parse string as an integer',
-              input: pid,
-            },
-          ]),
-        )
-      }
-      if (deps.registry.visible(wsId, req.account) === null) {
-        return reply.status(404).send({ detail: 'workspace not found' })
-      }
-      const ws = deps.registry.get(wsId).runner.ws
-      const record = await ws.process(new ProcessId(ws.workspaceId, Number(pid)))
-      if (record === null) return reply.status(404).send({ detail: 'process not found' })
-      return toResponse(record)
-    },
-  )
+  app.get<{ Params: WsProcessParams }>('/v1/workspaces/:wsId/processes/:pid', async (req) => {
+    // One process, by its pid.
+    const { wsId, pid } = req.params
+    if (!/^\d+$/.test(pid)) {
+      throw new HttpError('invalid_value', 'pid must be an integer', { param: 'pid' })
+    }
+    if (deps.registry.visible(wsId, req.account) === null) {
+      throw new WorkspaceMissing(wsId)
+    }
+    const ws = deps.registry.get(wsId).runner.ws
+    const record = await ws.process(new ProcessId(ws.workspaceId, Number(pid)))
+    if (record === null) throw new HttpError('not_found', 'process not found')
+    return toResponse(record)
+  })
 }

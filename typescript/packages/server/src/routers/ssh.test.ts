@@ -141,7 +141,7 @@ describe('the SSH route', () => {
     ).toBe(201)
     const ws = await open(address, 'w', { origin: 'https://evil.example' })
     if (typeof ws !== 'number') ws.close()
-    expect(ws).toBe(400)
+    expect(ws).toBe(403)
   })
 
   it('lets the login name only the route workspace', async () => {

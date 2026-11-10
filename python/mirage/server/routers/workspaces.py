@@ -25,6 +25,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import ValidationError
 
 from mirage import Workspace, WorkspaceRunner
 from mirage.concurrency.limiter import run_blocking
@@ -52,6 +53,7 @@ from mirage.server.errors import (
     ErrorCode,
     HttpError,
     loader_error,
+    validation_error,
 )
 from mirage.server.io_serde import explanation_to_dict, refusal_to_dict
 from mirage.server.logs import (
@@ -1116,9 +1118,13 @@ def _snapshot_store(request: Request) -> S3Config:
 
 def _parse_load_request(body: bytes) -> LoadWorkspaceRequest:
     try:
-        return LoadWorkspaceRequest.model_validate(json.loads(body or b"{}"))
+        data = json.loads(body or b"{}")
     except ValueError as e:
-        raise HttpError(ErrorCode.INVALID_REQUEST, f"bad load request: {e}")
+        raise HttpError(ErrorCode.INVALID_JSON, "body must be JSON") from e
+    try:
+        return LoadWorkspaceRequest.model_validate(data)
+    except ValidationError as e:
+        raise validation_error(e.errors(include_url=False)) from e
 
 
 async def _read_load_body(

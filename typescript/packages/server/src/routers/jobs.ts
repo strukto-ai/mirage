@@ -16,7 +16,7 @@ import type { Job, JobState } from '@struktoai/mirage-core/execution/job/types'
 import { JobId, LineId } from '@struktoai/mirage-core/execution/types'
 import type { RouteApp } from '../routes.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
-import { failure, invalidChoice } from './vfs.ts'
+import { HttpError, oneOf, WorkspaceMissing } from '../errors.ts'
 
 interface WsIdParams {
   wsId: string
@@ -81,16 +81,16 @@ export function registerJobsRoutes(
 ): void {
   app.get<{ Params: WsIdParams; Querystring: ListJobsQuery }>(
     '/v1/workspaces/:wsId/jobs',
-    async (req, reply) => {
+    async (req) => {
       // The jobs the workspace's sessions list, as `jobs` does, a
       // session's, those in a state or those a line started when named.
       const { wsId } = req.params
       const { session_id: sessionId, state, line_id: lineId } = req.query
       if (state !== undefined && !(STATES as readonly string[]).includes(state)) {
-        return failure(reply, invalidChoice(['query', 'state'], STATES, state))
+        throw new HttpError('invalid_value', `state must be ${oneOf(STATES)}`, { param: 'state' })
       }
       if (deps.registry.visible(wsId, req.account) === null) {
-        return reply.status(404).send({ detail: 'workspace not found' })
+        throw new WorkspaceMissing(wsId)
       }
       const ws = deps.registry.get(wsId).runner.ws
       const records = await ws.jobs({
@@ -102,17 +102,17 @@ export function registerJobsRoutes(
     },
   )
 
-  app.get<{ Params: WsJobParams }>('/v1/workspaces/:wsId/jobs/:jobId', async (req, reply) => {
+  app.get<{ Params: WsJobParams }>('/v1/workspaces/:wsId/jobs/:jobId', async (req) => {
     // One job, named by the id its listing gives, with the pids of the
     // processes it ran that the workspace still keeps: its own and every
     // one under it.
     const { wsId, jobId } = req.params
     if (deps.registry.visible(wsId, req.account) === null) {
-      return reply.status(404).send({ detail: 'workspace not found' })
+      throw new WorkspaceMissing(wsId)
     }
     const ws = deps.registry.get(wsId).runner.ws
     const record = await ws.job(new JobId(ws.workspaceId, jobId))
-    if (record === null) return reply.status(404).send({ detail: 'job not found' })
+    if (record === null) throw new HttpError('not_found', 'job not found')
     const detail: JobDetailResponse = {
       ...toResponse(record),
       processes: (await ws.processes({ jobId: record.id })).map((process) => process.id.pid),

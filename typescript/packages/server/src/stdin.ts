@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import { CHUNK_SIZE } from '@struktoai/mirage-core/io/cooperative'
 import { CAPACITY } from '@struktoai/mirage-core/io/pipe'
 import { MAX_STDIN_BYTES } from './constants.ts'
-import { MultipartError } from './multipart.ts'
+import { HttpError } from './errors.ts'
 import { KeyLock } from '@struktoai/mirage-core/cache/lock'
 
 /** Keep receiving disconnects while unread stdin spills beyond bounded memory. */
@@ -47,7 +47,7 @@ export class UploadStdin implements AsyncIterable<Uint8Array> {
         if (this.discarding) return
         const chunk = new Uint8Array(data.subarray(offset, offset + CHUNK_SIZE))
         this.received += chunk.length
-        if (this.received > this.limit) throw new MultipartError(413, 'stdin part too large')
+        if (this.received > this.limit) throw new HttpError('too_large', 'stdin part too large')
         if (this.file === undefined && this.buffered + chunk.length <= this.capacity) {
           this.chunks.push(chunk)
           this.buffered += chunk.length

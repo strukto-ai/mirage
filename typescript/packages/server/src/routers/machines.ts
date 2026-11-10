@@ -16,6 +16,7 @@ import type { Machine, MachineState } from '@struktoai/mirage-core/execution/mac
 import { MachineId } from '@struktoai/mirage-core/execution/types'
 import type { RouteApp } from '../routes.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
+import { HttpError, loaderError, WorkspaceMissing } from '../errors.ts'
 import { toResponse as processResponse, type ProcessResponse } from './processes.ts'
 
 interface WsIdParams {
@@ -47,43 +48,40 @@ export function registerMachinesRoutes(
     registry: WorkspaceRegistry
   },
 ): void {
-  app.get<{ Params: WsIdParams }>('/v1/workspaces/:wsId/machines', async (req, reply) => {
+  app.get<{ Params: WsIdParams }>('/v1/workspaces/:wsId/machines', async (req) => {
     // The machines the workspace runs programs on, its own host first, each
     // checked now: `managed` when Mirage sees and stops every process its
     // programs start there, `reachable` when only what it started itself,
     // `unreachable` when the check failed.
     const { wsId } = req.params
     if (deps.registry.visible(wsId, req.account) === null) {
-      return reply.status(404).send({ detail: 'workspace not found' })
+      throw new WorkspaceMissing(wsId)
     }
     const ws = deps.registry.get(wsId).runner.ws
     return (await ws.machines()).map(toResponse)
   })
 
-  app.get<{ Params: WsMachineParams }>(
-    '/v1/workspaces/:wsId/machines/:machineId',
-    async (req, reply) => {
-      // One machine, by its id (`provider:name`), checked now, with the
-      // processes the workspace keeps that ran on it.
-      const { wsId, machineId } = req.params
-      if (deps.registry.visible(wsId, req.account) === null) {
-        return reply.status(404).send({ detail: 'workspace not found' })
-      }
-      let machine: MachineId
-      try {
-        machine = MachineId.parse(machineId)
-      } catch (err) {
-        return reply.status(400).send({ detail: (err as Error).message })
-      }
-      const ws = deps.registry.get(wsId).runner.ws
-      const [found] = await ws.machines(machine)
-      if (found === undefined) return reply.status(404).send({ detail: 'machine not found' })
-      const processes = await ws.processes({ machine })
-      const detail: MachineDetailResponse = {
-        ...toResponse(found),
-        processes: processes.map(processResponse),
-      }
-      return detail
-    },
-  )
+  app.get<{ Params: WsMachineParams }>('/v1/workspaces/:wsId/machines/:machineId', async (req) => {
+    // One machine, by its id (`provider:name`), checked now, with the
+    // processes the workspace keeps that ran on it.
+    const { wsId, machineId } = req.params
+    if (deps.registry.visible(wsId, req.account) === null) {
+      throw new WorkspaceMissing(wsId)
+    }
+    let machine: MachineId
+    try {
+      machine = MachineId.parse(machineId)
+    } catch (err) {
+      throw loaderError(err)
+    }
+    const ws = deps.registry.get(wsId).runner.ws
+    const [found] = await ws.machines(machine)
+    if (found === undefined) throw new HttpError('not_found', 'machine not found')
+    const processes = await ws.processes({ machine })
+    const detail: MachineDetailResponse = {
+      ...toResponse(found),
+      processes: processes.map(processResponse),
+    }
+    return detail
+  })
 }

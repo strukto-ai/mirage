@@ -23,6 +23,20 @@ export class TunnelRefused extends Error {
 }
 
 /**
+ * The message of an upgrade's error body, or the body's text when it is
+ * not the server's JSON error. Mirrors Python's `refusal_message`.
+ */
+export function refusalMessage(body: string): string {
+  const text = body.trim()
+  try {
+    const message = (JSON.parse(text) as { error?: { message?: unknown } } | null)?.error?.message
+    return typeof message === 'string' ? message : text
+  } catch {
+    return text
+  }
+}
+
+/**
  * Carry this process's stdio over a workspace's SSH route: what an ssh
  * `ProxyCommand` runs. ssh speaks on stdin and stdout, and the bytes travel
  * over the server's HTTPS port, logged in by the bearer token instead of a
@@ -61,7 +75,11 @@ export async function relaySsh(url: string, headers: Record<string, string>): Pr
       res.on('data', (chunk: Buffer) => (body += chunk.toString()))
       res.on('end', () => {
         req.destroy()
-        reject(new TunnelRefused(`the server refused: ${String(res.statusCode)} ${body.trim()}`))
+        reject(
+          new TunnelRefused(
+            `the server refused: ${String(res.statusCode)} ${refusalMessage(body)}`,
+          ),
+        )
       })
     })
     ws.once('error', reject)
@@ -160,7 +178,7 @@ export async function relayCodex(
             req.destroy()
             const status = String(res.statusCode)
             process.stderr.write(
-              `mirage: codex-exec: the server refused: ${status} ${body.trim()}\n`,
+              `mirage: codex-exec: the server refused: ${status} ${refusalMessage(body)}\n`,
             )
             incoming.close(1011, `the server refused: ${status}`)
           })

@@ -14,7 +14,7 @@
 
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import Fastify from 'fastify'
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
 import {
   buildVfs,
   configToWorkspaceArgs,
@@ -64,6 +64,15 @@ import type { SSHEndpoint } from './ssh/types.ts'
 import websocket from '@fastify/websocket'
 import { fastifyRoutes, type ServerHost } from './routes.ts'
 import { loadProfilePolicy } from '@struktoai/mirage-node'
+import {
+  answer,
+  errorResponse,
+  HttpError,
+  registerErrorHandlers,
+  WorkspaceMissing,
+} from './errors.ts'
+import { RAW_BODIES } from './constants.ts'
+import { isStopped } from './routers/workspaces.ts'
 
 export interface BuildAppOptions {
   idleGraceSeconds?: number
@@ -175,6 +184,43 @@ export async function removePidFile(p: string): Promise<void> {
   }
 }
 
+/**
+ * A workspace a route needs and the caller has none of live: 409 when the
+ * caller's own is stopped, else 404, every other error as `answer` gives
+ * it. Mirrors Python's `answer_missing`.
+ */
+function answerMissing(deps: {
+  registry: WorkspaceRegistry
+  host: ServerHost
+}): (err: unknown, req: FastifyRequest, reply: FastifyReply) => Promise<void> {
+  return async (err, req, reply) => {
+    if (!(err instanceof WorkspaceMissing)) {
+      answer(err, req, reply)
+      return
+    }
+    const stopped = await isStopped(deps, err.workspaceId, req.account)
+    void errorResponse(reply, stopped ? err.stopped() : err)
+  }
+}
+
+/**
+ * Read a request body as JSON whatever its Content-Type says, save a
+ * multipart or raw byte upload (`RAW_BODIES`), which a route reads as
+ * sent, so `curl -d` reaches a JSON route as sent. An empty body is none.
+ * Mirrors Python's `LenientJson`.
+ */
+function lenientJson(app: FastifyInstance): void {
+  const json = app.getDefaultJsonParser('error', 'error')
+  app.removeAllContentTypeParsers()
+  app.addContentTypeParser(RAW_BODIES, (_req, _payload, done) => {
+    done(null)
+  })
+  app.addContentTypeParser('*', { parseAs: 'string' }, (req, body, done) => {
+    if (body.length === 0) done(null, undefined)
+    else void json(req, body as string, done)
+  })
+}
+
 function noop(): void {
   /* intentional no-op for onIdleExit default */
 }
@@ -229,9 +275,13 @@ export function buildApp(options: BuildAppOptions = {}) {
   // workspaces and holds new lines itself.
   const app = Fastify({
     logger: false,
+    ajv: { customOptions: { coerceTypes: false, removeAdditional: false, allErrors: true } },
     trustProxy: proxies.includes('*') ? true : proxies.length > 0 ? proxies : false,
     return503OnClosing: false,
+    frameworkErrors: answer,
   })
+  registerErrorHandlers(app, answerMissing({ registry, host }))
+  lenientJson(app)
   const allowedHosts = resolveAllowedHosts(options.allowedHosts)
   app.decorateRequest('closed', null as never)
   app.addHook('onRequest', (request, reply, done) => {
@@ -245,14 +295,14 @@ export function buildApp(options: BuildAppOptions = {}) {
       console.warn(
         `rejecting request from ${request.ip}: Host=${JSON.stringify(host)} not in allowlist ${JSON.stringify(allowedHosts)}`,
       )
-      void reply.code(400).send({ detail: 'Invalid host header' })
+      void errorResponse(reply, new HttpError('host_not_allowed', 'host header is not allowed'))
       return
     }
     if (isCrossOrigin(host, origin, fetchSite)) {
       console.warn(
         `rejecting request from ${request.ip}: Origin=${JSON.stringify(origin)} Sec-Fetch-Site=${JSON.stringify(fetchSite)} is not Host=${JSON.stringify(host)}`,
       )
-      void reply.code(400).send({ detail: 'Cross-origin request refused' })
+      void errorResponse(reply, new HttpError('origin_not_allowed', 'cross-origin request refused'))
       return
     }
     done()
@@ -260,9 +310,6 @@ export function buildApp(options: BuildAppOptions = {}) {
   registerRateLimits(app, rateLimits)
   registerAuth(app, authConfig)
   registerRateLimits(app, rateLimits, true)
-  app.addContentTypeParser(/^(multipart\/|application\/octet-stream)/, (_req, _payload, done) => {
-    done(null)
-  })
   const resources = options.resourceStore ?? buildResourceStore(resolveResourceStore())
   const mcp = registerApi(fastifyRoutes(app), {
     registry,

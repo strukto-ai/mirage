@@ -63,13 +63,11 @@ async function fakeServer(): Promise<{ url: string; seen: Seen[]; server: Server
       seen.push(got)
       if (req.method === 'DELETE') res.writeHead(204).end()
       else if (url.startsWith('/missing'))
-        res.writeHead(404, { 'content-type': 'application/json' }).end('{"detail":"not found"}')
-      else if (url.startsWith('/invalid'))
-        res.writeHead(422, { 'content-type': 'application/json' }).end(
-          JSON.stringify({
-            detail: [{ type: 'missing', loc: ['body', 'config', 'mounts'], msg: 'Field required' }],
-          }),
-        )
+        res
+          .writeHead(404, { 'content-type': 'application/json' })
+          .end(JSON.stringify({ error: { code: 'not_found', message: 'not found' } }))
+      else if (url.startsWith('/odd'))
+        res.writeHead(500, { 'content-type': 'application/json' }).end('{"detail":"odd"}')
       else if (url.endsWith('/snapshot'))
         res.writeHead(200, { 'content-type': 'application/x-tar' }).end(TAR)
       else if (url.endsWith('/stream'))
@@ -211,7 +209,7 @@ describe('mirage api', () => {
     })
   })
 
-  it('exits 2 with the detail of an error answer, and on a bad call before sending it', async () => {
+  it('exits 2 with the message of an error answer, and on a bad call before sending it', async () => {
     await withServer(async (url, dir, seen) => {
       const missing = await api(url, dir, '/missing')
       expect(missing.code).toBe(2)
@@ -240,14 +238,11 @@ describe('mirage api', () => {
     })
   })
 
-  it('exits 2 and preserves structured validation details', async () => {
+  it('exits 2 and prints a body without an error as it came', async () => {
     await withServer(async (url, dir) => {
-      const answer = await api(url, dir, '/invalid')
+      const answer = await api(url, dir, '/odd')
       expect(answer.code).toBe(2)
-      expect(answer.stderr).toMatch(/^error 422: /)
-      expect(JSON.parse(answer.stderr.replace(/^error 422: /, ''))).toEqual([
-        { type: 'missing', loc: ['body', 'config', 'mounts'], msg: 'Field required' },
-      ])
+      expect(answer.stderr).toContain('error 500: {"detail":"odd"}')
     })
   })
 })
