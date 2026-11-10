@@ -1620,6 +1620,49 @@
       ]
     },
     {
+      "id": "a_run_across_mounts_streams_within_max_memory",
+      "note": "A command whose operands sit on two mounts reads and prints a chunk at a time, as it does on one: od's 480 KB of output passes a 160 KB workspace. TypeScript used to read it whole and stop with `line: memory exhausted`.",
+      "world": {
+        "max_memory": "160KB",
+        "mounts": {
+          "/a": {
+            "vfs": "ram",
+            "files": {}
+          },
+          "/b": {
+            "vfs": "ram",
+            "files": {}
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "head -c 60000 /dev/zero | tr '\\0' x > /a/x && head -c 60000 /dev/zero | tr '\\0' y > /b/y && echo ok",
+          "expect": {
+            "exit": 0,
+            "stdout": "ok\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "od -v -An -c /a/x /b/y | wc -l",
+          "expect": {
+            "exit": 0,
+            "stdout": "7500\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "od -v -An -c /a/x /b/y | head -n 1",
+          "expect": {
+            "exit": 0,
+            "stdout": "   x   x   x   x   x   x   x   x   x   x   x   x   x   x   x   x\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
       "id": "a_workspace_without_network_still_runs_its_lines",
       "world": {
         "network": false,

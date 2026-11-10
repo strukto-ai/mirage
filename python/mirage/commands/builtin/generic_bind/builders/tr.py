@@ -39,4 +39,4 @@ async def tr(
     return generic_tr(engine, paths, read_stream=files.read, stdin=ctx.stdin)
 
 
-BUILDER = GenericCommand("tr", tr, read=True)
+BUILDER = GenericCommand("tr", tr, read=True, streams=True)

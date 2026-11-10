@@ -36,5 +36,6 @@ function comparer(command: 'zcmp' | 'zdiff'): CommandFn {
 export const BUILDERS: readonly GenericCommand[] = (['zcmp', 'zdiff'] as const).map((name) => ({
   name,
   read: true,
+  streams: true,
   fn: comparer(name),
 }))

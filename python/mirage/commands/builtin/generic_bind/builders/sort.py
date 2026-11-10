@@ -45,4 +45,6 @@ async def sort(
     )
 
 
-BUILDER = GenericCommand("sort", sort, write=True, read=True, facts=facts)
+BUILDER = GenericCommand(
+    "sort", sort, write=True, read=True, streams=True, facts=facts
+)

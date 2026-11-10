@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { abortable } from '../../../../utils/abort.ts'
-import { discardStreams, ensureStream } from '../../../../io/stream.ts'
+import { discardStreams } from '../../../../io/stream.ts'
 import { chunks } from '../../../../io/cooperative.ts'
 import { concat as concatBytes } from '../../../../utils/bytes.ts'
 import { isStdin } from '../../utils/stream.ts'
@@ -169,7 +169,10 @@ export function readdirOp(
 export function fileStreamOp(dispatch: DispatchFn): (p: PathSpec) => AsyncIterable<Uint8Array> {
   async function* stream(path: PathSpec): AsyncIterable<Uint8Array> {
     const [data] = await dispatch('read', path, [], { stream: true })
-    yield* ensureStream(data as ByteSource)
+    // A store that answers with the whole file is handed on in bounded
+    // pieces, as the mount's own stream reads it, so an engine copies one
+    // piece at a time rather than the file.
+    yield* chunks(data as ByteSource)
   }
   return stream
 }

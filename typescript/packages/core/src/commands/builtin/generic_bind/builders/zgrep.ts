@@ -26,5 +26,6 @@ const zgrep: CommandFn = async (_accessor, paths, texts, ctx) => {
 export const BUILDER: GenericCommand = {
   name: 'zgrep',
   read: true,
+  streams: true,
   fn: zgrep,
 }

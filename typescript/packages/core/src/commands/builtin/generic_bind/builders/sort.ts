@@ -28,5 +28,6 @@ export const BUILDER: GenericCommand = {
   facts: facts,
   write: true,
   read: true,
+  streams: true,
   fn: sort,
 }

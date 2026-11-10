@@ -73,4 +73,4 @@ async def look(
     return hosted_stream("look", config, host, io), io
 
 
-BUILDER = GenericCommand("look", look, read=True)
+BUILDER = GenericCommand("look", look, read=True, streams=True)

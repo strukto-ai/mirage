@@ -44,4 +44,4 @@ async def zgrep(
     )
 
 
-BUILDER = GenericCommand("zgrep", zgrep, read=True)
+BUILDER = GenericCommand("zgrep", zgrep, read=True, streams=True)

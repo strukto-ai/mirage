@@ -11,6 +11,7 @@ import { commandFiles, fileSize, resolveOrEmpty } from '../files.ts'
 export const BUILDER: GenericCommand = {
   name: 'od',
   read: true,
+  streams: true,
   fn: async (_accessor, paths, _texts, ctx) => {
     const files = commandFiles(ctx, paths)
     const resolved = await resolveOrEmpty(files, paths)

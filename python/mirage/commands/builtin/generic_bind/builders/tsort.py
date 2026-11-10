@@ -69,4 +69,4 @@ async def tsort(
     return _ordered(engine, source, io), io
 
 
-BUILDER = GenericCommand("tsort", tsort, read=True)
+BUILDER = GenericCommand("tsort", tsort, read=True, streams=True)

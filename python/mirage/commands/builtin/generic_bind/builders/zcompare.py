@@ -47,6 +47,6 @@ def _comparer(command: str) -> CommandFn:
 
 
 BUILDERS = tuple(
-    GenericCommand(name, _comparer(name), read=True)
+    GenericCommand(name, _comparer(name), read=True, streams=True)
     for name in ("zcmp", "zdiff")
 )

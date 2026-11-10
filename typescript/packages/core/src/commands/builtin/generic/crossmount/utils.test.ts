@@ -13,10 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { expect, it } from 'vitest'
+import { CHUNK_SIZE } from '../../../../io/cooperative.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
 import { PathSpec } from '../../../../types.ts'
-import type { RunSingle } from './types.ts'
-import { streamOperands } from './utils.ts'
+import type { DispatchFn, RunSingle } from './types.ts'
+import { fileStreamOp, streamOperands } from './utils.ts'
 
 const reporting: RunSingle = (_cmd, operands) => {
   const virtual = operands[0]?.virtual ?? ''
@@ -43,4 +44,13 @@ it('keeps what a run reported when its reader stops inside it', async () => {
     "find: '/m1/c': Permission denied\n",
   )
   expect(io.exitCode).toBe(1)
+})
+
+it('hands a store that answers with the whole file on in bounded pieces', async () => {
+  const whole = new Uint8Array(CHUNK_SIZE * 2 + 1)
+  const dispatch = (() => Promise.resolve([whole, new IOResult()])) as unknown as DispatchFn
+  const sizes: number[] = []
+  for await (const piece of fileStreamOp(dispatch)(PathSpec.fromStrPath('/m/f')))
+    sizes.push(piece.byteLength)
+  expect(sizes).toEqual([CHUNK_SIZE, CHUNK_SIZE, 1])
 })
