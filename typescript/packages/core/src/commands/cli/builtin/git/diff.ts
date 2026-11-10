@@ -16,26 +16,46 @@ import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { headEntries, stagedEntries, workEntries } from './changes.ts'
 import { readIndex, refuseUnresolved } from './index_file.ts'
 import { commitEntries, treeEntries, type TreeEntry } from './tree.ts'
-import { compare, limited, renderChanges, parseDiffFlags, renamesEnabled } from './diff_output.ts'
+import {
+  compare,
+  limited,
+  renderChanges,
+  parseDiffFlags,
+  renamesEnabled,
+  filtered,
+  prefixConfig,
+  type DiffFlags,
+} from './diff_output.ts'
 import { HEAD } from './constants.ts'
 
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
-import type { PathSpec } from '../../../../types.ts'
+import { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { GitError, InvalidOptionError, NoMergeBaseError, UsageError } from './errors.ts'
-import { pathspecPatterns, patternRoots } from './pathspec.ts'
+import { exists } from './io.ts'
+import { absoluteOperand, pathspecPatterns, patternRoots } from './pathspec.ts'
 import { configBool, type Repo } from './repo.ts'
 import { deltas, shownSides, type Delta } from './rows.ts'
 import { shownEntries } from './seen.ts'
 import { opened } from './session.ts'
-import { mergeBases, rangeCommits, resolveCommit } from './revparse.ts'
-import { optionOperand, splitMarked, startPoint, STDERR, verbUsage, requireVfs } from './util.ts'
+import { mergeBases, rangeCommits, resolveCommit, resolveObject, treeId } from './revparse.ts'
+import {
+  loneHelp,
+  optionOperand,
+  splitMarked,
+  startPoint,
+  STDERR,
+  verbUsage,
+  requireVfs,
+} from './util.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
 const ENC = new TextEncoder()
 
 type Tree = Map<string, TreeEntry>
+// What makes a word a pattern git reads as a path unseen.
+const WILDCARDS = '*?[\\'
 
 /**
  * The two sides a diff compares, and any warning.
@@ -108,8 +128,11 @@ export async function diff(
     true,
     await renamesEnabled(repo),
     await configBool(repo, 'core.quotepath', true),
+    await prefixConfig(repo),
   )
   let before: Tree, after: Tree
+  let indexSide: Tree = new Map()
+  let workTree = false
   let warning = ''
   const pathspecs = pathspecPatterns(repo.location, startPoint(fl).virtual, marked)
   if (cached) {
@@ -130,28 +153,154 @@ export async function diff(
       const state = await readIndex(repo, repo.vfs)
       after = await workEntries(repo, vfs, state, patternRoots(pathspecs))
       if (old === null) for (const path of state.conflicts.keys()) after.delete(path)
-      before = old ?? shownEntries(repo, stagedEntries(state))
+      indexSide = shownEntries(repo, stagedEntries(state))
+      before = old ?? indexSide
+      workTree = true
     } else {
       before = old ?? new Map<string, TreeEntry>()
       after = fresh
     }
   }
-  const flags = { ...parsed, pathspecs }
-  const rows = deltas(repo.location, [[limited(before, pathspecs), limited(after, pathspecs)]])
+  return compared(
+    repo,
+    { ...parsed, pathspecs, workTree, sameAsIndex: sameAsIndex(indexSide, after) },
+    [before, after],
+    fl,
+    warning,
+  )
+}
+
+function sameAsIndex(index: Tree, work: Tree): ReadonlySet<string> {
+  const same = new Set<string>()
+  for (const [path, side] of work) {
+    const held = index.get(path)
+    if (held?.oid === side.oid && held.mode === side.mode) same.add(path)
+  }
+  return same
+}
+
+/** Answer one comparison: its rows, and exit 1 when asked whether anything differs. */
+function compared(
+  repo: Repo,
+  flags: DiffFlags,
+  sides: readonly [Tree, Tree],
+  fl: FlagView,
+  warning = '',
+): CommandFnResult {
+  const quiet = fl.asBool('quiet')
+  const report = quiet || fl.asBool('exit_code')
+  const rows = deltas(repo.location, [
+    [limited(sides[0], flags.pathspecs), limited(sides[1], flags.pathspecs)],
+  ])
   const render = async (shown: Delta[]): Promise<ByteSource | null> => {
     const [oldSide, newSide] = shownSides(shown, 1)[0] ?? [new Map(), new Map()]
-    const body = await renderChanges(
-      repo,
-      await compare(repo, oldSide, newSide, flags.renames),
-      flags,
-    )
+    const changes = await compare(repo, oldSide, newSide, flags.renames)
+    if (report && filtered(changes, flags).length) io.exitCode = 1
+    if (quiet) return null
+    const body = await renderChanges(repo, changes, flags)
     return body === '' ? null : encodeText(body)
   }
-  return [
-    null,
-    new IOResult({
-      ...(warning ? { stderr: ENC.encode(warning) } : {}),
-      rows: { items: rows, render },
-    }),
-  ]
+  const io = new IOResult({
+    ...(warning ? { stderr: ENC.encode(warning) } : {}),
+    rows: { items: rows, render },
+  })
+  return [null, io]
+}
+
+/**
+ * Refuse a bare word a plumbing diff cannot read as a path. With no `--` a word
+ * that exists, or a pattern, is a path; one that names a revision is a misuse,
+ * and anything else is unknown.
+ */
+async function pathOperands(
+  ctx: Context,
+  fl: FlagView,
+  repo: Repo,
+  words: readonly string[],
+): Promise<void> {
+  const start = startPoint(fl).virtual
+  for (const word of words) {
+    if ([...WILDCARDS].some((char) => word.includes(char))) continue
+    if (await exists(repo.vfs, PathSpec.fromStrPath(absoluteOperand(start, word)))) continue
+    await resolveObject(repo, word)
+    throw new UsageError('', verbUsage(ctx))
+  }
+}
+
+async function plumbingFlags(fl: FlagView, repo: Repo): Promise<DiffFlags> {
+  return parseDiffFlags(
+    fl,
+    false,
+    'off',
+    false,
+    false,
+    await configBool(repo, 'core.quotepath', true),
+    await prefixConfig(repo),
+  )
+}
+
+/** `git diff-files`: compare the index with the working tree, in plumbing's defaults. */
+export async function diffFiles(
+  _accessor: NOOPAccessor,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const vfs = requireVfs(ctx)
+  const fl = new FlagView(ctx.flags)
+  if (optionOperand(ctx, texts, loneHelp(ctx, texts)) !== null) {
+    throw new UsageError('', verbUsage(ctx))
+  }
+  const [words, marked] = splitMarked(texts, ctx.argv ?? [])
+  const repo = await opened(ctx, fl, true)
+  await pathOperands(ctx, fl, repo, words)
+  const parsed = await plumbingFlags(fl, repo)
+  const pathspecs = pathspecPatterns(repo.location, startPoint(fl).virtual, [...words, ...marked])
+  const state = await readIndex(repo, repo.vfs)
+  const after = await workEntries(repo, vfs, state, patternRoots(pathspecs))
+  for (const path of state.conflicts.keys()) after.delete(path)
+  const before = shownEntries(repo, stagedEntries(state))
+  return compared(repo, { ...parsed, pathspecs, workTree: true }, [before, after], fl)
+}
+
+/**
+ * `git diff-index`: compare a tree with the working tree, or with the index. A
+ * file staged and left alone reports the staged id; only one that differs from
+ * the index reports the all-zero id.
+ */
+export async function diffIndex(
+  _accessor: NOOPAccessor,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const vfs = requireVfs(ctx)
+  const fl = new FlagView(ctx.flags)
+  if (optionOperand(ctx, texts, loneHelp(ctx, texts)) !== null) {
+    throw new UsageError('', verbUsage(ctx))
+  }
+  const [words, marked] = splitMarked(texts, ctx.argv ?? [])
+  const first = words[0]
+  if (first === undefined) throw new UsageError('', verbUsage(ctx))
+  const cached = fl.asBool('cached')
+  const repo = await opened(ctx, fl, !cached)
+  const tree = await treeId(repo, first)
+  await pathOperands(ctx, fl, repo, words.slice(1))
+  const parsed = await plumbingFlags(fl, repo)
+  const pathspecs = pathspecPatterns(repo.location, startPoint(fl).virtual, [
+    ...words.slice(1),
+    ...marked,
+  ])
+  const before = shownEntries(repo, await treeEntries(repo, tree))
+  const state = await readIndex(repo, repo.vfs)
+  const staged = shownEntries(repo, stagedEntries(state))
+  if (cached) return compared(repo, { ...parsed, pathspecs }, [before, staged], fl)
+  const worked = await workEntries(repo, vfs, state, patternRoots(pathspecs))
+  const after = fl.asBool('m') ? new Map([...staged, ...worked]) : worked
+  return compared(
+    repo,
+    { ...parsed, pathspecs, workTree: true, sameAsIndex: sameAsIndex(staged, after) },
+    [before, after],
+    fl,
+  )
 }

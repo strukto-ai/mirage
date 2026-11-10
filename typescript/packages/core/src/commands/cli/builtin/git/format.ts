@@ -21,6 +21,7 @@ import { BadPrettyError, UnsupportedPrettyError } from './errors.ts'
 
 const SHORT_SHA = 7
 export const FULL_SHA = 40
+const ABBREV_FLOOR = 4
 const INDENT = '    '
 
 export const DEFAULT_DATE: DateMode = {
@@ -143,6 +144,13 @@ export function needsDecorations(fmt: LogFormat): boolean {
     if (marker === 'd' || marker === 'D') return true
     cursor += 2
   }
+}
+
+export function abbrevWidth(value: unknown, fallback: number): number {
+  if (typeof value !== 'string') return fallback
+  const digits = /^\s*\d+/.exec(value)
+  const width = digits === null ? 0 : Number(digits[0])
+  return Math.min(Math.max(width, ABBREV_FLOOR), FULL_SHA)
 }
 
 /**

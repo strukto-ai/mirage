@@ -90,8 +90,10 @@ class Scanner:
         mode: str,
         show_ignored: bool = False,
         roots: tuple[str, ...] | None = None,
+        per_directory: str | None = GITIGNORE,
     ) -> None:
         self._vfs = vfs
+        self._per_directory = per_directory
         self._worktree = worktree
         self._tracked = tracked
         self._directories = tracked_directories(tracked)
@@ -264,10 +266,10 @@ class Scanner:
             relative (str): repository-relative path of the directory.
             ignores (IgnoreStack): the rules governing its parent.
         """
-        if not relative:
+        if not relative or self._per_directory is None:
             return ignores
         local = await read_optional(
-            self._vfs, self._absolute(relative).join(GITIGNORE)
+            self._vfs, self._absolute(relative).join(self._per_directory)
         )
         return ignores if local is None else ignores.push(relative, local)
 
@@ -360,6 +362,8 @@ async def scan(
     mode: str,
     show_ignored: bool = False,
     roots: tuple[str, ...] | None = None,
+    ignores: IgnoreStack | None = None,
+    per_directory: str | None = GITIGNORE,
 ) -> WorkTree:
     """Walk a working tree once, for both halves of a status report.
 
@@ -379,8 +383,16 @@ async def scan(
         roots (tuple[str, ...] | None): narrow the walk to these
             repository-relative paths and what lies under them, for a
             verb whose pathspecs say what it reads; None walks it all.
+        ignores (IgnoreStack | None): the rules at the top of the tree;
+            None for the repository's own files.
+        per_directory (str | None): the exclude file each directory may
+            hold, None for none.
     """
-    ignores = await load_ignores(vfs, location.commondir, location.worktree)
+    rules = (
+        ignores
+        if ignores is not None
+        else await load_ignores(vfs, location.commondir, location.worktree)
+    )
     scanner = Scanner(
         vfs,
         location.worktree,
@@ -388,6 +400,7 @@ async def scan(
         mode,
         show_ignored,
         roots,
+        per_directory,
     )
-    await scanner.walk("", False, ignores)
+    await scanner.walk("", False, rules)
     return scanner.found

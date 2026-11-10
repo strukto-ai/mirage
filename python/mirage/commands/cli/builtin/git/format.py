@@ -32,10 +32,12 @@ from mirage.commands.cli.builtin.git.types import (
     Decoration,
     MailmapEntry,
 )
+from mirage.commands.spec.types import FlagValue
 from mirage.shell.bytes import byte_char, encode_text
 
 SHORT_SHA = 7
 FULL_SHA = 40
+ABBREV_FLOOR = 4
 INDENT = "    "
 DEFAULT_DATE = DateMode()
 RAW_DATE = DateMode(kind=DateKind.RAW)
@@ -158,6 +160,23 @@ def needs_decorations(fmt: LogFormat) -> bool:
         if fmt.template[cursor + 1] in ("d", "D"):
             return True
         cursor += 2
+
+
+def abbrev_width(value: FlagValue, fallback: int) -> int:
+    """How many hex digits ``--short`` keeps.
+
+    The repository's own width bare, and otherwise the number given,
+    read as strtoul reads it, between git's four and the whole id.
+
+    Args:
+        value (FlagValue): the option's value.
+        fallback (int): the repository's own width.
+    """
+    if not isinstance(value, str):
+        return fallback
+    digits = re.match(r"\s*\d+", value)
+    width = int(digits.group()) if digits else 0
+    return min(max(width, ABBREV_FLOOR), FULL_SHA)
 
 
 def abbrev_length(packed: int) -> int:

@@ -16,6 +16,7 @@ import posixpath
 import re
 from collections.abc import Iterable
 
+from dulwich.config import ConfigFile
 from dulwich.errors import NotTreeError
 from dulwich.objects import Commit, ObjectID, ShaFile, Tag, Tree
 from dulwich.objectspec import parse_commit
@@ -23,7 +24,11 @@ from dulwich.refs import Ref
 from dulwich.repo import BaseRepo
 
 from mirage.bridge.sync import run_async_from_sync
-from mirage.commands.cli.builtin.git.constants import DWIM_RULES, HEAD
+from mirage.commands.cli.builtin.git.constants import (
+    DWIM_RULES,
+    HEAD,
+    LOGS_DIR,
+)
 from mirage.commands.cli.builtin.git.errors import (
     AmbiguousArgumentError,
     BadRevisionError,
@@ -31,13 +36,20 @@ from mirage.commands.cli.builtin.git.errors import (
     PathNotAtStageError,
     PathNotInIndexError,
     PathNotInRevisionError,
+    SelectorError,
 )
 from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.io import exists, read_optional
 from mirage.commands.cli.builtin.git.pathspec import visible_path
 from mirage.commands.cli.builtin.git.ref_fields import MINIMUM_ABBREV
-from mirage.commands.cli.builtin.git.refs import TAG_PREFIX
-from mirage.commands.cli.builtin.git.repo import Repo
+from mirage.commands.cli.builtin.git.refs import (
+    BRANCH_PREFIX,
+    SYMREF_PREFIX,
+    TAG_PREFIX,
+    mapped,
+    parse_refspec,
+)
+from mirage.commands.cli.builtin.git.repo import Repo, read_config
 from mirage.commands.cli.builtin.git.seen import (
     decoded,
     guarded,
@@ -46,7 +58,13 @@ from mirage.commands.cli.builtin.git.seen import (
     placed,
     rooted,
 )
-from mirage.commands.cli.builtin.git.types import AncestryStep, PeelStep, RevOp
+from mirage.commands.cli.builtin.git.types import (
+    AncestryStep,
+    PeelStep,
+    RefUpstream,
+    RevOp,
+)
+from mirage.commands.cli.builtin.git.util import multivar
 
 ANCESTOR = "~"
 PARENT = "^"
@@ -67,6 +85,15 @@ STAGED = re.compile(r"[0-3]:")
 RANGE = ".."
 SYMMETRIC_DOT = "."
 NEGATION = "^"
+# ``@`` alone is HEAD, and ``<name>@{...}`` reads a reflog entry, an earlier
+# branch, or the ref a branch tracks.
+CURRENT = "@"
+SELECTOR_OPEN = "@{"
+SELECTOR_CLOSE = "}"
+UPSTREAM_WORDS = ("u", "upstream")
+PUSH_WORD = "push"
+MOVED_FROM = "checkout: moving from "
+MOVED_TO = " to "
 
 
 def split_operators(revision: str) -> tuple[str, tuple[RevOp, ...]]:
@@ -186,6 +213,7 @@ def resolve_commit(repo: BaseRepo, revision: str) -> Commit:
         revision (str): revision as the user spelled it.
     """
     base, ops = split_operators(revision)
+    base = expand_selector(repo, base, revision)
     try:
         commit = parse_commit(repo, base)
     except (KeyError, ValueError) as exc:
@@ -206,7 +234,7 @@ def resolve_commit(repo: BaseRepo, revision: str) -> Commit:
     return commit
 
 
-def _range_ends(revision: str) -> tuple[str, str, bool] | None:
+def range_ends(revision: str) -> tuple[str, str, bool] | None:
     """The two ends of ``A..B`` or ``A...B``, or None for one revision.
 
     Read the way git reads a range: the first ``..`` splits
@@ -250,7 +278,7 @@ def range_commits(
         AmbiguousArgumentError: an end does not resolve; the message
             names the whole operand, as git's does.
     """
-    ends = None if revision == RANGE else _range_ends(revision)
+    ends = None if revision == RANGE else range_ends(revision)
     if ends is None:
         return None
     try:
@@ -669,6 +697,282 @@ def refs_named(known: Iterable[str], name: str) -> list[str]:
     ]
 
 
+def tracking_ref(
+    cfg: ConfigFile, branch: str, known: frozenset[str]
+) -> RefUpstream | None:
+    """The ref a branch's upstream lands in.
+
+    ``branch.<name>.merge`` is mapped through the remote's fetch
+    refspecs; a branch following a remote with none that map it has no
+    upstream at all, and one following ``.`` follows a local ref.
+
+    Args:
+        cfg (ConfigFile): the repository's config.
+        branch (str): the branch's short name.
+        known (frozenset[str]): every name that resolves, for ``.``.
+    """
+    section = (b"branch", branch.encode())
+    remotes = multivar(cfg, section, b"remote")
+    merges = multivar(cfg, section, b"merge")
+    if not remotes or not merges:
+        return None
+    remote, merged = remotes[-1].decode(), merges[0].decode()
+    target = _fetched_as(cfg, remote, merged)
+    if target is not None:
+        return RefUpstream(ref=target, remote=remote, merge=merged)
+    if remote != ".":
+        return None
+    found = next(iter(refs_named(known, merged)), merged)
+    return RefUpstream(ref=found, remote=remote, merge=merged)
+
+
+def _fetched_as(cfg: ConfigFile, remote: str, name: str) -> str | None:
+    """Where a remote's fetch refspecs put one of its refs.
+
+    Args:
+        cfg (ConfigFile): the repository's config.
+        remote (str): the remote's name.
+        name (str): the ref on the remote.
+    """
+    for text in multivar(cfg, (b"remote", remote.encode()), b"fetch"):
+        spec = parse_refspec(text.decode())
+        if spec.src.startswith("^"):
+            continue
+        target = mapped(spec, name)
+        if target:
+            return target
+    return None
+
+
+def _head_branch(repo: Repo) -> str | None:
+    raw = repo.refs.read_loose_ref(Ref(HEAD.encode())) or b""
+    text = raw.decode("utf-8", "replace")
+    if not text.startswith(SYMREF_PREFIX):
+        return None
+    return text[len(SYMREF_PREFIX) :].strip().removeprefix(BRANCH_PREFIX)
+
+
+def _log_rows(repo: Repo, ref: str) -> list[bytes] | None:
+    """A ref's reflog, oldest first, None when it has none.
+
+    Args:
+        repo (Repo): the opened repository.
+        ref (str): the ref name, ``HEAD`` or a full ``refs/`` name.
+    """
+    root = repo.location.gitdir if ref == HEAD else repo.location.commondir
+    data = run_async_from_sync(
+        read_optional(repo.dispatch, root.join(LOGS_DIR, ref)), repo.loop
+    )
+    return None if data is None else [row for row in data.splitlines() if row]
+
+
+def _logged_id(repo: Repo, stem: str, count: int, revision: str) -> str:
+    """The id a ref held ``count`` moves ago, as its reflog tells it.
+
+    Args:
+        repo (Repo): the opened repository.
+        stem (str): the name before the selector; empty for the current
+            branch, or HEAD itself when detached.
+        count (int): how many entries back.
+        revision (str): the whole revision, which a failure names.
+
+    Raises:
+        AmbiguousArgumentError: the name has no reflog.
+    """
+    branch = _head_branch(repo) if not stem else None
+    shown = stem or branch or HEAD
+    known = [ref.decode(errors="replace") for ref in repo.refs.allkeys()]
+    full = f"{BRANCH_PREFIX}{branch}" if branch else None
+    for ref in [full] if full else refs_named(known, shown):
+        rows = _log_rows(repo, ref)
+        if rows is None:
+            continue
+        if count >= len(rows):
+            raise SelectorError(
+                f"log for '{shown}' only has {len(rows)} entries"
+            )
+        return rows[-1 - count].split(b" ")[1].decode()
+    raise AmbiguousArgumentError(revision)
+
+
+def _previous_branch(repo: Repo, count: int, revision: str) -> str:
+    """The branch or commit HEAD left ``count`` checkouts ago.
+
+    Args:
+        repo (Repo): the opened repository.
+        count (int): how many checkouts back.
+        revision (str): the whole revision, which a failure names.
+
+    Raises:
+        AmbiguousArgumentError: HEAD has not moved that many times.
+    """
+    seen = 0
+    for row in reversed(_log_rows(repo, HEAD) or []):
+        message = row.partition(b"\t")[2].decode("utf-8", "replace")
+        if not message.startswith(MOVED_FROM):
+            continue
+        seen += 1
+        if seen == count:
+            return message[len(MOVED_FROM) :].partition(MOVED_TO)[0]
+    raise AmbiguousArgumentError(revision)
+
+
+def _selected_branch(repo: Repo, stem: str) -> str:
+    """The branch ``<stem>@{upstream}`` asks about.
+
+    Args:
+        repo (Repo): the opened repository.
+        stem (str): the name before the selector, empty for the current
+            branch.
+
+    Raises:
+        SelectorError: HEAD is on no branch, or no such branch exists.
+    """
+    if not stem or stem == HEAD:
+        branch = _head_branch(repo)
+        if branch is None:
+            raise SelectorError("HEAD does not point to a branch")
+        return branch
+    if (
+        repo.refs.read_loose_ref(Ref(f"{BRANCH_PREFIX}{stem}".encode()))
+        is None
+    ):
+        raise SelectorError(f"no such branch: '{stem}'")
+    return stem
+
+
+def _upstream_of(repo: Repo, branch: str) -> tuple[ConfigFile, RefUpstream]:
+    """The ref a branch tracks.
+
+    Args:
+        repo (Repo): the opened repository.
+        branch (str): the branch's short name.
+
+    Raises:
+        SelectorError: none is configured, or the remote does not store it.
+    """
+    cfg = run_async_from_sync(
+        read_config(repo.dispatch, repo.location), repo.loop
+    )
+    section = (b"branch", branch.encode())
+    merges = multivar(cfg, section, b"merge")
+    if not multivar(cfg, section, b"remote") or not merges:
+        raise SelectorError(f"no upstream configured for branch '{branch}'")
+    known = frozenset(ref.decode() for ref in repo.refs.allkeys())
+    found = tracking_ref(cfg, branch, known)
+    if found is None:
+        raise SelectorError(
+            f"upstream branch '{merges[0].decode()}' not stored as a "
+            "remote-tracking branch"
+        )
+    return cfg, found
+
+
+def _push_target(repo: Repo, branch: str, revision: str) -> str:
+    """The remote-tracking ref a push of a branch would update, as
+    ``push.default`` says; ``simple`` is the default.
+
+    Args:
+        repo (Repo): the opened repository.
+        branch (str): the branch's short name.
+        revision (str): the whole revision, which a failure names.
+
+    Raises:
+        SelectorError: the branch has no such destination.
+    """
+    cfg = run_async_from_sync(
+        read_config(repo.dispatch, repo.location), repo.loop
+    )
+    modes = multivar(cfg, (b"push",), b"default")
+    mode = modes[-1].decode().lower() if modes else "simple"
+    section = (b"branch", branch.encode())
+    if mode == "nothing":
+        raise SelectorError(
+            "push has no destination (push.default is 'nothing')"
+        )
+    if mode in ("current", "matching"):
+        remotes = multivar(cfg, section, b"remote")
+        remote = remotes[-1].decode() if remotes else "origin"
+        target = _fetched_as(cfg, remote, f"{BRANCH_PREFIX}{branch}")
+        if target is None:
+            raise AmbiguousArgumentError(revision)
+        return target
+    _, upstream = _upstream_of(repo, branch)
+    if mode == "upstream":
+        return upstream.ref
+    pushes = multivar(cfg, section, b"pushremote") or multivar(
+        cfg, (b"remote",), b"pushdefault"
+    )
+    away = pushes[-1].decode() if pushes else upstream.remote
+    if _fetched_as(cfg, away, f"{BRANCH_PREFIX}{branch}") is None:
+        raise SelectorError(
+            f"push destination '{BRANCH_PREFIX}{branch}' on remote "
+            f"'{away}' has no local tracking branch"
+        )
+    if away != upstream.remote or upstream.merge != f"{BRANCH_PREFIX}{branch}":
+        raise SelectorError(
+            "cannot resolve 'simple' push to a single destination"
+        )
+    return upstream.ref
+
+
+def expand_selector(repo: BaseRepo, name: str, revision: str) -> str:
+    """What a name reads as once ``@`` and any ``@{...}`` are read.
+
+    A plain name comes back as it is. ``@{n}`` becomes the id the ref held
+    n moves ago, ``@{-n}`` the n-th branch left behind, and ``@{upstream}``
+    and ``@{push}`` the remote-tracking ref. A selector git reads as a date
+    is not built, and names nothing.
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        name (str): the name, operators already split off.
+        revision (str): the whole revision, which a failure names.
+
+    Raises:
+        AmbiguousArgumentError: the selector names nothing.
+        SelectorError: the selector is one git refuses in its own words.
+    """
+    if name == CURRENT:
+        return HEAD
+    at = name.rfind(SELECTOR_OPEN)
+    if at < 0 or not name.endswith(SELECTOR_CLOSE):
+        return name
+    if not isinstance(repo, Repo):
+        return name
+    stem = expand_selector(repo, name[:at], revision) if at else ""
+    inner = name[at + len(SELECTOR_OPEN) : -len(SELECTOR_CLOSE)]
+    word = inner.lower()
+    if inner.isascii() and inner.isdigit():
+        return _logged_id(repo, stem, int(inner), revision)
+    if not stem and inner[:1] == "-" and inner[1:].isascii():
+        if inner[1:].isdigit() and int(inner[1:]) > 0:
+            return _previous_branch(repo, int(inner[1:]), revision)
+    if word in UPSTREAM_WORDS:
+        return _upstream_of(repo, _selected_branch(repo, stem))[1].ref
+    if word == PUSH_WORD:
+        return _push_target(repo, _selected_branch(repo, stem), revision)
+    raise AmbiguousArgumentError(revision)
+
+
+def tree_id(repo: BaseRepo, revision: str) -> ObjectID:
+    """The tree a revision stands for, a commit's or a tree's own.
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        revision (str): the revision as the user spelled it.
+
+    Raises:
+        AmbiguousArgumentError: it names something with no tree.
+    """
+    found = unwrapped(repo, resolve_object(repo, revision), revision)
+    if isinstance(found, Commit):
+        return ObjectID(found.tree)
+    if isinstance(found, Tree):
+        return found.id
+    raise AmbiguousArgumentError(revision)
+
+
 def note_ambiguity(repo: BaseRepo, name: str) -> None:
     """Put git's ``refname is ambiguous`` warning on the repository's
     list when two refs answer to a name, as git does each time it reads
@@ -696,6 +1000,7 @@ def _named_object(repo: BaseRepo, name: str, revision: str) -> ShaFile:
         name (str): the name or id, operators already split off.
         revision (str): the whole revision, which a failure names.
     """
+    name = expand_selector(repo, name, revision)
     known = [ref.decode(errors="replace") for ref in repo.refs.allkeys()]
     named = refs_named(known, name)
     if named:

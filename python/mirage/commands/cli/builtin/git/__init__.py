@@ -16,13 +16,16 @@ from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.add import add
 from mirage.commands.cli.builtin.git.branch import branch, branch_read_only
 from mirage.commands.cli.builtin.git.cat_file import cat_file
+from mirage.commands.cli.builtin.git.check_ignore import check_ignore
 from mirage.commands.cli.builtin.git.checkout import (
     checkout,
     checkout_read_only,
 )
 from mirage.commands.cli.builtin.git.clone import clone, clone_read_only
 from mirage.commands.cli.builtin.git.commit import commit
-from mirage.commands.cli.builtin.git.diff import diff
+from mirage.commands.cli.builtin.git.config import config
+from mirage.commands.cli.builtin.git.describe import describe
+from mirage.commands.cli.builtin.git.diff import diff, diff_files, diff_index
 from mirage.commands.cli.builtin.git.fetch import fetch, fetch_read_only
 from mirage.commands.cli.builtin.git.for_each_ref import for_each_ref
 from mirage.commands.cli.builtin.git.fsck import fsck
@@ -33,7 +36,7 @@ from mirage.commands.cli.builtin.git.hash_object import (
 )
 from mirage.commands.cli.builtin.git.init import init
 from mirage.commands.cli.builtin.git.inspect import (
-    config,
+    check_ref_format,
     merge_base,
     remote,
     rev_list,
@@ -43,6 +46,7 @@ from mirage.commands.cli.builtin.git.inspect import (
 )
 from mirage.commands.cli.builtin.git.log import log
 from mirage.commands.cli.builtin.git.ls_files import ls_files, ls_tree
+from mirage.commands.cli.builtin.git.ls_remote import ls_remote
 from mirage.commands.cli.builtin.git.mv import mv
 from mirage.commands.cli.builtin.git.reflog import reflog
 from mirage.commands.cli.builtin.git.reset import reset
@@ -109,7 +113,44 @@ DATE_OPTION = Argument(
     "or format:<strftime>",
 )
 
+# Commands never paint, so these only have to be accepted and checked.
+COLOR_OPTIONS = (
+    Argument(
+        "--color",
+        nargs="?",
+        attached_only=True,
+        metavar="when",
+        help="Accepted; output stays plain",
+    ),
+    Argument(
+        "--no-color", action="store_true", help="Accepted; output stays plain"
+    ),
+)
+
 DIFF_OPTIONS = (
+    *COLOR_OPTIONS,
+    Argument(
+        "--diff-filter",
+        metavar="[ACDMRTUXB*]",
+        help="Show only the paths with these change classes",
+    ),
+    Argument(
+        "--no-prefix",
+        action="store_true",
+        help="Show no source or destination prefix",
+    ),
+    Argument(
+        "--default-prefix",
+        action="store_true",
+        help="Use the a/ and b/ prefixes",
+    ),
+    Argument("--src-prefix", help="Show this source prefix"),
+    Argument("--dst-prefix", help="Show this destination prefix"),
+    Argument(
+        "--full-index",
+        action="store_true",
+        help="Show whole blob ids on the index line",
+    ),
     Argument(
         "-a", "--text", action="store_true", help="Treat binary files as text"
     ),
@@ -174,6 +215,29 @@ DIFF_OPTIONS = (
         "--no-renames", action="store_true", help="Turn off rename detection"
     ),
     Argument("--raw", action="store_true", help="Show the raw diff format"),
+)
+
+# Where a comparison answers by exit status, and takes the id width.
+DIFF_RESULT_OPTIONS = (
+    Argument(
+        "--quiet",
+        action="store_true",
+        help="Print nothing; exit 1 if there are differences",
+    ),
+    Argument(
+        "--exit-code",
+        action="store_true",
+        help="Exit 1 if there are differences",
+    ),
+    Argument(
+        "--abbrev",
+        nargs="?",
+        attached_only=True,
+        help="Abbreviate ids to this many digits",
+    ),
+    Argument(
+        "--no-abbrev", action="store_true", help="Show whole ids in --raw"
+    ),
 )
 
 # git's optional-value form: a bare --decorate is short, and a detached
@@ -470,6 +534,7 @@ IGNORE_CASE_OPTION = Argument(
 )
 
 FOR_EACH_REF_OPTIONS = (
+    *COLOR_OPTIONS,
     Argument(
         "-s",
         "--shell",
@@ -518,7 +583,13 @@ FOR_EACH_REF_OPTIONS = (
     ),
 )
 
+NO_COLUMN_OPTION = Argument(
+    "--no-column", action="store_true", help="List one entry per line"
+)
+
 BRANCH_OPTIONS = (
+    *COLOR_OPTIONS,
+    NO_COLUMN_OPTION,
     Argument(
         "--show-current",
         action="store_true",
@@ -535,10 +606,16 @@ BRANCH_OPTIONS = (
     ),
     Argument(
         "-a",
+        "--all",
         action="store_true",
         help="List local and remote-tracking branches",
     ),
-    Argument("-r", action="store_true", help="List remote-tracking branches"),
+    Argument(
+        "-r",
+        "--remotes",
+        action="store_true",
+        help="List remote-tracking branches",
+    ),
     Argument(
         "-d",
         "--delete",
@@ -696,6 +773,8 @@ MV_OPTIONS = (
 )
 
 TAG_OPTIONS = (
+    *COLOR_OPTIONS,
+    NO_COLUMN_OPTION,
     Argument("-l", "--list", action="store_true", help="List tag names"),
     # git spells the count attached (`-n2`) or not at all, never as a
     # separate token, which is what value_optional says: a bare -n means
@@ -731,6 +810,38 @@ TAG_OPTIONS = (
 )
 
 STATUS_OPTIONS = (
+    NO_COLUMN_OPTION,
+    Argument(
+        "-z",
+        "--null",
+        action="store_true",
+        help="End each entry with NUL; implies --porcelain",
+    ),
+    Argument(
+        "--long",
+        action="store_true",
+        help="Give the output in the long format",
+    ),
+    Argument(
+        "--show-stash",
+        action="store_true",
+        help="Say how many stashes there are",
+    ),
+    Argument("--no-show-stash", action="store_true"),
+    Argument(
+        "--ahead-behind",
+        action="store_true",
+        help="Count how far the branch and its upstream have moved",
+    ),
+    Argument("--no-ahead-behind", action="store_true"),
+    Argument("--renames", action="store_true", help="Pair renamed files"),
+    Argument("--no-renames", action="store_true"),
+    Argument(
+        "--find-renames",
+        nargs="?",
+        attached_only=True,
+        help="Pair renames with an optional similarity threshold",
+    ),
     Argument("--ignored", action="store_true", help="Show ignored files"),
     Argument(
         "--porcelain",
@@ -985,6 +1096,67 @@ GIT = CLI(
                         action="store_true",
                         help="Treat binary files as text",
                     ),
+                    *COLOR_OPTIONS,
+                    Argument(
+                        "-A",
+                        "--after-context",
+                        type="int",
+                        help="Print this many lines after each match",
+                    ),
+                    Argument(
+                        "-B",
+                        "--before-context",
+                        type="int",
+                        help="Print this many lines before each match",
+                    ),
+                    Argument(
+                        "-C",
+                        "--context",
+                        type="int",
+                        numeric_shorthand=True,
+                        help="Print this many lines around each match",
+                    ),
+                    Argument(
+                        "-m",
+                        "--max-count",
+                        type="int",
+                        help="Stop after this many matches in a file",
+                    ),
+                    Argument(
+                        "--threads",
+                        type="int",
+                        help="Accepted; files are searched in order",
+                    ),
+                    Argument(
+                        "--heading",
+                        action="store_true",
+                        help="Print each file's name once, above its matches",
+                    ),
+                    Argument(
+                        "--break",
+                        action="store_true",
+                        help="Print a blank line between files",
+                    ),
+                    Argument(
+                        "--full-name",
+                        action="store_true",
+                        help="Name paths from the top of the work tree",
+                    ),
+                    Argument(
+                        "--untracked",
+                        action="store_true",
+                        help="Also search untracked files",
+                    ),
+                    Argument(
+                        "--exclude-standard",
+                        action="store_true",
+                        help="With --untracked, skip ignored files",
+                    ),
+                    Argument(
+                        "--no-exclude-standard",
+                        action="store_true",
+                        help="With --untracked, search ignored files too",
+                    ),
                     Argument(
                         "-I", action="store_true", help="Skip binary files"
                     ),
@@ -1043,6 +1215,27 @@ GIT = CLI(
                         help="Show paths relative to the repository root",
                     ),
                     Argument(
+                        "-l",
+                        "--long",
+                        action="store_true",
+                        help="Show each blob's size",
+                    ),
+                    Argument(
+                        "--object-only",
+                        action="store_true",
+                        help="Print only each object id",
+                    ),
+                    Argument(
+                        "--abbrev",
+                        nargs="?",
+                        attached_only=True,
+                        help="Abbreviate ids to this many digits",
+                    ),
+                    Argument(
+                        "--format",
+                        help="Format each row: %(atom) placeholders",
+                    ),
+                    Argument(
                         "--full-tree",
                         action="store_true",
                         help="List the whole tree, ignoring the current directory",
@@ -1070,6 +1263,99 @@ GIT = CLI(
                         "--cached",
                         action="store_true",
                         help="Show cached files",
+                    ),
+                    Argument(
+                        "-o",
+                        "--others",
+                        action="store_true",
+                        help="Show untracked files",
+                    ),
+                    Argument(
+                        "-m",
+                        "--modified",
+                        action="store_true",
+                        help="Show files that differ from the index",
+                    ),
+                    Argument(
+                        "-d",
+                        "--deleted",
+                        action="store_true",
+                        help="Show files missing from the work tree",
+                    ),
+                    Argument(
+                        "-i",
+                        "--ignored",
+                        action="store_true",
+                        help="Show only excluded files; needs -o or -c",
+                    ),
+                    Argument(
+                        "-u",
+                        "--unmerged",
+                        action="store_true",
+                        help="Show only unmerged entries",
+                    ),
+                    Argument(
+                        "-t",
+                        action="store_true",
+                        help="Prefix each row with its status",
+                    ),
+                    Argument("-v", action="store_true", help="Same as -t"),
+                    Argument("-f", action="store_true", help="Same as -t"),
+                    Argument(
+                        "--directory",
+                        action="store_true",
+                        help="Show an untracked directory by its name",
+                    ),
+                    Argument(
+                        "--no-empty-directory",
+                        action="store_true",
+                        help="Leave out empty directories",
+                    ),
+                    Argument(
+                        "--exclude-standard",
+                        action="store_true",
+                        help="Apply the repository's ignore files",
+                    ),
+                    Argument(
+                        "-x",
+                        "--exclude",
+                        action="append",
+                        help="Leave out what matches this pattern",
+                    ),
+                    Argument(
+                        "-X",
+                        "--exclude-from",
+                        action="append",
+                        help="Read exclude patterns from a file",
+                    ),
+                    Argument(
+                        "--exclude-per-directory",
+                        help="Read this exclude file in each directory",
+                    ),
+                    Argument(
+                        "--error-unmatch",
+                        action="store_true",
+                        help="Fail for a pathspec that matches nothing",
+                    ),
+                    Argument(
+                        "--full-name",
+                        action="store_true",
+                        help="Name paths from the top of the work tree",
+                    ),
+                    Argument(
+                        "--deduplicate",
+                        action="store_true",
+                        help="List each path once",
+                    ),
+                    Argument(
+                        "--abbrev",
+                        nargs="?",
+                        attached_only=True,
+                        help="Abbreviate ids to this many digits",
+                    ),
+                    Argument(
+                        "--format",
+                        help="Format each row: %(atom) placeholders",
                     ),
                     REVISION,
                 ),
@@ -1211,9 +1497,108 @@ GIT = CLI(
                         help="Read global configuration",
                     ),
                     Argument(
+                        "--system",
+                        action="store_true",
+                        help="Read the machine-wide configuration",
+                    ),
+                    Argument(
+                        "--local",
+                        action="store_true",
+                        help="Read the repository's configuration",
+                    ),
+                    Argument(
+                        "--worktree",
+                        action="store_true",
+                        help="Read the work tree's configuration",
+                    ),
+                    Argument(
+                        "-f", "--file", help="Read the named config file"
+                    ),
+                    Argument(
                         "--get",
                         action="store_true",
                         help="Get a configuration value",
+                    ),
+                    Argument(
+                        "--get-all",
+                        action="store_true",
+                        help="Get every value of a variable",
+                    ),
+                    Argument(
+                        "--all",
+                        action="store_true",
+                        help="With get, print every value",
+                    ),
+                    Argument(
+                        "--regexp",
+                        action="store_true",
+                        help="With get, read the name as a pattern",
+                    ),
+                    Argument(
+                        "--value", help="With get, keep values that match"
+                    ),
+                    Argument(
+                        "--fixed-value",
+                        action="store_true",
+                        help="Compare the value pattern literally",
+                    ),
+                    Argument(
+                        "--show-names",
+                        action="store_true",
+                        help="With get, print names too",
+                    ),
+                    Argument(
+                        "--default", help="Answer when the variable is unset"
+                    ),
+                    Argument(
+                        "--type",
+                        help="Print as bool, int, bool-or-int or path",
+                    ),
+                    Argument(
+                        "--bool",
+                        action="store_true",
+                        help="Print as a boolean",
+                    ),
+                    Argument(
+                        "--int",
+                        action="store_true",
+                        help="Print as an integer",
+                    ),
+                    Argument(
+                        "--bool-or-int",
+                        action="store_true",
+                        help="Print as a boolean or an integer",
+                    ),
+                    Argument(
+                        "--path",
+                        action="store_true",
+                        help="Expand a leading ~/",
+                    ),
+                    Argument(
+                        "-z",
+                        "--null",
+                        action="store_true",
+                        help="End each value with NUL",
+                    ),
+                    Argument(
+                        "--name-only",
+                        action="store_true",
+                        help="Print names without values",
+                    ),
+                    Argument(
+                        "--show-scope",
+                        action="store_true",
+                        help="Show the scope of each value",
+                    ),
+                    Argument(
+                        "--includes",
+                        action="store_true",
+                        help="Accepted; include files are not followed",
+                    ),
+                    Argument(
+                        "--no-includes",
+                        action="store_true",
+                        help="Accepted; include files are not followed",
                     ),
                     Argument(
                         "-l",
@@ -1242,6 +1627,16 @@ GIT = CLI(
                 description="Find best common ancestors of commits",
                 arguments=(
                     Argument(
+                        "--octopus",
+                        action="store_true",
+                        help="Find the common ancestor of all the commits",
+                    ),
+                    Argument(
+                        "--independent",
+                        action="store_true",
+                        help="List the commits no other commit reaches",
+                    ),
+                    Argument(
                         "-a",
                         "--all",
                         action="store_true",
@@ -1259,7 +1654,62 @@ GIT = CLI(
             CommandSpec(
                 name="show-ref",
                 description="List references",
-                arguments=(REVISION,),
+                arguments=(
+                    Argument(
+                        "--heads",
+                        action="store_true",
+                        help="Only list branches",
+                    ),
+                    Argument(
+                        "--branches",
+                        action="store_true",
+                        help="Only list branches",
+                    ),
+                    Argument(
+                        "--tags", action="store_true", help="Only list tags"
+                    ),
+                    Argument(
+                        "--head",
+                        action="store_true",
+                        help="List HEAD first",
+                    ),
+                    Argument(
+                        "-d",
+                        "--dereference",
+                        action="store_true",
+                        help="Also list what an annotated tag points at",
+                    ),
+                    Argument(
+                        "-s",
+                        "--hash",
+                        nargs="?",
+                        attached_only=True,
+                        help="Print only the id, of this many digits",
+                    ),
+                    Argument(
+                        "--abbrev",
+                        nargs="?",
+                        attached_only=True,
+                        help="Abbreviate the id to this many digits",
+                    ),
+                    Argument(
+                        "-q",
+                        "--quiet",
+                        action="store_true",
+                        help="Print nothing; the exit status answers",
+                    ),
+                    Argument(
+                        "--verify",
+                        action="store_true",
+                        help="Each operand must be a whole ref name",
+                    ),
+                    Argument(
+                        "--exists",
+                        action="store_true",
+                        help="Test whether one ref exists",
+                    ),
+                    REVISION,
+                ),
             ),
             # symbolic-ref has every option git's has, so its rows carry git's
             # own help and its usage block reads exactly as git's.
@@ -1324,6 +1774,7 @@ GIT = CLI(
                 name="shortlog",
                 description="Summarize commit history",
                 arguments=(
+                    *COLOR_OPTIONS,
                     *(opt for opt in LOG_OPTIONS if "-n" not in opt.names),
                     Argument(
                         "--max-count",
@@ -1378,6 +1829,120 @@ GIT = CLI(
                         help="Print whether the repository is shallow",
                     ),
                     Argument(
+                        "--is-inside-git-dir",
+                        action="store_true",
+                        help="Print whether the current directory is "
+                        "inside the git directory",
+                    ),
+                    Argument(
+                        "--is-bare-repository",
+                        action="store_true",
+                        help="Print whether the repository is bare",
+                    ),
+                    Argument(
+                        "--show-cdup",
+                        action="store_true",
+                        help="Show the way up to the worktree root",
+                    ),
+                    Argument(
+                        "--absolute-git-dir",
+                        action="store_true",
+                        help="Show the git directory's absolute path",
+                    ),
+                    Argument(
+                        "--git-common-dir",
+                        action="store_true",
+                        help="Show the directory shared by linked worktrees",
+                    ),
+                    Argument(
+                        "--git-path",
+                        nargs="?",
+                        metavar="path",
+                        help="Show where a file of the git directory lives",
+                    ),
+                    Argument(
+                        "--path-format",
+                        nargs="?",
+                        attached_only=True,
+                        metavar="absolute|relative",
+                        help="Print later paths in this form",
+                    ),
+                    Argument(
+                        "--show-object-format",
+                        nargs="?",
+                        attached_only=True,
+                        metavar="mode",
+                        help="Show the hash the repository uses",
+                    ),
+                    Argument(
+                        "--show-ref-format",
+                        action="store_true",
+                        help="Show how the repository stores refs",
+                    ),
+                    Argument(
+                        "--symbolic",
+                        action="store_true",
+                        help="Print later revisions as they were typed",
+                    ),
+                    Argument(
+                        "--symbolic-full-name",
+                        action="store_true",
+                        help="Print later revisions as whole ref names, "
+                        "dropping what names no ref",
+                    ),
+                    Argument(
+                        "--not",
+                        action="store_true",
+                        help="Print later revisions with their sign flipped",
+                    ),
+                    Argument(
+                        "--default",
+                        nargs="?",
+                        metavar="revision",
+                        help="Use this revision if the line gives none",
+                    ),
+                    Argument(
+                        "--all",
+                        action="store_true",
+                        help="List every ref under refs/",
+                    ),
+                    Argument(
+                        "--branches",
+                        nargs="?",
+                        attached_only=True,
+                        metavar="pattern",
+                        help="List branches, or those matching a pattern",
+                    ),
+                    Argument(
+                        "--tags",
+                        nargs="?",
+                        attached_only=True,
+                        metavar="pattern",
+                        help="List tags, or those matching a pattern",
+                    ),
+                    Argument(
+                        "--remotes",
+                        nargs="?",
+                        attached_only=True,
+                        metavar="pattern",
+                        help="List remote-tracking branches, or those "
+                        "matching a pattern",
+                    ),
+                    Argument(
+                        "--glob",
+                        nargs="?",
+                        attached_only=True,
+                        metavar="pattern",
+                        help="List the refs a pattern matches",
+                    ),
+                    Argument(
+                        "--exclude",
+                        nargs="?",
+                        attached_only=True,
+                        metavar="pattern",
+                        help="Leave matching refs out of the next listing",
+                    ),
+                    Argument(
                         "--is-inside-work-tree",
                         action="store_true",
                         help="Print whether the current directory is "
@@ -1408,6 +1973,7 @@ GIT = CLI(
                 description="List reachable commits",
                 arguments=(
                     *LOG_OPTIONS,
+                    *COLOR_OPTIONS,
                     Argument(
                         "--count",
                         action="store_true",
@@ -1418,9 +1984,10 @@ GIT = CLI(
             ),
             CommandSpec(
                 name="diff-tree",
-                description="Compare a commit with its parent",
+                description="Compare a commit with its parent, or two trees",
                 arguments=(
                     *SHOW_OPTIONS,
+                    *DIFF_RESULT_OPTIONS,
                     Argument(
                         "--no-commit-id",
                         action="store_true",
@@ -1429,14 +1996,254 @@ GIT = CLI(
                     Argument(
                         "-r", action="store_true", help="Recurse into subtrees"
                     ),
+                    Argument(
+                        "--root",
+                        action="store_true",
+                        help="Show a root commit as all additions",
+                    ),
                     Argument("commit"),
+                    PATHSPEC,
+                ),
+            ),
+            CommandSpec(
+                name="diff-files",
+                description="Compare the index with the working tree",
+                arguments=(
+                    *DIFF_OPTIONS,
+                    *DIFF_RESULT_OPTIONS,
+                    Argument(
+                        "-q",
+                        action="store_true",
+                        help="Stay silent about missing files",
+                    ),
+                    PATHSPEC,
+                ),
+            ),
+            CommandSpec(
+                name="diff-index",
+                description="Compare a tree with the working tree or index",
+                arguments=(
+                    *DIFF_OPTIONS,
+                    *DIFF_RESULT_OPTIONS,
+                    Argument(
+                        "--cached",
+                        action="store_true",
+                        help="Compare with the index",
+                    ),
+                    Argument(
+                        "-m",
+                        action="store_true",
+                        help="Count missing files as unchanged",
+                    ),
+                    Argument("tree-ish", nargs="?"),
+                    PATHSPEC,
+                ),
+            ),
+            CommandSpec(
+                name="check-ref-format",
+                description="Check that a ref name is well formed",
+                arguments=(
+                    Argument(
+                        "--normalize",
+                        action="store_true",
+                        help="Print the name with redundant slashes removed",
+                    ),
+                    Argument(
+                        "--print",
+                        action="store_true",
+                        help="Alias of --normalize",
+                    ),
+                    Argument(
+                        "--allow-onelevel",
+                        action="store_true",
+                        help="Take a name with one component",
+                    ),
+                    Argument(
+                        "--no-allow-onelevel",
+                        action="store_true",
+                        help="Need more than one component",
+                    ),
+                    Argument(
+                        "--refspec-pattern",
+                        action="store_true",
+                        help="Take a name holding one *",
+                    ),
+                    Argument(
+                        "--branch",
+                        action="store_true",
+                        help="Check a branch name and print it",
+                    ),
+                    PATHSPEC,
+                ),
+            ),
+            CommandSpec(
+                name="ls-remote",
+                description="List the refs another repository publishes",
+                arguments=(
+                    Argument(
+                        "-h",
+                        "--heads",
+                        action="store_true",
+                        help="Only list branches",
+                    ),
+                    Argument(
+                        "-b",
+                        "--branches",
+                        action="store_true",
+                        help="Only list branches",
+                    ),
+                    Argument(
+                        "-t",
+                        "--tags",
+                        action="store_true",
+                        help="Only list tags",
+                    ),
+                    Argument(
+                        "--refs",
+                        action="store_true",
+                        help="Leave out pseudorefs and peeled tags",
+                    ),
+                    Argument(
+                        "--symref",
+                        action="store_true",
+                        help="Show what symbolic refs point at",
+                    ),
+                    Argument(
+                        "-q",
+                        "--quiet",
+                        action="store_true",
+                        help="Do not print the remote URL",
+                    ),
+                    Argument(
+                        "--exit-code",
+                        action="store_true",
+                        help="Exit 2 when nothing is listed",
+                    ),
+                    Argument(
+                        "--get-url",
+                        action="store_true",
+                        help="Print the remote's URL and stop",
+                    ),
+                    *SORT_OPTIONS,
+                    PATHSPEC,
+                ),
+            ),
+            CommandSpec(
+                name="check-ignore",
+                description="Show which paths the ignore rules cover",
+                arguments=(
+                    Argument(
+                        "-q",
+                        "--quiet",
+                        action="store_true",
+                        help="Answer by exit status alone",
+                    ),
+                    Argument(
+                        "-v",
+                        "--verbose",
+                        action="store_true",
+                        help="Show the rule that decided each path",
+                    ),
+                    Argument(
+                        "--stdin",
+                        action="store_true",
+                        help="Read the paths from standard input",
+                    ),
+                    Argument(
+                        "-z",
+                        action="store_true",
+                        help="Separate input and output with NUL",
+                    ),
+                    Argument(
+                        "-n",
+                        "--non-matching",
+                        action="store_true",
+                        help="Also show paths no rule matches",
+                    ),
+                    Argument(
+                        "--no-index",
+                        action="store_true",
+                        help="Apply the rules to tracked paths too",
+                    ),
+                    PATHSPEC,
+                ),
+            ),
+            CommandSpec(
+                name="describe",
+                description="Name a commit after the nearest tag",
+                arguments=(
+                    Argument("--all", action="store_true", help="Use any ref"),
+                    Argument(
+                        "--tags",
+                        action="store_true",
+                        help="Use lightweight tags too",
+                    ),
+                    Argument(
+                        "--always",
+                        action="store_true",
+                        help="Fall back to the abbreviated id",
+                    ),
+                    Argument(
+                        "--long",
+                        action="store_true",
+                        help="Always print the long form",
+                    ),
+                    Argument(
+                        "--exact-match",
+                        action="store_true",
+                        help="Only a tag on the commit itself",
+                    ),
+                    Argument(
+                        "--first-parent",
+                        action="store_true",
+                        help="Follow first parents only",
+                    ),
+                    Argument(
+                        "--abbrev",
+                        nargs="?",
+                        attached_only=True,
+                        help="Digits of the commit id; 0 drops the suffix",
+                    ),
+                    Argument(
+                        "--candidates",
+                        nargs="?",
+                        attached_only=True,
+                        metavar="n",
+                        help="How many tags to weigh",
+                    ),
+                    Argument(
+                        "--match",
+                        action="append",
+                        metavar="pattern",
+                        help="Only names matching this glob",
+                    ),
+                    Argument(
+                        "--exclude",
+                        action="append",
+                        metavar="pattern",
+                        help="Leave out names matching this glob",
+                    ),
+                    Argument(
+                        "--dirty",
+                        nargs="?",
+                        attached_only=True,
+                        metavar="mark",
+                        help="Add a mark when the work tree differs",
+                    ),
+                    Argument(
+                        "--broken",
+                        nargs="?",
+                        attached_only=True,
+                        metavar="mark",
+                        help="Like --dirty",
+                    ),
                     PATHSPEC,
                 ),
             ),
             CommandSpec(
                 name="status",
                 description="Show the working tree status",
-                arguments=(*STATUS_OPTIONS,),
+                arguments=(*STATUS_OPTIONS, PATHSPEC),
             ),
             CommandSpec(
                 name="log",
@@ -1462,6 +2269,7 @@ GIT = CLI(
                 description="Show changes between commits",
                 arguments=(
                     *DIFF_OPTIONS,
+                    *DIFF_RESULT_OPTIONS,
                     Argument(
                         "--cached",
                         action="store_true",
@@ -1561,6 +2369,45 @@ GIT = CLI(
         arguments=(
             DIRECTORY_OPTION,
             Argument(
+                "--config-env",
+                "-c",
+                action="append",
+                metavar="name=value",
+                help="Set a config variable for this one command",
+            ),
+            Argument(
+                "-p",
+                "--paginate",
+                action="store_true",
+                help="Accepted; there is no pager to run",
+            ),
+            Argument(
+                "-P",
+                "--no-pager",
+                action="store_true",
+                help="Accepted; there is no pager to run",
+            ),
+            Argument(
+                "--no-optional-locks",
+                action="store_true",
+                help="Accepted; only the locks a write needs are taken",
+            ),
+            Argument(
+                "--no-replace-objects",
+                action="store_true",
+                help="Accepted; replace refs are not followed",
+            ),
+            Argument(
+                "--no-lazy-fetch",
+                action="store_true",
+                help="Accepted; objects are never fetched lazily",
+            ),
+            Argument(
+                "--no-advice",
+                action="store_true",
+                help="Accepted; hints stay as they are",
+            ),
+            Argument(
                 "--git-dir",
                 type="path",
                 env="GIT_DIR",
@@ -1603,6 +2450,12 @@ GIT = CLI(
         "rev-parse": CLIHandler(fn=verb(rev_parse)),
         "rev-list": CLIHandler(fn=verb(rev_list)),
         "diff-tree": CLIHandler(fn=verb(diff_tree)),
+        "diff-files": CLIHandler(fn=verb(diff_files)),
+        "diff-index": CLIHandler(fn=verb(diff_index)),
+        "check-ref-format": CLIHandler(fn=verb(check_ref_format)),
+        "ls-remote": CLIHandler(fn=verb(ls_remote)),
+        "check-ignore": CLIHandler(fn=verb(check_ignore)),
+        "describe": CLIHandler(fn=verb(describe)),
         "status": CLIHandler(fn=verb(status)),
         "log": CLIHandler(fn=verb(log)),
         "show": CLIHandler(fn=verb(show)),

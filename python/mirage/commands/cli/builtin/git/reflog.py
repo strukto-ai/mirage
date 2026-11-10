@@ -16,7 +16,7 @@ import asyncio
 import posixpath
 
 from mirage.accessor.base import Accessor
-from mirage.commands.cli.builtin.git.constants import HEAD
+from mirage.commands.cli.builtin.git.constants import HEAD, LOGS_DIR
 from mirage.commands.cli.builtin.git.discover import is_bare
 from mirage.commands.cli.builtin.git.io import read_optional, write_file
 from mirage.commands.cli.builtin.git.objects import abbrev_for
@@ -34,7 +34,6 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.workspace.files import Files
 
-LOGS_DIR = "logs"
 HEAD_LOG = "logs/HEAD"
 ZERO = b"0" * 40
 # What a move of HEAD or a new branch records in the reflog. There is no

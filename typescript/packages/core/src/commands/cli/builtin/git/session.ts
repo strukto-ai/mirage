@@ -15,15 +15,15 @@
 import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { materialize } from '../../../../io/types.ts'
 import { concat } from '../../../../utils/bytes.ts'
-import type { FlagView } from '../../../spec/flag_view.ts'
+import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIVerbFn } from '../../types.ts'
-import { discover, requireWorkTree } from './discover.ts'
-import { GitError, IndexLockError } from './errors.ts'
+import { discover, inGitDir, requireWorkTree } from './discover.ts'
+import { GitError, IndexLockError, NotARepositoryError, NotAWorkTreeError } from './errors.ts'
 import { configValues } from './fs.ts'
 import { openRepo, type Repo } from './repo.ts'
 import type { ReadOnlyRefusal, RepoLocation } from './types.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
-import { fatal, gitBool, startPoint, requireVfs } from './util.ts'
+import { checkColor, commandLineConfig, fatal, gitBool, startPoint, requireVfs } from './util.ts'
 import { isErofs } from '../../../../errors/fs.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 
@@ -92,6 +92,7 @@ export function verb(
     AMBIGUOUS.set(own.argv, lines)
     let result: CommandFnResult
     try {
+      checkColor(new FlagView(own.flags))
       result = await fn(accessor, paths, texts, own)
     } catch (err) {
       if (err instanceof GitError) {
@@ -111,6 +112,29 @@ export function verb(
 }
 
 /**
+ * Locate a repository without opening its objects.
+ *
+ * @param ctx the line's context, whose files git reads
+ * @param fl repository-selection flags
+ */
+/** The repository the line runs in, null outside one. */
+export async function inside(ctx: Context, fl: FlagView): Promise<RepoLocation | null> {
+  try {
+    return await located(ctx, fl)
+  } catch (err) {
+    if (err instanceof NotARepositoryError) return null
+    throw err
+  }
+}
+
+export async function located(ctx: Context, fl: FlagView): Promise<RepoLocation> {
+  const vfs = requireVfs(ctx)
+  const overrides = commandLineConfig(ctx)
+  const found = await discover(vfs, startPoint(fl), fl.asPath('git_dir'), fl.asPath('work_tree'))
+  return { ...found, vfs, overrides }
+}
+
+/**
  * Discover and open the repository a verb was invoked against.
  *
  * Every verb starts the same way: honor `-C`, walk up to the mount root looking
@@ -126,11 +150,13 @@ export async function opened(ctx: Context, fl: FlagView, workTree = false): Prom
   // The mount root is the session's files' `mountOf`, the same answer a
   // runtime's guest gets.
   const vfs = requireVfs(ctx)
-  const chosen = fl.asPath('work_tree')
-  const found = await discover(vfs, startPoint(fl), fl.asPath('git_dir'), chosen)
-  const location = { ...found, vfs }
+  const location = await located(ctx, fl)
   if (ctx.argv !== undefined) LOCATIONS.set(ctx.argv, location)
-  if (workTree) await requireWorkTree(vfs, location, chosen !== undefined)
+  if (workTree) {
+    const named = fl.asPath('work_tree') !== undefined
+    await requireWorkTree(vfs, location, named)
+    if (!named && inGitDir(startPoint(fl).virtual, location)) throw new NotAWorkTreeError()
+  }
   const warn = gitBool(
     await configValues(vfs, location, 'core.warnAmbiguousRefs'),
     'core.warnambiguousrefs',

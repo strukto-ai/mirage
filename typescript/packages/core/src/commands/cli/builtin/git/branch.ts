@@ -78,19 +78,11 @@ import {
   resolveRef,
   rootNames,
   sortKeys,
-  trackingRef,
   worktreeHeads,
 } from './ref_list.ts'
 import { configBool, repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
-import {
-  COMMIT,
-  noteAmbiguity,
-  refsNamed,
-  resolveCommit,
-  resolveObject,
-  unwrapped,
-} from './revparse.ts'
+import { COMMIT, noteAmbiguity, refsNamed, resolveCommit, resolveObject, trackingRef, unwrapped } from './revparse.ts'
 import { append, entry, IDENTITY, logged, ZERO } from './reflog.ts'
 import {
   RefKind,
@@ -820,8 +812,8 @@ export async function branch(
   const words = filterWords(ctx)
   const operands = withoutFilterValues(texts, words)
   const fl = new FlagView(ctx.flags)
-  const remotesOnly = fl.asBool('r')
-  const includeRemotes = remotesOnly || fl.asBool('a')
+  const remotesOnly = fl.asBool('remotes')
+  const includeRemotes = remotesOnly || fl.asBool('all')
   const forked = fl.asList('forked')
   const cleanup = fl.asList('delete_merged')
   const dryRun = fl.typedOrder('dry_run', 'no_dry_run').at(-1) === 'dry_run'

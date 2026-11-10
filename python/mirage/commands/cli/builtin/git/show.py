@@ -37,10 +37,17 @@ from mirage.commands.cli.builtin.git.diff_output import (
     commit_output,
     commit_shown,
     commit_sides,
+    compare,
+    entries,
+    filtered,
     parse_diff_flags,
     renames_enabled,
+    render_changes,
+    shows,
 )
 from mirage.commands.cli.builtin.git.errors import (
+    AmbiguousArgumentError,
+    GitError,
     UsageError,
 )
 from mirage.commands.cli.builtin.git.format import (
@@ -52,12 +59,17 @@ from mirage.commands.cli.builtin.git.history import (
     displayed,
     pretty_format,
 )
-from mirage.commands.cli.builtin.git.pathspec import pathspec_patterns
+from mirage.commands.cli.builtin.git.io import exists
+from mirage.commands.cli.builtin.git.pathspec import (
+    absolute_operand,
+    pathspec_patterns,
+)
 from mirage.commands.cli.builtin.git.ref_fields import ident_date
 from mirage.commands.cli.builtin.git.repo import config_bool
 from mirage.commands.cli.builtin.git.revparse import (
     resolve_commit,
     resolve_object,
+    tree_id,
 )
 from mirage.commands.cli.builtin.git.rows import (
     Delta,
@@ -295,6 +307,10 @@ def _render(
             shown_one = True
         elif isinstance(target, Commit) and target.id not in shown_commits:
             shown_commits.add(target.id)
+            if flags.diff.diff_filter is not None and not shows(
+                repo, target, flags.diff
+            ):
+                continue
             entry = commit_entry(
                 repo,
                 target,
@@ -406,10 +422,61 @@ def _diff_tree(
     )
 
 
+async def _second_tree(
+    ctx: Context, fl: FlagView, repo: BaseRepo, words: tuple[str, ...]
+) -> tuple[str | None, tuple[str, ...]]:
+    """The other tree-ish a line names, and the paths that follow it.
+
+    The word after the first is a tree-ish if it resolves, and a path
+    when it does not but exists; anything else names nothing.
+
+    Args:
+        ctx (Context): the line's context.
+        fl (FlagView): parsed flags.
+        repo (BaseRepo): the opened repository.
+        words (tuple[str, ...]): the operands after the first.
+
+    Raises:
+        AmbiguousArgumentError: the next word names nothing.
+    """
+    if not words:
+        return None, ()
+    try:
+        await asyncio.to_thread(resolve_object, repo, words[0])
+    except GitError as exc:
+        where = absolute_operand(start_point(fl).virtual, words[0])
+        if await exists(require_vfs(ctx), PathSpec.from_str_path(where)):
+            return None, words
+        raise AmbiguousArgumentError(words[0]) from exc
+    return words[0], words[1:]
+
+
+def _two_trees(
+    repo: BaseRepo,
+    first: str,
+    second: str,
+    parsed: DiffFlags,
+    recursive: bool,
+) -> list[Side]:
+    return [
+        (
+            entries(repo, tree_id(repo, first), recursive, parsed.pathspecs),
+            entries(repo, tree_id(repo, second), recursive, parsed.pathspecs),
+        )
+    ]
+
+
+def _trees_output(
+    repo: BaseRepo, side: Side, parsed: DiffFlags
+) -> tuple[bytes, bool]:
+    rows = compare(repo, side[0], side[1], parsed.renames)
+    return render_changes(repo, rows, parsed), bool(filtered(rows, parsed))
+
+
 async def diff_tree(
     accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    """Compare a commit with its parents.
+    """Compare a commit with its parents, or two trees.
 
     Operands after ``--`` are pathspecs, read once the commit has
     resolved; they limit every block to the paths they name.
@@ -430,25 +497,53 @@ async def diff_tree(
         fl,
         default_patch=False,
         porcelain=False,
+        default_renames=False,
         quote_path_fully=fully,
     )
+    quiet = fl.as_bool("quiet")
+    report = quiet or fl.as_bool("exit_code")
+    if quiet:
+        parsed = replace(parsed, no_patch=True)
     revisions, pathspecs = split_marked(tuple(texts), ctx.argv)
-    commit = await asyncio.to_thread(
-        resolve_commit, repo, revision_arg(revisions)
-    )
+    first = revision_arg(revisions)
+    second, spare = await _second_tree(ctx, fl, repo, revisions[1:])
     parsed = replace(
         parsed,
         pathspecs=pathspec_patterns(
-            location, start_point(fl).virtual, pathspecs
+            location, start_point(fl).virtual, (*spare, *pathspecs)
         ),
     )
+    recursive = fl.as_bool("r") or parsed.patch
+    if second is not None:
+        pair = await asyncio.to_thread(
+            _two_trees, repo, first, second, parsed, recursive
+        )
+
+        async def render_trees(shown: list[Delta]) -> ByteSource | None:
+            body, differs = await asyncio.to_thread(
+                _trees_output, repo, shown_sides(shown, 1)[0], parsed
+            )
+            if report and differs:
+                trees_io.exit_code = 1
+            return None if quiet else body or None
+
+        trees_io = IOResult(rows=Rows(deltas(location, pair), render_trees))
+        return None, trees_io
+    found = await asyncio.to_thread(resolve_object, repo, first)
+    if isinstance(found, Tree):
+        return None, IOResult(
+            stderr=(
+                f"error: object {found.id.decode()} is a tree, not a commit\n"
+            ).encode()
+        )
+    commit = await asyncio.to_thread(resolve_commit, repo, first)
     sides = await asyncio.to_thread(
-        commit_sides, repo, commit, parsed, fl.as_bool("r"), False
+        commit_sides, repo, commit, parsed, recursive, fl.as_bool("root")
     )
     rows = deltas(location, sides)
 
     async def render(shown: list[Delta]) -> ByteSource | None:
-        return await asyncio.to_thread(
+        body = await asyncio.to_thread(
             _diff_tree,
             repo,
             commit,
@@ -456,5 +551,9 @@ async def diff_tree(
             fl.as_bool("no_commit_id"),
             shown_sides(shown, len(sides)),
         )
+        if report and body:
+            io.exit_code = 1
+        return body or None
 
-    return None, IOResult(rows=Rows(rows, render))
+    io = IOResult(rows=Rows(rows, render))
+    return None, io

@@ -76,6 +76,7 @@ def file_patch(
     context: int = HUNK_CONTEXT,
     function_context: bool = False,
     force_text: bool = False,
+    prefixes: tuple[str, str] = ("a/", "b/"),
 ) -> bytes:
     """One path's patch, headers and hunks, as git diff prints it.
 
@@ -99,14 +100,23 @@ def file_patch(
         context (int): the requested number of context lines.
         function_context (bool): ``-W``, widen hunks to whole functions.
         force_text (bool): render binary blobs as text under ``--text``.
+        prefixes (tuple[str, str]): the labels the two sides go under.
     """
     if old and new and S_IFMT(old[0]) != S_IFMT(new[0]):
-        rest = (score, width, fully, context, function_context, force_text)
+        rest = (
+            score,
+            width,
+            fully,
+            context,
+            function_context,
+            force_text,
+            prefixes,
+        )
         return file_patch(repo, name, origin, old, None, *rest) + file_patch(
             repo, name, origin, None, new, *rest
         )
-    source = quote_path(f"a/{origin}", False, fully)
-    target = quote_path(f"b/{name}", False, fully)
+    source = quote_path(f"{prefixes[0]}{origin}", False, fully)
+    target = quote_path(f"{prefixes[1]}{name}", False, fully)
     head = [f"diff --git {source} {target}"]
     if old is None and new:
         head.append(f"new file mode {new[0]:06o}")

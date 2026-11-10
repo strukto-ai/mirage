@@ -37,7 +37,7 @@ from mirage.commands.cli.builtin.git.errors import (
 from mirage.commands.cli.builtin.git.io import (
     stat_of,
 )
-from mirage.commands.cli.builtin.git.refs import read_head
+from mirage.commands.cli.builtin.git.refs import SYMREF_PREFIX, read_head
 from mirage.commands.cli.builtin.git.repo import open_repo
 from mirage.commands.cli.builtin.git.util import require_vfs
 from mirage.commands.config import Context
@@ -76,11 +76,14 @@ class Advertisement:
         peeled (dict[str, str]): the commit each annotated tag peels to.
         head (str | None): the ref HEAD points at, None when it is
             detached or the remote does not say.
+        symrefs (dict[str, str]): every symbolic ref and its target, for
+            a remote that says.
     """
 
     refs: dict[str, str] = field(default_factory=dict)
     peeled: dict[str, str] = field(default_factory=dict)
     head: str | None = None
+    symrefs: dict[str, str] = field(default_factory=dict)
 
 
 def pkt_line(data: bytes) -> bytes:
@@ -252,6 +255,7 @@ class LocalTransport:
         store = self._repo.object_store
         refs: dict[str, str] = {}
         peeled: dict[str, str] = {}
+        symrefs: dict[str, str] = {}
         for name in sorted(self._repo.refs.allkeys()):
             try:
                 oid = self._repo.refs[name]
@@ -261,12 +265,16 @@ class LocalTransport:
             if name != b"HEAD" and not name.startswith(b"refs/"):
                 continue
             refs[name.decode()] = oid.decode()
+            raw = self._repo.refs.read_ref(name) or b""
+            text = raw.decode()
+            if text.startswith(SYMREF_PREFIX):
+                symrefs[name.decode()] = text[len(SYMREF_PREFIX) :]
             obj = store[oid]
             while isinstance(obj, Tag):
                 obj = store[obj.object[1]]
             if obj.id != oid:
                 peeled[name.decode()] = obj.id.decode()
-        return Advertisement(refs, peeled, self._head)
+        return Advertisement(refs, peeled, self._head, symrefs)
 
     async def fetch_pack(
         self,

@@ -25,7 +25,7 @@ import { GITLINK_MODE } from './constants.ts'
 import { discover } from './discover.ts'
 import { GitError, MissingRepositoryError } from './errors.ts'
 import { requireVfs } from './util.ts'
-import { loadRefs, readHead } from './refs.ts'
+import { loadRefs, readHead, SYMREF_PREFIX } from './refs.ts'
 import { objectType, openRepo, repoArgs, type Repo } from './repo.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { concat } from '../../../../utils/bytes.ts'
@@ -48,7 +48,7 @@ const SCP_LIKE = /^[^/:]+:/
 // them.
 const REPO_SUFFIXES = ['/.git', '', '.git/.git', '.git']
 const SYMREF_HEAD = 'symref=HEAD:'
-const PEELED = '^{}'
+export const PEELED = '^{}'
 
 /** What a remote publishes before anything is fetched. */
 export interface Advertisement {
@@ -58,6 +58,8 @@ export interface Advertisement {
   readonly peeled: Map<string, string>
   /** The ref HEAD points at, null when detached or unsaid. */
   readonly head: string | null
+  /** Every symbolic ref and its target, for a remote that says. */
+  readonly symrefs?: ReadonlyMap<string, string>
 }
 
 /** Whether the receiver already holds an object. */
@@ -219,6 +221,7 @@ export class LocalTransport implements Transport {
     )
     const refs = new Map<string, string>()
     const peeled = new Map<string, string>()
+    const symrefs = new Map<string, string>()
     const names = [
       'HEAD',
       ...[...loaded.keys()].filter((name) => name.startsWith('refs/')).sort(compareCodePoints),
@@ -233,12 +236,14 @@ export class LocalTransport implements Transport {
         throw err
       }
       refs.set(name, oid)
+      const raw = loaded.get(name) ?? ''
+      if (raw.startsWith(SYMREF_PREFIX)) symrefs.set(name, raw.slice(SYMREF_PREFIX.length))
       let target = oid
       while ((await objectType(this.repo, target)) === 'tag')
         target = (await git.readTag({ ...repoArgs(this.repo), oid: target })).tag.object
       if (target !== oid) peeled.set(name, target)
     }
-    return { refs, peeled, head: this.head }
+    return { refs, peeled, head: this.head, symrefs }
   }
 
   /** A pack of everything reachable from `wants` the receiver lacks. */

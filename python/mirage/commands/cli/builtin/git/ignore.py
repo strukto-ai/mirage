@@ -12,12 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Sequence
+from dataclasses import dataclass
 from io import BytesIO
 from typing import BinaryIO, cast
 
-from dulwich.ignore import IgnoreFilter, read_ignore_patterns
+from dulwich.ignore import IgnoreFilter, Pattern, read_ignore_patterns
 
 from mirage.commands.cli.builtin.git.io import read_optional
+from mirage.commands.cli.builtin.git.types import RepoLocation
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import PathSpec
 from mirage.workspace.files import Files
 
@@ -37,6 +41,73 @@ def _relative(prefix: str, path: str) -> str:
         path (str): repository-relative path being tested.
     """
     return path[len(prefix) + 1 :] if prefix else path
+
+
+@dataclass(frozen=True)
+class Rule:
+    """One pattern of an ignore file and the line that holds it.
+
+    Args:
+        line (int): the line's number, from one.
+        text (str): the pattern as the file spells it.
+        pattern (Pattern): the compiled pattern.
+    """
+
+    line: int
+    text: str
+    pattern: Pattern
+
+
+@dataclass(frozen=True)
+class IgnoreFile:
+    """One ignore file's rules and where they came from.
+
+    Args:
+        prefix (str): the directory the rules govern,
+            repository-relative, empty at the root.
+        source (str): the file's name as ``check-ignore`` reports it.
+        rules (tuple[Rule, ...]): its patterns, in file order.
+    """
+
+    prefix: str
+    source: str
+    rules: tuple[Rule, ...]
+
+
+def parse_rules(data: bytes) -> tuple[Rule, ...]:
+    """Parse one ignore file into rules, in file order.
+
+    Args:
+        data (bytes): the file's contents.
+    """
+    rules: list[Rule] = []
+    for number, raw in enumerate(data.split(b"\n"), start=1):
+        line = raw.rstrip(b"\r")
+        while line.endswith(b" ") and not line.endswith(b"\\ "):
+            line = line[:-1]
+        for pattern in read_ignore_patterns(cast(BinaryIO, BytesIO(line))):
+            rules.append(Rule(number, decode_text(line), Pattern(pattern)))
+    return tuple(rules)
+
+
+def last_match(
+    files: Sequence[IgnoreFile], path: str, is_dir: bool
+) -> tuple[IgnoreFile, Rule] | None:
+    """The rule that decides a path: the deepest file's last matching line.
+
+    Args:
+        files (Sequence[IgnoreFile]): the files governing the path's
+            directory, innermost last.
+        path (str): repository-relative path.
+        is_dir (bool): whether the path names a directory.
+    """
+    spelled = f"{path}/" if is_dir else path
+    for found in reversed(files):
+        own = encode_text(_relative(found.prefix, spelled))
+        for rule in reversed(found.rules):
+            if rule.pattern.match(own):
+                return found, rule
+    return None
 
 
 class IgnoreStack:
@@ -116,3 +187,25 @@ async def load_ignores(
     if root is not None:
         stack = stack.push("", root)
     return stack
+
+
+async def load_ignore_files(
+    vfs: Files, location: RepoLocation
+) -> list[IgnoreFile]:
+    """The repository's two rule files, as ``check-ignore`` reports them.
+
+    Args:
+        vfs (Files): the session's files.
+        location (RepoLocation): the discovered repository.
+    """
+    files: list[IgnoreFile] = []
+    exclude = location.commondir.join(INFO_EXCLUDE)
+    private = await read_optional(vfs, exclude)
+    if private is not None:
+        top = f"{location.worktree.virtual.rstrip('/')}/"
+        source = exclude.virtual.removeprefix(top)
+        files.append(IgnoreFile("", source, parse_rules(private)))
+    root = await read_optional(vfs, location.worktree.join(GITIGNORE))
+    if root is not None:
+        files.append(IgnoreFile("", GITIGNORE, parse_rules(root)))
+    return files

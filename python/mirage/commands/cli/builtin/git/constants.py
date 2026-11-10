@@ -75,3 +75,4 @@ DWIM_RULES = (
 # The branch a new repository, or a clone whose remote names no usable
 # HEAD, starts on when nothing says otherwise.
 DEFAULT_BRANCH = "master"
+LOGS_DIR = "logs"

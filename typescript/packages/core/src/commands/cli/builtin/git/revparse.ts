@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import git, { Errors } from 'isomorphic-git'
-import { DWIM_RULES, GITLINK_MODE, HEAD } from './constants.ts'
+import { DWIM_RULES, GITLINK_MODE, HEAD, LOGS_DIR } from './constants.ts'
 
 import {
   AmbiguousArgumentError,
@@ -22,6 +22,7 @@ import {
   PathNotAtStageError,
   PathNotInIndexError,
   PathNotInRevisionError,
+  SelectorError,
 } from './errors.ts'
 import { readIndex } from './index_file.ts'
 import { exists, readOptional } from './io.ts'
@@ -30,10 +31,11 @@ import { visiblePath } from './pathspec.ts'
 import { isEnotdir } from '../../../../errors/fs.ts'
 import type { CommitFacts } from './format.ts'
 import { MINIMUM_ABBREV } from './ref_fields.ts'
-import { loadRefs, TAG_PREFIX } from './refs.ts'
+import { BRANCH_PREFIX, loadRefs, mapped, parseRefspec, SYMREF_PREFIX, TAG_PREFIX } from './refs.ts'
 import { commitFacts, repoArgs, type Repo } from './repo.ts'
 import { decoded, guarded, located, placeOf, placed, rooted } from './seen.ts'
-import type { AncestryStep, GitObject, RevOp } from './types.ts'
+import type { AncestryStep, GitObject, RefUpstream, RevOp } from './types.ts'
+import { configValues } from './fs.ts'
 
 const ANCESTOR = '~'
 const PARENT = '^'
@@ -51,9 +53,18 @@ export const OBJECT = 'object'
 const STAGED = /^[0-3]:/
 // `A..B` hides A and walks B; a third dot walks both and hides only what they
 // share. A leading caret hides one revision on its own.
-const RANGE = '..'
+export const RANGE = '..'
 const SYMMETRIC_DOT = '.'
-const NEGATION = '^'
+export const NEGATION = '^'
+// `@` alone is HEAD, and `<name>@{...}` reads a reflog entry, an earlier branch,
+// or the ref a branch tracks.
+const CURRENT = '@'
+export const SELECTOR_OPEN = '@{'
+const SELECTOR_CLOSE = '}'
+const UPSTREAM_WORDS = new Set(['u', 'upstream'])
+const PUSH_WORD = 'push'
+const MOVED_FROM = 'checkout: moving from '
+const MOVED_TO = ' to '
 
 /**
  * Split a revision into its base and the operators applied to it.
@@ -220,7 +231,8 @@ export function refsNamed(table: { has(name: string): boolean }, name: string): 
  * @param base the name or id, operators already split off
  * @param revision the whole revision, for error attribution
  */
-async function namedObject(repo: Repo, base: string, revision: string): Promise<string> {
+async function namedObject(repo: Repo, spelled: string, revision: string): Promise<string> {
+  const base = await expandSelector(repo, spelled, revision)
   let oid: string
   try {
     oid = await git.resolveRef({ ...repoArgs(repo), ref: base })
@@ -237,6 +249,217 @@ async function namedObject(repo: Repo, base: string, revision: string): Promise<
   }
   await noteAmbiguity(repo, base)
   return oid
+}
+
+/**
+ * The ref a branch's upstream lands in.
+ * `branch.<name>.merge` is mapped through the remote's fetch refspecs; a branch
+ * following a remote with none that map it has no upstream at all, and one
+ * following `.` follows a local ref.
+ */
+export async function trackingRef(
+  repo: Repo,
+  branch: string,
+  known: ReadonlySet<string>,
+): Promise<RefUpstream | null> {
+  const values = (path: string): Promise<string[]> => configValues(repo.vfs, repo.location, path)
+  const remote = (await values(`branch.${branch}.remote`)).at(-1)
+  const merge = (await values(`branch.${branch}.merge`))[0]
+  if (remote === undefined || merge === undefined) return null
+  const up = { remote, merge, ahead: 0, behind: 0, gone: false }
+  const target = await fetchedAs(repo, remote, merge)
+  if (target !== null) return { ...up, ref: target }
+  if (remote !== '.') return null
+  return { ...up, ref: refsNamed(known, merge)[0] ?? merge }
+}
+
+/** Where a remote's fetch refspecs put one of its refs, null when none does. */
+async function fetchedAs(repo: Repo, remote: string, name: string): Promise<string | null> {
+  for (const text of await configValues(repo.vfs, repo.location, `remote.${remote}.fetch`)) {
+    const spec = parseRefspec(text)
+    if (spec.src.startsWith('^')) continue
+    const target = mapped(spec, name)
+    if (target) return target
+  }
+  return null
+}
+
+function headBranch(table: ReadonlyMap<string, string>): string | null {
+  const raw = table.get(HEAD) ?? ''
+  if (!raw.startsWith(SYMREF_PREFIX)) return null
+  const target = raw.slice(SYMREF_PREFIX.length).trim()
+  return target.startsWith(BRANCH_PREFIX) ? target.slice(BRANCH_PREFIX.length) : target
+}
+
+/** A ref's reflog, oldest first, null when it has none. */
+async function logRows(repo: Repo, ref: string): Promise<string[] | null> {
+  const root = ref === HEAD ? repo.location.gitdir : repo.location.commondir
+  const data = await readOptional(repo.vfs, root.join(LOGS_DIR, ref))
+  if (data === null) return null
+  return new TextDecoder().decode(data).split('\n').filter(Boolean)
+}
+
+/**
+ * The id a ref held `count` moves ago, as its reflog tells it.
+ *
+ * @param stem the name before the selector; empty for the current branch, or
+ *   HEAD itself when detached
+ * @param count how many entries back
+ * @param revision the whole revision, which a failure names
+ * @throws AmbiguousArgumentError the name has no reflog
+ */
+async function loggedId(
+  repo: Repo,
+  stem: string,
+  count: number,
+  revision: string,
+): Promise<string> {
+  const table = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
+  const branch = stem === '' ? headBranch(table) : null
+  const shown = stem === '' ? (branch ?? HEAD) : stem
+  const names = branch !== null ? [`${BRANCH_PREFIX}${branch}`] : refsNamed(table, shown)
+  for (const ref of names) {
+    const rows = await logRows(repo, ref)
+    if (rows === null) continue
+    if (count >= rows.length)
+      throw new SelectorError(`log for '${shown}' only has ${String(rows.length)} entries`)
+    return rows[rows.length - 1 - count]?.split(' ')[1] ?? ''
+  }
+  throw new AmbiguousArgumentError(revision)
+}
+
+/**
+ * The branch or commit HEAD left `count` checkouts ago.
+ *
+ * @throws AmbiguousArgumentError HEAD has not moved that many times
+ */
+async function previousBranch(repo: Repo, count: number, revision: string): Promise<string> {
+  let seen = 0
+  for (const row of ((await logRows(repo, HEAD)) ?? []).reverse()) {
+    const message = row.slice(row.indexOf('\t') + 1)
+    if (!message.startsWith(MOVED_FROM)) continue
+    seen += 1
+    if (seen === count) {
+      const rest = message.slice(MOVED_FROM.length)
+      return rest.slice(0, rest.indexOf(MOVED_TO))
+    }
+  }
+  throw new AmbiguousArgumentError(revision)
+}
+
+/**
+ * The branch `<stem>@{upstream}` asks about.
+ *
+ * @throws SelectorError HEAD is on no branch, or no such branch exists
+ */
+async function selectedBranch(repo: Repo, stem: string): Promise<string> {
+  const table = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
+  if (stem === '' || stem === HEAD) {
+    const branch = headBranch(table)
+    if (branch === null) throw new SelectorError('HEAD does not point to a branch')
+    return branch
+  }
+  if (!table.has(`${BRANCH_PREFIX}${stem}`)) throw new SelectorError(`no such branch: '${stem}'`)
+  return stem
+}
+
+/**
+ * The ref a branch tracks.
+ *
+ * @throws SelectorError none is configured, or the remote does not store it
+ */
+async function upstreamOf(repo: Repo, branch: string): Promise<RefUpstream> {
+  const values = (path: string): Promise<string[]> => configValues(repo.vfs, repo.location, path)
+  const merge = (await values(`branch.${branch}.merge`))[0]
+  if ((await values(`branch.${branch}.remote`)).length === 0 || merge === undefined)
+    throw new SelectorError(`no upstream configured for branch '${branch}'`)
+  const found = await trackingRef(
+    repo,
+    branch,
+    new Set((await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)).keys()),
+  )
+  if (found === null)
+    throw new SelectorError(`upstream branch '${merge}' not stored as a remote-tracking branch`)
+  return found
+}
+
+/**
+ * The remote-tracking ref a push of a branch would update, as `push.default`
+ * says; `simple` is the default.
+ *
+ * @throws SelectorError the branch has no such destination
+ */
+async function pushTarget(repo: Repo, branch: string, revision: string): Promise<string> {
+  const values = (path: string): Promise<string[]> => configValues(repo.vfs, repo.location, path)
+  const full = `${BRANCH_PREFIX}${branch}`
+  const mode = (await values('push.default')).at(-1)?.toLowerCase() ?? 'simple'
+  if (mode === 'nothing')
+    throw new SelectorError("push has no destination (push.default is 'nothing')")
+  if (mode === 'current' || mode === 'matching') {
+    const remote = (await values(`branch.${branch}.remote`)).at(-1) ?? 'origin'
+    const target = await fetchedAs(repo, remote, full)
+    if (target === null) throw new AmbiguousArgumentError(revision)
+    return target
+  }
+  const upstream = await upstreamOf(repo, branch)
+  if (mode === 'upstream') return upstream.ref
+  const pushes = await values(`branch.${branch}.pushRemote`)
+  const named = pushes.length > 0 ? pushes : await values('remote.pushDefault')
+  const away = named.at(-1) ?? upstream.remote
+  if ((await fetchedAs(repo, away, full)) === null)
+    throw new SelectorError(
+      `push destination '${full}' on remote '${away}' has no local tracking branch`,
+    )
+  if (away !== upstream.remote || upstream.merge !== full)
+    throw new SelectorError("cannot resolve 'simple' push to a single destination")
+  return upstream.ref
+}
+
+/**
+ * What a name reads as once `@` and any `@{...}` are read.
+ *
+ * A plain name comes back as it is. `@{n}` becomes the id the ref held n moves
+ * ago, `@{-n}` the n-th branch left behind, and `@{upstream}` and `@{push}` the
+ * remote-tracking ref. A selector git reads as a date is not built, and names
+ * nothing.
+ *
+ * @param repo the opened repository
+ * @param name the name, operators already split off
+ * @param revision the whole revision, which a failure names
+ * @throws AmbiguousArgumentError the selector names nothing
+ * @throws SelectorError the selector is one git refuses in its own words
+ */
+export async function expandSelector(repo: Repo, name: string, revision: string): Promise<string> {
+  if (name === CURRENT) return HEAD
+  const at = name.lastIndexOf(SELECTOR_OPEN)
+  if (at < 0 || !name.endsWith(SELECTOR_CLOSE)) return name
+  const stem = at > 0 ? await expandSelector(repo, name.slice(0, at), revision) : ''
+  const inner = name.slice(at + SELECTOR_OPEN.length, -SELECTOR_CLOSE.length)
+  const word = inner.toLowerCase()
+  if (/^[0-9]+$/.test(inner)) return loggedId(repo, stem, Number(inner), revision)
+  if (
+    stem === '' &&
+    inner.startsWith('-') &&
+    /^[0-9]+$/.test(inner.slice(1)) &&
+    Number(inner.slice(1)) > 0
+  )
+    return previousBranch(repo, Number(inner.slice(1)), revision)
+  if (UPSTREAM_WORDS.has(word))
+    return (await upstreamOf(repo, await selectedBranch(repo, stem))).ref
+  if (word === PUSH_WORD) return pushTarget(repo, await selectedBranch(repo, stem), revision)
+  throw new AmbiguousArgumentError(revision)
+}
+
+/**
+ * The tree a revision stands for, a commit's or a tree's own.
+ *
+ * @throws AmbiguousArgumentError it names something with no tree
+ */
+export async function treeId(repo: Repo, revision: string): Promise<string> {
+  const found = await unwrapped(repo, await resolveObject(repo, revision), revision)
+  if (found.type === COMMIT) return (await commitFacts(repo, found.oid)).tree
+  if (found.type === 'tree') return found.oid
+  throw new AmbiguousArgumentError(revision)
 }
 
 /**
@@ -482,7 +705,7 @@ export async function tagObject(repo: Repo, stem: string): Promise<GitObject | n
  * a dot right after it makes the range symmetric, and an empty end is HEAD, so
  * `..side` is `HEAD..side`.
  */
-function rangeEnds(revision: string): [string, string, boolean] | null {
+export function rangeEnds(revision: string): [string, string, boolean] | null {
   const at = revision.indexOf(RANGE)
   if (at < 0) return null
   let right = revision.slice(at + RANGE.length)

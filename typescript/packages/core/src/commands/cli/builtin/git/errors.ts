@@ -151,6 +151,51 @@ export class BadConfigValueError extends GitError {
   }
 }
 
+/** A config value an integer type cannot read. */
+export class BadNumericConfigError extends GitError {
+  constructor(value: string, key: string, reason: string) {
+    super(`bad numeric config value '${value}' for '${key}': ${reason}`)
+  }
+}
+
+/** A `--color` value that is not one git knows. */
+export class ColorValueError extends GitError {
+  override readonly prefix: string | null = 'error'
+  override readonly exitCode: number = USAGE_EXIT
+  constructor() {
+    super('option `color\' expects "always", "auto", or "never"')
+  }
+}
+
+/** A `--diff-filter` letter git has no change class for. */
+export class DiffFilterError extends GitError {
+  override readonly prefix: string | null = 'error'
+  override readonly exitCode: number = USAGE_EXIT
+  constructor(letter: string, spelled: string) {
+    super(`unknown change class '${letter}' in --diff-filter=${spelled}`)
+  }
+}
+
+/** A config name git cannot read as `section.name`. */
+export class ConfigKeyError extends GitError {
+  override readonly prefix: string | null = 'error'
+  override readonly exitCode: number = 1
+}
+
+/** `git config` asked for something its usage rules out. */
+export class ConfigUsageError extends GitError {
+  override readonly prefix: string | null = 'error'
+  override readonly exitCode: number = USAGE_EXIT
+}
+
+/** A `-c` git cannot read: it says why, then that it gave up. */
+export class CommandLineConfigError extends GitError {
+  override readonly prefix: string | null = 'error'
+  constructor(reason: string) {
+    super(`${reason}\nfatal: unable to parse command-line config`)
+  }
+}
+
 /**
  * A date flag whose value could not be read.
  *
@@ -418,6 +463,12 @@ export class AbbrevModeError extends GitError {
     super(`unknown mode for --abbrev-ref: ${mode}`)
   }
 }
+
+/**
+ * A `@{...}` selector git refuses in its own words, where a name that resolves
+ * to nothing would be answered as an unknown revision.
+ */
+export class SelectorError extends GitError {}
 
 /**
  * `rev-parse --verify` (or `--short`, which implies it) not given exactly one

@@ -344,3 +344,23 @@ describe('status under a hide', () => {
     expect(DEC.decode((await ws.shell(line)).stdout)).toBe(git(repo, ['status', '--porcelain']))
   })
 })
+
+describe('git status --show-stash against the real binary', () => {
+  it('reports what git reports', async () => {
+    const env = {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'Ada',
+      GIT_AUTHOR_EMAIL: 'ada@example.com',
+      GIT_COMMITTER_NAME: 'Ada',
+      GIT_COMMITTER_EMAIL: 'ada@example.com',
+    }
+    const [mine, theirs] = await both(
+      (r) => {
+        put(r, 'letters.txt', 'edited\n')
+        execFileSync('git', ['-C', r, 'stash', '-q'], { env })
+      },
+      ['--show-stash'],
+    )
+    expect(mine).toBe(theirs)
+  })
+})

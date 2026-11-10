@@ -226,6 +226,11 @@ export async function isBare(vfs: Files, location: RepoLocation): Promise<boolea
   return gitBool(await configValues(vfs, location, 'core.bare'), 'core.bare', false)
 }
 
+/** Whether a directory is the git directory or inside it. */
+export function inGitDir(start: string, location: RepoLocation): boolean {
+  return start === location.gitdir.virtual || start.startsWith(`${location.gitdir.virtual}/`)
+}
+
 /**
  * Refuse, in git's words, when there is no work tree to enter.
  *

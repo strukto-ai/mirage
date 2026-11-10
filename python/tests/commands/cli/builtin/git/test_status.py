@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -331,3 +332,23 @@ async def test_a_hide_matches_an_index_name_that_is_not_utf8(repo_path: Path):
         line = "git -C /repo status --porcelain"
         assert (await ws.shell(line, session_id="v")).stdout == b""
         assert (await ws.shell(line)).stdout == (b'AD "\\357\\277\\275.txt"\n')
+
+
+@pytest.mark.asyncio
+async def test_show_stash_reports_what_git_reports(git_ws, repo_path):
+    env = {
+        "GIT_AUTHOR_NAME": "Ada",
+        "GIT_AUTHOR_EMAIL": "ada@example.com",
+        "GIT_COMMITTER_NAME": "Ada",
+        "GIT_COMMITTER_EMAIL": "ada@example.com",
+    }
+    (repo_path / "a.txt").write_text("stashed\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "-C", str(repo_path), "stash", "-q"], check=True, env=env
+    )
+    native = subprocess.run(
+        ["git", "-C", str(repo_path), "status", "--show-stash"],
+        capture_output=True,
+        check=True,
+    )
+    assert await run(git_ws, "status --show-stash") == native.stdout

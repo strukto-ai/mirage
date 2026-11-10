@@ -18,8 +18,12 @@ import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { branchUpstream } from './branch.ts'
-import { assembled, collect, type StatusRow } from './changes.ts'
+import { assembled, collect, RENAME_THRESHOLD, type StatusRow } from './changes.ts'
+import { similarity } from './diff_output.ts'
 import { GitError } from './errors.ts'
+import { configValues } from './fs.ts'
+import { readOptional } from './io.ts'
+import { pathspecPatterns, pathspecSelects } from './pathspec.ts'
 import { detachedLine } from './ref_list.ts'
 import { readHead } from './refs.ts'
 import { branchLine, longFormat, relativeEntries, shortFormat } from './render.ts'
@@ -27,7 +31,7 @@ import { configBool, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import type { HeadRef } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
-import { startPoint, requireVfs } from './util.ts'
+import { checkSwitches, maybeBool, startPoint, requireVfs } from './util.ts'
 import { repoRelative } from './pathspec.ts'
 import { UNTRACKED_ALL, UNTRACKED_NO, UNTRACKED_NORMAL } from './worktree.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
@@ -43,6 +47,8 @@ interface StatusFlags {
   /** `-u`, which untracked files to report. */
   readonly untracked: string
   readonly ignored: boolean
+  /** `-z`, end entries with NUL. */
+  readonly nul: boolean
 }
 
 /**
@@ -57,13 +63,56 @@ function parseFlags(fl: FlagView): StatusFlags {
   const version = fl.asStr('porcelain')
   if (version != null && !['1', 'v1'].includes(version))
     throw new GitError(`unsupported porcelain version '${version}'`)
+  const nul = fl.asBool('null')
+  const last = fl.typedOrder('short', 'long', 'porcelain').at(-1) ?? ''
+  if (nul && fl.asBool('long'))
+    throw new GitError("options '--long' and '-z' cannot be used together")
   return {
-    porcelain: fl.asBool('porcelain') || fl.asStr('porcelain') != null,
-    short: fl.asBool('short'),
+    porcelain: last === 'porcelain' || (nul && last !== 'short'),
+    short: last === 'short',
     branch: fl.asBool('branch'),
     ignored: fl.asBool('ignored'),
     untracked: mode,
+    nul,
   }
+}
+
+/** A setting the line can turn on or off and config otherwise decides. */
+async function chosen(
+  repo: Repo,
+  fl: FlagView,
+  on: string,
+  off: string,
+  variable: string,
+  fallback: boolean,
+): Promise<boolean> {
+  const last = fl.typedOrder(on, off).at(-1)
+  if (last !== undefined) return last === on
+  return configBool(repo, `status.${variable}`, fallback)
+}
+
+/** The similarity a status rename needs, null for no pairing. */
+async function renameThreshold(repo: Repo, fl: FlagView): Promise<number | null> {
+  const last = fl.typedOrder('renames', 'no_renames', 'find_renames').at(-1)
+  if (last === 'no_renames') return null
+  if (last === 'find_renames') {
+    const value = fl.raw('find_renames')
+    return typeof value === 'string' && value !== '' ? similarity(value) : 50
+  }
+  if (last !== undefined) return RENAME_THRESHOLD
+  const values = await configValues(repo.vfs, repo.location, 'status.renames')
+  const value = values.at(-1)
+  return value !== undefined && maybeBool(value) === false ? null : RENAME_THRESHOLD
+}
+
+/** How many stashes the repository holds. */
+async function stashCount(repo: Repo): Promise<number> {
+  const data = await readOptional(repo.vfs, repo.location.commondir.join('logs/refs/stash'))
+  if (data === null) return 0
+  return new TextDecoder()
+    .decode(data)
+    .split('\n')
+    .filter((row) => row !== '').length
 }
 
 /**
@@ -131,21 +180,32 @@ export async function status(
   const fl = new FlagView(ctx.flags)
   const vfs = requireVfs(ctx)
   const parsed = parseFlags(fl)
+  checkSwitches(ctx, texts)
   const repo = await opened(ctx, fl, true)
   const head = await readHead(vfs, repo.location.gitdir)
-  const [rows, state, noCommits] = await collect(repo, vfs, parsed.untracked, parsed.ignored)
+  const start = startPoint(fl).virtual
+  const patterns = pathspecPatterns(repo.location, start, texts)
+  const showStash = await chosen(repo, fl, 'show_stash', 'no_show_stash', 'showStash', false)
+  const aheadBehind = await chosen(repo, fl, 'ahead_behind', 'no_ahead_behind', 'aheadBehind', true)
+  const threshold = await renameThreshold(repo, fl)
+  const [collected, state, noCommits] = await collect(repo, vfs, parsed.untracked, parsed.ignored)
+  const rows = patterns.length
+    ? collected.filter((row) => pathspecSelects(row.name.replace(/\/$/, ''), patterns))
+    : collected
   const fully = await configBool(repo, 'core.quotepath', true)
-  const prefix = parsed.porcelain ? '' : await relativePrefix(repo, startPoint(fl).virtual)
+  const prefix = parsed.porcelain ? '' : await relativePrefix(repo, start)
+  const stashes = showStash ? await stashCount(repo) : 0
   const upstream = await branchUpstream(repo, head, noCommits)
   const detached = head.branch !== null ? '' : await detachedLine(repo, head)
   const render = async (shown: StatusRow[]): Promise<ByteSource> => {
-    const entries = relativeEntries(await assembled(repo, shown), prefix)
-    const body =
+    const entries = relativeEntries(await assembled(repo, shown, threshold), prefix)
+    let body =
       parsed.porcelain || parsed.short
         ? shortFormat(
             entries,
-            parsed.branch ? branchLine(head.branch, noCommits, upstream) : null,
+            parsed.branch ? branchLine(head.branch, noCommits, upstream, aheadBehind) : null,
             fully,
+            parsed.nul,
           )
         : longFormat(
             entries,
@@ -156,7 +216,10 @@ export async function status(
             parsed.untracked === UNTRACKED_NO,
             fully,
             upstream,
+            aheadBehind,
           )
+    if (stashes > 0 && !parsed.porcelain && !parsed.short)
+      body += `Your stash currently has ${String(stashes)} ${stashes === 1 ? 'entry' : 'entries'}\n`
     return encodeText(body)
   }
   return [null, new IOResult({ rows: { items: rows, render } })]

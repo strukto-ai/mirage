@@ -281,6 +281,18 @@ async def is_bare(vfs: Files, location: RepoLocation) -> bool:
     )
 
 
+def in_git_dir(start: str, location: RepoLocation) -> bool:
+    """Whether a directory is the git directory or inside it.
+
+    Args:
+        start (str): the absolute virtual directory.
+        location (RepoLocation): the discovered repository.
+    """
+    return start == location.gitdir.virtual or start.startswith(
+        location.gitdir.virtual + "/"
+    )
+
+
 async def require_work_tree(
     vfs: Files,
     location: RepoLocation,

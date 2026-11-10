@@ -591,7 +591,9 @@ class StatusRow:
 
 
 def assembled(
-    store: BaseObjectStore, shown: list[StatusRow]
+    store: BaseObjectStore,
+    shown: list[StatusRow],
+    threshold: int | None = RENAME_THRESHOLD,
 ) -> list[StatusEntry]:
     """The status entries the rows a session sees make, renames paired.
 
@@ -600,6 +602,8 @@ def assembled(
     Args:
         store (BaseObjectStore): the object database, read for blobs.
         shown (list[StatusRow]): the rows the command boundary kept.
+        threshold (int | None): the similarity a rename needs, None to
+            pair none.
     """
     staged: dict[str, str] = {}
     shas: dict[str, bytes] = {}
@@ -623,7 +627,9 @@ def assembled(
             if row.end is not None:
                 kinds[row.name], shas[row.name] = row.end
     rows = merge(
-        pair_renames(store, staged, shas, kinds),
+        pair_renames(store, staged, shas, kinds, threshold)
+        if threshold is not None
+        else {path: (letter, None, 0) for path, letter in staged.items()},
         unstaged,
         conflicts,
         untracked,

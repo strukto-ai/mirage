@@ -1,15 +1,17 @@
-import git from 'isomorphic-git'
 import type { FlagView } from '../../../spec/flag_view.ts'
 import { pairRenames, kindOf } from './changes.ts'
 import { combinedLines } from './combined.ts'
 import { TEMPLATE_KINDS, TERMINATED_KINDS } from './constants.ts'
-import { GitError } from './errors.ts'
+import { GitError, DiffFilterError } from './errors.ts'
 import { pathspecSelects } from './pathspec.ts'
 import { commitHeader, type CommitDisplay, type CommitFacts, type Decorations } from './format.ts'
 import { blobData, DEV_NULL, filePatch, HUNK_CONTEXT, OID_HEX, shortOid } from './patch.ts'
 import { quotePath } from './render.ts'
 import { deltas, shownSides, type Delta, type Side } from './rows.ts'
-import { commitFacts, repoArgs, type Repo } from './repo.ts'
+import { configValues } from './fs.ts'
+import { abbrevWidth } from './format.ts'
+import { maybeBool } from './util.ts'
+import { commitFacts, type Repo } from './repo.ts'
 import { readable, shownEntries } from './seen.ts'
 import { BINARY_SNIFF, diffstat, statTable, type FileStat } from './summary.ts'
 import { matches, type Pickaxe } from './pickaxe.ts'
@@ -17,6 +19,7 @@ import { TREE_MODE, treeEntries, treeItems, type TreeEntry } from './tree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const RENAME_SCORE = 50
+const CHANGE_CLASSES = 'ACDMRTUXB'
 // What a combined diff's mode line starts with; `log --graph` prints that line
 // with no graph in front of it.
 export const COMBINED_MODE = 'mode '
@@ -41,6 +44,89 @@ export interface DiffFlags {
   quotePathFully: boolean
   pathspecs: readonly string[]
   pickaxe?: Pickaxe | null
+  diffFilter?: readonly [ReadonlySet<string>, boolean] | null
+  prefixes?: readonly [string, string]
+  indexWidth?: number | null
+  rawWidth?: number | null
+  workTree?: boolean
+  sameAsIndex?: ReadonlySet<string>
+}
+
+/**
+ * A `--diff-filter` value as the classes it keeps. Capitals keep a class and
+ * small letters drop one, so only small letters start from every class. `*`
+ * keeps a whole comparison when any of its paths matches.
+ */
+export function diffFilterOf(
+  spelled: string | undefined,
+): readonly [ReadonlySet<string>, boolean] | null {
+  if (spelled === undefined || spelled === '') return null
+  const letters = [...spelled].filter((char) => char !== '*')
+  const star = spelled.includes('*')
+  const lower = (char: string): boolean =>
+    char === char.toLowerCase() && char !== char.toUpperCase()
+  const chosen = new Set<string>(letters.length > 0 && letters.every(lower) ? CHANGE_CLASSES : '')
+  for (const char of letters) {
+    if (!CHANGE_CLASSES.includes(char.toUpperCase())) throw new DiffFilterError(char, spelled)
+    if (lower(char)) chosen.delete(char.toUpperCase())
+    else chosen.add(char)
+  }
+  return [chosen, star]
+}
+
+/** The changes `--diff-filter` keeps. */
+export function filtered(rows: Change[], flags: DiffFlags): Change[] {
+  if (flags.diffFilter === undefined || flags.diffFilter === null) return rows
+  const [chosen, star] = flags.diffFilter
+  const kept = rows.filter((row) => chosen.has(row.status))
+  return star ? (kept.length ? rows : []) : kept
+}
+
+/** The `diff` variables that choose a patch's prefixes. */
+export async function prefixConfig(repo: Repo): Promise<Record<string, string | undefined>> {
+  const out: Record<string, string | undefined> = {}
+  for (const name of ['noprefix', 'srcprefix', 'dstprefix'])
+    out[name] = (await configValues(repo.vfs, repo.location, `diff.${name}`)).at(-1)
+  return out
+}
+
+function prefixesOf(
+  fl: FlagView,
+  settings: Record<string, string | undefined>,
+): readonly [string, string] {
+  let source = 'a/'
+  let target = 'b/'
+  if (settings.noprefix !== undefined && maybeBool(settings.noprefix) === true) {
+    source = ''
+    target = ''
+  }
+  source = settings.srcprefix ?? source
+  target = settings.dstprefix ?? target
+  for (const [name, value] of fl.occurrences(
+    'no_prefix',
+    'default_prefix',
+    'src_prefix',
+    'dst_prefix',
+  )) {
+    if (name === 'no_prefix') {
+      source = ''
+      target = ''
+    } else if (name === 'default_prefix') {
+      source = 'a/'
+      target = 'b/'
+    } else if (name === 'src_prefix' && typeof value === 'string') source = value
+    else if (name === 'dst_prefix' && typeof value === 'string') target = value
+  }
+  return [source, target]
+}
+
+/** A similarity option's value as a percentage: `50%`, or a fraction's digits as in `-M5`. */
+export function similarity(spelled: string): number {
+  const value = spelled.endsWith('%')
+    ? Number(spelled.slice(0, -1))
+    : Math.floor(Number(`0.${spelled}`) * 100)
+  if (!Number.isFinite(value)) throw new GitError(`invalid similarity index ${spelled}`)
+  return value
 }
 
 export function parseDiffFlags(
@@ -50,6 +136,7 @@ export function parseDiffFlags(
   porcelain = true,
   defaultRenames = true,
   quotePathFully = true,
+  prefixSettings: Record<string, string | undefined> = {},
 ): DiffFlags {
   const nameOnly = fl.asBool('name_only'),
     nameStatus = fl.asBool('name_status'),
@@ -63,12 +150,7 @@ export function parseDiffFlags(
   let threshold: number | null = porcelain && defaultRenames ? RENAME_SCORE : null
   if (rename !== undefined && rename !== false) {
     threshold = RENAME_SCORE
-    if (typeof rename === 'string' && rename !== '') {
-      threshold = rename.endsWith('%')
-        ? Number(rename.slice(0, -1))
-        : Math.floor(Number(`0.${rename}`) * 100)
-      if (!Number.isFinite(threshold)) throw new GitError(`invalid similarity index ${rename}`)
-    }
+    if (typeof rename === 'string' && rename !== '') threshold = similarity(rename)
   }
   if (fl.asBool('no_renames')) threshold = null
   let merge = fl.asStr('diff_merges', defaultMerge)
@@ -94,7 +176,13 @@ export function parseDiffFlags(
     fl.asBool('function_context') ||
     fl.asInt('unified') != null ||
     ((defaultPatch || fl.asBool('cc') || (porcelain && fl.asBool('c'))) && !modes)
+  const abbrevWanted = fl.raw('abbrev')
+  const named = typeof abbrevWanted === 'string' ? abbrevWidth(abbrevWanted, OID_HEX) : null
   return {
+    diffFilter: diffFilterOf(fl.asStr('diff_filter')),
+    prefixes: prefixesOf(fl, prefixSettings),
+    indexWidth: fl.asBool('full_index') ? OID_HEX : named,
+    rawWidth: fl.asBool('no_abbrev') ? OID_HEX : named,
     context,
     functionContext: fl.asBool('function_context'),
     forceText: fl.asBool('text'),
@@ -109,7 +197,7 @@ export function parseDiffFlags(
     renames: threshold,
     merge,
     raw: raw || (!porcelain && !modes && !patch),
-    abbrev: porcelain,
+    abbrev: porcelain || abbrevWanted === true,
     quotePathFully,
     pathspecs: [],
   }
@@ -195,9 +283,18 @@ function textLines(data: Uint8Array): string[] {
  * `--name-only` and `--name-status` stand alone; otherwise raw rows come first,
  * then numstat, stat and summary, then a blank line and the patch.
  */
-export async function renderChanges(repo: Repo, rows: Change[], flags: DiffFlags): Promise<string> {
+function showsNewId(row: Change, flags: DiffFlags): boolean {
+  return flags.workTree !== true || flags.sameAsIndex?.has(row.path) === true
+}
+
+export async function renderChanges(
+  repo: Repo,
+  input: Change[],
+  flags: DiffFlags,
+): Promise<string> {
+  const rows = filtered(input, flags)
   if (flags.noPatch) return ''
-  const width = flags.abbrev ? repo.abbrev : OID_HEX
+  const width = flags.rawWidth ?? (flags.abbrev ? repo.abbrev : OID_HEX)
   const fully = flags.quotePathFully
   let output: string[] = []
   const numbers: string[] = [],
@@ -218,7 +315,7 @@ export async function renderChanges(repo: Repo, rows: Change[], flags: DiffFlags
     }
     if (flags.raw)
       output.push(
-        `:${row.old?.mode ?? '000000'} ${row.new?.mode ?? '000000'} ${shortOid(row.old, width)} ${shortOid(row.new, width)} ${status}\t${paths}`,
+        `:${row.old?.mode ?? '000000'} ${row.new?.mode ?? '000000'} ${shortOid(row.old, width)} ${shortOid(showsNewId(row, flags) ? row.new : null, width)} ${status}\t${paths}`,
       )
     const display = row.status === 'R' ? renameName(row.oldPath, row.path, fully) : shown
     if (flags.stat || flags.numstat || flags.shortstat)
@@ -238,11 +335,12 @@ export async function renderChanges(repo: Repo, rows: Change[], flags: DiffFlags
           row.old,
           row.new,
           row.status === 'R' ? row.score : null,
-          repo.abbrev,
+          flags.indexWidth ?? repo.abbrev,
           fully,
           flags.context,
           flags.functionContext,
           flags.forceText,
+          flags.prefixes,
         ),
       )
   }
@@ -466,9 +564,9 @@ export async function commitSides(
  * @param flags the diff flags, carrying the pickaxe
  */
 export async function shows(repo: Repo, commit: CommitFacts, flags: DiffFlags): Promise<boolean> {
-  if (!flags.pickaxe || isCombined(commit, flags)) return true
+  if ((!flags.pickaxe && !flags.diffFilter) || isCombined(commit, flags)) return true
   for (const [before, after] of await commitSides(repo, commit, flags))
-    if ((await rowsOf(repo, before, after, flags)).length) return true
+    if (filtered(await rowsOf(repo, before, after, flags), flags).length) return true
   return false
 }
 
@@ -650,13 +748,8 @@ function changeAt(rows: ReadonlyMap<string, Change>, path: string): Change {
 }
 
 export async function renamesEnabled(repo: Repo): Promise<boolean> {
-  const value = (await git.getConfig({ ...repoArgs(repo), path: 'diff.renames' })) as
-    | string
-    | boolean
-    | undefined
-  return (
-    value === undefined || !['false', 'no', 'off', '0', ''].includes(String(value).toLowerCase())
-  )
+  const value = (await configValues(repo.vfs, repo.location, 'diff.renames')).at(-1)
+  return value === undefined || !['false', 'no', 'off', '0', ''].includes(value.toLowerCase())
 }
 
 /**

@@ -361,7 +361,7 @@
       "expect": {
         "exit": 129,
         "stdout": "",
-        "stderr": "error: unknown option `bogus'\nusage: git for-each-ref [<options>] [<pattern>]\n   or: git for-each-ref [--points-at <object>]\n   or: git for-each-ref [--merged [<commit>]] [--no-merged [<commit>]]\n   or: git for-each-ref [--contains [<commit>]] [--no-contains [<commit>]]\n\n    -s, --shell           Quote fields suitably for shells\n    -p, --perl            Quote fields suitably for perl\n    --python              Quote fields suitably for python\n    --tcl                 Quote fields suitably for Tcl\n    --omit-empty          Print nothing, not even a newline, for an empty row\n    --count <n>           Show only the first <n> refs\n    --format <format>     Format each ref: %(fieldname) placeholders, as git for-each-ref\n    --exclude <pattern>   Leave out refs matching the pattern\n    --[no-]sort <key>     Sort on a field, - reversing it and version: comparing as versions\n    --contains[=<commit>] List only refs that contain the commit (HEAD if omitted)\n    --no-contains[=<commit>]\n                          List only refs that don't contain the commit (HEAD if omitted)\n    --merged[=<commit>]   List only refs reachable from the commit (HEAD if omitted)\n    --no-merged[=<commit>]\n                          List only refs not reachable from the commit (HEAD if omitted)\n    --points-at <object>  List only refs that point at the object\n    --ignore-case         Sort and match patterns case-insensitively\n    --stdin               Read ref patterns from stdin\n    --include-root-refs   Also list HEAD and the other root refs\n\n"
+        "stderr": "error: unknown option `bogus'\nusage: git for-each-ref [<options>] [<pattern>]\n   or: git for-each-ref [--points-at <object>]\n   or: git for-each-ref [--merged [<commit>]] [--no-merged [<commit>]]\n   or: git for-each-ref [--contains [<commit>]] [--no-contains [<commit>]]\n\n    --[no-]color[=<when>] Accepted; output stays plain\n    -s, --shell           Quote fields suitably for shells\n    -p, --perl            Quote fields suitably for perl\n    --python              Quote fields suitably for python\n    --tcl                 Quote fields suitably for Tcl\n    --omit-empty          Print nothing, not even a newline, for an empty row\n    --count <n>           Show only the first <n> refs\n    --format <format>     Format each ref: %(fieldname) placeholders, as git for-each-ref\n    --exclude <pattern>   Leave out refs matching the pattern\n    --[no-]sort <key>     Sort on a field, - reversing it and version: comparing as versions\n    --contains[=<commit>] List only refs that contain the commit (HEAD if omitted)\n    --no-contains[=<commit>]\n                          List only refs that don't contain the commit (HEAD if omitted)\n    --merged[=<commit>]   List only refs reachable from the commit (HEAD if omitted)\n    --no-merged[=<commit>]\n                          List only refs not reachable from the commit (HEAD if omitted)\n    --points-at <object>  List only refs that point at the object\n    --ignore-case         Sort and match patterns case-insensitively\n    --stdin               Read ref patterns from stdin\n    --include-root-refs   Also list HEAD and the other root refs\n\n"
       }
     },
     {
@@ -1005,7 +1005,7 @@
       "expect": {
         "exit": 129,
         "stdout": "",
-        "stderr": "unknown option: --bogus\nusage: git [-v | --version] [--help] [-C <path>] [--git-dir=<path>]\n           [--work-tree=<path>] <command> [<args>]\n"
+        "stderr": "unknown option: --bogus\nusage: git [-v | --version] [--help] [-C <path>] [-c <name>=<value>]\n           [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--no-lazy-fetch]\n           [--no-optional-locks] [--no-advice] [--git-dir=<path>]\n           [--work-tree=<path>] [--config-env=<name>=<envvar>]\n           <command> [<args>]\n"
       }
     },
     {
@@ -1047,7 +1047,7 @@
       "expect": {
         "exit": 129,
         "stdout": "",
-        "stderr": "error: unknown option `bogus'\nusage: git ls-files [<options>] [<file>...]\n\n    -z                    Terminate paths with NUL\n    -s, --stage           Show staged object metadata\n    -c, --cached          Show cached files\n\nerror: unknown option `bogus'\nusage: git show-ref [--] [<pattern>...]\n\nerror: unknown option `bogus'\nusage: git help [<command>]\n\nerror: unknown option `bogus'\nusage: git clone [<options>] [--] <repo> [<dir>]\n\n    -q, --quiet           Print nothing but errors\n    -b, --branch <branch> Check out this branch or tag\n    -o, --origin <origin> Name the remote this instead of origin\n    -n, --no-checkout     Leave the working tree empty\n\nerror: unknown option `bogus'\nusage: git fetch [<options>] [<repository> [<refspec>...]]\n\n    -q, --quiet           Print nothing but errors\n    -v, --verbose         Also list unchanged refs\n    -p, --prune           Remove remote-tracking refs the remote no longer has\n    -t, --tags            Fetch every tag\n    -n, --no-tags         Follow no tags\n\n"
+        "stderr": "error: unknown option `bogus'\nusage: git ls-files [<options>] [<file>...]\n\n    -z                    Terminate paths with NUL\n    -s, --stage           Show staged object metadata\n    -c, --cached          Show cached files\n    -o, --others          Show untracked files\n    -m, --modified        Show files that differ from the index\n    -d, --deleted         Show files missing from the work tree\n    -i, --ignored         Show only excluded files; needs -o or -c\n    -u, --unmerged        Show only unmerged entries\n    -t                    Prefix each row with its status\n    -v                    Same as -t\n    -f                    Same as -t\n    --directory           Show an untracked directory by its name\n    --no-empty-directory  Leave out empty directories\n    --exclude-standard    Apply the repository's ignore files\n    -x, --exclude <exclude>\n                          Leave out what matches this pattern\n    -X, --exclude-from <exclude-from>\n                          Read exclude patterns from a file\n    --exclude-per-directory <exclude-per-directory>\n                          Read this exclude file in each directory\n    --error-unmatch       Fail for a pathspec that matches nothing\n    --full-name           Name paths from the top of the work tree\n    --deduplicate         List each path once\n    --abbrev[=<abbrev>]   Abbreviate ids to this many digits\n    --format <format>     Format each row: %(atom) placeholders\n\nerror: unknown option `bogus'\nusage: git show-ref [--] [<pattern>...]\n\n    --heads               Only list branches\n    --branches            Only list branches\n    --tags                Only list tags\n    --head                List HEAD first\n    -d, --dereference     Also list what an annotated tag points at\n    -s, --hash[=<hash>]   Print only the id, of this many digits\n    --abbrev[=<abbrev>]   Abbreviate the id to this many digits\n    -q, --quiet           Print nothing; the exit status answers\n    --verify              Each operand must be a whole ref name\n    --exists              Test whether one ref exists\n\nerror: unknown option `bogus'\nusage: git help [<command>]\n\nerror: unknown option `bogus'\nusage: git clone [<options>] [--] <repo> [<dir>]\n\n    -q, --quiet           Print nothing but errors\n    -b, --branch <branch> Check out this branch or tag\n    -o, --origin <origin> Name the remote this instead of origin\n    -n, --no-checkout     Leave the working tree empty\n\nerror: unknown option `bogus'\nusage: git fetch [<options>] [<repository> [<refspec>...]]\n\n    -q, --quiet           Print nothing but errors\n    -v, --verbose         Also list unchanged refs\n    -p, --prune           Remove remote-tracking refs the remote no longer has\n    -t, --tags            Fetch every tag\n    -n, --no-tags         Follow no tags\n\n"
       }
     },
     {
@@ -1664,6 +1664,1490 @@
         "exit": 0,
         "stdout": "  feat/a\n* main\n  t1\n  t2\n  t4\n  t7\n  t8\n  t4\n  t9\n  x\n  y\nWould delete branch t1\nWould delete branch t3\nWould delete branch feat/a\nWould delete branch t3\nDeleted branch t1\nDeleted branch t9\nDeleted branch t8\nDeleted branch feat/a\nDeleted branch t3\nDeleted branch z\n  gone\n* main\n  t2\n  t4\n  t7\n  topic\n  x\n  y\nbranch.y.rebase true\nbranch.x.remote .\nbranch.x.merge refs/heads/y\n",
         "stderr": "Skipping 't7' (branch.t7.deleteMerged is false)\nSkipping 't7' (branch.t7.deleteMerged is false)\n"
+      }
+    },
+    {
+      "id": "git_root_pager_options",
+      "seq": 567721,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git --no-pager -C /repo log -1 --oneline; git -P -C /repo log -1 --oneline; git -p -C /repo log -1 --oneline; git --paginate -C /repo log -1 --oneline; git --no-optional-locks --no-advice --no-replace-objects --no-lazy-fetch -C /repo log -1 --oneline",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef2542 add two\n8ef2542 add two\n8ef2542 add two\n8ef2542 add two\n8ef2542 add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_c_sets_config",
+      "seq": 567722,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -c a.b=c -C /repo config a.b; git -c a.B.c=d -C /repo config a.B.c; git -c A.b.C=d -C /repo config a.b.c; git -c a.b=1 -c a.b=2 -C /repo config a.b; git -c a.b=1 -c a.b=2 -C /repo config --get-all a.b; git -c a.b -C /repo config --bool a.b; git -c a.b=c -C /repo config --list | tail -1; git -c a.b=c -C /repo config --list --show-origin | tail -1; git -c 'a.b=x y' -C /repo config a.b",
+      "expect": {
+        "exit": 0,
+        "stdout": "c\nd\nd\n2\n1\n2\ntrue\na.b=c\ncommand line:\ta.b=c\nx y\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_c_refused",
+      "seq": 567723,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -c a -C /repo status 2>&1; echo \"[$?]\"; git -c =x -C /repo status 2>&1; echo \"[$?]\"; git -c a_b.c=d -C /repo status 2>&1; echo \"[$?]\"; git -c a.b.=c -C /repo status 2>&1; echo \"[$?]\"; git -c a.1b=c -C /repo config a.1b 2>&1; echo \"[$?]\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "error: key does not contain a section: a\nfatal: unable to parse command-line config\n[128]\nerror: empty config key\nfatal: unable to parse command-line config\n[128]\nerror: invalid key: a_b.c\nfatal: unable to parse command-line config\n[128]\nerror: key does not contain variable name: a.b.\nfatal: unable to parse command-line config\n[128]\nerror: invalid key: a.1b\n[1]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_config_env_option",
+      "seq": 567724,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "E=v git --config-env=a.b=E -C /repo config a.b; E=v git --config-env a.b=E -C /repo config a.b; git --config-env=a.b=NOPE -C /repo config a.b 2>&1; echo \"[$?]\"; git --config-env=a.b -C /repo config a.b 2>&1; echo \"[$?]\"; E=v git --config-env=a.b=c=E -C /repo config a.b 2>&1; echo \"[$?]\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "v\nv\nfatal: missing environment variable 'NOPE' for configuration 'a.b'\n[128]\nfatal: invalid config format: a.b\n[128]\nerror: invalid key: a.b=c\nfatal: unable to parse command-line config\n[128]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_c_reaches_verbs",
+      "seq": 567725,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -c log.decorate=full -C /repo log -1 --oneline; git -c diff.renames=false -C /repo show --stat --format= HEAD; git -c core.quotepath=off -C /repo status --short",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef2542 (HEAD -> refs/heads/main) add two\n numbers.txt | 1 +\n 1 file changed, 1 insertion(+)\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_config_read_forms",
+      "seq": 567726,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git config get user.name; git config --local user.name; git config --local --list | head -2; git config --get-all user.name; git config --name-only --list | head -2; git config --name-only --get-regexp user; git config --show-scope user.name; git config --show-scope --list | head -1; git config --show-origin user.name; git config list --name-only | head -1; git config list --show-origin | head -1)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Integ Author\nInteg Author\ncore.repositoryformatversion=0\ncore.filemode=true\nInteg Author\ncore.repositoryformatversion\ncore.filemode\nuser.name\nuser.email\nlocal\tInteg Author\nlocal\tcore.repositoryformatversion=0\nfile:.git/config\tInteg Author\ncore.repositoryformatversion\nfile:.git/config\tcore.repositoryformatversion=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_config_nul_rows",
+      "seq": 567727,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git config -z user.name | od -c | head -2; git config -z --get-regexp user.name | od -c | head -3; git config -z --show-origin user.name | od -c | head -3; git config -z --show-scope --list | head -c 60 | od -c | head -3)",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000000   I   n   t   e   g       A   u   t   h   o   r  \\0\n0000015\n0000000   u   s   e   r   .   n   a   m   e  \\n   I   n   t   e   g    \n0000020   A   u   t   h   o   r  \\0\n0000027\n0000000   f   i   l   e   :   .   g   i   t   /   c   o   n   f   i   g\n0000020  \\0   I   n   t   e   g       A   u   t   h   o   r  \\0\n0000036\n0000000   l   o   c   a   l  \\0   c   o   r   e   .   r   e   p   o   s\n0000020   i   t   o   r   y   f   o   r   m   a   t   v   e   r   s   i\n0000040   o   n  \\n   0  \\0   l   o   c   a   l  \\0   c   o   r   e   .\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_config_types",
+      "seq": 567728,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git config --bool core.bare; git config --type=bool core.bare; git -c a.b=2k config --int a.b; git -c a.b=1g config --int a.b; git -c a.b=-1 config --int a.b; git -c a.b=+5 config --int a.b; git -c a.b=yes config --bool-or-int a.b; git -c a.b=7 config --bool-or-int a.b; git -c a.b=0 config --bool a.b; git -c a.b= config --bool a.b; git config --bool --default yes a.b; git config --get --default d a.b; git config --default d a.b; git config get --default=x a.b)",
+      "expect": {
+        "exit": 0,
+        "stdout": "false\nfalse\n2048\n1073741824\n-1\n5\ntrue\n7\nfalse\nfalse\ntrue\nd\nd\nx\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_config_type_refused",
+      "seq": 567729,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git config --bool user.name 2>&1; echo \"[$?]\"; git config --type=nope core.bare 2>&1; echo \"[$?]\"; git -c a.b=x config --int a.b 2>&1; echo \"[$?]\"; git -c a.b=99999999999999999999 config --int a.b 2>&1; echo \"[$?]\"; git -c a.b config --int a.b 2>&1; echo \"[$?]\"; git config --int --default x a.b 2>&1; echo \"[$?]\"; git config --bool --int user.name 2>&1; echo \"[$?]\"; git config --local --global user.name 2>&1; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "fatal: bad boolean config value 'Integ Author' for 'user.name'\n[128]\nfatal: unrecognized --type argument, nope\n[128]\nfatal: bad numeric config value 'x' for 'a.b': invalid unit\n[128]\nfatal: bad numeric config value '99999999999999999999' for 'a.b': out of range\n[128]\nfatal: bad numeric config value '' for 'a.b': invalid unit\n[128]\nfatal: bad numeric config value 'x' for 'a.b': invalid unit\n[128]\nerror: only one type at a time\n[129]\nerror: only one config file at a time\n[129]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_config_value_patterns",
+      "seq": 567730,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git config --get user.name Integ; git config --get user.name '^x'; echo \"[$?]\"; git config --get user.name '!^x'; git config --get-regexp '^user\\.' integ; git config --get-regexp '^user\\.' '!x'; git config --fixed-value --get user.name 'Integ Author'; git config --fixed-value --get user.name 'Int.g'; echo \"[$?]\"; git config get --value=Integ user.name; git config get --show-names user.name; git config get --regexp --all 'user.*'; git config get --regexp --show-names 'user.*')",
+      "expect": {
+        "exit": 0,
+        "stdout": "Integ Author\n[1]\nInteg Author\nuser.email integ@example.com\nuser.name Integ Author\nInteg Author\n[1]\nInteg Author\nuser.name Integ Author\nInteg Author\ninteg@example.com\nuser.email integ@example.com\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_config_usage",
+      "seq": 567731,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git config 2>&1; echo \"[$?]\"; git config --get 2>&1; echo \"[$?]\"; git config --list x 2>&1; echo \"[$?]\"; git config nodot 2>&1; echo \"[$?]\"; git config a. 2>&1; echo \"[$?]\"; git config get 2>&1; echo \"[$?]\"; git config list x 2>&1; echo \"[$?]\"; git config --get user.name '[' 2>&1; echo \"[$?]\"; git config --get-regexp '[' 2>&1; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "error: no action specified\n[129]\nerror: wrong number of arguments, should be from 1 to 2\n[129]\nerror: wrong number of arguments, should be 0\n[129]\nerror: key does not contain a section: nodot\n[1]\nerror: key does not contain variable name: a.\n[1]\nerror: wrong number of arguments, should be 1\n[129]\nerror: wrong number of arguments, should be 0\n[129]\nerror: invalid pattern: [\n[6]\nerror: invalid key pattern: [\n[6]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_config_named_file",
+      "seq": 567732,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git config --file .git/config user.name; git config -f .git/config --list | head -1; git config -f nope --list 2>&1; echo \"[$?]\"; git config -f nope a.b; echo \"[$?]\"; git config --includes user.name; git config --no-includes user.name)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Integ Author\ncore.repositoryformatversion=0\nfatal: unable to read config file 'nope': No such file or directory\n[128]\n[1]\nInteg Author\nInteg Author\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_config_from_subdirectory",
+      "seq": 567733,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo/docs; git config --show-origin user.name; git config --list --show-origin | head -1)",
+      "expect": {
+        "exit": 0,
+        "stdout": "file:.git/config\tInteg Author\nfile:.git/config\tcore.repositoryformatversion=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_ls_files_others",
+      "seq": 567734,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/lsf && cd /repo/lsf || exit 1; echo x >> letters.txt; echo y > new.txt; mkdir sub; echo a > sub/u.txt; printf 'ig*\\n' > .gitignore; echo z > igged.txt; rm numbers.txt; git ls-files -o; git ls-files --others --exclude-standard; git ls-files -o --directory; git ls-files -o --directory --no-empty-directory; git ls-files -o -x '*.txt'; git ls-files -o --exclude='*.txt'; git ls-files -o -X .gitignore; git ls-files -o --exclude-from=.gitignore; git ls-files -o --exclude-per-directory=.gitignore; git ls-files -z -o | od -c | head -4; git ls-files -o sub; git ls-files -o nope; echo \"[$?]\"); rm -rf /repo/lsf",
+      "expect": {
+        "exit": 0,
+        "stdout": ".gitignore\nigged.txt\nnew.txt\nsub/u.txt\n.gitignore\nnew.txt\nsub/u.txt\n.gitignore\nigged.txt\nnew.txt\nsub/\n.gitignore\nigged.txt\nnew.txt\nsub/\n.gitignore\n.gitignore\n.gitignore\nnew.txt\nsub/u.txt\n.gitignore\nnew.txt\nsub/u.txt\n.gitignore\nnew.txt\nsub/u.txt\n0000000   .   g   i   t   i   g   n   o   r   e  \\0   i   g   g   e   d\n0000020   .   t   x   t  \\0   n   e   w   .   t   x   t  \\0   s   u   b\n0000040   /   u   .   t   x   t  \\0\n0000047\nsub/u.txt\n[0]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_ls_files_changed",
+      "seq": 567735,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/lsf && cd /repo/lsf || exit 1; echo x >> letters.txt; echo y > new.txt; mkdir sub; echo a > sub/u.txt; printf 'ig*\\n' > .gitignore; echo z > igged.txt; rm numbers.txt; git ls-files -m; git ls-files --modified; git ls-files -d; git ls-files --deleted; git ls-files -m -d; git ls-files --deduplicate -m -d; git ls-files -m -c; git ls-files -m letters.txt; git ls-files -d -- numbers.txt); rm -rf /repo/lsf",
+      "expect": {
+        "exit": 0,
+        "stdout": "letters.txt\nnumbers.txt\nletters.txt\nnumbers.txt\nnumbers.txt\nnumbers.txt\nletters.txt\nnumbers.txt\nnumbers.txt\nletters.txt\nnumbers.txt\ndocs/readme.md\nletters.txt\nletters.txt\nnumbers.txt\nnumbers.txt\nletters.txt\nnumbers.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_ls_files_ignored",
+      "seq": 567736,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/lsf && cd /repo/lsf || exit 1; echo x >> letters.txt; echo y > new.txt; mkdir sub; echo a > sub/u.txt; printf 'ig*\\n' > .gitignore; echo z > igged.txt; rm numbers.txt; git ls-files -i -o --exclude-standard; git ls-files -i -c --exclude-standard; git ls-files -i 2>&1; echo \"[$?]\"); rm -rf /repo/lsf",
+      "expect": {
+        "exit": 0,
+        "stdout": "igged.txt\nfatal: ls-files -i must be used with either -o or -c\n[128]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_ls_files_tagged",
+      "seq": 567737,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/lsf && cd /repo/lsf || exit 1; echo x >> letters.txt; echo y > new.txt; mkdir sub; echo a > sub/u.txt; printf 'ig*\\n' > .gitignore; echo z > igged.txt; rm numbers.txt; git ls-files -t; git ls-files -t -o; git ls-files -t -m; git ls-files -v; git ls-files -f); rm -rf /repo/lsf",
+      "expect": {
+        "exit": 0,
+        "stdout": "H docs/readme.md\nH letters.txt\nH numbers.txt\n? .gitignore\n? igged.txt\n? new.txt\n? sub/u.txt\nC letters.txt\nC numbers.txt\nH docs/readme.md\nH letters.txt\nH numbers.txt\nH docs/readme.md\nH letters.txt\nH numbers.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_ls_files_stage_forms",
+      "seq": 567738,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/lsf && cd /repo/lsf || exit 1; echo x >> letters.txt; echo y > new.txt; mkdir sub; echo a > sub/u.txt; printf 'ig*\\n' > .gitignore; echo z > igged.txt; rm numbers.txt; git ls-files -c -o; git ls-files -s -o; git ls-files -s -m; git ls-files --abbrev -s; git ls-files --abbrev=10 -s; git ls-files -u; echo \"[$?]\"); rm -rf /repo/lsf",
+      "expect": {
+        "exit": 0,
+        "stdout": ".gitignore\nigged.txt\nnew.txt\nsub/u.txt\ndocs/readme.md\nletters.txt\nnumbers.txt\n.gitignore\nigged.txt\nnew.txt\nsub/u.txt\n100644 bfa655111293037a5564088d1a9bbca4cbcf446b 0\tdocs/readme.md\n100644 7a28df3c975fa62270a452251c4e0b24d685c4ba 0\tletters.txt\n100644 814f4a422927b82f5f8a43f8fab6d3839e3983f2 0\tnumbers.txt\n100644 bfa655111293037a5564088d1a9bbca4cbcf446b 0\tdocs/readme.md\n100644 7a28df3c975fa62270a452251c4e0b24d685c4ba 0\tletters.txt\n100644 7a28df3c975fa62270a452251c4e0b24d685c4ba 0\tletters.txt\n100644 814f4a422927b82f5f8a43f8fab6d3839e3983f2 0\tnumbers.txt\n100644 814f4a422927b82f5f8a43f8fab6d3839e3983f2 0\tnumbers.txt\n100644 bfa6551 0\tdocs/readme.md\n100644 7a28df3 0\tletters.txt\n100644 814f4a4 0\tnumbers.txt\n100644 bfa6551112 0\tdocs/readme.md\n100644 7a28df3c97 0\tletters.txt\n100644 814f4a4229 0\tnumbers.txt\n[0]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_ls_files_format",
+      "seq": 567739,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/lsf && cd /repo/lsf || exit 1; echo x >> letters.txt; echo y > new.txt; mkdir sub; echo a > sub/u.txt; printf 'ig*\\n' > .gitignore; echo z > igged.txt; rm numbers.txt; git ls-files --format='%(path)'; git ls-files --format='%(objectname) %(objectmode) %(stage) %(path)'; git ls-files --format='%(objecttype)'); rm -rf /repo/lsf",
+      "expect": {
+        "exit": 0,
+        "stdout": "docs/readme.md\nletters.txt\nnumbers.txt\nbfa655111293037a5564088d1a9bbca4cbcf446b 100644 0 docs/readme.md\n7a28df3c975fa62270a452251c4e0b24d685c4ba 100644 0 letters.txt\n814f4a422927b82f5f8a43f8fab6d3839e3983f2 100644 0 numbers.txt\nblob\nblob\nblob\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_ls_files_error_unmatch",
+      "seq": 567740,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/lsf && cd /repo/lsf || exit 1; echo x >> letters.txt; echo y > new.txt; mkdir sub; echo a > sub/u.txt; printf 'ig*\\n' > .gitignore; echo z > igged.txt; rm numbers.txt; git ls-files --error-unmatch letters.txt; git ls-files --error-unmatch nope 2>&1; echo \"[$?]\"; git ls-files --error-unmatch letters.txt nope 2>/dev/null; echo \"[$?]\"); rm -rf /repo/lsf",
+      "expect": {
+        "exit": 0,
+        "stdout": "letters.txt\nerror: pathspec 'nope' did not match any file(s) known to git\nDid you forget to 'git add'?\n[1]\nletters.txt\n[1]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_ls_files_full_name",
+      "seq": 567741,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/lsf && cd /repo/lsf || exit 1; echo x >> letters.txt; echo y > new.txt; mkdir sub; echo a > sub/u.txt; printf 'ig*\\n' > .gitignore; echo z > igged.txt; rm numbers.txt; cd docs; git ls-files --full-name; git ls-files; git ls-files -o; git ls-files -o --full-name); rm -rf /repo/lsf",
+      "expect": {
+        "exit": 0,
+        "stdout": "docs/readme.md\nreadme.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_ref_filters",
+      "seq": 567742,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show-ref --heads; git -C /repo show-ref --branches; git -C /repo show-ref --head | head -2; git -C /repo show-ref -s --heads; git -C /repo show-ref --hash --heads; git -C /repo show-ref --hash=7 --heads; git -C /repo show-ref -s7 --heads; git -C /repo show-ref --abbrev --heads; git -C /repo show-ref --abbrev=8 --heads; git -C /repo show-ref -q; echo \"[$?]\"; git -C /repo show-ref --tags nope; echo \"[$?]\"; git -C /repo show-ref -q nope; echo \"[$?]\"; git -C /repo show-ref --head topic; git -C /repo show-ref --heads topic; git -C /repo show-ref --abbrev=7 -s main",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef25423772bbfe671c8e285ae1d63991d59db19 refs/heads/main\n225f39c50d27e015653a38d589474ce2880399e6 refs/heads/topic\n8ef25423772bbfe671c8e285ae1d63991d59db19 refs/heads/main\n225f39c50d27e015653a38d589474ce2880399e6 refs/heads/topic\n8ef25423772bbfe671c8e285ae1d63991d59db19 HEAD\n8ef25423772bbfe671c8e285ae1d63991d59db19 refs/heads/main\n8ef25423772bbfe671c8e285ae1d63991d59db19\n225f39c50d27e015653a38d589474ce2880399e6\n8ef25423772bbfe671c8e285ae1d63991d59db19\n225f39c50d27e015653a38d589474ce2880399e6\n8ef2542\n225f39c\n8ef2542\n225f39c\n8ef2542 refs/heads/main\n225f39c refs/heads/topic\n8ef25423 refs/heads/main\n225f39c5 refs/heads/topic\n[0]\n[1]\n[1]\n8ef25423772bbfe671c8e285ae1d63991d59db19 HEAD\n225f39c50d27e015653a38d589474ce2880399e6 refs/heads/topic\n225f39c50d27e015653a38d589474ce2880399e6 refs/heads/topic\n8ef2542\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_ref_verify",
+      "seq": 567743,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show-ref --verify refs/heads/main; git -C /repo show-ref --verify main 2>&1; echo \"[$?]\"; git -C /repo show-ref --verify refs/heads/nope 2>&1; echo \"[$?]\"; git -C /repo show-ref --verify -q refs/heads/nope; echo \"[$?]\"; git -C /repo show-ref --verify refs/heads/main refs/heads/topic; git -C /repo show-ref --verify HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef25423772bbfe671c8e285ae1d63991d59db19 refs/heads/main\nfatal: 'main' - not a valid ref\n[128]\nfatal: 'refs/heads/nope' - not a valid ref\n[128]\n[1]\n8ef25423772bbfe671c8e285ae1d63991d59db19 refs/heads/main\n225f39c50d27e015653a38d589474ce2880399e6 refs/heads/topic\n8ef25423772bbfe671c8e285ae1d63991d59db19 HEAD\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_ref_exists",
+      "seq": 567744,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show-ref --exists refs/heads/main; echo \"[$?]\"; git -C /repo show-ref --exists refs/heads/nope 2>&1; echo \"[$?]\"; git -C /repo show-ref --exists 2>&1; echo \"[$?]\"; git -C /repo show-ref --exists a b 2>&1; echo \"[$?]\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "[0]\nerror: reference does not exist\n[2]\nfatal: --exists requires a reference\n[128]\nfatal: --exists requires exactly one reference\n[128]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_ref_tags",
+      "seq": 567745,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/srf && cd /repo/srf || exit 1; git tag v1; GIT_AUTHOR_NAME=a GIT_AUTHOR_EMAIL=a@b GIT_COMMITTER_NAME=a GIT_COMMITTER_EMAIL=a@b git tag -a -m m v2; git show-ref --tags | cut -d' ' -f2; git show-ref --heads --tags | cut -d' ' -f2; git show-ref -d | grep -F '^{}' | cut -d' ' -f2; git show-ref --verify -d refs/tags/v2 | tail -1; git show-ref --tags v1); rm -rf /repo/srf",
+      "expect": {
+        "exit": 0,
+        "stdout": "refs/tags/v1\nrefs/tags/v2\nrefs/heads/main\nrefs/tags/v1\nrefs/tags/v2\nrefs/tags/v2^{}\n8ef25423772bbfe671c8e285ae1d63991d59db19 refs/tags/v2^{}\n8ef25423772bbfe671c8e285ae1d63991d59db19 refs/tags/v1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_merge_base_modes",
+      "seq": 567746,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo merge-base --octopus main topic; git -C /repo merge-base --independent main topic; git -C /repo merge-base --octopus; echo \"[$?]\"; git -C /repo merge-base --independent; echo \"[$?]\"; git -C /repo merge-base --octopus --independent main topic 2>&1; echo \"[$?]\"; git -C /repo merge-base --independent HEAD HEAD~1 HEAD~2; git -C /repo merge-base --octopus -a main topic",
+      "expect": {
+        "exit": 0,
+        "stdout": "225f39c50d27e015653a38d589474ce2880399e6\n8ef25423772bbfe671c8e285ae1d63991d59db19\n[1]\n[1]\nerror: options '--independent' and '--octopus' cannot be used together\n[129]\n8ef25423772bbfe671c8e285ae1d63991d59db19\n225f39c50d27e015653a38d589474ce2880399e6\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_ls_tree_columns",
+      "seq": 567747,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo ls-tree -l HEAD; git -C /repo ls-tree --long HEAD; git -C /repo ls-tree --object-only HEAD; git -C /repo ls-tree --abbrev HEAD; git -C /repo ls-tree --abbrev=10 HEAD; git -C /repo ls-tree -l -r HEAD; git -C /repo ls-tree -z -l HEAD | od -c | head -4",
+      "expect": {
+        "exit": 0,
+        "stdout": "040000 tree 24f073f4fa69a811e1bb64f65729188ccc3ce32a       -\tdocs\n100644 blob 7a28df3c975fa62270a452251c4e0b24d685c4ba      23\tletters.txt\n100644 blob 814f4a422927b82f5f8a43f8fab6d3839e3983f2       8\tnumbers.txt\n040000 tree 24f073f4fa69a811e1bb64f65729188ccc3ce32a       -\tdocs\n100644 blob 7a28df3c975fa62270a452251c4e0b24d685c4ba      23\tletters.txt\n100644 blob 814f4a422927b82f5f8a43f8fab6d3839e3983f2       8\tnumbers.txt\n24f073f4fa69a811e1bb64f65729188ccc3ce32a\n7a28df3c975fa62270a452251c4e0b24d685c4ba\n814f4a422927b82f5f8a43f8fab6d3839e3983f2\n040000 tree 24f073f\tdocs\n100644 blob 7a28df3\tletters.txt\n100644 blob 814f4a4\tnumbers.txt\n040000 tree 24f073f4fa\tdocs\n100644 blob 7a28df3c97\tletters.txt\n100644 blob 814f4a4229\tnumbers.txt\n100644 blob bfa655111293037a5564088d1a9bbca4cbcf446b       6\tdocs/readme.md\n100644 blob 7a28df3c975fa62270a452251c4e0b24d685c4ba      23\tletters.txt\n100644 blob 814f4a422927b82f5f8a43f8fab6d3839e3983f2       8\tnumbers.txt\n0000000   0   4   0   0   0   0       t   r   e   e       2   4   f   0\n0000020   7   3   f   4   f   a   6   9   a   8   1   1   e   1   b   b\n0000040   6   4   f   6   5   7   2   9   1   8   8   c   c   c   3   c\n0000060   e   3   2   a                               -  \\t   d   o   c\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_ls_tree_format",
+      "seq": 567748,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo ls-tree --format='%(objectname) %(path)' HEAD; git -C /repo ls-tree --format='%(objectmode) %(objecttype) %(objectsize) %(objectsize:padded) %(path)' HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "24f073f4fa69a811e1bb64f65729188ccc3ce32a docs\n7a28df3c975fa62270a452251c4e0b24d685c4ba letters.txt\n814f4a422927b82f5f8a43f8fab6d3839e3983f2 numbers.txt\n040000 tree -       - docs\n100644 blob 23      23 letters.txt\n100644 blob 8       8 numbers.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_ls_tree_refused",
+      "seq": 567749,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo ls-tree -l --name-only HEAD 2>&1; echo \"[$?]\"; git -C /repo ls-tree --object-only --name-only HEAD 2>&1; echo \"[$?]\"; git -C /repo ls-tree --format='%(oops)' HEAD 2>&1; echo \"[$?]\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "error: options '--name-only' and '-l' cannot be used together\n[129]\nerror: options '--name-only' and '--object-only' cannot be used together\n[129]\nfatal: bad ls-tree format: %(oops)\n[128]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_status_nul_forms",
+      "seq": 567750,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/stz && cd /repo/stz || exit 1; echo x >> letters.txt; echo y > new.txt; git add new.txt; git status -z | od -c | head -3; git status -s -z | od -c | head -3; git status --porcelain -z | od -c | head -3; git status --porcelain=v1; git status --porcelain=v3 2>&1; echo \"[$?]\"; git status --long | head -2; git status --long -s; git status --null -s | od -c | head -3; git status -s --porcelain; git status --porcelain -s; git status -sb --porcelain); rm -rf /repo/stz",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000000       M       l   e   t   t   e   r   s   .   t   x   t  \\0   A\n0000020           n   e   w   .   t   x   t  \\0\n0000032\n0000000       M       l   e   t   t   e   r   s   .   t   x   t  \\0   A\n0000020           n   e   w   .   t   x   t  \\0\n0000032\n0000000       M       l   e   t   t   e   r   s   .   t   x   t  \\0   A\n0000020           n   e   w   .   t   x   t  \\0\n0000032\n M letters.txt\nA  new.txt\nfatal: unsupported porcelain version 'v3'\n[128]\nOn branch main\nYour branch is up to date with 'origin/main'.\n M letters.txt\nA  new.txt\n0000000       M       l   e   t   t   e   r   s   .   t   x   t  \\0   A\n0000020           n   e   w   .   t   x   t  \\0\n0000032\n M letters.txt\nA  new.txt\n M letters.txt\nA  new.txt\n## main...origin/main\n M letters.txt\nA  new.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_status_renames",
+      "seq": 567751,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/str && cd /repo/str || exit 1; git mv numbers.txt n2.txt; git status -z | od -c | head -3; git status -s --no-renames; git status -s --renames; git status --no-renames | head -5; git -c status.renames=false status -s; git status -s --find-renames=99%; git status -s --find-renames); rm -rf /repo/str",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000000   R           n   2   .   t   x   t  \\0   n   u   m   b   e   r\n0000020   s   .   t   x   t  \\0\n0000026\nA  n2.txt\nD  numbers.txt\nR  numbers.txt -> n2.txt\nOn branch main\nYour branch is up to date with 'origin/main'.\n\nChanges to be committed:\n  (use \"git restore --staged <file>...\" to unstage)\nA  n2.txt\nD  numbers.txt\nR  numbers.txt -> n2.txt\nR  numbers.txt -> n2.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_status_pathspecs",
+      "seq": 567752,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/stp && cd /repo/stp || exit 1; echo x >> letters.txt; echo y > new.txt; git add new.txt; git status -s letters.txt; git status -- letters.txt | head -3; git status -s nope; git status nope; echo y > docs/a; git status -s docs; git status -s letters.txt docs; cd docs; git status -s .; git status -s ..; git status -s ../letters.txt); rm -rf /repo/stp",
+      "expect": {
+        "exit": 0,
+        "stdout": " M letters.txt\nOn branch main\nYour branch is up to date with 'origin/main'.\n\nOn branch main\nYour branch is up to date with 'origin/main'.\n\nnothing to commit, working tree clean\n?? docs/a\n M letters.txt\n?? docs/a\n?? a\n M ../letters.txt\nA  ../new.txt\n?? a\n M ../letters.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_status_ahead_behind",
+      "seq": 567753,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/sta && cd /repo/sta || exit 1; GIT_AUTHOR_NAME=a GIT_AUTHOR_EMAIL=a@b GIT_COMMITTER_NAME=a GIT_COMMITTER_EMAIL=a@b git commit -q --allow-empty -m x; git status --no-ahead-behind; git status -sb --no-ahead-behind; git -c status.aheadBehind=false status -sb; git status --ahead-behind | head -3; git -c status.aheadBehind=false status --ahead-behind -sb); rm -rf /repo/sta",
+      "expect": {
+        "exit": 0,
+        "stdout": "On branch main\nYour branch and 'origin/main' refer to different commits.\n  (use \"git status --ahead-behind\" for details)\n\nnothing to commit, working tree clean\n## main...origin/main [different]\n## main...origin/main [different]\nOn branch main\nYour branch is ahead of 'origin/main' by 1 commit.\n  (use \"git push\" to publish your local commits)\n## main...origin/main [ahead 1]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_status_accepted_options",
+      "seq": 567754,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/sto && cd /repo/sto || exit 1; echo x >> letters.txt; echo y > new.txt; git add new.txt; git status --long -z 2>&1; echo \"[$?]\"; git status -z --long 2>&1; echo \"[$?]\"; git status --no-show-stash -s; git status --show-stash -s; git status --no-column -s); rm -rf /repo/sto",
+      "expect": {
+        "exit": 0,
+        "stdout": "fatal: options '--long' and '-z' cannot be used together\n[128]\nfatal: options '--long' and '-z' cannot be used together\n[128]\n M letters.txt\nA  new.txt\n M letters.txt\nA  new.txt\n M letters.txt\nA  new.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_color_options_stay_plain",
+      "seq": 567755,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --color=never -1 --oneline; git -C /repo log --no-color -1 --oneline; git -C /repo log --color=auto -1 --oneline; git -C /repo show --no-color -s --oneline; git -C /repo show --color=never -s --oneline; git -C /repo diff --no-color; git -C /repo diff --color=never; git -C /repo branch --no-color; git -C /repo branch --color=never; git -C /repo tag --no-color; git -C /repo tag --color=never; git -C /repo grep --no-color -l alpha; git -C /repo grep --color=never -l alpha; git -C /repo rev-list --no-color -1 HEAD; git -C /repo shortlog --no-color -s HEAD; git -C /repo for-each-ref --color=never --count=1 --format='%(refname)'; git -C /repo log --no-color --color=never -1 --oneline",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef2542 add two\n8ef2542 add two\n8ef2542 add two\n8ef2542 add two\n8ef2542 add two\n* main\n  topic\n* main\n  topic\nletters.txt\nletters.txt\n8ef25423772bbfe671c8e285ae1d63991d59db19\n     4\tInteg Author\nrefs/heads/main\n8ef2542 add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_color_bad_value",
+      "seq": 567756,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --color=bad -1 --oneline 2>&1; echo \"[$?]\"; git -C /repo diff --color=bad 2>&1; echo \"[$?]\"; git -C /repo branch --color=bad 2>&1; echo \"[$?]\"; git -C /repo grep --color=bad -l alpha 2>&1; echo \"[$?]\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "error: option `color' expects \"always\", \"auto\", or \"never\"\n[129]\nerror: option `color' expects \"always\", \"auto\", or \"never\"\n[129]\nerror: option `color' expects \"always\", \"auto\", or \"never\"\n[129]\nerror: option `color' expects \"always\", \"auto\", or \"never\"\n[129]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_branch_long_listing",
+      "seq": 567757,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo branch --all; git -C /repo branch --remotes; echo \"[$?]\"; git -C /repo branch --no-column; git -C /repo branch --list --all; git -C /repo tag --no-column",
+      "expect": {
+        "exit": 0,
+        "stdout": "* main\n  topic\n[0]\n* main\n  topic\n* main\n  topic\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_grep_context",
+      "seq": 567758,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/grc && cd /repo/grc || exit 1; printf 'a1\\nb2\\nc3\\nd4\\ne5\\nf6\\ng7\\nh8\\ni9\\nj0\\n' > long.txt; git add long.txt; git grep -A1 c3 long.txt; git grep -B1 c3 long.txt; git grep -C1 c3 long.txt; git grep -1 c3 long.txt; git grep --after-context=1 c3 long.txt; git grep --before-context=1 c3 long.txt; git grep --context=1 c3 long.txt; git grep -n -A1 c3 long.txt); rm -rf /repo/grc",
+      "expect": {
+        "exit": 0,
+        "stdout": "long.txt:c3\nlong.txt-d4\nlong.txt-b2\nlong.txt:c3\nlong.txt-b2\nlong.txt:c3\nlong.txt-d4\nlong.txt-b2\nlong.txt:c3\nlong.txt-d4\nlong.txt:c3\nlong.txt-d4\nlong.txt-b2\nlong.txt:c3\nlong.txt-b2\nlong.txt:c3\nlong.txt-d4\nlong.txt:3:c3\nlong.txt-4-d4\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_grep_context_groups",
+      "seq": 567759,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/grg && cd /repo/grg || exit 1; printf 'a1\\nb2\\nc3\\nd4\\ne5\\nf6\\ng7\\nh8\\ni9\\nj0\\n' > long.txt; git add long.txt; git grep -n -C1 -e c3 -e h8 long.txt; git grep -n -C1 -e c3 -e d4 long.txt; git grep -n -C1 -e c3 -e f6 long.txt; git grep -C1 -e a1 -e j0 long.txt; git grep -n -A1 -e alpha -e c3; git grep -h -A1 -e c3 long.txt; git grep -c -A1 c3 long.txt; git grep -l -A1 c3 long.txt; git grep -z -n -A1 c3 long.txt | od -c | head -3; git grep -v -A1 c3 long.txt); rm -rf /repo/grg",
+      "expect": {
+        "exit": 0,
+        "stdout": "long.txt-2-b2\nlong.txt:3:c3\nlong.txt-4-d4\n--\nlong.txt-7-g7\nlong.txt:8:h8\nlong.txt-9-i9\nlong.txt-2-b2\nlong.txt:3:c3\nlong.txt:4:d4\nlong.txt-5-e5\nlong.txt-2-b2\nlong.txt:3:c3\nlong.txt-4-d4\nlong.txt-5-e5\nlong.txt:6:f6\nlong.txt-7-g7\nlong.txt:a1\nlong.txt-b2\n--\nlong.txt-i9\nlong.txt:j0\nletters.txt:1:alpha\nletters.txt-2-beta\n--\nlong.txt:3:c3\nlong.txt-4-d4\nc3\nd4\nlong.txt:1\nlong.txt\n0000000   l   o   n   g   .   t   x   t  \\0   3  \\0   c   3  \\n   l   o\n0000020   n   g   .   t   x   t  \\0   4  \\0   d   4  \\n\n0000034\nlong.txt:a1\nlong.txt:b2\nlong.txt-c3\nlong.txt:d4\nlong.txt:e5\nlong.txt:f6\nlong.txt:g7\nlong.txt:h8\nlong.txt:i9\nlong.txt:j0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_grep_heading_break",
+      "seq": 567760,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/grh && cd /repo/grh || exit 1; printf 'a1\\nb2\\nc3\\nd4\\ne5\\nf6\\ng7\\nh8\\ni9\\nj0\\n' > long.txt; git add long.txt; git grep --heading c3 long.txt; git grep --heading -n -e alpha -e c3; git grep --heading --break -e alpha -e c3; git grep --break -e alpha -e c3; git grep --heading -A1 -e alpha -e c3; git grep --break -A1 -e alpha -e c3); rm -rf /repo/grh",
+      "expect": {
+        "exit": 0,
+        "stdout": "long.txt\nc3\nletters.txt\n1:alpha\nlong.txt\n3:c3\nletters.txt\nalpha\n\nlong.txt\nc3\nletters.txt:alpha\n\nlong.txt:c3\nletters.txt\nalpha\nbeta\n--\nlong.txt\nc3\nd4\nletters.txt:alpha\nletters.txt-beta\n\nlong.txt:c3\nlong.txt-d4\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_grep_max_count",
+      "seq": 567761,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/grm && cd /repo/grm || exit 1; printf 'a1\\nb2\\nc3\\nd4\\ne5\\nf6\\ng7\\nh8\\ni9\\nj0\\n' > long.txt; git add long.txt; git grep -m 1 . long.txt; git grep --max-count=2 . long.txt; git grep -m 0 . long.txt; echo \"[$?]\"; git grep -c -m1 . long.txt; git grep -l -m1 . long.txt; git grep --threads=2 c3 long.txt); rm -rf /repo/grm",
+      "expect": {
+        "exit": 0,
+        "stdout": "long.txt:a1\nlong.txt:a1\nlong.txt:b2\n[1]\nlong.txt:1\nlong.txt\nlong.txt:c3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_grep_untracked",
+      "seq": 567762,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/gru && cd /repo/gru || exit 1; echo alpha > un.txt; printf 'ig*\\n' > .gitignore; echo alpha > igged.txt; git grep --untracked alpha; git grep --untracked --no-exclude-standard alpha; git grep --untracked --exclude-standard alpha; git grep --untracked -l alpha; git grep --no-exclude-standard alpha 2>&1; echo \"[$?]\"; git grep --exclude-standard alpha 2>&1; echo \"[$?]\"; git grep --cached --untracked alpha 2>&1; echo \"[$?]\"; git grep --full-name -l alpha; cd docs; echo alpha > x; git grep --full-name --untracked -l alpha; git grep --untracked -l alpha); rm -rf /repo/gru",
+      "expect": {
+        "exit": 0,
+        "stdout": "letters.txt:alpha\nun.txt:alpha\nigged.txt:alpha\nletters.txt:alpha\nun.txt:alpha\nletters.txt:alpha\nun.txt:alpha\nletters.txt\nun.txt\nfatal: --[no-]exclude-standard cannot be used for tracked contents\n[128]\nfatal: --[no-]exclude-standard cannot be used for tracked contents\n[128]\nfatal: options '--untracked' and '--cached' cannot be used together\n[128]\nletters.txt\ndocs/x\nx\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_diff_exit_status",
+      "seq": 567763,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/dfq && cd /repo/dfq || exit 1; echo x >> letters.txt; echo y > new.txt; git add new.txt; git mv numbers.txt n2.txt; git rm -q --cached docs/readme.md; git diff --quiet; echo \"[$?]\"; git diff --quiet --cached; echo \"[$?]\"; git diff --exit-code --stat; echo \"[$?]\"; git diff --exit-code --cached --name-only; echo \"[$?]\"; git diff --quiet HEAD; echo \"[$?]\"; git diff --exit-code HEAD~1 HEAD~1; echo \"[$?]\"); rm -rf /repo/dfq",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1]\n[1]\n letters.txt | 1 +\n 1 file changed, 1 insertion(+)\n[1]\ndocs/readme.md\nn2.txt\nnew.txt\n[1]\n[1]\n[0]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_diff_filter",
+      "seq": 567764,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/dff && cd /repo/dff || exit 1; echo x >> letters.txt; echo y > new.txt; git add new.txt; git mv numbers.txt n2.txt; git rm -q --cached docs/readme.md; git diff --diff-filter=M --name-status HEAD; git diff --diff-filter=A --name-status HEAD; git diff --diff-filter=AD --name-status HEAD; git diff --diff-filter=a --name-status HEAD; git diff --diff-filter=R --name-status HEAD; git diff --diff-filter=r --name-status HEAD; git diff --diff-filter=d --name-status --cached; git diff --diff-filter=Z --name-status HEAD 2>&1; echo \"[$?]\"; git diff --diff-filter='*' --name-status HEAD; git diff --diff-filter='A*' --name-status HEAD; git diff --diff-filter= --name-status HEAD; git diff --diff-filter=M --quiet --cached; echo \"[$?]\"; git diff --diff-filter=M --exit-code --cached --name-status; echo \"[$?]\"); rm -rf /repo/dff",
+      "expect": {
+        "exit": 0,
+        "stdout": "M\tletters.txt\nA\tnew.txt\nD\tdocs/readme.md\nA\tnew.txt\nD\tdocs/readme.md\nM\tletters.txt\nR100\tnumbers.txt\tn2.txt\nR100\tnumbers.txt\tn2.txt\nD\tdocs/readme.md\nM\tletters.txt\nA\tnew.txt\nR100\tnumbers.txt\tn2.txt\nA\tnew.txt\nerror: unknown change class 'Z' in --diff-filter=Z\n[129]\nD\tdocs/readme.md\nM\tletters.txt\nR100\tnumbers.txt\tn2.txt\nA\tnew.txt\nD\tdocs/readme.md\nM\tletters.txt\nR100\tnumbers.txt\tn2.txt\nA\tnew.txt\n[0]\n[0]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_diff_prefixes",
+      "seq": 567765,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/dfp && cd /repo/dfp || exit 1; echo x >> letters.txt; echo y > new.txt; git add new.txt; git mv numbers.txt n2.txt; git rm -q --cached docs/readme.md; git diff --no-prefix HEAD -- letters.txt; git diff --src-prefix=x/ --dst-prefix=y/ HEAD -- letters.txt; git diff --src-prefix=x/ --no-prefix HEAD -- letters.txt; git diff --no-prefix --src-prefix=x/ HEAD -- letters.txt; git diff --default-prefix HEAD -- letters.txt; git diff --no-prefix --default-prefix HEAD -- letters.txt; git -c diff.noprefix=true diff HEAD -- letters.txt | head -4; git -c diff.srcPrefix=p/ diff HEAD -- letters.txt | head -4); rm -rf /repo/dfp",
+      "expect": {
+        "exit": 0,
+        "stdout": "diff --git letters.txt letters.txt\nindex 7a28df3..47427fc 100644\n--- letters.txt\n+++ letters.txt\n@@ -2,3 +2,4 @@ alpha\n beta\n gamma\n delta\n+x\ndiff --git x/letters.txt y/letters.txt\nindex 7a28df3..47427fc 100644\n--- x/letters.txt\n+++ y/letters.txt\n@@ -2,3 +2,4 @@ alpha\n beta\n gamma\n delta\n+x\ndiff --git letters.txt letters.txt\nindex 7a28df3..47427fc 100644\n--- letters.txt\n+++ letters.txt\n@@ -2,3 +2,4 @@ alpha\n beta\n gamma\n delta\n+x\ndiff --git x/letters.txt letters.txt\nindex 7a28df3..47427fc 100644\n--- x/letters.txt\n+++ letters.txt\n@@ -2,3 +2,4 @@ alpha\n beta\n gamma\n delta\n+x\ndiff --git a/letters.txt b/letters.txt\nindex 7a28df3..47427fc 100644\n--- a/letters.txt\n+++ b/letters.txt\n@@ -2,3 +2,4 @@ alpha\n beta\n gamma\n delta\n+x\ndiff --git a/letters.txt b/letters.txt\nindex 7a28df3..47427fc 100644\n--- a/letters.txt\n+++ b/letters.txt\n@@ -2,3 +2,4 @@ alpha\n beta\n gamma\n delta\n+x\ndiff --git letters.txt letters.txt\nindex 7a28df3..47427fc 100644\n--- letters.txt\n+++ letters.txt\ndiff --git p/letters.txt b/letters.txt\nindex 7a28df3..47427fc 100644\n--- p/letters.txt\n+++ b/letters.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_diff_id_width",
+      "seq": 567766,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/dfi && cd /repo/dfi || exit 1; echo x >> letters.txt; echo y > new.txt; git add new.txt; git mv numbers.txt n2.txt; git rm -q --cached docs/readme.md; git diff --full-index HEAD -- letters.txt; git diff --abbrev=10 HEAD -- letters.txt; git diff --abbrev HEAD -- letters.txt; git diff --abbrev=10 --raw HEAD -- letters.txt; git diff --raw HEAD -- letters.txt; git diff --full-index --raw HEAD -- letters.txt; git diff --no-abbrev --raw HEAD -- letters.txt); rm -rf /repo/dfi",
+      "expect": {
+        "exit": 0,
+        "stdout": "diff --git a/letters.txt b/letters.txt\nindex 7a28df3c975fa62270a452251c4e0b24d685c4ba..47427fcc02401201ecd63f87994ad3d20e05a11f 100644\n--- a/letters.txt\n+++ b/letters.txt\n@@ -2,3 +2,4 @@ alpha\n beta\n gamma\n delta\n+x\ndiff --git a/letters.txt b/letters.txt\nindex 7a28df3c97..47427fcc02 100644\n--- a/letters.txt\n+++ b/letters.txt\n@@ -2,3 +2,4 @@ alpha\n beta\n gamma\n delta\n+x\ndiff --git a/letters.txt b/letters.txt\nindex 7a28df3..47427fc 100644\n--- a/letters.txt\n+++ b/letters.txt\n@@ -2,3 +2,4 @@ alpha\n beta\n gamma\n delta\n+x\n:100644 100644 7a28df3c97 0000000000 M\tletters.txt\n:100644 100644 7a28df3 0000000 M\tletters.txt\n:100644 100644 7a28df3 0000000 M\tletters.txt\n:100644 100644 7a28df3c975fa62270a452251c4e0b24d685c4ba 0000000000000000000000000000000000000000 M\tletters.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_diff_filter",
+      "seq": 567767,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --diff-filter=A --name-only --format=%s; git -C /repo log --diff-filter=A --format=%s -- docs/readme.md; git -C /repo log --diff-filter=M --oneline; git -C /repo log --diff-filter=D --oneline; git -C /repo show --diff-filter=A --name-only --format=%s HEAD~1; git -C /repo show --diff-filter=D --name-only --format=%s HEAD~1; git -C /repo diff-tree --diff-filter=M -r --name-status HEAD; git -C /repo log --no-prefix -1 -p --format=; git -C /repo show --no-prefix --format= HEAD; git -C /repo show --src-prefix=s/ --format= HEAD; git -C /repo show --full-index --format= HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "add docs\n\ndocs/readme.md\nfirst commit\n\nletters.txt\nnumbers.txt\nadd docs\n8ef2542 add two\n265ec3a add delta\nadd docs\n\ndocs/readme.md\n8ef25423772bbfe671c8e285ae1d63991d59db19\nM\tnumbers.txt\ndiff --git numbers.txt numbers.txt\nindex 5626abf..814f4a4 100644\n--- numbers.txt\n+++ numbers.txt\n@@ -1 +1,2 @@\n one\n+two\ndiff --git numbers.txt numbers.txt\nindex 5626abf..814f4a4 100644\n--- numbers.txt\n+++ numbers.txt\n@@ -1 +1,2 @@\n one\n+two\ndiff --git s/numbers.txt b/numbers.txt\nindex 5626abf..814f4a4 100644\n--- s/numbers.txt\n+++ b/numbers.txt\n@@ -1 +1,2 @@\n one\n+two\ndiff --git a/numbers.txt b/numbers.txt\nindex 5626abf0f72e58d7a153368ba57db4c673c0e171..814f4a422927b82f5f8a43f8fab6d3839e3983f2 100644\n--- a/numbers.txt\n+++ b/numbers.txt\n@@ -1 +1,2 @@\n one\n+two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_rev_parse_place_words",
+      "seq": 567768,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo/docs; git rev-parse --show-cdup --show-prefix --is-inside-git-dir --is-inside-work-tree --is-bare-repository --absolute-git-dir --git-common-dir --git-path HEAD --git-path objects --show-ref-format --show-object-format --show-object-format=storage)",
+      "expect": {
+        "exit": 0,
+        "stdout": "../\ndocs/\nfalse\ntrue\nfalse\n/repo/.git\n../.git\n../.git/HEAD\n../.git/objects\nfiles\nsha1\nsha1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_rev_parse_place_in_git_dir",
+      "seq": 567769,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo/.git; git rev-parse --is-inside-git-dir --is-inside-work-tree --is-bare-repository --show-cdup --show-prefix --absolute-git-dir --git-common-dir --git-dir --git-path HEAD; cd refs; git rev-parse --git-dir --git-common-dir --git-path HEAD --show-cdup)",
+      "expect": {
+        "exit": 0,
+        "stdout": "true\nfalse\nfalse\n\n/repo/.git\n.\n.\nHEAD\n/repo/.git\n/repo/.git\n/repo/.git/HEAD\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_rev_parse_path_format",
+      "seq": 567770,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo/docs; git rev-parse --path-format=absolute --git-dir --show-toplevel --git-common-dir --git-path HEAD --path-format=relative --git-dir --show-toplevel --git-common-dir --git-path HEAD; cd ..; git rev-parse --path-format=relative --show-toplevel --git-dir; cd .git; git rev-parse --path-format=relative --git-dir --git-path HEAD; cd ..; git rev-parse --path-format=nope --git-dir; echo \"[$?]\"; git rev-parse --path-format; echo \"[$?]\"; git rev-parse --path-format=; echo \"[$?]\"; git rev-parse --show-object-format=nope; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "/repo/.git\n/repo\n/repo/.git\n/repo/.git/HEAD\n../.git\n../\n../.git\n../.git/HEAD\n./\n.git\n./\nHEAD\n[128]\n[128]\n[128]\n[128]\n",
+        "stderr": "fatal: unknown argument to --path-format: nope\nfatal: --path-format requires an argument\nfatal: unknown argument to --path-format: \nfatal: unknown mode for --show-object-format: nope\n"
+      }
+    },
+    {
+      "id": "git_rev_parse_symbolic_modes",
+      "seq": 567771,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git rev-parse --symbolic HEAD main topic~1 HEAD:letters.txt; git rev-parse --symbolic-full-name HEAD main topic topic~1 8ef2542 'HEAD^{tree}'; git rev-parse --abbrev-ref HEAD..topic topic...main; git rev-parse --symbolic HEAD..topic ^main ..topic topic.. topic...main; git rev-parse --symbolic-full-name HEAD..topic ^main topic...main; git rev-parse --short --symbolic HEAD)",
+      "expect": {
+        "exit": 0,
+        "stdout": "HEAD\nmain\ntopic~1\nHEAD:letters.txt\nrefs/heads/main\nrefs/heads/main\nrefs/heads/topic\ntopic\n^main\nmain\ntopic\n^225f39c50d27e015653a38d589474ce2880399e6\ntopic\n^HEAD\n^main\ntopic\n^HEAD\nHEAD\n^topic\nmain\ntopic\n^225f39c50d27e015653a38d589474ce2880399e6\nrefs/heads/topic\n^refs/heads/main\n^refs/heads/main\nrefs/heads/main\nrefs/heads/topic\n^225f39c50d27e015653a38d589474ce2880399e6\nHEAD\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_rev_parse_ranges",
+      "seq": 567772,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git rev-parse HEAD..topic; git rev-parse topic...main; git rev-parse ...topic; git rev-parse ..topic; git rev-parse topic..; git rev-parse ^HEAD; git rev-parse 'HEAD^@'; git rev-parse 'HEAD^!'; git rev-parse 'HEAD^-'; git rev-parse 'HEAD^-1'; git rev-parse 'HEAD~3^@'; git rev-parse --symbolic 'HEAD^@' 'HEAD^!' 'HEAD^-'; git rev-parse --symbolic-full-name 'HEAD^!'; git rev-parse topic..nope; echo \"[$?]\"; git rev-parse nope..topic; echo \"[$?]\"; git rev-parse ^nope; echo \"[$?]\"; git rev-parse 'HEAD^-2'; echo \"[$?]\"; git rev-parse 'HEAD^-0'; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "225f39c50d27e015653a38d589474ce2880399e6\n^8ef25423772bbfe671c8e285ae1d63991d59db19\n8ef25423772bbfe671c8e285ae1d63991d59db19\n225f39c50d27e015653a38d589474ce2880399e6\n^225f39c50d27e015653a38d589474ce2880399e6\n225f39c50d27e015653a38d589474ce2880399e6\n8ef25423772bbfe671c8e285ae1d63991d59db19\n^225f39c50d27e015653a38d589474ce2880399e6\n225f39c50d27e015653a38d589474ce2880399e6\n^8ef25423772bbfe671c8e285ae1d63991d59db19\n8ef25423772bbfe671c8e285ae1d63991d59db19\n^225f39c50d27e015653a38d589474ce2880399e6\n^8ef25423772bbfe671c8e285ae1d63991d59db19\n225f39c50d27e015653a38d589474ce2880399e6\n8ef25423772bbfe671c8e285ae1d63991d59db19\n^225f39c50d27e015653a38d589474ce2880399e6\n8ef25423772bbfe671c8e285ae1d63991d59db19\n^225f39c50d27e015653a38d589474ce2880399e6\n8ef25423772bbfe671c8e285ae1d63991d59db19\n^225f39c50d27e015653a38d589474ce2880399e6\nHEAD^1\nHEAD\n^HEAD^1\nHEAD\n^HEAD^1\nrefs/heads/main\ntopic..nope\n[128]\nnope..topic\n[128]\n^nope\n[128]\nHEAD^-2\n[128]\nHEAD^-0\n[128]\n",
+        "stderr": "fatal: ambiguous argument 'topic..nope': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\nfatal: ambiguous argument 'nope..topic': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\nfatal: ambiguous argument '^nope': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\nfatal: ambiguous argument 'HEAD^-2': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\nfatal: ambiguous argument 'HEAD^-0': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\n"
+      }
+    },
+    {
+      "id": "git_rev_parse_not",
+      "seq": 567773,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git rev-parse --not HEAD topic; git rev-parse HEAD --not topic --not main; git rev-parse --not HEAD..topic; git rev-parse --not --all; git rev-parse --not --verify HEAD; git rev-parse --not --short HEAD)",
+      "expect": {
+        "exit": 0,
+        "stdout": "^8ef25423772bbfe671c8e285ae1d63991d59db19\n^225f39c50d27e015653a38d589474ce2880399e6\n8ef25423772bbfe671c8e285ae1d63991d59db19\n^225f39c50d27e015653a38d589474ce2880399e6\n8ef25423772bbfe671c8e285ae1d63991d59db19\n^225f39c50d27e015653a38d589474ce2880399e6\n8ef25423772bbfe671c8e285ae1d63991d59db19\n^8ef25423772bbfe671c8e285ae1d63991d59db19\n^225f39c50d27e015653a38d589474ce2880399e6\n^8ef25423772bbfe671c8e285ae1d63991d59db19\n^8ef2542\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_rev_parse_ref_listings",
+      "seq": 567774,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git rev-parse --all; git rev-parse --branches --tags --remotes; git rev-parse --symbolic --branches --branches=to* --branches=topic --branches='[m]ain' --branches= --glob=heads --glob=refs/heads/to* --glob=nope --glob= --glob=heads/; git rev-parse --abbrev-ref --branches; git rev-parse --symbolic-full-name --all --branches)",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef25423772bbfe671c8e285ae1d63991d59db19\n225f39c50d27e015653a38d589474ce2880399e6\n8ef25423772bbfe671c8e285ae1d63991d59db19\n225f39c50d27e015653a38d589474ce2880399e6\nmain\ntopic\ntopic\nmain\nmain\ntopic\nrefs/heads/main\nrefs/heads/topic\nrefs/heads/topic\nrefs/heads/main\nrefs/heads/topic\nrefs/heads/main\nrefs/heads/topic\nmain\ntopic\nrefs/heads/main\nrefs/heads/topic\nrefs/heads/main\nrefs/heads/topic\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_rev_parse_exclude",
+      "seq": 567775,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git rev-parse --symbolic --exclude=to* --branches --branches; git rev-parse --symbolic --exclude=refs/heads/main --all; git rev-parse --symbolic --exclude=main --all; git rev-parse --symbolic --exclude=refs/heads/topic --branches; git rev-parse --exclude=main; git rev-parse --symbolic --glob --exclude)",
+      "expect": {
+        "exit": 0,
+        "stdout": "main\nmain\ntopic\nrefs/heads/topic\nrefs/heads/main\nrefs/heads/topic\nmain\ntopic\n--glob\n--exclude\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_rev_parse_ref_listings_in_a_clone",
+      "seq": 567776,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/rp && cd /repo/rp || exit 1; git tag v1 HEAD~1; git rev-parse --symbolic --tags --remotes --all; git rev-parse --symbolic-full-name --tags --remotes; git rev-parse --abbrev-ref --tags --remotes; git rev-parse --remotes=origin/to*; git rev-parse --remotes=origin; git rev-parse --symbolic --exclude='origin/m*' --remotes; git rev-parse --symbolic --exclude='refs/remotes/origin/m*' --all; git rev-parse --symbolic-full-name origin/topic v1); rm -rf /repo/rp",
+      "expect": {
+        "exit": 0,
+        "stdout": "v1\norigin/HEAD\norigin/main\norigin/topic\nrefs/heads/main\nrefs/remotes/origin/HEAD\nrefs/remotes/origin/main\nrefs/remotes/origin/topic\nrefs/tags/v1\nrefs/tags/v1\nrefs/remotes/origin/main\nrefs/remotes/origin/main\nrefs/remotes/origin/topic\nv1\norigin/main\norigin/main\norigin/topic\n225f39c50d27e015653a38d589474ce2880399e6\n8ef25423772bbfe671c8e285ae1d63991d59db19\n8ef25423772bbfe671c8e285ae1d63991d59db19\n225f39c50d27e015653a38d589474ce2880399e6\norigin/HEAD\norigin/topic\nrefs/heads/main\nrefs/remotes/origin/HEAD\nrefs/remotes/origin/topic\nrefs/tags/v1\nrefs/remotes/origin/topic\nrefs/tags/v1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_rev_parse_verify_positions",
+      "seq": 567777,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git rev-parse --verify HEAD --; git rev-parse --verify HEAD -- x; git rev-parse --verify -- HEAD; echo \"[$?]\"; git rev-parse HEAD --verify; echo \"[$?]\"; git rev-parse --verify HEAD..topic 2>/dev/null; echo \"[$?]\"; git rev-parse -q --verify HEAD..topic; echo \"[$?]\"; git rev-parse --verify ^HEAD; git rev-parse --verify --bogus; echo \"[$?]\"; git rev-parse --verify HEAD --bogus; git rev-parse --branches --verify 2>/dev/null; echo \"[$?]\"; git rev-parse --short=4 --all 2>/dev/null; echo \"[$?]\"; git rev-parse --short --short=10 HEAD; git rev-parse --short=4 HEAD --short=8 topic; echo \"[$?]\"; git rev-parse --symbolic-full-name --verify HEAD; git rev-parse --symbolic --verify main; git rev-parse --symbolic-full-name --verify HEAD~1; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef25423772bbfe671c8e285ae1d63991d59db19\n8ef25423772bbfe671c8e285ae1d63991d59db19\n[128]\n8ef25423772bbfe671c8e285ae1d63991d59db19\n[128]\n225f39c50d27e015653a38d589474ce2880399e6\n^8ef25423772bbfe671c8e285ae1d63991d59db19\n[128]\n225f39c50d27e015653a38d589474ce2880399e6\n^8ef25423772bbfe671c8e285ae1d63991d59db19\n[1]\n^8ef25423772bbfe671c8e285ae1d63991d59db19\n[128]\n8ef25423772bbfe671c8e285ae1d63991d59db19\n8ef25423772bbfe671c8e285ae1d63991d59db19\n225f39c50d27e015653a38d589474ce2880399e6\n[128]\n8ef2\n225f\n[128]\n8ef2542377\n[128]\nrefs/heads/main\nmain\n[0]\n",
+        "stderr": "fatal: Needed a single revision\nfatal: Needed a single revision\nfatal: Needed a single revision\nfatal: Needed a single revision\n"
+      }
+    },
+    {
+      "id": "git_rev_parse_prints_stray_words_back",
+      "seq": 567778,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git rev-parse --bogus -x - --show-t; git rev-parse -- HEAD; git rev-parse HEAD -- letters.txt; git rev-parse HEAD --; git rev-parse --git-dir -- --git-dir; git rev-parse --show-cdup --bogus -x HEAD)",
+      "expect": {
+        "exit": 0,
+        "stdout": "--bogus\n-x\n-\n--show-t\n--\nHEAD\n8ef25423772bbfe671c8e285ae1d63991d59db19\n--\nletters.txt\n8ef25423772bbfe671c8e285ae1d63991d59db19\n--\n.git\n--\n--git-dir\n\n--bogus\n-x\n8ef25423772bbfe671c8e285ae1d63991d59db19\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_rev_parse_file_words",
+      "seq": 567779,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git rev-parse letters.txt; git rev-parse letters.txt HEAD; echo \"[$?]\"; cd docs; git rev-parse readme.md letters.txt; echo \"[$?]\"; git rev-parse ..; cd ..; git rev-parse --symbolic letters.txt; git rev-parse --verify letters.txt; echo \"[$?]\"; git rev-parse -q HEAD nope; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "letters.txt\nletters.txt\nHEAD\n[128]\nreadme.md\nletters.txt\n[128]\n..\nletters.txt\n[128]\n8ef25423772bbfe671c8e285ae1d63991d59db19\nnope\n[128]\n",
+        "stderr": "fatal: HEAD: no such path in the working tree.\nUse 'git <command> -- <path>...' to specify paths that do not exist locally.\nfatal: letters.txt: no such path in the working tree.\nUse 'git <command> -- <path>...' to specify paths that do not exist locally.\nfatal: Needed a single revision\nfatal: ambiguous argument 'nope': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\n"
+      }
+    },
+    {
+      "id": "git_rev_parse_default",
+      "seq": 567780,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git rev-parse --default HEAD; git rev-parse --default HEAD topic; git rev-parse --default HEAD --branches; git rev-parse --default HEAD HEAD..topic; git rev-parse --default HEAD --bogus; git rev-parse --default nope; echo \"[$?]\"; git rev-parse --default HEAD --verify; git rev-parse --verify --default HEAD topic; git rev-parse --default; echo \"[$?]\"; git rev-parse --git-path; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef25423772bbfe671c8e285ae1d63991d59db19\n225f39c50d27e015653a38d589474ce2880399e6\n8ef25423772bbfe671c8e285ae1d63991d59db19\n225f39c50d27e015653a38d589474ce2880399e6\n225f39c50d27e015653a38d589474ce2880399e6\n^8ef25423772bbfe671c8e285ae1d63991d59db19\n--bogus\n8ef25423772bbfe671c8e285ae1d63991d59db19\n[0]\n8ef25423772bbfe671c8e285ae1d63991d59db19\n225f39c50d27e015653a38d589474ce2880399e6\n[128]\n[128]\n",
+        "stderr": "fatal: --default requires an argument\nfatal: --git-path requires an argument\n"
+      }
+    },
+    {
+      "id": "git_rev_parse_needs_a_repository",
+      "seq": 567781,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /; git rev-parse --bogus; echo \"[$?]\"; git rev-parse --show-cdup; echo \"[$?]\"; git rev-parse; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "[128]\n[128]\n[128]\n",
+        "stderr": "fatal: not a git repository (or any of the parent directories): .git\nfatal: not a git repository (or any of the parent directories): .git\nfatal: not a git repository (or any of the parent directories): .git\n"
+      }
+    },
+    {
+      "id": "git_selector_at_alone",
+      "seq": 567782,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git rev-parse @ @~1 @^ '@^{tree}' @:letters.txt; git rev-parse --symbolic @ @~1; git rev-parse --symbolic-full-name @; git rev-parse @@; echo \"[$?]\"; git rev-parse '@{'; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef25423772bbfe671c8e285ae1d63991d59db19\n225f39c50d27e015653a38d589474ce2880399e6\n225f39c50d27e015653a38d589474ce2880399e6\n213a314abdd4e23f24dccd80a763c4b533bdb01d\n7a28df3c975fa62270a452251c4e0b24d685c4ba\n@\n@~1\nrefs/heads/main\n@@\n[128]\n@{\n[128]\n",
+        "stderr": "fatal: ambiguous argument '@@': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\nfatal: ambiguous argument '@{': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\n"
+      }
+    },
+    {
+      "id": "git_selector_reflog",
+      "seq": 567783,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git rev-parse @{0} HEAD@{0} main@{0} @{1} HEAD@{1} main@{1} @{3} @{1}~1 @{1}^ 'main@{1}^{tree}'; git rev-parse @{4}; echo \"[$?]\"; git rev-parse HEAD@{4}; echo \"[$?]\"; git rev-parse main@{9}; echo \"[$?]\"; git rev-parse topic@{0}; git rev-parse topic@{1}; echo \"[$?]\"; git rev-parse nope@{1}; echo \"[$?]\"; git rev-parse @{bogus}; echo \"[$?]\"; git rev-parse 8ef2542@{0}; echo \"[$?]\"; git rev-parse --symbolic @{1}; git rev-parse --symbolic-full-name @{1} HEAD@{1} main@{1}; git rev-parse --abbrev-ref @{1}; git rev-parse @{1}..@)",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef25423772bbfe671c8e285ae1d63991d59db19\n8ef25423772bbfe671c8e285ae1d63991d59db19\n8ef25423772bbfe671c8e285ae1d63991d59db19\n225f39c50d27e015653a38d589474ce2880399e6\n225f39c50d27e015653a38d589474ce2880399e6\n225f39c50d27e015653a38d589474ce2880399e6\n98b4ffe0976edf04eebcc645df908f5a4f19e538\n265ec3adb16a0c90ad09a180687677927b9d7b7f\n265ec3adb16a0c90ad09a180687677927b9d7b7f\n7b5b66640798491bd2712ebc2506543f0813f9ac\n[128]\n[128]\n[128]\n225f39c50d27e015653a38d589474ce2880399e6\n[128]\nnope@{1}\n[128]\n@{bogus}\n[128]\n8ef2542@{0}\n[128]\n@{1}\n8ef25423772bbfe671c8e285ae1d63991d59db19\n^225f39c50d27e015653a38d589474ce2880399e6\n",
+        "stderr": "fatal: log for 'main' only has 4 entries\nfatal: log for 'HEAD' only has 4 entries\nfatal: log for 'main' only has 4 entries\nfatal: log for 'topic' only has 1 entries\nfatal: ambiguous argument 'nope@{1}': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\nfatal: ambiguous argument '@{bogus}': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\nfatal: ambiguous argument '8ef2542@{0}': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\n"
+      }
+    },
+    {
+      "id": "git_selector_reflog_across_verbs",
+      "seq": 567784,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git log --format=%s -1 @{1}; git log --format=%s @{2}..; git show -s --format=%s main@{2}; git diff --stat @{3} @{2}; git rev-list --count @{1}..HEAD; git log -1 --format=%s @{9}; echo \"[$?]\"; git show -s --format=%s nope@{1}; echo \"[$?]\"; git branch --contains @{1}; git merge-base @ @{2}; git ls-tree --name-only @{1}; git cat-file -t @{1}; git cat-file -p @{1}:numbers.txt; git rev-parse HEAD@{1}:letters.txt @{1}:docs/readme.md)",
+      "expect": {
+        "exit": 0,
+        "stdout": "add docs\nadd two\nadd docs\nadd delta\n letters.txt | 1 +\n 1 file changed, 1 insertion(+)\n1\n[128]\n[128]\n* main\n  topic\n265ec3adb16a0c90ad09a180687677927b9d7b7f\ndocs\nletters.txt\nnumbers.txt\ncommit\none\n7a28df3c975fa62270a452251c4e0b24d685c4ba\nbfa655111293037a5564088d1a9bbca4cbcf446b\n",
+        "stderr": "fatal: log for 'main' only has 4 entries\nfatal: ambiguous argument 'nope@{1}': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\n"
+      }
+    },
+    {
+      "id": "git_selector_previous_branch",
+      "seq": 567785,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/pv && cd /repo/pv || exit 1; git rev-parse @{-1}; echo \"[$?]\"; git checkout -q -b t1 origin/topic; git checkout -q main; git rev-parse @{-1}; git rev-parse --abbrev-ref @{-1}; git rev-parse --symbolic-full-name @{-1}; git rev-parse --symbolic @{-1}; git rev-parse @{-0}; echo \"[$?]\"; git check-ref-format --branch @{-1}); rm -rf /repo/pv",
+      "expect": {
+        "exit": 0,
+        "stdout": "@{-1}\n[128]\n225f39c50d27e015653a38d589474ce2880399e6\nt1\nrefs/heads/t1\n@{-1}\n@{-0}\n[128]\nt1\n",
+        "stderr": "fatal: ambiguous argument '@{-1}': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\nfatal: ambiguous argument '@{-0}': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\n"
+      }
+    },
+    {
+      "id": "git_selector_upstream",
+      "seq": 567786,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/up && cd /repo/up || exit 1; git rev-parse @{u} main@{u} @{U} @{upstream} @{UPSTREAM} @{push} main@{push} HEAD@{u} HEAD@{push}; git rev-parse --symbolic-full-name @{u} main@{upstream} @{push}; git rev-parse --abbrev-ref @{u}; git rev-parse --abbrev-ref --symbolic-full-name @{u}; git rev-parse --symbolic @{u}; git log --format=%s -1 @{u}; git diff --stat @{u}; git rev-list --count @{u}..; git merge-base @ @{u}; git ls-tree --name-only @{u}; git branch --contains @{u}); rm -rf /repo/up",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef25423772bbfe671c8e285ae1d63991d59db19\n8ef25423772bbfe671c8e285ae1d63991d59db19\n8ef25423772bbfe671c8e285ae1d63991d59db19\n8ef25423772bbfe671c8e285ae1d63991d59db19\n8ef25423772bbfe671c8e285ae1d63991d59db19\n8ef25423772bbfe671c8e285ae1d63991d59db19\n8ef25423772bbfe671c8e285ae1d63991d59db19\n8ef25423772bbfe671c8e285ae1d63991d59db19\n8ef25423772bbfe671c8e285ae1d63991d59db19\nrefs/remotes/origin/main\nrefs/remotes/origin/main\nrefs/remotes/origin/main\norigin/main\norigin/main\n@{u}\nadd two\n0\n8ef25423772bbfe671c8e285ae1d63991d59db19\ndocs\nletters.txt\nnumbers.txt\n* main\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_selector_upstream_refused",
+      "seq": 567787,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/up && cd /repo/up || exit 1; git rev-parse topic@{u}; echo \"[$?]\"; git rev-parse nope@{u}; echo \"[$?]\"; git rev-parse origin/main@{u}; echo \"[$?]\"; git rev-parse refs/heads/main@{u}; echo \"[$?]\"; git rev-parse origin/main@{1}; echo \"[$?]\"; git checkout -q -b loc; git rev-parse @{u}; echo \"[$?]\"; git rev-parse @{push}; echo \"[$?]\"; git checkout -q --detach; git rev-parse @{u}; echo \"[$?]\"; git rev-parse @{push}; echo \"[$?]\"); rm -rf /repo/up",
+      "expect": {
+        "exit": 0,
+        "stdout": "[128]\n[128]\n[128]\n[128]\norigin/main@{1}\n[128]\n[128]\n[128]\n[128]\n[128]\n",
+        "stderr": "fatal: no such branch: 'topic'\nfatal: no such branch: 'nope'\nfatal: no such branch: 'origin/main'\nfatal: no such branch: 'refs/heads/main'\nfatal: ambiguous argument 'origin/main@{1}': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\nfatal: no upstream configured for branch 'loc'\nfatal: no upstream configured for branch 'loc'\nfatal: HEAD does not point to a branch\nfatal: HEAD does not point to a branch\n"
+      }
+    },
+    {
+      "id": "git_selector_no_upstream",
+      "seq": 567788,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git rev-parse @{u}; echo \"[$?]\"; git rev-parse main@{upstream}; echo \"[$?]\"; git rev-parse --verify @{u}; echo \"[$?]\"; git rev-parse -q --verify @{u}; echo \"[$?]\"; git rev-parse HEAD @{u}; echo \"[$?]\"; git rev-parse --abbrev-ref @{u}; echo \"[$?]\"; git rev-parse --symbolic @{u}; echo \"[$?]\"; git log @{u}; echo \"[$?]\"; git log --oneline @{u}..; echo \"[$?]\"; git diff @{u}; echo \"[$?]\"; git show @{u}; echo \"[$?]\"; git rev-list --count @{u}..HEAD; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "[128]\n[128]\n[128]\n[1]\n8ef25423772bbfe671c8e285ae1d63991d59db19\n[128]\n[128]\n[128]\n[128]\n[128]\n[128]\n[128]\n[128]\n",
+        "stderr": "fatal: no upstream configured for branch 'main'\nfatal: no upstream configured for branch 'main'\nfatal: no upstream configured for branch 'main'\nfatal: no upstream configured for branch 'main'\nfatal: no upstream configured for branch 'main'\nfatal: no upstream configured for branch 'main'\nfatal: no upstream configured for branch 'main'\nfatal: no upstream configured for branch 'main'\nfatal: no upstream configured for branch 'main'\nfatal: no upstream configured for branch 'main'\nfatal: no upstream configured for branch 'main'\n"
+      }
+    },
+    {
+      "id": "git_selector_tracking_refused",
+      "seq": 567789,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/up && cd /repo/up || exit 1; git branch -q t3 main; git branch -q t8 main; git branch -q t9 main; printf '[branch \"t8\"]\\n\\tremote = origin\\n\\tmerge = refs/heads/nope\\n[branch \"t9\"]\\n\\tremote = nope\\n\\tmerge = refs/heads/main\\n[branch \"main\"]\\n\\tpushRemote = up\\n' >> .git/config; git rev-parse t3@{u}; echo \"[$?]\"; git rev-parse t8@{u}; echo \"[$?]\"; git rev-parse t9@{u}; echo \"[$?]\"; git rev-parse main@{push}; echo \"[$?]\"); rm -rf /repo/up",
+      "expect": {
+        "exit": 0,
+        "stdout": "[128]\nt8@{u}\n[128]\n[128]\n[128]\n",
+        "stderr": "fatal: no upstream configured for branch 't3'\nfatal: ambiguous argument 't8@{u}': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\nfatal: upstream branch 'refs/heads/main' not stored as a remote-tracking branch\nfatal: push destination 'refs/heads/main' on remote 'up' has no local tracking branch\n"
+      }
+    },
+    {
+      "id": "git_selector_push_default",
+      "seq": 567790,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/pu && cd /repo/pu || exit 1; git checkout -q -b t2 origin/topic; git rev-parse --symbolic-full-name @{push}; echo \"[$?]\"; printf '[push]\\n\\tdefault = upstream\\n' >> .git/config; git rev-parse --symbolic-full-name @{push}; printf '[push]\\n\\tdefault = nothing\\n' >> .git/config; git rev-parse @{push}; echo \"[$?]\"; printf '[push]\\n\\tdefault = current\\n' >> .git/config; git rev-parse @{push}; echo \"[$?]\"); rm -rf /repo/pu",
+      "expect": {
+        "exit": 0,
+        "stdout": "[128]\nrefs/remotes/origin/topic\n[128]\n@{push}\n[128]\n",
+        "stderr": "fatal: cannot resolve 'simple' push to a single destination\nfatal: push has no destination (push.default is 'nothing')\nfatal: ambiguous argument '@{push}': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\n"
+      }
+    },
+    {
+      "id": "git_diff_tree_two_trees",
+      "seq": 567791,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git diff-tree HEAD~1 HEAD; git diff-tree HEAD~2 HEAD; git diff-tree -r HEAD~2 HEAD; git diff-tree -r --name-only HEAD~2 HEAD; git diff-tree -r --name-status HEAD~2 HEAD; git diff-tree -p HEAD~1 HEAD; git diff-tree -p HEAD~2 HEAD; git diff-tree --stat HEAD~1 HEAD; git diff-tree HEAD HEAD; git diff-tree HEAD~1 HEAD -- numbers.txt; git diff-tree HEAD~1 HEAD -- letters.txt; git diff-tree HEAD~1 HEAD numbers.txt; git diff-tree HEAD HEAD~1 HEAD~2; git diff-tree 'HEAD^{tree}' 'HEAD~1^{tree}'; git diff-tree --abbrev -r HEAD~1 HEAD; git diff-tree --abbrev=10 -r HEAD~1 HEAD; git diff-tree --no-abbrev -r HEAD~1 HEAD; git diff-tree --diff-filter=D -r HEAD~1 HEAD)",
+      "expect": {
+        "exit": 0,
+        "stdout": ":100644 100644 5626abf0f72e58d7a153368ba57db4c673c0e171 814f4a422927b82f5f8a43f8fab6d3839e3983f2 M\tnumbers.txt\n:000000 040000 0000000000000000000000000000000000000000 24f073f4fa69a811e1bb64f65729188ccc3ce32a A\tdocs\n:100644 100644 5626abf0f72e58d7a153368ba57db4c673c0e171 814f4a422927b82f5f8a43f8fab6d3839e3983f2 M\tnumbers.txt\n:000000 100644 0000000000000000000000000000000000000000 bfa655111293037a5564088d1a9bbca4cbcf446b A\tdocs/readme.md\n:100644 100644 5626abf0f72e58d7a153368ba57db4c673c0e171 814f4a422927b82f5f8a43f8fab6d3839e3983f2 M\tnumbers.txt\ndocs/readme.md\nnumbers.txt\nA\tdocs/readme.md\nM\tnumbers.txt\ndiff --git a/numbers.txt b/numbers.txt\nindex 5626abf..814f4a4 100644\n--- a/numbers.txt\n+++ b/numbers.txt\n@@ -1 +1,2 @@\n one\n+two\ndiff --git a/docs/readme.md b/docs/readme.md\nnew file mode 100644\nindex 0000000..bfa6551\n--- /dev/null\n+++ b/docs/readme.md\n@@ -0,0 +1 @@\n+notes\ndiff --git a/numbers.txt b/numbers.txt\nindex 5626abf..814f4a4 100644\n--- a/numbers.txt\n+++ b/numbers.txt\n@@ -1 +1,2 @@\n one\n+two\n numbers.txt | 1 +\n 1 file changed, 1 insertion(+)\n:100644 100644 5626abf0f72e58d7a153368ba57db4c673c0e171 814f4a422927b82f5f8a43f8fab6d3839e3983f2 M\tnumbers.txt\n:100644 100644 5626abf0f72e58d7a153368ba57db4c673c0e171 814f4a422927b82f5f8a43f8fab6d3839e3983f2 M\tnumbers.txt\n:100644 100644 814f4a422927b82f5f8a43f8fab6d3839e3983f2 5626abf0f72e58d7a153368ba57db4c673c0e171 M\tnumbers.txt\n:100644 100644 5626abf 814f4a4 M\tnumbers.txt\n:100644 100644 5626abf0f7 814f4a4229 M\tnumbers.txt\n:100644 100644 5626abf0f72e58d7a153368ba57db4c673c0e171 814f4a422927b82f5f8a43f8fab6d3839e3983f2 M\tnumbers.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_diff_tree_result_status",
+      "seq": 567792,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git diff-tree --quiet HEAD~1 HEAD; echo \"[$?]\"; git diff-tree --quiet HEAD HEAD; echo \"[$?]\"; git diff-tree --exit-code HEAD~1 HEAD; echo \"[$?]\"; git diff-tree --exit-code HEAD HEAD; echo \"[$?]\"; git diff-tree --quiet HEAD; echo \"[$?]\"; git diff-tree --exit-code HEAD; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1]\n[0]\n:100644 100644 5626abf0f72e58d7a153368ba57db4c673c0e171 814f4a422927b82f5f8a43f8fab6d3839e3983f2 M\tnumbers.txt\n[1]\n[0]\n8ef25423772bbfe671c8e285ae1d63991d59db19\n[1]\n8ef25423772bbfe671c8e285ae1d63991d59db19\n:100644 100644 5626abf0f72e58d7a153368ba57db4c673c0e171 814f4a422927b82f5f8a43f8fab6d3839e3983f2 M\tnumbers.txt\n[1]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_diff_tree_root_and_refusals",
+      "seq": 567793,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git diff-tree --root HEAD~3; git diff-tree HEAD~3; echo \"[$?]\"; git diff-tree --root -r --name-only HEAD~3; git diff-tree --no-commit-id --name-only -r HEAD; git diff-tree -s HEAD; git diff-tree HEAD numbers.txt; git diff-tree nope HEAD; echo \"[$?]\"; git diff-tree HEAD nope; echo \"[$?]\"; git diff-tree 'HEAD^{tree}'; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "98b4ffe0976edf04eebcc645df908f5a4f19e538\n:000000 100644 0000000000000000000000000000000000000000 85c30401ce288f253613cb07ee32e62128089caa A\tletters.txt\n:000000 100644 0000000000000000000000000000000000000000 5626abf0f72e58d7a153368ba57db4c673c0e171 A\tnumbers.txt\n[0]\n98b4ffe0976edf04eebcc645df908f5a4f19e538\nletters.txt\nnumbers.txt\nnumbers.txt\n8ef25423772bbfe671c8e285ae1d63991d59db19\n8ef25423772bbfe671c8e285ae1d63991d59db19\n:100644 100644 5626abf0f72e58d7a153368ba57db4c673c0e171 814f4a422927b82f5f8a43f8fab6d3839e3983f2 M\tnumbers.txt\n[128]\n[128]\n[0]\n",
+        "stderr": "fatal: ambiguous argument 'nope': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\nfatal: ambiguous argument 'nope': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\nerror: object 213a314abdd4e23f24dccd80a763c4b533bdb01d is a tree, not a commit\n"
+      }
+    },
+    {
+      "id": "git_diff_tree_no_rename_by_default",
+      "seq": 567794,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/dt && cd /repo/dt || exit 1; export GIT_COMMITTER_NAME=A GIT_COMMITTER_EMAIL=a@example.com GIT_AUTHOR_NAME=A GIT_AUTHOR_EMAIL=a@example.com; git mv letters.txt l.txt; git commit -qm mv; git diff-tree -r HEAD~1 HEAD; git diff-tree -r -M HEAD~1 HEAD; git diff-tree --no-commit-id -r HEAD; git diff-tree --no-commit-id -r -M HEAD); rm -rf /repo/dt",
+      "expect": {
+        "exit": 0,
+        "stdout": ":000000 100644 0000000000000000000000000000000000000000 7a28df3c975fa62270a452251c4e0b24d685c4ba A\tl.txt\n:100644 000000 7a28df3c975fa62270a452251c4e0b24d685c4ba 0000000000000000000000000000000000000000 D\tletters.txt\n:100644 100644 7a28df3c975fa62270a452251c4e0b24d685c4ba 7a28df3c975fa62270a452251c4e0b24d685c4ba R100\tletters.txt\tl.txt\n:000000 100644 0000000000000000000000000000000000000000 7a28df3c975fa62270a452251c4e0b24d685c4ba A\tl.txt\n:100644 000000 7a28df3c975fa62270a452251c4e0b24d685c4ba 0000000000000000000000000000000000000000 D\tletters.txt\n:100644 100644 7a28df3c975fa62270a452251c4e0b24d685c4ba 7a28df3c975fa62270a452251c4e0b24d685c4ba R100\tletters.txt\tl.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_diff_files",
+      "seq": 567795,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/df && cd /repo/df || exit 1; git status > /dev/null; git diff-files; git diff-files --quiet; echo \"[$?]\"; echo x >> letters.txt; git diff-files; git diff-files --quiet; echo \"[$?]\"; git diff-files --exit-code; echo \"[$?]\"; git diff-files --name-only; git diff-files --name-status; git diff-files -p; git diff-files --stat; git diff-files numbers.txt; git diff-files -- letters.txt; git add letters.txt; git diff-files; rm numbers.txt; git diff-files; git diff-files -q); rm -rf /repo/df",
+      "expect": {
+        "exit": 0,
+        "stdout": "[0]\n:100644 100644 7a28df3c975fa62270a452251c4e0b24d685c4ba 0000000000000000000000000000000000000000 M\tletters.txt\n[1]\n:100644 100644 7a28df3c975fa62270a452251c4e0b24d685c4ba 0000000000000000000000000000000000000000 M\tletters.txt\n[1]\nletters.txt\nM\tletters.txt\ndiff --git a/letters.txt b/letters.txt\nindex 7a28df3..47427fc 100644\n--- a/letters.txt\n+++ b/letters.txt\n@@ -2,3 +2,4 @@ alpha\n beta\n gamma\n delta\n+x\n letters.txt | 1 +\n 1 file changed, 1 insertion(+)\n:100644 100644 7a28df3c975fa62270a452251c4e0b24d685c4ba 0000000000000000000000000000000000000000 M\tletters.txt\n:100644 000000 814f4a422927b82f5f8a43f8fab6d3839e3983f2 0000000000000000000000000000000000000000 D\tnumbers.txt\n:100644 000000 814f4a422927b82f5f8a43f8fab6d3839e3983f2 0000000000000000000000000000000000000000 D\tnumbers.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_diff_files_refusals",
+      "seq": 567796,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git diff-files nope; echo \"[$?]\"; cd .git; git diff-files; echo \"[$?]\"; cd /; git diff-files; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "[128]\n[128]\n[128]\n",
+        "stderr": "fatal: ambiguous argument 'nope': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\nfatal: this operation must be run in a work tree\nfatal: not a git repository (or any of the parent directories): .git\n"
+      }
+    },
+    {
+      "id": "git_diff_index",
+      "seq": 567797,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/di && cd /repo/di || exit 1; git status > /dev/null; git diff-index HEAD; git diff-index --cached HEAD; git diff-index --quiet HEAD; echo \"[$?]\"; echo x >> letters.txt; git diff-index HEAD; git diff-index --cached HEAD; git diff-index --quiet HEAD; echo \"[$?]\"; git diff-index --exit-code HEAD; echo \"[$?]\"; git diff-index --name-only HEAD; git diff-index --name-status HEAD; git diff-index -p HEAD; git diff-index --stat HEAD; git diff-index HEAD -- numbers.txt; git diff-index HEAD letters.txt; git diff-index --abbrev HEAD~1; git diff-index 'HEAD^{tree}'; git diff-index origin/topic); rm -rf /repo/di",
+      "expect": {
+        "exit": 0,
+        "stdout": "[0]\n:100644 100644 7a28df3c975fa62270a452251c4e0b24d685c4ba 0000000000000000000000000000000000000000 M\tletters.txt\n[1]\n:100644 100644 7a28df3c975fa62270a452251c4e0b24d685c4ba 0000000000000000000000000000000000000000 M\tletters.txt\n[1]\nletters.txt\nM\tletters.txt\ndiff --git a/letters.txt b/letters.txt\nindex 7a28df3..47427fc 100644\n--- a/letters.txt\n+++ b/letters.txt\n@@ -2,3 +2,4 @@ alpha\n beta\n gamma\n delta\n+x\n letters.txt | 1 +\n 1 file changed, 1 insertion(+)\n:100644 100644 7a28df3c975fa62270a452251c4e0b24d685c4ba 0000000000000000000000000000000000000000 M\tletters.txt\n:100644 100644 7a28df3 0000000 M\tletters.txt\n:100644 100644 5626abf 814f4a4 M\tnumbers.txt\n:100644 100644 7a28df3c975fa62270a452251c4e0b24d685c4ba 0000000000000000000000000000000000000000 M\tletters.txt\n:100644 100644 7a28df3c975fa62270a452251c4e0b24d685c4ba 0000000000000000000000000000000000000000 M\tletters.txt\n:100644 100644 5626abf0f72e58d7a153368ba57db4c673c0e171 814f4a422927b82f5f8a43f8fab6d3839e3983f2 M\tnumbers.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_diff_index_staged",
+      "seq": 567798,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/di && cd /repo/di || exit 1; git status > /dev/null; echo x >> letters.txt; git add letters.txt; git diff-index HEAD; git diff-index --cached HEAD; git diff-index --quiet --cached HEAD; echo \"[$?]\"; git diff --raw HEAD; echo y >> letters.txt; git diff-index HEAD; git diff --raw HEAD; echo n > new; git add new; git diff-index --cached HEAD; rm numbers.txt; git diff-index HEAD; git diff-index -m HEAD); rm -rf /repo/di",
+      "expect": {
+        "exit": 0,
+        "stdout": ":100644 100644 7a28df3c975fa62270a452251c4e0b24d685c4ba 47427fcc02401201ecd63f87994ad3d20e05a11f M\tletters.txt\n:100644 100644 7a28df3c975fa62270a452251c4e0b24d685c4ba 47427fcc02401201ecd63f87994ad3d20e05a11f M\tletters.txt\n[1]\n:100644 100644 7a28df3 47427fc M\tletters.txt\n:100644 100644 7a28df3c975fa62270a452251c4e0b24d685c4ba 0000000000000000000000000000000000000000 M\tletters.txt\n:100644 100644 7a28df3 0000000 M\tletters.txt\n:100644 100644 7a28df3c975fa62270a452251c4e0b24d685c4ba 47427fcc02401201ecd63f87994ad3d20e05a11f M\tletters.txt\n:000000 100644 0000000000000000000000000000000000000000 8ba3a16384aacc37d01564b28401755ce8053f51 A\tnew\n:100644 100644 7a28df3c975fa62270a452251c4e0b24d685c4ba 0000000000000000000000000000000000000000 M\tletters.txt\n:000000 100644 0000000000000000000000000000000000000000 8ba3a16384aacc37d01564b28401755ce8053f51 A\tnew\n:100644 000000 814f4a422927b82f5f8a43f8fab6d3839e3983f2 0000000000000000000000000000000000000000 D\tnumbers.txt\n:100644 100644 7a28df3c975fa62270a452251c4e0b24d685c4ba 0000000000000000000000000000000000000000 M\tletters.txt\n:000000 100644 0000000000000000000000000000000000000000 8ba3a16384aacc37d01564b28401755ce8053f51 A\tnew\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_diff_index_refusals",
+      "seq": 567799,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git diff-index nope; echo \"[$?]\"; cd .git; git diff-index HEAD; echo \"[$?]\"; git diff-index --cached HEAD; echo \"[$?]\"; cd /; git diff-index HEAD; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "[128]\n[128]\n[0]\n[128]\n",
+        "stderr": "fatal: ambiguous argument 'nope': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\nfatal: this operation must be run in a work tree\nfatal: not a git repository (or any of the parent directories): .git\n"
+      }
+    },
+    {
+      "id": "git_diff_plumbing_from_a_subdirectory",
+      "seq": 567841,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/ds && cd /repo/ds || exit 1; git status > /dev/null; echo z >> docs/readme.md; cd docs; git diff-files; git diff-index HEAD; git diff-index HEAD -- .; git diff-index HEAD -- ../letters.txt); rm -rf /repo/ds",
+      "expect": {
+        "exit": 0,
+        "stdout": ":100644 100644 bfa655111293037a5564088d1a9bbca4cbcf446b 0000000000000000000000000000000000000000 M\tdocs/readme.md\n:100644 100644 bfa655111293037a5564088d1a9bbca4cbcf446b 0000000000000000000000000000000000000000 M\tdocs/readme.md\n:100644 100644 bfa655111293037a5564088d1a9bbca4cbcf446b 0000000000000000000000000000000000000000 M\tdocs/readme.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_check_ref_format_rules",
+      "seq": 567842,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git check-ref-format refs/heads/main; echo \"[$?]\"; git check-ref-format main; echo \"[$?]\"; git check-ref-format --allow-onelevel main; echo \"[$?]\"; git check-ref-format --no-allow-onelevel main; echo \"[$?]\"; git check-ref-format 'refs/a b'; echo \"[$?]\"; git check-ref-format refs/x.; echo \"[$?]\"; git check-ref-format refs/x.lock; echo \"[$?]\"; git check-ref-format refs/.x; echo \"[$?]\"; git check-ref-format 'refs/a@{b'; echo \"[$?]\"; git check-ref-format @; echo \"[$?]\"; git check-ref-format refs/@; echo \"[$?]\"; git check-ref-format refs//x; echo \"[$?]\"; git check-ref-format /refs/x; echo \"[$?]\"; git check-ref-format refs/x/; echo \"[$?]\"; git check-ref-format refs/a.b/c.d; echo \"[$?]\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "[0]\n[1]\n[0]\n[1]\n[1]\n[1]\n[1]\n[1]\n[1]\n[1]\n[0]\n[1]\n[1]\n[1]\n[0]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_check_ref_format_patterns",
+      "seq": 567843,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git check-ref-format --refspec-pattern 'refs/heads/*'; echo \"[$?]\"; git check-ref-format 'refs/heads/*'; echo \"[$?]\"; git check-ref-format --refspec-pattern 'refs/*/a/*'; echo \"[$?]\"; git check-ref-format --refspec-pattern --allow-onelevel '*'; echo \"[$?]\"; git check-ref-format --refspec-pattern '*'; echo \"[$?]\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "[0]\n[1]\n[1]\n[0]\n[1]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_check_ref_format_normalize",
+      "seq": 567844,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git check-ref-format --normalize refs//heads///main; echo \"[$?]\"; git check-ref-format --normalize /refs/heads/main; echo \"[$?]\"; git check-ref-format --normalize main; echo \"[$?]\"; git check-ref-format --normalize --allow-onelevel main; echo \"[$?]\"; git check-ref-format --print refs//a; echo \"[$?]\"; git check-ref-format --normalize refs/x/; echo \"[$?]\"; git check-ref-format --normalize 'refs/a b'; echo \"[$?]\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "refs/heads/main\n[0]\nrefs/heads/main\n[0]\n[1]\nmain\n[0]\nrefs/a\n[0]\n[1]\n[1]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_check_ref_format_branch",
+      "seq": 567845,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git check-ref-format --branch main; echo \"[$?]\"; git check-ref-format --branch -x; echo \"[$?]\"; git check-ref-format --branch 'a..b'; echo \"[$?]\"; git check-ref-format --branch HEAD; echo \"[$?]\"; (cd /repo; git check-ref-format --branch @{-1}; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "main\n[0]\n[128]\n[128]\n[128]\n[128]\n",
+        "stderr": "fatal: '-x' is not a valid branch name\nfatal: 'a..b' is not a valid branch name\nfatal: 'HEAD' is not a valid branch name\nfatal: '@{-1}' is not a valid branch name\n"
+      }
+    },
+    {
+      "id": "git_describe_no_tags",
+      "seq": 567846,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git describe; echo \"[$?]\"; git describe --always; git describe --all; git describe --all --long; git describe --all topic; git describe --exact-match --always; echo \"[$?]\"; git describe --abbrev=0 --always; git describe --abbrev=2 --always; git describe --abbrev=50 --always; git describe --abbrev=abc --always; echo \"[$?]\"; git describe --candidates=x; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "[128]\n8ef2542\nheads/main\nheads/main-0-g8ef2542\nheads/topic\n[128]\n8ef25423772bbfe671c8e285ae1d63991d59db19\n8ef2\n8ef25423772bbfe671c8e285ae1d63991d59db19\n[129]\n[129]\n",
+        "stderr": "fatal: No names found, cannot describe anything.\nfatal: no tag exactly matches '8ef25423772bbfe671c8e285ae1d63991d59db19'\nerror: option `abbrev' expects a numerical value\nerror: option `candidates' expects a numerical value\n"
+      }
+    },
+    {
+      "id": "git_describe_annotated",
+      "seq": 567847,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/ds && cd /repo/ds || exit 1; export GIT_COMMITTER_NAME=A GIT_COMMITTER_EMAIL=a@example.com GIT_AUTHOR_NAME=A GIT_AUTHOR_EMAIL=a@example.com; git tag -a -m m v1 HEAD~2; git describe; git describe --tags; git describe --long; git describe --abbrev=4; git describe --abbrev=0; git describe HEAD~2; git describe --long HEAD~2; git describe --exact-match HEAD~2; git describe --exact-match; echo \"[$?]\"; git describe --match 'v*'; git describe --match 'x*'; echo \"[$?]\"; git describe --exclude 'v*'; echo \"[$?]\"; git describe --all; git describe --all HEAD~1; git describe --all --long; git describe nope; echo \"[$?]\"; git describe 'HEAD^{tree}'; echo \"[$?]\"; git describe HEAD origin/topic; git describe --long --abbrev=0; echo \"[$?]\"; git describe --candidates=0; echo \"[$?]\"; git describe --candidates=1; git describe --first-parent); rm -rf /repo/ds",
+      "expect": {
+        "exit": 0,
+        "stdout": "v1-2-g8ef2542\nv1-2-g8ef2542\nv1-2-g8ef2542\nv1-2-g8ef2\nv1\nv1\nv1-0-g265ec3a\nv1\n[128]\nv1-2-g8ef2542\n[128]\n[128]\nheads/main\nremotes/origin/topic\nheads/main-0-g8ef2542\n[128]\n[128]\nv1-2-g8ef2542\nv1-1-g225f39c\n[128]\n[128]\nv1-2-g8ef2542\nv1-2-g8ef2542\n",
+        "stderr": "fatal: no tag exactly matches '8ef25423772bbfe671c8e285ae1d63991d59db19'\nfatal: No names found, cannot describe anything.\nfatal: No names found, cannot describe anything.\nfatal: Not a valid object name nope\nfatal: HEAD^{tree} is neither a commit nor blob\nfatal: options '--long' and '--abbrev=0' cannot be used together\nfatal: no tag exactly matches '8ef25423772bbfe671c8e285ae1d63991d59db19'\n"
+      }
+    },
+    {
+      "id": "git_describe_lightweight",
+      "seq": 567848,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/ds && cd /repo/ds || exit 1; export GIT_COMMITTER_NAME=A GIT_COMMITTER_EMAIL=a@example.com GIT_AUTHOR_NAME=A GIT_AUTHOR_EMAIL=a@example.com; git tag v1 HEAD~2; git describe; echo \"[$?]\"; git describe --tags; git describe --tags --abbrev=0; git tag -a -m m v2 HEAD~3; git describe; git describe --tags; git describe --tags --match 'v*' --exclude 'v1'); rm -rf /repo/ds",
+      "expect": {
+        "exit": 0,
+        "stdout": "[128]\nv1-2-g8ef2542\nv1\nv2-3-g8ef2542\nv1-2-g8ef2542\nv2-3-g8ef2542\n",
+        "stderr": "fatal: No annotated tags can describe '8ef25423772bbfe671c8e285ae1d63991d59db19'.\nHowever, there were unannotated tags: try --tags.\n"
+      }
+    },
+    {
+      "id": "git_describe_dirty",
+      "seq": 567849,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/ds && cd /repo/ds || exit 1; export GIT_COMMITTER_NAME=A GIT_COMMITTER_EMAIL=a@example.com GIT_AUTHOR_NAME=A GIT_AUTHOR_EMAIL=a@example.com; git tag -a -m m v1 HEAD~2; git describe --dirty; git describe --dirty HEAD; echo \"[$?]\"; echo x >> letters.txt; git describe --dirty; git describe --dirty=-X; git describe --broken; git add letters.txt; git describe --dirty); rm -rf /repo/ds",
+      "expect": {
+        "exit": 0,
+        "stdout": "v1-2-g8ef2542\n[128]\nv1-2-g8ef2542-dirty\nv1-2-g8ef2542-X\nv1-2-g8ef2542-dirty\nv1-2-g8ef2542-dirty\n",
+        "stderr": "fatal: option '--dirty' and commit-ishes cannot be used together\n"
+      }
+    },
+    {
+      "id": "git_describe_unreachable_tags",
+      "seq": 567850,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/ds && cd /repo/ds || exit 1; export GIT_COMMITTER_NAME=A GIT_COMMITTER_EMAIL=a@example.com GIT_AUTHOR_NAME=A GIT_AUTHOR_EMAIL=a@example.com; t=$(git rev-parse 'HEAD^{tree}'); o=$(printf 'tree %s\\nauthor a <a@b> 1754388000 +0000\\ncommitter a <a@b> 1754388000 +0000\\n\\nx\\n' \"$t\" | git hash-object -t commit -w --stdin); git tag -a -m m far $o; git describe; echo \"[$?]\"; git describe --always; git tag -d far > /dev/null; git tag far $o; git describe; echo \"[$?]\"; git describe --tags; echo \"[$?]\"); rm -rf /repo/ds",
+      "expect": {
+        "exit": 0,
+        "stdout": "[128]\n8ef2542\n[128]\n[128]\n",
+        "stderr": "fatal: No tags can describe '8ef25423772bbfe671c8e285ae1d63991d59db19'.\nTry --always, or create some tags.\nfatal: No tags can describe '8ef25423772bbfe671c8e285ae1d63991d59db19'.\nTry --always, or create some tags.\nfatal: No tags can describe '8ef25423772bbfe671c8e285ae1d63991d59db19'.\nTry --always, or create some tags.\n"
+      }
+    },
+    {
+      "id": "git_check_ignore_answers",
+      "seq": 567851,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/ci && cd /repo/ci || exit 1; printf 'ig*\\n!igkeep\\nsub/\\n' > .gitignore; mkdir sub; echo a > sub/x; echo b > igfile; git check-ignore igfile igkeep sub sub/x sub/y other; echo \"[$?]\"; git check-ignore other; echo \"[$?]\"; git check-ignore -q igfile; echo \"[$?]\"; git check-ignore -q other; echo \"[$?]\"); rm -rf /repo/ci",
+      "expect": {
+        "exit": 0,
+        "stdout": "igfile\nsub\nsub/x\nsub/y\n[0]\n[1]\n[0]\n[1]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_check_ignore_verbose",
+      "seq": 567852,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/ci && cd /repo/ci || exit 1; mkdir -p .git/info docs; printf '# c\\n\\nig*\\n!igkeep\\n' > .gitignore; printf 'ig2\\n' > docs/.gitignore; printf 'ex\\nig*\\n' > .git/info/exclude; git check-ignore -v igfile igkeep docs/ig2 docs/igfile ex other; echo \"[$?]\"; git check-ignore -v other; echo \"[$?]\"; git check-ignore -v -n igfile other docs/zz; echo \"[$?]\"; git check-ignore --verbose --non-matching other; echo \"[$?]\"); rm -rf /repo/ci",
+      "expect": {
+        "exit": 0,
+        "stdout": ".gitignore:3:ig*\tigfile\n.gitignore:4:!igkeep\tigkeep\ndocs/.gitignore:1:ig2\tdocs/ig2\n.gitignore:3:ig*\tdocs/igfile\n.git/info/exclude:1:ex\tex\n[0]\n[1]\n.gitignore:3:ig*\tigfile\n::\tother\n::\tdocs/zz\n[0]\n::\tother\n[1]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_check_ignore_tracked",
+      "seq": 567853,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/ci && cd /repo/ci || exit 1; printf 'docs\\n*.md\\n' > .gitignore; git check-ignore docs docs/readme.md docs/new docs/new.md; echo \"[$?]\"; git check-ignore --no-index docs docs/readme.md; echo \"[$?]\"; git check-ignore -v --no-index docs/readme.md; echo \"[$?]\"; git check-ignore -v -n docs docs/readme.md; echo \"[$?]\"); rm -rf /repo/ci",
+      "expect": {
+        "exit": 0,
+        "stdout": "docs/new\ndocs/new.md\n[0]\ndocs\ndocs/readme.md\n[0]\n.gitignore:1:docs\tdocs/readme.md\n[0]\n::\tdocs\n::\tdocs/readme.md\n[1]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_check_ignore_parent_decides",
+      "seq": 567854,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/ci && cd /repo/ci || exit 1; printf 'sub/\\n!sub/x\\n' > .gitignore; mkdir sub; echo a > sub/x; git check-ignore -v sub/x sub; echo \"[$?]\"; printf 'sub/*\\n!sub/x\\n' > .gitignore; git check-ignore -v sub/x sub/y; echo \"[$?]\"; printf 'a/\\n' > .gitignore; git check-ignore a; echo \"[$?]\"; git check-ignore a/; echo \"[$?]\"; git check-ignore a/b; echo \"[$?]\"; mkdir a; git check-ignore a; echo \"[$?]\"; printf '!ig*\\n' > docs/.gitignore; printf 'ig*\\n' > .gitignore; git check-ignore -v docs/igfile; echo \"[$?]\"; git check-ignore docs/igfile; echo \"[$?]\"); rm -rf /repo/ci",
+      "expect": {
+        "exit": 0,
+        "stdout": ".gitignore:1:sub/\tsub/x\n.gitignore:1:sub/\tsub\n[0]\n.gitignore:2:!sub/x\tsub/x\n.gitignore:1:sub/*\tsub/y\n[0]\n[1]\na/\n[0]\na/b\n[0]\na\n[0]\ndocs/.gitignore:1:!ig*\tdocs/igfile\n[0]\n[1]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_check_ignore_paths_as_typed",
+      "seq": 567855,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/ci && cd /repo/ci || exit 1; printf 'x\\nigé\\n' > .gitignore; cd docs; git check-ignore x ../x; git check-ignore -v x ../x; cd ..; git check-ignore /repo/ci/x; git check-ignore ./x; git check-ignore .; echo \"[$?]\"; git check-ignore igé; git check-ignore -v igé; git -c core.quotepath=false check-ignore igé; git -c core.quotepath=false check-ignore -v igé; echo \"[$?]\"); rm -rf /repo/ci",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\n../x\n.gitignore:1:x\tx\n.gitignore:1:x\t../x\n/repo/ci/x\n./x\n[1]\n\"ig\\303\\251\"\n.gitignore:2:igé\t\"ig\\303\\251\"\nigé\n.gitignore:2:igé\tigé\n[0]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_check_ignore_stdin",
+      "seq": 567856,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/ci && cd /repo/ci || exit 1; printf 'ig*\\n' > .gitignore; printf 'igfile\\nother\\n' | git check-ignore --stdin; echo \"[$?]\"; printf '\"igfile\"\\n\"ig\\\\157\"\\n\"ig\"x\\nother' | git check-ignore --stdin; echo \"[$?]\"; git check-ignore --stdin < /dev/null; echo \"[$?]\"; printf 'igfile\\r\\n' | git check-ignore --stdin -v -n; echo \"[$?]\"; printf 'igfile\\nother\\n' | git check-ignore --stdin -v -n; echo \"[$?]\"; printf 'igfile\\nigb\\n' | git check-ignore -q --stdin; echo \"[$?]\"); rm -rf /repo/ci",
+      "expect": {
+        "exit": 0,
+        "stdout": "igfile\n[0]\nigfile\nigo\nig\n[0]\n[1]\n.gitignore:1:ig*\t\"igfile\\r\"\n[0]\n.gitignore:1:ig*\tigfile\n::\tother\n[0]\n[0]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_check_ignore_stdin_nul",
+      "seq": 567857,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/ci && cd /repo/ci || exit 1; printf 'ig*\\n' > .gitignore; printf 'igfile\\0other\\0' | git check-ignore --stdin -z | tr '\\0' '|'; echo; printf 'igfile\\0other\\0' | git check-ignore --stdin -z -v -n | tr '\\0' '|'; echo; printf '\"igfile\"\\0' | git check-ignore --stdin -z; echo \"[$?]\"); rm -rf /repo/ci",
+      "expect": {
+        "exit": 0,
+        "stdout": "igfile|\n.gitignore|1|ig*|igfile||||other|\n[1]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_check_ignore_stdin_stops_at_a_bad_line",
+      "seq": 567858,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/ci && cd /repo/ci || exit 1; printf 'ig*\\n' > .gitignore; printf 'igfile\\n/x\\nigb\\n' | git check-ignore --stdin; echo \"[$?]\"; printf 'igfile\\n\\nigb\\n' | git check-ignore --stdin; echo \"[$?]\"; printf 'igfile\\n\"bad\\nigb\\n' | git check-ignore --stdin; echo \"[$?]\"; printf 'igfile\\0\\0igb\\0' | git check-ignore --stdin -z | tr '\\0' '|'; echo); rm -rf /repo/ci",
+      "expect": {
+        "exit": 0,
+        "stdout": "igfile\n[128]\nigfile\n[128]\nigfile\n[128]\nigfile|\n",
+        "stderr": "fatal: /x: '/x' is outside repository at '/repo/ci'\nfatal: empty string is not a valid pathspec. please use . instead if you meant to match all paths\nfatal: line is badly quoted\nfatal: empty string is not a valid pathspec. please use . instead if you meant to match all paths\n"
+      }
+    },
+    {
+      "id": "git_check_ignore_refusals",
+      "seq": 567859,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git check-ignore; echo \"[$?]\"; git check-ignore -q a b; echo \"[$?]\"; git check-ignore -q -v a; echo \"[$?]\"; git check-ignore -q -v a b; echo \"[$?]\"; git check-ignore -n a; echo \"[$?]\"; git check-ignore -z a; echo \"[$?]\"; git check-ignore -z; echo \"[$?]\"; git check-ignore --stdin a -q -v; echo \"[$?]\"; git check-ignore --stdin -n < /dev/null; echo \"[$?]\"; git check-ignore ''; echo \"[$?]\"; git check-ignore /x; echo \"[$?]\"; git check-ignore x /x; echo \"[$?]\"; git check-ignore ..; echo \"[$?]\"; cd .git; git check-ignore x; echo \"[$?]\"; cd /; git check-ignore x; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "[128]\n[128]\n[128]\n[128]\n[128]\n[128]\n[128]\n[128]\n[128]\n[128]\n[128]\n[128]\n[128]\n[128]\n[128]\n",
+        "stderr": "fatal: no path specified\nfatal: --quiet is only valid with a single pathname\nfatal: cannot have both --quiet and --verbose\nfatal: --quiet is only valid with a single pathname\nfatal: --non-matching is only valid with --verbose\nfatal: -z only makes sense with --stdin\nfatal: -z only makes sense with --stdin\nfatal: cannot specify pathnames with --stdin\nfatal: --non-matching is only valid with --verbose\nfatal: empty string is not a valid pathspec. please use . instead if you meant to match all paths\nfatal: /x: '/x' is outside repository at '/repo'\nfatal: /x: '/x' is outside repository at '/repo'\nfatal: ..: '..' is outside repository at '/repo'\nfatal: this operation must be run in a work tree\nfatal: not a git repository (or any of the parent directories): .git\n"
+      }
+    },
+    {
+      "id": "git_ls_remote_lists",
+      "seq": 567860,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/lr && cd /repo/lr || exit 1; export GIT_COMMITTER_NAME=A GIT_COMMITTER_EMAIL=a@example.com GIT_AUTHOR_NAME=A GIT_AUTHOR_EMAIL=a@example.com; git tag -a -m m ann HEAD~1; git tag light; git ls-remote . | cut -f2; git ls-remote . HEAD refs/heads/main 'refs/tags/ann^{}' refs/tags/light; git ls-remote --heads . | cut -f2; git ls-remote -h . | cut -f2; git ls-remote --branches . | cut -f2; git ls-remote -b . | cut -f2; git ls-remote --tags . | cut -f2; git ls-remote -t . | cut -f2; git ls-remote --heads --tags . | cut -f2; git ls-remote --refs . | cut -f2; git ls-remote --refs --tags . | cut -f2; echo \"[$?]\"); rm -rf /repo/lr",
+      "expect": {
+        "exit": 0,
+        "stdout": "HEAD\nrefs/heads/main\nrefs/remotes/origin/HEAD\nrefs/remotes/origin/main\nrefs/remotes/origin/topic\nrefs/tags/ann\nrefs/tags/ann^{}\nrefs/tags/light\n8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/main\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/remotes/origin/HEAD\n225f39c50d27e015653a38d589474ce2880399e6\trefs/tags/ann^{}\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/tags/light\nrefs/heads/main\nrefs/heads/main\nrefs/heads/main\nrefs/heads/main\nrefs/tags/ann\nrefs/tags/ann^{}\nrefs/tags/light\nrefs/tags/ann\nrefs/tags/ann^{}\nrefs/tags/light\nrefs/heads/main\nrefs/tags/ann\nrefs/tags/ann^{}\nrefs/tags/light\nrefs/heads/main\nrefs/remotes/origin/HEAD\nrefs/remotes/origin/main\nrefs/remotes/origin/topic\nrefs/tags/ann\nrefs/tags/light\nrefs/tags/ann\nrefs/tags/light\n[0]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_ls_remote_patterns",
+      "seq": 567861,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git ls-remote . main; git ls-remote . 'refs/heads/*'; git ls-remote . 'ma*'; git ls-remote . '*/main'; git ls-remote . 'heads/main'; git ls-remote . 'eads/main'; git ls-remote . 'refs/heads/[m]ain'; git ls-remote . 'REFS/heads/main'; git ls-remote . HEAD; git ls-remote . main topic; git ls-remote . ''; echo \"[$?]\"; git ls-remote . nope; echo \"[$?]\"; git ls-remote --exit-code . nope; echo \"[$?]\"; git ls-remote --exit-code . main; echo \"[$?]\"; git ls-remote --exit-code --tags .; echo \"[$?]\"; git ls-remote --quiet --heads .; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/main\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/main\n225f39c50d27e015653a38d589474ce2880399e6\trefs/heads/topic\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/main\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/main\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/main\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/main\n8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/main\n225f39c50d27e015653a38d589474ce2880399e6\trefs/heads/topic\n[0]\n[0]\n[2]\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/main\n[0]\n[2]\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/main\n225f39c50d27e015653a38d589474ce2880399e6\trefs/heads/topic\n[0]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_ls_remote_symref",
+      "seq": 567862,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/lr && cd /repo/lr || exit 1; mkdir -p .git/refs/heads; printf 'ref: refs/heads/main\\n' > .git/refs/heads/alias; git ls-remote --symref .; git ls-remote --symref --heads .; git ls-remote --symref . alias; git ls-remote --symref . HEAD; git ls-remote --symref --tags .; echo \"[$?]\"; git checkout -q --detach; git ls-remote --symref . HEAD; echo \"[$?]\"); rm -rf /repo/lr",
+      "expect": {
+        "exit": 0,
+        "stdout": "ref: refs/heads/main\tHEAD\n8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\nref: refs/heads/main\trefs/heads/alias\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/alias\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/main\nref: refs/remotes/origin/main\trefs/remotes/origin/HEAD\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/remotes/origin/HEAD\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/remotes/origin/main\n225f39c50d27e015653a38d589474ce2880399e6\trefs/remotes/origin/topic\nref: refs/heads/main\trefs/heads/alias\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/alias\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/main\nref: refs/heads/main\trefs/heads/alias\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/alias\nref: refs/heads/main\tHEAD\n8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\nref: refs/remotes/origin/main\trefs/remotes/origin/HEAD\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/remotes/origin/HEAD\n[0]\n8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\nref: refs/remotes/origin/main\trefs/remotes/origin/HEAD\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/remotes/origin/HEAD\n[0]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_ls_remote_sort",
+      "seq": 567863,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git ls-remote --sort=-refname .; git ls-remote --sort=refname --heads .; git ls-remote --sort=version:refname .; git ls-remote --sort=-v:refname --heads .; git ls-remote --sort=objectname --heads .; git ls-remote --sort=-refname --symref .; git ls-remote --sort=committerdate --heads .; git ls-remote --sort=bogus .; echo \"[$?]\"; cd /; git ls-remote --sort=committerdate /repo; echo \"[$?]\"; git ls-remote --sort=-refname /repo; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "225f39c50d27e015653a38d589474ce2880399e6\trefs/heads/topic\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/main\n8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/main\n225f39c50d27e015653a38d589474ce2880399e6\trefs/heads/topic\n8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/main\n225f39c50d27e015653a38d589474ce2880399e6\trefs/heads/topic\n225f39c50d27e015653a38d589474ce2880399e6\trefs/heads/topic\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/main\n225f39c50d27e015653a38d589474ce2880399e6\trefs/heads/topic\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/main\n225f39c50d27e015653a38d589474ce2880399e6\trefs/heads/topic\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/main\nref: refs/heads/main\tHEAD\n8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\n225f39c50d27e015653a38d589474ce2880399e6\trefs/heads/topic\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/main\n[128]\n[128]\n225f39c50d27e015653a38d589474ce2880399e6\trefs/heads/topic\n8ef25423772bbfe671c8e285ae1d63991d59db19\trefs/heads/main\n8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\n[0]\n",
+        "stderr": "fatal: unknown field name: bogus\nfatal: not a git repository, but the field 'committerdate' requires access to object data\n"
+      }
+    },
+    {
+      "id": "git_ls_remote_version_sort",
+      "seq": 567864,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/lr && cd /repo/lr || exit 1; git tag v1.0-rc1; git tag v1.0; git tag v2.10; git tag v2.9; git ls-remote --sort=v:refname --tags . | cut -f2; git ls-remote --sort=-v:refname --tags . | cut -f2; git -c versionsort.suffix=-rc ls-remote --sort=v:refname --tags . | cut -f2; echo \"[$?]\"); rm -rf /repo/lr",
+      "expect": {
+        "exit": 0,
+        "stdout": "refs/tags/v1.0\nrefs/tags/v1.0-rc1\nrefs/tags/v2.9\nrefs/tags/v2.10\nrefs/tags/v2.10\nrefs/tags/v2.9\nrefs/tags/v1.0-rc1\nrefs/tags/v1.0\nrefs/tags/v1.0-rc1\nrefs/tags/v1.0\nrefs/tags/v2.9\nrefs/tags/v2.10\n[0]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_ls_remote_get_url",
+      "seq": 567865,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/lr && cd /repo/lr || exit 1; git ls-remote --get-url; git ls-remote --get-url origin; git ls-remote --get-url nope; git ls-remote --get-url . extra; git -c remote.o.url=/a -c remote.o.url=/b ls-remote --get-url o; git -c url./x/.insteadOf=y: ls-remote --get-url y:z; git -c url./a/.insteadOf=y -c url./ab/.insteadOf=yy ls-remote --get-url yyz; git -c url./a/.pushInsteadOf=y ls-remote --get-url yz; git -c remote.o.url=/repo -c url./x/.insteadOf=/repo ls-remote --get-url o; git -c branch.main.remote=o -c remote.o.url=/elsewhere ls-remote --get-url; echo \"[$?]\"); rm -rf /repo/lr",
+      "expect": {
+        "exit": 0,
+        "stdout": "/repo\n/repo\nnope\n.\n/a\n/x/z\n/ab/z\nyz\n/x/\n/elsewhere\n[0]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_ls_remote_default_remote",
+      "seq": 567866,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/lr && cd /repo/lr || exit 1; git ls-remote | cut -f2; git ls-remote -q | cut -f2; git -c branch.main.remote=o -c remote.o.url=/repo/lr ls-remote | cut -f2; cd ..; cd /repo; git ls-remote; echo \"[$?]\"; git ls-remote -q; echo \"[$?]\"; git ls-remote --get-url; echo \"[$?]\"; cd /; git ls-remote; echo \"[$?]\"); rm -rf /repo/lr",
+      "expect": {
+        "exit": 0,
+        "stdout": "HEAD\nrefs/heads/main\nrefs/heads/topic\nHEAD\nrefs/heads/main\nrefs/heads/topic\nHEAD\nrefs/heads/main\nrefs/remotes/origin/HEAD\nrefs/remotes/origin/main\nrefs/remotes/origin/topic\n[128]\n[128]\n[128]\n[128]\n",
+        "stderr": "From /repo\nFrom /repo/lr\nfatal: No remote configured to list refs from.\nfatal: No remote configured to list refs from.\nfatal: No remote configured to list refs from.\nfatal: No remote configured to list refs from.\n"
+      }
+    },
+    {
+      "id": "git_ls_remote_repositories",
+      "seq": 567867,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git ls-remote /repo HEAD; git ls-remote .git HEAD; git ls-remote /repo/.git HEAD; git ls-remote file:///repo HEAD; cd docs; git ls-remote ..; echo \"[$?]\"; git ls-remote . HEAD; echo \"[$?]\"; cd /; git ls-remote /repo HEAD; echo \"[$?]\"; cd /repo; git init -q --bare e.git; git ls-remote e.git; echo \"[$?]\"; git ls-remote --exit-code --symref e.git; echo \"[$?]\"; rm -rf /repo/e.git; git ls-remote nope; echo \"[$?]\"; git ls-remote /no/such/path; echo \"[$?]\"; git ls-remote ./docs; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\n8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\n8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\n8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\n[128]\n8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\n[0]\n8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\n[0]\n[0]\n[2]\n[128]\n[128]\n[128]\n",
+        "stderr": "fatal: '..' does not appear to be a git repository\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\nfatal: 'nope' does not appear to be a git repository\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\nfatal: '/no/such/path' does not appear to be a git repository\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\nfatal: './docs' does not appear to be a git repository\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\n"
       }
     }
   ]

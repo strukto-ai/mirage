@@ -35,7 +35,8 @@ import {
 import { removeFile, writeFile } from './io.ts'
 
 import { shortenRef } from './ref_fields.ts'
-import { append, entry, logged, LOGS_DIR, ZERO } from './reflog.ts'
+import { append, entry, logged, ZERO } from './reflog.ts'
+import { LOGS_DIR } from './constants.ts'
 import {
   blockingRef,
   deleteRef,
