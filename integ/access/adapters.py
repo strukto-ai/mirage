@@ -1099,13 +1099,15 @@ class CliSteps:
     async def history(
         self, wid: str, vfs: bool, last: int | None
     ) -> list[dict[str, Any]]:
-        page = await self._json("workspace", "logs", wid, "--limit", "200")
+        page = await self._json(
+            "workspace", "logs", "-w", wid, "--limit", "200"
+        )
         return _logs_as_events(page, vfs, last)
 
     async def asks(self, wid: str) -> list[tuple[str, str]]:
         return [
             (a["id"], a["reason"])
-            for a in await self._json("workspace", "list-asks", wid)
+            for a in await self._json("workspace", "list-asks", "-w", wid)
         ]
 
     async def records(
