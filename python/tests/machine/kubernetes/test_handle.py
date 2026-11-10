@@ -141,6 +141,23 @@ async def test_exec_line_carries_cwd_and_env_on_the_command():
     assert stdin == b"a\n"
 
 
+@pytest.mark.asyncio
+async def test_exec_line_with_no_input_takes_no_stdin():
+    machine = FakeKubernetesMachine(config={"pod": "p"})
+    await machine.exec_line("wc -c", b"", {}, "/")
+    args, stdin = machine.calls[-1]
+    assert args == [
+        "exec",
+        "--quiet",
+        "p",
+        "--",
+        "/bin/sh",
+        "-c",
+        "exec </dev/null\n" + wrap_line(("/bin/sh", "-c", "wc -c"), {}, "/"),
+    ]
+    assert stdin is None
+
+
 class CutOffMachine(KubernetesMachine):
     cut_off: type[BaseException] = OSError
 

@@ -44,3 +44,14 @@ export const EXIT_STATUS = /^(?:[0-9]{0,3}|[0-9]{1,3}\n)$/
 export function ownStdin(command: string): string {
   return `cat 2>/dev/null | { (${command}); kill "$$"; }`
 }
+
+/**
+ * `command` reading /dev/null, for an exec that takes no stdin because it
+ * has no input to send: the program's end of input then comes from the pod,
+ * not from a close kubectl forwards as the exec starts.
+ *
+ * @param command the shell command.
+ */
+export function noStdin(command: string): string {
+  return `exec </dev/null\n${command}`
+}

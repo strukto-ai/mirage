@@ -40,3 +40,14 @@ def own_stdin(command: str) -> str:
         command (str): the shell command.
     """
     return f'cat 2>/dev/null | {{ ({command}); kill "$$"; }}'
+
+
+def no_stdin(command: str) -> str:
+    """``command`` reading /dev/null, for an exec that takes no stdin
+    because it has no input to send: the program's end of input then comes
+    from the pod, not from a close kubectl forwards as the exec starts.
+
+    Args:
+        command (str): the shell command.
+    """
+    return f"exec </dev/null\n{command}"

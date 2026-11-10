@@ -21,6 +21,7 @@ from mirage.machine.kubernetes.constants import (
     EXIT_STATUS,
     KUBECTL_HINT,
     RUNNING_PHASE,
+    no_stdin,
     own_stdin,
 )
 from mirage.machine.program import open_program_pipe, reported_state
@@ -113,7 +114,7 @@ class KubernetesMachine(ProgramMachine):
     You create the pod yourself; mirage only connects to it and execs
     lines. The `kubectl` program is the transport, with the credentials
     and context it already has, so there is no SDK dependency; each line
-    is one `kubectl exec --stdin` with real stdin and separated stderr.
+    is one `kubectl exec`, `--stdin` when it has input, with separated stderr.
     `kubectl exec` has no ``-w``/``-e``, so the working directory and
     environment ride the command, as over SSH.
 
@@ -146,7 +147,9 @@ class KubernetesMachine(ProgramMachine):
         )
         return (*context, *namespace)
 
-    def exec_words(self) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    def exec_words(
+        self, stdin: bool = True
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         config = self.config
         container = (
             ()
@@ -155,7 +158,7 @@ class KubernetesMachine(ProgramMachine):
         )
         return (
             "exec",
-            "--stdin",
+            *(("--stdin",) if stdin else ()),
             "--quiet",
             *self._scope(),
             *container,
@@ -179,12 +182,22 @@ class KubernetesMachine(ProgramMachine):
         output: OutputFn | None,
         errors: OutputFn | None,
     ) -> RunResult:
-        head, tail = self.exec_words()
+        # A run with no input takes no stdin, so its program's end of input
+        # does not ride kubectl's stream.
+        given = stdin is not None and stdin != b""
+        head, tail = self.exec_words(given)
+        line = wrap_line(argv, env, cwd)
         said = ExitLineFilter(errors)
         try:
             done = await self._exec_program(
-                [*head, *tail, "/bin/sh", "-c", wrap_line(argv, env, cwd)],
-                stdin=stdin,
+                [
+                    *head,
+                    *tail,
+                    "/bin/sh",
+                    "-c",
+                    line if given else no_stdin(line),
+                ],
+                stdin=stdin if given else None,
                 output=output,
                 errors=said.write,
             )
