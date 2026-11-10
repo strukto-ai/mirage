@@ -29,7 +29,8 @@ await ws.shell('cat /sql/greet')
 | --- | --- | --- |
 | `path` | `:memory:` | The SQLite file, opened and closed with the mount. |
 | `driver` | none | A database to borrow instead of a file; you close it. |
-| `capacity` | none | The most bytes the files may hold, like `100MB`. |
+| `capacity` | none | The most bytes the database's files may hold, like `100MB`. |
+| `root` | `/` | The folder of the database the mount serves, made if missing. |
 
 To mount Postgres, install `pg` and pass its driver:
 
@@ -48,8 +49,37 @@ The tables are laid out as
 - `fs_data`: a file's bytes, in rows of the database's chunk size (4 KiB unless the database says otherwise)
 - `fs_config`: the chunk size
 
-One database holds one filesystem. The Python mount reads and writes the same
-tables, so the two runtimes on one file serve one filesystem.
+The Python mount reads and writes the same tables, so the two runtimes on one
+file serve one filesystem.
+
+## Several mounts on one database
+
+A mount serves one folder of its database, `/` by default. Hand two mounts one
+driver to serve the whole database at `/` and its `/workspace` folder as a mount
+of its own:
+
+```ts
+import { MountMode, SqliteDriver, SqlVFS, Workspace } from '@struktoai/mirage-node'
+
+const driver = new SqliteDriver('./workspace.db')
+const ws = new Workspace(
+  {
+    '/': new SqlVFS({ driver, capacity: '1GB' }),
+    '/workspace': new SqlVFS({ driver, root: '/workspace', capacity: '1GB' }),
+  },
+  { mode: MountMode.WRITE },
+)
+```
+
+- `capacity` counts every file in the database, whichever mount wrote it.
+  Mounts on one driver with the same `capacity` share one count, so their writes
+  together stay within it. Mounts on separate drivers count apart, even on one
+  file, and together they can pass it.
+- `getState` and `loadState` keep and replace the mount's own folder. A restore
+  leaves the rest of the database as it was.
+
+Core's `SqlVFS` takes the same `root` and `capacity` over any driver, a Durable
+Object's storage among them.
 
 ## VFS.md
 

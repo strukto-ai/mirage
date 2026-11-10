@@ -24,6 +24,7 @@ from mirage.core.sql.constants import (
     RESTORED_INO,
     ROOT_INO,
     SQL,
+    clear_under,
 )
 from mirage.core.sql.data import fill_bytes
 from mirage.core.sql.inode import (
@@ -56,14 +57,14 @@ def depth(p: str) -> int:
 
 
 def snapshot(accessor: SqlAccessor) -> SqlSnapshot:
-    """Every file and directory of the database, read in one walk of the
-    tree. Blocking, as ``get_state`` is: it calls the driver itself.
-    Mirrors TypeScript's ``snapshot``."""
+    """Every file and directory of the mount's folder, read in one walk
+    of the tree. Blocking, as ``get_state`` is: it calls the driver
+    itself. Mirrors TypeScript's ``snapshot``."""
     cs = accessor.ready()
     files: dict[str, bytes] = {}
     dirs = ["/"]
     modified: dict[str, str] = {}
-    for row in accessor.driver.query(SQL["subtree"], (ROOT_INO,)):
+    for row in accessor.driver.query(SQL["subtree"], (accessor.root_ino(),)):
         node = inode_of(row)
         if node is None or not (is_dir(node) or is_file(node)):
             continue
@@ -86,23 +87,28 @@ def restore(
     dirs: list[str],
     modified: dict[str, str],
 ) -> None:
-    """Replace everything the database holds with a snapshot, in one
-    transaction: the directories outermost first, then each file under
-    its directory. A path whose directory the snapshot does not hold is
-    dropped. The inodes take fresh numbers counted from one the database
-    gives first, so an entry names its parent by number however deep the
-    tree, and an op that read an inode before the restore reaches none it
-    made. Blocking, as ``load_state`` is. Mirrors TypeScript's
+    """Replace everything the mount's folder holds with a snapshot, in
+    one transaction: the directories outermost first, then each file
+    under its directory. A path whose directory the snapshot does not
+    hold is dropped. The inodes take fresh numbers counted from one the
+    database gives first, so an entry names its parent by number however
+    deep the tree, and an op that read an inode before the restore
+    reaches none it made. Outside the folder, the database keeps what it
+    holds. Blocking, as ``load_state`` is. Mirrors TypeScript's
     ``restore``."""
     cs = accessor.ready()
     now = now_stamp()
+    root = accessor.root_ino()
     statements = [
         SqlStatement(SQL["drop_base"]),
         SqlStatement(SQL["new_inode"], (FILE, 0, *now)),
         SqlStatement(SQL["set_base"]),
-        *(SqlStatement(sql) for sql in CLEAR),
+        *(
+            SqlStatement(sql)
+            for sql in (CLEAR if root == ROOT_INO else clear_under(root))
+        ),
     ]
-    made: dict[str, InoRef] = {"/": by_ino(ROOT_INO)}
+    made: dict[str, InoRef] = {"/": by_ino(root)}
     numbers = itertools.count(1)
 
     def place(p: str, mode: int, data: bytes | None) -> None:

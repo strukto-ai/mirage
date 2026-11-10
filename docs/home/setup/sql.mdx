@@ -6,7 +6,8 @@ description: Store workspace files in SQL tables.
 
 SQL stores workspace files in a database's tables, laid out as
 [AgentFS](https://github.com/tursodatabase/agentfs)'s. The files last as long
-as the database does. One database holds one filesystem.
+as the database does. A mount serves the whole database, or one folder of it,
+so several mounts can share one database.
 
 ## Configuration
 
@@ -25,8 +26,12 @@ mounts:
 A Postgres server, a Durable Object's storage or a D1 database mounts from
 code, through its driver. See the SDK guides.
 
-Add `capacity: 100MB` under `config` to cap the bytes the files hold. See
-[capacity](/home/configuration#capacity).
+Add `capacity: 100MB` under `config` to cap the bytes the database's files
+hold. See [capacity](/home/configuration#capacity).
+
+Add `root: /workspace` under `config` to serve only that folder of the
+database. Mirage makes the folder when it is missing. A mount of the whole
+database lists the folder too, and its files count against the same database.
 
 ## SDK guides
 

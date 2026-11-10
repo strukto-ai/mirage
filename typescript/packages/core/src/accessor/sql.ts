@@ -12,27 +12,47 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DEFAULT_CHUNK_SIZE, SCHEMA, SQL } from '../core/sql/constants.ts'
+import {
+  DEFAULT_CHUNK_SIZE,
+  DIR,
+  LAST_INO,
+  ROOT_INO,
+  SCHEMA,
+  SQL,
+} from '../core/sql/constants.ts'
+import { enoent, enotdir } from '../errors/fs.ts'
+import { PathSpec } from '../types.ts'
 import { systemDate } from '../utils/clock.ts'
+import { norm } from '../utils/path.ts'
+import { stripSlash } from '../utils/slash.ts'
 import type { SqlDriver, SqlRow, SqlStatement, SqlValue } from '../vfs/sql/types.ts'
 import { Accessor } from './base.ts'
 
 /**
- * A sql mount's database: its driver, and the tables the ops read, made on
- * the first statement. Mirrors Python's `SqlAccessor`.
+ * A sql mount's database: its driver, the folder of it the mount serves,
+ * and the tables the ops read, made on the first statement with the
+ * folder. Mirrors Python's `SqlAccessor`.
  */
 export class SqlAccessor extends Accessor {
   readonly driver: SqlDriver
+  /** The folder of the database the mount serves, `/` for all of it. */
+  readonly root: string
+  /** The names the ops walk from the database's root to `root`. */
+  readonly rootNames: readonly string[]
   private opened: Promise<number> | null = null
 
-  constructor(driver: SqlDriver) {
+  constructor(driver: SqlDriver, root = '/') {
     super()
     this.driver = driver
+    this.root = norm(root)
+    const bare = stripSlash(this.root)
+    this.rootNames = bare === '' ? [] : bare.split('/')
   }
 
   /**
    * The bytes one row of a file holds, as the database records it; the
-   * tables and the root are made first when the database has none.
+   * tables, the root and the mount's folder are made first when the
+   * database has none.
    */
   chunkSize(): Promise<number> {
     this.opened ??= this.open().catch((err: unknown) => {
@@ -49,7 +69,46 @@ export class SqlAccessor extends Accessor {
       { sql: SQL.seedRoot, params: [now] },
     ])
     const row = (await this.driver.query(SQL.chunkSize))[0]
+    await this.folder()
     return Number(row?.value) || DEFAULT_CHUNK_SIZE
+  }
+
+  /** The inode of the mount's folder, made with its parents when gone. */
+  async rootIno(): Promise<number> {
+    await this.chunkSize()
+    return this.folder()
+  }
+
+  // Each name of the folder in turn, made where the database has none, as
+  // the root is: a directory inode and the entry naming it, its parent named
+  // through its inode. A writer that makes one first holds its entry, so
+  // this one's insert fails and it reads the entry instead.
+  private async folder(): Promise<number> {
+    let ino = ROOT_INO
+    for (const name of this.rootNames) {
+      const entry = (): Promise<SqlRow[]> => this.driver.query(SQL.entry, [ino, name])
+      let row = (await entry())[0]
+      if (row === undefined) {
+        const now = Math.floor(systemDate().getTime() / 1000)
+        try {
+          await this.driver.batch([
+            { sql: SQL.newInode, params: [DIR, 0, now, 0] },
+            {
+              sql: `INSERT INTO fs_dentry (name, parent_ino, ino)
+                VALUES (?, (SELECT ino FROM fs_inode WHERE ino = ?), ${LAST_INO[this.driver.dialect]})`,
+              params: [name, ino],
+            },
+          ])
+        } catch (err) {
+          if ((await entry())[0] === undefined) throw err
+        }
+        row = (await entry())[0]
+      }
+      if (row === undefined) throw enoent(PathSpec.fromStrPath(this.root))
+      if (Number(row.mode) !== DIR) throw enotdir(PathSpec.fromStrPath(this.root))
+      ino = Number(row.ino)
+    }
+    return ino
   }
 
   /** The rows one statement answers, once the tables are there. */

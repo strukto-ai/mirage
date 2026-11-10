@@ -140,6 +140,9 @@ SQL: dict[str, str] = {
     "children": f"""SELECT d.name, {columns("i")}
     FROM fs_dentry d JOIN fs_inode i ON i.ino = d.ino
     WHERE d.parent_ino = ?""",
+    "entry": f"""SELECT {columns("i")}
+    FROM fs_dentry d JOIN fs_inode i ON i.ino = d.ino
+    WHERE d.parent_ino = ? AND d.name = ?""",
     "has_child": "SELECT 1 AS hit FROM fs_dentry WHERE parent_ino = ? LIMIT 1",
     "has_entry": "SELECT 1 AS hit FROM fs_dentry WHERE parent_ino = ? AND name = ?",
     "subtree": f"""WITH RECURSIVE tree (id, ino, depth, rel) AS (
@@ -170,3 +173,21 @@ CLEAR: tuple[str, ...] = (
     "DELETE FROM fs_dentry",
     f"DELETE FROM fs_inode WHERE ino <> {ROOT_INO}",
 )
+
+
+def clear_under(ino: int) -> tuple[str, ...]:
+    """What ``restore`` empties of a mount on a folder of its database:
+    the folder's files, entries and inodes, and the inode the restore
+    counts from, which the folder does not hold. Each statement walks the
+    folder's entries again, so the entries go last. Mirrors TypeScript's
+    ``clearUnder``."""
+    tree = f"""WITH RECURSIVE tree (id, ino) AS (
+      SELECT id, ino FROM fs_dentry WHERE parent_ino = {int(ino)}
+      UNION ALL
+      SELECT d.id, d.ino FROM fs_dentry d JOIN tree t ON d.parent_ino = t.ino)"""
+    return (
+        f"DELETE FROM fs_data WHERE ino IN ({tree} SELECT ino FROM tree)",
+        f"DELETE FROM fs_inode WHERE ino IN ({tree} SELECT ino FROM tree)"
+        f" OR ino = {_RESTORE_BASE}",
+        f"DELETE FROM fs_dentry WHERE id IN ({tree} SELECT id FROM tree)",
+    )

@@ -23,9 +23,12 @@ export interface SqlVFSOptions {
   /** A database to borrow instead of a file, a `PostgresSqlDriver` say; the
    * caller closes it. */
   driver?: SqlDriver
-  /** The most bytes the mount's files may hold: a size like `100MB` or a count
-   * of bytes. */
+  /** The most bytes the database's files may hold: a size like `100MB` or a
+   * count of bytes. */
   capacity?: number | string | null
+  /** The folder of the database the mount serves, made when missing; `/` for
+   * all of it. */
+  root?: string
 }
 
 /**
@@ -45,6 +48,7 @@ export class SqlVFS extends CoreSqlVFS {
     }
     super(options.driver ?? new SqliteDriver(options.path ?? ':memory:'), {
       capacity: options.capacity ?? null,
+      root: options.root ?? '/',
       ownsDriver: options.driver === undefined,
     })
   }

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import weakref
 from contextlib import AbstractAsyncContextManager
 from functools import partial
 from typing import Any
@@ -45,9 +46,26 @@ from mirage.types import (
     VFSName,
 )
 from mirage.vfs.base import BaseVFS
-from mirage.vfs.capacity import Charge, charge, storage_usage
+from mirage.vfs.capacity import Charge, StorageUsage, charge, storage_usage
 from mirage.vfs.sql.driver import SqliteDriver
 from mirage.vfs.sql.types import SqlDriver
+
+# The usages of the mounts on one driver, by limit. Each counts every
+# file of the database, so mounts with one limit count against one usage
+# and their writes together stay within it.
+_shared: weakref.WeakKeyDictionary[SqlDriver, dict[int, StorageUsage]] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _shared_usage(
+    name: str, driver: SqlDriver, capacity: int | str | None
+) -> StorageUsage | None:
+    usage = storage_usage(name, capacity)
+    if usage is None:
+        return None
+    by_limit = _shared.setdefault(driver, {})
+    return by_limit.setdefault(usage.limit, usage)
 
 
 class SqlVFS(BaseVFS):
@@ -56,8 +74,9 @@ class SqlVFS(BaseVFS):
     The tables are laid out as AgentFS's: an inode per file and
     directory, an entry naming each under its parent, and a file's bytes
     in rows of the database's chunk size. Each op resolves its path in
-    one query and lands its change in one transaction. One database holds
-    one filesystem. Mirrors TypeScript's ``SqlVFS``.
+    one query and lands its change in one transaction. A mount serves one
+    folder of its database (``/``, all of it, by default), so several
+    mounts can share one database. Mirrors TypeScript's ``SqlVFS``.
     """
 
     name: str = VFSName.SQL
@@ -75,17 +94,23 @@ class SqlVFS(BaseVFS):
         capacity: int | str | None = None,
         *,
         driver: SqlDriver | None = None,
+        root: str = "/",
     ) -> None:
         """Args:
         path (str | None): the SQLite file the mount lives in, opened and
             closed with the mount; None keeps it in this process
             (``:memory:``).
-        capacity (int | str | None): the most bytes the mount's files may
-            hold, a size like ``100MB`` or a count of bytes; None for no
-            limit. Counted at the first write or ``df``; a writer in
-            another process is counted at the next ``df``.
+        capacity (int | str | None): the most bytes the database's files
+            may hold, whichever folder they are in, a size like
+            ``100MB`` or a count of bytes; None for no limit. Mounts
+            handed one driver with one capacity share it. Counted at the
+            first write or ``df``; a writer in another process is
+            counted at the next ``df``.
         driver (SqlDriver | None): a database to borrow instead of a
             file; the caller closes it.
+        root (str): the folder of the database the mount serves, made
+            with its parents on the first op when missing; ``/`` for all
+            of it.
 
         Raises:
             ValueError: when both ``path`` and ``driver`` are given.
@@ -94,10 +119,11 @@ class SqlVFS(BaseVFS):
             raise ValueError("SqlVFS takes a path or a driver, not both")
         super().__init__()
         self._owns_driver = driver is None
-        self.accessor = SqlAccessor(
+        opened = (
             driver if driver is not None else SqliteDriver(path or ":memory:")
         )
-        self.usage = storage_usage(self.name, capacity)
+        self.accessor = SqlAccessor(opened, root)
+        self.usage = _shared_usage(self.name, opened, capacity)
 
     def _charge(self, path: PathSpec) -> AbstractAsyncContextManager[Charge]:
         return charge(
@@ -108,7 +134,12 @@ class SqlVFS(BaseVFS):
         )
 
     def storage_location(self) -> str:
-        return f"{self.name}:{self.accessor.driver.location}"
+        # The folder joins the location, so a file reads as one key
+        # through every mount on the database, as ``/`` and its folder
+        # ``/a`` name ``/a/x`` and ``/x``.
+        root = self.accessor.root
+        folder = "" if root == "/" else root
+        return f"{self.name}:{self.accessor.driver.location}{folder}"
 
     async def readdir(self, path: PathSpec) -> list[FileStat]:
         return await _readdir(self.accessor, path)
@@ -194,7 +225,7 @@ class SqlVFS(BaseVFS):
             await _truncate(self.accessor, path, length, no_create)
 
     async def capacity(self) -> CapacityResult:
-        """The mount's own quota when capped, counted afresh so a writer
+        """The database's quota when capped, counted afresh so a writer
         in another process shows; else a database that grows (ELASTIC).
         Mirrors TypeScript's."""
         if self.usage is None:

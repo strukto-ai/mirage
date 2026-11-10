@@ -132,6 +132,9 @@ export const SQL = {
   children: `SELECT d.name, ${columns('i')}
     FROM fs_dentry d JOIN fs_inode i ON i.ino = d.ino
     WHERE d.parent_ino = ?`,
+  entry: `SELECT ${columns('i')}
+    FROM fs_dentry d JOIN fs_inode i ON i.ino = d.ino
+    WHERE d.parent_ino = ? AND d.name = ?`,
   hasChild: 'SELECT 1 AS hit FROM fs_dentry WHERE parent_ino = ? LIMIT 1',
   hasEntry: 'SELECT 1 AS hit FROM fs_dentry WHERE parent_ino = ? AND name = ?',
   // Every entry under one directory, each with its depth below it and its
@@ -163,3 +166,21 @@ export const CLEAR: readonly string[] = [
   'DELETE FROM fs_dentry',
   `DELETE FROM fs_inode WHERE ino <> ${String(ROOT_INO)}`,
 ]
+
+/**
+ * What `restore` empties of a mount on a folder of its database: the
+ * folder's files, entries and inodes, and the inode the restore counts
+ * from, which the folder does not hold. Each statement walks the folder's
+ * entries again, so the entries go last.
+ */
+export function clearUnder(ino: number): string[] {
+  const tree = `WITH RECURSIVE tree (id, ino) AS (
+      SELECT id, ino FROM fs_dentry WHERE parent_ino = ${String(Math.trunc(ino))}
+      UNION ALL
+      SELECT d.id, d.ino FROM fs_dentry d JOIN tree t ON d.parent_ino = t.ino)`
+  return [
+    `DELETE FROM fs_data WHERE ino IN (${tree} SELECT ino FROM tree)`,
+    `DELETE FROM fs_inode WHERE ino IN (${tree} SELECT ino FROM tree) OR ino = ${RESTORE_BASE}`,
+    `DELETE FROM fs_dentry WHERE id IN (${tree} SELECT id FROM tree)`,
+  ]
+}

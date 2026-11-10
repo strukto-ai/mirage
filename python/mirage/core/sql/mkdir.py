@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.sql import SqlAccessor
-from mirage.core.sql.constants import DIR, ROOT_INO
+from mirage.core.sql.constants import DIR
 from mirage.core.sql.inode import (
     by_entry,
     by_ino,
@@ -67,8 +67,11 @@ async def mkdir(
             make_node(accessor, parent_ref(w), leaf(w), DIR, 0, now)
         )
         return
+    top = w.chain[0]
+    if top is None:
+        raise enoent(path)
     statements: list[SqlStatement] = []
-    parent = by_ino(ROOT_INO)
+    parent = by_ino(top.ino)
     levels = 0
     for i, name in enumerate(w.names):
         node = w.chain[i + 1]
