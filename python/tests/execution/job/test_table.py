@@ -2272,6 +2272,11 @@ async def test_a_sweep_spanning_adoption_stops_no_adopted_job():
     await table.close()
 
 
+async def _unreadable(console: JobConsole) -> tuple[int, int]:
+    """A console read the store never answers."""
+    raise ConnectionError("store unavailable")
+
+
 # Once adopting is done, a daemon swept before it is swept again, which
 # stops the detached program no daemon adopted.
 @pytest.mark.asyncio
@@ -2295,15 +2300,12 @@ async def test_adopting_sweeps_again_a_daemon_swept_before(monkeypatch):
         stopped.append(record["pid"])
         return True
 
-    async def unreadable(console):
-        raise ConnectionError("store unavailable")
-
     new.run_stopper = stopper
     try:
         new._stop_later(old.daemon)
         await asyncio.gather(*new._stopping_runs)
         assert stopped == []
-        monkeypatch.setattr(table_module, "_console_bytes", unreadable)
+        monkeypatch.setattr(table_module, "_console_bytes", _unreadable)
         await new.claim()
         new._stop_later(old.daemon)
         await asyncio.gather(*new._stopping_runs)
