@@ -518,22 +518,16 @@ async def plan_links(
     return [_into(op, resolved, word_text(last)) for op in operands[:-1]], None
 
 
-async def _source_bytes(
+async def _source_path(
     links: NamespaceReader,
     dispatch: DispatchFn,
     src_abs: str,
     typed: str,
     link_typed: str,
     flags: LnFlags,
-) -> tuple[ByteSource | None, str | None]:
-    """The bytes a hard link copies, held in a spool that spills past
-    memory, or the refusal in ln's words: a read that fails does so
-    before the link name is touched.
-
-    A source whose stat passes but whose read fails (a policy deny, a
-    backend that answers stat but not read) is refused the way GNU
-    refuses a source it cannot reach at all, ``failed to access``, so
-    the remaining operands still link.
+) -> tuple[PathSpec | None, str | None]:
+    """The file a hard link copies, past the links leading to it, or
+    the refusal in ln's words.
 
     Args:
         links (NamespaceReader): the link table as the session sees it.
@@ -567,10 +561,28 @@ async def _source_bytes(
                 f"=> '{typed}': Operation not permitted\n"
             )
         return None, f"ln: {typed}: hard link not allowed for directory\n"
+    return PathSpec.from_str_path(src_abs), None
+
+
+async def _staged_source(
+    dispatch: DispatchFn, source: PathSpec, typed: str
+) -> tuple[ByteSource | None, str | None]:
+    """The bytes a hard link copies, held in a spool that spills past
+    memory, or the refusal in ln's words, read before the first change
+    at the link name so a read that fails leaves it as it was.
+
+    A source whose stat passes but whose read fails (a policy deny, a
+    backend that answers stat but not read) is refused the way GNU
+    refuses a source it cannot reach at all, ``failed to access``, so
+    the remaining operands still link.
+
+    Args:
+        dispatch (DispatchFn): op dispatcher.
+        source (PathSpec): the file the link copies.
+        typed (str): the TARGET as typed.
+    """
     try:
-        data, _ = await dispatch(
-            "read", PathSpec.from_str_path(src_abs), stream=True
-        )
+        data, _ = await dispatch("read", source, stream=True)
         return (await spooled(data)) or b"", None
     except FS_ERRORS as exc:
         return None, f"ln: failed to access '{typed}': {fs_strerror(exc)}\n"
@@ -823,6 +835,7 @@ async def _attempt_link(
     typed = plan.link_typed
     target_typed = word_text(plan.source)
     link_target: str | None = None
+    source: PathSpec | None = None
     data: ByteSource | None = None
     refusal = await _walk_refusal(links, dispatch, cwd, plan, flags)
     if refusal is not None:
@@ -850,13 +863,27 @@ async def _attempt_link(
         if links.is_link(src_abs) and not flags.logical:
             link_target = links.readlink(src_abs)
         else:
-            data, refusal = await _source_bytes(
+            source, refusal = await _source_path(
                 links, dispatch, src_abs, target_typed, typed, flags
             )
             if refusal is not None:
                 errors.append(refusal)
                 return
-            opened.append(data)
+
+    async def staged() -> bool:
+        """Stage a copy's bytes once the name passed every check that
+        refuses it, before the first change there (a backup, -f's
+        removal, the write)."""
+        nonlocal data
+        if source is None or data is not None:
+            return True
+        data, refusal = await _staged_source(dispatch, source, target_typed)
+        if refusal is not None:
+            errors.append(refusal)
+            return False
+        opened.append(data)
+        return True
+
     if links.is_mount(plan.link_abs):
         errors.append(f"ln: failed to create {kind} '{typed}': File exists\n")
         return
@@ -892,7 +919,7 @@ async def _attempt_link(
     # would otherwise rename the whole tree to `d~`. A symlink standing
     # there is what -T names, and that one is backed up.
     occupied = False
-    if data is not None or backs:
+    if source is not None or backs:
         found = (
             None
             if links.is_link(plan.link_abs)
@@ -910,6 +937,8 @@ async def _attempt_link(
             flags.suffix,
         )
         if backup is not None:
+            if not await staged():
+                return
             try:
                 await dispatch("rename", link_spec, dst=backup)
             except OSError as exc:
@@ -932,6 +961,8 @@ async def _attempt_link(
             if found is not None and found.type is FileType.DIRECTORY:
                 errors.append(f"ln: {typed}: cannot overwrite directory\n")
                 return
+        if not await staged():
+            return
         try:
             await dispatch("unlink", link_spec)
         except (FileNotFoundError, NotADirectoryError):
@@ -968,6 +999,8 @@ async def _attempt_link(
         if why is not None:
             errors.append(_refused(flags, typed, target_typed, why))
             return
+    if not await staged():
+        return
     refusal = await _create_link(
         dispatch, link_spec, link_target, data, flags, typed, target_typed
     )

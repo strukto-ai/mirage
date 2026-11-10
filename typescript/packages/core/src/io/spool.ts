@@ -228,11 +228,25 @@ export class ByteSpool {
     }
   }
 
+  /**
+   * Transfer the stored contents to a reader that owns their lifetime, every
+   * write to scratch storage done first, so one that fails fails here, with
+   * the spool closed. Mirrors Python's output.
+   */
   async output(): Promise<ByteSource> {
     if (this.size <= this.memoryLimit) {
       const data = await this.read(0, this.size)
       await this.close()
       return data
+    }
+    try {
+      await this.locked(async () => {
+        this.usable()
+        await this.flush()
+      })
+    } catch (error) {
+      await this.close()
+      throw error
     }
     return new OutputStream(this.stream(0, undefined, IO_BUFFER_SIZE), () => this.close())
   }

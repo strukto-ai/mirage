@@ -254,6 +254,14 @@ describe('ln with a source it cannot read', () => {
       )
       const rest = await ws.shell('ls /data/d; cat /data/d/b.txt')
       expect(DEC.decode(rest.stdout)).toBe('b.txt\nb')
+      // A name that refuses the link does so before the source is read, and a
+      // read that fails under -f leaves the name as it was.
+      const kept = await ws.shell('ln /data/c.late /data/b.txt; ln -f /data/c.late /data/b.txt')
+      expect(err(kept)).toBe(
+        "ln: failed to create hard link '/data/b.txt': File exists\n" +
+          "ln: failed to access '/data/c.late': File too large\n",
+      )
+      expect(DEC.decode((await ws.shell('cat /data/b.txt')).stdout)).toBe('b')
     } finally {
       await ws.close()
     }

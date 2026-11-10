@@ -450,17 +450,16 @@ export async function planLinks(
   return [operands.slice(0, -1).map((op) => into(op, resolved, wordText(last))), null]
 }
 
-// The bytes a hard link copies, held in a spool that spills past memory, or
-// the refusal in ln's words: a read that fails does so before the link name
-// is touched.
-async function sourceBytes(
+// The file a hard link copies, past the links leading to it, or the refusal in
+// ln's words.
+async function sourcePath(
   links: NamespaceReader,
   dispatch: DispatchFn,
   srcAbs: string,
   typed: string,
   linkTyped: string,
   flags: LnFlags,
-): Promise<[ByteSource | null, string | null]> {
+): Promise<[PathSpec | null, string | null]> {
   let resolved = srcAbs
   if (links.isLink(srcAbs)) {
     try {
@@ -494,12 +493,22 @@ async function sourceBytes(
     }
     return [null, `ln: ${typed}: hard link not allowed for directory\n`]
   }
-  // A source whose stat passes but whose read fails (a policy deny, a
-  // backend that answers stat but not read) is refused the way GNU
-  // refuses a source it cannot reach at all, so the remaining operands
-  // still link.
+  return [PathSpec.fromStrPath(resolved), null]
+}
+
+// The bytes a hard link copies, held in a spool that spills past memory, or
+// the refusal in ln's words, read before the first change at the link name so
+// a read that fails leaves it as it was. A source whose stat passes but whose
+// read fails (a policy deny, a backend that answers stat but not read) is
+// refused the way GNU refuses a source it cannot reach at all, so the
+// remaining operands still link.
+async function stagedSource(
+  dispatch: DispatchFn,
+  source: PathSpec,
+  typed: string,
+): Promise<[ByteSource | null, string | null]> {
   try {
-    const [data] = await dispatch('read', PathSpec.fromStrPath(resolved), [], { stream: true })
+    const [data] = await dispatch('read', source, [], { stream: true })
     return [(await spooled(data as ByteSource)) ?? new Uint8Array(), null]
   } catch (err) {
     const why = fsStrerror(err)
@@ -696,6 +705,7 @@ async function attemptLink(
   const typed = plan.linkTyped
   const targetTyped = wordText(plan.source)
   let linkTarget: string | null = null
+  let source: PathSpec | null = null
   let data: ByteSource | null = null
   const refusal = await walkRefusal(links, dispatch, cwd, plan, flags)
   if (refusal !== null) {
@@ -726,14 +736,26 @@ async function attemptLink(
     if (links.isLink(srcAbs) && !flags.logical) {
       linkTarget = links.readlink(srcAbs)
     } else {
-      const [bytes, refusal] = await sourceBytes(links, dispatch, srcAbs, targetTyped, typed, flags)
+      const [found, refusal] = await sourcePath(links, dispatch, srcAbs, targetTyped, typed, flags)
       if (refusal !== null) {
         errors.push(refusal)
         return
       }
-      data = bytes
-      if (data !== null) opened.push(data)
+      source = found
     }
+  }
+  // A copy's bytes, staged once the name passed every check that refuses it
+  // and before the first change there (a backup, -f's removal, the write).
+  const staged = async (): Promise<boolean> => {
+    if (source === null || data !== null) return true
+    const [bytes, refusal] = await stagedSource(dispatch, source, targetTyped)
+    if (refusal !== null) {
+      errors.push(refusal)
+      return false
+    }
+    data = bytes
+    if (data !== null) opened.push(data)
+    return true
   }
   if (links.isMount(plan.linkAbs)) {
     errors.push(`ln: failed to create ${kind} '${typed}': File exists\n`)
@@ -773,7 +795,7 @@ async function attemptLink(
   // would otherwise rename the whole tree to `d~`. A symlink standing
   // there is what -T names, and that one is backed up.
   let occupied = false
-  if (data !== null || backs) {
+  if (source !== null || backs) {
     const found = links.isLink(plan.linkAbs) ? null : await pathStat(dispatch, plan.linkAbs)
     if (backs && found !== null && found.type === FileType.DIRECTORY) {
       errors.push(`ln: ${typed}: cannot overwrite directory\n`)
@@ -789,6 +811,7 @@ async function attemptLink(
       flags.suffix,
     )
     if (backup !== null) {
+      if (!(await staged())) return
       try {
         await dispatch('rename', linkSpec, [backup])
       } catch (err) {
@@ -813,6 +836,7 @@ async function attemptLink(
         return
       }
     }
+    if (!(await staged())) return
     try {
       await dispatch('unlink', linkSpec)
     } catch (err) {
@@ -849,6 +873,7 @@ async function attemptLink(
       return
     }
   }
+  if (!(await staged())) return
   const failed = await createLink(dispatch, linkSpec, linkTarget, data, flags, typed, targetTyped)
   if (failed !== null) {
     errors.push(failed)

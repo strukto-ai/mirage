@@ -300,6 +300,16 @@ async def test_ln_keeps_going_after_a_source_it_cannot_read():
     assert (
         await ws.shell("ls /data/d; cat /data/d/b.txt")
     ).stdout == b"b.txt\nb"
+    # A name that refuses the link does so before the source is read, and
+    # a read that fails under -f leaves the name as it was.
+    r = await ws.shell(
+        "ln /data/c.late /data/b.txt; ln -f /data/c.late /data/b.txt"
+    )
+    assert r.stderr == (
+        b"ln: failed to create hard link '/data/b.txt': File exists\n"
+        b"ln: failed to access '/data/c.late': File too large\n"
+    )
+    assert (await ws.shell("cat /data/b.txt")).stdout == b"b"
 
 
 @pytest.mark.asyncio
