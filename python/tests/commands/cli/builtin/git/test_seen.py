@@ -18,11 +18,12 @@ from pathlib import Path
 
 import pytest
 from dulwich import porcelain
-from dulwich.objects import ObjectID
+from dulwich.objects import ObjectID, Tree
 from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git import GIT
 from mirage.commands.cli.builtin.git.cat_file import typed_bytes
+from mirage.commands.cli.builtin.git.constants import GITLINK
 from mirage.commands.cli.builtin.git.discover import discover
 from mirage.commands.cli.builtin.git.repo import open_repo
 from mirage.commands.cli.builtin.git.seen import (
@@ -45,6 +46,7 @@ from tests.commands.cli.builtin.git.conftest import (
     commit_file,
     conflict_index,
     repo_context,
+    write_branch,
 )
 
 PROFILES = {
@@ -223,6 +225,35 @@ async def test_a_rule_keeps_history_content_but_not_names(history: Path):
         history, "git ls-tree --name-only HEAD", "sealed"
     )
     assert code == 0 and "secret.txt" in out.split()
+
+
+@pytest.mark.asyncio
+async def test_a_place_goes_by_the_stored_object_not_its_tree_entry(
+    history: Path,
+):
+    with Repo(str(history)) as repo:
+        head = repo[repo.refs[b"HEAD"]]
+        _, blob = repo[head.tree].lookup_path(
+            repo.object_store.__getitem__, b"secret.txt"
+        )
+        tree = Tree()
+        tree.add(b"box", 0o40000, blob)
+        tree.add(b"secret.txt", GITLINK, blob)
+        repo.object_store.add_object(tree)
+        write_branch(repo, "lying", tree.id, b"lying")
+    assert await shell(
+        history, "git cat-file -p lying:secret.txt", "sealed"
+    ) == (1, "", "git cat-file: /repo/secret.txt: Permission denied\n")
+    assert await shell(history, "git cat-file -t lying:box") == (
+        0,
+        "blob\n",
+        "",
+    )
+    assert await shell(history, "git cat-file -t lying:box/x") == (
+        128,
+        "",
+        "fatal: path 'box/x' does not exist in 'lying'\n",
+    )
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import git from 'isomorphic-git'
 import { describe, expect, it } from 'vitest'
 
 import { runWithAdmission } from '../../../../context/session_context.ts'
@@ -21,10 +22,11 @@ import { MountMode, PathSpec } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { typedBytes } from './cat_file.ts'
+import { GITLINK_MODE, TREE_MODE } from './constants.ts'
 import { discover } from './discover.ts'
 import { GIT } from './index.ts'
 import { ensureDir, readOptional } from './io.ts'
-import { openRepo, type Repo } from './repo.ts'
+import { openRepo, repoArgs, type Repo } from './repo.ts'
 import { located, placeOf, readable, shownEntries } from './seen.ts'
 
 const DEC = new TextDecoder()
@@ -220,6 +222,37 @@ describe('what a session is shown of history', () => {
     const [listed, names] = await shell(ws, 'git ls-tree --name-only HEAD', 'sealed')
     expect(listed).toBe(0)
     expect(names.split(/\s+/)).toContain('secret.txt')
+  })
+
+  it('goes by the stored object, not what its tree entry claims', async () => {
+    const ws = await history()
+    const [, head] = await shell(ws, 'git rev-parse HEAD')
+    const [, blob] = await shell(ws, 'git rev-parse HEAD:secret.txt')
+    const args = repoArgs(await guardedRepo(ws))
+    const tree = await git.writeTree({
+      ...args,
+      tree: [
+        { mode: TREE_MODE, path: 'box', oid: blob.trim(), type: 'tree' },
+        { mode: GITLINK_MODE, path: 'secret.txt', oid: blob.trim(), type: 'commit' },
+      ],
+    })
+    const who = { name: 'a', email: 'a@b', timestamp: 0, timezoneOffset: 0 }
+    const value = await git.writeCommit({
+      ...args,
+      commit: { message: 'lying\n', tree, parent: [head.trim()], author: who, committer: who },
+    })
+    await git.writeRef({ ...args, ref: 'refs/heads/lying', value })
+    expect(await shell(ws, 'git cat-file -p lying:secret.txt', 'sealed')).toEqual([
+      1,
+      '',
+      'git cat-file: /repo/secret.txt: Permission denied\n',
+    ])
+    expect(await shell(ws, 'git cat-file -t lying:box')).toEqual([0, 'blob\n', ''])
+    expect(await shell(ws, 'git cat-file -t lying:box/x')).toEqual([
+      128,
+      '',
+      "fatal: path 'box/x' does not exist in 'lying'\n",
+    ])
   })
 
   it('leaves the index as it was when a checkout is refused', async () => {
