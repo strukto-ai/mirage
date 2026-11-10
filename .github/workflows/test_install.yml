@@ -7,6 +7,8 @@ permissions:
   push:
     branches: [main]
     paths:
+      - scripts/install.sh
+      - scripts/check_install.py
       - python/**
       - typescript/**
       - docs/typescript/install.mdx
@@ -36,6 +38,7 @@ jobs:
       pull-requests: read
     outputs:
       hit: ${{ steps.filter.outputs.hit }}
+      installer: ${{ steps.filter.outputs.installer }}
     steps:
       - uses: dorny/paths-filter@v4
         id: filter
@@ -43,6 +46,10 @@ jobs:
           # A '!' rule drops a file even when another rule matched it.
           predicate-quantifier: some-with-excludes
           filters: |
+            installer:
+              - 'scripts/install.sh'
+              - 'scripts/check_install.py'
+              - '.github/workflows/test_install.yml'
             hit:
               - 'python/**'
               - 'typescript/**'
@@ -56,6 +63,22 @@ jobs:
               # the fake hubs serve the READMEs there as fixture content.
               - '!python/**/README.md'
               - '!typescript/**/README.md'
+
+  installer:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.installer == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        shell: [sh, dash, bash]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Check installer behavior
+        run: python3 scripts/check_install.py --shell ${{ matrix.shell }}
 
   python-install:
     needs: changes
@@ -256,7 +279,7 @@ jobs:
     name: test-install-gate
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [changes, python-install, ts-install]
+    needs: [changes, installer, python-install, ts-install]
     if: always()
     steps:
       - name: Check required jobs
