@@ -23,7 +23,14 @@ import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { openProgramPipe, reportedState } from '../program.ts'
 import { ProgramMachine } from '../transport.ts'
 import { KUBERNETES_CONFIG_FIELDS, type KubernetesConfig } from './config.ts'
-import { EXIT_PREFIX, EXIT_STATUS, KUBECTL_HINT, ownStdin, RUNNING_PHASE } from './constants.ts'
+import {
+  EXIT_PREFIX,
+  EXIT_STATUS,
+  KUBECTL_HINT,
+  noStdin,
+  ownStdin,
+  RUNNING_PHASE,
+} from './constants.ts'
 
 /**
  * Where kubectl's report of the exit status can begin in the stderr so
@@ -111,7 +118,7 @@ export class ExitLineFilter {
  * You create the pod yourself; mirage only connects to it and execs
  * lines. The `kubectl` program is the transport, with the credentials
  * and context it already has, so there is no SDK dependency; each line
- * is one `kubectl exec --stdin` with real stdin and separated stderr.
+ * is one `kubectl exec`, `--stdin` when it has input, with separated stderr.
  * `kubectl exec` has no `-w`/`-e`, so the working directory and
  * environment ride the command, as over SSH.
  *
@@ -139,12 +146,12 @@ export class KubernetesMachine extends ProgramMachine<KubernetesConfig> {
     ]
   }
 
-  protected execWords(): readonly [readonly string[], readonly string[]] {
+  protected execWords(stdin = true): readonly [readonly string[], readonly string[]] {
     const { container, pod } = this.config
     return [
       [
         'exec',
-        '--stdin',
+        ...(stdin ? ['--stdin'] : []),
         '--quiet',
         ...this.scope(),
         ...(container === undefined ? [] : ['--container', container]),
@@ -169,13 +176,17 @@ export class KubernetesMachine extends ProgramMachine<KubernetesConfig> {
     errors: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    const [head, tail] = this.execWords()
+    // A run with no input takes no stdin, so its program's end of input
+    // does not ride kubectl's stream.
+    const given = stdin !== null && !(stdin instanceof Uint8Array && stdin.byteLength === 0)
+    const [head, tail] = this.execWords(given)
+    const line = wrapLine(argv, env, cwd)
     const said = new ExitLineFilter(errors)
     let done: RunResult
     try {
       done = await this.execProgram(
-        [...head, ...tail, '/bin/sh', '-c', wrapLine(argv, env, cwd)],
-        stdin,
+        [...head, ...tail, '/bin/sh', '-c', given ? line : noStdin(line)],
+        given ? stdin : null,
         output,
         signal,
         (data) => said.write(data),
