@@ -23,14 +23,10 @@ compatibility_date = "2026-10-01"
 compatibility_flags = ["nodejs_compat", "no_handle_cross_request_promise_resolution"]
 
 [alias]
-"cpu-features" = "./src/cpu_features.ts"
+"cpu-features" = "@struktoai/mirage-cloudflare/cpu_features"
 ```
 
-The package serves a workspace's files into a [machine](/home/setup/machine/e2b) with `ssh2`, which tries the native `cpu-features` addon inside a `try`. A Worker cannot load a native addon, so alias it to a module that throws:
-
-```ts src/cpu_features.ts
-throw new Error('cpu-features is a native addon, which a Worker cannot load')
-```
+The package serves a workspace's files into a [machine](/home/setup/machine/e2b) with `ssh2`, which tries the native `cpu-features` addon inside a `try`. A Worker cannot load a native addon, so the alias hands it the package's stub, which throws in its place.
 
 ## Run a workspace
 

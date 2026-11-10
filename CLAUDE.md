@@ -262,8 +262,8 @@ sends signals as sent. A line picks its machine with `execute(machine=)` or
 
 ### FUSE and FSKit
 
-`mount/` (python) and `core/src/mount/` (node's adapters in
-`node/src/mount/`): `MountCore` owns the semantics every kernel or protocol
+`mount/` (python) and `core/src/mount/` (its SFTP server too; node's other
+adapters in `node/src/mount/`): `MountCore` owns the semantics every kernel or protocol
 adapter and every runtime's open files share (FUSE, SFTP, NFS, codex-exec),
 async on both hosts with per-file ordering; `classify_error` is the one
 errno table.

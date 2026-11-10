@@ -37,6 +37,7 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./cpu_features": "./dist/cpu_features.js",
     "./*": {
       "types": "./dist/*.d.ts",
       "import": "./dist/*.js"
