@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import json
 
 import pytest
@@ -138,6 +139,21 @@ async def test_exec_line_carries_cwd_and_env_on_the_command():
         wrap_line(("/bin/sh", "-c", "wc -l"), {"E": "1"}, "/work"),
     ]
     assert stdin == b"a\n"
+
+
+class CutOffMachine(KubernetesMachine):
+    async def _exec_program(self, args, stdin=None, output=None, errors=None):
+        await errors(b"command")
+        raise asyncio.CancelledError
+
+
+@pytest.mark.asyncio
+async def test_a_cut_off_run_keeps_what_was_held():
+    chunks, collect = collector()
+    machine = CutOffMachine("box", config={"pod": "p"})
+    with pytest.raises(asyncio.CancelledError):
+        await machine._exec_argv(("x",), None, {}, "/", None, collect)
+    assert chunks == [b"command"]
 
 
 @pytest.mark.asyncio

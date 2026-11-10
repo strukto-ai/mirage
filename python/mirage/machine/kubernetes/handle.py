@@ -180,12 +180,18 @@ class KubernetesMachine(ProgramMachine):
     ) -> RunResult:
         head, tail = self.exec_words()
         said = ExitLineFilter(errors)
-        done = await self._exec_program(
-            [*head, *tail, "/bin/sh", "-c", wrap_line(argv, env, cwd)],
-            stdin=stdin,
-            output=output,
-            errors=said.write,
-        )
+        try:
+            done = await self._exec_program(
+                [*head, *tail, "/bin/sh", "-c", wrap_line(argv, env, cwd)],
+                stdin=stdin,
+                output=output,
+                errors=said.write,
+            )
+        except BaseException:
+            # A stopped kubectl reports nothing, so what is held is the
+            # program's.
+            await said.finish(0)
+            raise
         if not await said.finish(done.exit_code):
             raise ConnectionLostError(
                 f"kubectl exited {done.exit_code} without the program's status",
