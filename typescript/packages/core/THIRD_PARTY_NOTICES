@@ -620,8 +620,8 @@ SOFTWARE.
 
 ------------------------------------------------------------------------
 
-The WebAssembly modules embedded in this package (src/generated/mirage_rs.ts,
-mirage_shell.ts and mirage_gh.ts, built from rust/ in
+The WebAssembly modules shipped in this package (dist/generated/mirage_rs.wasm,
+mirage_shell.wasm and mirage_gh.wasm, built from rust/ in
 https://github.com/strukto-ai/mirage) are compiled from the Rust crates below,
 each listed under the license it came with:
 

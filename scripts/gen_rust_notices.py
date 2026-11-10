@@ -28,8 +28,8 @@ ADAPTED = [
     ROOT / "licenses/third_party/tree-sitter-bash-parser.txt",
 ]
 CORE_LEAD = (
-    "The WebAssembly modules embedded in this package (src/generated/"
-    "mirage_rs.ts,\nmirage_shell.ts and mirage_gh.ts, built from rust/ in\n"
+    "The WebAssembly modules shipped in this package (dist/generated/"
+    "mirage_rs.wasm,\nmirage_shell.wasm and mirage_gh.wasm, built from rust/ in\n"
     "https://github.com/strukto-ai/mirage) are compiled from the Rust crates "
     "below,\neach listed under the license it came with:"
 )

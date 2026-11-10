@@ -18,7 +18,6 @@ import { SEALED } from '../io/pipe.ts'
 import type { util } from 'zod'
 import { YieldBudget } from '../io/yield_budget.ts'
 import { concat } from '../utils/bytes.ts'
-import { decodeBase64 } from '../utils/base64.ts'
 import { StreamRefusal } from './errors.ts'
 
 interface Exports {
@@ -64,76 +63,76 @@ const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 const movables = new WeakMap<Exports, Set<OpenStream>>()
 
-type ModuleSource = string | WebAssembly.Module | (() => WebAssembly.Module)
-
-function moduleSource(source: ModuleSource): string | WebAssembly.Module {
-  if (typeof source === 'string' || source instanceof WebAssembly.Module) return source
-  return source()
-}
+type ModuleSource = WebAssembly.Module | (() => WebAssembly.Module)
 
 /**
  * One embedded streams module and the instance its streams run on. A module
  * holds what it compiled, so each compiles once, and recycles its own instance.
  */
 export class StreamModule {
-  private compiled: Promise<WebAssembly.Module> | undefined
-  private compiledSync: WebAssembly.Module | undefined
-  private current: Promise<Exports> | undefined
-  private synchronous: Exports | undefined
+  private compiled: WebAssembly.Module | undefined
+  private exports: Exports | undefined
+  // Made ahead to replace a retiring instance, so a browser, whose main
+  // thread refuses to instantiate a module over 8 MB synchronously, never
+  // has to.
+  private next: Exports | undefined
+  private making: Promise<void> | undefined
 
   constructor(private readonly source: ModuleSource) {}
 
-  compiledModule(): Promise<WebAssembly.Module> {
-    const source = moduleSource(this.source)
-    this.compiled ??=
-      typeof source === 'string'
-        ? WebAssembly.compile(decodeBase64(source) as BufferSource)
-        : Promise.resolve(source)
+  compiledModule(): WebAssembly.Module {
+    this.compiled ??= compileSync(this.source)
     return this.compiled
   }
 
-  moduleSync(): WebAssembly.Module {
-    this.compiledSync ??= compileSync(this.source)
-    this.compiled ??= Promise.resolve(this.compiledSync)
-    return this.compiledSync
-  }
-
   adopt(module: WebAssembly.Module): void {
-    this.compiledSync ??= module
-    this.compiled ??= Promise.resolve(module)
+    this.compiled ??= module
   }
 
-  // The next stream gets a fresh instance; the movable streams still on this
-  // one close, and `live` says so to their owners.
+  /** The instance the next stream opens on and the one to replace it, both made asynchronously. */
+  ready(): Promise<void> {
+    if (this.exports !== undefined && this.next !== undefined) return Promise.resolve()
+    this.making ??= this.make().finally(() => {
+      this.making = undefined
+    })
+    return this.making
+  }
+
+  private async make(): Promise<void> {
+    while (this.exports === undefined || this.next === undefined) {
+      const instance = await WebAssembly.instantiate(this.compiledModule(), {})
+      const made = instance.exports as unknown as Exports
+      if (this.exports === undefined) this.exports = made
+      else this.next ??= made
+    }
+  }
+
+  // The next stream gets the instance made ahead; the movable streams still
+  // on this one close, and `live` says so to their owners.
   retire(exports: Exports, trapped: boolean): void {
-    this.current = undefined
-    if (this.synchronous === exports) this.synchronous = undefined
+    if (this.exports === exports) {
+      this.exports = this.next
+      this.next = undefined
+    }
     for (const stream of movables.get(exports) ?? []) stream.drop(!trapped)
     movables.delete(exports)
   }
 
-  private async instance(): Promise<Exports> {
-    if (this.synchronous !== undefined) return this.synchronous
-    this.current ??= this.compiledModule().then((module) => {
-      this.compiledSync = module
-      this.synchronous ??= new WebAssembly.Instance(module, {}).exports as unknown as Exports
-      return this.synchronous
-    })
-    return this.current
-  }
-
   async open(kind: string, config: Readonly<Record<string, util.JSONType>>): Promise<OpenStream> {
-    return open(await this.instance(), this, kind, config)
+    await this.ready()
+    return this.openSync(kind, config, false)
   }
 
+  // An instance made here, when none was made ahead, is one a browser allows
+  // only up to 8 MB.
   openSync(
     kind: string,
     config: Readonly<Record<string, util.JSONType>>,
     movable: boolean,
   ): OpenStream {
-    this.synchronous ??= new WebAssembly.Instance(this.moduleSync(), {})
+    this.exports ??= new WebAssembly.Instance(this.compiledModule(), {})
       .exports as unknown as Exports
-    return open(this.synchronous, this, kind, config, movable)
+    return open(this.exports, this, kind, config, movable)
   }
 }
 
@@ -142,25 +141,28 @@ const MAIN = new StreamModule(MIRAGE_RS_WASM)
 /**
  * The compiled module, for the page to hand the workers it starts without a
  * copy. `#mirage-rs-wasm` is the module itself where the host's bundler loads
- * `.wasm` files (the `workerd` condition: no code is compiled at run time)
- * or a function that reads it on first use (`node`), and its bytes as
- * base64 everywhere else.
+ * `.wasm` files (the `workerd` condition: no code is compiled at run time) or
+ * a browser fetched and compiled it as the page loaded, and a function that
+ * reads it on first use under `node`.
  */
-export function compiledModule(): Promise<WebAssembly.Module> {
+export function compiledModule(): WebAssembly.Module {
   return MAIN.compiledModule()
 }
 
-/** An embedded module (a `#mirage-*-wasm` import) compiled now, for a caller that cannot wait. */
+/** An embedded module (a `#mirage-*-wasm` import), compiled now where its loader waits for a first use. */
 export function compileSync(source: ModuleSource): WebAssembly.Module {
-  const module = moduleSource(source)
-  return typeof module === 'string'
-    ? new WebAssembly.Module(decodeBase64(module) as BufferSource)
-    : module
+  return source instanceof WebAssembly.Module ? source : source()
 }
 
-/** The compiled module, compiled now if no one has yet, for a caller that cannot wait. */
-export function moduleSync(): WebAssembly.Module {
-  return MAIN.moduleSync()
+/**
+ * The instance streams open on and the one made ahead to replace it when it
+ * retires, both made asynchronously: a page's main thread refuses to
+ * instantiate a module over 8 MB synchronously. The browser package waits
+ * for them as the page loads it, and the workspace at every entry point, so
+ * a retired instance's replacement is back before the next line.
+ */
+export function streamsReady(): Promise<void> {
+  return MAIN.ready()
 }
 
 /**

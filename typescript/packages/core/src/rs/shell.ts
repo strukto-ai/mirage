@@ -67,8 +67,8 @@ function bytesAt(wasm: Exports, ptr: number, len: number): Uint8Array {
 }
 
 // One instance of the shell module (`#mirage-shell-wasm`: the parser and the
-// evaluator, small enough to compile synchronously anywhere) holds every parse
-// tree and every session's shell for the process's life, so it is never
+// evaluator, small enough to instantiate synchronously anywhere) holds every
+// parse tree and every session's shell for the process's life, so it is never
 // swapped for a fresh one.
 function instance(): Exports {
   if (exports === undefined) {

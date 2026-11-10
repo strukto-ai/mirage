@@ -132,11 +132,15 @@ describe('openStream', () => {
 describe('adoptModule', () => {
   const bundle = async (): Promise<typeof StreamModule> => {
     vi.resetModules()
-    vi.doMock('../generated/mirage_rs.ts', () => ({ default: '' }))
+    vi.doMock('#mirage-rs-wasm', () => ({
+      default: () => {
+        throw new Error('a worker runs on the module its page hands it')
+      },
+    }))
     try {
       return await import('./stream.ts')
     } finally {
-      vi.doUnmock('../generated/mirage_rs.ts')
+      vi.doUnmock('#mirage-rs-wasm')
       vi.resetModules()
     }
   }
@@ -146,10 +150,10 @@ describe('adoptModule', () => {
     )
 
   it('runs a bundle without the bytes on the module the page compiled', async () => {
-    const page = await compiledModule()
+    const page = compiledModule()
     const worker = await bundle()
     worker.adoptModule(page)
-    expect(await worker.compiledModule()).toBe(page)
+    expect(worker.compiledModule()).toBe(page)
     const sync = worker.openStreamSync('base64', DECODE)
     const async = await worker.openStream('base64', DECODE)
     try {
@@ -163,8 +167,8 @@ describe('adoptModule', () => {
 
   it('a bundle without the bytes has no module of its own', async () => {
     const worker = await bundle()
-    await expect(worker.openStream('base64', DECODE)).rejects.toBeInstanceOf(
-      WebAssembly.CompileError,
+    await expect(worker.openStream('base64', DECODE)).rejects.toThrow(
+      'a worker runs on the module its page hands it',
     )
   })
 })
