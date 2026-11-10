@@ -643,6 +643,54 @@ async function slashRefusal(
   return null
 }
 
+// The line refusing the link name as it stands, null when nothing refuses
+// it, and whether a file stands there; asked before the source is staged and
+// again after, as the name may have changed meanwhile. GNU's same-name check
+// comes before any backup or removal: -f would otherwise unlink the source it
+// is about to link, leaving `ln -sf a a` a self-loop where a file was. GNU
+// waives it when a backup keeps the original, so `ln -sfb a a` still goes
+// through, and a name typed as `.` or `..` removes nothing, so -f meets the
+// directory there. The dispatcher refuses an occupied name for a symlink; a
+// byte copy would overwrite one, and a backup has to see it first, so those
+// two probe. A backup or -f's removal never replaces a directory: GNU refuses
+// it (`ln -bT a d` is `cannot overwrite directory`) where a backup would
+// rename the whole tree to `d~`. A symlink standing there is what -T names,
+// and that one is backed up or removed. Without either a taken name is
+// refused.
+async function nameRefusal(
+  links: NamespaceReader,
+  dispatch: DispatchFn,
+  cwd: string,
+  plan: LinkPlan,
+  flags: LnFlags,
+  copies: boolean,
+): Promise<[string | null, boolean]> {
+  const typed = plan.linkTyped
+  const backs = flags.backup !== null && flags.backup !== 'none'
+  const linked = links.isLink(plan.linkAbs)
+  const dotted = typed.endsWith('/.') || typed.endsWith('/..')
+  if (
+    flags.force &&
+    !backs &&
+    !dotted &&
+    operandAbs(links, plan.source, cwd) === plan.linkAbs &&
+    (linked || (await pathStat(dispatch, plan.linkAbs)) !== null)
+  ) {
+    return [`ln: '${wordText(plan.source)}' and '${typed}' are the same file\n`, true]
+  }
+  const found =
+    (copies || backs || flags.force) && !linked ? await pathStat(dispatch, plan.linkAbs) : null
+  const occupied = (copies || backs) && (found !== null || linked)
+  if ((backs || flags.force) && found?.type === FileType.DIRECTORY) {
+    return [`ln: ${typed}: cannot overwrite directory\n`, occupied]
+  }
+  if (occupied && !backs && !flags.force) {
+    const kind = flags.symbolic ? 'symbolic link' : 'hard link'
+    return [`ln: failed to create ${kind} '${typed}': File exists\n`, occupied]
+  }
+  return [null, occupied]
+}
+
 // Make the link, and answer the line refusing it, null when made.
 async function createLink(
   dispatch: DispatchFn,
@@ -755,7 +803,9 @@ async function attemptLink(
     }
     data = bytes
     if (data !== null) opened.push(data)
-    return true
+    const [changed] = await nameRefusal(links, dispatch, cwd, plan, flags, true)
+    if (changed !== null) errors.push(changed)
+    return changed === null
   }
   if (links.isMount(plan.linkAbs)) {
     errors.push(`ln: failed to create ${kind} '${typed}': File exists\n`)
@@ -772,37 +822,12 @@ async function attemptLink(
       return
     }
   }
-  // GNU's same-name check, before any backup or removal: -f would
-  // otherwise unlink the source it is about to link, leaving `ln -sf a a`
-  // a self-loop where a file was. GNU waives it when a backup keeps the
-  // original, so `ln -sfb a a` still goes through, and a name typed as `.`
-  // or `..` removes nothing, so -f meets the directory there.
-  const dotted = typed.endsWith('/.') || typed.endsWith('/..')
-  if (
-    flags.force &&
-    !backs &&
-    !dotted &&
-    operandAbs(links, plan.source, cwd) === plan.linkAbs &&
-    (links.isLink(plan.linkAbs) || (await pathStat(dispatch, plan.linkAbs)) !== null)
-  ) {
-    errors.push(`ln: '${targetTyped}' and '${typed}' are the same file\n`)
+  const [refusing, standing] = await nameRefusal(links, dispatch, cwd, plan, flags, source !== null)
+  if (refusing !== null) {
+    errors.push(refusing)
     return
   }
-  // The dispatcher refuses an occupied name for a symlink; a byte copy would
-  // overwrite one, and a backup has to see it first, so those two probe.
-  // A backup moves a file aside, never a directory: GNU refuses the
-  // directory (`ln -bT a d` is `cannot overwrite directory`) where it
-  // would otherwise rename the whole tree to `d~`. A symlink standing
-  // there is what -T names, and that one is backed up.
-  let occupied = false
-  if (source !== null || backs) {
-    const found = links.isLink(plan.linkAbs) ? null : await pathStat(dispatch, plan.linkAbs)
-    if (backs && found !== null && found.type === FileType.DIRECTORY) {
-      errors.push(`ln: ${typed}: cannot overwrite directory\n`)
-      return
-    }
-    occupied = found !== null || links.isLink(plan.linkAbs)
-  }
+  let occupied = standing
   if (occupied && backs) {
     const backup = await backupTarget(
       async (p) => await pathReaddir(dispatch, p.virtual),
@@ -829,13 +854,6 @@ async function attemptLink(
     // there is what -f is for, so its miss is the expected case and not
     // an error. unlink(2) refuses a directory (EISDIR); a backend that would
     // remove one is never asked.
-    if (!links.isLink(plan.linkAbs)) {
-      const found = await pathStat(dispatch, plan.linkAbs)
-      if (found?.type === FileType.DIRECTORY) {
-        errors.push(`ln: ${typed}: cannot overwrite directory\n`)
-        return
-      }
-    }
     if (!(await staged())) return
     try {
       await dispatch('unlink', linkSpec)

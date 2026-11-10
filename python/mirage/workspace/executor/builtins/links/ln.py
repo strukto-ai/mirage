@@ -747,6 +747,65 @@ async def _slash_refusal(
     return None
 
 
+async def _name_refusal(
+    links: NamespaceReader,
+    dispatch: DispatchFn,
+    cwd: str,
+    plan: LinkPlan,
+    flags: LnFlags,
+    copies: bool,
+) -> tuple[str | None, bool]:
+    """The line refusing the link name as it stands, None when nothing
+    refuses it, and whether a file stands there; asked before the source
+    is staged and again after, as the name may have changed meanwhile.
+
+    GNU's same-name check comes before any backup or removal, waived when
+    a backup keeps the original (``ln -sfb a a``) and for a name typed as
+    ``.`` or ``..``, which removes nothing. The dispatcher refuses an
+    occupied name for a symlink; a byte copy would overwrite one, and a
+    backup has to see it first, so those two probe. A backup or -f's
+    removal never replaces a directory: GNU refuses it (``ln -bT a d`` is
+    ``cannot overwrite directory``) where a backup would rename the whole
+    tree to ``d~``. A symlink standing there is what -T names, and that
+    one is backed up or removed. Without either a taken name is refused.
+
+    Args:
+        links (NamespaceReader): the link table as the session sees it.
+        dispatch (DispatchFn): op dispatcher.
+        cwd (str): session working directory.
+        plan (LinkPlan): the link to make.
+        flags (LnFlags): the parsed flags.
+        copies (bool): the link is a byte copy.
+    """
+    typed = plan.link_typed
+    backs = flags.backup not in (None, "none")
+    linked = links.is_link(plan.link_abs)
+    if (
+        flags.force
+        and not backs
+        and not typed.endswith(("/.", "/.."))
+        and operand_abs(links, plan.source, cwd) == plan.link_abs
+        and (linked or await path_stat(dispatch, plan.link_abs) is not None)
+    ):
+        same = (
+            f"ln: '{word_text(plan.source)}' and '{typed}' are the same file\n"
+        )
+        return same, True
+    found = (
+        await path_stat(dispatch, plan.link_abs)
+        if (copies or backs or flags.force) and not linked
+        else None
+    )
+    occupied = (copies or backs) and (found is not None or linked)
+    if (backs or flags.force) and found is not None:
+        if found.type is FileType.DIRECTORY:
+            return f"ln: {typed}: cannot overwrite directory\n", occupied
+    if occupied and not backs and not flags.force:
+        kind = "symbolic link" if flags.symbolic else "hard link"
+        return f"ln: failed to create {kind} '{typed}': File exists\n", True
+    return None, occupied
+
+
 async def _create_link(
     dispatch: DispatchFn,
     link_spec: PathSpec,
@@ -882,7 +941,12 @@ async def _attempt_link(
             errors.append(refusal)
             return False
         opened.append(data)
-        return True
+        changed, _ = await _name_refusal(
+            links, dispatch, cwd, plan, flags, True
+        )
+        if changed is not None:
+            errors.append(changed)
+        return changed is None
 
     if links.is_mount(plan.link_abs):
         errors.append(f"ln: failed to create {kind} '{typed}': File exists\n")
@@ -894,41 +958,13 @@ async def _attempt_link(
         if refusal is not None:
             errors.append(refusal)
             return
-    # A name typed as `.` or `..` removes nothing, so -f meets the
-    # directory there rather than GNU's same-name check.
-    dotted = typed.endswith(("/.", "/.."))
-    if (
-        flags.force
-        and not backs
-        and not dotted
-        and operand_abs(links, plan.source, cwd) == plan.link_abs
-        and (
-            links.is_link(plan.link_abs)
-            or await path_stat(dispatch, plan.link_abs) is not None
-        )
-    ):
-        errors.append(
-            f"ln: '{target_typed}' and '{typed}' are the same file\n"
-        )
-        return
     backup_note = ""
-    # The dispatcher refuses an occupied name for a symlink; a byte copy would
-    # overwrite one, and a backup has to see it first, so those two probe.
-    # A backup moves a file aside, never a directory: GNU refuses the
-    # directory (`ln -bT a d` is `cannot overwrite directory`) where it
-    # would otherwise rename the whole tree to `d~`. A symlink standing
-    # there is what -T names, and that one is backed up.
-    occupied = False
-    if source is not None or backs:
-        found = (
-            None
-            if links.is_link(plan.link_abs)
-            else await path_stat(dispatch, plan.link_abs)
-        )
-        if backs and found is not None and found.type is FileType.DIRECTORY:
-            errors.append(f"ln: {typed}: cannot overwrite directory\n")
-            return
-        occupied = found is not None or links.is_link(plan.link_abs)
+    refusal, occupied = await _name_refusal(
+        links, dispatch, cwd, plan, flags, source is not None
+    )
+    if refusal is not None:
+        errors.append(refusal)
+        return
     if occupied and backs:
         backup = await backup_target(
             lambda p: path_readdir(dispatch, p.virtual),
@@ -956,11 +992,6 @@ async def _attempt_link(
         # that is not there is what -f is for, so its miss is the
         # expected case and not an error. unlink(2) refuses a directory
         # (EISDIR); a backend that would remove one is never asked.
-        if not links.is_link(plan.link_abs):
-            found = await path_stat(dispatch, plan.link_abs)
-            if found is not None and found.type is FileType.DIRECTORY:
-                errors.append(f"ln: {typed}: cannot overwrite directory\n")
-                return
         if not await staged():
             return
         try:
