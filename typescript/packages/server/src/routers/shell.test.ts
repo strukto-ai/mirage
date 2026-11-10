@@ -40,11 +40,18 @@ async function ended(app: ReturnType<typeof buildApp>, id: string, lineId: LineI
   )
 }
 
-async function createWs(app: ReturnType<typeof buildApp>, id: string): Promise<void> {
+async function createWs(
+  app: ReturnType<typeof buildApp>,
+  id: string,
+  runtimes?: string[],
+): Promise<void> {
   await app.inject({
     method: 'POST',
     url: '/v1/workspaces',
-    payload: { id, config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } },
+    payload: {
+      id,
+      config: { mounts: { '/': { vfs: 'ram', mode: 'write' } }, ...(runtimes ? { runtimes } : {}) },
+    },
   })
 }
 
@@ -407,7 +414,7 @@ describe('execute router', () => {
 
   it('refuses a runtime or machine the workspace lacks', async () => {
     const app = buildApp()
-    await createWs(app, 'ert')
+    await createWs(app, 'ert', ['monty', 'quickjs', 'workspace'])
     const runtime = await app.inject({
       method: 'POST',
       url: '/v1/workspaces/ert/shell',
