@@ -192,8 +192,9 @@ function usageCell(fact: string, usage: ProcessUsage | null): string {
   if (fact === 'vsz') return String(usage.vsz)
   const total = Math.trunc(usage.cpuSeconds)
   const days = Math.floor(total / 86400)
-  const pad = (value: number): string => String(value).padStart(2, '0')
-  const clock = `${pad(Math.floor((total % 86400) / 3600))}:${pad(Math.floor((total % 3600) / 60))}:${pad(total % 60)}`
+  const hours = Math.floor((total % 86400) / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const clock = [hours, minutes, total % 60].map((part) => String(part).padStart(2, '0')).join(':')
   return days > 0 ? `${String(days)}-${clock}` : clock
 }
 

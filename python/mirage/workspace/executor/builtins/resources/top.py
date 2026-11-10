@@ -20,11 +20,10 @@ from mirage.commands.builtin.utils.identity import UNKNOWN_NAME
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
 from mirage.context import current_caller
 from mirage.execution.job import JobTable
-from mirage.execution.process.constants import WORKSPACE_MACHINE
 from mirage.execution.process.types import Process, ProcessUsage
 from mirage.execution.types import CpuShares, MachineResources, TaskCounts
 from mirage.io import IOResult
-from mirage.io.types import ByteSource
+from mirage.io.types import ByteSource, OutputState
 from mirage.shell.bytes import encode_text
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.jobspec import (
@@ -35,6 +34,7 @@ from mirage.workspace.executor.builtins.jobspec import (
 from mirage.workspace.executor.builtins.machine_view import (
     MACHINE_HEADER,
     MachineScope,
+    in_scope,
     machine_scope,
     option_refusal,
     read_machines,
@@ -311,10 +311,7 @@ async def _frame_of(
         for info in processes.visible(session_of(session), grants_of(session))
         if not info.stages
         and info.pid != own
-        and (
-            info.shown_machine in scope.ids
-            or info.shown_machine == WORKSPACE_MACHINE
-        )
+        and in_scope(scope, info.shown_machine)
         and (not options.pids or info.shown_pid in options.pids)
     ]
     lines: list[str] = []
@@ -337,8 +334,12 @@ async def _frames_of(
     session: SessionState | None,
     scope: MachineScope,
     options: TopOptions,
+    io: IOResult,
+    node: ExecutionNode,
 ) -> AsyncIterator[bytes]:
     """The first frame, then one every ``delay`` until ``iterations``.
+    A machine that stops answering says so on stderr, and the command
+    ends with 1 once its output does.
 
     Args:
         first (str): the first frame, already read.
@@ -346,14 +347,26 @@ async def _frames_of(
         session (SessionState | None): the shell session.
         scope (MachineScope): the machines.
         options (TopOptions): how to print.
+        io (IOResult): the result, settled as the output ends.
+        node (ExecutionNode): the command's node, settled with it.
     """
-    yield encode_text(first)
-    done = 1
-    while options.iterations is None or done < options.iterations:
-        await asyncio.sleep(options.delay)
-        text, _ = await _frame_of(job_table, session, scope, options)
-        yield encode_text(f"\n{text}")
-        done += 1
+    told = [node.stderr]
+    try:
+        yield encode_text(first)
+        done = 1
+        while options.iterations is None or done < options.iterations:
+            await asyncio.sleep(options.delay)
+            text, errors = await _frame_of(job_table, session, scope, options)
+            if errors:
+                told.append(encode_text(errors))
+                io.exit_code = node.exit_code = 1
+            yield encode_text(f"\n{text}")
+            done += 1
+    finally:
+        node.stderr = b"".join(told)
+        io.stderr = node.stderr or None
+        if io.output is not None:
+            io.output.finish()
 
 
 def _read_options(
@@ -464,13 +477,10 @@ async def handle_top(
     text, errors = await _frame_of(job_table, session, scope, options)
     code = 1 if errors else 0
     err = encode_text(errors) or None
-    out: ByteSource = (
-        encode_text(text)
-        if options.iterations == 1
-        else _frames_of(text, job_table, session, scope, options)
-    )
-    return (
-        out,
-        IOResult(exit_code=code, stderr=err),
-        ExecutionNode(command=cmd_str, exit_code=code, stderr=err or b""),
-    )
+    io = IOResult(exit_code=code, stderr=err)
+    node = ExecutionNode(command=cmd_str, exit_code=code, stderr=err or b"")
+    if options.iterations == 1:
+        return encode_text(text), io, node
+    io.output = OutputState()
+    out = _frames_of(text, job_table, session, scope, options, io, node)
+    return out, io, node

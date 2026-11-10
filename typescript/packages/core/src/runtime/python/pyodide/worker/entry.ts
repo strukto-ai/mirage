@@ -59,7 +59,7 @@ console.warn = (...messages: unknown[]) => {
 }
 const sync: SyncVFS = {
   started: () => {
-    post({ kind: 'started' })
+    call({ op: 'started', path: '' })
   },
   checkPath: (path, follow) => {
     call({

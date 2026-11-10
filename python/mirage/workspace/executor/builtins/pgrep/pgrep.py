@@ -29,15 +29,16 @@ from mirage.shell.signals import signal_number
 from mirage.utils.clock import system_now
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.jobspec import (
+    grants_of,
     job_result,
     session_of,
 )
 from mirage.workspace.executor.builtins.kill.kill import signal_one
 from mirage.workspace.executor.builtins.machine_view import (
     MachineScope,
-    machine_scope,
     option_refusal,
     permuted_options,
+    process_scope,
     usage_page,
 )
 from mirage.workspace.executor.builtins.pgrep.shared import (
@@ -169,14 +170,21 @@ def _matcher_of(
 
 
 def _selected(
-    rows: list[Process], search: Search, shown: dict[int, int], now: float
+    rows: list[Process],
+    search: Search,
+    shown: dict[int, int],
+    leaders: dict[int, int],
+    now: float,
 ) -> list[Process]:
     """The processes a search picks, by pid.
 
     Args:
         rows (list[Process]): the processes to pick from.
         search (Search): what it selects.
-        shown (dict[int, int]): each process's pid as the agent knows it.
+        shown (dict[int, int]): each visible process's pid as the agent
+            knows it.
+        leaders (dict[int, int]): each row's session leader, as ``ps``
+            reads its ``sid``.
         now (float): the moment it runs, epoch seconds.
     """
 
@@ -184,6 +192,7 @@ def _selected(
         haystack = info.command if search.full else process_name(info)
         parent = shown.get(info.parent or 0, 0)
         group = shown.get(info.group or info.pid, info.group or info.pid)
+        session = shown.get(leaders[info.pid], leaders[info.pid])
         return (
             (
                 search.matcher is None
@@ -191,7 +200,7 @@ def _selected(
             )
             and (not search.parents or parent in search.parents)
             and (not search.groups or group in search.groups)
-            and (not search.sessions or group in search.sessions)
+            and (not search.sessions or session in search.sessions)
             and (
                 not search.states
                 or (info.shown_state or "S")[0] in search.states
@@ -270,7 +279,7 @@ async def _search_for(
     machine = flags.get("machine")
     named = machine if isinstance(machine, str) else None
     processes = job_table.processes
-    scope = machine_scope(processes, named)
+    scope = process_scope(processes, named)
     if scope is None:
         return _refused(flags, f"{name}: {named}: no such machine\n")
     full = flags.get("f") is True
@@ -283,7 +292,16 @@ async def _search_for(
         else ""
     )
     rows = await running(job_table, session, scope)
-    shown = {info.pid: info.shown_pid for info in rows}
+    sid = session_of(session)
+    seen = processes.visible(sid, grants_of(session))
+    shown = {info.pid: info.shown_pid for info in seen}
+    shell = session.shell_pid if session is not None else None
+    leaders = {
+        info.pid: shell
+        if info.session_id == sid and shell is not None
+        else info.group or info.pid
+        for info in rows
+    }
     search = Search(
         matcher,
         full,
@@ -296,7 +314,7 @@ async def _search_for(
         numbered["sessions"],
         states if isinstance(states, str) else "",
     )
-    picked = _selected(rows, search, shown, system_now())
+    picked = _selected(rows, search, shown, leaders, system_now())
     return Searched(picked, scope, flags, said, 0)
 
 

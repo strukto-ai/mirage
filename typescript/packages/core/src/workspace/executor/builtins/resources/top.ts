@@ -16,7 +16,6 @@ import { UNKNOWN_NAME } from '../../../../commands/builtin/utils/identity.ts'
 import { parseShellOptions, SHELL_SPECS } from '../../../../commands/spec/shell.ts'
 import { currentCaller, type RedirectResult } from '../../../../context/session_context.ts'
 import type { JobTable } from '../../../../execution/job/index.ts'
-import { WORKSPACE_MACHINE } from '../../../../execution/process/constants.ts'
 import {
   type Process,
   type ProcessUsage,
@@ -24,15 +23,16 @@ import {
   shownPid,
 } from '../../../../execution/process/types.ts'
 import type { CpuShares, MachineResources, TaskCounts } from '../../../../execution/types.ts'
-import type { ByteSource } from '../../../../io/types.ts'
-import { IOResult } from '../../../../io/types.ts'
+import { IOResult, OutputState } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { sleep } from '../../../../utils/abort.ts'
+import { concat } from '../../../../utils/bytes.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { grantsOf, jobResult, sessionOf } from '../jobspec.ts'
 import {
+  inScope,
   MACHINE_HEADER,
   machineScope,
   type MachineScope,
@@ -221,7 +221,7 @@ async function frameOf(
       (info) =>
         (info.stages === undefined || info.stages.length === 0) &&
         info.id.pid !== own &&
-        (scope.ids.includes(shownMachine(info)) || shownMachine(info) === WORKSPACE_MACHINE) &&
+        inScope(scope, shownMachine(info)) &&
         (options.pids.size === 0 || options.pids.has(shownPid(info))),
     )
   const lines: string[] = []
@@ -241,14 +241,28 @@ async function* framesOf(
   session: SessionState | null,
   scope: MachineScope,
   options: TopOptions,
+  io: IOResult,
+  node: ExecutionNode,
+  signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
-  yield encodeText(first)
-  let done = 1
-  while (options.iterations === null || done < options.iterations) {
-    await sleep(options.delay * 1000)
-    const [text] = await frameOf(jobTable, session, scope, options)
-    yield encodeText(`\n${text}`)
-    done += 1
+  const told = [node.stderr]
+  try {
+    yield encodeText(first)
+    let done = 1
+    while (options.iterations === null || done < options.iterations) {
+      await sleep(options.delay * 1000, signal)
+      const [text, errors] = await frameOf(jobTable, session, scope, options)
+      if (errors !== '') {
+        told.push(encodeText(errors))
+        io.exitCode = node.exitCode = 1
+      }
+      yield encodeText(`\n${text}`)
+      done += 1
+    }
+  } finally {
+    node.stderr = concat(told)
+    io.stderr = node.stderr.length > 0 ? node.stderr : null
+    io.output?.finish()
   }
 }
 
@@ -315,6 +329,7 @@ export async function handleTop(
   parts: string[],
   session: SessionState | null = null,
   _view: SessionView | null = null,
+  signal?: AbortSignal,
 ): Promise<RedirectResult> {
   const cmdStr = parts.join(' ')
   const spec = SHELL_SPECS.top
@@ -339,11 +354,14 @@ export async function handleTop(
   const [text, errors] = await frameOf(jobTable, session, scope, options)
   const code = errors === '' ? 0 : 1
   const err = errors === '' ? null : encodeText(errors)
-  const out: ByteSource =
-    options.iterations === 1 ? encodeText(text) : framesOf(text, jobTable, session, scope, options)
-  return [
-    out,
-    new IOResult({ exitCode: code, stderr: err }),
-    new ExecutionNode({ command: cmdStr, exitCode: code, stderr: err ?? new Uint8Array() }),
-  ]
+  const io = new IOResult({ exitCode: code, stderr: err })
+  const node = new ExecutionNode({
+    command: cmdStr,
+    exitCode: code,
+    stderr: err ?? new Uint8Array(),
+  })
+  if (options.iterations === 1) return [encodeText(text), io, node]
+  io.output = new OutputState()
+  const out = framesOf(text, jobTable, session, scope, options, io, node, signal)
+  return [out, io, node]
 }

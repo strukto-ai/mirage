@@ -17,6 +17,7 @@ const WASM_PAGE_BYTES = 1 << 16
 const WASM_HEADER_BYTES = 8
 const MEMORY_SECTION = 5
 const HAS_MAXIMUM = 1
+const WASM32_PAGES = 65536
 
 /** How many differently limited compilations of a module stay ready. */
 export const KEPT_COMPILATIONS = 4
@@ -56,7 +57,8 @@ function leb(value: number): number[] {
 
 /**
  * A module's bytes with the memory it defines held to `pages` pages, its own
- * minimum being the least it can start on. The WebAssembly API takes no limit
+ * minimum being the least it can start on and a maximum it declares or the
+ * 4 GiB of a 32-bit memory the most. The WebAssembly API takes no limit
  * for a memory a module defines itself, as wasmtime's `Store` limits do, so
  * the limit goes in the module.
  *
@@ -71,9 +73,11 @@ export function capMemory(bytes: Uint8Array, pages: number): Uint8Array {
     if (bytes[at] === MEMORY_SECTION) {
       const [count, flagsAt] = readLeb(bytes, body)
       if (count !== 1) return bytes
-      const [least] = readLeb(bytes, flagsAt + 1)
-      const flags = (bytes[flagsAt] ?? 0) | HAS_MAXIMUM
-      const section = [count, flags, ...leb(least), ...leb(Math.max(least, pages))]
+      const declared = bytes[flagsAt] ?? 0
+      const [least, maximumAt] = readLeb(bytes, flagsAt + 1)
+      const ceiling = declared & HAS_MAXIMUM ? readLeb(bytes, maximumAt)[0] : WASM32_PAGES
+      const most = Math.max(least, Math.min(pages, ceiling))
+      const section = [count, declared | HAS_MAXIMUM, ...leb(least), ...leb(most)]
       return new Uint8Array([
         ...bytes.subarray(0, at),
         MEMORY_SECTION,

@@ -25,7 +25,7 @@ from mirage.execution.process.table import ProcessTable
 from mirage.execution.types import MachineResources
 from mirage.io import IOResult
 from mirage.io.memory import MemoryBudget, memory_budget
-from mirage.io.types import ByteSource
+from mirage.io.types import ByteSource, OutputState
 from mirage.shell.bytes import encode_text
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.jobspec import job_result
@@ -337,9 +337,12 @@ async def _passes(
     options: FreeOptions,
     count: int | None,
     delay: float,
+    io: IOResult,
+    node: ExecutionNode,
 ) -> AsyncIterator[bytes]:
     """The first pass, then one every ``delay`` until ``count`` are out,
-    a blank line between each.
+    a blank line between each. A machine that stops answering says so
+    on stderr, and the command ends with 1 once its output does.
 
     Args:
         first (str): the first pass, already read.
@@ -349,14 +352,26 @@ async def _passes(
         options (FreeOptions): how to print.
         count (int | None): how many passes; None for no end.
         delay (float): the seconds between them.
+        io (IOResult): the result, settled as the output ends.
+        node (ExecutionNode): the command's node, settled with it.
     """
-    yield encode_text(first)
-    done = 1
-    while count is None or done < count:
-        await asyncio.sleep(delay)
-        rows, _ = await _read(processes, scope, memory)
-        yield encode_text("\n" + _render(rows, options, scope.several))
-        done += 1
+    told = [node.stderr]
+    try:
+        yield encode_text(first)
+        done = 1
+        while count is None or done < count:
+            await asyncio.sleep(delay)
+            rows, errors = await _read(processes, scope, memory)
+            if errors:
+                told.append(encode_text(errors))
+                io.exit_code = node.exit_code = 1
+            yield encode_text("\n" + _render(rows, options, scope.several))
+            done += 1
+    finally:
+        node.stderr = b"".join(told)
+        io.stderr = node.stderr or None
+        if io.output is not None:
+            io.output.finish()
 
 
 def _free_options(
@@ -481,13 +496,12 @@ async def handle_free(
     text = _render(rows, options, scope.several) if rows else ""
     code = 1 if errors else 0
     err = encode_text(errors) or None
-    out: ByteSource = (
-        encode_text(text)
-        if count == 1
-        else _passes(text, processes, scope, memory, options, count, delay)
+    io = IOResult(exit_code=code, stderr=err)
+    node = ExecutionNode(command=cmd_str, exit_code=code, stderr=err or b"")
+    if count == 1:
+        return encode_text(text), io, node
+    io.output = OutputState()
+    out = _passes(
+        text, processes, scope, memory, options, count, delay, io, node
     )
-    return (
-        out,
-        IOResult(exit_code=code, stderr=err),
-        ExecutionNode(command=cmd_str, exit_code=code, stderr=err or b""),
-    )
+    return out, io, node
