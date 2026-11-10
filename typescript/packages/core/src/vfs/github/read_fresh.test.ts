@@ -322,7 +322,7 @@ describe('github cannot-see versus gone', () => {
       // prints aiohttp's rendering of the same 404. Never ENOENT.
       expect(await fails(w, `cat ${PATH}`)).toBe('cat: Not Found\n')
       expect(kept(w)).toBe(true)
-      expect(await fails(w, `cp ${PATH} /r/x`)).toBe('Not Found\n')
+      expect(await fails(w, `cp ${PATH} /r/x`)).toBe('cp: Not Found\n')
       expect(kept(w)).toBe(true)
     } finally {
       await w.close()
@@ -393,7 +393,7 @@ describe('github cannot-see versus gone', () => {
     const w = ws(await vfsOf())
     try {
       await clearedWithOverlay(w)
-      expect(await fails(w, `cp ${PATH} /r/x`)).toBe('Bad credentials\n')
+      expect(await fails(w, `cp ${PATH} /r/x`)).toBe('cp: Bad credentials\n')
       expect(kept(w)).toBe(true)
     } finally {
       await w.close()

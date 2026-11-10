@@ -136,4 +136,17 @@ describe('cross-mount relay glob expansion', () => {
     expect(r.err).toBe("mv: cannot stat '/a/nomatch*.zzz': No such file or directory\n")
     await ws.close()
   })
+
+  it("a relay run out of memory fails in its own voice, not the line's", async () => {
+    const ram1 = new RAMVFS()
+    const ram2 = new RAMVFS()
+    ram1.store.files.set('/x.json', ENC.encode(`{"k":"${'v'.repeat(800_000)}"}\n`))
+    ram2.store.files.set('/y.json', ENC.encode(`{"k":"${'w'.repeat(800_000)}"}\n`))
+    const ws = new Workspace(
+      { '/a': ram1, '/b': ram2 },
+      { mode: MountMode.WRITE, maxMemory: '1MB' },
+    )
+    const r = await runCmd(ws, 'jq -s . /a/x.json /b/y.json')
+    expect([r.code, r.err]).toEqual([1, 'jq: memory exhausted\n'])
+  })
 })

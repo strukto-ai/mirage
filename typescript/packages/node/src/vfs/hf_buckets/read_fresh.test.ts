@@ -150,7 +150,7 @@ describe('hf_buckets under read: fresh', () => {
       // deleted file. Measured on the first green run: the raw Hub error.
       b.hub.fail.set('bucket_resolve', [404, ''])
       const cp = await w.shell('cp /m/a.txt /r/x')
-      expect([cp.exitCode, DEC.decode(cp.stderr)]).toEqual([1, 'fake bucket_resolve refused\n'])
+      expect([cp.exitCode, DEC.decode(cp.stderr)]).toEqual([1, 'cp: fake bucket_resolve refused\n'])
       expect(w.namespace.metaFor('/m/a.txt')?.mode).toBe(0o600)
     } finally {
       await w.close()

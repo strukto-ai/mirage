@@ -148,7 +148,7 @@ async def test_a_download_404_that_is_not_entry_not_found_keeps_the_overlay():
             cp = await ws.shell("cp /m/a.txt /r/x")
             assert (cp.exit_code, await cp.stderr_str()) == (
                 1,
-                "fake bucket_resolve refused\n",
+                "cp: fake bucket_resolve refused\n",
             )
             meta = ws.namespace.meta_for("/m/a.txt")
             assert meta is not None and meta.mode == 0o600

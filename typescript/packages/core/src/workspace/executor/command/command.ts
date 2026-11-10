@@ -45,6 +45,7 @@ import {
   type CallerDispatchFn,
 } from '../../../context/session_context.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { framed, mountVoice } from './handler.ts'
 import type { EntryGate, HandOff } from '../../../policy/types.ts'
 import { parseFind, type FindExpr } from '../../../rs/find.ts'
 import { encodeText } from '../../../shell/bytes.ts'
@@ -476,26 +477,41 @@ async function runCrossMount(
     findExpr ?? undefined,
     parts,
   )
-  const [csStdout0, csIo] = await handleCrossMount(
-    cmdName,
-    csScopes,
-    csTexts,
-    csFlags,
-    dispatch,
-    runOperand,
-    stdin,
-    makeStorageKey(registry),
-    files,
-    view,
-    session.cwd,
-    spelledWords(parts.slice(1)),
-    aggregateFor(cmdName, operandMounts(registry, cmdName, csScopes)),
-    makeCheckUnlink(registry, sessionAccess(session)),
-    follow,
-    registry.diff,
-    registry.ids,
-    mergeSignals(signal, context.frame.abortSignal),
-  )
+  // What fails outside every mount's own run (a relay generic outgrowing the
+  // workspace's memory) is this command's, in the voice one mount's run gives
+  // it, before the output or while it streams.
+  const voice = mountVoice(cmdName, pathScopes)
+  let csStdout0: ByteSource | null
+  let csIo: IOResult
+  try {
+    ;[csStdout0, csIo] = await handleCrossMount(
+      cmdName,
+      csScopes,
+      csTexts,
+      csFlags,
+      dispatch,
+      runOperand,
+      stdin,
+      makeStorageKey(registry),
+      files,
+      view,
+      session.cwd,
+      spelledWords(parts.slice(1)),
+      aggregateFor(cmdName, operandMounts(registry, cmdName, csScopes)),
+      makeCheckUnlink(registry, sessionAccess(session)),
+      follow,
+      registry.diff,
+      registry.ids,
+      mergeSignals(signal, context.frame.abortSignal),
+    )
+  } catch (err) {
+    if (voice.passes(err)) throw err
+    const [printed, stderr, code] = voice.fail(err)
+    csStdout0 = printed
+    csIo = new IOResult({ exitCode: code, stderr })
+  }
+  if (csStdout0 !== null && !(csStdout0 instanceof Uint8Array))
+    csStdout0 = framed(csStdout0, csIo, voice)
   const csExec = new ExecutionNode({
     command: cmdStr,
     stderr: await csIo.materializeStderr(),
