@@ -1199,6 +1199,25 @@ export async function admitLine(
 }
 
 /**
+ * A command a `Deny` refuses at its own node, rendered as its run renders it,
+ * while the rest of its line still runs.
+ */
+export function refusedWhereItStands(one: Judged, deny: Deny): Judged {
+  const [stderr, exitCode] = renderDeny(one.judgment.command, deny)
+  return {
+    ...one,
+    judgment: {
+      ...one.judgment,
+      outcome: Outcome.DENY,
+      reason: deny.reason,
+      exitCode,
+      stderr: decodeText(stderr),
+      refusal: refusalOf(deny),
+    },
+  }
+}
+
+/**
  * The refusal of a command a `preCommand` route places off the runtime or
  * machine its line runs whole on (`offLine`, `Router.offLine`), which that
  * one run cannot honor; null for one that stays. Mirrors Python's

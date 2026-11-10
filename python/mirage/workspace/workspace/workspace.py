@@ -1068,6 +1068,8 @@ class Workspace:
                 exit_code=refused.exit_code,
                 stderr=decode_text(await refused.materialize_stderr()),
             )
+        if not whole_line:
+            judged = self._router.refuse_disagreeing(judged, placed)
         said = explained_line(
             line,
             judged,

@@ -256,6 +256,28 @@ async def test_explain_ignores_a_shell_line_under_a_wrapper():
         await ws.close()
 
 
+class _WrapperApart(Policy):
+    def pre_command(self, ctx):
+        machine = {"nohup": "a", "hostname": "b"}.get(ctx.command)
+        return None if machine is None else Route(machine=machine)
+
+
+@pytest.mark.asyncio
+async def test_explain_refuses_a_wrapper_whose_routes_disagree():
+    ws = _workspace(_WrapperApart())
+    try:
+        said = await ws.explain("nohup hostname; echo after")
+        wrapper = next(n for n in _commands(said.node) if n.command == "nohup")
+        run = await ws.shell("nohup hostname")
+        assert (wrapper.outcome, wrapper.exit_code) == (Outcome.DENY, 126)
+        assert wrapper.refusal == run.refusal
+        assert wrapper.stderr == await run.stderr_str()
+        echo = next(n for n in _commands(said.node) if n.command == "echo")
+        assert (echo.outcome, echo.exit_code) == (Outcome.ALLOW, 0)
+    finally:
+        await ws.close()
+
+
 def _commands(node):
     for child in getattr(node, "children", ()):
         if getattr(child, "type", "") == "command":

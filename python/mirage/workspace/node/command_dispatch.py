@@ -59,7 +59,6 @@ from mirage.policy import (
     PolicyDenied,
     post_command_gate,
     refusal_of,
-    render_command_deny,
     render_deny,
     resolve_producer,
 )
@@ -992,9 +991,7 @@ async def _run_argv(
                 own = [] if admitted.route is None else [admitted.route]
                 answer = agreed([*own, *verdict])
                 if isinstance(answer, Deny):
-                    err, code = await render_command_deny(
-                        name, answer, admitted.ctx
-                    )
+                    err, code = render_deny(name, answer)
                     return _refused(
                         " ".join([name, *argv.args]),
                         Refused(err, code, refusal_of(answer)),
