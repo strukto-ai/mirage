@@ -230,7 +230,7 @@ interface Case {
   entry?: { captures?: string[]; config?: Record<string, unknown> }
   world?: World
   filesystem?: Record<string, Partial<Record<FilesystemOperation, boolean>>>
-  build_error?: { contains: string }
+  build_error?: { contains: string; http_contains?: string }
   steps?: Step[]
 }
 
