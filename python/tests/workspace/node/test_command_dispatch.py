@@ -378,12 +378,10 @@ class HostnameOn(Policy):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("machine", "out"), [("b", None), ("a", b"a\n")])
-async def test_an_outside_wrapper_runs_where_its_program_is_routed(
-    machine, out
-):
-    # The machine the wrapper runs on runs its program, so a route placing
-    # the program on another one is refused, as in a line run whole.
+@pytest.mark.parametrize("machine", ["a", "b"])
+async def test_an_outside_wrapper_runs_where_its_program_is_routed(machine):
+    # The wrapper goes with its program, so a route answering for the program
+    # places them both, as it places the program run alone.
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
@@ -392,15 +390,128 @@ async def test_an_outside_wrapper_runs_where_its_program_is_routed(
         policies=[HostnameOn(machine)],
     )
     try:
-        assert (await ws.shell("hostname")).stdout == f"{machine}\n".encode()
+        out = f"{machine}\n".encode()
+        assert (await ws.shell("hostname")).stdout == out
         r = await ws.shell("nohup hostname")
-        if out is None:
-            assert (r.exit_code, r.stdout) == (126, b"")
-            assert r.refusal is not None
-            assert r.refusal.reason.startswith(
-                "HostnameOn routes hostname elsewhere"
+        assert (r.exit_code, r.stdout) == (0, out)
+    finally:
+        await ws.close()
+
+
+class OtherBox(Box):
+    name = "other"
+    captures = ("hostname",)
+
+
+class HostnameTo(Policy):
+    def __init__(self, runtime: str) -> None:
+        self.runtime = runtime
+
+    def pre_command(self, ctx):
+        return Route(self.runtime) if ctx.command == "hostname" else None
+
+
+@pytest.mark.asyncio
+async def test_a_routed_wrapper_reaches_the_runtime_with_its_words():
+    box, other = Box(), OtherBox()
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[box, other],
+        policies=[HostnameTo("other")],
+    )
+    try:
+        r = await ws.shell("nohup nice -n 5 hostname -s")
+        assert r.exit_code == 0
+        assert other.ran == [["nohup", "nice", "-n", "5", "hostname", "-s"]]
+        assert box.ran == []
+    finally:
+        await ws.close()
+
+
+class PythonOnMonty(Policy):
+    def pre_command(self, ctx):
+        return Route("monty") if ctx.command == "python3" else None
+
+
+@pytest.mark.asyncio
+async def test_a_route_into_mirage_runs_the_wrapper_s_program_there():
+    box = Box()
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[box, "monty"],
+        policies=[PythonOnMonty()],
+    )
+    try:
+        r = await ws.shell("nohup python3 -c 'print(1)'")
+        assert (r.exit_code, r.stdout) == (0, b"1\n")
+        assert box.ran == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("profile", "refused"),
+    [
+        ({"commands": {"allow": ["echo"]}}, True),
+        ({"commands": {"deny": [{"reason": "r", "commands": ["rm"]}]}}, False),
+        ({}, False),
+    ],
+)
+async def test_an_absent_path_goes_to_the_external_runtime(profile, refused):
+    box = Box()
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box])
+    try:
+        ws.create_session("s", profile=profile)
+        r = await ws.shell("/opt/tool a", session_id="s")
+        if refused:
+            assert (r.exit_code, r.stderr) == (
+                126,
+                b"/opt/tool: Permission denied\n",
             )
+            assert box.ran == []
         else:
-            assert (r.exit_code, r.stdout) == (0, out)
+            assert r.exit_code == 0
+            assert box.ran == [["/opt/tool", "a"]]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_path_mirage_holds_runs_in_mirage():
+    box = Box()
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box])
+    try:
+        await ws.shell("echo 'echo hi' > /data/s.sh")
+        r = await ws.shell("/data/s.sh")
+        assert (r.exit_code, r.stdout) == (0, b"hi\n")
+        assert box.ran == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_relative_path_stays_the_shell_s_to_answer():
+    box = Box()
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box])
+    try:
+        r = await ws.shell("./tool a")
+        assert r.exit_code == 127
+        assert box.ran == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_an_absent_path_is_the_shell_s_without_an_external_runtime():
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=["workspace"]
+    )
+    try:
+        r = await ws.shell("/opt/tool a")
+        assert r.exit_code == 127
+        assert b"No such file or directory" in r.stderr
     finally:
         await ws.close()

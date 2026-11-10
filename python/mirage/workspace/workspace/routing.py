@@ -45,7 +45,12 @@ from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.utils.abort import MirageAbortError
 from mirage.view.types import FileView, SessionView
-from mirage.workspace.lookup.lookup import mirage_program_at, routed_consumer
+from mirage.workspace.lookup.constants import PROGRAM_WRAPPERS
+from mirage.workspace.lookup.lookup import (
+    mirage_program_at,
+    routed_consumer,
+    wrapper_runs_outside,
+)
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.node.explain import Judged, Walked
@@ -90,6 +95,21 @@ def _apart(
             if name != WHOLE_LINE
         },
     )
+
+
+def _runs_under(one: Judged, outer: Judged) -> bool:
+    """Whether a judged command stands inside another on its line.
+
+    Args:
+        one (Judged): the command.
+        outer (Judged): the command that may be running it.
+    """
+    at = one.occurrence.parent
+    while at is not None:
+        if at == outer.occurrence:
+            return True
+        at = at.parent
+    return False
 
 
 class Router:
@@ -300,19 +320,25 @@ class Router:
         )
 
     def placement_for(
-        self, one: Judged, decision: RouteDecision[RuntimeIdentity]
+        self,
+        one: Judged,
+        decision: RouteDecision[RuntimeIdentity],
+        programs: Sequence[Judged] = (),
     ) -> tuple[str, str]:
         """The runtime entry that serves a command under a decision, as
         its run places it, and the machine it runs there on: the
         ``@external`` runtime for a program no name binds (a path runs
         through the workspace's exec path first); both empty when the
         workspace runs it itself. A ``pre_command`` route of the command
-        places it over the line's decision, as its run does.
+        places it over the line's decision, as its run does, and so does
+        the route of a program a wrapper takes along to a runtime.
 
         Args:
             one (Judged): the command's judgment and the session it was
                 judged in.
             decision (RouteDecision): the line's placement.
+            programs (Sequence[Judged]): the commands it runs, outermost
+                first.
         """
         whole = whole_line_runtime(decision.bindings)
         if isinstance(whole, Runtime):
@@ -325,6 +351,26 @@ class Router:
                 route.runtime,
                 route.machine or decision.machine,
             )
+        if (
+            one.ctx is not None
+            and one.session is not None
+            and wrapper_runs_outside(
+                one.judgment.command,
+                one.ctx.argv,
+                one.session,
+                self._registry,
+                decision,
+            )
+        ):
+            for program in programs:
+                inner = command_route(program.judgment.answers)
+                if inner is not None:
+                    decision = routed(
+                        self._runtimes.entries,
+                        decision.bindings,
+                        inner.runtime,
+                        inner.machine or decision.machine,
+                    )
         return self._serving(one, decision)
 
     def placements(
@@ -361,7 +407,13 @@ class Router:
                         route.runtime,
                         route.machine or line.machine,
                     )
-            return self.placement_for(one, line)
+            if one.judgment.command not in PROGRAM_WRAPPERS:
+                return self.placement_for(one, line)
+            return self.placement_for(
+                one,
+                line,
+                [held for held in judged if _runs_under(held, one)],
+            )
 
         return placed
 

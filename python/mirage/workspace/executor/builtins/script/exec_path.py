@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mirage.context import (
@@ -106,6 +106,13 @@ async def handle_exec_path(
     sink: JobConsole | None = None,
     job_table: JobTable | None = None,
     call_stack: CallStack | None = None,
+    absent: (
+        Callable[
+            [],
+            Awaitable[tuple[ByteSource | None, IOResult, ExecutionNode]],
+        ]
+        | None
+    ) = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a slash-carrying head word as a program, bash's loader rule.
 
@@ -141,6 +148,9 @@ async def handle_exec_path(
             script starts a table of its own beside.
         call_stack (CallStack | None): the caller's frames, whose nesting
             a shell script counts on from.
+        absent (Callable | None): runs the path where a runtime takes
+            programs Mirage does not have, when no file of Mirage's is
+            there; None answers ``No such file or directory``.
     """
     session = context.session
     try:
@@ -149,6 +159,8 @@ async def handle_exec_path(
         strerror = fs_strerror(exc)
         if strerror is None:
             raise
+        if absent is not None and isinstance(exc, FileNotFoundError):
+            return await absent()
         code = (
             NOT_FOUND_STATUS
             if isinstance(exc, FileNotFoundError)

@@ -341,6 +341,19 @@ class PlaceLine implements TestPolicy<RouteContext> {
   }
 }
 
+class PlaceCommand implements TestPolicy<CommandContext> {
+  readonly hook = 'preCommand'
+  private readonly spec: PolicySpec
+  constructor(spec: PolicySpec) {
+    this.spec = spec
+  }
+  decide(ctx: CommandContext): Action | null {
+    return ctx.command === this.spec.contains
+      ? { kind: 'route', runtime: this.spec.runtime ?? '' }
+      : null
+  }
+}
+
 class LockWrites implements TestPolicy<VfsContext> {
   readonly hook = 'preVfs'
   private readonly prefix: string
@@ -585,6 +598,7 @@ class Boom implements TestPolicy<ExecuteResultContext> {
 const POLICY_KINDS: Record<string, new (spec: PolicySpec) => TestPolicy<never>> = {
   deny_flag: DenyFlag,
   place_line: PlaceLine,
+  place_command: PlaceCommand,
   lock_writes: LockWrites,
   seal_reads: SealReads,
   redact_reads: RedactReads,

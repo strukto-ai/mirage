@@ -78,8 +78,17 @@ To choose a runtime for each command line, see [Route Runtime](/home/policy/rout
 - `monty`, `wasi`, `pyodide` and `quickjs` take only their own interpreter's
   names; naming another program on one is refused when the workspace is
   built. `local`, `sandlock` and `machine` take any name.
+- Mirage matches the program each command really runs, after expanding its
+  words, so `python3` is captured in `$P x`, `env python3 x`,
+  `timeout 5 python3 x`, `sh -c 'python3 x'` and `xargs python3`. Each command
+  on a line matches on its own, so `cat a.txt | python3 x` sends only `python3`.
 - `nice`, `nohup`, `stdbuf`, `ionice` and `setsid` run their program where
   it runs alone: `nice gcc x.c` where `gcc` is taken, `nice grep` in Mirage.
+  On a runtime the wrapper goes with it, and permission rules and a
+  `pre_command` route answer for the program.
+- An absolute path Mirage has no file for, such as `/usr/bin/ffmpeg`, goes to
+  the `@external` runtime. A profile's `commands.allow` refuses it, since the
+  list can only name what it can read.
 - Under `local`, `sandlock` and `machine`, a program a captured program
   starts runs there: `make` running `gcc`, or a script calling `subprocess`. Capture the
   launcher on the same runtime as the tool. A Pyodide script's `subprocess`

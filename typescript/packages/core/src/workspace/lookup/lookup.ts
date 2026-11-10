@@ -168,6 +168,24 @@ export function mirageProgramAt(
  * program: a bad option, or a word it cannot exec (`nice cd`). Mirrors
  * Python's `wrapper_refusal`.
  */
+/**
+ * Whether a wrapper goes to a runtime with its program under it (`nohup
+ * python3` on a machine), so Mirage never runs that program itself.
+ */
+export function wrapperRunsOutside(
+  name: string,
+  args: readonly string[],
+  session: SessionState,
+  registry: MountRegistry,
+  routing: RouteDecision<Runtime> | undefined,
+): boolean {
+  return (
+    PROGRAM_WRAPPERS.has(name) &&
+    mirageProgramAt(name, args, session, registry, routing) === null &&
+    routedConsumer(name, args, session, registry, routing)[0] === Consumer.EXTERNAL
+  )
+}
+
 export function wrapperRefusal(
   name: string,
   args: readonly string[],

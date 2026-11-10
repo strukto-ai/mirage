@@ -174,10 +174,10 @@ it.each([
 
 class Box extends Runtime implements ProcessExecutorMixin {
   readonly [PROCESS_EXECUTOR] = true as const
-  readonly name = 'box'
+  readonly name: string = 'box'
   readonly ran: string[][] = []
-  constructor() {
-    super({}, [EXTERNAL_COMMANDS])
+  constructor(captures: string[] = [EXTERNAL_COMMANDS]) {
+    super({}, captures)
   }
   runProcess(_engine: unknown, _paths: unknown, texts: string[]): Promise<RunResult> {
     this.ran.push([...texts])
@@ -341,13 +341,10 @@ class HostnameOn implements Policy {
   }
 }
 
-// The machine the wrapper runs on runs its program, so a route placing the
-// program on another one is refused, as in a line run whole.
+// The wrapper goes with its program, so a route answering for the program
+// places them both, as it places the program run alone.
 describe('a wrapper whose program is routed', () => {
-  it.each([
-    ['b', null],
-    ['a', 'a\n'],
-  ])('runs where the program goes: %s', async (machine, out) => {
+  it.each(['a', 'b'])('runs where the program goes: %s', async (machine) => {
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
@@ -360,12 +357,113 @@ describe('a wrapper whose program is routed', () => {
     try {
       expect(text((await ws.shell('hostname')).stdout)).toBe(`${machine}\n`)
       const io = await ws.shell('nohup hostname')
-      if (out === null) {
-        expect([io.exitCode, text(io.stdout)]).toEqual([126, ''])
-        expect(io.refusal?.reason.startsWith('HostnameOn routes hostname elsewhere')).toBe(true)
+      expect([io.exitCode, text(io.stdout)]).toEqual([0, `${machine}\n`])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('reaches the runtime with its words', async () => {
+    const box = new Box()
+    const other = new OtherBox()
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: [box, other], policies: [new HostnameTo('other')] },
+    )
+    try {
+      const io = await ws.shell('nohup nice -n 5 hostname -s')
+      expect(io.exitCode).toBe(0)
+      expect(other.ran).toEqual([['nohup', 'nice', '-n', '5', 'hostname', '-s']])
+      expect(box.ran).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('runs in Mirage when the route says so', async () => {
+    const box = new Box()
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: [box, 'monty'], policies: [new PythonOnMonty()] },
+    )
+    try {
+      const io = await ws.shell("nohup python3 -c 'print(1)'")
+      expect([io.exitCode, text(io.stdout)]).toEqual([0, '1\n'])
+      expect(box.ran).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+class OtherBox extends Box {
+  override readonly name: string = 'other'
+  constructor() {
+    super(['hostname'])
+  }
+}
+
+class HostnameTo implements Policy {
+  constructor(private readonly runtime: string) {}
+
+  preCommand(ctx: CommandContext): Route | null {
+    return ctx.command === 'hostname' ? { kind: 'route', runtime: this.runtime } : null
+  }
+}
+
+class PythonOnMonty implements Policy {
+  preCommand(ctx: CommandContext): Route | null {
+    return ctx.command === 'python3' ? { kind: 'route', runtime: 'monty' } : null
+  }
+}
+
+describe('a path no file of Mirage answers', () => {
+  it.each([
+    [{ commands: { allow: ['echo'] } }, true],
+    [{ commands: { deny: [{ reason: 'r', commands: ['rm'] }] } }, false],
+    [{}, false],
+  ])('goes to the external runtime: %j', async (profile, isRefused) => {
+    await withBox(profile, async (ws, box) => {
+      const io = await ws.shell('/opt/tool a', { sessionId: 's' })
+      if (isRefused) {
+        expect([io.exitCode, text(await materialize(io.stderr))]).toEqual([
+          126,
+          '/opt/tool: Permission denied\n',
+        ])
+        expect(box.ran).toEqual([])
       } else {
-        expect([io.exitCode, text(io.stdout)]).toEqual([0, out])
+        expect(io.exitCode).toBe(0)
+        expect(box.ran).toEqual([['/opt/tool', 'a']])
       }
+    })
+  })
+
+  it('runs in Mirage when Mirage holds the file', async () => {
+    await withBox({}, async (ws, box) => {
+      await ws.shell("echo 'echo hi' > /data/s.sh")
+      const io = await ws.shell('/data/s.sh')
+      expect([io.exitCode, text(io.stdout)]).toEqual([0, 'hi\n'])
+      expect(box.ran).toEqual([])
+    })
+  })
+
+  it('leaves a relative path to the shell', async () => {
+    await withBox({}, async (ws, box) => {
+      const io = await ws.shell('./tool a')
+      expect(io.exitCode).toBe(127)
+      expect(box.ran).toEqual([])
+    })
+  })
+
+  it("is the shell's without an external runtime", async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: ['workspace'] },
+    )
+    try {
+      const io = await ws.shell('/opt/tool a')
+      expect(io.exitCode).toBe(127)
+      expect(text(await materialize(io.stderr))).toContain('No such file or directory')
     } finally {
       await ws.close()
     }

@@ -293,6 +293,20 @@ class PlaceLine(Policy):
         return Route(self._runtime)
 
 
+class PlaceCommand(Policy):
+    """Test-only pre_command policy: place the commands of one name on a
+    runtime."""
+
+    HOOK = "pre_command"
+
+    def __init__(self, spec: dict[str, Any]) -> None:
+        self._contains = spec["contains"]
+        self._runtime = spec["runtime"]
+
+    def decide(self, ctx: CommandContext) -> Route | None:
+        return Route(self._runtime) if ctx.command == self._contains else None
+
+
 class LockWrites(Policy):
     """Test-only pre_vfs policy: refuse write ops under a prefix."""
 
@@ -537,6 +551,7 @@ class Boom(Policy):
 POLICY_KINDS = {
     "deny_flag": DenyFlag,
     "place_line": PlaceLine,
+    "place_command": PlaceCommand,
     "lock_writes": LockWrites,
     "seal_reads": SealReads,
     "redact_reads": RedactReads,

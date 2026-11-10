@@ -113,6 +113,9 @@ export async function handleExecPath(
   jobTable?: JobTable,
   // The caller's frames, whose nesting a shell script counts on from.
   callStack: CallStack | null = null,
+  // Runs the path where a runtime takes programs Mirage does not have, when
+  // no file of Mirage's is there; unset answers `No such file or directory`.
+  absent?: () => Promise<RedirectResult>,
 ): Promise<RedirectResult> {
   let session = context.session
   let data: Uint8Array
@@ -122,6 +125,7 @@ export async function handleExecPath(
     const strerror = fsStrerror(exc)
     if (strerror === null) throw exc
     const code = (exc as { code?: string }).code
+    if (absent !== undefined && code === 'ENOENT') return absent()
     return scriptError(
       `${shellVoice()}${path}`,
       strerror,

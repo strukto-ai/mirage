@@ -29,7 +29,8 @@ import type { Runtime } from '../../runtime/base.ts'
 import { EXTERNAL_COMMANDS, WHOLE_LINE } from '../../runtime/constants.ts'
 import { catchAll, routed, runtimeBindingsFor, wholeLineRuntime } from '../../runtime/table.ts'
 import { PathSpec } from '../../types.ts'
-import { mirageProgramAt, routedConsumer } from '../lookup/lookup.ts'
+import { PROGRAM_WRAPPERS } from '../lookup/constants.ts'
+import { mirageProgramAt, routedConsumer, wrapperRunsOutside } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -95,6 +96,14 @@ function apart(decision: RouteDecision<Runtime>): RouteDecision<Runtime> {
     if (name !== WHOLE_LINE) bindings[name] = runtime
   }
   return { ...decision, bindings }
+}
+
+/** Whether a judged command stands inside another on its line. */
+function runsUnder(one: Judged, outer: Judged): boolean {
+  for (let at = one.occurrence.parent; at !== null; at = at.parent) {
+    if (sameOccurrence(at, outer.occurrence)) return true
+  }
+  return false
 }
 
 export class Router {
@@ -224,16 +233,39 @@ export class Router {
    * for a program no name binds (a path runs through the workspace's exec
    * path first); both empty when the workspace runs it itself. A
    * `preCommand` route of the command places it over the line's decision,
-   * as its run does. Mirrors Python's `Router.placement_for`.
+   * as its run does, and so does the route of a program a wrapper takes
+   * along to a runtime (`programs`, the commands it runs, outermost first).
+   * Mirrors Python's `Router.placement_for`.
    */
-  placementFor(one: Judged, line: RouteDecision<Runtime>): [string, string] {
+  placementFor(
+    one: Judged,
+    line: RouteDecision<Runtime>,
+    programs: readonly Judged[] = [],
+  ): [string, string] {
     const whole = wholeLineRuntime(line.bindings)
     if (whole !== null) return [whole.name, machineOf(whole, line)]
     const route = commandRoute(one.judgment.answers)
-    const placed =
+    let placed =
       route === null
         ? line
         : routed(this.runtimes.entries, line.bindings, route.runtime, route.machine ?? line.machine)
+    if (
+      one.ctx !== undefined &&
+      one.session !== undefined &&
+      wrapperRunsOutside(one.judgment.command, one.ctx.argv, one.session, this.registry, placed)
+    ) {
+      for (const program of programs) {
+        const inner = commandRoute(program.judgment.answers)
+        if (inner !== null) {
+          placed = routed(
+            this.runtimes.entries,
+            placed.bindings,
+            inner.runtime,
+            inner.machine ?? placed.machine,
+          )
+        }
+      }
+    }
     return this.serving(one, placed)
   }
 
@@ -265,7 +297,12 @@ export class Router {
           )
         }
       }
-      return this.placementFor(one, line)
+      if (!PROGRAM_WRAPPERS.has(one.judgment.command)) return this.placementFor(one, line)
+      return this.placementFor(
+        one,
+        line,
+        judged.filter((held) => runsUnder(held, one)),
+      )
     }
   }
 
