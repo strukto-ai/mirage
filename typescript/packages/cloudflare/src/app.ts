@@ -113,7 +113,7 @@ function codexSocket(
   if (req.headers.upgrade?.toLowerCase() !== 'websocket') {
     return errorResponse(
       reply,
-      new HttpError('invalid_request', 'codex-exec needs a WebSocket upgrade'),
+      new HttpError('upgrade_required', 'codex-exec needs a WebSocket upgrade'),
     )
   }
   const entry = registry.visible(req.params.id, req.account)
