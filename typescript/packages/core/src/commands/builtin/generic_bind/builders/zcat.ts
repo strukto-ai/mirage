@@ -26,6 +26,7 @@ const zcat: CommandFn = async (_accessor, paths, _texts, ctx) => {
 export const BUILDER: GenericCommand = {
   name: 'zcat',
   read: true,
+  streams: true,
   fn: zcat,
   facts: facts,
 }

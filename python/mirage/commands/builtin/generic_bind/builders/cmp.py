@@ -46,4 +46,4 @@ async def cmp_cmd(
     )
 
 
-BUILDER = GenericCommand("cmp", cmp_cmd, read=True)
+BUILDER = GenericCommand("cmp", cmp_cmd, read=True, streams=True)

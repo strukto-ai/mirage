@@ -51,5 +51,6 @@ const look: CommandFn = async (_accessor, paths, texts, ctx) => {
 export const BUILDER: GenericCommand = {
   name: 'look',
   read: true,
+  streams: true,
   fn: look,
 }

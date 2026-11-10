@@ -37,5 +37,6 @@ const cmpCmd: CommandFn = async (_accessor, paths, texts, ctx) => {
 export const BUILDER: GenericCommand = {
   name: 'cmp',
   read: true,
+  streams: true,
   fn: cmpCmd,
 }

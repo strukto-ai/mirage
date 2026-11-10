@@ -43,4 +43,4 @@ async def zcat(
     )
 
 
-BUILDER = GenericCommand("zcat", zcat, read=True, facts=facts)
+BUILDER = GenericCommand("zcat", zcat, read=True, streams=True, facts=facts)

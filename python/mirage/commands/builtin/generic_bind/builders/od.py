@@ -52,4 +52,4 @@ async def od(
     return hosted_stream("od", config, host, io), io
 
 
-BUILDER = GenericCommand("od", od, read=True)
+BUILDER = GenericCommand("od", od, read=True, streams=True)

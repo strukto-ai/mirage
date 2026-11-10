@@ -26,5 +26,6 @@ const jq: CommandFn = async (_accessor, paths, texts, ctx) => {
 export const BUILDER: GenericCommand = {
   name: 'jq',
   read: true,
+  streams: true,
   fn: jq,
 }

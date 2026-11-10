@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { currentCaller, sessionVisibility } from '../../../context/session_context.ts'
+import { callsAs, currentCaller, sessionVisibility } from '../../../context/session_context.ts'
 import { eacces, eisdir, enoent, isDotWalkError, isEnoent } from '../../../errors/fs.ts'
 import { ensureStream } from '../../../io/stream.ts'
 import type { ByteSource } from '../../../io/types.ts'
@@ -684,10 +684,21 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
   let rawReaddir: (path: PathSpec, nofollow?: boolean, limit?: number) => Promise<string[]>
   let rawStream: (path: PathSpec) => AsyncIterable<Uint8Array>
   if (crossing) {
-    rawStat = async (path) => (await dispatch('stat', path, [], { nofollow: true }))[0] as FileStat
-    rawReaddir = async (path, _nofollow, limit) =>
-      (await dispatch('readdir', path, [], limit === undefined ? {} : { limit }))[0] as string[]
-    rawStream = (path) => callerStream(dispatch, currentCaller(), path)
+    // A run across mounts can hand its output on as it drains, after its
+    // handler returned (`streams`): every call these files make opens as the
+    // command that built them, whenever it is made.
+    const caller = currentCaller()
+    rawStat = callsAs(
+      caller,
+      async (path: PathSpec) =>
+        (await dispatch('stat', path, [], { nofollow: true }))[0] as FileStat,
+    )
+    rawReaddir = callsAs(
+      caller,
+      async (path: PathSpec, _nofollow?: boolean, limit?: number) =>
+        (await dispatch('readdir', path, [], limit === undefined ? {} : { limit }))[0] as string[],
+    )
+    rawStream = (path) => callerStream(dispatch, caller, path)
   } else {
     rawStat = (path) => dispatchedStat(dispatch, path)
     rawReaddir = async (path, nofollow, limit) =>

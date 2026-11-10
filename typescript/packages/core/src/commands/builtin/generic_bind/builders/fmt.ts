@@ -29,5 +29,6 @@ const fmt: CommandFn = async (_accessor, paths, _texts, ctx) => {
 export const BUILDER: GenericCommand = {
   name: 'fmt',
   read: true,
+  streams: true,
   fn: fmt,
 }

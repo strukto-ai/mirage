@@ -46,4 +46,4 @@ async def fmt(
     )
 
 
-BUILDER = GenericCommand("fmt", fmt, read=True)
+BUILDER = GenericCommand("fmt", fmt, read=True, streams=True)

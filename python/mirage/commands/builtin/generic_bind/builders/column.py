@@ -40,4 +40,4 @@ async def column(
     )
 
 
-BUILDER = GenericCommand("column", column, read=True)
+BUILDER = GenericCommand("column", column, read=True, streams=True)

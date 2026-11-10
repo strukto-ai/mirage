@@ -26,5 +26,6 @@ const column: CommandFn = async (_accessor, paths, _texts, ctx) => {
 export const BUILDER: GenericCommand = {
   name: 'column',
   read: true,
+  streams: true,
   fn: column,
 }

@@ -66,5 +66,6 @@ const tsort: CommandFn = async (_accessor, paths, _texts, ctx) => {
 export const BUILDER: GenericCommand = {
   name: 'tsort',
   read: true,
+  streams: true,
   fn: tsort,
 }

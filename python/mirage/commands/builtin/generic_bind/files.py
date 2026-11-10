@@ -44,7 +44,7 @@ from mirage.commands.builtin.utils.paths import is_implicit_dir
 from mirage.commands.builtin.utils.tree import ReadTree
 from mirage.commands.config import Context
 from mirage.context import session_visibility
-from mirage.context.session_context import current_caller
+from mirage.context.session_context import awaits_as, current_caller
 from mirage.errors.fs import eacces, eisdir, enoent
 from mirage.errors.types import DotWalkError
 from mirage.io.cooperative import chunks
@@ -835,6 +835,10 @@ def command_files(
     raw_readdir: ReaddirFn
     raw_stream: ReadStreamFn
     if crossing:
+        # A run across mounts can hand its output on as it drains, after
+        # its handler returned (``streams``): every call these files make
+        # opens as the command that built them, whenever it is made.
+        caller = current_caller()
 
         async def crossing_stat(path: PathSpec) -> FileStat:
             found, _ = await dispatch("stat", path, nofollow=True)
@@ -849,10 +853,10 @@ def command_files(
             return cast(list[str], entries)
 
         def crossing_stream(path: PathSpec) -> AsyncIterator[bytes]:
-            return caller_stream(dispatch, current_caller(), path)
+            return caller_stream(dispatch, caller, path)
 
-        raw_stat = crossing_stat
-        raw_readdir = crossing_readdir
+        raw_stat = awaits_as(caller, crossing_stat)
+        raw_readdir = awaits_as(caller, crossing_readdir)
         raw_stream = crossing_stream
     else:
 

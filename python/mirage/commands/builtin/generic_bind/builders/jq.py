@@ -40,4 +40,4 @@ async def jq(
     )
 
 
-BUILDER = GenericCommand("jq", jq, read=True)
+BUILDER = GenericCommand("jq", jq, read=True, streams=True)
