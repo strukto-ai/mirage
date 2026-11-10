@@ -61,7 +61,7 @@ export function diffFilterOf(
   spelled: string | undefined,
 ): readonly [ReadonlySet<string>, boolean] | null {
   if (spelled === undefined || spelled === '') return null
-  const letters = [...spelled].filter((char) => char !== '*')
+  const letters = Array.from(spelled).filter((char) => char !== '*')
   const star = spelled.includes('*')
   const lower = (char: string): boolean =>
     char === char.toLowerCase() && char !== char.toUpperCase()
