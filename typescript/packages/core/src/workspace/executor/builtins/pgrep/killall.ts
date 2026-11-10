@@ -126,7 +126,6 @@ export async function handleKillall(
   const sid = sessionOf(session)
   const jobs = jobTable.listJobs(sid)
   const quiet = flags.q === true
-  const out: string[] = []
   const errors: string[] = []
   let missed = false
   const gone: ProcessHandle[] = []
@@ -154,7 +153,7 @@ export async function handleKillall(
         killed += 1
         if (handle !== null) gone.push(handle)
         if (flags.v === true)
-          out.push(`Killed ${processName(info)}(${pid}) with signal ${String(signal)}\n`)
+          errors.push(`Killed ${processName(info)}(${pid}) with signal ${String(signal)}\n`)
       }
     }
     if (killed === 0) {
@@ -167,7 +166,7 @@ export async function handleKillall(
   const code = missed ? 1 : 0
   const err = errors.length === 0 ? null : encodeText(errors.join(''))
   return [
-    encodeText(out.join('')),
+    new Uint8Array(),
     new IOResult({ exitCode: code, stderr: err }),
     new ExecutionNode({ command: cmdStr, exitCode: code, stderr: err ?? new Uint8Array() }),
   ]

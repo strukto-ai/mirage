@@ -15,17 +15,31 @@
       }
     },
     {
-      "id": "free_has_no_size_without_a_max_memory",
+      "id": "free_leaves_what_the_workspace_cannot_say_blank",
       "seq": 16200009,
       "targets": [
         "ram",
         "disk"
       ],
-      "command": "free -m | head -n 1; free -m | awk '/^Mem:/{print $2, $5, $6}'; free -m | awk '/^Swap:/{print $2, $3, $4}'; free --machine nosuch; echo rc=$?",
+      "command": "free -m | head -n 1; free -m | awk '/^Mem:/{print $5, $6}'; free -m | awk '/^Swap:/{print NF}'; free --machine nosuch; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "               total        used        free      shared  buff/cache   available\n- - -\n- - -\nrc=1\n",
+        "stdout": "               total        used        free      shared  buff/cache   available\n- -\n4\nrc=1\n",
         "stderr": "free: nosuch: no such machine\n"
+      }
+    },
+    {
+      "id": "free_lays_out_units_rows_and_repeats",
+      "seq": 16200112,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "free -h | awk '/^Mem:/{print $5, $6}'; free -w | head -1; free -t | awk '{print $1}'; free -l | awk '{print $1}'; free -v | awk '{print $1}'; free --si -k | head -1; free -c 2 -s 0.01 | grep -c '^Mem:'; free extra >/dev/null 2>&1; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "- -\n               total        used        free      shared     buffers       cache   available\ntotal\nMem:\nSwap:\nTotal:\ntotal\nMem:\nLow:\nHigh:\nSwap:\ntotal\nMem:\nSwap:\nComm:\n               total        used        free      shared  buff/cache   available\n2\n1\n",
+        "stderr": ""
       }
     }
   ]

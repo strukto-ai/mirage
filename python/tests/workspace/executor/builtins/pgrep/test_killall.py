@@ -23,10 +23,11 @@ from tests.fixtures.process_search import stop, text, with_jobs
 async def test_killall_signals_by_exact_name():
     table, jobs = await with_jobs("sleep 30")
     assert text(await handle_killall(table, ["killall", "slee"]))[2] == 1
-    out, _, code = text(
+    out, err, code = text(
         await handle_killall(table, ["killall", "-v", "sleep"])
     )
-    assert out == f"Killed sleep({jobs[0].pid}) with signal 15\n"
+    assert out == ""
+    assert err == f"Killed sleep({jobs[0].pid}) with signal 15\n"
     assert code == 0
 
 

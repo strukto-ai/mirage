@@ -18,6 +18,7 @@ from mirage.commands.builtin.grep_pattern import compile_pattern
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.shell import SHELL_SPECS
 from mirage.commands.spec.standard import version_line
+from mirage.context import current_caller
 from mirage.execution.job import JobTable
 from mirage.execution.process.types import Process
 from mirage.io import IOResult
@@ -302,6 +303,12 @@ async def _search_for(
         else info.group or info.pid
         for info in rows
     }
+    caller = current_caller().process
+    group = (
+        caller.record.group or caller.record.pid
+        if caller is not None
+        else None
+    )
     search = Search(
         matcher,
         full,
@@ -310,12 +317,31 @@ async def _search_for(
         flags.get("o") is True,
         older,
         numbered["parents"],
-        numbered["groups"],
-        numbered["sessions"],
+        _own_zero(
+            numbered["groups"],
+            shown.get(group, group) if group is not None else None,
+        ),
+        _own_zero(
+            numbered["sessions"],
+            shown.get(shell, shell) if shell is not None else None,
+        ),
         states if isinstance(states, str) else "",
     )
     picked = _selected(rows, search, shown, leaders, system_now())
     return Searched(picked, scope, flags, said, 0)
+
+
+def _own_zero(listed: frozenset[int], own: int | None) -> frozenset[int]:
+    """A ``-g`` or ``-s`` list with 0 read as the searcher's own group or
+    session, as procps reads it.
+
+    Args:
+        listed (frozenset[int]): the numbers given.
+        own (int | None): the searcher's; None when it has none.
+    """
+    if 0 not in listed or own is None:
+        return listed
+    return frozenset(own if number == 0 else number for number in listed)
 
 
 def _listed(picked: list[Process], flags: Flags, scope: MachineScope) -> str:

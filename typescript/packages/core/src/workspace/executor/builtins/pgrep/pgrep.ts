@@ -16,7 +16,7 @@ import { compilePattern } from '../../../../commands/builtin/grep_pattern.ts'
 import { UsageError } from '../../../../commands/errors.ts'
 import { SHELL_SPECS } from '../../../../commands/spec/shell.ts'
 import { versionLine } from '../../../../commands/spec/standard.ts'
-import type { RedirectResult } from '../../../../context/session_context.ts'
+import { currentCaller, type RedirectResult } from '../../../../context/session_context.ts'
 import type { JobTable } from '../../../../execution/job/index.ts'
 import { type Process, shownMachine, shownPid } from '../../../../execution/process/types.ts'
 import { IOResult } from '../../../../io/types.ts'
@@ -207,6 +207,8 @@ async function searchFor(
       info.sessionId === sid && shell !== null ? shell : info.group || info.id.pid,
     ]),
   )
+  const caller = currentCaller().process?.record
+  const group = caller === undefined ? null : caller.group || caller.id.pid
   const search: Search = {
     matcher,
     full,
@@ -215,12 +217,18 @@ async function searchFor(
     oldest: flags.o === true,
     older,
     parents,
-    groups,
-    sessions,
+    groups: ownZero(groups, group === null ? null : (shown.get(group) ?? group)),
+    sessions: ownZero(sessions, shell === null ? null : (shown.get(shell) ?? shell)),
     states: states ?? '',
   }
   const picked = await selected(rows, search, shown, leaders, systemNow())
   return { picked, scope, flags, said, status: 0 }
+}
+
+/** A `-g` or `-s` list with 0 read as the searcher's own group or session, as procps reads it. */
+function ownZero(listed: ReadonlySet<number>, own: number | null): ReadonlySet<number> {
+  if (!listed.has(0) || own === null) return listed
+  return new Set([...listed].map((number) => (number === 0 ? own : number)))
 }
 
 function listed(picked: readonly Process[], flags: Flags, scope: MachineScope): string {
