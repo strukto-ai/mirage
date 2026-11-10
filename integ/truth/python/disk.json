@@ -3,14 +3,13 @@
     "python": {
       "command": [
         "./python/.venv/bin/python",
+        "-u",
         "examples/python/vfs/disk/disk.py"
       ]
     }
   },
   "exit": 0,
   "lines": [
-    "Workspace.from_state: 1 mount(s) opt out of snapshot replay; reads against them will serve current state with no drift detection: ['/data/']",
-    "Workspace.from_state: 1 mount(s) opt out of snapshot replay; reads against them will serve current state with no drift detection: ['/data/']",
     "=== ls /data/ ===",
     "example.json",
     "example.jsonl",
@@ -138,10 +137,12 @@
     {
       "re": "  saved → .*\\.tar \\(\\d+ bytes\\)"
     },
+    "Workspace.from_state: 1 mount(s) opt out of snapshot replay; reads against them will serve current state with no drift detection: ['/data/']",
     "  loaded (default tmpdir) ls: example.json",
     "example.jsonl",
     "example.pdf",
     "qdrant.json…",
+    "Workspace.from_state: 1 mount(s) opt out of snapshot replay; reads against them will serve current state with no drift detection: ['/data/']",
     {
       "re": "  loaded \\(root=[^)]+…\\) ls: example\\.json"
     },
