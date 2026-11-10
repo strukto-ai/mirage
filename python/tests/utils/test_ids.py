@@ -123,6 +123,11 @@ KEPT_ON_PROCESS_RANDOMNESS = {
         "the default NFS mountpoint is a host directory, not a name "
         "inside the workspace"
     ),
+    ("workspace/record/disk.py", "uuid.uuid4"): (
+        "a record's temp file stages beside it on the host disk, which other "
+        "processes write too, so a seeded name would collide with theirs or "
+        "an earlier run's leftover"
+    ),
     ("workspace/snapshot/state.py", "tempfile.mkdtemp"): (
         "a restored disk mount with no override gets a fresh host root, "
         "which must not collide with another restore's"
