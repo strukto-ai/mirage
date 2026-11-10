@@ -70,6 +70,9 @@ class FakeExitError extends Error {
 }
 class FakeSandboxError extends Error {}
 class FakeNotFoundError extends FakeSandboxError {}
+class FakeSandboxNotFoundError extends FakeNotFoundError {}
+class FakeTimeoutError extends FakeSandboxError {}
+class FakeSandboxNotRunningError extends FakeTimeoutError {}
 
 /** The runtime's transport called directly: a run with no tag but the caller's. */
 function execArgv(
@@ -100,6 +103,7 @@ class FakeHandle {
   disconnected = false
   killed = false
   inputError: Error | null = null
+  waitError: Error | null = null
   onStdout: ((text: string) => unknown) | undefined = undefined
   onStderr: ((text: string) => unknown) | undefined = undefined
   private readonly received = deferred<undefined>()
@@ -123,6 +127,7 @@ class FakeHandle {
     return Promise.resolve()
   }
   async wait(): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    if (this.waitError) throw this.waitError
     if (this.command === 'sleep' || this.command === 'native-sleep')
       return new Promise<{ stdout: string; stderr: string; exitCode: number }>(() => undefined)
     if (this.command === 'exit 3' || this.command === 'exit 0') {
@@ -156,6 +161,8 @@ class FakeCommands {
   calls: [string, boolean][] = []
   handles: FakeHandle[] = []
   inputError: Error | null = null
+  runError: Error | null = null
+  waitError: Error | null = null
   run(
     command: string,
     opts: {
@@ -168,8 +175,10 @@ class FakeCommands {
   ) {
     expect([opts.background, opts.timeoutMs]).toEqual([true, 0])
     this.calls.push([command, opts.stdin])
+    if (this.runError) return Promise.reject(this.runError)
     const handle = new FakeHandle(lineOf(command), !opts.stdin)
     handle.inputError = this.inputError
+    handle.waitError = this.waitError
     handle.onStdout = opts.onStdout
     handle.onStderr = opts.onStderr
     this.handles.push(handle)
@@ -226,12 +235,14 @@ class FakePty {
 
 class FakeMachine {
   static connected: [string, Record<string, unknown>][] = []
+  static refusal: Error | null = null
   static last: FakeMachine
   readonly commands = new FakeCommands()
   readonly pty = new FakePty()
   static async connect(sandboxId: string, params: Record<string, unknown>): Promise<FakeMachine> {
     FakeMachine.connected.push([sandboxId, params])
     await Promise.resolve()
+    if (FakeMachine.refusal) throw FakeMachine.refusal
     FakeMachine.last = new FakeMachine()
     return FakeMachine.last
   }
@@ -244,6 +255,8 @@ class FakedE2BMachine extends E2BMachine {
       CommandExitError: FakeExitError,
       NotFoundError: FakeNotFoundError,
       SandboxError: FakeSandboxError,
+      SandboxNotFoundError: FakeSandboxNotFoundError,
+      SandboxNotRunningError: FakeSandboxNotRunningError,
     } as unknown as E2bSdk)
   }
 }
@@ -254,6 +267,7 @@ function makeRuntime() {
 
 beforeEach(() => {
   FakeMachine.connected = []
+  FakeMachine.refusal = null
   FakeMachine.last = new FakeMachine()
   vi.restoreAllMocks()
 })
@@ -453,6 +467,43 @@ describe('E2BMachine', () => {
     ).rejects.toThrow('stdin transport failed')
     expect(commands.calls.map(([command]) => lineOf(command))).toEqual(['cat', stopLine('run', 15)])
   })
+  const FIX = "create a new sandbox and set the machine's sandbox_id to it"
+  const DELETED = `sandbox sb-live is not running: it was killed, reached its timeout or never existed; ${FIX}`
+  const ENDED = `sandbox sb-live is not running: it was killed or reached its timeout; ${FIX}`
+  it.each([
+    [new FakeSandboxNotFoundError('Sandbox sb-live not found'), DELETED],
+    [new FakeSandboxNotRunningError('was not found'), ENDED],
+  ])('says how to replace a sandbox gone at connect: %s', async (refusal, said) => {
+    FakeMachine.refusal = refusal
+    const runtime = makeRuntime()
+    await expect(runtime.connect()).rejects.toThrow(said)
+    FakeMachine.refusal = null
+    expect((await runLine(runtime, 'cat', null)).exitCode).toBe(0)
+    expect(FakeMachine.connected).toHaveLength(2)
+  })
+  it.each([
+    ['runError', new FakeSandboxNotRunningError('was not found'), ENDED],
+    ['waitError', new FakeSandboxNotRunningError('was not found'), ENDED],
+    ['inputError', new FakeSandboxNotFoundError('Sandbox sb-live not found'), DELETED],
+  ] as const)(
+    'loses the connection to a sandbox gone mid-run (%s), and connects again',
+    async (where, error, said) => {
+      const runtime = makeRuntime()
+      await (runtime as unknown as { ensureConnected(): Promise<void> }).ensureConnected()
+      const gone = FakeMachine.last.commands
+      gone[where] = error
+      const result = await runLine(runtime, 'cat', new Uint8Array([1]))
+      expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
+        129,
+        `e2b: ${said}\nmirage: e2b:box: connection lost\n`,
+      ])
+      expect(gone.calls).toHaveLength(1)
+      expect(gone.handles.some((h) => h.killed)).toBe(false)
+      const next = await runLine(runtime, 'cat', new Uint8Array([1]))
+      expect([next.exitCode, DEC.decode(next.stdout)]).toEqual([0, '01'])
+      expect(FakeMachine.connected).toHaveLength(2)
+    },
+  )
   it("registers under the config name 'e2b'", () => {
     const machine = buildMachine('box', { provider: 'e2b', sandboxId: 'sb-live' })
     expect(machine).toBeInstanceOf(E2BMachine)
@@ -839,6 +890,8 @@ class ShellE2BMachine extends E2BMachine {
       CommandExitError: FakeExitError,
       NotFoundError: FakeNotFoundError,
       SandboxError: FakeSandboxError,
+      SandboxNotFoundError: FakeSandboxNotFoundError,
+      SandboxNotRunningError: FakeSandboxNotRunningError,
     } as unknown as E2bSdk)
   }
 }
@@ -925,6 +978,8 @@ class TailE2BMachine extends E2BMachine {
       CommandExitError: FakeExitError,
       NotFoundError: FakeNotFoundError,
       SandboxError: FakeSandboxError,
+      SandboxNotFoundError: FakeSandboxNotFoundError,
+      SandboxNotRunningError: FakeSandboxNotRunningError,
     } as unknown as E2bSdk)
   }
 }

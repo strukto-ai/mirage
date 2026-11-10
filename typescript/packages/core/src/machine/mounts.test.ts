@@ -42,6 +42,7 @@ import {
   registerPipeServer,
   runningLine,
   servedPrefixes,
+  sourceName,
   topPrefixes,
   type PipeServer,
 } from './mounts.ts'
@@ -73,6 +74,7 @@ class FakeMachine extends MachineHandle implements PipeTransport {
   readonly stopped: string[] = []
   readonly guards: string[][] = []
   failUnmount = false
+  refuseUnmount = false
   failTable = false
   failCheck = false
   failKill = false
@@ -208,6 +210,12 @@ class FakeMachine extends MachineHandle implements PipeTransport {
     }
     if (line.startsWith('fusermount3 -uz ')) {
       if (this.failUnmount) return Promise.reject(new Error('the machine went away'))
+      if (this.refuseUnmount)
+        return Promise.resolve({
+          stdout: new Uint8Array(),
+          stderr: ENC.encode('fusermount: busy\n'),
+          exitCode: 1,
+        })
       const prefix = words(line)[2] ?? ''
       const [source] = this.table.get(prefix) ?? ['']
       this.table.delete(prefix)
@@ -286,6 +294,7 @@ function workspace(
   hide: string[] = [],
   mounts?: ReadonlyMap<string, ProfileMount>,
   commandLimits?: Record<string, Limit>,
+  workspaceId?: string,
 ): Workspace {
   return new Workspace(
     {
@@ -299,6 +308,7 @@ function workspace(
       profiles: { agent: { paths: { hide }, ...(mounts === undefined ? {} : { mounts }) } },
       ...on(sandbox, 'workspace'),
       ...(commandLimits === undefined ? {} : { commandLimits }),
+      ...(workspaceId === undefined ? {} : { workspaceId }),
     },
   )
 }
@@ -428,6 +438,17 @@ describe('killLine', () => {
   })
 })
 
+describe('sourceName', () => {
+  it('names a workspace by its id, escaping what no two ids may share', () => {
+    expect(sourceName('w1-2')).toBe('mirage-w1-2')
+    expect([sourceName('a.b'), sourceName('a_b'), sourceName('a:é')]).toEqual([
+      'mirage-a_2eb',
+      'mirage-a_5fb',
+      'mirage-a_3a_c3_a9',
+    ])
+  })
+})
+
 describe('topPrefixes', () => {
   it('leaves out the root, the devices and nested mounts', () => {
     const prefixes = ['/', '/dev/', '/data/', '/data/sub/', '/database/', '/a/b/']
@@ -453,8 +474,7 @@ describe('MachineMounts', () => {
     const agent = await ws.session('agent', { profile: 'agent' })
     const result = await agent.shell('python3 job.py')
     expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'ran\n'])
-    const name = (words(sandbox.pipes[0] ?? '')[5] ?? '').split('-1:')[0] ?? ''
-    expect(name).toMatch(/^mirage-[0-9a-f]{32}$/)
+    const name = sourceName(ws.workspaceId)
     expect(sandbox.pipes.map((p) => p.split(' 2>')[0])).toEqual([
       `exec sshfs -f -o ${SSHFS_OPTIONS} '${name}-1:/data' '/data'`,
       `exec sshfs -f -o ${SSHFS_OPTIONS} '${name}-2:/my notes' '/my notes'`,
@@ -678,6 +698,58 @@ describe('MachineMounts', () => {
 
   const FOREIGN =
     'fake: another sshfs serves /data in this machine; give this workspace a machine of its own\n'
+
+  it('takes back the sshfs a restarted instance of its workspace left', async () => {
+    const first = new FakeMachine('ssh')
+    const one = await workspace(first, [], undefined, undefined, 'w 1').session('agent', {
+      profile: 'agent',
+    })
+    expect((await one.shell('python3 job.py')).exitCode).toBe(0)
+    const stale = first.table.get('/data')?.[0] ?? ''
+    expect(stale).toBe('mirage-w_201-1:/data')
+    // The host restarted: the first instance never closes, and its sshfs runs on.
+    const second = sharing(first, 'ssh')
+    const ws = workspace(second, [], undefined, undefined, 'w 1')
+    const two = await ws.session('agent', { profile: 'agent' })
+    expect((await two.shell('python3 job.py')).exitCode).toBe(0)
+    const killed = second.commands.indexOf(killLine(stale))
+    expect(killed).toBeGreaterThan(-1)
+    expect(killed).toBeLessThan(
+      second.commands.indexOf("fusermount3 -uz '/data' || fusermount -uz '/data'"),
+    )
+    expect(second.served()).toEqual(['/data', '/my notes'])
+    await ws.close()
+    expect(first.table.size).toBe(0)
+  })
+
+  it('fails loud when the mount a restarted instance left cannot be unmounted', async () => {
+    const sandbox = new FakeMachine('ssh')
+    sandbox.table.set('/data', ['mirage-w1-1:/data', 'fuse.sshfs'])
+    sandbox.refuseUnmount = true
+    const ws = workspace(sandbox, [], undefined, undefined, 'w1')
+    const result = await (await ws.session('agent', { profile: 'agent' })).shell('python3 job.py')
+    expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
+      1,
+      'python3: fake: cannot unmount /data, which this workspace served before a restart: fusermount: busy\n',
+    ])
+    expect(sandbox.pipes).toEqual([])
+  })
+
+  it('refuses the live sshfs of a workspace whose id only starts like its own', async () => {
+    const first = new FakeMachine('ssh')
+    const second = sharing(first, 'ssh')
+    const ws1 = workspace(first, [], undefined, undefined, 'w1-2')
+    const ws2 = workspace(second, [], undefined, undefined, 'w1')
+    const one = await ws1.session('agent', { profile: 'agent' })
+    expect((await one.shell('python3 job.py')).exitCode).toBe(0)
+    const mounted = new Map(first.table)
+    const result = await (await ws2.session('agent', { profile: 'agent' })).shell('python3 job.py')
+    expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([1, FOREIGN])
+    expect(second.commands.filter((c) => c.startsWith('for p in /proc/'))).toEqual([])
+    expect(first.table).toEqual(mounted)
+    await ws2.close()
+    await ws1.close()
+  })
 
   it('lets a second workspace on the machine unmount nothing', async () => {
     const first = new FakeMachine('ssh')

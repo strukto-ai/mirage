@@ -21,3 +21,13 @@ PTY_RAW = "stty raw -echo -iexten; printf '\\001mirage-sftp\\002'; "
 # envd reports a write to an input the command has closed (head) as the
 # broken-pipe or closed-file text inside a generic INTERNAL error.
 CLOSED_INPUT = ("broken pipe", "file already closed")
+
+# Why a sandbox the SDK says is gone cannot take a line, by how it said so,
+# with the fix: the sandbox is the user's, and Mirage never makes one.
+_SANDBOX_FIX = "create a new sandbox and set the machine's sandbox_id to it"
+SANDBOX_GONE = {
+    "deleted": (
+        f"it was killed, reached its timeout or never existed; {_SANDBOX_FIX}"
+    ),
+    "ended": f"it was killed or reached its timeout; {_SANDBOX_FIX}",
+}

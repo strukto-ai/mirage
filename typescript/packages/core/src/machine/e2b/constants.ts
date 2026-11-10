@@ -21,3 +21,11 @@ export const PTY_RAW = "stty raw -echo -iexten; printf '\\001mirage-sftp\\002'; 
 // envd reports a write to an input the command has closed (head) as the
 // broken-pipe or closed-file text inside a generic INTERNAL error.
 export const CLOSED_INPUT = ['broken pipe', 'file already closed'] as const
+
+// Why a sandbox the SDK says is gone cannot take a line, by how it said so,
+// with the fix: the sandbox is the user's, and Mirage never makes one.
+const SANDBOX_FIX = "create a new sandbox and set the machine's sandbox_id to it"
+export const SANDBOX_GONE: Readonly<Record<string, string>> = {
+  deleted: `it was killed, reached its timeout or never existed; ${SANDBOX_FIX}`,
+  ended: `it was killed or reached its timeout; ${SANDBOX_FIX}`,
+}

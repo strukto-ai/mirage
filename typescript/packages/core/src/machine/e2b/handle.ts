@@ -24,16 +24,18 @@ import type { OutputFn, PipeWriter, RunResult } from '../../runtime/types.ts'
 import type { ConfigFields } from '../../runtime/config.ts'
 import { concat } from '../../utils/bytes.ts'
 import { requireId } from '../config.ts'
+import { ConnectionLostError } from '../errors.ts'
 import {
   decodeOutput,
   encodeOutput,
   isRun,
+  notRunningHint,
   PROCESS,
   runTag,
   stopSignal,
   wrapLine,
 } from '../constants.ts'
-import { CLOSED_INPUT, PTY_MARK, PTY_RAW } from './constants.ts'
+import { CLOSED_INPUT, PTY_MARK, PTY_RAW, SANDBOX_GONE } from './constants.ts'
 import { loadSdk, type E2bSdk } from './sdk.ts'
 import { E2B_CONFIG_FIELDS, type E2BConfig } from './config.ts'
 import type { CommandResult, Sandbox } from 'e2b'
@@ -135,6 +137,11 @@ class PtyWriter implements PipeWriter {
  * stdin when the command starts. The SDK's own command timeout is off: a
  * command runs until mirage's limits stop it. A `mountType` serves the
  * workspace over a PTY, since E2B's exec decodes output as text.
+ *
+ * The sandbox is yours: Mirage never extends or kills it. Once the SDK
+ * says it is gone, connecting fails with how to replace it, and a line it
+ * cut short loses its connection (129) with the same advice; the next line
+ * connects again.
  */
 export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTransport {
   static override readonly configFields: ConfigFields = E2B_CONFIG_FIELDS
@@ -164,7 +171,36 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
 
   async connect(): Promise<void> {
     const sdk = await this.ensureSdk()
-    this.sandbox = await sdk.Sandbox.connect(this.config.sandboxId, this.apiParams())
+    try {
+      this.sandbox = await sdk.Sandbox.connect(this.config.sandboxId, this.apiParams())
+    } catch (error) {
+      const hint = this.gone(sdk, error)
+      throw hint === null ? error : new Error(hint, { cause: error })
+    }
+  }
+
+  /** How to replace the sandbox when `error` says it is gone, else null. */
+  private gone(sdk: E2bSdk, error: unknown): string | null {
+    const state =
+      error instanceof sdk.SandboxNotFoundError
+        ? 'deleted'
+        : error instanceof sdk.SandboxNotRunningError
+          ? 'ended'
+          : null
+    return state === null
+      ? null
+      : notRunningHint('sandbox', this.config.sandboxId, state, SANDBOX_GONE)
+  }
+
+  /**
+   * The lost connection `error` is when it says the sandbox is gone, which
+   * also lets the next line connect again; null otherwise.
+   */
+  private lost(sdk: E2bSdk, error: unknown): ConnectionLostError | null {
+    const hint = this.gone(sdk, error)
+    if (hint === null) return null
+    this.disconnected()
+    return new ConnectionLostError(hint, new Uint8Array(), ENC.encode(`e2b: ${hint}\n`))
   }
 
   protected override async execArgv(
@@ -190,13 +226,17 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
         const data = decoder.feed(text)
         if (data.byteLength > 0) await sink(data)
       }
-    const handle = await this.sandbox.commands.run(encodeOutput(wrapLine(argv, env, cwd)), {
-      background: true,
-      stdin: stdin !== null,
-      timeoutMs: 0,
-      ...(output !== null ? { onStdout: decoding(output, out) } : {}),
-      ...(errors !== null ? { onStderr: decoding(errors, err) } : {}),
-    })
+    const handle = await this.sandbox.commands
+      .run(encodeOutput(wrapLine(argv, env, cwd)), {
+        background: true,
+        stdin: stdin !== null,
+        timeoutMs: 0,
+        ...(output !== null ? { onStdout: decoding(output, out) } : {}),
+        ...(errors !== null ? { onStderr: decoding(errors, err) } : {}),
+      })
+      .catch((error: unknown) => {
+        throw this.lost(sdk, error) ?? error
+      })
     let result: Pick<CommandResult, 'stdout' | 'stderr' | 'exitCode'>
     const state = { exited: false }
     const write = async (chunk: Uint8Array): Promise<void> => {
@@ -209,11 +249,12 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
     // input while it runs (head). Wait for its real exit status rather
     // than reporting either as I/O.
     const closed = (error: unknown): boolean =>
-      (error instanceof sdk.SandboxError &&
+      this.gone(sdk, error) === null &&
+      ((error instanceof sdk.SandboxError &&
         CLOSED_INPUT.some((message) => error.message.includes(message))) ||
-      // Process RPCs still throw this SDK class; no process-specific replacement exists.
-      // eslint-disable-next-line @typescript-eslint/no-deprecated
-      error instanceof sdk.NotFoundError
+        // Process RPCs still throw this SDK class; no process-specific replacement exists.
+        // eslint-disable-next-line @typescript-eslint/no-deprecated
+        error instanceof sdk.NotFoundError)
     try {
       signal?.throwIfAborted()
       // The command may end without reading all its input (head), so its
@@ -231,6 +272,8 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
       }
       signal?.throwIfAborted()
     } catch (error) {
+      const lost = signal?.aborted === true ? null : this.lost(sdk, error)
+      if (lost !== null) throw lost
       if (!signal?.aborted && error instanceof sdk.CommandExitError) {
         result = error
       } else {
@@ -291,6 +334,7 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
 
   async openPipe(command: string): Promise<MachinePipe> {
     if (this.sandbox === null) throw new Error('e2b sandbox not connected')
+    const sdk = await this.ensureSdk()
     const pty = this.sandbox.pty
     let feed: ReadableStreamDefaultController<Uint8Array> | null = null
     const reader = new ReadableStream<Uint8Array>({
@@ -311,7 +355,11 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
       head = null
       if (rest.byteLength > 0) feed?.enqueue(rest)
     }
-    const handle = await pty.create({ cols: 80, rows: 24, onData, timeoutMs: 0 })
+    const handle = await pty
+      .create({ cols: 80, rows: 24, onData, timeoutMs: 0 })
+      .catch((error: unknown) => {
+        throw this.lost(sdk, error) ?? error
+      })
     let failed = false
     const fail = async (err: unknown): Promise<void> => {
       failed = true
@@ -345,7 +393,7 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
       await stop().catch((stopErr: unknown) => {
         console.debug(`e2b: stopping the PTY for ${command} failed`, stopErr)
       })
-      throw err
+      throw this.lost(sdk, err) ?? err
     }
     return { reader, writer, stop }
   }

@@ -17,7 +17,6 @@ import contextlib
 import errno
 import io
 import os
-import re
 import shlex
 import shutil
 import subprocess
@@ -49,6 +48,7 @@ from mirage.machine.mounts import (
     mount_table,
     running_line,
     served_prefixes,
+    source_name,
     top_prefixes,
 )
 from mirage.machine.types import MachinePipe
@@ -97,6 +97,7 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
         self.sshfs = sshfs
         self.sshfs_mounts = sshfs_mounts
         self.fail_unmount = False
+        self.refuse_unmount = False
         self.fail_table = False
         self.fail_check = False
         self.fail_kill = False
@@ -170,6 +171,10 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
         if line.startswith("fusermount3 -uz "):
             if self.fail_unmount:
                 raise RuntimeError("the machine went away")
+            if self.refuse_unmount:
+                return RunResult(
+                    stdout=b"", stderr=b"fusermount: busy\n", exit_code=1
+                )
             source, _ = self.table.pop(shlex.split(line)[2], (None, None))
             self.running.discard(source)
         return RunResult(stdout=b"ran\n", stderr=None, exit_code=0)
@@ -372,6 +377,15 @@ def test_the_running_line_cannot_tell_without_a_process_list(tmp_path):
     assert done.returncode == 2
 
 
+def test_a_source_name_escapes_what_no_two_workspace_ids_may_share():
+    assert source_name("w1-2") == "mirage-w1-2"
+    assert [source_name("a.b"), source_name("a_b"), source_name("a:é")] == [
+        "mirage-a_2eb",
+        "mirage-a_5fb",
+        "mirage-a_3a_c3_a9",
+    ]
+
+
 def test_top_prefixes_leave_out_the_root_devices_and_nested_mounts():
     prefixes = ["/", "/dev/", "/data/", "/data/sub/", "/database/", "/a/b/"]
     assert top_prefixes(prefixes) == ["/a/b", "/data", "/database"]
@@ -389,8 +403,7 @@ async def test_ssh_serves_every_prefix_the_session_sees():
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("python3 job.py")
     assert (result.exit_code, await result.stdout_str()) == (0, "ran\n")
-    name = shlex.split(sandbox.pipes[0])[5].split("-1:")[0]
-    assert re.fullmatch("mirage-[0-9a-f]{32}", name)
+    name = source_name(ws.workspace_id)
     assert [p.split(" 2>")[0] for p in sandbox.pipes] == [
         f"exec sshfs -f -o {SSHFS_OPTIONS} '{name}-1:/data' '/data'",
         f"exec sshfs -f -o {SSHFS_OPTIONS} '{name}-2:/my notes' '/my notes'",
@@ -628,6 +641,65 @@ FOREIGN = (
     "fake: another sshfs serves /data in this machine; "
     "give this workspace a machine of its own\n"
 )
+
+
+@pytest.mark.asyncio
+async def test_a_restarted_workspace_takes_back_the_sshfs_it_left():
+    first = FakeMachine("ssh")
+    one = await workspace(first, workspace_id="w 1").session(
+        "agent", profile="agent"
+    )
+    assert (await one.shell("python3 job.py")).exit_code == 0
+    stale = first.table["/data"][0]
+    assert stale == "mirage-w_201-1:/data"
+    # The host restarted: the first instance never closes, and its sshfs runs on.
+    second = sharing(first, "ssh")
+    ws = workspace(second, workspace_id="w 1")
+    two = await ws.session("agent", profile="agent")
+    assert (await two.shell("python3 job.py")).exit_code == 0
+    killed = second.commands.index(kill_line(stale))
+    assert killed < second.commands.index(
+        "fusermount3 -uz '/data' || fusermount -uz '/data'"
+    )
+    assert served(second) == ["/data", "/my notes"]
+    await ws.close()
+    assert first.table == {}
+
+
+@pytest.mark.asyncio
+async def test_a_mount_a_restarted_instance_left_that_will_not_unmount_fails():
+    sandbox = FakeMachine("ssh")
+    sandbox.table["/data"] = ("mirage-w1-1:/data", "fuse.sshfs")
+    sandbox.refuse_unmount = True
+    ws = workspace(sandbox, workspace_id="w1")
+    result = await (await ws.session("agent", profile="agent")).shell(
+        "python3 job.py"
+    )
+    assert (result.exit_code, await result.stderr_str()) == (
+        1,
+        "python3: fake: cannot unmount /data, which this workspace served "
+        "before a restart: fusermount: busy\n",
+    )
+    assert sandbox.pipes == []
+
+
+@pytest.mark.asyncio
+async def test_the_live_sshfs_of_a_workspace_whose_id_starts_alike_is_refused():
+    first = FakeMachine("ssh")
+    second = sharing(first, "ssh")
+    ws1 = workspace(first, workspace_id="w1-2")
+    ws2 = workspace(second, workspace_id="w1")
+    one = await ws1.session("agent", profile="agent")
+    assert (await one.shell("python3 job.py")).exit_code == 0
+    mounted = dict(first.table)
+    result = await (await ws2.session("agent", profile="agent")).shell(
+        "python3 job.py"
+    )
+    assert (result.exit_code, await result.stderr_str()) == (1, FOREIGN)
+    assert not [c for c in second.commands if c.startswith("for p in /proc/")]
+    assert first.table == mounted
+    await ws2.close()
+    await ws1.close()
 
 
 @pytest.mark.asyncio
