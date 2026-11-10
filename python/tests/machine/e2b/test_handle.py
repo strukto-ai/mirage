@@ -21,7 +21,13 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
-from e2b import CommandExitException, NotFoundException, SandboxException
+from e2b import (
+    CommandExitException,
+    NotFoundException,
+    SandboxException,
+    SandboxNotFoundException,
+    SandboxNotRunningException,
+)
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
@@ -75,6 +81,7 @@ class FakeHandle:
         self.received = asyncio.Event()
         self.closed = asyncio.Event()
         self.input_error = None
+        self.wait_error = None
         self.on_stdout = None
         self.on_stderr = None
 
@@ -90,6 +97,8 @@ class FakeHandle:
 
     async def wait(self):
         self.waiting.set()
+        if self.wait_error is not None:
+            raise self.wait_error
         if self.command == "sleep":
             await asyncio.Event().wait()
         if self.command == "exit 0":
@@ -124,14 +133,19 @@ class FakeCommands:
         self.calls = []
         self.handles = []
         self.input_error = None
+        self.run_error = None
+        self.wait_error = None
 
     async def run(
         self, command, *, background, stdin, on_stdout, on_stderr, timeout
     ):
         assert (background, timeout) == (True, 0)
         self.calls.append((command, stdin))
+        if self.run_error is not None:
+            raise self.run_error
         handle = FakeHandle(shlex.split(command)[-1], stdin)
         handle.input_error = self.input_error
+        handle.wait_error = self.wait_error
         handle.on_stdout = on_stdout
         handle.on_stderr = on_stderr
         self.handles.append(handle)
@@ -142,9 +156,12 @@ class FakePtyHandle:
     def __init__(self, pid: int) -> None:
         self.pid = pid
         self.ended = asyncio.Event()
+        self.error = None
 
     async def wait(self):
         await self.ended.wait()
+        if self.error is not None:
+            raise self.error
         raise CommandExitException(
             stderr="", stdout="", exit_code=-1, error="killed"
         )
@@ -182,6 +199,7 @@ class FakePty:
 
 class FakeMachine:
     connected = []
+    refusal = None
     last = None
 
     def __init__(self):
@@ -192,6 +210,8 @@ class FakeMachine:
     async def connect(cls, sandbox_id, **params):
         cls.connected.append((sandbox_id, params))
         await asyncio.sleep(0)
+        if cls.refusal is not None:
+            raise cls.refusal
         cls.last = cls()
         return cls.last
 
@@ -199,6 +219,7 @@ class FakeMachine:
 @pytest.fixture(autouse=True)
 def fake_sdk(monkeypatch):
     FakeMachine.connected = []
+    FakeMachine.refusal = None
     FakeMachine.last = None
     monkeypatch.setattr(sdk, "AsyncSandbox", FakeMachine)
 
@@ -475,6 +496,68 @@ def test_invalid_sandbox_id_is_rejected_before_connecting(value):
     assert FakeMachine.connected == []
 
 
+FIX = "create a new sandbox and set the machine's sandbox_id to it"
+DELETED = (
+    "sandbox sb-live is not running: it was killed, reached its timeout or "
+    f"never existed; {FIX}"
+)
+ENDED = (
+    "sandbox sb-live is not running: it was killed or reached its timeout; "
+    f"{FIX}"
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "refusal, said",
+    [
+        (SandboxNotFoundException("Sandbox sb-live not found"), DELETED),
+        (SandboxNotRunningException("was not found"), ENDED),
+    ],
+)
+async def test_a_sandbox_gone_at_connect_says_how_to_replace_it(refusal, said):
+    FakeMachine.refusal = refusal
+    runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
+    with pytest.raises(RuntimeError) as raised:
+        await runtime.connect()
+    assert str(raised.value) == said
+    FakeMachine.refusal = None
+    assert (await _line(runtime, "cat", None)).exit_code == 0
+    assert len(FakeMachine.connected) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "where, error, said",
+    [
+        ("run_error", SandboxNotRunningException("was not found"), ENDED),
+        ("wait_error", SandboxNotRunningException("was not found"), ENDED),
+        (
+            "input_error",
+            SandboxNotFoundException("Sandbox sb-live not found"),
+            DELETED,
+        ),
+    ],
+)
+async def test_a_sandbox_gone_mid_run_loses_the_connection_and_connects_again(
+    where, error, said
+):
+    runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
+    await runtime._ensure_connected()
+    gone = FakeMachine.last.commands
+    setattr(gone, where, error)
+    result = await asyncio.wait_for(_line(runtime, "cat", b"\x01"), 5)
+    assert (result.exit_code, result.stderr) == (
+        129,
+        f"e2b: {said}\nmirage: e2b:box: connection lost\n".encode(),
+    )
+    assert len(gone.calls) == 1
+    assert not any(h.killed for h in gone.handles)
+    after = await _line(runtime, "cat", b"\x01")
+    assert (after.exit_code, after.stdout) == (0, b"01")
+    assert len(FakeMachine.connected) == 2
+
+
 def test_mount_type_is_one_of_ssh_fuse_both():
     with pytest.raises(ValueError, match="e2b mount_type must be one of"):
         E2BMachine("box", config={"sandbox_id": "sb", "mount_type": "nfs"})
@@ -498,6 +581,18 @@ async def test_a_pipe_is_a_raw_pty_past_the_shells_own_output():
     await pipe.stop()
     assert pty.handle.ended.is_set()
     assert pipe.reader.at_eof()
+
+
+@pytest.mark.asyncio
+async def test_a_pty_the_sandbox_took_with_it_ends_the_pipe_quietly():
+    runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
+    await runtime.connect()
+    pty = FakeMachine.last.pty
+    pipe = await runtime.open_pipe("exec sshfs x y")
+    pty.handle.error = SandboxNotRunningException("was not found")
+    pty.handle.ended.set()
+    await pipe.stop()
+    assert await pipe.reader.read() == b"\x00sftp"
 
 
 @pytest.mark.asyncio

@@ -150,6 +150,23 @@ def mount_paths(prefixes: Iterable[str]) -> set[str]:
     return {p.rstrip("/") for p in prefixes} - {"", "/dev"}
 
 
+def source_name(workspace_id: str) -> str:
+    """The name a workspace's sshfs sources start with: its id, each byte
+    of a character outside ``[A-Za-z0-9-]`` written ``_xx``, so no two ids
+    share a name and the name stays one word in ``/proc/mounts`` and a
+    shell line.
+
+    Args:
+        workspace_id (str): the workspace's id.
+    """
+    escaped = re.sub(
+        r"[^A-Za-z0-9-]",
+        lambda c: "".join(f"_{b:02x}" for b in c.group().encode()),
+        workspace_id,
+    )
+    return f"{SSHFS_SOURCE_PREFIX}{escaped}"
+
+
 def unmount_line(prefix: str) -> str:
     """The machine command that lazily unmounts ``prefix``.
 
@@ -241,12 +258,20 @@ class MachineMounts:
     started could otherwise read through. Under ``fuse`` the host serves
     nothing, and any session may run.
 
-    Each sshfs source names the instance serving it and the serve
-    (``mirage-<id>-<n>:<prefix>``), so an instance unmounts only its own,
-    and kills only the sshfs of a server that ended: a
-    prefix another sshfs still serves, as another workspace on
-    the same machine does, refuses the line (1) rather than being taken,
-    and one whose sshfs has gone is unmounted and served.
+    Each sshfs source names the workspace serving it and the serve
+    (``mirage-<workspace id>-<n>:<prefix>``, ``source_name``), so an
+    instance unmounts only its workspace's, and kills only the sshfs of a
+    server that ended: a prefix another sshfs still serves, as another
+    workspace on the same machine does, refuses the line (1) rather than
+    being taken, and one whose sshfs has gone is unmounted and served. A
+    prefix whose sshfs carries the workspace's own name but which this
+    instance does not serve was left by an instance before a restart: its
+    sshfs is killed, the prefix unmounted and served again. Workspace ids
+    must therefore be unique among live workspaces, and stable across a
+    restart for it to take its mounts back. A workspace with no id names
+    its sources at random. The session that owns the machine is held in
+    memory, so after a restart the first session to run a line owns it
+    again.
 
     A machine may restart between a line's ``validate`` and its exec and come
     back without its mounts, so each line runs under ``MOUNT_GUARD``,
@@ -295,9 +320,12 @@ class MachineMounts:
         self._lock = asyncio.Lock()
         # Each kill of the sshfs of a server that ended, until it has run.
         self._kills: set[asyncio.Task[None]] = set()
-        self._name = f"{SSHFS_SOURCE_PREFIX}{uuid.uuid4().hex}"
-        # The prefixes served so far, numbering each sshfs's source.
+        self._random = f"{SSHFS_SOURCE_PREFIX}{uuid.uuid4().hex}"
+        self._name = self._random
+        # The prefixes served so far, numbering each sshfs's source, and
+        # each source started.
         self._serves = 0
+        self._sources: set[str] = set()
 
     @property
     def file_effects_dispatched(self) -> bool:
@@ -368,6 +396,9 @@ class MachineMounts:
                 "rules",
             )
         async with self._lock:
+            ws_id = binding.processes.workspace_id if binding.processes else ""
+            if not self._served:
+                self._name = source_name(ws_id) if ws_id else self._random
             served = self._session
             session = binding.get_session(current.session_id)
             if served is not None and served is not session:
@@ -677,13 +708,19 @@ class MachineMounts:
             self._seen = (frozenset(every), visible)
         return None
 
-    def _ours(self, source: str) -> bool:
-        """Whether ``source`` is an sshfs this instance served.
+    def _ours(self, source: str, prefix: str) -> bool:
+        """Whether ``source``, mounted at ``prefix``, is an sshfs this
+        workspace served: exactly ``<name>-<n>:<prefix>``.
 
         Args:
             source (str): a mount's source.
+            prefix (str): its mountpoint.
         """
-        return source.startswith(f"{self._name}-")
+        serve = source[len(self._name) + 1 : len(source) - len(prefix) - 1]
+        return (
+            bool(re.fullmatch("[0-9]+", serve))
+            and source == f"{self._name}-{serve}:{prefix}"
+        )
 
     def _lost(self) -> str | None:
         """A mount of the machine's own it held and no longer does; the
@@ -700,7 +737,7 @@ class MachineMounts:
             present (dict[str, tuple[str, str]]): the machine's mount table.
         """
         source, kind = present.get(prefix, ("", ""))
-        if kind != "fuse.sshfs" or self._ours(source):
+        if kind != "fuse.sshfs" or self._ours(source, prefix):
             return False
         found = await self._run(running_line(source))
         if found.exit_code not in (0, 1):
@@ -717,7 +754,14 @@ class MachineMounts:
         present: dict[str, tuple[str, str]],
     ) -> None:
         self._under[prefix] = present.get(prefix)
-        if present.get(prefix, ("", ""))[1] == "fuse.sshfs":
+        old, kind = present.get(prefix, ("", ""))
+        if (
+            kind == "fuse.sshfs"
+            and self._ours(old, prefix)
+            and old not in self._sources
+        ):
+            await self._reclaim(old, prefix)
+        elif kind == "fuse.sshfs":
             await self._run(unmount_line(prefix))
         path = single_quote(prefix)
         made = await self._run(
@@ -732,6 +776,7 @@ class MachineMounts:
         log = single_quote(f"{SSHFS_LOG_PREFIX}_{uuid.uuid4().hex}.log")
         self._serves += 1
         source = f"{self._name}-{self._serves}:{prefix}"
+        self._sources.add(source)
         pipe = await self._open_pipe(
             f"exec sshfs -f -o {SSHFS_OPTIONS} {single_quote(source)} {path} "
             f"2>{log}"
@@ -845,6 +890,25 @@ class MachineMounts:
                 self._provider,
                 prefix,
                 said(killed.stderr),
+            )
+
+    async def _reclaim(self, source: str, prefix: str) -> None:
+        """Kill the sshfs an earlier instance of this workspace left serving
+        ``prefix``, then unmount it: unmounted alone, it stays blocked on
+        its dead pipe. The next serve may take the same source, so a failed
+        unmount fails loud rather than leaving the old mount to pass for
+        the new one.
+
+        Args:
+            source (str): the stale mount's source.
+            prefix (str): its mountpoint.
+        """
+        await self._run(kill_line(source))
+        done = await self._run(unmount_line(prefix))
+        if done.exit_code != 0:
+            raise RuntimeError(
+                f"{self._provider}: cannot unmount {prefix}, which this "
+                f"workspace served before a restart: {said(done.stderr)}"
             )
 
     async def _drop_log(self, log: str) -> None:

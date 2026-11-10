@@ -26,6 +26,7 @@ from mirage.machine.constants import (
     decode_output,
     encode_output,
     is_run,
+    not_running_hint,
     run_tag,
     stop_signal,
     wrap_line,
@@ -36,7 +37,9 @@ from mirage.machine.e2b.constants import (
     CLOSED_INPUT,
     PTY_MARK,
     PTY_RAW,
+    SANDBOX_GONE,
 )
+from mirage.machine.errors import ConnectionLostError
 from mirage.machine.handle import MachineHandle
 from mirage.machine.mixin import PipeTransportMixin
 from mirage.machine.types import MachinePipe
@@ -139,6 +142,11 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
     it. A ``mount_type`` serves the workspace over a PTY, since E2B's
     exec decodes output as text.
 
+    The sandbox is yours: Mirage never extends or kills it. Once the SDK
+    says it is gone, connecting fails with how to replace it, and a line
+    it cut short loses its connection (129) with the same advice; the
+    next line connects again.
+
     Args:
         name (str): the machine's name, its key under ``machines:``.
         config (E2BConfig | dict[str, Any] | None): how to reach the sandbox.
@@ -157,9 +165,43 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
     async def connect(self) -> None:
         if sdk.AsyncSandbox is None:
             raise ImportError(sdk_install_hint("e2b"))
-        self._sandbox = await sdk.AsyncSandbox.connect(
-            self.config.sandbox_id, **self._api_params()
+        try:
+            self._sandbox = await sdk.AsyncSandbox.connect(
+                self.config.sandbox_id, **self._api_params()
+            )
+        except Exception as exc:
+            if (hint := self._gone(exc)) is None:
+                raise
+            raise RuntimeError(hint) from exc
+
+    def _gone(self, exc: BaseException) -> str | None:
+        """How to replace the sandbox when ``exc`` says it is gone, else
+        None.
+
+        Args:
+            exc (BaseException): what an SDK call raised.
+        """
+        if isinstance(exc, sdk.SandboxNotFoundException):
+            state = "deleted"
+        elif isinstance(exc, sdk.SandboxNotRunningException):
+            state = "ended"
+        else:
+            return None
+        return not_running_hint(
+            "sandbox", self.config.sandbox_id, state, SANDBOX_GONE
         )
+
+    def _lost(self, exc: BaseException) -> ConnectionLostError | None:
+        """The lost connection ``exc`` is when it says the sandbox is
+        gone, which also lets the next line connect again; None otherwise.
+
+        Args:
+            exc (BaseException): what an SDK call raised.
+        """
+        if (hint := self._gone(exc)) is None:
+            return None
+        self._connected = False
+        return ConnectionLostError(hint, b"", f"e2b: {hint}\n".encode())
 
     async def _exec_argv(
         self,
@@ -182,14 +224,19 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
             if data := err.feed(text):
                 await errors(data)
 
-        handle = await self._sandbox.commands.run(
-            encode_output(wrap_line(argv, env, cwd)),
-            background=True,
-            stdin=stdin is not None,
-            on_stdout=emit if output is not None else None,
-            on_stderr=emit_errors if errors is not None else None,
-            timeout=0,
-        )
+        try:
+            handle = await self._sandbox.commands.run(
+                encode_output(wrap_line(argv, env, cwd)),
+                background=True,
+                stdin=stdin is not None,
+                on_stdout=emit if output is not None else None,
+                on_stderr=emit_errors if errors is not None else None,
+                timeout=0,
+            )
+        except Exception as exc:
+            if (lost := self._lost(exc)) is None:
+                raise
+            raise lost from exc
         exited = asyncio.Event()
 
         async def write(chunk: bytes) -> None:
@@ -209,11 +256,14 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
                 end,
                 exited.is_set,
                 lambda exc: (
-                    isinstance(exc, sdk.NotFoundException)
-                    or (
-                        isinstance(exc, sdk.SandboxException)
-                        and any(
-                            message in str(exc) for message in CLOSED_INPUT
+                    self._gone(exc) is None
+                    and (
+                        isinstance(exc, sdk.NotFoundException)
+                        or (
+                            isinstance(exc, sdk.SandboxException)
+                            and any(
+                                message in str(exc) for message in CLOSED_INPUT
+                            )
                         )
                     )
                 ),
@@ -237,6 +287,8 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
             await asyncio.gather(feeding, exiting)
             result = exiting.result()
         except BaseException as exc:
+            if (lost := self._lost(exc)) is not None:
+                raise lost from exc
             # A tagged command a kill stopped with a gentler signal is left
             # to the caller's stop, which sends it that signal first.
             try:
@@ -319,9 +371,14 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
                     reader.feed_data(rest)
 
         pty = self._sandbox.pty
-        handle = await pty.create(
-            sdk.PtySize(rows=24, cols=80), on_data=on_data, timeout=0
-        )
+        try:
+            handle = await pty.create(
+                sdk.PtySize(rows=24, cols=80), on_data=on_data, timeout=0
+            )
+        except Exception as exc:
+            if (lost := self._lost(exc)) is None:
+                raise
+            raise lost from exc
 
         async def fail(exc: Exception) -> None:
             reader.set_exception(exc)
@@ -339,7 +396,7 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
         async def wait() -> None:
             try:
                 await handle.wait()
-            except sdk.CommandExitException as exc:
+            except Exception as exc:
                 logger.debug("e2b: the PTY for %r ended: %s", command, exc)
             finally:
                 reader.feed_eof()
@@ -354,7 +411,7 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
 
         try:
             await pty.send_stdin(handle.pid, f"{PTY_RAW}{command}\n".encode())
-        except BaseException:
+        except BaseException as exc:
             try:
                 await stop()
             except Exception:
@@ -363,5 +420,7 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
                     command,
                     exc_info=True,
                 )
+            if (lost := self._lost(exc)) is not None:
+                raise lost from exc
             raise
         return MachinePipe(reader, writer, stop)

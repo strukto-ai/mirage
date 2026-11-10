@@ -69,6 +69,7 @@ export function registerPipeServer(
 }
 
 const DECODER = new TextDecoder()
+const ENCODER = new TextEncoder()
 const OCTAL_ESCAPE = /\\([0-7]{3})/g
 
 function octalChar(_match: string, digits: string): string {
@@ -126,6 +127,18 @@ export function topPrefixes(prefixes: Iterable<string>): string[] {
  */
 export function servedPrefixes(prefixes: Iterable<string>): string[] {
   return topPrefixes([...prefixes].filter((p) => rstripSlash(p) !== '/tmp'))
+}
+
+/**
+ * The name a workspace's sshfs sources start with: its id, each byte of a
+ * character outside `[A-Za-z0-9-]` written `_xx`, so no two ids share a
+ * name and the name stays one word in `/proc/mounts` and a shell line.
+ */
+export function sourceName(workspaceId: string): string {
+  const escaped = workspaceId.replace(/[^A-Za-z0-9-]/gu, (c) =>
+    [...ENCODER.encode(c)].map((b) => `_${b.toString(16).padStart(2, '0')}`).join(''),
+  )
+  return `${SSHFS_SOURCE_PREFIX}${escaped}`
 }
 
 /** The machine command that lazily unmounts `prefix`. */
@@ -234,12 +247,19 @@ interface Served {
  * otherwise read through. Under `fuse` the host serves nothing, and any
  * session may run.
  *
- * Each sshfs source names the instance serving it and the serve
- * (`mirage-<id>-<n>:<prefix>`), so an instance unmounts only its own, and
- * kills only the sshfs of a server that ended: a prefix another sshfs still
- * serves, as another workspace on the same machine does, refuses
- * the line (1) rather than being taken, and one whose sshfs has gone is
- * unmounted and served.
+ * Each sshfs source names the workspace serving it and the serve
+ * (`mirage-<workspace id>-<n>:<prefix>`, `sourceName`), so an instance
+ * unmounts only its workspace's, and kills only the sshfs of a server that
+ * ended: a prefix another sshfs still serves, as another workspace on the
+ * same machine does, refuses the line (1) rather than being taken, and one
+ * whose sshfs has gone is unmounted and served. A prefix whose sshfs carries
+ * the workspace's own name but which this instance does not serve was left
+ * by an instance before a restart: its sshfs is killed, the prefix
+ * unmounted and served again. Workspace ids must therefore be unique among
+ * live workspaces, and stable across a restart for it to take its mounts
+ * back. A workspace with no id names its sources at random. The session
+ * that owns the machine is held in memory, so after a restart the first
+ * session to run a line owns it again.
  *
  * A machine may restart between a line's admit and its exec and come back
  * without its mounts, so each line runs under `MOUNT_GUARD`, which checks
@@ -263,9 +283,11 @@ export class MachineMounts {
   // What each served prefix was laid over (as JSON), shown again once its server ends.
   private readonly under = new Map<string, string>()
   private lock: Promise<unknown> = Promise.resolve()
-  private readonly name = `${SSHFS_SOURCE_PREFIX}${crypto.randomUUID().replaceAll('-', '')}`
-  // The prefixes served so far, numbering each sshfs's source.
+  private readonly random = `${SSHFS_SOURCE_PREFIX}${crypto.randomUUID().replaceAll('-', '')}`
+  private name = this.random
+  // The prefixes served so far, numbering each sshfs's source, and each source started.
   private serves = 0
+  private readonly sources = new Set<string>()
   // Each kill of an ended server's sshfs still running, which close stops.
   private readonly kills = new Set<AbortController>()
 
@@ -340,6 +362,8 @@ export class MachineMounts {
       )
     }
     return this.locked(async () => {
+      const id = binding.processes?.workspaceId ?? ''
+      if (this.served.size === 0) this.name = id === '' ? this.random : sourceName(id)
       const served = this.session
       const session = getSession(current.sessionId)
       if (served !== null && served !== session) {
@@ -618,9 +642,10 @@ export class MachineMounts {
     return null
   }
 
-  /** Whether `source` is an sshfs this instance served. */
-  private ours(source: string): boolean {
-    return source.startsWith(`${this.name}-`)
+  /** Whether `source`, mounted at `prefix`, is an sshfs this workspace served: exactly `<name>-<n>:<prefix>`. */
+  private ours(source: string, prefix: string): boolean {
+    const serve = source.slice(this.name.length + 1, source.length - prefix.length - 1)
+    return /^[0-9]+$/.test(serve) && source === `${this.name}-${serve}:${prefix}`
   }
 
   /**
@@ -638,7 +663,7 @@ export class MachineMounts {
     signal?: AbortSignal,
   ): Promise<boolean> {
     const [source, kind] = present.get(prefix) ?? ['', '']
-    if (kind !== 'fuse.sshfs' || this.ours(source)) return false
+    if (kind !== 'fuse.sshfs' || this.ours(source, prefix)) return false
     const found = await this.run(runningLine(source), signal)
     if (found.exitCode !== 0 && found.exitCode !== 1) {
       throw new Error(
@@ -655,7 +680,10 @@ export class MachineMounts {
     signal?: AbortSignal,
   ): Promise<void> {
     this.under.set(prefix, JSON.stringify(present.get(prefix) ?? null))
-    if (present.get(prefix)?.[1] === 'fuse.sshfs') await this.run(unmountLine(prefix), signal)
+    const [old, kind] = present.get(prefix) ?? ['', '']
+    if (kind === 'fuse.sshfs' && this.ours(old, prefix) && !this.sources.has(old))
+      await this.reclaim(old, prefix, signal)
+    else if (kind === 'fuse.sshfs') await this.run(unmountLine(prefix), signal)
     const path = singleQuote(prefix)
     const made = await this.run(
       `mkdir -p ${path} 2>/dev/null || { sudo -n mkdir -p ${path} && ` +
@@ -670,6 +698,7 @@ export class MachineMounts {
     const log = singleQuote(`${SSHFS_LOG_PREFIX}_${crypto.randomUUID().replaceAll('-', '')}.log`)
     this.serves += 1
     const source = `${this.name}-${String(this.serves)}:${prefix}`
+    this.sources.add(source)
     const pipe = await this.openPipe(
       `exec sshfs -f -o ${SSHFS_OPTIONS} ${singleQuote(source)} ${path} 2>${log}`,
     )
@@ -766,6 +795,22 @@ export class MachineMounts {
       .finally(() => {
         this.kills.delete(kill)
       })
+  }
+
+  /**
+   * Kill the sshfs an earlier instance of this workspace left serving
+   * `prefix`, then unmount it: unmounted alone, it stays blocked on its dead
+   * pipe. The next serve may take the same source, so a failed unmount
+   * fails loud rather than leaving the old mount to pass for the new one.
+   */
+  private async reclaim(source: string, prefix: string, signal?: AbortSignal): Promise<void> {
+    await this.run(killLine(source), signal)
+    const done = await this.run(unmountLine(prefix), signal)
+    if (done.exitCode !== 0) {
+      throw new Error(
+        `${this.provider}: cannot unmount ${prefix}, which this workspace served before a restart: ${said(done.stderr)}`,
+      )
+    }
   }
 
   /** Remove the helper's setup log; keeping it only costs a file. */

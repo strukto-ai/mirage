@@ -19,21 +19,29 @@ CommandExitException: Any
 NotFoundException: Any
 PtySize: Any
 SandboxException: Any
+SandboxNotFoundException: Any
+SandboxNotRunningException: Any
 try:
     from e2b import AsyncSandbox as _AsyncSandbox
     from e2b import CommandExitException as _CommandExitException
     from e2b import NotFoundException as _NotFoundException
     from e2b import PtySize as _PtySize
     from e2b import SandboxException as _SandboxException
+    from e2b import SandboxNotFoundException as _SandboxNotFoundException
+    from e2b import SandboxNotRunningException as _SandboxNotRunningException
 except ImportError:
     AsyncSandbox = None
     CommandExitException = None
     NotFoundException = None
     PtySize = None
     SandboxException = None
+    SandboxNotFoundException = None
+    SandboxNotRunningException = None
 else:
     AsyncSandbox = _AsyncSandbox
     CommandExitException = _CommandExitException
     NotFoundException = _NotFoundException
     PtySize = _PtySize
     SandboxException = _SandboxException
+    SandboxNotFoundException = _SandboxNotFoundException
+    SandboxNotRunningException = _SandboxNotRunningException

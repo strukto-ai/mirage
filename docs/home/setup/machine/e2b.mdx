@@ -133,6 +133,14 @@ Keep the base image's user, which has `sudo` for mountpoints such as
 ## Notes
 
 - Stopping or closing the workspace leaves the sandbox running.
+- The sandbox is yours: Mirage never extends or kills it, so its timeout
+  is your deadline. Once it has ended, a line says so and exits 1 (129
+  if the sandbox ends while the line runs); create a new sandbox and set
+  `sandbox_id` to it.
+- With `mount_type: ssh` or `both`, a workspace that restarts with the
+  same workspace ID takes back the mounts it left in the sandbox. Give
+  each live workspace its own ID: two live workspaces with one ID take
+  each other's mounts.
 - Output comes back as the program wrote it, binary included: the
   sandbox base64-encodes it on the way out, so the image needs `dd` and
   `base64` (Debian, Ubuntu and Alpine images have both), and output
