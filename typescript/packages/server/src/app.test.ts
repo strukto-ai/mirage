@@ -75,7 +75,9 @@ describe('buildApp state root', () => {
     })
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     try {
-      const app = buildApp({ stateRoot: join(mkdtempSync(join(tmpdir(), 'mirage-state-')), 'state') })
+      const app = buildApp({
+        stateRoot: join(mkdtempSync(join(tmpdir(), 'mirage-state-')), 'state'),
+      })
       expect(warn.mock.calls.flat().join(' ')).toMatch(/is not owned by this user/)
       await app.close()
     } finally {
