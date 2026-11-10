@@ -111,6 +111,27 @@ class Idle extends MachineHandle {
   }
 }
 
+describe('the default world', () => {
+  it.each([
+    ['python3', '-c'],
+    ['python', '-c'],
+    ['node', '-e'],
+    ['js', '-e'],
+  ])('runs no %s', async (command, flag) => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC })
+    try {
+      const io = await ws.shell(`${command} ${flag} x`)
+      expect([io.exitCode, DEC.decode(io.stdout), DEC.decode(io.stderr)]).toEqual([
+        127,
+        '',
+        `${command}: command not found\n`,
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
 describe('removeRuntime', () => {
   it('swaps engines as remove then add and keeps a removed instance out', async () => {
     const alpha = new Engine('alpha')

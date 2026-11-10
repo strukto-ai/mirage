@@ -124,8 +124,6 @@ class CommandRuntime:
     Args:
         bound (RuntimeIdentity | None): the runtime the line bound the
             command to; None when none is.
-        unavailable (str | None): why the requested runtime is missing.
-            Python only; TypeScript refuses earlier.
         exec_allowed (bool): whether policy lets the command start an
             interpreter.
         exec_path_allowed (ExecPathFn | None): whether policy lets an
@@ -137,7 +135,6 @@ class CommandRuntime:
     """
 
     bound: RuntimeIdentity | None = None
-    unavailable: str | None = None
     exec_allowed: bool = True
     exec_path_allowed: ExecPathFn | None = None
     settle: Callable[[], Awaitable[None]] | None = None

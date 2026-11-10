@@ -886,7 +886,11 @@ class TestProcessPatch:
         # A command runs with the patch transparent (its mount op holds
         # host_io), so the guest reaches the workspace through its own
         # file adapter while the block's code reaches it through the patch.
-        ws = Workspace({"/mem/": RAMVFS()}, mode=MountMode.EXEC)
+        ws = Workspace(
+            {"/mem/": RAMVFS()},
+            mode=MountMode.EXEC,
+            runtimes=["monty", "workspace"],
+        )
         with ws:
             Path("/mem/host.txt").write_text("from host")
             result = run(

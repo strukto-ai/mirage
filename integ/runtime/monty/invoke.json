@@ -1,8 +1,13 @@
 {
   "cases": [
     {
-      "id": "default_world_python3",
-      "world": {},
+      "id": "named_world_python3",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ]
+      },
       "steps": [
         {
           "command": "python3 -c \"print(6 * 7)\"",

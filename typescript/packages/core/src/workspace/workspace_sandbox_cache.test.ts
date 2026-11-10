@@ -33,6 +33,7 @@ function makeCachingWorkspace(): { ws: Workspace; ram: RAMVFS } {
     { '/r': ram },
     {
       mode: MountMode.EXEC,
+      runtimes: ['quickjs', 'workspace'],
     },
   )
   return { ws, ram }

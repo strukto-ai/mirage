@@ -80,16 +80,9 @@ async def test_runtime_version_without_a_probe_is_unavailable():
     assert io.stderr == b"echo: version information unavailable\n"
 
 
-def test_not_bound_reports_recorded_hint():
-    """A default entry's build error surfaces as the 127 hint."""
-    stdout, io = not_bound("python3", "needs the broken extra")
-    assert io.exit_code == 127
-    assert io.stderr == b"python3: needs the broken extra\n"
-
-
-def test_not_bound_refuses_without_hint():
+def test_not_bound_answers_command_not_found():
     """No captured runtime means refusal, not a hidden interpreter."""
-    stdout, io = not_bound("python3", None)
+    stdout, io = not_bound("python3")
     assert io.exit_code == 127
     assert io.stderr == b"python3: command not found\n"
 

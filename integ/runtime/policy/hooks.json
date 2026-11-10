@@ -131,6 +131,10 @@
     {
       "id": "hook_pre_vfs_judges_a_scripts_own_read",
       "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
         "mounts": {
           "/ram": {
             "vfs": "ram",

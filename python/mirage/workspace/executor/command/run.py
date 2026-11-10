@@ -296,7 +296,6 @@ async def run_on_mount(
                 else None,
                 runtime=CommandRuntime(
                     bound=line_runtime,
-                    unavailable=registry.runtime_unavailable.get(cmd_name),
                     exec_allowed=registry.is_exec_allowed(),
                     exec_path_allowed=registry.exec_allowed_at,
                     settle=(

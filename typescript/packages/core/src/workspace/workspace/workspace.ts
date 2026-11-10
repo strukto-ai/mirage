@@ -2718,11 +2718,12 @@ export class Workspace {
       // instance, and without the block the copy would answer the
       // first read with "unknown secrets source". Policy instances and
       // the route policy stay behind: a policy is a live host object whose
-      // state two workspaces must not share, and the route names runtimes
-      // the copy does not carry. The policy functions travel, the host's
-      // code as a CLI's spec is. A caller's own profile table brings its
-      // own default.
+      // state two workspaces must not share, and the route names runtime
+      // instances the copy does not carry; the entries named by string are
+      // rebuilt. The policy functions travel, the host's code as a CLI's
+      // spec is. A caller's own profile table brings its own default.
       secrets: options.secrets ?? this.declaredSecretSources,
+      runtimes: options.runtimes ?? this.runtimeWorld.named(),
       policyFunctions: options.policyFunctions ?? this.policyFunctions,
       clock: options.clock ?? this.clock,
       ids: options.ids ?? this.ids,

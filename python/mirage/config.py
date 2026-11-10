@@ -757,7 +757,8 @@ class WorkspaceConfig(BaseModel):
     clis: dict[str, CLIBlock] | None = None
     # The workspace's ordered runtime world: name strings or maps
     # with a name plus the uniform runtime options ({name: wasi,
-    # config: {home: /opt/...}}). Unset = the default world.
+    # config: {home: /opt/...}}). Unset = the default world, the
+    # workspace runtime alone.
     runtimes: list[str | dict[str, Any]] | None = None
     # Per runtime entry, the values `resolve_secrets` read into its
     # config, which a refusal of it masks.

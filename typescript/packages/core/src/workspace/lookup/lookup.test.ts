@@ -76,7 +76,10 @@ class HostPython extends PythonRuntime implements ProcessExecutorMixin {
 
 function fixture(): { session: SessionState; ws: Workspace } {
   const ram = new RAMVFS()
-  const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE })
+  const ws = new Workspace(
+    { '/ram': ram },
+    { mode: MountMode.WRITE, runtimes: ['monty', 'workspace'] },
+  )
   return { session: new SessionState({ sessionId: 't' }), ws }
 }
 

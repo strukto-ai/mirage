@@ -56,7 +56,10 @@ function makeConfig(): S3Config {
 }
 
 function makeWorkspace(read: ReadSpec, mode: MountMode = MountMode.WRITE): Workspace {
-  return new Workspace({ '/s3': new S3VFS(makeConfig()) }, { mode, read })
+  return new Workspace(
+    { '/s3': new S3VFS(makeConfig()) },
+    { mode, read, runtimes: ['quickjs', 'workspace'] },
+  )
 }
 
 describe('object-store write fingerprint (mocked S3)', () => {

@@ -42,7 +42,7 @@ async def _js(
     placement = ctx.runtime or CommandRuntime()
     runtime = placement.bound
     if not isinstance(runtime, LanguageRuntime):
-        return not_bound(label, placement.unavailable)
+        return not_bound(label)
     fl = FlagView(ctx.flags, spec=SPECS["js"])
     if fl.as_bool("version"):
         return await runtime_version(runtime, ctx.env)

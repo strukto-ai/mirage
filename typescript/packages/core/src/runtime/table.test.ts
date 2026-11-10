@@ -116,9 +116,8 @@ describe('runtime table', () => {
     expect([...new MontyRuntime({ captures: ['only'] }).captures]).toEqual(['only'])
   })
 
-  it('the default world is monty, quickjs and workspace', () => {
-    expect(DEFAULT_ENTRIES).toEqual(['monty', 'quickjs', 'workspace'])
-    expect(buildRuntime('monty')).toBeInstanceOf(MontyRuntime)
+  it('the default world is the workspace alone', () => {
+    expect(DEFAULT_ENTRIES).toEqual(['workspace'])
   })
 
   it('buildRuntime builds pyodide by name', () => {

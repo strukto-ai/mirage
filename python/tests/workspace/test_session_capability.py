@@ -483,7 +483,9 @@ def test_implicit_root_keeps_pathless_commands_working():
 
 def test_exec_gate_is_per_session():
     a = _seed("x.txt", b"hi")
-    ws = Workspace({"/e": (a, MountMode.EXEC)})
+    ws = Workspace(
+        {"/e": (a, MountMode.EXEC)}, runtimes=["monty", "workspace"]
+    )
     ws.create_session("no_exec", mounts={"/e": "write"})
     ws.create_session("with_exec", mounts={"/e": "exec"})
 

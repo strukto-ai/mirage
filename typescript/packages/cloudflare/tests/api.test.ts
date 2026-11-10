@@ -45,10 +45,16 @@ async function call(
   return { status: response.status, json, text, type: response.headers.get('content-type') }
 }
 
-async function shell(id: string, command: string): Promise<{ stdout: string; exit_code: number }> {
+interface ShellAnswer {
+  stdout: string
+  stderr: string
+  exit_code: number
+}
+
+async function shell(id: string, command: string): Promise<ShellAnswer> {
   const answer = await call('POST', `/v1/workspaces/${id}/shell`, { command })
   expect(answer.status).toBe(200)
-  return answer.json as { stdout: string; exit_code: number }
+  return answer.json as ShellAnswer
 }
 
 interface LineRecord {
@@ -336,11 +342,15 @@ describe('the server API in workerd', () => {
     expect([ran.exit_code, ran.stdout]).toEqual([0, '8\n'])
   })
 
-  it('runs no QuickJS, and refuses a config that names it', async () => {
+  it('runs no interpreter a config does not name, and refuses QuickJS', async () => {
     const config = { mounts: { '/': { vfs: 'ram' } }, mode: 'exec' }
     await call('POST', '/v1/workspaces', { id: 'nojs', config })
     const plain = await shell('nojs', 'node -e "console.log(1)"; python3 -c "print(2)"')
-    expect([plain.exit_code, plain.stdout]).toEqual([0, '2\n'])
+    expect([plain.exit_code, plain.stdout, plain.stderr]).toEqual([
+      127,
+      '',
+      'node: command not found\npython3: command not found\n',
+    ])
     const named = await call('POST', '/v1/workspaces', {
       id: 'js',
       config: { ...config, runtimes: ['workspace', 'quickjs'] },

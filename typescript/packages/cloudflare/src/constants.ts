@@ -16,6 +16,6 @@
 // workspace shares the isolate's 128 MB.
 export const EDGE_MAX_SESSIONS = 4
 
-// What a workspace runs when its options name no runtimes: Monty and the
-// shell, the default world without QuickJS, which the edge refuses.
-export const EDGE_RUNTIMES: readonly string[] = ['monty', 'workspace']
+// What a workspace runs when its options name no runtimes: the shell alone,
+// the default world; Monty stays bundled for policies and named entries.
+export const EDGE_RUNTIMES: readonly string[] = ['workspace']

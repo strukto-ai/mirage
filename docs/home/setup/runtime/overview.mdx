@@ -15,17 +15,17 @@ A runtime runs the programs in a line. Mirage's own commands (`grep`, `cat`, pip
 | Runtime | Runs | Where | SDK |
 | --- | --- | --- | --- |
 | `workspace` | Mirage's own commands | Mirage workspace | both |
-| [`monty`](/home/setup/runtime/monty) | `python3`, a Python subset | Mirage workspace | both (default) |
+| [`monty`](/home/setup/runtime/monty) | `python3`, a Python subset | Mirage workspace | both |
 | [`wasi`](/home/setup/runtime/wasi) | `python3`, CPython in WebAssembly | Mirage workspace | Python |
 | [`pyodide`](/home/setup/runtime/pyodide) | `python3`, CPython in WebAssembly | Mirage workspace | TypeScript |
-| [`quickjs`](/home/setup/runtime/quickjs) | `node` and `js`, with Node.js's common APIs | Mirage workspace | both (default) |
+| [`quickjs`](/home/setup/runtime/quickjs) | `node` and `js`, with Node.js's common APIs | Mirage workspace | both |
 | [`local`](/home/setup/runtime/local) | host programs such as `python3`, `node` or `tsx` | host | Python, Node |
 | [`machine`](/home/setup/machine/overview) | native programs | a [machine](/home/setup/machine/overview): a container, VM, cloud sandbox or SSH host | Python, Node; E2B also in the browser |
 | [`sandlock`](/home/setup/runtime/sandlock) | native programs | this Linux host, confined | Python, Node |
 
 ## Routing
 
-`runtimes` is an ordered list: the first runtime whose `captures` name a program runs it, and `workspace` takes the rest. Without the key, the list is `[monty, quickjs, workspace]` in both SDKs, and `[monty, workspace]` on [Cloudflare Workers](/typescript/cloudflare-quickstart), which runs no QuickJS.
+`runtimes` is an ordered list: the first runtime whose `captures` name a program runs it, and `workspace` takes the rest. Without the key, the list is `[workspace]` on every host, so `python3`, `node` and `js` answer `command not found` (exit 127) until an entry captures them. [Cloudflare Workers](/typescript/cloudflare-quickstart) runs no QuickJS.
 
 ```yaml
 machines:

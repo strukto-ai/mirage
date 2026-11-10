@@ -2371,11 +2371,14 @@ class Workspace:
         # first read with "unknown secrets source". Policy instances
         # and the route policy stay behind: a policy is a live host
         # object whose state two workspaces must not share, and the
-        # route names runtimes the copy does not carry. The policy
-        # functions travel, the host's code as a CLI's spec is.
+        # route names runtime instances the copy does not carry; the
+        # entries named by string are rebuilt. The policy functions
+        # travel, the host's code as a CLI's spec is.
+        named: list[Runtime[Any] | str] = [*self._runtimes.named()]
         return await type(self)._from_state(
             state,
             mounts=mounts,
+            runtimes=named,
             clis=reusable_clis(self),
             secrets=self._declared_sources,
             policy_functions=self._policy_functions,

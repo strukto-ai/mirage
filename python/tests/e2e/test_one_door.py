@@ -243,7 +243,11 @@ async def test_a_builtin_reaches_its_files_only_through_the_dispatcher(
 ):
     line, prefixes = TRACES[name]
     toys = [Toy() for _ in prefixes]
-    ws = Workspace(dict(zip(prefixes, toys)), mode=MountMode.EXEC)
+    ws = Workspace(
+        dict(zip(prefixes, toys)),
+        mode=MountMode.EXEC,
+        runtimes=["monty", "workspace"],
+    )
     try:
         for prefix in prefixes:
             seeded = await ws.shell(SEED.replace("/t/", prefix))

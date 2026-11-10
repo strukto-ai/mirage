@@ -22,7 +22,7 @@ import { Workspace } from './workspace/workspace.ts'
 describe('Workspace + Python mount', () => {
   it('Workspace.addMount makes paths visible inside Python after it loads', async () => {
     const ram = new RAMVFS()
-    const ws = new Workspace({}, { mode: MountMode.EXEC })
+    const ws = new Workspace({}, { mode: MountMode.EXEC, runtimes: ['monty', 'workspace'] })
     ws.addMount('/ram', ram, MountMode.EXEC)
     await ws.vfs.write('/ram/hello.txt', 'world')
     const io = await ws.shell(`python3 -c "with open('/ram/hello.txt') as f: print(f.read())"`)
@@ -33,7 +33,7 @@ describe('Workspace + Python mount', () => {
 
   it('Python writes flush back through the bridge', async () => {
     const ram = new RAMVFS()
-    const ws = new Workspace({}, { mode: MountMode.EXEC })
+    const ws = new Workspace({}, { mode: MountMode.EXEC, runtimes: ['monty', 'workspace'] })
     ws.addMount('/ram', ram, MountMode.EXEC)
     const io = await ws.shell(`python3 -c "with open('/ram/out.txt', 'wb') as f: f.write(b'data')"`)
     expect(io.exitCode, new TextDecoder().decode(io.stderr)).toBe(0)
@@ -44,7 +44,7 @@ describe('Workspace + Python mount', () => {
 
   it('Workspace.addMount does not load Pyodide when no Python ever runs', async () => {
     const ram = new RAMVFS()
-    const ws = new Workspace({}, { mode: MountMode.EXEC })
+    const ws = new Workspace({}, { mode: MountMode.EXEC, runtimes: ['monty', 'workspace'] })
     ws.addMount('/ram', ram, MountMode.EXEC)
     await ws.vfs.write('/ram/never.txt', 'unused')
     const io = await ws.shell('echo hello')
@@ -55,7 +55,7 @@ describe('Workspace + Python mount', () => {
 
   it('unmount drains in-flight Python addMount before closing the VFS', async () => {
     const ram = new RAMVFS()
-    const ws = new Workspace({}, { mode: MountMode.EXEC })
+    const ws = new Workspace({}, { mode: MountMode.EXEC, runtimes: ['monty', 'workspace'] })
     ws.addMount('/ram', ram, MountMode.EXEC)
     await ws.vfs.write('/ram/seed.txt', 'seed')
     const io = await ws.shell(`python3 -c "pass"`)
@@ -70,7 +70,7 @@ describe('Workspace + Python mount', () => {
 
   it('Python writes a 50KB chunked file end-to-end', async () => {
     const ram = new RAMVFS()
-    const ws = new Workspace({}, { mode: MountMode.EXEC })
+    const ws = new Workspace({}, { mode: MountMode.EXEC, runtimes: ['monty', 'workspace'] })
     ws.addMount('/ram', ram, MountMode.EXEC)
     const code =
       "data = b'X' * 1024\n" +

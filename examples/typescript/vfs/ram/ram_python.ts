@@ -20,12 +20,15 @@ async function stdout(ws: Workspace, cmd: string): Promise<string> {
 }
 
 async function main(): Promise<void> {
-  const ws = new Workspace({ '/ram': new RAMVFS() }, { mode: MountMode.EXEC })
+  const ws = new Workspace(
+    { '/ram': new RAMVFS() },
+    { mode: MountMode.EXEC, runtimes: ['monty', 'workspace'] },
+  )
 
   console.log('=== python3 -c (basic) ===')
   console.log(`stdout: ${await stdout(ws, 'python3 -c "print(42)"')}  (expected: 42)`)
 
-  // The default monty runtime exposes command-line args as the `argv`
+  // The monty runtime exposes command-line args as the `argv`
   // global; `sys.argv` exists under the `local` runtime.
   console.log('\n=== python3 -c with argv (flag-conditional) ===')
   console.log(

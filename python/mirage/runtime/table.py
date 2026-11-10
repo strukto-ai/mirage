@@ -87,26 +87,17 @@ def known_runtimes() -> list[str]:
     return sorted(NAMED)
 
 
-# The default world when no runtimes list is given: one python engine,
-# one js engine, and the builtin command engine, the same three as
-# TypeScript's (integ/runtime/routing/defaults.json pins the python
-# engine). Defaults build gracefully (a missing extra leaves the command
-# reporting its install hint per invocation); an explicitly listed name
-# still fails loud.
-# `local` is deliberately absent: a sandboxed default must never
-# silently escalate to host execution.
-DEFAULT_ENTRIES: tuple[str, ...] = (
-    MontyRuntime.name,
-    QuickJsRuntime.name,
-    WorkspaceRuntime.name,
-)
+# The default world when no runtimes list is given: the builtin command
+# engine alone, as TypeScript's, so an interpreter runs only where the
+# config names one (integ/runtime/routing/defaults.json pins it).
+DEFAULT_ENTRIES: tuple[str, ...] = (WorkspaceRuntime.name,)
 
 # TypeScript-only runtime names a cross-language config may carry.
 RUNTIME_HINTS: dict[str, str] = {
     "pyodide": (
         "runtime 'pyodide' is TypeScript-only (a WASM CPython for "
         "runtimes without a host Python); Python supports 'monty' "
-        "(sandboxed, default), 'wasi' (sandboxed full CPython), "
+        "(sandboxed), 'wasi' (sandboxed full CPython), "
         "'sandlock' (confined native processes), 'local' (the host "
         "CPython), and 'quickjs' (sandboxed JavaScript)"
     ),

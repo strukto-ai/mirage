@@ -31,6 +31,7 @@ def _started(
         mode=MountMode.EXEC,
         clock=clock if clock is not None else ManualClock(1_000_000),
         system_time=system_time,
+        runtimes=["monty", "workspace"],
     )
 
 

@@ -71,9 +71,8 @@ class DirectEngine(LanguageRuntime):
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
 
-def test_default_world_is_monty_quickjs_and_workspace():
-    assert DEFAULT_ENTRIES == ("monty", "quickjs", "workspace")
-    assert issubclass(NAMED[DEFAULT_ENTRIES[0]], PythonRuntime)
+def test_default_world_is_the_workspace_alone():
+    assert DEFAULT_ENTRIES == ("workspace",)
 
 
 @pytest.mark.parametrize(

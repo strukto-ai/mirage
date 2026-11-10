@@ -239,7 +239,9 @@ async def test_guest_runtime_reads_the_fetched_value():
     calls, fetch = counting_source({"GITHUB_TOKEN": "gt"})
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws(
-        {"GITHUB_TOKEN": {"from": "fake", "ref": "r"}}, mode=MountMode.EXEC
+        {"GITHUB_TOKEN": {"from": "fake", "ref": "r"}},
+        mode=MountMode.EXEC,
+        runtimes=["monty", "workspace"],
     )
     try:
         io = await ws.shell(

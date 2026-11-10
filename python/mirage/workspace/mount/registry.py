@@ -205,12 +205,6 @@ class MountRegistry:
         self._networks: dict[
             str, tuple[NetworkRule | None, NetworkRule | None]
         ] = {}
-        # Why a command that SOME runtime class captures has no live
-        # binding: default-world entries that failed to build (missing
-        # extra) record their construction error per captured command,
-        # so the refusal at dispatch carries the install hint without
-        # any command naming a runtime class.
-        self.runtime_unavailable: dict[str, str] = {}
         # Command admission policies. Policies itself is a bare
         # mechanism; the registry seeds the POSIX mount-root rule
         # (mount-root semantics are mount semantics), and user policies
