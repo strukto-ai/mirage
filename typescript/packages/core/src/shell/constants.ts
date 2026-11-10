@@ -49,19 +49,9 @@ export const OUTPUT_ONLY_BUILTINS: ReadonlySet<string> = new Set([
   ':',
 ])
 
-// The dynamic variables the shell answers itself: PIPESTATUS reads the
-// session's record of the last pipeline (`SessionState.pipeStatus`) and
-// FUNCNAME the frames on the call stack (`SessionState.functionNames`),
-// neither held in the variable store, and BASH_LINENO the line each was
-// called from, which no unset ends; RANDOM steps mirage-rs's generator,
-// which stores each draw on the name; LINENO is the running command's line
-// and BASHPID the process running it.
-export const PIPESTATUS = 'PIPESTATUS'
+// FUNCNAME reads the frames on the call stack (`SessionState.functionNames`),
+// which the variable store does not hold.
 export const FUNCNAME = 'FUNCNAME'
-export const BASH_LINENO = 'BASH_LINENO'
-export const RANDOM = 'RANDOM'
-export const LINENO = 'LINENO'
-export const BASHPID = 'BASHPID'
 export const PPID = 'PPID'
 // What the shell calls itself when no script is running, bash's "bash".
 // A nested `bash`/`sh` overrides it through SessionState.scriptName, and

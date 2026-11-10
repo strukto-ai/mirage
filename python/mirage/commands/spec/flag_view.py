@@ -305,26 +305,6 @@ class FlagView:
         value = self._flags.get(self._key(name))
         return value if isinstance(value, str) else default
 
-    @overload
-    def as_nonempty(self, name: str) -> str | None: ...
-
-    @overload
-    def as_nonempty(self, name: str, default: str) -> str: ...
-
-    def as_nonempty(self, name: str, default: str | None = None) -> str | None:
-        """The option as text, ``default`` when it is absent or empty.
-
-        For a program that cannot tell an empty value from none, as a Go
-        flag's zero value cannot (gh's ``if opts.Name != ""``): there the
-        empty one reads as unset, and nowhere else.
-
-        Args:
-            name (str): the option's dest.
-            default (str | None): what an absent or empty option reads as.
-        """
-        value = self.as_str(name)
-        return value if value else default
-
     def as_list(self, name: str) -> list[str]:
         value = self._flags.get(self._key(name))
         if isinstance(value, list):

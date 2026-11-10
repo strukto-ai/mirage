@@ -84,19 +84,9 @@ FD_CLOSE = -1
 # opened first like any other command (`redirect.py`).
 OUTPUT_ONLY_BUILTINS = frozenset({"echo", "printf", "true", "false", ":"})
 
-# The dynamic variables the shell answers itself: PIPESTATUS reads the
-# session's record of the last pipeline (`SessionState.pipe_status`) and
-# FUNCNAME the frames on the call stack (`SessionState.function_names`),
-# neither held in the variable store, and BASH_LINENO the line each was
-# called from, which no unset ends; RANDOM steps mirage-rs's generator,
-# which stores each draw on the name; LINENO is the running command's
-# line and BASHPID the process running it.
-PIPESTATUS = "PIPESTATUS"
+# FUNCNAME reads the frames on the call stack
+# (`SessionState.function_names`), which the variable store does not hold.
 FUNCNAME = "FUNCNAME"
-BASH_LINENO = "BASH_LINENO"
-RANDOM = "RANDOM"
-LINENO = "LINENO"
-BASHPID = "BASHPID"
 PPID = "PPID"
 
 # Node types whose failure never triggers `set -e` by shape alone.
