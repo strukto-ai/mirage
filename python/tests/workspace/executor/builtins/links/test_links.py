@@ -266,6 +266,12 @@ async def _first_page(path: PathSpec) -> AsyncIterator[bytes]:
     raise efbig(path)
 
 
+async def _racing(vfs: RAMVFS, path: PathSpec) -> AsyncIterator[bytes]:
+    yield b"a"
+    taken = PathSpec(virtual="/data/e", directory=path.directory, vfs_path="e")
+    await vfs.write(taken, b"new")
+
+
 class SealedReads(RAMVFS):
     async def read(
         self, path: PathSpec, offset: int = 0, size: int | None = None
@@ -276,6 +282,8 @@ class SealedReads(RAMVFS):
             )
         if path.virtual.endswith(".late"):
             return _first_page(path)
+        if path.virtual.endswith(".racy"):
+            return _racing(self, path)
         return await super().read(path, offset, size)
 
 
@@ -310,6 +318,13 @@ async def test_ln_keeps_going_after_a_source_it_cannot_read():
         b"ln: failed to access '/data/c.late': File too large\n"
     )
     assert (await ws.shell("cat /data/b.txt")).stdout == b"b"
+    # A file another job puts at the name while the source is read is
+    # refused as one already there, and kept.
+    r = await ws.shell("printf c > /data/c.racy; ln /data/c.racy /data/e")
+    assert (
+        r.stderr == b"ln: failed to create hard link '/data/e': File exists\n"
+    )
+    assert (await ws.shell("cat /data/e")).stdout == b"new"
 
 
 @pytest.mark.asyncio

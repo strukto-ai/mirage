@@ -43,6 +43,13 @@ async function* firstPage(path: PathSpec): AsyncIterable<Uint8Array> {
   throw efbig(path)
 }
 
+// A source whose read puts a file at `/data/e`, as another job could.
+async function* racing(vfs: RAMVFS, path: PathSpec): AsyncIterable<Uint8Array> {
+  yield new TextEncoder().encode('a')
+  const taken = new PathSpec({ virtual: '/data/e', directory: path.directory, vfsPath: 'e' })
+  await vfs.write(taken, new TextEncoder().encode('new'))
+}
+
 // A backend that refuses to read `*.sealed`, and `*.late` past its first
 // page: the faults a command meets partway through, after it was admitted.
 class SealedReads extends RAMVFS {
@@ -54,6 +61,7 @@ class SealedReads extends RAMVFS {
   ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
     if (path.virtual.endsWith('.sealed')) return Promise.reject(eacces(path))
     if (path.virtual.endsWith('.late')) return firstPage(path)
+    if (path.virtual.endsWith('.racy')) return racing(this, path)
     return super.read(path, handed, offset, size)
   }
 }
@@ -262,6 +270,11 @@ describe('ln with a source it cannot read', () => {
           "ln: failed to access '/data/c.late': File too large\n",
       )
       expect(DEC.decode((await ws.shell('cat /data/b.txt')).stdout)).toBe('b')
+      // A file another job puts at the name while the source is read is
+      // refused as one already there, and kept.
+      const raced = await ws.shell('printf c > /data/c.racy; ln /data/c.racy /data/e')
+      expect(err(raced)).toBe("ln: failed to create hard link '/data/e': File exists\n")
+      expect(DEC.decode((await ws.shell('cat /data/e')).stdout)).toBe('new')
     } finally {
       await ws.close()
     }
