@@ -1,3 +1,73 @@
+html:root {
+  --font-inter: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-paper-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --sidebar-panel: #fafafa;
+  --chrome-line: #e5e5e5;
+}
+
+html.dark:root {
+  --sidebar-panel: #16171b;
+  --chrome-line: rgb(255 255 255 / 0.1);
+}
+
+#navbar {
+  box-shadow: 0 1px 0 var(--chrome-line);
+}
+
+#navbar div:has(> div > #search-bar-entry) {
+  border-bottom: 0;
+}
+
+#sidebar::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 0 -100vw;
+  background: var(--sidebar-panel);
+  border-right: 1px solid var(--chrome-line);
+}
+
+#sidebar .from-background-light {
+  background-image: linear-gradient(to bottom, var(--sidebar-panel), transparent);
+}
+
+@media (min-width: 1280px) {
+  #navbar div:has(> #search-bar-entry) {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 315px;
+    right: 392px;
+  }
+}
+
 #content-area:has(#api-playground-2-operation-page) #header > .prose {
   margin-top: 1.5rem;
+}
+
+img.nav-logo {
+  height: 2.25rem;
+}
+
+html.dark img[src*="mirage-icon-light"] {
+  filter: invert(1);
+}
+
+.sidebar-group a,
+.sidebar-group button {
+  border-radius: 0.5rem;
+  clip-path: inset(0 0 0 0.5rem round 0.5rem);
+}
+
+h1#page-title {
+  font-weight: 800;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+
+.mdx-content :is(h1, h2, h3, h4) {
+  letter-spacing: -0.02em;
+}
+
+.mdx-content h2 {
+  font-weight: 700;
 }
