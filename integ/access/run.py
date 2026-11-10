@@ -100,6 +100,7 @@ from issuer import Issuer
 from starlette.routing import WebSocketRoute
 
 from mirage.server.app import build_app
+from mirage.server.errors import ErrorCode
 
 CASES = json.loads(Path(__file__).with_name("cases.json").read_text())
 OVERVIEW = ROOT / "docs" / "home" / "access" / "overview.mdx"
@@ -709,6 +710,67 @@ async def waits_beside_busy(
     return timed
 
 
+async def error_checks(
+    server: Server,
+    http: httpx.AsyncClient,
+    auth: dict[str, str],
+    report: Report,
+) -> None:
+    """Each shared error case: its status, its code and its param, and
+    that every code a server answers is a registered one."""
+    d = server.d
+    stopped = f"stopped-{uuid.uuid4().hex[:8]}"
+    made = await http.post(
+        "/v1/workspaces",
+        headers=auth,
+        json={"id": stopped, "config": CASES["workspace"]},
+    )
+    made.raise_for_status()
+    (
+        await http.post(f"/v1/workspaces/{stopped}/stop", headers=auth)
+    ).raise_for_status()
+    try:
+        for case in CASES["server"]["errors"]:
+            if d.name not in case.get("deployments", [d.name]):
+                continue
+            ask = case["request"]
+            headers = {
+                **(auth if ask.get("auth", True) else {}),
+                **ask.get("headers", {}),
+            }
+            if "type" in ask:
+                headers["Content-Type"] = ask["type"]
+            path = ask["path"].format(seed=SEED, stopped=stopped)
+            reply = await http.request(
+                ask["method"],
+                path,
+                headers=headers,
+                **(
+                    {"json": ask["json"]}
+                    if "json" in ask
+                    else {"content": ask["content"]}
+                    if "content" in ask
+                    else {}
+                ),
+            )
+            got: dict[str, Any] = {"status": reply.status_code}
+            if reply.status_code >= 400:
+                error = reply.json()["error"]
+                got["code"] = error["code"]
+                if "param" in error:
+                    got["param"] = error["param"]
+                report.check(
+                    f"{server.key} server.error_code_registered.{case['id']}",
+                    error["code"] in {code.value for code in ErrorCode},
+                    True,
+                )
+            report.check(
+                f"{server.key} server.errors.{case['id']}", got, case["expect"]
+            )
+    finally:
+        await http.delete(f"/v1/workspaces/{stopped}", headers=auth)
+
+
 async def server_checks(server: Server, report: Report) -> None:
     d = server.d
     want = CASES["server"]
@@ -743,12 +805,10 @@ async def server_checks(server: Server, report: Report) -> None:
             )
             report.check(
                 f"{server.key} server.invalid_config.{case['id']}",
-                {
-                    "status": reply.status_code,
-                    "detail": reply.json()["detail"],
-                },
+                {"status": reply.status_code, "error": reply.json()["error"]},
                 case["expect"],
             )
+        await error_checks(server, http, auth, report)
         mcp = f"/v1/workspaces/{SEED}/mcp"
         got = {}
         for method in ("GET", "DELETE"):
@@ -765,7 +825,7 @@ async def server_checks(server: Server, report: Report) -> None:
             )
             report.check(
                 f"{server.key} server.no_snapshot_store",
-                [refused.status_code, refused.json().get("detail")],
+                [refused.status_code, refused.json()["error"]["message"]],
                 want["no_snapshot_store"],
             )
         name = f"access-{uuid.uuid4().hex[:8]}"
