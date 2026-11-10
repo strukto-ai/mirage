@@ -32,7 +32,7 @@ describe('Pyodide captured streams', { timeout: 120_000 }, () => {
     const vfs = kind === 'disk' ? new DiskVFS({ root }) : new RAMVFS()
     const ws = new Workspace(
       { '/ram': vfs },
-      { mode: MountMode.EXEC, runtimes: ['pyodide', 'workspace'] },
+      { mode: MountMode.EXEC, runtimes: ['pyodide', 'workspace'], maxMemory: null },
     )
     try {
       for (const [name, content] of Object.entries(fixture.world.mounts['/ram'].files ?? {})) {
