@@ -21,9 +21,10 @@ import { getCurrentEvaluation, type RedirectResult } from '../../../context/sess
 import { WORKSPACE_MACHINE } from '../../../execution/process/constants.ts'
 import type { ProcessTable } from '../../../execution/process/table.ts'
 import type { MachineId, MachineResources } from '../../../execution/types.ts'
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
-import { encodeText } from '../../../shell/bytes.ts'
+import { decodeText, encodeText } from '../../../shell/bytes.ts'
+import { concat } from '../../../utils/bytes.ts'
 import { ExecutionNode } from '../../types.ts'
 import { namesMachine } from './jobspec.ts'
 
@@ -173,6 +174,22 @@ export async function readMachines(
     errors.push(`${name}: ${scope.ids[at] ?? ''}: machine did not answer\n`)
   })
   return [rows, errors.join('')]
+}
+
+/**
+ * Add a later sample's diagnostics to a repeating command's result and fail
+ * it: each line once, after what its stderr already holds (an output limit's
+ * notice among it), so a machine that stays down is told once. Mirrors
+ * Python's `tell_once`.
+ */
+export async function tellOnce(io: IOResult, node: ExecutionNode, errors: string): Promise<void> {
+  io.exitCode = node.exitCode = 1
+  const told = new Set(decodeText(node.stderr).split('\n'))
+  const fresh = errors.split('\n').filter((line) => line !== '' && !told.has(line))
+  if (fresh.length === 0) return
+  const said = encodeText(fresh.map((line) => `${line}\n`).join(''))
+  node.stderr = concat([node.stderr, said])
+  io.stderr = concat([await materialize(io.stderr), said])
 }
 
 /**

@@ -30,11 +30,11 @@ from mirage.execution.process.constants import WORKSPACE_MACHINE
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.types import MachineResources
 from mirage.io import IOResult
-from mirage.io.types import ByteSource
+from mirage.io.types import ByteSource, materialize
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
-from mirage.shell.bytes import encode_text
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.workspace.executor.builtins.jobspec import names_machine
 from mirage.workspace.types import ExecutionNode
 
@@ -225,6 +225,27 @@ async def read_machines(
         logger.debug("%s: %s not read: %s", name, machine, answer)
         errors.append(f"{name}: {machine}: machine did not answer\n")
     return rows, "".join(errors)
+
+
+async def tell_once(io: IOResult, node: ExecutionNode, errors: str) -> None:
+    """Add a later sample's diagnostics to a repeating command's result
+    and fail it: each line once, after what its stderr already holds (an
+    output limit's notice among it), so a machine that stays down is told
+    once. Mirrors TypeScript's ``tellOnce``.
+
+    Args:
+        io (IOResult): the command's result.
+        node (ExecutionNode): the command's node.
+        errors (str): the sample's diagnostics.
+    """
+    io.exit_code = node.exit_code = 1
+    told = set(decode_text(node.stderr).split("\n"))
+    fresh = [line for line in errors.split("\n") if line and line not in told]
+    if not fresh:
+        return
+    said = encode_text("".join(f"{line}\n" for line in fresh))
+    node.stderr += said
+    io.stderr = await materialize(io.stderr) + said
 
 
 def _ended(spec: CommandSpec, words: list[str], parse: ShellParse) -> bool:

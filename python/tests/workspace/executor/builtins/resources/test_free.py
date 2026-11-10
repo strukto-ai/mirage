@@ -14,7 +14,9 @@
 
 import pytest
 
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.io.memory import MemoryBudget, run_with_memory
+from mirage.types import Limit
 from mirage.workspace.executor.builtins.resources.free import (
     handle_free,
     human_size,
@@ -224,6 +226,18 @@ async def test_a_machine_that_does_not_answer_says_so():
     assert "docker:a" in out and "e2b:down" not in out
     assert err == "free: e2b:down: machine did not answer\n"
     assert code == 1
+
+
+@pytest.mark.asyncio
+async def test_a_repeat_cut_short_keeps_the_limits_notice():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.WRITE,
+        command_limits={"free": Limit(max_bytes=100)},
+    )
+    result = await ws.shell("free -s 0.01 -c 3")
+    assert len(result.stdout) == 100
+    assert b"free: output truncated at limit (100 bytes)" in result.stderr
 
 
 @pytest.mark.parametrize(

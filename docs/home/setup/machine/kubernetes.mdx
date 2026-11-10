@@ -5,7 +5,7 @@ description: Run captured programs in a Kubernetes pod, including a Nitro Sandbo
 ---
 
 The `kubernetes` machine provider reaches a running pod, by name, through
-`kubectl exec`, and the `machine` runtime runs captured programs in it. You
+`kubectl exec`, and the `remote` runtime runs captured programs in it. You
 create the pod; Mirage only runs programs in it. Python SDK and Node.
 
 ## Installation
@@ -49,27 +49,27 @@ Python in the pod too.
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.runtime.machine import MachineRuntime
+    from mirage.runtime.machine import RemoteRuntime
 
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
         machines={"box": {"provider": "kubernetes", "pod": "mirage-box"}},
-        runtimes=[MachineRuntime(["@python", "@external"], machine="box")],
+        runtimes=[RemoteRuntime(["@python", "@external"], machine="box")],
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { MountMode, MachineRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { MountMode, RemoteRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
         machines: { box: { provider: 'kubernetes', pod: 'mirage-box' } },
-        runtimes: [new MachineRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+        runtimes: [new RemoteRuntime({ captures: ['@python', '@external'], machine: 'box' })],
       },
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
@@ -83,7 +83,7 @@ Python in the pod too.
         provider: kubernetes
         pod: mirage-box
     runtimes:
-      - name: machine
+      - name: remote
         captures: ["@python", "@external"]
         machine: box
     mounts:

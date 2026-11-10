@@ -12,8 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage.commands.spec.shell import SHELL_SPECS
 from mirage.execution.process.table import ProcessTable
+from mirage.io import IOResult
 from mirage.workspace.executor.builtins.machine_view import (
     MachineScope,
     in_scope,
@@ -21,8 +24,10 @@ from mirage.workspace.executor.builtins.machine_view import (
     option_refusal,
     permuted_options,
     process_scope,
+    tell_once,
     with_machine,
 )
+from mirage.workspace.types import ExecutionNode
 
 
 def table(*ids: str) -> ProcessTable:
@@ -120,3 +125,17 @@ def test_option_refusal_names_the_option():
 
 def test_with_machine_pads_to_the_columns():
     assert with_machine("ab  ", "m", 6) == "ab      m"
+
+
+@pytest.mark.asyncio
+async def test_a_later_error_is_told_once_after_what_stderr_holds():
+    down = "free: e2b:down: machine did not answer\n"
+    gone = "free: e2b:gone: machine did not answer\n"
+    cut = "free: output truncated\n"
+    node = ExecutionNode(command="free", stderr=down.encode())
+    io = IOResult(stderr=(down + cut).encode())
+    await tell_once(io, node, down + gone)
+    await tell_once(io, node, gone)
+    assert io.stderr == (down + cut + gone).encode()
+    assert node.stderr == (down + gone).encode()
+    assert io.exit_code == node.exit_code == 1

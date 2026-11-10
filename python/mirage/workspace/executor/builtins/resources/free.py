@@ -35,6 +35,7 @@ from mirage.workspace.executor.builtins.machine_view import (
     machine_scope,
     option_refusal,
     read_machines,
+    tell_once,
     usage_page,
     with_machine,
 )
@@ -355,7 +356,6 @@ async def _passes(
         io (IOResult): the result, settled as the output ends.
         node (ExecutionNode): the command's node, settled with it.
     """
-    told = [node.stderr]
     try:
         yield encode_text(first)
         done = 1
@@ -363,13 +363,10 @@ async def _passes(
             await asyncio.sleep(delay)
             rows, errors = await _read(processes, scope, memory)
             if errors:
-                told.append(encode_text(errors))
-                io.exit_code = node.exit_code = 1
+                await tell_once(io, node, errors)
             yield encode_text("\n" + _render(rows, options, scope.several))
             done += 1
     finally:
-        node.stderr = b"".join(told)
-        io.stderr = node.stderr or None
         if io.output is not None:
             io.output.finish()
 
