@@ -14,6 +14,7 @@
 
 import type { FsCondition } from '@struktoai/mirage-core/errors/index'
 import { classify } from '@struktoai/mirage-core/errors/index'
+import { messageCondition } from '@struktoai/mirage-core/mount/errors'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import { constants as osConstants } from 'node:os'
 
@@ -44,19 +45,6 @@ const CONDITION_ERRNO: Record<FsCondition, number> = {
   STALE_WRITE: osConstants.errno.ESTALE,
 }
 
-// Genuine last resort, for an error whose only signal is its message (a
-// third-party client's untyped failure). "read-only" and "no mount" are not
-// here: those arrive typed and `classify` names them. Mirrors python's
-// `_MESSAGE_CODES`.
-const MESSAGE_CODES: [string[], number][] = [
-  [['not empty', 'enotempty'], osConstants.errno.ENOTEMPTY],
-  [['not a directory', 'enotdir'], osConstants.errno.ENOTDIR],
-  [['is a directory', 'eisdir'], osConstants.errno.EISDIR],
-  [['permission', 'eacces'], osConstants.errno.EACCES],
-  [['file exists', 'eexist'], osConstants.errno.EEXIST],
-  [['not found', 'no such', 'enoent'], osConstants.errno.ENOENT],
-]
-
 /**
  * Map a mirage-native error onto a positive POSIX errno.
  *
@@ -83,10 +71,8 @@ export function classifyErrno(err: unknown): number {
     const passthrough = errnos[code]
     if (passthrough !== undefined) return passthrough
   }
-  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase()
-  for (const [needles, errno] of MESSAGE_CODES) {
-    if (needles.some((n) => msg.includes(n))) return errno
-  }
+  const named = messageCondition(err)
+  if (named !== null) return CONDITION_ERRNO[named]
   // A bug in the core would otherwise read only as "I/O error".
   if (code === undefined) console.warn(`unclassified mount error: ${String(err)}`)
   return osConstants.errno.EIO
@@ -95,20 +81,4 @@ export function classifyErrno(err: unknown): number {
 /** Same classification, negated for `@zkochan/fuse-native` callbacks. */
 export function classifyError(err: unknown): number {
   return -classifyErrno(err)
-}
-
-/**
- * An SFTP request answered with a status the core cannot express as an
- * errno: an operation mirage does not offer, or a workspace that is not
- * there. asyncssh raises its own SFTPError classes for these on the
- * Python side.
- */
-export class SFTPStatusError extends Error {
-  readonly status: number
-
-  constructor(status: number, message: string) {
-    super(message)
-    this.name = 'SFTPStatusError'
-    this.status = status
-  }
 }

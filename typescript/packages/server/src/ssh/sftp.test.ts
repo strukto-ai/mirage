@@ -23,7 +23,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { WorkspaceRegistry, type WorkspaceEntry } from '../registry.ts'
 import { mintKeyPair } from './keys.ts'
 import { startSSHServer } from './server.ts'
-import { STATUS } from '@struktoai/mirage-node/mount/constants'
+import { STATUS } from '@struktoai/mirage-core/mount/constants'
 import type { SSHListener } from './types.ts'
 
 interface Harness {

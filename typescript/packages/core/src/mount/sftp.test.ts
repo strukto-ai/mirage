@@ -12,14 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { currentCaller, runWithCaller } from '@struktoai/mirage-core/context/session_context'
-import { strerrorOf } from '@struktoai/mirage-core/errors/fs'
-import type { MountCore } from '@struktoai/mirage-core/mount/core'
-import { MountMode } from '@struktoai/mirage-core/types'
-import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { describe, expect, it } from 'vitest'
-import { Workspace } from '../workspace.ts'
+import { describe, expect, it, vi } from 'vitest'
+import { currentCaller, runWithCaller } from '../context/session_context.ts'
+import { strerrorOf } from '../errors/fs.ts'
+import { MountMode } from '../types.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
+import { Workspace } from '../workspace/workspace/workspace.ts'
 import { OPEN, STATUS } from './constants.ts'
+import type { MountCore } from './core.ts'
 import { PipeServer, longname, toAttrs, workspacePath } from './sftp.ts'
 
 // SFTP v3 packet types the pipe tests speak.
@@ -256,6 +256,83 @@ describe('PipeServer', () => {
     end.close()
     await served
     await ws.close()
+  })
+
+  it.each([
+    [undefined, 0, 0],
+    [{ uid: 501, gid: 20 }, 501, 20],
+  ])('answers as the owner it is given (%o)', async (owner, uid, gid) => {
+    const ws = new Workspace({ '/notes': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.vfs.write('/notes/plan.txt', 'plan')
+    await ws.session('agent')
+    const end = client()
+    const served = new PipeServer(ws.vfs, ws.getSession('agent'), undefined, owner).serve(
+      end.reader,
+      end.writer,
+    )
+    try {
+      end.send(packet(FXP_INIT, uint32(3)))
+      await end.answer()
+      end.send(stat(1, '/notes/plan.txt'))
+      const [kind, body] = await end.answer()
+      // id, flags, size (8 bytes), then uid and gid.
+      expect([kind, body.readUInt32BE(16), body.readUInt32BE(20)]).toEqual([FXP_ATTRS, uid, gid])
+    } finally {
+      end.close()
+      await served
+      await ws.close()
+    }
+  })
+
+  it.each([
+    ['NoSuchKey: object not found', STATUS.NO_SUCH_FILE],
+    ['permission denied by the bucket', STATUS.PERMISSION_DENIED],
+    ['bucket on fire', STATUS.FAILURE],
+  ])('names an untyped failure by its message: %s', async (said, status) => {
+    // A third-party client's error carries nothing else, as FUSE reads it.
+    const notes = new RAMVFS()
+    vi.spyOn(notes, 'stat').mockRejectedValue(new Error(said))
+    const ws = new Workspace({ '/notes': notes }, { mode: MountMode.WRITE })
+    await ws.session('agent')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const end = client()
+    const served = new PipeServer(ws.vfs, ws.getSession('agent')).serve(end.reader, end.writer)
+    try {
+      end.send(packet(FXP_INIT, uint32(3)))
+      await end.answer()
+      end.send(stat(1, '/notes/plan.txt'))
+      const [kind, body] = await end.answer()
+      expect([kind, body.readUInt32BE(4)]).toEqual([FXP_STATUS, status])
+    } finally {
+      warn.mockRestore()
+      end.close()
+      await served
+      await ws.close()
+    }
+  })
+
+  it('loads ssh2 only once it serves', async () => {
+    // A host without the optional peer still loads the module.
+    let loaded = false
+    vi.resetModules()
+    vi.doMock('ssh2/lib/protocol/SFTP.js', async (importOriginal) => {
+      loaded = true
+      return importOriginal()
+    })
+    try {
+      const { PipeServer: Fresh } = await import('./sftp.ts')
+      expect(loaded).toBe(false)
+      const ws = new Workspace({ '/notes': new RAMVFS() }, { mode: MountMode.WRITE })
+      await ws.session('agent')
+      const end = client()
+      end.close()
+      await new Fresh(ws.vfs, ws.getSession('agent')).serve(end.reader, end.writer)
+      expect(loaded).toBe(true)
+      await ws.close()
+    } finally {
+      vi.doUnmock('ssh2/lib/protocol/SFTP.js')
+      vi.resetModules()
+    }
   })
 
   it('ends quietly when the pipe closes before it speaks', async () => {

@@ -594,6 +594,9 @@ importers:
       '@xmldom/xmldom':
         specifier: ^0.9.12
         version: 0.9.12
+      ssh2:
+        specifier: ^1.16.0
+        version: 1.17.0
     devDependencies:
       '@pydantic/monty':
         specifier: 1.4.0
@@ -695,6 +698,9 @@ importers:
       pyodide:
         specifier: ^314.0.5
         version: 314.0.5
+      ssh2:
+        specifier: ^1.16.0
+        version: 1.17.0
       typescript:
         specifier: ^6.0.0
         version: 6.0.3

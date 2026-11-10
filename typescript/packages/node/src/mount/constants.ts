@@ -12,29 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// SFTP v3 open flags and status codes, fixed by the protocol draft.
-export const OPEN = {
-  READ: 0x01,
-  WRITE: 0x02,
-  APPEND: 0x04,
-  CREAT: 0x08,
-  TRUNC: 0x10,
-  EXCL: 0x20,
-} as const
-export const STATUS = {
-  OK: 0,
-  EOF: 1,
-  NO_SUCH_FILE: 2,
-  PERMISSION_DENIED: 3,
-  FAILURE: 4,
-  OP_UNSUPPORTED: 8,
-} as const
-
-// ssh2's SFTP protocol class, which a served sandbox pipe runs without an
-// SSH connection around it, and the size it cuts each answer to there.
-export const SSH2_SFTP_MODULE = 'ssh2/lib/protocol/SFTP.js'
-export const PIPE_PACKET_SIZE = 64 * 1024
-
 /**
  * Who owns what a mount shows when a row names its owner by name (the
  * kernel wants numbers): the mounting user. Windows has none. Mirrors

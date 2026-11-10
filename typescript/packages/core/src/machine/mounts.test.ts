@@ -35,8 +35,9 @@ import type { MachinePipe, MountType } from './types.ts'
 import type { OutputFn, RunResult } from '../runtime/types.ts'
 import { MachineHandle } from './handle.ts'
 import { PIPE_TRANSPORT, type PipeTransport } from './mixin.ts'
-import { isRun, MOUNT_GUARD, SSHFS_OPTIONS } from './constants.ts'
+import { isRun, MOUNT_GUARD, SSHFS_OPTIONS, UNMOUNT_WAIT_SECONDS } from './constants.ts'
 import {
+  killLine,
   mountTable,
   registerPipeServer,
   runningLine,
@@ -73,7 +74,13 @@ class FakeMachine extends MachineHandle implements PipeTransport {
   failUnmount = false
   failTable = false
   failCheck = false
+  failKill = false
+  hangKill = false
+  // How long the kill line takes, answering past any abort.
+  killMs = 0
   hang = false
+  // Holds every mount table read until it settles.
+  gate: Promise<void> | null = null
 
   constructor(
     mountType: MountType,
@@ -156,10 +163,30 @@ class FakeMachine extends MachineHandle implements PipeTransport {
       })
     }
     if (line === 'cat /proc/mounts') {
-      return Promise.resolve({ stdout: ENC.encode(this.rows()), stderr: null, exitCode: 0 })
+      return (this.gate ?? Promise.resolve()).then(() => ({
+        stdout: ENC.encode(this.rows()),
+        stderr: null,
+        exitCode: 0,
+      }))
     }
     if (line.startsWith('cat /proc/[0-9]*/cmdline') && this.failCheck) {
       return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 2 })
+    }
+    if (line.startsWith('for p in /proc/[0-9]*') && this.killMs > 0) {
+      return new Promise((resolve) =>
+        setTimeout(() => {
+          resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+        }, this.killMs),
+      )
+    }
+    if (line.startsWith('for p in /proc/[0-9]*') && this.hangKill) {
+      return new Promise(() => undefined)
+    }
+    if (line.startsWith('for p in /proc/[0-9]*') && this.failKill) {
+      return Promise.reject(new Error('the machine went away'))
+    }
+    if (line.startsWith('for p in /proc/[0-9]*')) {
+      this.running.delete(/ S='([^']*)' /.exec(line)?.[1] ?? '')
     }
     if (line.startsWith('cat /proc/[0-9]*/cmdline')) {
       const source = / S='([^']*)' /.exec(line)?.[1] ?? ''
@@ -365,6 +392,36 @@ describe('runningLine', () => {
       timeout: 10_000,
     })
     expect(done.status).toBe(2)
+  })
+})
+
+describe('killLine', () => {
+  // It kills each program carrying the source as an argument, as sshfs
+  // does, and no program carrying a shorter or another source, nor itself.
+  it.skipIf(!existsSync('/proc/self'))('kills only a program carrying the source', async () => {
+    const start = (source: string) =>
+      spawn('/bin/sh', ['-c', 'echo ready; while :; do sleep 1; done', 'sh', source])
+    const programs = ['mirage-x:/my notes', 'mirage-x:/my', 'mirage-y:/my notes'].map(start)
+    try {
+      await Promise.all(
+        programs.map(
+          (program) =>
+            new Promise<void>((resolve) => {
+              program.stdout.once('data', () => {
+                resolve()
+              })
+            }),
+        ),
+      )
+      const done = spawnSync('/bin/sh', ['-c', killLine('mirage-x:/my notes')], {
+        timeout: 10_000,
+      })
+      expect(done.status).toBe(0)
+      await until(() => programs[0]?.signalCode !== null)
+      expect(programs.map((program) => program.signalCode)).toEqual(['SIGKILL', null, null])
+    } finally {
+      for (const program of programs) program.kill('SIGKILL')
+    }
   })
 })
 
@@ -941,6 +998,152 @@ describe('MachineMounts', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
     expect(sandbox.served()).toEqual(['/data', '/my notes', '/data'])
+    await ws.close()
+  })
+
+  it.each([
+    ['fails', () => Promise.reject(new Error('no server here'))],
+    ['ends', () => Promise.resolve()],
+  ])('never takes a mount whose server %s before it shows', async (_, serve) => {
+    registerPipeServer((files, session) => ({ ...drain(files, session), serve }))
+    try {
+      const sandbox = new FakeMachine('ssh')
+      const ws = workspace(sandbox)
+      const agent = await ws.session('agent', { profile: 'agent' })
+      const result = await agent.shell('python3 job.py')
+      expect(result.exitCode).toBe(1)
+      expect(DEC.decode(result.stderr)).toContain('fake: sshfs did not mount /data')
+      expect(sandbox.commands).not.toContain('python3 job.py')
+      expect(sandbox.table.has('/data')).toBe(false)
+      expect(sandbox.stopped).toContain('/data')
+      await ws.close()
+    } finally {
+      registerPipeServer(drain)
+    }
+  })
+
+  it('takes a mount down as soon as its server ends', async () => {
+    // A program blocked on a mount nobody answers is freed while its line
+    // runs: the sshfs is killed, then the mount is unmounted.
+    const sandbox = new FakeMachine('ssh')
+    const ws = workspace(sandbox)
+    await ws.session('agent', { profile: 'agent' })
+    const abort = new AbortController()
+    const line = ws
+      .shell('python3 slow.py', { sessionId: 'agent', signal: abort.signal })
+      .catch(() => undefined)
+    await until(() => sandbox.commands.includes('python3 slow.py'))
+    const source = sandbox.table.get('/data')?.[0] ?? ''
+    sandbox.ends.get('/data')?.()
+    await until(() => !sandbox.table.has('/data'))
+    const killed = sandbox.commands.indexOf(killLine(source))
+    expect(killed).toBeGreaterThan(-1)
+    expect(
+      sandbox.commands.indexOf("fusermount3 -uz '/data' || fusermount -uz '/data'"),
+    ).toBeGreaterThan(killed)
+    expect(sandbox.running.has(source)).toBe(false)
+    expect(sandbox.table.has('/my notes')).toBe(true)
+    abort.abort()
+    await line
+    expect((await ws.shell('python3 job.py', { sessionId: 'agent' })).exitCode).toBe(0)
+    expect(sandbox.stopped).toEqual(['/data'])
+    expect(sandbox.served()).toEqual(['/data', '/my notes', '/data'])
+    await ws.close()
+  })
+
+  it('unmounts a mount whose server ended when its sshfs cannot be killed', async () => {
+    const sandbox = new FakeMachine('ssh')
+    sandbox.failKill = true
+    const ws = workspace(sandbox)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      sandbox.ends.get('/data')?.()
+      await until(() => !sandbox.table.has('/data'))
+      expect(warn).toHaveBeenCalledWith(
+        'fake: killing the sshfs for /data failed:',
+        expect.any(Error),
+      )
+    } finally {
+      warn.mockRestore()
+      await ws.close()
+    }
+  })
+
+  it('lets the next line run past a takedown the machine never answers', async () => {
+    const sandbox = new FakeMachine('ssh')
+    sandbox.hangKill = true
+    const ws = workspace(sandbox)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    const timeout = AbortSignal.timeout.bind(AbortSignal)
+    const short = vi
+      .spyOn(AbortSignal, 'timeout')
+      .mockImplementation((ms) => timeout(ms === UNMOUNT_WAIT_SECONDS * 1000 ? 50 : ms))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      sandbox.ends.get('/data')?.()
+      await until(() => sandbox.commands.some((c) => c.startsWith('for p in /proc/[0-9]*')))
+      expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+      expect(sandbox.served()).toEqual(['/data', '/my notes', '/data'])
+    } finally {
+      short.mockRestore()
+      warn.mockRestore()
+      await ws.close()
+    }
+  })
+
+  it('unmounts nothing once a takedown is past its deadline', async () => {
+    // The kill answers past the deadline; what the next line serves there
+    // carries the same source, so a late unmount could take it.
+    const sandbox = new FakeMachine('ssh')
+    sandbox.killMs = 100
+    const ws = workspace(sandbox)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    const timeout = AbortSignal.timeout.bind(AbortSignal)
+    const short = vi
+      .spyOn(AbortSignal, 'timeout')
+      .mockImplementation((ms) => timeout(ms === UNMOUNT_WAIT_SECONDS * 1000 ? 50 : ms))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      sandbox.ends.get('/data')?.()
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      expect(sandbox.commands.filter((c) => c.startsWith('fusermount3'))).toEqual([])
+    } finally {
+      short.mockRestore()
+      warn.mockRestore()
+      await ws.close()
+    }
+  })
+
+  it('leaves its own sshfs that replaced an ended server', async () => {
+    // An sshfs exits while a line holds the mounts: that line serves the
+    // prefix again before the ended server's takedown runs, which then
+    // leaves the new sshfs, carrying the same source, alone.
+    const sandbox = new FakeMachine('ssh')
+    const ws = workspace(sandbox)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    const source = sandbox.table.get('/data')?.[0] ?? ''
+    let open = (): void => undefined
+    sandbox.gate = new Promise<void>((resolve) => {
+      open = resolve
+    })
+    ws.addMount('/extra', new RAMVFS(), MountMode.WRITE)
+    const reads = sandbox.commands.filter((c) => c === 'cat /proc/mounts').length
+    const line = agent.shell('python3 job.py')
+    await until(() => sandbox.commands.filter((c) => c === 'cat /proc/mounts').length > reads)
+    sandbox.sshfsExits('/data')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    sandbox.gate = null
+    open()
+    expect((await line).exitCode).toBe(0)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(sandbox.served()).toEqual(['/data', '/my notes', '/data', '/extra'])
+    expect(sandbox.table.get('/data')).toEqual([source, 'fuse.sshfs'])
+    expect(sandbox.running.has(source)).toBe(true)
     await ws.close()
   })
 

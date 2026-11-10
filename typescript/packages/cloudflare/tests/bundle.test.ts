@@ -66,6 +66,12 @@ it('loads the Rust modules as .wasm files, with no base64 copy in the script', (
   expect(longest).toBeLessThan(1024 * 1024)
 })
 
+it('carries the file server a machine mounts, with ssh2 in it', () => {
+  const script = readFileSync(join(outdir, 'worker.js'), 'latin1')
+  expect(script).toContain('__name(this, "PipeServer")')
+  expect(script).toContain('ssh2/lib/protocol/SFTP.js')
+})
+
 it('ships no QuickJS', () => {
   expect([...files.keys()].some((name) => name.includes('qjs'))).toBe(false)
 })

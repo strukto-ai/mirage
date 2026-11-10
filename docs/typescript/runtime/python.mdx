@@ -22,7 +22,8 @@ specific to the TypeScript SDK.
 - **Local:** in `@struktoai/mirage-node` only. With neither `home` nor
   `MIRAGE_LOCAL_HOME`, `python3` is the one on `PATH`.
 - **Machines:** in `@struktoai/mirage-node`; `e2b` also runs in browsers.
-  `mountType` `ssh` and `both` need Node and the `ssh2` package. The `ssh`
+  `mountType` `ssh` and `both` need the `ssh2` package; a browser serves no
+  files into a machine. The `ssh`
   machine authenticates through `SSH_AUTH_SOCK` when there is no
   `identityFile`, and `username` defaults to the local user.
 - **Config objects** are camelCase in code (`sandboxId`, `mountType`); YAML

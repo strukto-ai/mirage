@@ -13,9 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { MountCore } from '@struktoai/mirage-core/mount/core'
-import { OWNER, STATUS } from '@struktoai/mirage-node/mount/constants'
-import { SFTPStatusError } from '@struktoai/mirage-node/mount/errors'
-import { MirageSFTPServer } from '@struktoai/mirage-node/mount/sftp'
+import { STATUS } from '@struktoai/mirage-core/mount/constants'
+import { SFTPStatusError } from '@struktoai/mirage-core/mount/errors'
+import { MirageSFTPServer } from '@struktoai/mirage-core/mount/sftp'
+import { OWNER } from '@struktoai/mirage-node/mount/constants'
 import type { SFTPWrapper } from 'ssh2'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import { keyProfile, loginEntry, newSessionId, openSession } from './session.ts'

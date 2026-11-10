@@ -109,7 +109,8 @@
     "imapflow": "^2.10.0",
     "mailparser": "^3.12.4",
     "nodemailer": "^10.1.4",
-    "@types/nodemailer": "^8.0.0"
+    "@types/nodemailer": "^8.0.0",
+    "ssh2": "^1.16.0"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1116.0",
@@ -134,7 +135,8 @@
     "pg": "^8.13.0",
     "imapflow": "^2.10.0",
     "mailparser": "^3.12.4",
-    "nodemailer": "^10.1.4"
+    "nodemailer": "^10.1.4",
+    "ssh2": "^1.16.0"
   },
   "peerDependenciesMeta": {
     "@qdrant/js-client-rest": {
@@ -165,6 +167,9 @@
       "optional": true
     },
     "nodemailer": {
+      "optional": true
+    },
+    "ssh2": {
       "optional": true
     }
   }

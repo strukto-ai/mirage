@@ -3,6 +3,11 @@ main = "worker.ts"
 compatibility_date = "2026-10-01"
 compatibility_flags = ["nodejs_compat", "no_handle_cross_request_promise_resolution"]
 
+# ssh2, which serves the workspace's files into a machine, tries this native
+# addon inside a try; the bundle takes a stub that throws in its place.
+[alias]
+"cpu-features" = "./cpu_features.ts"
+
 [limits]
 cpu_ms = 60000
 
