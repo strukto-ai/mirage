@@ -22,7 +22,6 @@ import { strerrorOf } from '../errors/fs.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import { singleQuote } from '../utils/quote.ts'
 import { compareCodePoints } from '../utils/sort.ts'
-import { abortable } from '../utils/abort.ts'
 import { runDetached } from '../utils/async_context.ts'
 import type { Files } from '../workspace/files.ts'
 import type { SessionState } from '../workspace/session/session.ts'
@@ -187,6 +186,8 @@ async function within(task: Promise<void>, ms: number): Promise<void> {
 }
 
 interface Served {
+  // The sshfs's source, its own to this serve.
+  source: string
   pipe: MachinePipe
   server: PipeServer
   // Settles when the server ends, never rejecting: `failure` says why.
@@ -222,8 +223,9 @@ interface Served {
  * otherwise read through. Under `fuse` the host serves nothing, and any
  * session may run.
  *
- * Each sshfs source names the instance serving it (`mirage-<id>:<prefix>`),
- * so an instance unmounts only its own: a prefix another sshfs still
+ * Each sshfs source names the instance serving it and the serve
+ * (`mirage-<id>-<n>:<prefix>`), so an instance unmounts only its own, and
+ * kills only the sshfs of a server that ended: a prefix another sshfs still
  * serves, as another workspace on the same machine does, refuses
  * the line (1) rather than being taken, and one whose sshfs has gone is
  * unmounted and served.
@@ -251,6 +253,8 @@ export class MachineMounts {
   private readonly under = new Map<string, string>()
   private lock: Promise<unknown> = Promise.resolve()
   private readonly name = `${SSHFS_SOURCE_PREFIX}${crypto.randomUUID().replaceAll('-', '')}`
+  // The prefixes served so far, numbering each sshfs's source.
+  private serves = 0
 
   /**
    * @param provider the machine's provider, for messages.
@@ -375,7 +379,7 @@ export class MachineMounts {
    */
   guarded(argv: readonly string[]): readonly string[] {
     const held = new Map<string, [string, string]>(
-      [...this.served.keys()].map((p) => [p, [this.source(p), 'fuse.sshfs']]),
+      [...this.served].map(([p, entry]) => [p, [entry.source, 'fuse.sshfs']]),
     )
     for (const [p, entry] of this.own) held.set(p, entry)
     if (held.size === 0) return argv
@@ -548,7 +552,7 @@ export class MachineMounts {
       return (
         wanted.includes(p) &&
         entry !== undefined &&
-        (entry[0] !== this.source(p) || entry[1] !== 'fuse.sshfs') &&
+        (entry[0] !== this.served.get(p)?.source || entry[1] !== 'fuse.sshfs') &&
         (!ended.includes(p) || entry[1] !== 'fuse.sshfs') &&
         !(ended.includes(p) && JSON.stringify(entry) === this.under.get(p))
       )
@@ -599,8 +603,9 @@ export class MachineMounts {
     return null
   }
 
-  private source(prefix: string): string {
-    return `${this.name}:${prefix}`
+  /** Whether `source` is an sshfs this instance served. */
+  private ours(source: string): boolean {
+    return source.startsWith(`${this.name}-`)
   }
 
   /**
@@ -618,7 +623,7 @@ export class MachineMounts {
     signal?: AbortSignal,
   ): Promise<boolean> {
     const [source, kind] = present.get(prefix) ?? ['', '']
-    if (kind !== 'fuse.sshfs' || source === this.source(prefix)) return false
+    if (kind !== 'fuse.sshfs' || this.ours(source)) return false
     const found = await this.run(runningLine(source), signal)
     if (found.exitCode !== 0 && found.exitCode !== 1) {
       throw new Error(
@@ -648,9 +653,19 @@ export class MachineMounts {
       )
     }
     const log = singleQuote(`${SSHFS_LOG_PREFIX}_${crypto.randomUUID().replaceAll('-', '')}.log`)
-    const source = singleQuote(this.source(prefix))
-    const pipe = await this.openPipe(`exec sshfs -f -o ${SSHFS_OPTIONS} ${source} ${path} 2>${log}`)
-    const entry: Served = { pipe, server, serving: Promise.resolve(), ended: false, failure: null }
+    this.serves += 1
+    const source = `${this.name}-${String(this.serves)}:${prefix}`
+    const pipe = await this.openPipe(
+      `exec sshfs -f -o ${SSHFS_OPTIONS} ${singleQuote(source)} ${path} 2>${log}`,
+    )
+    const entry: Served = {
+      source,
+      pipe,
+      server,
+      serving: Promise.resolve(),
+      ended: false,
+      failure: null,
+    }
     entry.serving = Promise.resolve(runDetached(() => server.serve(pipe.reader, pipe.writer))).then(
       () => {
         this.ended(prefix, entry)
@@ -665,8 +680,8 @@ export class MachineMounts {
       const deadline = Date.now() + MOUNT_WAIT_SECONDS * 1000
       for (;;) {
         try {
-          const [source, kind] = (await this.table(signal)).get(prefix) ?? ['', '']
-          if (!entry.ended && source === this.source(prefix) && kind === 'fuse.sshfs') return
+          const [found, kind] = (await this.table(signal)).get(prefix) ?? ['', '']
+          if (!entry.ended && found === source && kind === 'fuse.sshfs') return
         } catch (error) {
           signal?.throwIfAborted()
           const diagnostic = (await pipe.diagnostic?.()) ?? ''
@@ -704,43 +719,27 @@ export class MachineMounts {
   }
 
   /**
-   * Take down the mount of a prefix whose server ended, unless a line took
-   * it down already: the mount, rather than a program blocked on it, is
-   * what goes. The next line drops the prefix as it does any that ended.
-   * The lock keeps this off the sshfs a later line serves again, which
-   * carries the same source, and a deadline keeps a machine that went away
-   * from holding the lock.
+   * Kill the sshfs of a prefix whose server ended, unless a line dropped it
+   * already: a program blocked on the mount then gets an error rather than
+   * hanging. The next line unmounts it and serves the prefix again, as for
+   * any server that ended; a kill that lands late reaches only this serve's
+   * sshfs, never the one serving the prefix again.
    */
   private ended(prefix: string, entry: Served): void {
     entry.ended = true
-    this.locked(() => {
-      const deadline = AbortSignal.timeout(UNMOUNT_WAIT_SECONDS * 1000)
-      return abortable(this.takeDown(prefix, entry, deadline), deadline)
-    }).catch((err: unknown) => {
-      console.warn(`${this.provider}: taking down ${prefix} after its server ended failed:`, err)
-    })
-  }
-
-  private async takeDown(prefix: string, entry: Served, signal: AbortSignal): Promise<void> {
     if (this.served.get(prefix) !== entry) return
-    await this.attempt(killLine(this.source(prefix)), `killing the sshfs for ${prefix}`, signal)
-    // A provider may finish a line past its abort; a later step must not run then.
-    signal.throwIfAborted()
-    const present = await this.present(signal)
-    signal.throwIfAborted()
-    await this.unmountOwn(prefix, present, signal)
-  }
-
-  /** Run one cleanup line, warning when it fails; a stopped one stops the cleanup. */
-  private async attempt(line: string, what: string, signal?: AbortSignal): Promise<void> {
-    try {
-      const done = await this.run(line, signal)
-      if (done.exitCode !== 0)
-        console.warn(`${this.provider}: ${what} failed: ${said(done.stderr)}`)
-    } catch (err) {
-      signal?.throwIfAborted()
-      console.warn(`${this.provider}: ${what} failed:`, err)
-    }
+    this.run(killLine(entry.source)).then(
+      (killed) => {
+        if (killed.exitCode !== 0) {
+          console.warn(
+            `${this.provider}: killing the sshfs for ${prefix} failed: ${said(killed.stderr)}`,
+          )
+        }
+      },
+      (err: unknown) => {
+        console.warn(`${this.provider}: killing the sshfs for ${prefix} failed:`, err)
+      },
+    )
   }
 
   /** Remove the helper's setup log; keeping it only costs a file. */
@@ -775,7 +774,18 @@ export class MachineMounts {
     if (entry === undefined) return
     this.served.delete(prefix)
     this.under.delete(prefix)
-    await this.unmountOwn(prefix, present)
+    if (present.get(prefix)?.[0] === entry.source) {
+      try {
+        const done = await this.run(unmountLine(prefix))
+        if (done.exitCode !== 0) {
+          console.warn(
+            `${this.provider}: unmounting ${prefix} in the machine failed: ${said(done.stderr)}`,
+          )
+        }
+      } catch (err) {
+        console.warn(`${this.provider}: unmounting ${prefix} in the machine failed:`, err)
+      }
+    }
     try {
       await entry.pipe.stop()
       await within(entry.serving, UNMOUNT_WAIT_SECONDS * 1000)
@@ -785,33 +795,19 @@ export class MachineMounts {
     }
   }
 
-  /** Unmount `prefix` if the mount on top is still this instance's. */
-  private async unmountOwn(
-    prefix: string,
-    present: ReadonlyMap<string, [string, string]>,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    if (present.get(prefix)?.[0] !== this.source(prefix)) return
-    await this.attempt(unmountLine(prefix), `unmounting ${prefix} in the machine`, signal)
-  }
-
-  /** The mount table to unmount by, or every served prefix as this instance's when it cannot be read. */
-  private async present(signal?: AbortSignal): Promise<Map<string, [string, string]>> {
-    try {
-      return await this.table(signal)
-    } catch (err) {
-      signal?.throwIfAborted()
-      console.warn(
-        `${this.provider}: reading the mount table to unmount failed; unmounting every served prefix:`,
-        err,
-      )
-      return new Map([...this.served.keys()].map((p) => [p, [this.source(p), 'fuse.sshfs']]))
-    }
-  }
-
   private async unmount(): Promise<void> {
-    const present =
-      this.served.size > 0 ? await this.present() : new Map<string, [string, string]>()
+    let present = new Map<string, [string, string]>()
+    if (this.served.size > 0) {
+      try {
+        present = await this.table()
+      } catch (err) {
+        console.warn(
+          `${this.provider}: reading the mount table to unmount failed; unmounting every served prefix:`,
+          err,
+        )
+        present = new Map([...this.served].map(([p, entry]) => [p, [entry.source, 'fuse.sshfs']]))
+      }
+    }
     for (const prefix of [...this.served.keys()]) await this.drop(prefix, present)
     this.seen = null
   }

@@ -5,8 +5,10 @@ compatibility_flags = ["nodejs_compat", "no_handle_cross_request_promise_resolut
 
 # ssh2, which serves the workspace's files into a machine, tries this native
 # addon inside a try; the bundle takes a stub that throws in its place.
+# `wrangler dev` resolves it from the package, `deploy --config` from here,
+# which bundle.test.ts gives an absolute path.
 [alias]
-"cpu-features" = "./cpu_features.ts"
+"cpu-features" = "./tests/cpu_features.ts"
 
 [limits]
 cpu_ms = 60000

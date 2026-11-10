@@ -105,8 +105,8 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
         self.requests: dict[str, asyncio.StreamReader] = {}
         self.stopped: list[str] = []
         self.guards: list[tuple[str, ...]] = []
-        # Holds every mount table read until it is set.
-        self.gate: asyncio.Event | None = None
+        # How long the kill line takes to land.
+        self.kill_seconds = 0.0
 
     async def connect(self) -> None:
         return None
@@ -129,11 +129,11 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
             return RunResult(stdout=b"", stderr=b"gone\n", exit_code=1)
         if line == "cat /proc/mounts":
             await asyncio.sleep(0)
-            if self.gate is not None:
-                await self.gate.wait()
             return RunResult(
                 stdout=self.rows().encode(), stderr=None, exit_code=0
             )
+        if line.startswith("for p in /proc/[0-9]*") and self.kill_seconds:
+            await asyncio.sleep(self.kill_seconds)
         if line.startswith("for p in /proc/[0-9]*") and self.hang_kill:
             await asyncio.Event().wait()
         if line.startswith("for p in /proc/[0-9]*") and self.fail_kill:
@@ -378,11 +378,11 @@ async def test_ssh_serves_every_prefix_the_session_sees():
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("python3 job.py")
     assert (result.exit_code, await result.stdout_str()) == (0, "ran\n")
-    name = shlex.split(sandbox.pipes[0])[5].split(":")[0]
+    name = shlex.split(sandbox.pipes[0])[5].split("-1:")[0]
     assert re.fullmatch("mirage-[0-9a-f]{32}", name)
     assert [p.split(" 2>")[0] for p in sandbox.pipes] == [
-        f"exec sshfs -f -o {SSHFS_OPTIONS} '{name}:/data' '/data'",
-        f"exec sshfs -f -o {SSHFS_OPTIONS} '{name}:/my notes' '/my notes'",
+        f"exec sshfs -f -o {SSHFS_OPTIONS} '{name}-1:/data' '/data'",
+        f"exec sshfs -f -o {SSHFS_OPTIONS} '{name}-2:/my notes' '/my notes'",
     ]
     await agent.shell("python3 again.py")
     assert len(sandbox.pipes) == 2
@@ -899,7 +899,7 @@ async def test_a_landing_stopped_as_a_sync_returns_logs_its_failure(caplog):
             return [("/data/a.bin", QuotaExceededError(errno.EDQUOT, ""))]
 
     held = mounts.MachineMounts("fake", "ssh", None, None)
-    held._served["/data"] = (None, None, Server(None, None, None))
+    held._served["/data"] = (None, None, Server(None, None, None), "")
     landing.append(asyncio.create_task(held.land()))
     with caplog.at_level("WARNING"):
         await asyncio.wait(landing)
@@ -1006,10 +1006,10 @@ async def _until(ready):
     assert ready()
 
 
-# A program blocked on a mount nobody answers is freed while its line runs:
-# the sshfs is killed, then the mount is unmounted.
+# A program blocked on a mount nobody answers is freed while its line runs;
+# the next line unmounts the mount and serves the prefix again.
 @pytest.mark.asyncio
-async def test_a_mount_is_taken_down_as_soon_as_its_server_ends():
+async def test_the_sshfs_of_a_mount_whose_server_ended_is_killed():
     sandbox = FakeMachine("ssh")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
@@ -1017,43 +1017,40 @@ async def test_a_mount_is_taken_down_as_soon_as_its_server_ends():
     await _until(lambda: "python3 slow.py" in sandbox.commands)
     source = sandbox.table["/data"][0]
     sandbox.requests["/data"].feed_eof()
-    await _until(lambda: "/data" not in sandbox.table)
+    await _until(lambda: source not in sandbox.running)
     killed = sandbox.commands.index(kill_line(source))
+    line.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await line
+    assert (await agent.shell("python3 job.py")).exit_code == 0
     assert (
         sandbox.commands.index(
             "fusermount3 -uz '/data' || fusermount -uz '/data'"
         )
         > killed
     )
-    assert source not in sandbox.running
-    assert "/my notes" in sandbox.table
-    line.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await line
-    assert (await agent.shell("python3 job.py")).exit_code == 0
-    assert sandbox.stopped == ["/data"]
     assert served(sandbox) == ["/data", "/my notes", "/data"]
+    assert sandbox.table["/data"][0] != source
     await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_a_mount_whose_sshfs_cannot_be_killed_is_still_unmounted(caplog):
+async def test_a_kill_of_an_ended_servers_sshfs_that_fails_warns(caplog):
     sandbox = FakeMachine("ssh")
     sandbox.fail_kill = True
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 0
     sandbox.requests["/data"].feed_eof()
-    await _until(lambda: "/data" not in sandbox.table)
-    assert "fake: killing the sshfs for /data failed" in caplog.text
+    await _until(
+        lambda: "fake: killing the sshfs for /data failed" in caplog.text
+    )
+    assert (await agent.shell("python3 job.py")).exit_code == 0
     await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_the_next_line_runs_past_a_takedown_the_machine_never_answers(
-    monkeypatch,
-):
-    monkeypatch.setattr(mounts, "UNMOUNT_WAIT_SECONDS", 0.05)
+async def test_the_next_line_runs_while_an_ended_servers_kill_is_unanswered():
     sandbox = FakeMachine("ssh")
     sandbox.hang_kill = True
     ws = workspace(sandbox)
@@ -1068,30 +1065,23 @@ async def test_the_next_line_runs_past_a_takedown_the_machine_never_answers(
     await ws.close()
 
 
-# An sshfs exits while a line holds the mounts: that line serves the prefix
-# again before the ended server's takedown runs, which then leaves the new
-# sshfs, carrying the same source, alone.
+# Each serve's sshfs carries a source of its own, so the ended one's kill
+# reaches only it, however late it lands.
 @pytest.mark.asyncio
-async def test_its_own_sshfs_that_replaced_an_ended_server_is_left_alone():
+async def test_a_kill_that_lands_late_spares_the_sshfs_serving_the_prefix_again():
     sandbox = FakeMachine("ssh")
+    sandbox.kill_seconds = 0.05
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 0
     source = sandbox.table["/data"][0]
-    gate = sandbox.gate = asyncio.Event()
-    ws.add_mount("/extra", RAMVFS(), MountMode.WRITE)
-    reads = sandbox.commands.count("cat /proc/mounts")
-    line = asyncio.create_task(agent.shell("python3 job.py"))
-    await _until(lambda: sandbox.commands.count("cat /proc/mounts") > reads)
-    sandbox.sshfs_exits("/data")
-    await asyncio.sleep(0)
-    sandbox.gate = None
-    gate.set()
-    assert (await line).exit_code == 0
-    await asyncio.sleep(0.02)
-    assert served(sandbox) == ["/data", "/my notes", "/data", "/extra"]
-    assert sandbox.table["/data"] == (source, "fuse.sshfs")
-    assert source in sandbox.running
+    sandbox.requests["/data"].feed_eof()
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    again = sandbox.table["/data"][0]
+    assert again != source
+    await asyncio.sleep(0.1)
+    assert again in sandbox.running
+    assert source not in sandbox.running
     await ws.close()
 
 

@@ -59,6 +59,12 @@ afterAll(async () => {
 })
 
 describe('mirage in workerd', () => {
+  it("serves a file over SFTP as a machine's sshfs reads it", async () => {
+    const response = await worker.fetch('http://localhost/sftp')
+    // VERSION, HANDLE, then DATA with the file's bytes.
+    expect(await response.json()).toEqual({ kinds: [2, 102, 103], data: 'served from the edge' })
+  })
+
   it('runs pipes, awk and jq', async () => {
     const [write, awk, sorted, jq] = await run([
       "printf 'name,team,points\\nann,a,10\\nbob,b,7\\ncat,a,12\\n' > /data/p.csv",
