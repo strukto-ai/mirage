@@ -157,6 +157,68 @@ describe('execute router', () => {
     await app.close()
   })
 
+  it.each(['1', 'yes', 'on', 't', 'y', 'TRUE', 'Yes'])(
+    'reads %s as a set stream flag',
+    async (flag) => {
+      const app = buildApp()
+      await createWs(app, 'flag')
+      const res = await app.inject({
+        method: 'POST',
+        url: `/v1/workspaces/flag/shell?stream=${flag}&explain=${flag}`,
+        payload: { command: 'echo hi' },
+      })
+      expect(res.statusCode).toBe(400)
+      expect(res.json()).toEqual({ detail: 'stream cannot be combined with explain' })
+      await app.close()
+    },
+  )
+
+  it.each(['0', 'no', 'off', 'f', 'n', 'FALSE', 'No'])(
+    'reads %s as an unset stream and explain flag',
+    async (flag) => {
+      const app = buildApp()
+      await createWs(app, 'unflag')
+      const res = await app.inject({
+        method: 'POST',
+        url: `/v1/workspaces/unflag/shell?stream=${flag}&explain=${flag}`,
+        payload: { command: 'echo hi' },
+      })
+      expect(res.statusCode).toBe(200)
+      expect(res.json<{ stdout: string }>().stdout.trim()).toBe('hi')
+      await app.close()
+    },
+  )
+
+  it.each(['abc', '', '2', 'tru'])('answers 422 for the flag value %j', async (flag) => {
+    const app = buildApp()
+    await createWs(app, 'badflag')
+    for (const name of ['explain', 'stream']) {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/v1/workspaces/badflag/shell?${name}=${flag}`,
+        payload: { command: 'echo hi' },
+      })
+      expect(res.statusCode).toBe(422)
+      expect(res.json()).toEqual({ detail: `${name} must be a valid boolean` })
+    }
+    await app.close()
+  })
+
+  it('runs in the default session when session_id is empty', async () => {
+    const app = buildApp()
+    await createWs(app, 'emptysid')
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/emptysid/shell?session_id=',
+      payload: { command: 'echo hi' },
+    })
+    expect(res.statusCode).toBe(200)
+    const ws = app.registry.get('emptysid').runner.ws
+    const [line] = lines(app, 'emptysid')
+    expect(line?.sessionId).toBe(ws.defaultSessionId)
+    await app.close()
+  })
+
   // A line on a workspace another daemon holds is refused, naming that
   // daemon; once it gives the lease up, the line runs here.
   it('refuses a workspace another daemon holds', async () => {

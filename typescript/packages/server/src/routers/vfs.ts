@@ -94,11 +94,20 @@ export async function sessionOf(ws: Workspace, sessionId: string | undefined): P
   return new Session(ws, sessionId === undefined || sessionId === '' ? null : sessionId)
 }
 
-/** Whether a query flag is set; anything but `true` or `false` is refused. */
+const FLAG_TRUE = new Set(['true', '1', 'yes', 'on', 't', 'y'])
+const FLAG_FALSE = new Set(['false', '0', 'no', 'off', 'f', 'n'])
+
+/**
+ * Whether a boolean query flag is set. Accepts what a FastAPI `bool` does
+ * (`true`/`false`, `1`/`0`, `yes`/`no`, `on`/`off`, `t`/`f`, `y`/`n`, any case);
+ * anything else, an empty value included, is a 422. Absent is false.
+ */
 export function queryFlag(value: string | undefined, name: string): boolean {
-  if (value === undefined || value === 'false') return false
-  if (value === 'true') return true
-  throw new HttpError(400, `${name} must be true or false`)
+  if (value === undefined) return false
+  const spelled = value.toLowerCase()
+  if (FLAG_TRUE.has(spelled)) return true
+  if (FLAG_FALSE.has(spelled)) return false
+  throw new HttpError(422, `${name} must be a valid boolean`)
 }
 
 /**

@@ -290,7 +290,7 @@ export function registerShellRoutes(app: RouteApp, deps: ShellRoutesDeps): void 
           : undefined
       const source = pipe?.stream() ?? stdin
       await entry.runner.ws.ensureSessionsLoaded()
-      const sessionId = req.query.session_id ?? entry.runner.ws.defaultSessionId
+      const sessionId = (req.query.session_id ?? '') || entry.runner.ws.defaultSessionId
       if (deps.jobs.draining || !entry.acceptingJobs) {
         try {
           await upload.finish()

@@ -15,6 +15,7 @@
 import { Outcome, Scope, type Decision } from '@struktoai/mirage-core/policy/index'
 import type { RouteApp } from '../routes.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
+import { failure, queryFlag } from './vfs.ts'
 
 interface WsIdParams {
   wsId: string
@@ -90,8 +91,13 @@ export function registerAsksRoutes(
       if (sessionId !== '' && !ws.listSessions().some((s) => s.sessionId === sessionId)) {
         return reply.status(404).send({ detail: 'session not found' })
       }
-      const records =
-        req.query.all === 'true' ? ws.decisions.list(sessionId) : ws.decisions.pending(sessionId)
+      let settled: boolean
+      try {
+        settled = queryFlag(req.query.all, 'all')
+      } catch (e) {
+        return failure(reply, e)
+      }
+      const records = settled ? ws.decisions.list(sessionId) : ws.decisions.pending(sessionId)
       return records.map(toResponse)
     },
   )
