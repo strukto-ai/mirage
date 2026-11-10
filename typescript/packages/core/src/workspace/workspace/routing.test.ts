@@ -17,6 +17,8 @@ import { MachineHandle } from '../../machine/handle.ts'
 import type { Policy } from '../../policy/base.ts'
 import {
   Outcome,
+  Scope,
+  type Action,
   type CommandContext,
   type CommandExplanation,
   type Route,
@@ -78,6 +80,17 @@ class WrapperApart implements Policy {
   preCommand(ctx: CommandContext): Route | null {
     if (ctx.command === 'nohup') return { kind: 'route', machine: 'a' }
     return ctx.command === 'hostname' ? { kind: 'route', machine: 'b' } : null
+  }
+}
+
+class Answers implements Policy {
+  constructor(
+    private readonly command: string,
+    private readonly answer: Action,
+  ) {}
+
+  preCommand(ctx: CommandContext): Action | null {
+    return ctx.command === this.command ? this.answer : null
   }
 }
 
@@ -284,6 +297,48 @@ describe('routing on machines', () => {
       expect(wrapper?.stderr).toBe(DEC.decode(run.stderr))
       const echo = nodes.find((c) => c.command === 'echo')
       expect([echo?.outcome, echo?.exitCode]).toEqual([Outcome.ALLOW, 0])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([
+    ['nohup', { kind: 'ask', reason: 'sign-off' }, Outcome.ASK],
+    ['hostname', { kind: 'ask', reason: 'sign-off' }, Outcome.ASK],
+    ['nohup', { kind: 'deny', reason: 'no' }, Outcome.DENY],
+  ] as const)(
+    'keeps what stops a wrapper before its routes: %s %j',
+    async (name, answer, outcome) => {
+      const ws = workspace(new Answers(name, answer), new WrapperApart())
+      try {
+        const said = await ws.explain('nohup hostname')
+        const nodes = [...commands(said.node)]
+        const stopped = nodes.find((c) => c.command === name)
+        const wrapper = nodes.find((c) => c.command === 'nohup')
+        const run = await ws.shell('nohup hostname')
+        expect(stopped?.outcome).toBe(outcome)
+        expect(stopped?.refusal?.reason).toBe(answer.reason)
+        expect(run.refusal?.reason).toBe(answer.reason)
+        expect(wrapper?.outcome).toBe(name === 'nohup' ? outcome : Outcome.ALLOW)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it('explains disagreeing routes as refused once an approval is given', async () => {
+    const ws = workspace(
+      new Answers('nohup', { kind: 'ask', reason: 'sign-off' }),
+      new WrapperApart(),
+    )
+    try {
+      const first = await ws.shell('nohup hostname')
+      await ws.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW, Scope.SESSION)
+      const said = await ws.explain('nohup hostname')
+      const wrapper = [...commands(said.node)].find((c) => c.command === 'nohup')
+      const run = await ws.shell('nohup hostname')
+      expect([wrapper?.outcome, wrapper?.exitCode]).toEqual([Outcome.DENY, 126])
+      expect(wrapper?.refusal).toEqual(run.refusal)
     } finally {
       await ws.close()
     }
