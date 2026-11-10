@@ -20,6 +20,10 @@ the server in this terminal before sending authenticated requests:
 export MIRAGE_AUTH_TOKEN='replace-with-your-token'
 ```
 
+The requests below use `--fail-with-body`, available in curl 7.76.0 or newer.
+Check with `curl --version`. With an older curl, replace it with `--fail`;
+HTTP errors still exit nonzero, but their response bodies are omitted.
+
 Create a workspace with an in-memory mount:
 
 ```bash

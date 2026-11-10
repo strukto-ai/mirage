@@ -47,13 +47,12 @@ export MIRAGE_AUTH_TOKEN='replace-with-your-token'
     ```bash
     npm install @struktoai/mirage-server
     npm install -D tsx typescript
-    npm pkg set type=module
     ```
 
-    The packages require [ES modules](/typescript/install#quick-install).
-    Save this as `server.ts`:
+    Save this as `server.mts`. The `.mts` extension uses ES modules without
+    changing how other files in your project load:
 
-    ```typescript server.ts
+    ```typescript server.mts
     import { buildApp } from '@struktoai/mirage-server'
 
     await buildApp().listen({ host: '127.0.0.1', port: 8765 })
@@ -62,7 +61,7 @@ export MIRAGE_AUTH_TOKEN='replace-with-your-token'
     Start it in the terminal where you set the token, and leave it running:
 
     ```bash
-    npx tsx server.ts
+    npx tsx server.mts
     ```
   </Tab>
 </Tabs>
