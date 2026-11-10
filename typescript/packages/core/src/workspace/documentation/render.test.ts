@@ -174,11 +174,33 @@ describe('vfsMd', () => {
     )
     expect(await ws.vfsMd()).toContain(
       '| Path | Description |\n| --- | --- |\n' +
-        '| `/` | `ram`, exec |\n' +
-        '| `/data` | `ram`, read |\n' +
-        '| `/dev` | `ram`, write |\n' +
-        '| `/scratch` | `ram`, write |\n',
+        '| `/` | exec |\n' +
+        '| `/data` | read |\n' +
+        '| `/dev` | write |\n' +
+        '| `/scratch` | write |\n',
     )
+  })
+
+  it('names a VFS only where it is more than plain files', async () => {
+    class Searching extends RAMVFS {
+      override filesContaining(): Promise<null> {
+        return Promise.resolve(null)
+      }
+    }
+    const ws = new Workspace(
+      {
+        '/': [new RAMVFS(), MountMode.WRITE],
+        '/bucket': [Object.assign(new RAMVFS(), { name: 's3' }), MountMode.WRITE],
+        '/docs': [gdocs(), MountMode.READ],
+        '/found': [Object.assign(new Searching(), { name: 'dropbox' }), MountMode.WRITE],
+      },
+      { mode: MountMode.WRITE },
+    )
+    const markdown = await ws.vfsMd()
+    expect(markdown).toContain('| `/bucket` | write |\n')
+    expect(markdown).not.toContain('`s3`')
+    expect(markdown).toContain('| `/docs` | `gdocs`, read |\n')
+    expect(markdown).toContain('| `/found` | `dropbox`, write |\n')
   })
 
   it('shows a layout only where the VFS has one', async () => {
@@ -497,7 +519,7 @@ describe('vfsMd', () => {
     const ws = await seeded(['write', 'append', 'rmdir', 'rm_r'], new RAMVFS(), {
       commands: { allow: ['cat', 'rm -r'] },
     })
-    expect(row(await ws.vfsMd(), '', '/m')).toMatch(/, write$/)
+    expect(row(await ws.vfsMd(), '', '/m')).toBe('write')
     expect((await ws.shell('rm -r /m/f')).exitCode).toBe(0)
   })
 })
@@ -577,10 +599,37 @@ describe('skillMd', () => {
     expect(skill).not.toContain('delete')
   })
 
+  it('stops at the page of a command that answers --help', async () => {
+    const ws = new Workspace({ '/': [new RAMVFS(), MountMode.WRITE] })
+    ws.registerCli('gws', gws())
+    const skill = await ws.skillMd()
+    expect(skill).toContain('## `gws`\n')
+    expect(skill).toContain('drive')
+    expect(skill).not.toContain('## `gws drive')
+  })
+
+  it('stops below the top where the profile allows only a group', async () => {
+    const ws = new Workspace(
+      { '/': [new RAMVFS(), MountMode.WRITE] },
+      { profiles: { default: SessionProfile({ commands: { allow: ['gws drive'] } }) } },
+    )
+    ws.registerCli('gws', gws())
+    const skill = await ws.skillMd()
+    expect(skill).toContain('## `gws`\n')
+    expect(skill).toContain('## `gws drive`\n')
+    expect(skill).not.toContain('## `gws drive list`')
+  })
+
   it('lists no denied subcommand', async () => {
     const ws = new Workspace(
       { '/': [new RAMVFS(), MountMode.WRITE] },
-      { profiles: { default: SessionProfile({ commands: { deny: ['gws drive delete'] } }) } },
+      {
+        profiles: {
+          default: SessionProfile({
+            commands: { allow: ['gws drive'], deny: ['gws drive delete'] },
+          }),
+        },
+      },
     )
     ws.registerCli('gws', gws())
     const skill = await ws.skillMd()

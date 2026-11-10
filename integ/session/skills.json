@@ -62,7 +62,7 @@
           "path": "/SKILL.md"
         }
       ],
-      "command": "airtable record list --help | head -1 | sed 's/^usage: //' > /scratch/help.txt; man airtable record list | sed -n '/^SYNOPSIS/,/^$/p' | sed '1d;$d;s/^ *//' | paste -sd ' ' > /scratch/man.txt; cmp /scratch/help.txt /scratch/man.txt; grep -c '^usage: airtable record list' /SKILL.md; which airtable; type -t airtable",
+      "command": "airtable record list --help | head -1 | sed 's/^usage: //' > /scratch/help.txt; man airtable record list | sed -n '/^SYNOPSIS/,/^$/p' | sed '1d;$d;s/^ *//' | paste -sd ' ' > /scratch/man.txt; cmp /scratch/help.txt /scratch/man.txt; grep -c '^usage: airtable ' /SKILL.md; which airtable; type -t airtable",
       "expect": {
         "exit": 0,
         "stdout": "1\n/usr/bin/airtable\nfile\n",

@@ -9,7 +9,8 @@ A workspace describes itself to an agent in two Markdown files, in the
 
 - **VFS.md**: every mounted path, its layout and which Unix commands work
   there.
-- **SKILL.md**: the registered CLIs, with each one's help.
+- **SKILL.md**: the registered CLIs, with each one's top-level help. A
+  subcommand's usage is one `--help` away.
 
 Both are built from the live workspace and follow the session's
 [profile](/home/policy/overview): a command the profile denies, or a path it
@@ -67,6 +68,9 @@ hides, is never mentioned. Each VFS page shows its VFS.md, such as
 
 ## What VFS.md says about each path
 
+- **VFS**: its name, for a VFS with its own layout or its own search, such
+  as Google Drive. Plain files, on `s3` or `ram` for example, show only the
+  mode: which VFS holds them changes nothing an agent does.
 - **Mode**: `read`, `write` or `exec`. A path whose VFS cannot change files
   shows `read`, whatever mode it is mounted with.
 - **Layout**: how its files are organized and what they hold, for a VFS that

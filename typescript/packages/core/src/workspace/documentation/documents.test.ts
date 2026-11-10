@@ -152,7 +152,7 @@ it('omits unrestricted backend guidance with subtree mode overrides', async () =
   )
   const markdown = await ws.vfsMd()
   expect(markdown).not.toContain('In-memory')
-  expect(markdown).toContain('| `/data/public` | `ram`, read |')
+  expect(markdown).toContain('| `/data/public` | read |')
   await ws.close()
 })
 

@@ -128,11 +128,41 @@ async def test_vfs_md_states_each_mount_mode():
     markdown = await ws.vfs_md()
     assert (
         "| Path | Description |\n| --- | --- |\n"
-        "| `/` | `ram`, exec |\n"
-        "| `/data` | `ram`, read |\n"
-        "| `/dev` | `ram`, write |\n"
-        "| `/scratch` | `ram`, write |\n" in markdown
+        "| `/` | exec |\n"
+        "| `/data` | read |\n"
+        "| `/dev` | write |\n"
+        "| `/scratch` | write |\n" in markdown
     )
+
+
+@pytest.mark.asyncio
+async def test_vfs_md_names_a_vfs_only_where_it_is_more_than_plain_files():
+    class Bucket(RAMVFS):
+        name = "s3"
+
+    class Searching(RAMVFS):
+        name = "dropbox"
+
+        async def files_containing(self, *args, **kwargs):
+            return None
+
+    ws = Workspace(
+        {
+            "/": (RAMVFS(), MountMode.WRITE),
+            "/bucket": (Bucket(), MountMode.WRITE),
+            "/slack": (
+                SlackVFS(config=SlackConfig(token="xoxb-fake")),
+                MountMode.READ,
+            ),
+            "/found": (Searching(), MountMode.WRITE),
+        },
+        mode=MountMode.WRITE,
+    )
+    markdown = await ws.vfs_md()
+    assert "| `/bucket` | write |\n" in markdown
+    assert "`s3`" not in markdown
+    assert "| `/slack` | `slack`, read |\n" in markdown
+    assert "| `/found` | `dropbox`, write |\n" in markdown
 
 
 @pytest.mark.asyncio
@@ -592,10 +622,40 @@ async def test_skill_md_names_no_service_cli_a_path_hiding_profile_leaves_out():
 
 
 @pytest.mark.asyncio
+async def test_skill_md_stops_at_the_page_of_a_command_that_answers_help():
+    ws = Workspace({"/": (RAMVFS(), MountMode.WRITE)})
+    ws.register_cli("gws", gws())
+    skill = await ws.skill_md()
+    assert "## `gws`\n" in skill
+    assert "drive" in skill
+    assert "## `gws drive" not in skill
+
+
+@pytest.mark.asyncio
+async def test_skill_md_stops_below_the_top_where_the_profile_allows_a_group():
+    ws = Workspace(
+        {"/": (RAMVFS(), MountMode.WRITE)},
+        profiles={"default": {"commands": {"allow": ["gws drive"]}}},
+    )
+    ws.register_cli("gws", gws())
+    skill = await ws.skill_md()
+    assert "## `gws`\n" in skill
+    assert "## `gws drive`\n" in skill
+    assert "## `gws drive list`" not in skill
+
+
+@pytest.mark.asyncio
 async def test_skill_md_lists_no_denied_subcommand():
     ws = Workspace(
         {"/": (RAMVFS(), MountMode.WRITE)},
-        profiles={"default": {"commands": {"deny": ["gws drive delete"]}}},
+        profiles={
+            "default": {
+                "commands": {
+                    "allow": ["gws drive"],
+                    "deny": ["gws drive delete"],
+                }
+            }
+        },
     )
     ws.register_cli("gws", gws())
     skill = await ws.skill_md()
@@ -709,7 +769,7 @@ async def test_vfs_md_counts_rm_r_on_a_file_where_only_unlink_works():
         ("write", "append", "rmdir", "rm_r"),
         profile={"commands": {"allow": ["cat", "rm -r"]}},
     )
-    assert row(await ws.vfs_md(), "", "/m").endswith(", write")
+    assert row(await ws.vfs_md(), "", "/m") == "write"
     assert (await ws.shell("rm -r /m/f")).exit_code == 0
 
 
@@ -768,5 +828,6 @@ async def test_the_skill_names_only_the_mcp_tools_a_profile_allows():
         {"url": "http://x/mcp"},
     )
     skill = await ws.skill_md()
-    assert "fx issue-action-0" in skill
+    assert "issue-action-0" in skill
     assert "issue-action-1" not in skill
+    assert (await ws.shell("fx issue-action-0 --help")).exit_code == 0

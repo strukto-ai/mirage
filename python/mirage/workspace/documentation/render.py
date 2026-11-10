@@ -45,6 +45,7 @@ from mirage.workspace.session.session import SessionState
 SHARED = frozenset(c.name for c in (*GENERIC_COMMANDS, *GENERAL_COMMANDS))
 SEARCHES = ("grep -r", "rg")
 FINDS = ("grep", "rg")
+ANSWERS = ("files_containing", "lines_containing", *(op for op, _ in ASKS))
 
 
 def listed(
@@ -311,6 +312,33 @@ def granted(
     return mode
 
 
+def plain(mount: MountEntry) -> bool:
+    """Whether the mount is plain files to an agent: no layout of its
+    own and nothing it answers in place of reading them. Which VFS holds
+    such files changes nothing a command does, so the documents leave
+    its name out.
+
+    Args:
+        mount (MountEntry): the mount described.
+    """
+    return not mount.vfs.vfs_md.strip() and not any(
+        mount.answers(op) for op in ANSWERS
+    )
+
+
+def description(mount: MountEntry, mode: MountMode) -> str:
+    """What VFS.md's first table says of a path: its mode, after its VFS
+    unless that is plain files.
+
+    Args:
+        mount (MountEntry): the mount holding the path.
+        mode (MountMode): the mode VFS.md states for it.
+    """
+    if plain(mount):
+        return mode.value
+    return f"{code(mount.vfs.name)}, {mode.value}"
+
+
 def supported(
     session: SessionState, mount: MountEntry, path: str, mode: MountMode
 ) -> str:
@@ -449,7 +477,7 @@ def vfs_md(registry: MountRegistry, session: SessionState) -> str:
     vis = session.visibility
     for mount, prefix, mode in listed(registry, session):
         shown = granted(session, mount, prefix, mode)
-        paths.append((code(prefix), f"{code(mount.vfs.name)}, {shown.value}"))
+        paths.append((code(prefix), description(mount, shown)))
         commands.append(
             (code(prefix), supported(session, mount, prefix, shown))
         )
@@ -494,9 +522,7 @@ def vfs_md(registry: MountRegistry, session: SessionState) -> str:
                         ),
                     )
                     at = code(entry.path)
-                    paths.append(
-                        (at, f"{code(mount.vfs.name)}, {effective.value}")
-                    )
+                    paths.append((at, description(mount, effective)))
                     commands.append(
                         (
                             at,
@@ -545,11 +571,13 @@ def cli_pages(
     registry: MountRegistry,
     path: tuple[str, ...] = (),
 ) -> list[str]:
-    """The help pages of one CLI node and its descendants the profile
-    allows. A node gets a page when the profile allows it or leads to a
-    descendant it allows, so a group's own options stay documented; a
-    page lists only the children leading to an allowed one. A leaf
-    counts a longer form its allow list names (``gws gmail read --id``).
+    """The help pages of one CLI node and the descendants the profile
+    refuses ``--help`` above. A node gets a page when the profile allows
+    it or leads to a descendant it allows, so a group's own options stay
+    documented; a page lists only the children leading to an allowed
+    one. A node the profile allows answers ``--help`` for what is under
+    it, so it stops there. A leaf counts a longer form its allow list
+    names (``gws gmail read --id``).
 
     Args:
         head (str): the CLI's installed name.
@@ -580,8 +608,9 @@ def cli_pages(
             name, replace(node, subcommands=kept), style
         ).rstrip()
         pages.append(f"## `{name}`\n\n{fenced(help_text, 'text')}")
-    for _, found in children:
-        pages.extend(found)
+    if not allowed(session, session.cwd, words, registry=registry):
+        for _, found in children:
+            pages.extend(found)
     return pages
 
 
@@ -615,8 +644,8 @@ def skill_md(registry: MountRegistry, session: SessionState) -> str:
             )
     if pages:
         parts.append(
-            "These commands are registered with this shell; "
-            "`<cmd> --help` shows each one's usage."
+            "These commands are registered with this shell; `--help` "
+            "after a command or subcommand shows its usage."
         )
         parts.extend(pages)
     else:

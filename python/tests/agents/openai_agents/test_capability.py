@@ -78,7 +78,7 @@ def test_instructions_list_each_mount_with_its_mode():
         text = await capability.instructions(Manifest(root="/"))
         assert text is not None
         assert text.startswith(MOUNTS_INTRO)
-        assert "| `/data` | `ram`, read |" in text
+        assert "| `/data` | read |" in text
 
     asyncio.run(_run())
 

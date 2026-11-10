@@ -157,7 +157,7 @@ async def test_subtree_modes_omit_unrestricted_backend_guidance():
     )
     markdown = await ws.vfs_md()
     assert "In-memory" not in markdown
-    assert "| `/data/public` | `ram`, read |" in markdown
+    assert "| `/data/public` | read |" in markdown
     await ws.close()
 
 
