@@ -7280,7 +7280,8 @@ components:
                 `invalid_value` (400); `unauthorized` (401); `forbidden`, `policy_refused`,
                 `host_not_allowed`, `origin_not_allowed`, `storage_full` (403); `not_found`
                 (404); `method_not_allowed` (405); `conflict`, `already_exists`, `workspace_busy`,
-                `workspace_stopped`, `stale_write` (409); `too_large` (413); `rate_limited`,
+                `workspace_stopped`, `stale_write` (409); `too_large` (413); `upgrade_required`
+                (426, WebSocket routes only); `rate_limited`,
                 `session_limit` (429); `canceled` (499); `internal` (500); `not_supported`
                 (501); `unavailable`, `server_full`, `shutting_down` (503). New codes can be
                 added; a client that meets a code it does not know falls back to the HTTP

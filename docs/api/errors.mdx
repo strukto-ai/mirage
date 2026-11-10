@@ -45,6 +45,7 @@ success body can carry an `error` field of its own, such as a finished line's
 | `405` | `method_not_allowed` | The path exists but does not take this method. | Use the method the endpoint documents. |
 | `409` | `conflict`, `already_exists`, `workspace_busy`, `workspace_stopped`, `stale_write` | An identifier is taken, the workspace is busy or stopped, or a file changed since it was read. | Resolve the conflict before retrying: start a stopped workspace, read a changed file again. |
 | `413` | `too_large` | A request body, multipart part or stdin exceeds its size limit. | Reduce the input size and check the endpoint's limits. |
+| `426` | `upgrade_required` | WebSocket routes only: a plain request reached a route that needs a WebSocket upgrade. | Open the route as a WebSocket. |
 | `429` | `rate_limited`, `session_limit` | A rate limit or the workspace's session limit was reached. | Wait for `Retry-After` on `rate_limited`; close unused sessions on `session_limit`. |
 | `499` | `canceled` | A running shell job was canceled. | Check its output and any side effects before rerunning it. |
 | `500` | `internal` | The server failed. The message is always `internal server error`; the cause is in the server log. | Check the server log and for side effects before retrying. |

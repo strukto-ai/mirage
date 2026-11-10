@@ -374,7 +374,7 @@ describe('the server API in workerd', () => {
     expect((again.json as { stdout: string }).stdout).toBe('7\n')
   })
 
-  it('answers SSH with 501, and codex-exec without an upgrade with 400', async () => {
+  it('answers SSH with 501, and codex-exec without an upgrade with 426', async () => {
     const ssh = await call('GET', '/v1/workspaces/api/ssh')
     expect([ssh.status, ssh.json]).toEqual([
       501,
@@ -382,8 +382,8 @@ describe('the server API in workerd', () => {
     ])
     const codex = await call('GET', '/v1/workspaces/api/codex-exec')
     expect([codex.status, codex.json]).toEqual([
-      400,
-      { error: { code: 'invalid_request', message: 'codex-exec needs a WebSocket upgrade' } },
+      426,
+      { error: { code: 'upgrade_required', message: 'codex-exec needs a WebSocket upgrade' } },
     ])
   })
 

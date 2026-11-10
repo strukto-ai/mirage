@@ -55,6 +55,7 @@ class ErrorCode(StrEnum):
     WORKSPACE_STOPPED = "workspace_stopped"
     STALE_WRITE = "stale_write"
     TOO_LARGE = "too_large"
+    UPGRADE_REQUIRED = "upgrade_required"
     RATE_LIMITED = "rate_limited"
     SESSION_LIMIT = "session_limit"
     CANCELED = "canceled"
@@ -85,6 +86,7 @@ STATUS: dict[ErrorCode, int] = {
     ErrorCode.WORKSPACE_STOPPED: 409,
     ErrorCode.STALE_WRITE: 409,
     ErrorCode.TOO_LARGE: 413,
+    ErrorCode.UPGRADE_REQUIRED: 426,
     ErrorCode.RATE_LIMITED: 429,
     ErrorCode.SESSION_LIMIT: 429,
     ErrorCode.CANCELED: 499,
