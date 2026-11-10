@@ -337,18 +337,17 @@ class JobTable:
                 str(h.record.pid): h.record.started_at
                 for h in self.processes.live()
             }
+            published = await self.store.processes()
             earlier = {
                 pid: record
-                for pid, record in (await self.store.processes())
-                .get(self.daemon, {})
-                .items()
+                for pid, record in published.get(self.daemon, {}).items()
                 if pid not in live or live[pid] != record.get("started_at")
             }
             self.processes.continue_after(await self.store.highest_pid())
             self._claimed = True
             self._renewed = time.monotonic()
             self._keep_lease()
-            adopted = await self._adopt_retrying()
+            adopted = await self._adopt_retrying(published)
             if not self._claimed:
                 return
             self._adopted = True
@@ -644,18 +643,25 @@ class JobTable:
                 return
         raise RuntimeError(f"job {job.id}: entry kept conflicting")
 
-    async def _adopt_retrying(self) -> set[int]:
+    async def _adopt_retrying(
+        self, published: dict[str, dict[str, RecordFields]]
+    ) -> set[int]:
         """Adopt the jobs left detached (``_adopt_left``), again while one
         failed to, up to ``ADOPT_RETRIES`` times: a store that could not
         be read for a moment leaves no job to be stopped as abandoned.
         Answers the pids adopted.
+
+        Args:
+            published (dict[str, dict[str, RecordFields]]): each daemon's
+                process records as the claim read them, before this
+                daemon published its own over its earlier life's.
         """
         adopted: set[int] = set()
         for attempt in range(ADOPT_RETRIES + 1):
             if attempt:
                 await asyncio.sleep(ADOPT_RETRY_SECONDS)
             try:
-                found, complete = await self._adopt_left()
+                found, complete = await self._adopt_left(published)
             except Exception as exc:
                 found, complete = set(), False
                 logger.debug("detached jobs not adopted: %s", exc)
@@ -664,7 +670,9 @@ class JobTable:
                 break
         return adopted
 
-    async def _adopt_left(self) -> tuple[set[int], bool]:
+    async def _adopt_left(
+        self, published: dict[str, dict[str, RecordFields]]
+    ) -> tuple[set[int], bool]:
         """Adopt every running job whose program a daemon that no longer
         holds the lease left detached, this daemon's earlier life
         included: each one whose entry this daemon takes first runs here
@@ -672,6 +680,11 @@ class JobTable:
         pids adopted, whose published records no sweep stops after, and
         whether no job failed to be. A disowned job is adopted as one,
         and a lease lost meanwhile stops the adopting.
+
+        Args:
+            published (dict[str, dict[str, RecordFields]]): each daemon's
+                process records as the claim read them, which name a
+                program's pid on its machine.
         """
         adopted: set[int] = set()
         complete = True
@@ -684,7 +697,6 @@ class JobTable:
             if j.process is not None
         }
         owners: set[str] = set()
-        published = await self.store.processes()
         for session_id in await self.store.sessions():
             fields = await self.store.load(session_id) or {}
             found: list[tuple[int | None, RecordFields]] = [
@@ -2064,6 +2076,7 @@ class JobTable:
         """
         left: dict[str, RecordFields] = {}
         live = {handle.record.pid for handle in self.processes.live()}
+        adopted = self._plane._adopted
         for pid, record in records.items():
             # Only the lease holder, which adopted the detached jobs it
             # could, stops the rest, so one not adopted yet stays listed;
@@ -2072,7 +2085,7 @@ class JobTable:
             if record.get("runtime") is None:
                 continue
             if record.get("detached") and record.get("pid") not in live:
-                if not self._plane._adopted:
+                if not adopted:
                     left[pid] = record
                     continue
             elif record.get("detached"):

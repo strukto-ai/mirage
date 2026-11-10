@@ -2459,6 +2459,144 @@ describe('detached jobs a daemon left', () => {
     }
   })
 
+  // A job adopted on a retry keeps its program's machine pid, though the
+  // restarted daemon published its own records over its earlier life's while
+  // it adopted the first.
+  it("keep their program's machine pid when adopted on a retry", async () => {
+    const store = new RAMExecutionStore(30)
+    const old = publishing(store)
+    const jobs: JobHandle[] = []
+    for (let i = 0; i < 2; i++)
+      jobs.push(
+        await old.submit({
+          command: 'train',
+          run: runDetached,
+          abort: new AbortController(),
+          cwd: '/',
+          simple: true,
+          detachable: true,
+        }),
+      )
+    for (const job of jobs) {
+      await until(() => entryDetached(store, job))
+      job.process?.setMachinePid({ pid: 4240 + job.id, started: 123, exited: null })
+    }
+    await until(async () => {
+      const records = (await store.processes())[old.daemon] ?? {}
+      return jobs.every((job) => records[String(job.pid)]?.machine_pid != null)
+    })
+    Reflect.set(old, 'closed', true)
+    await (Reflect.get(old, 'publishing') as Promise<void> | null)
+    clearTimeout(Reflect.get(old, 'lease') as ReturnType<typeof setTimeout>)
+    await store.release(old.daemon)
+    const processes: ProcessTable = new ProcessTable(undefined, undefined, undefined, () => {
+      fresh.processesChanged()
+    })
+    const fresh: JobTable = new JobTable(store, processes, null, undefined, old.daemon)
+    resuming(fresh, 3, [])
+    let reads = 0
+    const read = Reflect.get(JobConsole.prototype, 'readFrom')
+    const failing = vi.spyOn(JobConsole.prototype, 'readFrom').mockImplementation(async function (
+      this: JobConsole,
+      ...args
+    ) {
+      reads += 1
+      if (reads === 2) {
+        await new Promise((resolve) => setTimeout(resolve, 200))
+        throw new Error('store unavailable')
+      }
+      return read.apply(this, args)
+    })
+    try {
+      await fresh.claim()
+      expect(reads).toBe(3)
+      expect(
+        jobs.map((job) => fresh.get(job.id, job.sessionId)?.process?.record.machinePid),
+      ).toEqual(jobs.map((job) => ({ pid: 4240 + job.id, started: 123, exited: null })))
+    } finally {
+      failing.mockRestore()
+      await fresh.killAll()
+      await fresh.close()
+      Reflect.set(old, 'closed', false)
+      await old.killAll()
+    }
+  })
+
+  // A sweep that began before the lease holder adopted stops none of the jobs
+  // adopted while it ran: what it skipped it keeps.
+  it('are never stopped by a sweep spanning their adoption', async () => {
+    const table = new JobTable(new RAMExecutionStore(30), new ProcessTable())
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const stopped: unknown[] = []
+    table.runStopper = async (record) => {
+      stopped.push(record.pid)
+      Reflect.set(table, 'adopted', true)
+      await held
+      return true
+    }
+    const records = {
+      '101': { pid: 101, runtime: 'machine', detached: false },
+      '102': { pid: 102, runtime: 'machine', detached: true },
+    }
+    const sweeping = (
+      Reflect.get(table, 'stopProcesses') as (
+        owner: string,
+        records: Record<string, RecordFields>,
+      ) => Promise<Record<string, RecordFields>>
+    ).call(table, 'gone', records)
+    await vi.waitFor(() => {
+      expect(stopped).toEqual([101])
+    })
+    release()
+    expect(await sweeping).toEqual({ '102': records['102'] })
+    expect(stopped).toEqual([101])
+    await table.close()
+  })
+
+  // Once adopting is done, a daemon swept before it is swept again, which
+  // stops the detached program no daemon adopted.
+  it('sweep again a daemon swept before adopting', async () => {
+    const store = new RAMExecutionStore(30)
+    const [old, job] = await leftDetached(store)
+    await until(async () =>
+      Object.values((await store.processes())[old.daemon] ?? {}).some(
+        (record) => record.detached === true,
+      ),
+    )
+    Reflect.set(old, 'closed', true)
+    await (Reflect.get(old, 'publishing') as Promise<void> | null)
+    const fresh = new JobTable(store, new ProcessTable())
+    resuming(fresh, 3, [])
+    const stopped: unknown[] = []
+    fresh.runStopper = (record) => {
+      stopped.push(record.pid)
+      return Promise.resolve(true)
+    }
+    const stopLater = Reflect.get(fresh, 'stopLater') as (owner: string) => void
+    const runs = (): Promise<unknown> =>
+      Promise.all([...(Reflect.get(fresh, 'stoppingRuns') as Set<Promise<void>>)])
+    const failing = vi
+      .spyOn(JobConsole.prototype, 'readFrom')
+      .mockRejectedValue(new Error('store unavailable'))
+    try {
+      stopLater.call(fresh, old.daemon)
+      await runs()
+      expect(stopped).toEqual([])
+      await fresh.claim()
+      stopLater.call(fresh, old.daemon)
+      await runs()
+      expect(stopped).toEqual([job.pid])
+    } finally {
+      failing.mockRestore()
+      await fresh.close()
+      Reflect.set(old, 'closed', false)
+      await old.killAll()
+    }
+  })
+
   // A restart adopts a detached job its session disowned, unlisted as it
   // was, rather than leave its program to the sweep.
   it('are adopted disowned when disowned', async () => {

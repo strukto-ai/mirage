@@ -2192,6 +2192,127 @@ async def test_an_adopted_job_keeps_its_programs_machine_pid(monkeypatch):
         await old.kill_all()
 
 
+# A job adopted on a retry keeps its program's machine pid, though the
+# restarted daemon published its own records over its earlier life's
+# while it adopted the first.
+@pytest.mark.asyncio
+async def test_a_job_adopted_on_a_retry_keeps_its_machine_pid(monkeypatch):
+    monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
+    monkeypatch.setattr(table_module, "ADOPT_RETRY_SECONDS", 0.2)
+    store = RAMExecutionStore(lease_seconds=30.0)
+    old = _publishing(store)
+    jobs = [
+        await old.submit(
+            "train", _run_detached, "/", simple=True, detachable=True
+        )
+        for _ in range(2)
+    ]
+    for job in jobs:
+        await _until(lambda job=job: _entry_detached(store, job))
+        assert job.process is not None
+        job.process.set_machine_pid(MachinePid(4240 + job.id, 123.0))
+
+    async def recorded() -> bool:
+        records = (await store.processes())[old.daemon]
+        return all(records[str(j.pid)]["machine_pid"] for j in jobs)
+
+    await _until(recorded)
+    old._publishing.cancel()
+    assert old._lease is not None
+    old._lease.cancel()
+    await store.release(old.daemon)
+    processes = ProcessTable(changed=lambda: new.processes_changed())
+    new = JobTable(store, processes, daemon=old.daemon)
+    _resuming(new, 3, [])
+    reads: list = []
+    read = table_module._console_bytes
+
+    async def second_fails_once(console):
+        reads.append(console)
+        if len(reads) == 2:
+            raise ConnectionError("store unavailable")
+        return await read(console)
+
+    monkeypatch.setattr(table_module, "_console_bytes", second_fails_once)
+    try:
+        await new.claim()
+        pids = [new.get(j.id, j.session_id).process.record for j in jobs]
+        assert len(reads) == 3
+        assert [p.machine_pid for p in pids] == [
+            MachinePid(4240 + j.id, 123.0) for j in jobs
+        ]
+    finally:
+        await new.kill_all()
+        await new.close()
+        await old.kill_all()
+
+
+# A sweep that began before the lease holder adopted stops none of the
+# jobs adopted while it ran: what it skipped it keeps.
+@pytest.mark.asyncio
+async def test_a_sweep_spanning_adoption_stops_no_adopted_job():
+    table = JobTable(RAMExecutionStore(lease_seconds=30.0), ProcessTable())
+    held, stopped = asyncio.Event(), []
+
+    async def stopper(record: dict, signum: int) -> bool:
+        stopped.append(record["pid"])
+        table._adopted = True
+        await held.wait()
+        return True
+
+    table.run_stopper = stopper
+    records = {
+        "101": {"pid": 101, "runtime": "machine", "detached": False},
+        "102": {"pid": 102, "runtime": "machine", "detached": True},
+    }
+    sweeping = asyncio.ensure_future(table._stop_processes("gone", records))
+    await _until(lambda: _any(stopped))
+    held.set()
+    assert (await sweeping, stopped) == ({"102": records["102"]}, [101])
+    await table.close()
+
+
+# Once adopting is done, a daemon swept before it is swept again, which
+# stops the detached program no daemon adopted.
+@pytest.mark.asyncio
+async def test_adopting_sweeps_again_a_daemon_swept_before(monkeypatch):
+    monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
+    monkeypatch.setattr(table_module, "ADOPT_RETRY_SECONDS", 0)
+    store = RAMExecutionStore(lease_seconds=30.0)
+    old, job = await _left_detached(store)
+
+    async def recorded() -> bool:
+        records = (await store.processes()).get(old.daemon, {})
+        return any(record.get("detached") for record in records.values())
+
+    await _until(recorded)
+    old._publishing.cancel()
+    new = JobTable(store, ProcessTable())
+    _resuming(new, 3, [])
+    stopped: list = []
+
+    async def stopper(record: dict, signum: int) -> bool:
+        stopped.append(record["pid"])
+        return True
+
+    async def unreadable(console):
+        raise ConnectionError("store unavailable")
+
+    new.run_stopper = stopper
+    try:
+        new._stop_later(old.daemon)
+        await asyncio.gather(*new._stopping_runs)
+        assert stopped == []
+        monkeypatch.setattr(table_module, "_console_bytes", unreadable)
+        await new.claim()
+        new._stop_later(old.daemon)
+        await asyncio.gather(*new._stopping_runs)
+        assert stopped == [job.pid]
+    finally:
+        await new.close()
+        await old.kill_all()
+
+
 # A restart adopts a detached job its session disowned, unlisted as it
 # was, rather than leave its program to the sweep.
 @pytest.mark.asyncio

@@ -327,8 +327,9 @@ export class JobTable {
     const live = new Map(
       this.processes.live().map((h) => [String(h.record.id.pid), h.record.startedAt]),
     )
+    const published = await this.store.processes()
     const earlier = Object.fromEntries(
-      Object.entries((await this.store.processes())[this.daemon] ?? {}).filter(
+      Object.entries(published[this.daemon] ?? {}).filter(
         ([pid, record]) => !live.has(pid) || live.get(pid) !== record.started_at,
       ),
     )
@@ -336,7 +337,7 @@ export class JobTable {
     this.held = true
     this.renewedAt = performance.now()
     this.keepLease()
-    const adopted = await this.adoptRetrying()
+    const adopted = await this.adoptRetrying(published)
     if (!this.claimed) return
     this.adopted = true
     // Owners swept while adopting kept their detached records.
@@ -640,9 +641,13 @@ export class JobTable {
    * Adopt the jobs left detached (`adoptLeft`), again while one failed to, up
    * to `ADOPT_RETRIES` times: a store that could not be read for a moment
    * leaves no job to be stopped as abandoned. Answers the pids adopted.
-   * Mirrors Python's `JobTable._adopt_retrying`.
+   * `published` is each daemon's process records as the claim read them,
+   * before this daemon published its own over its earlier life's. Mirrors
+   * Python's `JobTable._adopt_retrying`.
    */
-  private async adoptRetrying(): Promise<Set<number>> {
+  private async adoptRetrying(
+    published: Record<string, Record<string, RecordFields>>,
+  ): Promise<Set<number>> {
     const adopted = new Set<number>()
     for (let attempt = 0; attempt <= ADOPT_RETRIES; attempt++) {
       if (attempt > 0)
@@ -650,7 +655,7 @@ export class JobTable {
       let found = new Set<number>()
       let complete = false
       try {
-        ;[found, complete] = await this.adoptLeft()
+        ;[found, complete] = await this.adoptLeft(published)
       } catch (err) {
         console.debug('detached jobs not adopted:', err)
       }
@@ -666,10 +671,14 @@ export class JobTable {
    * entry this daemon takes first runs here from then on, viewed from what
    * its console holds. Answers the pids adopted, whose published records no
    * sweep stops after, and whether no job failed to be. A disowned job is
-   * adopted as one, and a lease lost meanwhile stops the adopting. Mirrors
-   * Python's `JobTable._adopt_left`.
+   * adopted as one, and a lease lost meanwhile stops the adopting.
+   * `published` is each daemon's process records as the claim read them,
+   * which name a program's pid on its machine. Mirrors Python's
+   * `JobTable._adopt_left`.
    */
-  private async adoptLeft(): Promise<[Set<number>, boolean]> {
+  private async adoptLeft(
+    published: Record<string, Record<string, RecordFields>>,
+  ): Promise<[Set<number>, boolean]> {
     const adopted = new Set<number>()
     let complete = true
     const resume = this.resumer
@@ -680,7 +689,6 @@ export class JobTable {
         .map((j) => j.consoleName),
     )
     const owners = new Set<string>()
-    const published = await this.store.processes()
     for (const sessionId of await this.store.sessions()) {
       const fields = await this.store.load(sessionId)
       const found: [number | null, ListEntry][] = [
@@ -1912,13 +1920,14 @@ export class JobTable {
   ): Promise<Record<string, RecordFields>> {
     const left: Record<string, RecordFields> = {}
     const live = new Set(this.processes.live().map((handle) => handle.record.id.pid))
+    const adopted = this.plane.adopted
     for (const [pid, record] of Object.entries(records)) {
       // Only the lease holder, which adopted the detached jobs it could,
       // stops the rest, so one not adopted yet stays listed; never one it
       // runs, should a daemon that lost the lease republish it.
       if (record.runtime == null) continue
       if (record.detached === true && !live.has(record.pid as number)) {
-        if (!this.plane.adopted) {
+        if (!adopted) {
           left[pid] = record
           continue
         }
