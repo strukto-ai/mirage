@@ -129,16 +129,21 @@ export function servedPrefixes(prefixes: Iterable<string>): string[] {
   return topPrefixes([...prefixes].filter((p) => rstripSlash(p) !== '/tmp'))
 }
 
-/**
- * The name a workspace's sshfs sources start with: its id, each byte of a
- * character outside `[A-Za-z0-9-]` written `_xx`, so no two ids share a
- * name and the name stays one word in `/proc/mounts` and a shell line.
- */
-export function sourceName(workspaceId: string): string {
-  const escaped = workspaceId.replace(/[^A-Za-z0-9-]/gu, (c) =>
+/** `text` with each byte of a character outside `[A-Za-z0-9-]` written `_xx`. */
+function escapeName(text: string): string {
+  return text.replace(/[^A-Za-z0-9-]/gu, (c) =>
     [...ENCODER.encode(c)].map((b) => `_${b.toString(16).padStart(2, '0')}`).join(''),
   )
-  return `${SSHFS_SOURCE_PREFIX}${escaped}`
+}
+
+/**
+ * The name the sshfs sources of one machine entry of a workspace start
+ * with: `mirage-<workspace id>.<machine>`, each escaped (`escapeName`) so no
+ * two pairs share a name, `.` never occurs inside either, and the name
+ * stays one word in `/proc/mounts` and a shell line.
+ */
+export function sourceName(workspaceId: string, machine: string): string {
+  return `${SSHFS_SOURCE_PREFIX}${escapeName(workspaceId)}.${escapeName(machine)}`
 }
 
 /** The machine command that lazily unmounts `prefix`. */
@@ -247,19 +252,19 @@ interface Served {
  * otherwise read through. Under `fuse` the host serves nothing, and any
  * session may run.
  *
- * Each sshfs source names the workspace serving it and the serve
- * (`mirage-<workspace id>-<n>:<prefix>`, `sourceName`), so an instance
- * unmounts only its workspace's, and kills only the sshfs of a server that
- * ended: a prefix another sshfs still serves, as another workspace on the
- * same machine does, refuses the line (1) rather than being taken, and one
- * whose sshfs has gone is unmounted and served. A prefix whose sshfs carries
- * the workspace's own name but which this instance does not serve was left
- * by an instance before a restart: its sshfs is killed, the prefix
- * unmounted and served again. Workspace ids must therefore be unique among
- * live workspaces, and stable across a restart for it to take its mounts
- * back. A workspace with no id names its sources at random. The session
- * that owns the machine is held in memory, so after a restart the first
- * session to run a line owns it again.
+ * Each sshfs source names the workspace and machine entry serving it and
+ * the serve (`mirage-<workspace id>.<machine>-<n>:<prefix>`, `sourceName`),
+ * so an instance unmounts only its own, and kills only the sshfs of a server
+ * that ended: a prefix another sshfs still serves, as another workspace, or
+ * another machine entry on the same machine, does, refuses the line (1)
+ * rather than being taken, and one whose sshfs has gone is unmounted and
+ * served. A prefix whose sshfs carries this entry's own name but which this
+ * instance does not serve was left by an instance before a restart: its
+ * sshfs is killed, the prefix unmounted and served again. Workspace ids must
+ * therefore be unique among live workspaces, and stable across a restart
+ * for it to take its mounts back. A workspace with no id names its sources
+ * at random. The session that owns the machine is held in memory, so after
+ * a restart the first session to run a line owns it again.
  *
  * A machine may restart between a line's admit and its exec and come back
  * without its mounts, so each line runs under `MOUNT_GUARD`, which checks
@@ -293,6 +298,7 @@ export class MachineMounts {
 
   /**
    * @param provider the machine's provider, for messages.
+   * @param machine the machine's name, its key under `machines:`.
    * @param mountType ssh, fuse or both.
    * @param run runs one setup command in the machine.
    * @param openPipe starts a command in the machine with its stdin and
@@ -300,6 +306,7 @@ export class MachineMounts {
    */
   constructor(
     private readonly provider: string,
+    private readonly machine: string,
     private readonly mountType: MountType,
     private readonly run: (line: string, signal?: AbortSignal) => Promise<RunResult>,
     private readonly openPipe: (command: string) => Promise<MachinePipe>,
@@ -363,7 +370,7 @@ export class MachineMounts {
     }
     return this.locked(async () => {
       const id = binding.processes?.workspaceId ?? ''
-      if (this.served.size === 0) this.name = id === '' ? this.random : sourceName(id)
+      if (this.served.size === 0) this.name = id === '' ? this.random : sourceName(id, this.machine)
       const served = this.session
       const session = getSession(current.sessionId)
       if (served !== null && served !== session) {

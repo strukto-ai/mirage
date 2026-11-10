@@ -29,6 +29,31 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_gone_e2b_sandbox_says_how_to_replace_it",
+      "note": "E2B answers an id it does not run with a 404, the same as for a sandbox it killed or that timed out.",
+      "runtimes": ["e2b"],
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "entry": {
+        "config": { "sandbox_id": "i0000000000000000000" }
+      },
+      "steps": [
+        {
+          "command": "echo hi",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "sandbox i0000000000000000000 is not running: it was killed, reached its timeout or never existed; create a new sandbox and set the machine's sandbox_id to it\n"
+          }
+        }
+      ]
     }
   ]
 }

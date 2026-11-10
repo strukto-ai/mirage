@@ -131,6 +131,7 @@ class MachineHandle:
                 )
             self._mounts = MachineMounts(
                 self.provider,
+                self.name,
                 self.config.mount_type,
                 self._setup,
                 self.open_pipe,

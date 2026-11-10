@@ -150,21 +150,35 @@ def mount_paths(prefixes: Iterable[str]) -> set[str]:
     return {p.rstrip("/") for p in prefixes} - {"", "/dev"}
 
 
-def source_name(workspace_id: str) -> str:
-    """The name a workspace's sshfs sources start with: its id, each byte
-    of a character outside ``[A-Za-z0-9-]`` written ``_xx``, so no two ids
-    share a name and the name stays one word in ``/proc/mounts`` and a
+def escape_name(text: str) -> str:
+    """``text`` with each byte of a character outside ``[A-Za-z0-9-]``
+    written ``_xx``.
+
+    Args:
+        text (str): a workspace id or machine name.
+    """
+    return re.sub(
+        r"[^A-Za-z0-9-]",
+        lambda c: "".join(f"_{b:02x}" for b in c.group().encode()),
+        text,
+    )
+
+
+def source_name(workspace_id: str, machine: str) -> str:
+    """The name the sshfs sources of one machine entry of a workspace
+    start with: ``mirage-<workspace id>.<machine>``, each escaped
+    (``escape_name``) so no two pairs share a name, ``.`` never occurs
+    inside either, and the name stays one word in ``/proc/mounts`` and a
     shell line.
 
     Args:
         workspace_id (str): the workspace's id.
+        machine (str): the machine's name, its key under ``machines:``.
     """
-    escaped = re.sub(
-        r"[^A-Za-z0-9-]",
-        lambda c: "".join(f"_{b:02x}" for b in c.group().encode()),
-        workspace_id,
+    return (
+        f"{SSHFS_SOURCE_PREFIX}{escape_name(workspace_id)}."
+        f"{escape_name(machine)}"
     )
-    return f"{SSHFS_SOURCE_PREFIX}{escaped}"
 
 
 def unmount_line(prefix: str) -> str:
@@ -258,20 +272,20 @@ class MachineMounts:
     started could otherwise read through. Under ``fuse`` the host serves
     nothing, and any session may run.
 
-    Each sshfs source names the workspace serving it and the serve
-    (``mirage-<workspace id>-<n>:<prefix>``, ``source_name``), so an
-    instance unmounts only its workspace's, and kills only the sshfs of a
-    server that ended: a prefix another sshfs still serves, as another
-    workspace on the same machine does, refuses the line (1) rather than
-    being taken, and one whose sshfs has gone is unmounted and served. A
-    prefix whose sshfs carries the workspace's own name but which this
-    instance does not serve was left by an instance before a restart: its
-    sshfs is killed, the prefix unmounted and served again. Workspace ids
-    must therefore be unique among live workspaces, and stable across a
-    restart for it to take its mounts back. A workspace with no id names
-    its sources at random. The session that owns the machine is held in
-    memory, so after a restart the first session to run a line owns it
-    again.
+    Each sshfs source names the workspace and machine entry serving it and
+    the serve (``mirage-<workspace id>.<machine>-<n>:<prefix>``,
+    ``source_name``), so an instance unmounts only its own, and kills only
+    the sshfs of a server that ended: a prefix another sshfs still serves,
+    as another workspace, or another machine entry on the same machine,
+    does, refuses the line (1) rather than being taken, and one whose sshfs
+    has gone is unmounted and served. A prefix whose sshfs carries this
+    entry's own name but which this instance does not serve was left by
+    an instance before a restart: its sshfs is killed, the prefix
+    unmounted and served again. Workspace ids must therefore be unique
+    among live workspaces, and stable across a restart for it to take its
+    mounts back. A workspace with no id names its sources at random. The
+    session that owns the machine is held in memory, so after a restart
+    the first session to run a line owns it again.
 
     A machine may restart between a line's ``validate`` and its exec and come
     back without its mounts, so each line runs under ``MOUNT_GUARD``,
@@ -285,6 +299,7 @@ class MachineMounts:
 
     Args:
         provider (str): the machine's provider, for messages.
+        machine (str): the machine's name, its key under ``machines:``.
         mount_type (MountType): ssh, fuse or both.
         run (Callable[[str], Awaitable[RunResult]]): runs one setup
             command in the machine.
@@ -295,11 +310,13 @@ class MachineMounts:
     def __init__(
         self,
         provider: str,
+        machine: str,
         mount_type: MountType,
         run: Callable[[str], Awaitable[RunResult]],
         open_pipe: Callable[[str], Awaitable[MachinePipe]],
     ) -> None:
         self._provider = provider
+        self._machine = machine
         self._mount_type = mount_type
         self._run = run
         self._open_pipe = open_pipe
@@ -398,7 +415,11 @@ class MachineMounts:
         async with self._lock:
             ws_id = binding.processes.workspace_id if binding.processes else ""
             if not self._served:
-                self._name = source_name(ws_id) if ws_id else self._random
+                self._name = (
+                    source_name(ws_id, self._machine)
+                    if ws_id
+                    else self._random
+                )
             served = self._session
             session = binding.get_session(current.session_id)
             if served is not None and served is not session:
