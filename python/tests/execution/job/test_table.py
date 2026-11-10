@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import re
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from functools import partial
@@ -394,6 +395,27 @@ async def test_load_restores_a_job_into_its_session():
     assert table.get(3) is None
     assert (await _submit(table, "a")).id == 4
     assert (await _submit(table, "b")).id == 1
+    await table.kill_all()
+
+
+# A job started here and one restored from a snapshot are both named
+# `job_` and 32 hex digits, the id every caller sees.
+@pytest.mark.asyncio
+async def test_a_started_and_a_restored_job_are_named_job_and_hex():
+    table = JobTable()
+    started = await _submit(table, "a")
+    restored = JobHandle(
+        id=7,
+        command="x",
+        cwd="/",
+        created_at=0.0,
+        state=JobState.EXITED,
+        session_id="a",
+    )
+    await table.load(restored)
+    names = [started.record.id.console, restored.record.id.console]
+    assert all(re.fullmatch(r"job_[0-9a-f]{32}", name) for name in names)
+    assert names[0] != names[1]
     await table.kill_all()
 
 

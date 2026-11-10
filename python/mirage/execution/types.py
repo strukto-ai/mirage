@@ -41,7 +41,8 @@ class ProcessId:
 @dataclass(frozen=True, slots=True)
 class JobId:
     """One job of a workspace, named by its console, which no other job
-    shares even when it takes a number a reaped one had."""
+    shares even when it takes a number a reaped one had, written
+    ``job_`` and 32 hex digits."""
 
     workspace_id: str
     console: str
