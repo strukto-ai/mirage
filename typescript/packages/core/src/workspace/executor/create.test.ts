@@ -82,21 +82,18 @@ async function* aBlockThenAByte(): AsyncGenerator<Uint8Array> {
 
 describe('writeDescription', () => {
   it('leaves the offset after what landed when a later write fails', async () => {
-    let landed = 3
-    const dispatch: DispatchFn = async (op, _path, args, kwargs) => {
+    const dispatch: DispatchFn = async (op, _path, args, kwargs, report) => {
       if (kwargs?.admit_only === true) return [null, new IOResult()]
       await Promise.resolve()
       if (op === 'stat') {
-        return [new FileStat({ name: 'f', size: landed, type: FileType.FILE }), new IOResult()]
+        return [new FileStat({ name: 'f', size: 1 << 30, type: FileType.FILE }), new IOResult()]
       }
       if (op === 'pwrite') {
         const [parts, offset] = args as [AsyncIterable<Uint8Array>, number]
         expect(offset).toBe(3)
-        for await (const part of parts) {
-          if (landed === 3 + MEMORY_LIMIT)
-            throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' })
-          landed += part.byteLength
-        }
+        await materialize(parts)
+        if (report !== undefined) report.bytes = MEMORY_LIMIT - 7
+        throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' })
       }
       return [null, new IOResult()]
     }
@@ -106,7 +103,7 @@ describe('writeDescription', () => {
     await expect(
       writeDescription(dispatch, new SessionState({ sessionId: 's' }), file, aBlockThenAByte()),
     ).rejects.toThrow('ENOSPC')
-    expect([file.offset, landed]).toEqual([3 + MEMORY_LIMIT, 3 + MEMORY_LIMIT])
+    expect(file.offset).toBe(3 + MEMORY_LIMIT - 7)
   })
 
   it.each([

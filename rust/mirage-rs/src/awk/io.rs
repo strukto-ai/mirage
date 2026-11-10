@@ -401,6 +401,7 @@ impl Io {
     }
 
     pub(super) fn retire(&mut self) -> Retirement {
+        self.written = Vec::new();
         Retirement {
             files_in: self.files_in.retire(),
             pipes_in: self.pipes_in.retire(),

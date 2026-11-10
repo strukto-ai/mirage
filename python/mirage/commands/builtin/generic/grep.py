@@ -336,6 +336,14 @@ async def grep_generic(
     if fl.as_bool("unix_byte_offsets"):
         warning = UNIX_BYTE_OFFSETS + warning
 
+    # -m over a file leaves standard input past its last selected line, so
+    # a stdin operand gives back the rest of the descriptor.
+    shared = (
+        stdin
+        if isinstance(stdin, SharedInput) and stdin.seekable and f.max_count
+        else None
+    )
+
     def search(
         source: AsyncIterator[bytes],
         label: str,
@@ -343,27 +351,27 @@ async def grep_generic(
         file_io: IOResult,
         after_output: bool = False,
         size: int | None = None,
+        reads_stdin: bool = False,
     ) -> AsyncGenerator[bytes, None]:
         return stream_input(
-            source, stream, label, show, file_io, after_output, size
+            source,
+            stream,
+            label,
+            show,
+            file_io,
+            after_output,
+            size,
+            shared=shared if reads_stdin else None,
         )
 
     io = IOResult(exit_code=1, stderr=warning or None)
     if not paths:
-        shared = (
-            stdin
-            if isinstance(stdin, SharedInput)
-            and stdin.seekable
-            and f.max_count
-            else None
-        )
-        return stream_input(
+        return search(
             resolve_source(stdin),
-            stream,
             f.label,
             f.with_filename and not f.no_filename,
             io,
-            shared=shared,
+            reads_stdin=True,
         ), io
 
     mounts = mounts_of(ctx)
@@ -508,6 +516,7 @@ async def grep_generic(
                         file_io,
                         printed,
                         info.size if info.type == FileType.FILE else None,
+                        is_stdin(p),
                     )
                 ) as output:
                     async for chunk in output:

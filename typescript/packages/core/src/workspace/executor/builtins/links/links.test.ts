@@ -23,7 +23,7 @@ import { followPaths, prepareMv } from './links.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Handed } from '../../../../vfs/types.ts'
-import { eacces } from '../../../../errors/fs.ts'
+import { eacces, efbig } from '../../../../errors/fs.ts'
 
 const DEC = new TextDecoder()
 
@@ -36,8 +36,15 @@ class PinLinks implements Policy {
   }
 }
 
-// A backend that refuses to read `*.sealed`: the fault a command meets
-// partway through, after it was admitted.
+// A records file that yields its first page and then is too large to read on.
+async function* firstPage(path: PathSpec): AsyncIterable<Uint8Array> {
+  await Promise.resolve()
+  yield new TextEncoder().encode('a')
+  throw efbig(path)
+}
+
+// A backend that refuses to read `*.sealed`, and `*.late` past its first
+// page: the faults a command meets partway through, after it was admitted.
 class SealedReads extends RAMVFS {
   override read(
     path: PathSpec,
@@ -46,6 +53,7 @@ class SealedReads extends RAMVFS {
     size: number | null = null,
   ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
     if (path.virtual.endsWith('.sealed')) return Promise.reject(eacces(path))
+    if (path.virtual.endsWith('.late')) return firstPage(path)
     return super.read(path, handed, offset, size)
   }
 }
@@ -235,10 +243,15 @@ describe('ln with a source it cannot read', () => {
     // foresee (the backend's refusal here) is that refusal, not an abort.
     const ws = new Workspace({ '/data': new SealedReads() }, { mode: MountMode.WRITE })
     try {
-      await ws.shell('mkdir /data/d; printf a > /data/a.sealed; printf b > /data/b.txt')
-      const r = await ws.shell('ln /data/a.sealed /data/b.txt /data/d')
+      await ws.shell(
+        'mkdir /data/d; printf a > /data/a.sealed; printf b > /data/b.txt; printf c > /data/c.late',
+      )
+      const r = await ws.shell('ln /data/a.sealed /data/c.late /data/b.txt /data/d')
       expect(r.exitCode).toBe(1)
-      expect(err(r)).toBe("ln: failed to access '/data/a.sealed': Permission denied\n")
+      expect(err(r)).toBe(
+        "ln: failed to access '/data/a.sealed': Permission denied\n" +
+          "ln: failed to access '/data/c.late': File too large\n",
+      )
       const rest = await ws.shell('ls /data/d; cat /data/d/b.txt')
       expect(DEC.decode(rest.stdout)).toBe('b.txt\nb')
     } finally {

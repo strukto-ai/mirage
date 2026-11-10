@@ -103,7 +103,8 @@ async function reachedPipe(dispatch: DispatchFn, path: string | null): Promise<P
  * before it stopped (`kept`) still lands, as Python's task writes on once
  * it has taken its cancel. A store that rewrites the file per pwrite rewrites
  * it once per write; writing nothing sends none, and a write that fails
- * leaves the offset no further than the file's end.
+ * advances the offset by what its store landed, as the dispatcher's report
+ * counts it.
  */
 export async function writeDescription(
   dispatch: DispatchFn,
@@ -155,14 +156,15 @@ export async function writeDescription(
         step = await parts.next()
       }
     }
+    const report = new OpReport()
     try {
       if (data instanceof Uint8Array) {
-        if (data.byteLength > 0) await dispatch('pwrite', file.where, [data, start])
+        if (data.byteLength > 0) await dispatch('pwrite', file.where, [data, start], {}, report)
         moved = data.byteLength
-      } else if (step.done !== true) await dispatch('pwrite', file.where, [counted(), start])
+      } else if (step.done !== true)
+        await dispatch('pwrite', file.where, [counted(), start], {}, report)
     } catch (err) {
-      const size = await sizeOf(dispatch, file.where)
-      if (size !== null) moved = Math.min(moved, Math.max(size - start, 0))
+      moved = Math.min(moved, report.bytes ?? 0)
       throw err
     } finally {
       await parts.return?.()

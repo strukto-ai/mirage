@@ -47,7 +47,9 @@ from mirage.errors.types import (
 from mirage.io import OpReport
 from mirage.io.errors import MemoryExhausted
 from mirage.io.memory import body_limit, memory_room
+from mirage.io.spool import MEMORY_LIMIT
 from mirage.io.stream import yield_bytes
+from mirage.io.types import ByteSource
 from mirage.observe.context import RecordingScope, record, start_op
 from mirage.policy import (
     Action,
@@ -2417,6 +2419,49 @@ async def test_the_report_names_the_path_the_op_ran_on():
             "read", PathSpec.from_str_path("/ram/lk"), report=report
         )
         assert report.path == "/ram/a.txt"
+
+
+class _FullRAM(RAMVFS):
+    """A RAM mount that fills up: its pwrite refuses past the first
+    window, or with ``rewrites`` it has no pwrite and its rewrite of the
+    file is refused."""
+
+    def __init__(self, rewrites: bool) -> None:
+        super().__init__()
+        self.rewrites = rewrites
+
+    def supports(self, name: str) -> bool:
+        return not (self.rewrites and name == "pwrite") and super().supports(
+            name
+        )
+
+    async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:
+        if offset >= MEMORY_LIMIT:
+            raise OSError(errno.ENOSPC, "No space left on device")
+        await super().pwrite(path, data, offset)
+
+    async def write(
+        self, path: PathSpec, data: ByteSource, *, atomic: bool = False
+    ) -> None:
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rewrites,landed", [(False, MEMORY_LIMIT), (True, 0)])
+async def test_a_failed_streamed_pwrite_reports_what_landed(rewrites, landed):
+    vfs = _FullRAM(rewrites)
+    vfs.accessor.store.files["/f"] = b"x" * (3 * MEMORY_LIMIT)
+    with Workspace({"/data/": vfs}, mode=MountMode.WRITE) as ws:
+        report = OpReport()
+        with pytest.raises(OSError):
+            await ws.dispatch(
+                "pwrite",
+                PathSpec.from_str_path("/data/f"),
+                data=yield_bytes(b"y" * (2 * MEMORY_LIMIT)),
+                offset=0,
+                report=report,
+            )
+        assert report.bytes == landed
 
 
 @pytest.mark.asyncio

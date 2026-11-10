@@ -169,7 +169,9 @@ async def handle_mapfile(
     # it, so neither -O appends nor empty records grow it past the
     # workspace's max_memory a few lines at a time.
     held = sum(_SLOT + len(encode_text(v)) for v in arr.elements.values())
-    max_env = env_limit()
+    # Only a fresh array grows with every record: -O over elements, or a
+    # callback, may replace them with shorter ones.
+    max_env = env_limit() if callback is None and not arr.elements else None
     outputs: list[bytes] = []
     errors: list[bytes] = []
     while buffer is not None and (limit == 0 or stored < limit):

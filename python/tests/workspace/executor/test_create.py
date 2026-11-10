@@ -97,20 +97,17 @@ async def _a_block_then_a_byte():
 
 @pytest.mark.asyncio
 async def test_a_failed_write_leaves_the_offset_after_what_landed():
-    landed = 3
-
     async def dispatch(op: str, scope: PathSpec, **kwargs):
-        nonlocal landed
         if kwargs.get("admit_only"):
             return None, None
         if op == "stat":
-            return FileStat(name="f", size=landed, type=FileType.FILE), None
+            return FileStat(name="f", size=1 << 30, type=FileType.FILE), None
         if op == "pwrite":
             assert kwargs["offset"] == 3
-            async for part in kwargs["data"]:
-                if landed == 3 + MEMORY_LIMIT:
-                    raise OSError(28, "No space left on device")
-                landed += len(part)
+            async for _ in kwargs["data"]:
+                pass
+            kwargs["report"].bytes = MEMORY_LIMIT - 7
+            raise OSError(28, "No space left on device")
         return None, None
 
     file = FileDescription(_to_scope("/data/f"), opened=True, offset=3)
@@ -118,7 +115,7 @@ async def test_a_failed_write_leaves_the_offset_after_what_landed():
         await write_description(
             dispatch, SessionState("s"), file, _a_block_then_a_byte()
         )
-    assert file.offset == landed == 3 + MEMORY_LIMIT
+    assert file.offset == 3 + MEMORY_LIMIT - 7
 
 
 @pytest.mark.asyncio

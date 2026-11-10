@@ -123,7 +123,9 @@ export async function handleMapfile(
   // max_memory a few lines at a time.
   let held = 0
   for (const v of arr.elements.values()) held += SLOT + encodeText(v).byteLength
-  const maxEnv = envLimit()
+  // Only a fresh array grows with every record: -O over elements, or a
+  // callback, may replace them with shorter ones.
+  const maxEnv = callback === null && arr.elements.size === 0 ? envLimit() : null
   const outputs: Uint8Array[] = []
   const errs: Uint8Array[] = []
   while (buffer !== null && (limit === 0 || stored < limit)) {

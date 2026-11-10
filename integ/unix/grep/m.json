@@ -466,6 +466,44 @@
       "flags": [
         "m"
       ]
+    },
+    {
+      "id": "grep_m_gives_back_stdin_through_a_dash_operand",
+      "seq": 14490102,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nb\\na\\nc\\n' > /data/grep_dash_in; printf 'a\\nz\\n' > /data/grep_dash_other; { grep -m1 a -; cat; } < /data/grep_dash_in; echo --; { grep -m1 a - /data/grep_dash_other; cat; } < /data/grep_dash_in; echo --; find /data/grep_dash_in -maxdepth 0 -exec grep -m1 a - \\; -exec cat \\; < /data/grep_dash_in; rm /data/grep_dash_in /data/grep_dash_other",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\na\nc\n--\n(standard input):a\n/data/grep_dash_other:a\nb\na\nc\n--\na\nb\na\nc\n",
+        "stderr": ""
+      },
+      "flags": [
+        "m"
+      ]
     }
   ]
 }

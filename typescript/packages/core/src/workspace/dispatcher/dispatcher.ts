@@ -2638,6 +2638,12 @@ export class Dispatcher {
             owners,
           )
         } catch (err) {
+          // A failed pwrite reports what its store's own pwrites landed, as
+          // their records count them: none for a store that rewrites.
+          if (name === 'pwrite' && report !== undefined)
+            report.bytes = mine
+              .filter((rec) => rec.op === 'pwrite' && rec.path === p.virtual)
+              .reduce((sum, rec) => sum + rec.bytes, 0)
           await this.evictFailedWrite(name, p, dst, others, lostPaths(line))
           throw err
         }
