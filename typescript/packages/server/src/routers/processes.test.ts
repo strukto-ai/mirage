@@ -70,14 +70,33 @@ it('lists a process live and after it ends', async () => {
     )
     expect((there.body as { pid: number }[]).map((p) => p.pid)).toContain(pid)
     expect((await get(app, '/v1/workspaces/w/processes?machine=docker:nowhere')).body).toEqual([])
-    expect((await get(app, '/v1/workspaces/w/processes?machine=nowhere')).status).toBe(400)
+    const nowhere = await get(app, '/v1/workspaces/w/processes?machine=nowhere')
+    expect(nowhere.status).toBe(422)
+    const [issue] = (nowhere.body as { detail: { type: string; loc: string[]; input: string }[] })
+      .detail
+    expect([issue?.type, issue?.loc, issue?.input]).toEqual([
+      'value_error',
+      ['query', 'machine'],
+      'nowhere',
+    ])
     await shell(app, 'w', 'kill %1; wait')
     const ended = await get(app, `/v1/workspaces/w/processes/${String(pid)}`)
     expect(ended.status).toBe(200)
     const body = ended.body as { command: string; state: string; signal: number }
     expect([body.command, body.state, body.signal]).toEqual(['sleep 30', 'exited', 15])
     expect((await get(app, '/v1/workspaces/w/processes/99999')).status).toBe(404)
-    expect((await get(app, '/v1/workspaces/w/processes/abc')).status).toBe(422)
+    expect((await get(app, '/v1/workspaces/w/processes/abc')).body).toEqual({
+      detail: [
+        {
+          type: 'int_parsing',
+          loc: ['path', 'pid'],
+          msg: 'Input should be a valid integer, unable to parse string as an integer',
+          input: 'abc',
+        },
+      ],
+    })
+    expect((await get(app, '/v1/workspaces/nope/processes/abc')).status).toBe(422)
+    expect((await get(app, '/v1/workspaces/nope/processes?state=lost')).status).toBe(422)
   } finally {
     await app.close()
   }

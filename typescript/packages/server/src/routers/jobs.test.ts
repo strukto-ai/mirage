@@ -56,6 +56,10 @@ it('lists a running job and finds it by id', async () => {
     try {
       const listed = await get(app, '/v1/workspaces/w/jobs?state=running')
       expect(listed.status).toBe(200)
+      const lost = await get(app, '/v1/workspaces/nope/jobs?state=lost')
+      expect(lost.status).toBe(422)
+      const [issue] = (lost.body as { detail: { type: string; loc: string[] }[] }).detail
+      expect([issue?.type, issue?.loc]).toEqual(['enum', ['query', 'state']])
       const [job] = listed.body as {
         id: string
         number: number

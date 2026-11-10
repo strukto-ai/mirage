@@ -23,6 +23,7 @@ import pytest
 import uvicorn
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from mirage.execution.line.types import Line, LineState
 from mirage.execution.types import LineId
@@ -75,8 +76,26 @@ async def test_shell_sync_returns_io_result():
         assert body["stdout"].startswith("hello")
 
 
+# A body that reads but fails the schema is a 422 in FastAPI's own shape,
+# located under "body"; a body that does not read is a 400.
 @pytest.mark.asyncio
-async def test_shell_refuses_an_unknown_field():
+@pytest.mark.parametrize(
+    ("body", "issues"),
+    [
+        (
+            {"command": "echo hello", "provision": True},
+            [("extra_forbidden", ["body", "provision"], True)],
+        ),
+        ({}, [("missing", ["body", "command"], {})]),
+        ({"command": 5}, [("string_type", ["body", "command"], 5)]),
+        (
+            {"command": "echo hi", "record": 1},
+            [("bool_type", ["body", "record"], 1)],
+        ),
+    ],
+)
+@pytest.mark.parametrize("explain", [False, True])
+async def test_shell_answers_a_bad_field_422(body, issues, explain):
     app = build_app(idle_grace_seconds=10.0)
     transport = ASGITransport(app=app)
     async with AsyncClient(
@@ -85,10 +104,119 @@ async def test_shell_refuses_an_unknown_field():
         wid = await _create_workspace(client)
         r = await client.post(
             f"/v1/workspaces/{wid}/shell",
-            json={"command": "echo hello", "provision": True},
+            params={"explain": str(explain).lower()},
+            json=body,
+        )
+        assert r.status_code == 422, r.text
+        assert [
+            (d["type"], d["loc"], d["input"]) for d in r.json()["detail"]
+        ] == issues
+
+
+@pytest.mark.asyncio
+async def test_shell_answers_a_bad_request_part_422():
+    async with _served() as client:
+        wid = await _create_workspace(client)
+        r = await client.post(
+            f"/v1/workspaces/{wid}/shell",
+            files={
+                "request": (
+                    None,
+                    json.dumps({"command": "echo hi", "provision": True}),
+                    "application/json",
+                ),
+            },
+        )
+        assert r.status_code == 422, r.text
+        [issue] = r.json()["detail"]
+        assert issue["loc"] == ["body", "request", "provision"]
+
+
+@pytest.mark.asyncio
+async def test_shell_answers_an_unreadable_body_400():
+    async with _served() as client:
+        wid = await _create_workspace(client)
+        route = f"/v1/workspaces/{wid}/shell"
+        headers = {"content-type": "application/json"}
+        r = await client.post(route, content=b'{"command":', headers=headers)
+        assert r.status_code == 400, r.text
+        for explain in ["false", "true"]:
+            empty = await client.post(route, params={"explain": explain})
+            assert empty.status_code == 400, empty.text
+        part = await client.post(
+            route,
+            files={"request": (None, '{"command":', "application/json")},
+        )
+        assert part.status_code == 400, part.text
+
+
+# A field's null is the field unset; an empty string is a value.
+@pytest.mark.asyncio
+async def test_shell_reads_null_as_unset():
+    app = build_app(idle_grace_seconds=10.0)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as client:
+        wid = await _create_workspace(client)
+        unset = dict.fromkeys(
+            ["cwd", "runtime", "machine", "record", "open_stdin"]
+        )
+        route = f"/v1/workspaces/{wid}/shell"
+        r = await client.post(route, json={"command": "echo hi", **unset})
+        assert r.status_code == 200, r.text
+        assert r.json()["stdout"] == "hi\n"
+        explained = await client.post(
+            route,
+            params={"explain": "true"},
+            json={"command": "echo hi", **unset},
+        )
+        assert explained.status_code == 200, explained.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["cwd", "runtime", "machine"])
+async def test_explain_refuses_an_empty_string_as_set(field):
+    app = build_app(idle_grace_seconds=10.0)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as client:
+        wid = await _create_workspace(client)
+        r = await client.post(
+            f"/v1/workspaces/{wid}/shell",
+            params={"explain": "true"},
+            json={"command": "echo hi", field: ""},
         )
         assert r.status_code == 400, r.text
-        assert "provision" in r.json()["detail"]
+
+
+# Query parameters are checked before the workspace, the body after the
+# workspace and the session.
+@pytest.mark.asyncio
+async def test_shell_checks_in_order():
+    app = build_app(idle_grace_seconds=10.0)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as client:
+        wid = await _create_workspace(client)
+        flags = await client.post(
+            "/v1/workspaces/nope/shell?stream=abc&explain=xyz",
+            json={"command": "echo hi"},
+        )
+        assert flags.status_code == 422
+        assert [d["loc"] for d in flags.json()["detail"]] == [
+            ["query", "explain"],
+            ["query", "stream"],
+        ]
+        for route in [
+            "/v1/workspaces/nope/shell",
+            "/v1/workspaces/nope/shell?stream=true&explain=true",
+            f"/v1/workspaces/{wid}/shell?session_id=nope",
+        ]:
+            r = await client.post(route, json={"bogus": 1})
+            assert r.status_code == 404, (route, r.text)
 
 
 # A line on a workspace another daemon holds is refused, naming that
@@ -366,6 +494,32 @@ def _request_part(command: str) -> bytes:
 
 END = f"\r\n--{BOUNDARY}--\r\n".encode()
 MULTIPART = {"content-type": f"multipart/form-data; boundary={BOUNDARY}"}
+
+
+class _StdinStatuses:
+    """Records the status each stdin route answers, a caller already
+    gone included.
+
+    Args:
+        app (ASGIApp): the app it wraps.
+        seen (list[int]): where the statuses go, in order.
+    """
+
+    def __init__(self, app: ASGIApp, seen: list[int]) -> None:
+        self.app = app
+        self.seen = seen
+
+    async def __call__(
+        self, scope: Scope, receive: Receive, send: Send
+    ) -> None:
+        async def spy(message: Message) -> None:
+            if message["type"] == "http.response.start" and scope[
+                "path"
+            ].endswith("/stdin"):
+                self.seen.append(message["status"])
+            await send(message)
+
+        await self.app(scope, receive, spy)
 
 
 @asynccontextmanager
@@ -835,6 +989,8 @@ async def test_stdin_routes_name_a_running_line_with_open_stdin():
 @pytest.mark.asyncio
 async def test_a_caller_that_hangs_up_drops_its_held_write():
     app = build_app(idle_grace_seconds=10.0)
+    statuses: list[int] = []
+    app.add_middleware(_StdinStatuses, seen=statuses)
     async with _served(app) as client:
         wid = await _create_workspace(client)
         capacity = app.state.registry.get(wid).runner.ws.io.buffer_bytes
@@ -868,3 +1024,4 @@ async def test_a_caller_that_hangs_up_drops_its_held_write():
                 seen += base64.b64decode(record["data"])
                 record = await _record(lines)
             assert seen == b"x" * capacity
+            assert statuses == [204, 499, 204]

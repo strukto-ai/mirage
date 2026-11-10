@@ -1882,14 +1882,13 @@ paths:
                   exit: null
                   signal: null
                   error: null
-        '400':
-          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
         '422':
-          description: Validation Error
+          description: A query parameter fails validation, such as an unknown `state` or a
+            `machine` not in `provider:name` format.
           content:
             application/json:
               schema:
@@ -2049,8 +2048,9 @@ paths:
           in: query
           description: Return the policy decision for the command without running it. Only
             `command` is evaluated; `record` is ignored and `open_stdin` may be `false`. A
-            multipart body, or a body with `cwd`, `runtime`, `machine` or `open_stdin` set to
-            `true`, is rejected with `400`. Cannot be combined with `stream`.
+            multipart body, a body that sets `cwd`, `runtime` or `machine` (an empty string
+            counts as set, `null` does not), or `open_stdin` set to `true`, is rejected with
+            `400`. Cannot be combined with `stream`.
           required: false
           schema:
             type: boolean
@@ -2089,8 +2089,8 @@ paths:
                   empty because the output was already sent. With `open_stdin`, a `line_id`
                   record comes first.
         '400':
-          description: The request is malformed. The body is not valid JSON, has an unknown or
-            invalid field, or its multipart parts are missing or out of order. Or the options
+          description: The request cannot be read or its options conflict. The body is not valid
+            JSON, or its multipart parts are malformed, missing or out of order. Or the options
             conflict, as `stream` with `explain`, `open_stdin` without `stream=true` or with a
             stdin part, or `explain` with a multipart body, `cwd`, `runtime`, `machine` or
             `open_stdin` set to `true`.
@@ -2112,11 +2112,20 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '422':
-          description: A query parameter has an invalid value, such as `explain=maybe`.
+          description: A body field or query parameter fails validation, such as an unknown or
+            missing field, a field of the wrong type, or `explain=maybe`. Each entry of `detail`
+            names the field in `loc`, starting with `body` or `query`; a field of the multipart
+            `request` part starts with `body`, `request`.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+              example:
+                detail:
+                  - type: missing
+                    loc: [body, command]
+                    msg: Field required
+                    input: {}
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -7776,25 +7785,37 @@ components:
           type: string
           description: Shell command or script to execute.
         cwd:
-          type: string
-          description: Working directory for this command only.
+          anyOf:
+            - type: string
+            - type: 'null'
+          description: Working directory for this command only. `null` is the same as omitting
+            it.
         runtime:
-          type: string
-          description: Name of an entry under `runtimes` in the workspace config. If omitted, the
-            runtime is selected automatically.
+          anyOf:
+            - type: string
+            - type: 'null'
+          description: Name of an entry under `runtimes` in the workspace config. If omitted or
+            `null`, the runtime is selected automatically.
         machine:
-          type: string
-          description: Name of an entry under `machines` in the workspace config. If omitted, the
-            machine is selected automatically.
+          anyOf:
+            - type: string
+            - type: 'null'
+          description: Name of an entry under `machines` in the workspace config. If omitted or
+            `null`, the machine is selected automatically.
         record:
-          type: boolean
+          anyOf:
+            - type: boolean
+            - type: 'null'
           default: true
-          description: Include this command in session history. Set `false` to keep it out.
+          description: Include this command in session history. Set `false` to keep it out;
+            `null` is the default.
         open_stdin:
-          type: boolean
+          anyOf:
+            - type: boolean
+            - type: 'null'
           default: false
           description: Keep stdin open for additional input. Requires `stream=true` and no stdin
-            part; the first response record contains `line_id`.
+            part; the first response record contains `line_id`. `null` is the default.
       required:
         - command
       additionalProperties: false

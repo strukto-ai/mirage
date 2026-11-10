@@ -14,13 +14,13 @@ so check `Content-Type` before parsing. Requests past a limit answer `429` with
 
 | Status | Meaning | Recovery |
 | --- | --- | --- |
-| `400` | Malformed request, disallowed host or disallowed browser origin. | Check the body, API host and browser origin. |
+| `400` | Malformed request, conflicting options, disallowed host or disallowed browser origin. | Check the body, the query flags, API host and browser origin. |
 | `401` | Missing or incorrect token. | Send a valid bearer token; sign in again if it expired. |
 | `403` | A policy or mount mode refused the call. | Check workspace policies and mount permissions. |
 | `404` | The workspace, session, job or file does not exist, or the workspace is stopped. | Verify the identifier or file path; start a stopped workspace. |
 | `409` | An identifier is taken, the workspace is busy or a file changed since it was read. | Resolve the conflict before retrying; see the workspace example below. |
 | `413` | A request body, multipart part, or stdin exceeds its size limit. | Reduce the input size and check the endpoint's limits. |
-| `422` | Request fields failed validation. | Correct the fields named in `detail`. |
+| `422` | A body field, query parameter or path parameter failed validation. | Correct the fields named in `detail`. |
 | `429` | A rate limit or session limit was reached. | Respect `Retry-After` when present; reduce the request rate or close unused sessions. |
 | `499` | A running shell job was canceled. | Check its output and any side effects before rerunning it. |
 | `500` | A job or server operation failed internally. | Inspect `detail` and the server logs; check for side effects before retrying. |
@@ -91,6 +91,11 @@ Sending a numeric workspace `id` returns HTTP `422`:
 
 `loc` identifies the invalid field. Change `id` to a string before retrying.
 Validation messages can differ between server implementations.
+
+A field that fails validation returns `422` wherever it is: `loc` starts with
+`body`, `query` or `path`. The shell endpoint returns `400` only for a body it
+cannot read, such as invalid JSON or multipart parts out of order, and for
+options that conflict, such as `stream=true` with `explain=true`.
 
 ## Shell exit codes
 

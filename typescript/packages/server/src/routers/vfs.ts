@@ -18,6 +18,7 @@ import type { FsCondition } from '@struktoai/mirage-core/errors/types'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import type { z } from '@struktoai/mirage-core/vfs/secrets'
 import { stderr } from 'node:process'
 import { format } from 'node:util'
 import { answered, CallArgsError, checked, customAnswer, failureToDict } from '../io_serde.ts'
@@ -61,14 +62,118 @@ const STATUS: Record<FsCondition, number> = {
   EBADF: 500,
 }
 
-/** Thrown for a request the route answers with a fixed status and detail. */
+/**
+ * One field that failed validation, an entry of an `HTTPValidationError`'s
+ * `detail`: `loc` says where it is, such as `['query', 'stream']` or
+ * `['body', 'command']`. Mirrors Python's `ValidationIssue`.
+ */
+export interface ValidationIssue {
+  type: string
+  loc: (string | number)[]
+  msg: string
+  input: JsonValue
+  ctx?: Record<string, JsonValue>
+}
+
+/**
+ * Thrown for a request the route answers with a fixed status and detail: a
+ * message, or the fields that failed validation. Mirrors FastAPI's
+ * `HTTPException`.
+ */
 export class HttpError extends Error {
   constructor(
     readonly status: number,
-    message: string,
+    readonly detail: string | ValidationIssue[],
   ) {
-    super(message)
+    super(typeof detail === 'string' ? detail : detail.map((issue) => issue.msg).join('; '))
   }
+}
+
+/**
+ * A 422 for fields that failed validation, in the shape FastAPI answers the
+ * ones it checks itself. Mirrors Python's `invalid`.
+ */
+export function invalid(issues: ValidationIssue[]): HttpError {
+  return new HttpError(422, issues)
+}
+
+/**
+ * A 422 for a value outside its choices, worded as pydantic words an enum.
+ * Python's routes declare the enum and FastAPI answers it.
+ */
+export function invalidChoice(
+  loc: (string | number)[],
+  choices: readonly string[],
+  input: string,
+): HttpError {
+  const quoted = choices.map((choice) => `'${choice}'`)
+  const expected =
+    quoted.length < 2
+      ? quoted.join('')
+      : `${quoted.slice(0, -1).join(', ')} or ${quoted[quoted.length - 1] ?? ''}`
+  return invalid([
+    { type: 'enum', loc, msg: `Input should be ${expected}`, input, ctx: { expected } },
+  ])
+}
+
+/**
+ * A body a route validates itself, refused as FastAPI refuses one it
+ * validates: each `loc` starts at `body` (then `part`, for the multipart
+ * part that carried it), and each `type` is pydantic's for the same failure.
+ * Mirrors Python's `invalid_body`.
+ */
+export function invalidBody(error: z.ZodError, body: JsonValue, part?: string): HttpError {
+  const where: (string | number)[] = part === undefined ? ['body'] : ['body', part]
+  const at = (path: readonly PropertyKey[]): JsonValue | undefined => {
+    let value: JsonValue | undefined = body
+    for (const key of path) {
+      if (value === null || typeof value !== 'object') return undefined
+      value = (value as Record<string, JsonValue | undefined>)[String(key)]
+    }
+    return value
+  }
+  const named: Record<string, [string, string]> = {
+    string: ['string_type', 'Input should be a valid string'],
+    boolean: ['bool_type', 'Input should be a valid boolean'],
+    number: ['float_type', 'Input should be a valid number'],
+    record: ['dict_type', 'Input should be a valid dictionary'],
+    object: ['dict_type', 'Input should be a valid dictionary'],
+  }
+  return invalid(
+    error.issues.flatMap((issue): ValidationIssue[] => {
+      const path = issue.path.filter((key) => typeof key !== 'symbol')
+      const loc = [...where, ...path]
+      if (issue.code === 'unrecognized_keys') {
+        return issue.keys.map((key) => ({
+          type: 'extra_forbidden',
+          loc: [...loc, key],
+          msg: 'Extra inputs are not permitted',
+          input: at([...path, key]) ?? null,
+        }))
+      }
+      const input = at(path)
+      if (input === undefined) {
+        return [
+          { type: 'missing', loc, msg: 'Field required', input: at(path.slice(0, -1)) ?? null },
+        ]
+      }
+      if (issue.code === 'invalid_type' && path.length === 0) {
+        return [
+          {
+            type: 'model_attributes_type',
+            loc,
+            msg: 'Input should be a valid dictionary or object to extract fields from',
+            input,
+          },
+        ]
+      }
+      const [type, msg] = (issue.code === 'invalid_type' ? named[issue.expected] : undefined) ?? [
+        issue.code,
+        issue.message,
+      ]
+      return [{ type, loc, msg, input }]
+    }),
+  )
 }
 
 /** The workspace a route names, as the caller may see it. Mirrors Python's `require_entry`. */
@@ -94,20 +199,35 @@ export async function sessionOf(ws: Workspace, sessionId: string | undefined): P
   return new Session(ws, sessionId === undefined || sessionId === '' ? null : sessionId)
 }
 
-const FLAG_TRUE = new Set(['true', '1', 'yes', 'on', 't', 'y'])
-const FLAG_FALSE = new Set(['false', '0', 'no', 'off', 'f', 'n'])
-
 /**
- * Whether a boolean query flag is set. Accepts what a FastAPI `bool` does
- * (`true`/`false`, `1`/`0`, `yes`/`no`, `on`/`off`, `t`/`f`, `y`/`n`, any case);
- * anything else, an empty value included, is a 422. Absent is false.
+ * Whether each named boolean query flag is set. Accepts what a FastAPI `bool`
+ * does (`true`/`false`, `1`/`0`, `yes`/`no`, `on`/`off`, `t`/`f`, `y`/`n`, any
+ * case); anything else, an empty value included, is a 422 naming every bad
+ * flag, in the order named. A flag given more than once, which a host hands
+ * over as a list, takes its last value, as FastAPI does. Absent is false.
  */
-export function queryFlag(value: string | undefined, name: string): boolean {
-  if (value === undefined) return false
-  const spelled = value.toLowerCase()
-  if (FLAG_TRUE.has(spelled)) return true
-  if (FLAG_FALSE.has(spelled)) return false
-  throw new HttpError(422, `${name} must be a valid boolean`)
+export function queryFlag<K extends string>(
+  query: Partial<Record<K, string | string[]>>,
+  ...names: K[]
+): Record<K, boolean> {
+  const flags = {} as Record<K, boolean>
+  const issues: ValidationIssue[] = []
+  for (const name of names) {
+    const given: string | string[] | undefined = query[name]
+    const value = typeof given === 'object' ? given.at(-1) : given
+    const spelled = value?.toLowerCase() ?? 'false'
+    flags[name] = ['true', '1', 'yes', 'on', 't', 'y'].includes(spelled)
+    if (!flags[name] && !['false', '0', 'no', 'off', 'f', 'n'].includes(spelled)) {
+      issues.push({
+        type: 'bool_parsing',
+        loc: ['query', name],
+        msg: 'Input should be a valid boolean, unable to interpret input',
+        input: value ?? null,
+      })
+    }
+  }
+  if (issues.length > 0) throw invalid(issues)
+  return flags
 }
 
 /**
@@ -116,7 +236,7 @@ export function queryFlag(value: string | undefined, name: string): boolean {
  * refusal, its record. Mirrors Python's `failure`.
  */
 export function failure(reply: RouteReply, err: unknown): RouteReply {
-  if (err instanceof HttpError) return reply.status(err.status).send({ detail: err.message })
+  if (err instanceof HttpError) return reply.status(err.status).send({ detail: err.detail })
   if (err instanceof CallArgsError) return reply.status(400).send({ detail: err.message })
   const condition = classify(err)
   const status = condition === null ? 500 : STATUS[condition]
@@ -143,8 +263,8 @@ export function registerVfsRoutes(
       async (req, reply) => {
         let body: JsonValue
         try {
+          const { explain } = queryFlag(req.query, 'explain')
           const ws = requireEntry(deps.registry, req.params.wsId, req.account).runner.ws
-          const explain = queryFlag(req.query.explain, 'explain')
           const params = (req.body ?? {}) as Record<string, unknown>
           const asked = call.name === 'read' && params.stream !== undefined
           const stream = asked ? params.stream : false
