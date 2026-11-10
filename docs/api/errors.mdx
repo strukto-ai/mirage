@@ -5,67 +5,125 @@ icon: triangle-exclamation
 ---
 
 A `200` from `POST /v1/workspaces/{workspace_id}/shell` means the server ran
-the line, not that the line succeeded: check `exit_code`. Most API errors return
-JSON with a `detail` message, but an auth or `Host` refusal can be plain text,
-so check `Content-Type` before parsing. Requests past a limit answer `429` with
-`Retry-After` ([rate limits](/home/access/http#rate-limits)).
+the line, not that the line succeeded: check `exit_code`. Every HTTP error
+answers JSON in one shape, on both servers. Requests past a limit answer `429`
+with `Retry-After` ([rate limits](/home/access/http#rate-limits)).
 
-## HTTP status codes
+## Error body
 
-| Status | Meaning | Recovery |
+```json
+{
+  "error": {
+    "code": "missing_field",
+    "message": "config.mounts is required",
+    "param": "config.mounts"
+  }
+}
+```
+
+| Field | Present | Means |
 | --- | --- | --- |
-| `400` | Malformed request, conflicting options, disallowed host or disallowed browser origin. | Check the body, the query flags, API host and browser origin. |
-| `401` | Missing or incorrect token. | Send a valid bearer token; sign in again if it expired. |
-| `403` | A policy or mount mode refused the call. | Check workspace policies and mount permissions. |
-| `404` | The workspace, session, job or file does not exist, or the workspace is stopped. | Verify the identifier or file path; start a stopped workspace. |
-| `409` | An identifier is taken, the workspace is busy or a file changed since it was read. | Resolve the conflict before retrying; see the workspace example below. |
-| `413` | A request body, multipart part, or stdin exceeds its size limit. | Reduce the input size and check the endpoint's limits. |
-| `422` | A body field, query parameter or path parameter failed validation. | Correct the fields named in `detail`. |
-| `429` | A rate limit or session limit was reached. | Respect `Retry-After` when present; reduce the request rate or close unused sessions. |
-| `499` | A running shell job was canceled. | Check its output and any side effects before rerunning it. |
-| `500` | A job or server operation failed internally. | Inspect `detail` and the server logs; check for side effects before retrying. |
-| `501` | A saved-config operation requires a server configured for one account. | Check the deployment's saved-configuration support. |
-| `503` | The server reached its workspace limit or is shutting down. | Retry after capacity or availability recovers. |
-| `507` | A filesystem operation exceeds its backend's storage capacity or quota. | Free space or increase the backend's capacity before retrying. |
+| `code` | Always | What went wrong. Codes are stable: branch on them. A code your client does not know falls back to the HTTP status. |
+| `message` | Always | Human-readable text. Its wording can change, so do not parse it. It never repeats a value you sent in the body, a header or the query. |
+| `param` | Request-shape errors | The request field at fault. A body field is a dotted path from the body's root, such as `config.mounts` or `mounts[0].mode`. A query or path parameter is its bare name. |
+| `errno` | Failed file calls | The POSIX condition, such as `ENOENT` or `STALE_WRITE`. See [file call conditions](/home/access/errors#file-calls). |
+| `refusal` | Policy refusals | The [refusal record](/home/policy/policies): `kind`, `reason`, `policy` and `ask_id`. |
+| `missing` | Saved-config routes | Names that must exist first, such as the secret stores a config refers to. |
+
+Detect an error by its HTTP status, never by the presence of an `error` key: a
+success body can carry an `error` field of its own, such as a finished line's
+`error` in `GET /v1/workspaces/{workspace_id}/lines/{line_id}`.
+
+## Status codes
+
+| Status | Codes | Means | Recovery |
+| --- | --- | --- | --- |
+| `400` | `invalid_request`, `invalid_json`, `missing_field`, `unknown_field`, `invalid_value` | The request is malformed, a field is missing, unknown or has a wrong value, or options conflict. | Fix the field named in `param`, or the request, before retrying. |
+| `401` | `unauthorized` | The token is missing or wrong. The response carries `WWW-Authenticate: Bearer`. | Send a valid bearer token; sign in again if it expired. |
+| `403` | `forbidden`, `policy_refused`, `host_not_allowed`, `origin_not_allowed`, `storage_full` | A mount mode, permission or policy refused the call, the `Host` or browser origin is not allowed, or the backend is out of space or quota. | Check policies, mount modes, the API host and the browser origin; free space for `storage_full`. |
+| `404` | `not_found` | The workspace, session, job, file or route does not exist, or you may not see it. | Verify the identifier, file path or URL. |
+| `405` | `method_not_allowed` | The path exists but does not take this method. | Use the method the endpoint documents. |
+| `409` | `conflict`, `already_exists`, `workspace_busy`, `workspace_stopped`, `stale_write` | An identifier is taken, the workspace is busy or stopped, or a file changed since it was read. | Resolve the conflict before retrying: start a stopped workspace, read a changed file again. |
+| `413` | `too_large` | A request body, multipart part or stdin exceeds its size limit. | Reduce the input size and check the endpoint's limits. |
+| `429` | `rate_limited`, `session_limit` | A rate limit or the workspace's session limit was reached. | Wait for `Retry-After` on `rate_limited`; close unused sessions on `session_limit`. |
+| `499` | `canceled` | A running shell job was canceled. | Check its output and any side effects before rerunning it. |
+| `500` | `internal` | The server failed. The message is always `internal server error`; the cause is in the server log. | Check the server log and for side effects before retrying. |
+| `501` | `not_supported` | The server does not support the call, such as saved configs on a server with accounts. | Check the deployment's saved-configuration support. |
+| `503` | `unavailable`, `server_full`, `shutting_down` | The server is at its workspace limit, shutting down, or cannot reach a worker. | Retry after capacity or availability recovers. |
+
+A route that needs a running workspace answers `409` `workspace_stopped` when
+your workspace is stopped. A workspace that does not exist, or that you may not
+see, is `404` `not_found`.
+
+A failed file call picks its code from its POSIX condition:
+
+| Condition | Status | Code |
+| --- | --- | --- |
+| `ENOENT`, `NO_XATTR` | `404` | `not_found` |
+| `EACCES`, `EPERM`, `EROFS` | `403` | `forbidden`, or `policy_refused` when a policy refused the call |
+| `EEXIST` | `409` | `already_exists` |
+| `ENOTEMPTY`, `EBUSY` | `409` | `conflict` |
+| `STALE_WRITE` | `409` | `stale_write` |
+| `ENOTDIR`, `EISDIR`, `EINVAL`, `EXDEV`, `ELOOP`, `ENOTSUP`, `EFBIG` | `400` | `invalid_request` |
+| `EDQUOT` | `403` | `storage_full` |
+| `EIO`, `EPIPE`, `EBADF` | `500` | `internal` |
 
 Each endpoint's **Errors** section lists its documented failures. The complete
 [OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml)
-retains every response schema. JSON errors can
-include `errno` and `refusal` alongside `detail`. Those fields describe filesystem
-errors and policy refusals when available.
+retains every response schema.
 
-For oversized JSON requests, TypeScript can return HTTP `413` with `statusCode`,
-`code`, `error`, and `message` fields. Read `message` when `detail` is absent.
+Some bodies are not this shape. The [RPC](/home/access/rpc#errors) and
+[MCP](/home/access/mcp) endpoints answer JSON-RPC errors. A failed file call
+carries the inner object above, `{code, message, errno, refusal}`, in an RPC
+error's `data`, and as the text of a failed MCP `vfs_<call>` tool. Records
+inside an NDJSON stream follow the stream's own format once the `200` is sent.
+The readiness endpoint answers `503` with `{"status": "full"}` or
+`{"status": "shutting_down"}` when the server cannot accept new workspaces.
 
-The readiness endpoint uses a different body: HTTP `503` returns
-`{"status": "full"}` or `{"status": "shutting_down"}` when the server cannot
-accept new workspaces.
+## Which error is reported
+
+A response reports one error, the first one found:
+
+1. Query and path parameters, before the body.
+2. The body's declared fields, in the order the endpoint's schema lists them.
+3. Unknown keys, last, in the order they appear in the body.
+
+The server reads a body as JSON whatever its `Content-Type` says, except
+`multipart/*` and `application/octet-stream`, so `curl -d` works without a
+header.
+
+Request-shape errors use these messages, where `<param>` is the field's path:
+
+| Problem | Code | Message |
+| --- | --- | --- |
+| The body is not JSON | `invalid_json` | `body must be JSON` |
+| The body is JSON but not an object | `invalid_request` | `body must be a JSON object` |
+| A required field is missing | `missing_field` | `<param> is required` |
+| A key the endpoint does not know | `unknown_field` | `<param> is not a known field` |
+| A value of the wrong type or outside its choices | `invalid_value` | `<param> must be <expected>` |
+
+`<expected>` is `a string`, `an integer`, `a number`, `a boolean`, `an object`,
+`an array` or `one of a, b, c`.
 
 ## Examples
 
 ### Missing or invalid credentials
 
-The TypeScript daemon returns HTTP `401` with JSON:
+A request without a valid token returns HTTP `401` with
+`WWW-Authenticate: Bearer`:
 
 ```json
-{"detail": "Unauthorized"}
+{"error": {"code": "unauthorized", "message": "unauthorized"}}
 ```
 
-The Python daemon returns the same status with `Content-Type: text/plain`:
-
-```text
-Unauthorized
-```
-
-Check `Content-Type` before decoding the body. Supply a valid token before retrying.
-See [Authentication](/api/authentication).
+Supply a valid token before retrying. See [Authentication](/api/authentication).
 
 ### Workspace identifier conflict
 
 Creating `demo` again with a different configuration returns HTTP `409`:
 
 ```json
-{"detail": "workspace id already exists: 'demo'"}
+{"error": {"code": "already_exists", "message": "workspace id already exists"}}
 ```
 
 Choose another identifier for a different workspace. Retrying the original
@@ -74,28 +132,60 @@ workspace, with the same response shape as a successful `201` creation.
 
 ### Invalid request field
 
-Sending a numeric workspace `id` returns HTTP `422`:
+Sending a numeric workspace `id` returns HTTP `400`:
+
+```json
+{"error": {"code": "invalid_value", "message": "id must be a string", "param": "id"}}
+```
+
+Change `id` to a string before retrying.
+
+### Unknown runtime or machine
+
+A shell request whose `runtime` or `machine` the workspace does not have is
+refused with HTTP `400` before anything runs:
+
+```json
+{"error": {"code": "invalid_value", "message": "runtime must be one of python", "param": "runtime"}}
+```
+
+The message lists the names the workspace has, or says the field must be unset
+when the workspace has none.
+
+### Policy refusal of a file call
+
+A VFS call a policy refuses returns HTTP `403`:
 
 ```json
 {
-  "detail": [
-    {
-      "type": "string_type",
-      "loc": ["body", "id"],
-      "msg": "Input should be a valid string",
-      "input": 4
+  "error": {
+    "code": "policy_refused",
+    "message": "Permission denied",
+    "errno": "EACCES",
+    "refusal": {
+      "kind": "deny",
+      "reason": "writes under /data are not allowed",
+      "policy": "PermissionsPolicy",
+      "ask_id": null
     }
-  ]
+  }
 }
 ```
 
-`loc` identifies the invalid field. Change `id` to a string before retrying.
-Validation messages can differ between server implementations.
+A shell line a policy refuses still returns `200`; check its `refusal`.
 
-A field that fails validation returns `422` wherever it is: `loc` starts with
-`body`, `query` or `path`. The shell endpoint returns `400` only for a body it
-cannot read, such as invalid JSON or multipart parts out of order, and for
-options that conflict, such as `stream=true` with `explain=true`.
+### Failed shell job
+
+A shell job that fails inside the server returns HTTP `500` with the fixed
+message:
+
+```json
+{"error": {"code": "internal", "message": "internal server error"}}
+```
+
+The job's own error stays readable as `error` in
+`GET /v1/workspaces/{workspace_id}/lines/{line_id}`, and in the final record of
+a stream. Check for side effects before retrying.
 
 ## Shell exit codes
 

@@ -16,8 +16,8 @@ failure with one of these conditions, whatever the backend. A service's own
 error becomes the condition it means, such as an object that is not there
 becoming `ENOENT`. One that means none keeps its own words in an exception
 and in a shell diagnostic. HTTP returns status `500`, and RPC `-32603`, with
-`detail` set to `internal server error` and no `errno`, since those words can
-carry credentials or host paths; they stay in the server's logs.
+code `internal`, message `internal server error` and no `errno`, since those
+words can carry credentials or host paths; they stay in the server's logs.
 
 | Condition | Message | HTTP | Means |
 | --- | --- | --- | --- |
@@ -35,7 +35,7 @@ carry credentials or host paths; they stay in the server's logs.
 | `EINVAL` | Invalid argument | `400` | The call's arguments are invalid. |
 | `EBUSY` | Device or resource busy | `409` | A mount root, or the workspace is busy. |
 | `EFBIG` | File too large | `400` | A read the backend will not serve whole. |
-| `EDQUOT` | Disk quota exceeded | `507` | A write past the mount's capacity. |
+| `EDQUOT` | Disk quota exceeded | `403` | A write past the mount's capacity. |
 | `EPIPE` | Broken pipe | `500` | A write to a closed pipe. |
 | `EIO` | Input/output error | `500` | The backend failed. |
 | `EBADF` | Bad file descriptor | `500` | A read from a closed or write-only descriptor. |
@@ -49,8 +49,8 @@ Each surface carries the condition its own way:
 | Python | An `OSError` with `errno` set, raised as the builtin class for it (`FileNotFoundError`, `PermissionError`, ...). A path no mount owns raises `NoMountError`, a `ValueError`. `mirage.errors.classify(exc)` names the condition for either. |
 | TypeScript | An `Error` whose `code` is the condition's name (`ENODATA` for `NO_XATTR`), as Node's `fs` does. A path no mount owns sets `noMount`. `classify(err)` from `@struktoai/mirage-core/errors/classify` names either. |
 | Shell | A line on stderr, `cat: /data/x: No such file or directory`, and the command's exit status. |
-| [HTTP](/api/errors) | `{detail, errno}` with the status above, plus a `refusal` record when a policy refused the call. |
-| [RPC](/home/access/rpc#errors) | `-32004` for `ENOENT` and `-32603` for the rest, with `{detail, errno}` in `data`. |
+| [HTTP](/api/errors) | `{"error": {code, message, errno}}` with the status above, plus a `refusal` record when a policy refused the call. The [code](/api/errors#status-codes) follows from the condition. |
+| [RPC](/home/access/rpc#errors) | `-32004` for `ENOENT` and `-32603` for the rest, with HTTP's error object, `{code, message, errno}`, in `data`. |
 | [MCP](/home/access/mcp#tools) | The tool result with `isError` set: `Error: /data/x: No such file or directory`. |
 | [FUSE](/home/setup/fuse) | The host's errno number. A failure with no errno reads as `EIO`. |
 | SFTP | An SFTP status code, such as `3` for permission denied and `4` for a general failure. |
