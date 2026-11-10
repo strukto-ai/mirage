@@ -217,6 +217,8 @@ async def is_stopped(request: Request, workspace_id: str) -> bool:
         request (Request): the request, for the registry and its account.
         workspace_id (str): the id asked about.
     """
+    if workspace_id in DOT_IDS:
+        return False
     registry = request.app.state.registry
     account = request.state.account
     if not await registry.allows(workspace_id, account, 0.0):

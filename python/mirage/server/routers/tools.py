@@ -74,7 +74,7 @@ async def call_tool(
     try:
         jsonschema.validate(arguments, INPUTS[name])
     except jsonschema.ValidationError as exc:
-        param = param_of(list(exc.absolute_path))[0] or None
+        param = param_of(list(exc.absolute_path)) or None
         raise HttpError(
             ErrorCode.INVALID_REQUEST
             if param is None

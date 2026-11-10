@@ -192,7 +192,7 @@ def checked(call: VfsCall, params: Mapping[str, JsonValue]) -> dict[str, Any]:
     except jsonschema.ValidationError as exc:
         raise CallArgsError(
             f"arguments do not fit vfs/{call.name}'s schema",
-            param_of(list(exc.absolute_path))[0] or None,
+            param_of(list(exc.absolute_path)) or None,
         ) from exc
     args: dict[str, Any] = {}
     for name, value in params.items():
