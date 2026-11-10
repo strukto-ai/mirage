@@ -27,7 +27,7 @@ import {
   respond,
   serviceWorkerBridge,
 } from './transport.ts'
-import { capMemory, KEPT_COMPILATIONS, pagesFor } from './limit.ts'
+import { capMemory, KEPT_COMPILATIONS, pagesFor, startRefusal } from './limit.ts'
 import type { WasmView } from './view.ts'
 
 /** One run the host hands a worker: the module and what the guest starts with. */
@@ -447,6 +447,12 @@ export class WasmExecution {
     maxMemory: number | null = null,
   ): Promise<[Uint8Array, Uint8Array | null, number]> {
     this.checkOpen()
+    const refusal =
+      maxMemory === null ? null : startRefusal(await abortable(this.load(), stop), maxMemory)
+    if (refusal !== null) {
+      const said = `${this.trapPrefix}: cannot start within max_memory (${String(maxMemory)} bytes): ${refusal}\n`
+      return [new Uint8Array(), new TextEncoder().encode(said), 1]
+    }
     const module = await abortable(this.module(maxMemory), stop)
     const port = this.idle.pop() ?? (await this.started(stop))
     const buffers = new Set<SharedArrayBuffer>()

@@ -47,7 +47,7 @@ import { getPipelineStages, getRedirects, isBackgrounded } from '../../shell/hel
 import { ENDING_SIGNALS, STOP_WAIT_SECONDS } from '../../execution/job/constants.ts'
 import type { JobHandle, JobTable } from '../../execution/job/index.ts'
 import { NodeKind, nodeKind, simpleCommand } from '../../shell/node_kind.ts'
-import { commandInvocations } from '../../shell/parse/names.ts'
+import { commandArgs, commandInvocations, walkNamedOutsideDefs } from '../../shell/parse/names.ts'
 import { retainPrograms } from '../../shell/parse/program.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { PathSpec, type PolicyDecision } from '../../types.ts'
@@ -228,6 +228,31 @@ export function oneProgram(left: TSNodeLike, session: SessionState): boolean {
 /** The word naming the program a job is, null when it is not one (`oneProgram`). */
 export function programWord(left: TSNodeLike, session: SessionState): string | null {
   return programWords(left, session)?.[0] ?? null
+}
+
+/**
+ * How `ps` shows a job or a pipeline stage that is one plain command: its
+ * words as typed from the command's name on, with none of the assignments or
+ * redirects around them, and from the program on where `exec` or `command`
+ * runs one in place (`programWord`). Null for anything else, which shows as
+ * typed. Mirrors Python's `program_text`.
+ */
+export function programText(left: TSNodeLike, session: SessionState): string | null {
+  if (!simpleCommand(left) || commandInvocations(left).length !== 1) return null
+  let command: TSNodeLike | undefined
+  for (const node of walkNamedOutsideDefs(left)) {
+    if (node.type === 'command') {
+      command = node
+      break
+    }
+  }
+  const name = command?.childForFieldName?.('name') ?? null
+  if (command === undefined || name === null) return null
+  const typed = [name, ...commandArgs(command)]
+  const words = programWords(left, session)
+  return (words === null ? typed : typed.slice(typed.length - words.length))
+    .map((word) => word.text)
+    .join(' ')
 }
 
 /** `programWord`'s word and the words after it, null when the job is not one program. */
@@ -721,6 +746,7 @@ export async function handleBackground(
       parent: session.processId,
       limit: session.processes.max,
       simple: oneProgram(left, session),
+      program: programText(left, session),
       // A job whose runner never begins skips runBg's finally, so its
       // holds on readers go as its process ends.
       ended: () =>

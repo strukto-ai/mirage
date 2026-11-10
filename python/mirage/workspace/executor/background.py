@@ -79,7 +79,11 @@ from mirage.shell.helpers import (
     is_backgrounded,
 )
 from mirage.shell.node_kind import NodeKind, node_kind, simple_command
-from mirage.shell.parse.names import command_invocations
+from mirage.shell.parse.names import (
+    command_args,
+    command_invocations,
+    walk_named_outside_defs,
+)
 from mirage.shell.parse.program import retain_programs
 from mirage.shell.signals import (
     signal_report,
@@ -287,6 +291,32 @@ def program_word(left: TSNodeLike, session: SessionState) -> str | None:
     """
     words = _program_words(left, session)
     return words[0] if words else None
+
+
+def program_text(left: TSNodeLike, session: SessionState) -> str | None:
+    """How ``ps`` shows a job or a pipeline stage that is one plain
+    command: its words as typed from the command's name on, with none of
+    the assignments or redirects around them, and from the program on
+    where ``exec`` or ``command`` runs one in place (``program_word``).
+    None for anything else, which shows as typed.
+
+    Args:
+        left (TSNodeLike): the job's or the stage's command.
+        session (SessionState): the session it is forked from.
+    """
+    if not simple_command(left) or len(command_invocations(left)) != 1:
+        return None
+    command = next(
+        n for n in walk_named_outside_defs(left) if n.type == "command"
+    )
+    name = command.child_by_field_name("name")
+    if name is None:
+        return None
+    typed = [name, *command_args(command)]
+    words = _program_words(left, session)
+    if words:
+        typed = typed[len(typed) - len(words) :]
+    return " ".join(get_text(word) for word in typed)
 
 
 def _program_words(
@@ -837,6 +867,7 @@ async def handle_background(
             parent=session.process_id,
             limit=session.processes.max,
             simple=one_program(left, session),
+            program=program_text(left, session),
         )
     except BaseException as exc:
         release_job()

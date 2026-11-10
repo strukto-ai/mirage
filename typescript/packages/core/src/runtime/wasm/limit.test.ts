@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { capMemory } from './limit.ts'
+import { capMemory, startRefusal } from './limit.ts'
 
 const HEADER = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]
 const EXPORT = [0x07, 0x0a, 0x01, 0x06, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00]
@@ -66,5 +66,23 @@ describe('capMemory', () => {
   it('leaves a module with no memory alone', () => {
     const empty = new Uint8Array(HEADER)
     expect(capMemory(empty, 3)).toBe(empty)
+  })
+})
+
+describe('startRefusal', () => {
+  const two = new Uint8Array([...HEADER, 0x05, 0x03, 0x01, 0x00, 0x02, ...EXPORT])
+
+  it('refuses a limit below the pages the memory starts on', () => {
+    expect(startRefusal(two, 2 * 65536 - 1)).toBe(
+      'memory minimum size of 2 pages exceeds memory limits',
+    )
+  })
+
+  it('lets a module start on exactly its pages', () => {
+    expect(startRefusal(two, 2 * 65536)).toBeNull()
+  })
+
+  it('lets a module with no memory start within nothing', () => {
+    expect(startRefusal(new Uint8Array(HEADER), 0)).toBeNull()
   })
 })

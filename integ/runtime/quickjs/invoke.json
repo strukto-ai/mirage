@@ -199,6 +199,32 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_max_memory_below_its_start_refuses_the_run",
+      "note": "QuickJS starts on 4 wasm pages (256 KiB), so a workspace with less left refuses the run rather than lending it more.",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "max_memory": "200KB",
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "js -e 'console.log(1)'",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "js: cannot start within max_memory (204800 bytes): memory minimum size of 4 pages exceeds memory limits\n"
+          }
+        }
+      ]
     }
   ]
 }

@@ -55,6 +55,36 @@ function leb(value: number): number[] {
   return out
 }
 
+// Where a module's memory section is: its start, its body and its end.
+function memorySection(bytes: Uint8Array): [number, number, number] | null {
+  let at = WASM_HEADER_BYTES
+  while (at < bytes.length) {
+    const [size, body] = readLeb(bytes, at + 1)
+    const end = body + size
+    if (bytes[at] === MEMORY_SECTION) return [at, body, end]
+    at = end
+  }
+  return null
+}
+
+/**
+ * Why a module cannot start within `limit` bytes, in wasmtime's words: the
+ * memory it defines starts on more. Null when it can, which holds for a
+ * module that defines none.
+ *
+ * @param bytes - the module.
+ * @param limit - the most its linear memory may take.
+ */
+export function startRefusal(bytes: Uint8Array, limit: number): string | null {
+  const section = memorySection(bytes)
+  if (section === null) return null
+  const [count, flagsAt] = readLeb(bytes, section[1])
+  const least = count === 1 ? readLeb(bytes, flagsAt + 1)[0] : 0
+  return least * WASM_PAGE_BYTES > limit
+    ? `memory minimum size of ${String(least)} pages exceeds memory limits`
+    : null
+}
+
 /**
  * A module's bytes with the memory it defines held to `pages` pages, its own
  * minimum being the least it can start on and a maximum it declares or the
@@ -66,27 +96,21 @@ function leb(value: number): number[] {
  * @param pages - the most its linear memory may grow to.
  */
 export function capMemory(bytes: Uint8Array, pages: number): Uint8Array {
-  let at = WASM_HEADER_BYTES
-  while (at < bytes.length) {
-    const [size, body] = readLeb(bytes, at + 1)
-    const end = body + size
-    if (bytes[at] === MEMORY_SECTION) {
-      const [count, flagsAt] = readLeb(bytes, body)
-      if (count !== 1) return bytes
-      const declared = bytes[flagsAt] ?? 0
-      const [least, maximumAt] = readLeb(bytes, flagsAt + 1)
-      const ceiling = declared & HAS_MAXIMUM ? readLeb(bytes, maximumAt)[0] : WASM32_PAGES
-      const most = Math.max(least, Math.min(pages, ceiling))
-      const section = [count, declared | HAS_MAXIMUM, ...leb(least), ...leb(most)]
-      return new Uint8Array([
-        ...bytes.subarray(0, at),
-        MEMORY_SECTION,
-        ...leb(section.length),
-        ...section,
-        ...bytes.subarray(end),
-      ])
-    }
-    at = end
-  }
-  return bytes
+  const section = memorySection(bytes)
+  if (section === null) return bytes
+  const [at, body, end] = section
+  const [count, flagsAt] = readLeb(bytes, body)
+  if (count !== 1) return bytes
+  const declared = bytes[flagsAt] ?? 0
+  const [least, maximumAt] = readLeb(bytes, flagsAt + 1)
+  const ceiling = declared & HAS_MAXIMUM ? readLeb(bytes, maximumAt)[0] : WASM32_PAGES
+  const most = Math.max(least, Math.min(pages, ceiling))
+  const fields = [count, declared | HAS_MAXIMUM, ...leb(least), ...leb(most)]
+  return new Uint8Array([
+    ...bytes.subarray(0, at),
+    MEMORY_SECTION,
+    ...leb(fields.length),
+    ...fields,
+    ...bytes.subarray(end),
+  ])
 }

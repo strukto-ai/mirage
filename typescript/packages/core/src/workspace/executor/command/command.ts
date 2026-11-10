@@ -834,7 +834,8 @@ export async function handleCommand(
       runsPrograms(context.frame.routing?.bindings ?? registry.runtimeBindings)) &&
     !(cmdName === 'nproc' && parts.some((p) => p === '--help' || p === '--version')) &&
     ((cmdName !== 'hostname' && cmdName !== MACHINE_VIEW) ||
-      picksMachine(parts.slice(1).map((p) => (typeof p === 'string' ? p : p.virtual))))
+      picksMachine(parts.slice(1).map((p) => (typeof p === 'string' ? p : p.virtual)))) &&
+    lookup(cmdName, session, registry, context.frame.routing ?? undefined) !== Consumer.FUNCTION
   ) {
     return machineHandler(
       jobTable,

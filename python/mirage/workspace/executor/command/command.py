@@ -1031,6 +1031,8 @@ async def handle_command(
             cmd_name not in ("hostname", MACHINE_VIEW)
             or picks_machine([str(part) for part in parts[1:]])
         )
+        and lookup(cmd_name, session, registry, context.frame.routing)
+        != Consumer.FUNCTION
     ):
         return await MACHINE_HANDLERS[cmd_name](
             job_table,

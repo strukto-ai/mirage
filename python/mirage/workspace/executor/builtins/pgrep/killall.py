@@ -24,7 +24,7 @@ from mirage.execution.process.types import Process
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
-from mirage.shell.constants import SIGTERM
+from mirage.shell.constants import SIGRTMAX, SIGTERM
 from mirage.shell.signals import signal_number
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.jobspec import (
@@ -172,7 +172,11 @@ async def handle_killall(
     signal = leading if leading is not None else SIGTERM
     named = flags.get("s")
     if isinstance(named, str):
-        number = signal_number(named)
+        number = (
+            int(named)
+            if named.isascii() and named.isdigit()
+            else signal_number(named)
+        )
         if number is None:
             unknown = named.removeprefix("SIG")
         else:
@@ -213,6 +217,13 @@ async def handle_killall(
             )
         killed = 0
         for info in picks:
+            if signal > SIGRTMAX:
+                if not quiet:
+                    errors.append(
+                        f"{process_name(info)}({info.shown_pid}): "
+                        "Invalid argument\n"
+                    )
+                continue
             try:
                 handle = processes.target(info.pid, sid, grants_of(session))
                 found = await signal_one(

@@ -50,6 +50,7 @@ import { carried, ended, isUnwinding } from './control.ts'
 import {
   handleBackground,
   oneProgram,
+  programText,
   pump,
   reportReaped,
   runProgram,
@@ -217,7 +218,7 @@ export async function handlePipe(
     const process = startShell(
       processes,
       session,
-      cmd.text,
+      programText(cmd, session) ?? cmd.text,
       async () => {
         await isolated()
         return ios[i]?.exitCode ?? 0
