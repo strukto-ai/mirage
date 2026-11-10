@@ -310,6 +310,28 @@ class DroppedBox(RecordingMachine):
         return result
 
 
+class StreamingDroppedBox(DroppedBox):
+    error = ConnectionLostError("closed by remote host", b"step 0\n")
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        if errors is not None:
+            await errors(b"warn\n")
+        return await super()._exec_argv(argv, stdin, env, cwd, output, errors)
+
+
+# Errors a transport streamed before the drop stay beside the message.
+@pytest.mark.asyncio
+async def test_a_dropped_run_keeps_the_errors_it_streamed():
+    box = StreamingDroppedBox(captures=("train",))
+    ctx = Context(flags={"c": "train"}, cwd=PathSpec.from_str_path("/"))
+    ran = await machine_runtime(box).run_line(None, [], [], ctx)
+    assert (ran.exit_code, ran.stdout, ran.stderr) == (
+        129,
+        b"step 0\n",
+        f"warn\nmirage: {box.id}: connection lost\n".encode(),
+    )
+
+
 # A run whose output was kept rather than streamed keeps what it read
 # before the drop.
 @pytest.mark.asyncio

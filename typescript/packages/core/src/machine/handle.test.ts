@@ -33,7 +33,7 @@ import {
 } from './constants.ts'
 import { LanguageRuntime } from '../runtime/language.ts'
 import { isLineExecutor } from '../runtime/mixin.ts'
-import type { RunResult } from '../runtime/types.ts'
+import type { OutputFn, RunResult } from '../runtime/types.ts'
 import type { MachineConfig } from './config.ts'
 import { ProcessTable } from '../execution/process/table.ts'
 import { runAsProcess } from '../context/session_context.ts'
@@ -103,6 +103,23 @@ class DroppedBox extends RecordingMachine {
     const result = await super.execLine(line, stdin, env, cwd)
     if (line.startsWith('train')) throw this.error
     return result
+  }
+}
+
+// A box that streams its errors before the connection drops.
+class StreamingDroppedBox extends DroppedBox {
+  override error: Error = new ConnectionLostError('closed by remote host', ENC.encode('step 0\n'))
+
+  protected override async execArgv(
+    argv: readonly string[],
+    stdin: ByteSource | null,
+    env: Record<string, string>,
+    cwd: string,
+    _output?: OutputFn | null,
+    errors?: OutputFn | null,
+  ): Promise<RunResult> {
+    if (errors !== null && errors !== undefined) await errors(ENC.encode('warn\n'))
+    return super.execArgv(argv, stdin, env, cwd)
   }
 }
 
@@ -384,6 +401,20 @@ describe('MachineHandle', () => {
   // before the drop.
   it('keeps the output a dropped run read', async () => {
     const box = new DroppedBox({ captures: ['train'] })
+    const ran = await machineRuntime(box).runLine(undefined, [], [], {
+      flags: { c: 'train' },
+      stdin: null,
+      cwd: PathSpec.fromStrPath('/'),
+    })
+    expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr ?? undefined)]).toEqual([
+      129,
+      'step 0\n',
+      `warn\nmirage: ${String(box.id)}: connection lost\n`,
+    ])
+  })
+
+  it('a dropped run keeps the errors it streamed', async () => {
+    const box = new StreamingDroppedBox({ captures: ['train'] })
     const ran = await machineRuntime(box).runLine(undefined, [], [], {
       flags: { c: 'train' },
       stdin: null,

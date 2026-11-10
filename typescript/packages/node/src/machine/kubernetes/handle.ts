@@ -171,13 +171,20 @@ export class KubernetesMachine extends ProgramMachine<KubernetesConfig> {
   ): Promise<RunResult> {
     const [head, tail] = this.execWords()
     const said = new ExitLineFilter(errors)
-    const done = await this.execProgram(
-      [...head, ...tail, '/bin/sh', '-c', wrapLine(argv, env, cwd)],
-      stdin,
-      output,
-      signal,
-      (data) => said.write(data),
-    )
+    let done: RunResult
+    try {
+      done = await this.execProgram(
+        [...head, ...tail, '/bin/sh', '-c', wrapLine(argv, env, cwd)],
+        stdin,
+        output,
+        signal,
+        (data) => said.write(data),
+      )
+    } catch (error) {
+      // A stopped kubectl reports nothing, so what is held is the program's.
+      await said.finish(0)
+      throw error
+    }
     if (!(await said.finish(done.exitCode))) {
       throw new ConnectionLostError(
         `kubectl exited ${String(done.exitCode)} without the program's status`,

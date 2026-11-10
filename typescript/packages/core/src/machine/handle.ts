@@ -245,7 +245,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       const said = new TextEncoder().encode(`mirage: ${String(this.id)}: connection lost\n`)
       done = {
         stdout: error.stdout,
-        stderr: concat([error.stderr ?? new Uint8Array(), said]),
+        stderr: concat([error.stderr ?? new Uint8Array(), ...kept[1], said]),
         exitCode: HANGUP_EXIT_CODE,
       }
     } finally {

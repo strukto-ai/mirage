@@ -53,6 +53,23 @@ class FakeKubernetesMachine extends KubernetesMachine {
   }
 }
 
+class CutOffMachine extends KubernetesMachine {
+  streamed(errors: OutputFn): Promise<RunResult> {
+    return this.execArgv(['x'], null, {}, '/', null, errors)
+  }
+
+  protected override async execProgram(
+    _args: string[],
+    _source: ByteSource | null = null,
+    _output: OutputFn | null = null,
+    _signal?: AbortSignal,
+    errors: OutputFn | null = null,
+  ): Promise<RunResult> {
+    await errors?.(ENC.encode('command'))
+    throw new Error('aborted')
+  }
+}
+
 function makeMachine(
   config: KubernetesConfig | Record<string, unknown> = { pod: 'p' },
   fake: Partial<Pick<FakeKubernetesMachine, 'phase' | 'stderr' | 'code'>> = {},
@@ -137,6 +154,14 @@ describe('KubernetesMachine', () => {
       wrapLine(['/bin/sh', '-c', 'wc -l'], { E: '1' }, '/work'),
     ])
     expect(DEC.decode(stdin ?? new Uint8Array())).toBe('a\n')
+  })
+
+  it('a cut off run keeps what was held', async () => {
+    const [chunks, collect] = collector()
+    await expect(new CutOffMachine('box', { pod: 'p' }).streamed(collect)).rejects.toThrow(
+      'aborted',
+    )
+    expect(text(chunks)).toBe('command')
   })
 
   it('a failing program says only what it said', async () => {

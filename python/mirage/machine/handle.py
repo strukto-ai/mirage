@@ -263,7 +263,7 @@ class MachineHandle:
             said = f"mirage: {self.id}: connection lost\n".encode()
             done = RunResult(
                 stdout=exc.stdout,
-                stderr=(exc.stderr or b"") + said,
+                stderr=(exc.stderr or b"") + bytes(kept[1]) + said,
                 exit_code=HANGUP_EXIT_CODE,
             )
         finally:
