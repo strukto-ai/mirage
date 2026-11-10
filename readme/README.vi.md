@@ -92,7 +92,7 @@ await ws.shell('slack send-message --channel general --text "report is up"')
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-arch-dark.svg">
-    <img src="../assets/mirage-arch-light.svg" alt="Kiến trúc Mirage: agent và harness tiếp cận profile và Mirage shell, hai thành phần này phân giải các lệnh kiểu Unix, CLI ảo và ngôn ngữ lập trình xuống runtime và hệ thống tệp ảo, cùng với xác thực, công cụ chính sách và thông báo bên cạnh" width="100%">
+    <img src="../assets/mirage-arch-light.svg" alt="Kiến trúc Mirage: agent và harness tiếp cận profile và Mirage shell, hai thành phần này phân giải các lệnh kiểu Unix, CLI ảo và ngôn ngữ lập trình xuống máy, runtime và hệ thống tệp ảo, cùng với xác thực, công cụ chính sách và thông báo bên cạnh" width="100%">
   </picture>
 </p>
 

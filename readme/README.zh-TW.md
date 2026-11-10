@@ -92,7 +92,7 @@ await ws.shell('slack send-message --channel general --text "report is up"')
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-arch-dark.svg">
-    <img src="../assets/mirage-arch-light.svg" alt="Mirage 架構：Agent 與 Harness 連接 Profile 和 Mirage Shell，兩者把類 Unix 命令、虛擬 CLI 和程式語言解析到執行環境與虛擬檔案系統上，認證、策略引擎和通知在旁" width="100%">
+    <img src="../assets/mirage-arch-light.svg" alt="Mirage 架構：Agent 與 Harness 連接 Profile 和 Mirage Shell，兩者把類 Unix 命令、虛擬 CLI 和程式語言解析到機器、執行環境與虛擬檔案系統上，認證、策略引擎和通知在旁" width="100%">
   </picture>
 </p>
 
