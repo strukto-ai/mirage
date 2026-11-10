@@ -85,6 +85,13 @@ interface ShellUpload {
  * `_check_placement`.
  */
 function checkPlacement(ws: Workspace, req: ShellRequest): void {
+  if (req.runtime === 'workspace') {
+    throw new HttpError(
+      'invalid_value',
+      `'workspace' is the default executor, not a runtime you can select`,
+      { param: 'runtime' },
+    )
+  }
   const named = [
     [
       'runtime',

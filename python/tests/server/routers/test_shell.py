@@ -319,6 +319,20 @@ async def test_shell_refuses_a_runtime_or_machine_the_workspace_lacks():
                 }
             },
         )
+        default = await client.post(
+            route, json={"command": "echo hi", "runtime": "workspace"}
+        )
+        assert (default.status_code, default.json()) == (
+            400,
+            {
+                "error": {
+                    "code": "invalid_value",
+                    "message": "'workspace' is the default executor, "
+                    "not a runtime you can select",
+                    "param": "runtime",
+                }
+            },
+        )
         machine = await client.post(
             route, json={"command": "echo hi", "machine": ""}
         )

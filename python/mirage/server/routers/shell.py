@@ -74,6 +74,12 @@ def _check_placement(ws: Workspace, req: ShellRequest) -> None:
     Raises:
         HttpError: ``invalid_value`` naming the workspace's own choices.
     """
+    if req.runtime == WorkspaceRuntime.name:
+        raise HttpError(
+            ErrorCode.INVALID_VALUE,
+            "'workspace' is the default executor, not a runtime you can select",
+            param="runtime",
+        )
     named = (
         (
             "runtime",
