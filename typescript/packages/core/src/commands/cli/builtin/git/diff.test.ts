@@ -36,6 +36,10 @@ const ENV = {
   GIT_COMMITTER_EMAIL: 'ada@example.com',
 }
 
+const SEALED: Record<string, SessionProfile> = {
+  sealed: { commands: { deny: [{ reason: 'sealed', paths: ['/repo/a.txt'] }] } },
+}
+
 let tmp: string
 let repoPath: string
 let ws: Workspace
@@ -77,12 +81,16 @@ function commit(name: string, text: string, message: string): void {
   native(['commit', '-q', '-m', message])
 }
 
-function conflicted(): void {
+function history(): void {
   repoPath = mkdtempSync(join(tmp, 'repo-'))
   native(['init', '-q', '-b', 'main'])
   commit('a.txt', 'one\n', 'first')
   commit('b.txt', 'two\n', 'second')
   commit('a.txt', 'one changed\n', 'third')
+}
+
+function conflicted(): void {
+  history()
   native(['checkout', '-q', '-b', 'side', 'HEAD~1'])
   commit('a.txt', 'one side\n', 'side')
   native(['checkout', '-q', 'main'])
@@ -139,9 +147,7 @@ describe('a conflict whose file is gone', () => {
   beforeAll(async () => {
     conflicted()
     rmSync(join(repoPath, 'a.txt'))
-    ws = await mounted({
-      sealed: { commands: { deny: [{ reason: 'sealed', paths: ['/repo/a.txt'] }] } },
-    })
+    ws = await mounted(SEALED)
     ws.createSession('sealed', { profile: 'sealed' })
   })
 
@@ -153,4 +159,25 @@ describe('a conflict whose file is gone', () => {
       'git diff-files: /repo/a.txt: Permission denied\n',
     ])
   })
+})
+
+describe.each([
+  ['stopped on a conflict', conflicted],
+  ['with a clean index', history],
+])('a file holding the bytes of a denied path, %s', (_name, build) => {
+  beforeAll(async () => {
+    build()
+    writeFileSync(join(repoPath, 'b.txt'), 'one changed\n')
+    ws = await mounted(SEALED)
+    ws.createSession('sealed', { profile: 'sealed' })
+  })
+
+  it.each(['diff-files -p -- b.txt', 'diff -- b.txt', 'diff-index -p HEAD -- b.txt'])(
+    'still shows: %s',
+    async (command) => {
+      const result = await ws.shell(`git -C /repo ${command}`, { sessionId: 'sealed' })
+      expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([0, ''])
+      expect(DEC.decode(result.stdout)).toContain('+one changed\n')
+    },
+  )
 })

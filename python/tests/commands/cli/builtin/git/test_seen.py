@@ -421,6 +421,27 @@ async def test_a_conflict_stage_answers_to_the_rules(history: Path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("conflicted", [True, False])
+@pytest.mark.parametrize(
+    "line",
+    [
+        "git diff-files -p -- ok.txt",
+        "git diff -- ok.txt",
+        "git diff-index -p HEAD -- ok.txt",
+    ],
+)
+async def test_a_work_file_sharing_a_sealed_blob_still_shows(
+    history: Path, conflicted: bool, line: str
+):
+    if conflicted:
+        conflict_index(history, "secret.txt")
+    (history / "ok.txt").write_text("S3CR3T two\n")
+    code, out, err = await shell(history, line, "sealed")
+    assert (code, err) == (0, "")
+    assert "+S3CR3T two\n" in out
+
+
+@pytest.mark.asyncio
 async def test_raw_tree_bytes_are_read_whole_whatever_an_entry_is_named(
     history: Path,
 ):
