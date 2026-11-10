@@ -1,4 +1,5 @@
-import { afterEach, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { compiledModule } from './stream.ts'
 
 afterEach(() => {
@@ -9,7 +10,7 @@ afterEach(() => {
 it('defers a lazy module source and shares it across synchronous and asynchronous digests', async () => {
   const module = compiledModule()
   const load = vi.fn(() => module)
-  vi.doMock('#mirage-rs-wasm', () => ({ default: load }))
+  vi.doMock('#mirage-rs-wasm', () => ({ default: load, AHEAD: false }))
   vi.resetModules()
   const streams = await import('./stream.ts')
   expect(load).not.toHaveBeenCalled()
@@ -32,7 +33,13 @@ it('defers a lazy module source and shares it across synchronous and asynchronou
   expect(load).toHaveBeenCalled()
 })
 
-it('instantiates nothing synchronously once ready, as a page, whose main thread refuses a module over 8 MB, needs', async () => {
+// The instance a stream runs on.
+function instance(stream: unknown): unknown {
+  return (stream as { exports: unknown }).exports
+}
+
+it('instantiates nothing synchronously where the loader compiled asynchronously, as a page needs', async () => {
+  const module = compiledModule()
   const Instance = WebAssembly.Instance
   WebAssembly.Instance = class extends Instance {
     constructor(module: WebAssembly.Module, imports?: WebAssembly.Imports) {
@@ -41,24 +48,70 @@ it('instantiates nothing synchronously once ready, as a page, whose main thread 
       super(module, imports)
     }
   }
+  vi.doMock('#mirage-rs-wasm', () => ({ default: module, AHEAD: true }))
   vi.resetModules()
   try {
     const { SessionProfile } = await import('../policy/profile.ts')
-    const { PosixRegex } = await import('./regex.ts')
-    const streams = await import('./stream.ts')
-    await streams.streamsReady()
+    const { StreamModule } = await import('./stream.ts')
     SessionProfile({ paths: { hide: ['/secret'] } })
-    const regex = new PosixRegex('x$')
-    const size = 34 * 1024 * 1024
+    const streams = new StreamModule(module)
+    await streams.ready()
     const md5 = { algorithm: 'md5' }
-    for (let round = 0; round < 2; round += 1) {
-      expect(await regex.search('a'.repeat(size) + 'x')).toEqual([[size, size + 1]])
-      // Only the matcher is left on the grown instance, so it retires.
-      streams.openStreamSync('digest', md5).close()
-      streams.openStreamSync('digest', md5).close()
-      await streams.streamsReady()
+    const used = (): unknown => {
+      const stream = streams.openSync('digest', md5, false)
+      stream.close()
+      return instance(stream)
     }
+    const first = used()
+    streams.retire(first as never, false)
+    const second = used()
+    expect(second).not.toBe(first)
+    // Retired again before another is made: it stays.
+    streams.retire(second as never, false)
+    expect(used()).toBe(second)
+    await streams.ready()
+    streams.retire(second as never, false)
+    expect(used()).not.toBe(second)
   } finally {
     WebAssembly.Instance = Instance
   }
+})
+
+describe('the browser loader', () => {
+  const loader = new URL('../../dist/generated/mirage_gh.js', import.meta.url).href
+  const bytes = new Uint8Array(
+    readFileSync(new URL('../../dist/generated/mirage_gh.wasm', import.meta.url)),
+  )
+  let round = 0
+  const load = async (response: Response): Promise<WebAssembly.Module> => {
+    vi.stubGlobal('fetch', () => Promise.resolve(response))
+    try {
+      round += 1
+      const loaded = (await import(/* @vite-ignore */ `${loader}?${String(round)}`)) as {
+        default: WebAssembly.Module
+      }
+      return loaded.default
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  }
+
+  it('compiles a module served as application/wasm while it downloads', async () => {
+    const response = new Response(bytes, { headers: { 'Content-Type': 'application/wasm' } })
+    expect(await load(response)).toBeInstanceOf(WebAssembly.Module)
+  })
+
+  it('compiles a module served under another type', async () => {
+    const response = new Response(bytes, {
+      headers: { 'Content-Type': 'application/octet-stream' },
+    })
+    expect(await load(response)).toBeInstanceOf(WebAssembly.Module)
+  })
+
+  it('names the URL and the fix when the answer is not WebAssembly', async () => {
+    const response = new Response('<!doctype html>', { headers: { 'Content-Type': 'text/html' } })
+    await expect(load(response)).rejects.toThrow(
+      /mirage_gh\.wasm answered 200 text\/html, not WebAssembly: .* under pnpm add @struktoai\/mirage-core/,
+    )
+  })
 })

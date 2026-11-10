@@ -136,6 +136,7 @@ describe('adoptModule', () => {
       default: () => {
         throw new Error('a worker runs on the module its page hands it')
       },
+      AHEAD: false,
     }))
     try {
       return await import('./stream.ts')

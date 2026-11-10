@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { streamsReady } from '@struktoai/mirage-core/rs/stream'
-
 export * from '@struktoai/mirage-core'
 // The Airtable, Mem0, OneDrive and SharePoint config types are named below
 // rather than left to the `export *` above: their VFS classes come through
@@ -150,9 +148,3 @@ export {
 
 export type { WandbConfig } from '@struktoai/mirage-core/core/wandb/config'
 export { WandbVFS } from '@struktoai/mirage-core/vfs/wandb/wandb'
-
-// A page's main thread refuses to instantiate a module over 8 MB
-// synchronously, so the page makes mirage-rs's instances as it loads this
-// package: a profile validates its document on one before any workspace
-// exists.
-await streamsReady()
