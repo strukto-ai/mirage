@@ -635,12 +635,14 @@ async function atPath(repo: Repo, rev: string, path: string, revision: string): 
   let found = holder
   try {
     if (holder.type !== TREE) throw new Errors.NotFoundError(path)
-    // Every tree the path passes through has its entries read, as git reads them.
+    // Every tree the path passes through has its entries read, as git reads
+    // them. The type is the stored object's, since an entry's mode can claim
+    // anything and only a blob answers to a read rule.
     for (const part of path.split('/').filter(Boolean)) {
       const items = found.type === TREE ? decoded(await storedItems(repo, found.oid)) : []
       const entry = items.find((item) => item.path === part)
       if (entry === undefined) throw new Errors.NotFoundError(path)
-      found = { oid: entry.oid, type: entry.type }
+      found = { oid: entry.oid, type: (await rawObject(repo, entry.oid)).type }
     }
   } catch (err) {
     if (err instanceof Errors.NotFoundError)

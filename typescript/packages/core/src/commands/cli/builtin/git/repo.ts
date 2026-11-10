@@ -211,7 +211,8 @@ export async function rawObject(repo: Repo, oid: string): Promise<RefObject> {
  * spells it.
  */
 export async function storedItems(repo: Repo, treeOid: string): Promise<TreeItem[]> {
-  const { raw } = await rawObject(repo, treeOid)
+  const { type, raw } = await rawObject(repo, treeOid)
+  if (type !== 'tree') throw new GitError(`unable to read tree (${treeOid})`)
   const items: TreeItem[] = []
   for (let at = 0; at < raw.length;) {
     const space = raw.indexOf(SPACE, at)
