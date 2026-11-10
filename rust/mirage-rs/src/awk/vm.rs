@@ -2234,8 +2234,9 @@ impl Machine {
             self.io.err.extend_from_slice(body);
         } else if let Some(file) = self.io.files_out.get_mut(name) {
             file.buf.extend_from_slice(body);
-            if !std::mem::replace(&mut file.written, true) {
-                self.io.written.insert(name.clone());
+            if file.queued.is_none() {
+                file.queued = Some(self.io.written.len());
+                self.io.written.push(name.clone());
             }
             if file.buf.len() >= FLUSH {
                 self.io.send_file(name);
@@ -2281,8 +2282,14 @@ impl Machine {
             }
             if self.io.files_out.contains(&name) {
                 self.io.send_file(&name);
-                self.io.files_out.remove(&name);
-                self.io.written.remove(&name);
+                if let Some(at) = self.io.files_out.remove(&name).and_then(|file| file.queued) {
+                    self.io.written.swap_remove(at);
+                    if let Some(moved) = self.io.written.get(at) {
+                        if let Some(file) = self.io.files_out.get_mut(moved) {
+                            file.queued = Some(at);
+                        }
+                    }
+                }
                 self.io.push(Request::Flush {
                     path: Some(name.to_vec()),
                 });

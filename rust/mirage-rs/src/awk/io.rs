@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use super::buffer::Buffer;
 use super::text::{RecordSearch, Regexes, take_record};
@@ -299,12 +299,13 @@ impl Reader {
 
 /// A file awk prints to: what it holds back, and how much of that is
 /// settled (printed before the last record ended), which a reader or a
-/// command must see; `written` while the record has printed to it.
+/// command must see; `queued`, where `Io::written` holds it, while the
+/// record has printed to it.
 #[derive(Default)]
 pub(super) struct OutFile {
     pub(super) buf: Vec<u8>,
     pub(super) settled: usize,
-    pub(super) written: bool,
+    pub(super) queued: Option<usize>,
 }
 
 pub(super) struct OutPipe {
@@ -328,8 +329,9 @@ pub(super) struct Io {
     pub(super) files_in: Ordered<Reader>,
     pub(super) pipes_in: Ordered<(Reader, f64)>,
     pub(super) files_out: Ordered<OutFile>,
-    /// The files the record has printed to, which alone its end settles.
-    pub(super) written: HashSet<Text>,
+    /// The files the record has printed to, which alone its end settles;
+    /// a closed one leaves by a swap.
+    pub(super) written: Vec<Text>,
     pub(super) pipes_out: Ordered<OutPipe>,
     pub(super) requests: VecDeque<Request>,
     pub(super) in_flight: Option<Request>,
@@ -401,7 +403,7 @@ impl Io {
     }
 
     pub(super) fn retire(&mut self) -> Retirement {
-        self.written = HashSet::new();
+        self.written = Vec::new();
         Retirement {
             files_in: self.files_in.retire(),
             pipes_in: self.pipes_in.retire(),
@@ -498,10 +500,10 @@ impl Io {
     /// The end of a record: what files hold so far is settled, and held
     /// standard output goes once no output pipe is open.
     pub(super) fn settle(&mut self) {
-        for name in self.written.drain() {
+        for name in self.written.drain(..) {
             if let Some(file) = self.files_out.get_mut(&name) {
                 file.settled = file.buf.len();
-                file.written = false;
+                file.queued = None;
             }
         }
         if self.pipes_out.is_empty() {
