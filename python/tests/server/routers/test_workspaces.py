@@ -123,6 +123,78 @@ def _make_app_with_short_grace(grace: float = 0.2):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mounts,extra,invalid_time",
+    [
+        (False, False, None),
+        (True, True, None),
+        (False, True, None),
+        (True, False, 123),
+        (False, True, 123),
+        (True, False, "tomorrow"),
+        (False, True, "tomorrow"),
+    ],
+)
+async def test_create_validates_config(mounts, extra, invalid_time):
+    app, _ = _make_app_with_short_grace(grace=10.0)
+    config = {
+        **({"mounts": {}} if mounts else {}),
+        **({"system_time": invalid_time} if invalid_time is not None else {}),
+        **({"unknown_setting": True} if extra else {}),
+    }
+    detail = []
+    if not mounts:
+        detail.append(
+            {
+                "type": "missing",
+                "loc": ["body", "config", "mounts"],
+                "msg": "Field required",
+                "input": config,
+            }
+        )
+    if invalid_time is not None:
+        detail.append(
+            {
+                "type": "string_type"
+                if isinstance(invalid_time, int)
+                else "value_error",
+                "loc": ["body", "config", "system_time"],
+                "msg": "Input should be a valid string"
+                if isinstance(invalid_time, int)
+                else (
+                    "Value error, system_time is not an ISO 8601 instant "
+                    "with an offset from 1970 through 2261, "
+                    "as 2026-03-02T09:00:00Z"
+                ),
+                "input": invalid_time,
+                **(
+                    {"ctx": {"error": {}}}
+                    if isinstance(invalid_time, str)
+                    else {}
+                ),
+            }
+        )
+    if extra:
+        detail.append(
+            {
+                "type": "extra_forbidden",
+                "loc": ["body", "config", "unknown_setting"],
+                "msg": "Extra inputs are not permitted",
+                "input": True,
+            }
+        )
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        r = await client.post(
+            "/v1/workspaces", json={"id": "bad", "config": config}
+        )
+        assert r.status_code == 422, r.text
+        assert r.json() == {"detail": detail}
+        assert "bad" not in app.state.registry
+
+
+@pytest.mark.asyncio
 async def test_create_list_get_delete_round_trip():
     app, _ = _make_app_with_short_grace(grace=10.0)
     transport = ASGITransport(app=app)

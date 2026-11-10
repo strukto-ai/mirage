@@ -71,8 +71,10 @@ export async function handleResponse(r: Response): Promise<unknown> {
   if (r.status >= 400) {
     let detail = await r.text()
     try {
-      const parsed = JSON.parse(detail) as { detail?: string }
-      if (parsed.detail !== undefined) detail = parsed.detail
+      const parsed: unknown = JSON.parse(detail)
+      if (parsed !== null && typeof parsed === 'object' && 'detail' in parsed) {
+        detail = typeof parsed.detail === 'string' ? parsed.detail : JSON.stringify(parsed.detail)
+      }
     } catch {
       // body wasn't JSON; fall through with the raw text as detail
     }

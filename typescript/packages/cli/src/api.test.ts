@@ -64,6 +64,12 @@ async function fakeServer(): Promise<{ url: string; seen: Seen[]; server: Server
       if (req.method === 'DELETE') res.writeHead(204).end()
       else if (url.startsWith('/missing'))
         res.writeHead(404, { 'content-type': 'application/json' }).end('{"detail":"not found"}')
+      else if (url.startsWith('/invalid'))
+        res.writeHead(422, { 'content-type': 'application/json' }).end(
+          JSON.stringify({
+            detail: [{ type: 'missing', loc: ['body', 'config', 'mounts'], msg: 'Field required' }],
+          }),
+        )
       else if (url.endsWith('/snapshot'))
         res.writeHead(200, { 'content-type': 'application/x-tar' }).end(TAR)
       else if (url.endsWith('/stream'))
@@ -231,6 +237,17 @@ describe('mirage api', () => {
         expect(r.stderr, args.join(' ')).not.toContain('    at ')
       }
       expect(seen).toHaveLength(1)
+    })
+  })
+
+  it('exits 2 and preserves structured validation details', async () => {
+    await withServer(async (url, dir) => {
+      const answer = await api(url, dir, '/invalid')
+      expect(answer.code).toBe(2)
+      expect(answer.stderr).toMatch(/^error 422: /)
+      expect(JSON.parse(answer.stderr.replace(/^error 422: /, ''))).toEqual([
+        { type: 'missing', loc: ['body', 'config', 'mounts'], msg: 'Field required' },
+      ])
     })
   })
 })

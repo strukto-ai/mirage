@@ -167,6 +167,17 @@ jobs:
           path: python/.mypy_cache
           key: ${{ steps.mypy-cache.outputs.cache-primary-key }}
 
+      - name: Check S3 cache test cleanup
+        working-directory: python
+        shell: bash
+        env:
+          PYTHONWARNINGS: always::ResourceWarning
+        run: |
+          uv run pytest tests/workspace/test_cache_invalidation.py -q -s 2>&1 | tee "$RUNNER_TEMP/cache-cleanup.log"
+          if grep -E 'Unclosed client session|Unclosed connector' "$RUNNER_TEMP/cache-cleanup.log"; then
+            exit 1
+          fi
+
       - name: Run pytest (main suite)
         working-directory: python
         env:

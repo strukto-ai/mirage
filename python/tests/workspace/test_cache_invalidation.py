@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 from collections.abc import Iterator
 
 import boto3
@@ -77,11 +76,15 @@ async def _gzip_roundtrip_interleaved_ls(
     return await _exec(ws, cmd)
 
 
-def test_gzip_roundtrip_with_interleaved_ls(s3_endpoint):
+@pytest.mark.asyncio
+async def test_gzip_roundtrip_with_interleaved_ls(s3_endpoint):
     ws = _s3_workspace(s3_endpoint, "bucket-gzip-ls")
-    code, out, err = asyncio.run(_gzip_roundtrip_interleaved_ls(ws))
-    assert code == 0, f"exit {code}, stderr: {err!r}"
-    assert "two" in out
+    try:
+        code, out, err = await _gzip_roundtrip_interleaved_ls(ws)
+        assert code == 0, f"exit {code}, stderr: {err!r}"
+        assert "two" in out
+    finally:
+        await ws.close()
 
 
 async def _overwrite_then_ls(ws: Workspace) -> tuple[int, str, str]:
@@ -95,11 +98,15 @@ async def _overwrite_then_ls(ws: Workspace) -> tuple[int, str, str]:
     return code, out, err
 
 
-def test_ls_sees_file_created_after_listing(s3_endpoint):
+@pytest.mark.asyncio
+async def test_ls_sees_file_created_after_listing(s3_endpoint):
     ws = _s3_workspace(s3_endpoint, "bucket-ls-create")
-    code, out, err = asyncio.run(_overwrite_then_ls(ws))
-    assert code == 0, f"exit {code}, stderr: {err!r}"
-    assert "b.txt" in out
+    try:
+        code, out, err = await _overwrite_then_ls(ws)
+        assert code == 0, f"exit {code}, stderr: {err!r}"
+        assert "b.txt" in out
+    finally:
+        await ws.close()
 
 
 async def _rm_then_stat(ws: Workspace) -> tuple[int, str, str]:
@@ -119,12 +126,16 @@ async def _rm_then_stat(ws: Workspace) -> tuple[int, str, str]:
     return await _exec(ws, "ls /data/arch")
 
 
-def test_ls_does_not_show_removed_file(s3_endpoint):
+@pytest.mark.asyncio
+async def test_ls_does_not_show_removed_file(s3_endpoint):
     ws = _s3_workspace(s3_endpoint, "bucket-rm-stat")
-    code, out, err = asyncio.run(_rm_then_stat(ws))
-    assert code == 0, f"exit {code}, stderr: {err!r}"
-    assert "c.txt" not in out
-    assert "d.txt" in out
+    try:
+        code, out, err = await _rm_then_stat(ws)
+        assert code == 0, f"exit {code}, stderr: {err!r}"
+        assert "c.txt" not in out
+        assert "d.txt" in out
+    finally:
+        await ws.close()
 
 
 async def _rm_last_key_then_ls(ws: Workspace) -> tuple[int, str, str]:
@@ -137,16 +148,22 @@ async def _rm_last_key_then_ls(ws: Workspace) -> tuple[int, str, str]:
     return await _exec(ws, "ls /data/imp")
 
 
-def test_ls_reports_enoent_for_an_emptied_implicit_directory(s3_endpoint):
+@pytest.mark.asyncio
+async def test_ls_reports_enoent_for_an_emptied_implicit_directory(
+    s3_endpoint,
+):
     # "/data/imp" was never mkdir'd, so the bucket holds no marker for it
     # and removing its last key removes the directory too. stat has always
     # said ENOENT here; ls used to render an empty directory and exit 0.
     ws = _s3_workspace(s3_endpoint, "bucket-rm-implicit")
-    code, out, err = asyncio.run(_rm_last_key_then_ls(ws))
-    assert code == 2, f"exit {code}, stdout: {out!r}"
-    assert err == (
-        "ls: cannot access '/data/imp': No such file or directory\n"
-    )
+    try:
+        code, out, err = await _rm_last_key_then_ls(ws)
+        assert code == 2, f"exit {code}, stdout: {out!r}"
+        assert err == (
+            "ls: cannot access '/data/imp': No such file or directory\n"
+        )
+    finally:
+        await ws.close()
 
 
 async def _rm_r_then_read_nested(ws: Workspace) -> tuple[int, str, str]:
@@ -162,17 +179,21 @@ async def _rm_r_then_read_nested(ws: Workspace) -> tuple[int, str, str]:
     return await _exec(ws, "cat /data/a/b/f.txt")
 
 
-def test_cat_does_not_serve_a_file_from_a_removed_subtree(s3_endpoint):
+@pytest.mark.asyncio
+async def test_cat_does_not_serve_a_file_from_a_removed_subtree(s3_endpoint):
     # `rm -r` removes directories the operand never named. The first ls
     # cached a listing for "/data/a/b" and the read cached its body, and
     # invalidating the operand plus its parent reaches neither: cat kept
     # printing "hi" for a key the bucket no longer had, without issuing a
     # single request.
     ws = _s3_workspace(s3_endpoint, "bucket-rm-r-subtree")
-    code, out, err = asyncio.run(_rm_r_then_read_nested(ws))
-    assert code == 1, f"exit {code}, stdout: {out!r}"
-    assert out == ""
-    assert err == "cat: /data/a/b/f.txt: No such file or directory\n"
+    try:
+        code, out, err = await _rm_r_then_read_nested(ws)
+        assert code == 1, f"exit {code}, stdout: {out!r}"
+        assert out == ""
+        assert err == "cat: /data/a/b/f.txt: No such file or directory\n"
+    finally:
+        await ws.close()
 
 
 async def _rm_r_then_ls_nested(ws: Workspace) -> tuple[int, str, str]:
@@ -188,12 +209,16 @@ async def _rm_r_then_ls_nested(ws: Workspace) -> tuple[int, str, str]:
     return await _exec(ws, "ls /data/x/y")
 
 
-def test_ls_reports_enoent_for_a_directory_inside_a_removed_subtree(
+@pytest.mark.asyncio
+async def test_ls_reports_enoent_for_a_directory_inside_a_removed_subtree(
     s3_endpoint,
 ):
     ws = _s3_workspace(s3_endpoint, "bucket-rm-r-listing")
-    code, out, err = asyncio.run(_rm_r_then_ls_nested(ws))
-    assert code == 2, f"exit {code}, stdout: {out!r}"
-    assert err == (
-        "ls: cannot access '/data/x/y': No such file or directory\n"
-    )
+    try:
+        code, out, err = await _rm_r_then_ls_nested(ws)
+        assert code == 2, f"exit {code}, stdout: {out!r}"
+        assert err == (
+            "ls: cannot access '/data/x/y': No such file or directory\n"
+        )
+    finally:
+        await ws.close()

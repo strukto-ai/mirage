@@ -201,7 +201,7 @@ def parse_system_time(text: str) -> float:
         ValueError: it is not one.
     """
     refused = ValueError(
-        f"system_time {text!r} is not an ISO 8601 instant with an offset "
+        "system_time is not an ISO 8601 instant with an offset "
         "from 1970 through 2261, as 2026-03-02T09:00:00Z"
     )
     if not _INSTANT.fullmatch(text):

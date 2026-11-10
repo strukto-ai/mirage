@@ -9,6 +9,8 @@ permissions:
     paths:
       - python/**
       - typescript/**
+      - docs/typescript/install.mdx
+      - docs/typescript/quickstart.mdx
       - .github/workflows/test_install.yml
       - .github/actions/setup-node-pnpm/action.yml
       - .github/actions/setup-uv/action.yml
@@ -44,6 +46,8 @@ jobs:
             hit:
               - 'python/**'
               - 'typescript/**'
+              - 'docs/typescript/install.mdx'
+              - 'docs/typescript/quickstart.mdx'
               - '.github/workflows/test_install.yml'
               - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/actions/setup-uv/action.yml'
@@ -221,6 +225,11 @@ jobs:
       - name: Bundle browser package without E2B
         working-directory: integ
         run: node runtime/e2b/install.ts "$RUNNER_TEMP/minimal"
+
+      - name: Run the documented TypeScript quickstart in the fresh consumer
+        run: |
+          npm install --prefix "$RUNNER_TEMP/minimal" --save-dev tsx typescript
+          node typescript/scripts/check-quickstart.ts "$RUNNER_TEMP/minimal"
 
       - name: Core workspace smoke test on bare install
         run: |

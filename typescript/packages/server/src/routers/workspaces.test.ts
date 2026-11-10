@@ -799,16 +799,74 @@ describe('workspaces router', () => {
     await app.close()
   })
 
-  it('POST /v1/workspaces returns 400 for missing mounts', async () => {
-    const app = buildApp()
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/workspaces',
-      payload: { config: {} },
-    })
-    expect(res.statusCode).toBe(400)
-    await app.close()
-  })
+  it.each([
+    { mounts: false, extra: false, invalidTime: undefined },
+    { mounts: true, extra: true, invalidTime: undefined },
+    { mounts: false, extra: true, invalidTime: undefined },
+    { mounts: true, extra: false, invalidTime: 123 },
+    { mounts: false, extra: true, invalidTime: 123 },
+    { mounts: true, extra: false, invalidTime: 'tomorrow' },
+    { mounts: false, extra: true, invalidTime: 'tomorrow' },
+  ])(
+    'POST /v1/workspaces validates config $mounts/$extra/$invalidTime',
+    async ({ mounts, extra, invalidTime }) => {
+      const app = buildApp()
+      const config = {
+        ...(mounts ? { mounts: {} } : {}),
+        ...(invalidTime !== undefined ? { system_time: invalidTime } : {}),
+        ...(extra ? { unknown_setting: true } : {}),
+      }
+      try {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/v1/workspaces',
+          payload: { id: 'bad', config },
+        })
+        expect(res.statusCode).toBe(422)
+        expect(res.json()).toEqual({
+          detail: [
+            ...(!mounts
+              ? [
+                  {
+                    type: 'missing',
+                    loc: ['body', 'config', 'mounts'],
+                    msg: 'Field required',
+                    input: config,
+                  },
+                ]
+              : []),
+            ...(invalidTime !== undefined
+              ? [
+                  {
+                    type: typeof invalidTime === 'number' ? 'string_type' : 'value_error',
+                    loc: ['body', 'config', 'system_time'],
+                    msg:
+                      typeof invalidTime === 'number'
+                        ? 'Input should be a valid string'
+                        : 'Value error, system_time is not an ISO 8601 instant with an offset from 1970 through 2261, as 2026-03-02T09:00:00Z',
+                    input: invalidTime,
+                    ...(typeof invalidTime === 'string' ? { ctx: { error: {} } } : {}),
+                  },
+                ]
+              : []),
+            ...(extra
+              ? [
+                  {
+                    type: 'extra_forbidden',
+                    loc: ['body', 'config', 'unknown_setting'],
+                    msg: 'Extra inputs are not permitted',
+                    input: true,
+                  },
+                ]
+              : []),
+          ],
+        })
+        expect(app.registry.has('bad')).toBe(false)
+      } finally {
+        await app.close()
+      }
+    },
+  )
 
   it('POST /v1/workspaces returns 502 when VFS build fails', async () => {
     const app = buildApp()
@@ -1283,7 +1341,17 @@ describe('workspaces router', () => {
         url: '/v1/workspaces',
         payload: { config: '/etc/passwd' },
       })
-      expect(res.statusCode).toBe(400)
+      expect(res.statusCode).toBe(422)
+      expect(res.json()).toEqual({
+        detail: [
+          {
+            type: 'model_attributes_type',
+            loc: ['body', 'config'],
+            msg: 'Input should be a valid dictionary or object to extract fields from',
+            input: '/etc/passwd',
+          },
+        ],
+      })
     } finally {
       await app.close().catch(() => undefined)
     }
