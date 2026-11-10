@@ -215,6 +215,79 @@
          }
        ]
      }
+   },
+   {
+     "id": "invalid_field_value",
+     "config": {
+       "mounts": {},
+       "system_time": "tomorrow"
+     },
+     "expect": {
+       "status": 422,
+       "detail": [
+         {
+           "type": "value_error",
+           "loc": [
+             "body",
+             "config",
+             "system_time"
+           ],
+           "msg": "Value error, system_time is not an ISO 8601 instant with an offset from 1970 through 2261, as 2026-03-02T09:00:00Z",
+           "input": "tomorrow",
+           "ctx": {
+             "error": {}
+           }
+         }
+       ]
+     }
+   },
+   {
+     "id": "missing_unknown_and_invalid_value",
+     "config": {
+       "system_time": "tomorrow",
+       "unknown_setting": true
+     },
+     "expect": {
+       "status": 422,
+       "detail": [
+         {
+           "type": "missing",
+           "loc": [
+             "body",
+             "config",
+             "mounts"
+           ],
+           "msg": "Field required",
+           "input": {
+             "system_time": "tomorrow",
+             "unknown_setting": true
+           }
+         },
+         {
+           "type": "value_error",
+           "loc": [
+             "body",
+             "config",
+             "system_time"
+           ],
+           "msg": "Value error, system_time is not an ISO 8601 instant with an offset from 1970 through 2261, as 2026-03-02T09:00:00Z",
+           "input": "tomorrow",
+           "ctx": {
+             "error": {}
+           }
+         },
+         {
+           "type": "extra_forbidden",
+           "loc": [
+             "body",
+             "config",
+             "unknown_setting"
+           ],
+           "msg": "Extra inputs are not permitted",
+           "input": true
+         }
+       ]
+     }
    }
  ],
  "suites": [

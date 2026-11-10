@@ -126,18 +126,20 @@ def _make_app_with_short_grace(grace: float = 0.2):
 @pytest.mark.parametrize(
     "mounts,extra,invalid_time",
     [
-        (False, False, False),
-        (True, True, False),
-        (False, True, False),
-        (True, False, True),
-        (False, True, True),
+        (False, False, None),
+        (True, True, None),
+        (False, True, None),
+        (True, False, 123),
+        (False, True, 123),
+        (True, False, "tomorrow"),
+        (False, True, "tomorrow"),
     ],
 )
 async def test_create_validates_config(mounts, extra, invalid_time):
     app, _ = _make_app_with_short_grace(grace=10.0)
     config = {
         **({"mounts": {}} if mounts else {}),
-        **({"system_time": 123} if invalid_time else {}),
+        **({"system_time": invalid_time} if invalid_time is not None else {}),
         **({"unknown_setting": True} if extra else {}),
     }
     detail = []
@@ -150,13 +152,26 @@ async def test_create_validates_config(mounts, extra, invalid_time):
                 "input": config,
             }
         )
-    if invalid_time:
+    if invalid_time is not None:
         detail.append(
             {
-                "type": "string_type",
+                "type": "string_type"
+                if isinstance(invalid_time, int)
+                else "value_error",
                 "loc": ["body", "config", "system_time"],
-                "msg": "Input should be a valid string",
-                "input": 123,
+                "msg": "Input should be a valid string"
+                if isinstance(invalid_time, int)
+                else (
+                    "Value error, system_time is not an ISO 8601 instant "
+                    "with an offset from 1970 through 2261, "
+                    "as 2026-03-02T09:00:00Z"
+                ),
+                "input": invalid_time,
+                **(
+                    {"ctx": {"error": {}}}
+                    if isinstance(invalid_time, str)
+                    else {}
+                ),
             }
         )
     if extra:

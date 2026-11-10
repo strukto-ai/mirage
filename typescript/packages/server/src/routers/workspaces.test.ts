@@ -800,18 +800,20 @@ describe('workspaces router', () => {
   })
 
   it.each([
-    { mounts: false, extra: false, invalidTime: false },
-    { mounts: true, extra: true, invalidTime: false },
-    { mounts: false, extra: true, invalidTime: false },
-    { mounts: true, extra: false, invalidTime: true },
-    { mounts: false, extra: true, invalidTime: true },
+    { mounts: false, extra: false, invalidTime: undefined },
+    { mounts: true, extra: true, invalidTime: undefined },
+    { mounts: false, extra: true, invalidTime: undefined },
+    { mounts: true, extra: false, invalidTime: 123 },
+    { mounts: false, extra: true, invalidTime: 123 },
+    { mounts: true, extra: false, invalidTime: 'tomorrow' },
+    { mounts: false, extra: true, invalidTime: 'tomorrow' },
   ])(
     'POST /v1/workspaces validates config $mounts/$extra/$invalidTime',
     async ({ mounts, extra, invalidTime }) => {
       const app = buildApp()
       const config = {
         ...(mounts ? { mounts: {} } : {}),
-        ...(invalidTime ? { system_time: 123 } : {}),
+        ...(invalidTime !== undefined ? { system_time: invalidTime } : {}),
         ...(extra ? { unknown_setting: true } : {}),
       }
       try {
@@ -833,13 +835,17 @@ describe('workspaces router', () => {
                   },
                 ]
               : []),
-            ...(invalidTime
+            ...(invalidTime !== undefined
               ? [
                   {
-                    type: 'string_type',
+                    type: typeof invalidTime === 'number' ? 'string_type' : 'value_error',
                     loc: ['body', 'config', 'system_time'],
-                    msg: 'Input should be a valid string',
-                    input: 123,
+                    msg:
+                      typeof invalidTime === 'number'
+                        ? 'Input should be a valid string'
+                        : 'Value error, system_time is not an ISO 8601 instant with an offset from 1970 through 2261, as 2026-03-02T09:00:00Z',
+                    input: invalidTime,
+                    ...(typeof invalidTime === 'string' ? { ctx: { error: {} } } : {}),
                   },
                 ]
               : []),

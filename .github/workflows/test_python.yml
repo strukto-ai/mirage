@@ -171,7 +171,6 @@ jobs:
         working-directory: python
         shell: bash
         env:
-          PYTHONASYNCIODEBUG: "1"
           PYTHONWARNINGS: always::ResourceWarning
         run: |
           uv run pytest tests/workspace/test_cache_invalidation.py -q -s 2>&1 | tee "$RUNNER_TEMP/cache-cleanup.log"

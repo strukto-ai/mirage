@@ -244,7 +244,8 @@ describe('mirage api', () => {
     await withServer(async (url, dir) => {
       const answer = await api(url, dir, '/invalid')
       expect(answer.code).toBe(2)
-      expect(JSON.parse(answer.stderr.split('error 422: ')[1])).toEqual([
+      expect(answer.stderr).toMatch(/^error 422: /)
+      expect(JSON.parse(answer.stderr.replace(/^error 422: /, ''))).toEqual([
         { type: 'missing', loc: ['body', 'config', 'mounts'], msg: 'Field required' },
       ])
     })

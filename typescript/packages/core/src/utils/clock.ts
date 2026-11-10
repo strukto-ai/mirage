@@ -176,7 +176,7 @@ export function parseSystemTime(text: string): number {
   }
   if (!(seconds >= 0 && seconds < SYSTEM_TIME_END)) {
     throw new Error(
-      `system_time ${JSON.stringify(text)} is not an ISO 8601 instant with an offset from 1970 through 2261, as 2026-03-02T09:00:00Z`,
+      'system_time is not an ISO 8601 instant with an offset from 1970 through 2261, as 2026-03-02T09:00:00Z',
     )
   }
   return seconds

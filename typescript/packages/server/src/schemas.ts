@@ -15,6 +15,7 @@
 import { loadWorkspaceConfig, type WorkspaceConfigRaw } from '@struktoai/mirage-core/config'
 import { validateDocument } from '@struktoai/mirage-core/rs/document'
 import { isPlainObject } from '@struktoai/mirage-core/utils/records'
+import { parseSystemTime } from '@struktoai/mirage-core/utils/clock'
 import type { JsonValue, MountBackend } from '@struktoai/mirage-core/types'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { OverrideShape } from './clone.ts'
@@ -68,16 +69,30 @@ export interface CreateWorkspaceRequest {
 
 /** A request config rejected by its schema, before operator-only runtime checks. */
 export class ConfigValidationError extends Error {
-  static readonly shape = z
-    .object({
-      mounts: z.record(z.string(), z.unknown()),
-      system_time: z.string().nullable().optional(),
-      profile: z.string().nullable().optional(),
-      default_session_id: z.string().nullable().optional(),
-      workspace_id: z.string().nullable().optional(),
-    })
-    .passthrough()
-  readonly detail: { type: string; loc: string[]; msg: string; input: unknown }[] = []
+  static time(value: string | null | undefined, ctx: z.RefinementCtx): void {
+    if (value === undefined || value === null) return
+    try {
+      parseSystemTime(value)
+    } catch (error) {
+      if (!(error instanceof Error)) throw error
+      ctx.addIssue({ code: 'custom', message: error.message })
+    }
+  }
+
+  static readonly shape = z.looseObject({
+    mounts: z.record(z.string(), z.unknown()),
+    system_time: z.string().nullable().optional().superRefine(ConfigValidationError.time),
+    profile: z.string().nullable().optional(),
+    default_session_id: z.string().nullable().optional(),
+    workspace_id: z.string().nullable().optional(),
+  })
+  readonly detail: {
+    type: string
+    loc: string[]
+    msg: string
+    input: unknown
+    ctx?: Record<string, unknown>
+  }[] = []
 
   constructor(config: unknown, cause: Error) {
     super(cause.message, { cause })
@@ -94,8 +109,19 @@ export class ConfigValidationError extends Error {
     if (!checked.success) {
       for (const issue of checked.error.issues) {
         const field = issue.path[0]
-        if (issue.code !== 'invalid_type' || typeof field !== 'string') throw checked.error
+        if (typeof field !== 'string') throw checked.error
         const input = config[field]
+        if (issue.code === 'custom') {
+          this.detail.push({
+            type: 'value_error',
+            loc: ['body', 'config', field],
+            msg: `Value error, ${issue.message}`,
+            input,
+            ctx: { error: {} },
+          })
+          continue
+        }
+        if (issue.code !== 'invalid_type') throw checked.error
         this.detail.push({
           type:
             input === undefined
