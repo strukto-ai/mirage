@@ -288,9 +288,11 @@ export class PyodideWorkerClient {
           console.warn(message.message)
           continue
         }
-        if (message.kind === 'started') {
+        if (message.kind === 'vfs' && message.op === 'started') {
           if (cap === null && request.room !== undefined)
             unwatch = await this.watchGrowth(request.room, stopOver(String(request.room)))
+          await this.answer(message, () => Promise.resolve(null))
+          if (message.buffer !== undefined) this.buffers.delete(message.buffer)
           continue
         }
         if (message.kind === 'vfs') {

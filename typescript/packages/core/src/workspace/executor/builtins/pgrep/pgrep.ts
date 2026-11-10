@@ -24,16 +24,17 @@ import type { LineRegex } from '../../../../rs/regex.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { SIGTERM } from '../../../../shell/constants.ts'
 import { signalNumber } from '../../../../shell/signals.ts'
+import { systemNow } from '../../../../utils/clock.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { jobResult, sessionOf } from '../jobspec.ts'
+import { grantsOf, jobResult, sessionOf } from '../jobspec.ts'
 import { signalOne } from '../kill/kill.ts'
 import {
-  machineScope,
   type MachineScope,
   optionRefusal,
   permutedOptions,
+  processScope,
   usagePage,
 } from '../machine_view.ts'
 import { NAME_WIDTH, processName, running } from './shared.ts'
@@ -101,20 +102,31 @@ function matcherOf(
   }
 }
 
-async function selected(rows: readonly Process[], search: Search): Promise<Process[]> {
-  const shown = new Map(rows.map((info) => [info.id.pid, shownPid(info)]))
-  const now = Date.now() / 1000
+/**
+ * The processes a search picks, by pid: `shown` holds each visible process's
+ * pid as the agent knows it, `leaders` each row's session leader as `ps`
+ * reads its `sid`. Mirrors Python's `_selected`.
+ */
+async function selected(
+  rows: readonly Process[],
+  search: Search,
+  shown: ReadonlyMap<number, number>,
+  leaders: ReadonlyMap<number, number>,
+  now: number,
+): Promise<Process[]> {
   const picked: Process[] = []
   for (const info of rows) {
     const haystack = search.full ? info.command : processName(info)
     const parent = shown.get(info.parent ?? 0) ?? 0
     const leader = info.group || info.id.pid
     const group = shown.get(leader) ?? leader
+    const head = leaders.get(info.id.pid) ?? leader
+    const session = shown.get(head) ?? head
     const wanted =
       (search.matcher === null || (await search.matcher.matches(haystack))) &&
       (search.parents.size === 0 || search.parents.has(parent)) &&
       (search.groups.size === 0 || search.groups.has(group)) &&
-      (search.sessions.size === 0 || search.sessions.has(group)) &&
+      (search.sessions.size === 0 || search.sessions.has(session)) &&
       (search.states === '' || search.states.includes((info.shownState ?? 'S').charAt(0))) &&
       (search.older === null || now - info.startedAt >= search.older)
     if (wanted !== search.inverse) picked.push(info)
@@ -175,7 +187,7 @@ async function searchFor(
   const [matcher, bad] = matcherOf(name, pattern, flags.i === true, flags.x === true)
   if (bad !== '') return refused(flags, bad)
   const machine = typeof flags.machine === 'string' ? flags.machine : null
-  const scope = machineScope(jobTable.processes, machine)
+  const scope = processScope(jobTable.processes, machine)
   if (scope === null) return refused(flags, `${name}: ${machine ?? ''}: no such machine\n`)
   const full = flags.f === true
   const said =
@@ -185,7 +197,17 @@ async function searchFor(
         `Try \`${name} -f' option to match against the complete command line.\n`
       : ''
   const rows = await running(jobTable, session, scope)
-  const picked = await selected(rows, {
+  const sid = sessionOf(session)
+  const seen = jobTable.processes.visible(sid, grantsOf(session))
+  const shown = new Map(seen.map((info) => [info.id.pid, shownPid(info)]))
+  const shell = session?.shellPid ?? null
+  const leaders = new Map(
+    rows.map((info) => [
+      info.id.pid,
+      info.sessionId === sid && shell !== null ? shell : info.group || info.id.pid,
+    ]),
+  )
+  const search: Search = {
     matcher,
     full,
     inverse: flags.v === true,
@@ -196,7 +218,8 @@ async function searchFor(
     groups,
     sessions,
     states: states ?? '',
-  })
+  }
+  const picked = await selected(rows, search, shown, leaders, systemNow())
   return { picked, scope, flags, said, status: 0 }
 }
 

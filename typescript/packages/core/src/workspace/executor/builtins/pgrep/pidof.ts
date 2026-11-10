@@ -15,6 +15,7 @@
 import { versionLine } from '../../../../commands/spec/standard.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import type { JobTable } from '../../../../execution/job/index.ts'
+import { WORKSPACE_MACHINE } from '../../../../execution/process/constants.ts'
 import { shownMachine, shownPid } from '../../../../execution/process/types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
@@ -22,7 +23,7 @@ import type { SessionView } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { jobResult } from '../jobspec.ts'
-import { machineScope, withMachine } from '../machine_view.ts'
+import { inScope, processScope, withMachine } from '../machine_view.ts'
 import { programOf, running } from './shared.ts'
 
 // Options that take nothing and change nothing here.
@@ -92,12 +93,13 @@ export async function handlePidof(
       }
     }
   }
-  const scope = machineScope(jobTable.processes, machine)
+  const scope = processScope(jobTable.processes, machine)
   if (scope === null) return jobResult(cmdStr, `pidof: ${machine ?? ''}: no such machine\n`, 1)
   const rows = await running(jobTable, session, scope)
   const lines: string[] = []
   let found = false
-  for (const place of scope.several ? scope.ids : ['']) {
+  const places = [WORKSPACE_MACHINE, ...scope.ids].filter((place) => inScope(scope, place))
+  for (const place of scope.several ? places : ['']) {
     let pids: string[] = []
     for (const name of names) {
       const matched = rows

@@ -14,13 +14,15 @@
 
 from mirage.commands.spec.standard import version_line
 from mirage.execution.job import JobTable
+from mirage.execution.process.constants import WORKSPACE_MACHINE
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.jobspec import job_result
 from mirage.workspace.executor.builtins.machine_view import (
-    machine_scope,
+    in_scope,
+    process_scope,
     with_machine,
 )
 from mirage.workspace.executor.builtins.pgrep.shared import (
@@ -95,13 +97,18 @@ async def handle_pidof(
             elif flag not in _ACCEPTED:
                 return job_result(cmd_str, "", 1)
     processes = job_table.processes
-    scope = machine_scope(processes, machine)
+    scope = process_scope(processes, machine)
     if scope is None:
         return job_result(cmd_str, f"pidof: {machine}: no such machine\n", 1)
     rows = await running(job_table, session, scope)
     lines: list[str] = []
     found = False
-    for place in scope.ids if scope.several else ("",):
+    places = [
+        place
+        for place in (WORKSPACE_MACHINE, *scope.ids)
+        if in_scope(scope, place)
+    ]
+    for place in places if scope.several else [""]:
         pids: list[str] = []
         for name in names:
             matched = sorted(

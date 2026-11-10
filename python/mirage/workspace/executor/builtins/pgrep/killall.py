@@ -35,9 +35,9 @@ from mirage.workspace.executor.builtins.jobspec import (
 )
 from mirage.workspace.executor.builtins.kill.kill import signal_one
 from mirage.workspace.executor.builtins.machine_view import (
-    machine_scope,
     option_refusal,
     permuted_options,
+    process_scope,
     usage_page,
 )
 from mirage.workspace.executor.builtins.pgrep.shared import (
@@ -186,7 +186,7 @@ async def handle_killall(
     machine = flags.get("machine")
     picked_machine = machine if isinstance(machine, str) else None
     processes = job_table.processes
-    scope = machine_scope(processes, picked_machine)
+    scope = process_scope(processes, picked_machine)
     if scope is None:
         return job_result(
             cmd_str, f"killall: {picked_machine}: no such machine\n", 1
@@ -213,8 +213,8 @@ async def handle_killall(
             )
         killed = 0
         for info in picks:
-            handle = processes.target(info.pid, sid, grants_of(session))
             try:
+                handle = processes.target(info.pid, sid, grants_of(session))
                 found = await signal_one(
                     job_table, session, jobs, info.pid, signal
                 )

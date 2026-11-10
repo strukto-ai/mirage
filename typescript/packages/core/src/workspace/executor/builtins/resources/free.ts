@@ -20,11 +20,11 @@ import type { JobTable } from '../../../../execution/job/index.ts'
 import { WORKSPACE_MACHINE } from '../../../../execution/process/constants.ts'
 import type { ProcessTable } from '../../../../execution/process/table.ts'
 import type { MachineResources } from '../../../../execution/types.ts'
-import type { ByteSource } from '../../../../io/types.ts'
 import { type MemoryBudget, memoryBudget } from '../../../../io/memory.ts'
-import { IOResult } from '../../../../io/types.ts'
+import { IOResult, OutputState } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { sleep } from '../../../../utils/abort.ts'
+import { concat } from '../../../../utils/bytes.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -242,14 +242,28 @@ async function* passes(
   options: FreeOptions,
   count: number | null,
   delay: number,
+  io: IOResult,
+  node: ExecutionNode,
+  signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
-  yield encodeText(first)
-  let done = 1
-  while (count === null || done < count) {
-    await sleep(delay * 1000)
-    const [rows] = await read(processes, scope, memory)
-    yield encodeText(`\n${render(rows, options, scope.several)}`)
-    done += 1
+  const told = [node.stderr]
+  try {
+    yield encodeText(first)
+    let done = 1
+    while (count === null || done < count) {
+      await sleep(delay * 1000, signal)
+      const [rows, errors] = await read(processes, scope, memory)
+      if (errors !== '') {
+        told.push(encodeText(errors))
+        io.exitCode = node.exitCode = 1
+      }
+      yield encodeText(`\n${render(rows, options, scope.several)}`)
+      done += 1
+    }
+  } finally {
+    node.stderr = concat(told)
+    io.stderr = node.stderr.length > 0 ? node.stderr : null
+    io.output?.finish()
   }
 }
 
@@ -296,6 +310,7 @@ export async function handleFree(
   parts: string[],
   _session: SessionState | null = null,
   _view: SessionView | null = null,
+  signal?: AbortSignal,
 ): Promise<RedirectResult> {
   const cmdStr = parts.join(' ')
   const spec = SHELL_SPECS.free
@@ -337,11 +352,14 @@ export async function handleFree(
   const text = rows.length > 0 ? render(rows, options, scope.several) : ''
   const code = errors === '' ? 0 : 1
   const err = errors === '' ? null : encodeText(errors)
-  const out: ByteSource =
-    count === 1 ? encodeText(text) : passes(text, processes, scope, memory, options, count, delay)
-  return [
-    out,
-    new IOResult({ exitCode: code, stderr: err }),
-    new ExecutionNode({ command: cmdStr, exitCode: code, stderr: err ?? new Uint8Array() }),
-  ]
+  const io = new IOResult({ exitCode: code, stderr: err })
+  const node = new ExecutionNode({
+    command: cmdStr,
+    exitCode: code,
+    stderr: err ?? new Uint8Array(),
+  })
+  if (count === 1) return [encodeText(text), io, node]
+  io.output = new OutputState()
+  const out = passes(text, processes, scope, memory, options, count, delay, io, node, signal)
+  return [out, io, node]
 }

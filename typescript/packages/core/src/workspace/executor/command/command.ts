@@ -841,6 +841,7 @@ export async function handleCommand(
       parts.map((p) => (typeof p === 'string' ? p : p.rawPath !== '' ? p.rawPath : p.virtual)),
       session,
       view,
+      mergeSignals(signal, context.frame.abortSignal),
     )
   }
   if (JOB_BUILTINS.has(cmdName) && jobTable !== null) {

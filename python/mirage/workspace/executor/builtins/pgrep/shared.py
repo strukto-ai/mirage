@@ -14,10 +14,12 @@
 
 from mirage.context import current_caller
 from mirage.execution.job import JobTable
-from mirage.execution.process.constants import WORKSPACE_MACHINE
 from mirage.execution.process.types import Process, ProcessState
 from mirage.workspace.executor.builtins.jobspec import grants_of, session_of
-from mirage.workspace.executor.builtins.machine_view import MachineScope
+from mirage.workspace.executor.builtins.machine_view import (
+    MachineScope,
+    in_scope,
+)
 from mirage.workspace.session import SessionState
 
 # The longest process name a process's ``comm`` holds.
@@ -49,7 +51,7 @@ async def running(
 ) -> list[Process]:
     """The processes a search picks from, on the machines looked at
     first: those ``ps`` shows, running, on a machine in ``scope`` or,
-    unless a machine was named, Mirage's own, without the one searching
+    unless another machine was named, Mirage's own, without the one searching
     and the shells it runs under, whose lines hold no program's name.
 
     Args:
@@ -71,8 +73,5 @@ async def running(
         if not info.stages
         and info.pid not in own
         and info.state == ProcessState.RUNNING
-        and (
-            info.shown_machine in scope.ids
-            or (not scope.picked and info.shown_machine == WORKSPACE_MACHINE)
-        )
+        and in_scope(scope, info.shown_machine)
     ]

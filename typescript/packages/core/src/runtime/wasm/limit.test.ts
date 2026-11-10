@@ -40,6 +40,17 @@ describe('capMemory', () => {
     expect(() => memory.grow(1)).toThrow(RangeError)
   })
 
+  it('keeps a tighter maximum the module named', () => {
+    const named = new Uint8Array([...HEADER, 0x05, 0x04, 0x01, 0x01, 0x01, 0x03, ...EXPORT])
+    const memory = memoryOf(capMemory(named, 300))
+    expect(memory.grow(2)).toBe(1)
+    expect(() => memory.grow(1)).toThrow(RangeError)
+  })
+
+  it('holds a limit past 4 GiB to what a 32-bit memory can name', () => {
+    expect(() => memoryOf(capMemory(open, 8 * 16384))).not.toThrow()
+  })
+
   it('lets a module start on its own minimum whatever the limit', () => {
     const memory = memoryOf(capMemory(open, 0))
     expect(memory.buffer.byteLength).toBe(65536)

@@ -244,6 +244,76 @@
         "stdout": "1\n",
         "stderr": "nosuchprogram: no process found\n"
       }
+    },
+    {
+      "id": "pgrep_parent_finds_the_shells_child",
+      "seq": 502438,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sleep 5 & p=$!; pgrep -c -P $$ sleep; kill $p; wait $p 2>/dev/null; true",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "killall_takes_names_after_double_dash",
+      "seq": 502439,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sleep 5 & p=$!; killall -- sleep --signal KILL; echo $?; wait $p; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n143\n",
+        "stderr": "--signal: no process found\nKILL: no process found\n"
+      }
     }
   ]
 }

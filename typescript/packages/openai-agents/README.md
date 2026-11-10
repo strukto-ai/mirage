@@ -84,7 +84,7 @@ ws = Workspace(
         RemoteRuntime(captures=["python", "python3"], machine="box"),
     ],
     # route the underlying computation: numpy lines run on the machine, the rest on monty
-    route_policy=lambda ctx: "machine" if "numpy" in ctx.line else None,
+    route_policy=lambda ctx: "remote" if "numpy" in ctx.line else None,
 )
 
 # Add an agent using the analyst profile

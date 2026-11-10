@@ -35,6 +35,24 @@
           }
         }
       ]
+    },
+    {
+      "id": "free_in_a_substitution_answers_for_the_workspace",
+      "note": "With no machine the workspace is the default one, so a script reading free still gets its row.",
+      "world": {
+        "runtimes": [
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "x=$(free -m); echo \"$x\" | awk '/^Mem:/ {print $2}'",
+          "expect": {
+            "exit": 0,
+            "stdout": "96\n"
+          }
+        }
+      ]
     }
   ]
 }

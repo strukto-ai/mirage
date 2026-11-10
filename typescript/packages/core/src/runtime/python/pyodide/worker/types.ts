@@ -33,8 +33,19 @@ export interface VfsRequest {
   buffer?: SharedArrayBuffer
   /** The request the service worker holds for a worker that shares none. */
   id?: string
-  /** `stdin` reads the run's input and `output` writes its stdout or stderr. */
-  op: ReadOperation | HandleOperation | 'dispatch' | 'flush' | 'process' | 'stdin' | 'output'
+  /**
+   * `stdin` reads the run's input and `output` writes its stdout or stderr;
+   * `started` holds the program until the heap it starts on is read.
+   */
+  op:
+    | ReadOperation
+    | HandleOperation
+    | 'dispatch'
+    | 'flush'
+    | 'process'
+    | 'stdin'
+    | 'output'
+    | 'started'
   path: string
   args?: Parameters<BridgeDispatchFn>
   mutations?: MirageMutation[]
@@ -88,7 +99,6 @@ export interface HostStdio {
 }
 export type WorkerResult =
   | { kind: 'notice'; message: string }
-  | { kind: 'started' }
   | { kind: 'result'; value: RunResult }
   | { kind: 'error'; message: string; name: string; seconds?: number }
 export type WorkerMessage = VfsRequest | WorkerResult | { kind: 'ready' }

@@ -16,9 +16,11 @@ from mirage.commands.spec.shell import SHELL_SPECS
 from mirage.execution.process.table import ProcessTable
 from mirage.workspace.executor.builtins.machine_view import (
     MachineScope,
+    in_scope,
     machine_scope,
     option_refusal,
     permuted_options,
+    process_scope,
     with_machine,
 )
 
@@ -71,10 +73,42 @@ def test_mirage_names_the_workspace_only_where_it_answers():
     assert machine_scope(processes, "mirage") is None
 
 
+def test_a_process_search_takes_mirage_as_mirages_own():
+    processes = table("docker:a")
+    assert process_scope(processes, "mirage") == MachineScope((), True, True)
+    assert process_scope(processes, "a") == MachineScope(("docker:a",), True)
+    assert process_scope(processes, "nosuch") is None
+
+
+def test_mirages_own_is_in_scope_unless_another_machine_is_picked():
+    assert in_scope(MachineScope(("docker:a",)), "mirage")
+    assert in_scope(MachineScope(("docker:a",)), "docker:a")
+    assert not in_scope(MachineScope(("docker:a",), True), "mirage")
+    assert in_scope(MachineScope((), True, True), "mirage")
+    assert not in_scope(MachineScope((), True, True), "docker:a")
+
+
 def test_options_may_follow_operands():
     parse = permuted_options(SHELL_SPECS["pgrep"], ["sleep", "-c", "-f"])
     assert parse.operands == ["sleep"]
     assert parse.flags["c"] is True and parse.flags["f"] is True
+
+
+def test_words_after_a_double_dash_are_operands():
+    parse = permuted_options(
+        SHELL_SPECS["killall"], ["--", "sleep", "--signal", "KILL"]
+    )
+    assert parse.operands == ["sleep", "--signal", "KILL"]
+    assert "s" not in parse.flags
+    parse = permuted_options(SHELL_SPECS["pgrep"], ["sleep", "--", "-c"])
+    assert parse.operands == ["sleep", "-c"]
+    assert "c" not in parse.flags
+
+
+def test_a_double_dash_an_option_takes_is_its_value():
+    parse = permuted_options(SHELL_SPECS["pgrep"], ["-d", "--", "sleep", "-c"])
+    assert parse.operands == ["sleep"]
+    assert parse.flags["d"] == "--" and parse.flags["c"] is True
 
 
 def test_option_refusal_names_the_option():

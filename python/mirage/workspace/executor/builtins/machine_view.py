@@ -66,6 +66,19 @@ class MachineScope:
         return len(self.ids) + self.workspace > 1
 
 
+def in_scope(scope: MachineScope, machine: str) -> bool:
+    """Whether a process on ``machine`` is in a scope: a machine in it,
+    or Mirage's own unless the line picked another machine.
+
+    Args:
+        scope (MachineScope): the machines.
+        machine (str): the machine as ``ps`` shows it.
+    """
+    if machine == WORKSPACE_MACHINE:
+        return scope.workspace or not scope.picked
+    return machine in scope.ids
+
+
 def _reach_of(runtime: RuntimeIdentity | None) -> str:
     """How far a runtime reaches.
 
@@ -110,7 +123,8 @@ def machine_scope(
 ) -> MachineScope | None:
     """Which machines a command answers for: the one ``--machine`` or
     the line's placement names; in a command substitution, whose reader
-    is a script, only the default one; otherwise every one. The host
+    is a script, only the default one, the workspace when there is no
+    machine; otherwise every one. The host
     counts only while a runtime runs programs on it, so a workspace that
     runs none says nothing of it.
 
@@ -151,7 +165,27 @@ def machine_scope(
     )
     if substituted and routing is not None and len(every) > 1:
         return MachineScope((_default_machine(routing, every, host),))
-    return MachineScope(tuple(every), workspace=workspace and not substituted)
+    return MachineScope(
+        tuple(every), workspace=workspace and not (substituted and every)
+    )
+
+
+def process_scope(
+    processes: ProcessTable, name: str | None
+) -> MachineScope | None:
+    """Which machines a process search looks at: those ``machine_scope``
+    picks, or Mirage's own alone for ``mirage``, as ``ps`` names them.
+
+    Args:
+        processes (ProcessTable): the workspace's processes.
+        name (str | None): the option's value, None for none.
+
+    Returns:
+        MachineScope | None: the machines; None when ``name`` names none.
+    """
+    if name is not None and names_machine(WORKSPACE_MACHINE, name):
+        return MachineScope((), True, True)
+    return machine_scope(processes, name)
 
 
 async def read_machines(
@@ -193,26 +227,46 @@ async def read_machines(
     return rows, "".join(errors)
 
 
+def _ended(spec: CommandSpec, words: list[str], parse: ShellParse) -> bool:
+    """Whether a parse of ``words`` stopped at a ``--`` that ends the
+    options, not one an option took as its value.
+
+    Args:
+        spec (CommandSpec): the command's options.
+        words (list[str]): the words parsed.
+        parse (ShellParse): how they read.
+    """
+    taken = len(words) - len(parse.operands)
+    return (
+        taken > 0
+        and words[taken - 1] == "--"
+        and parse_shell_options(spec, words[: taken - 1]).needs_value is None
+    )
+
+
 def permuted_options(spec: CommandSpec, words: list[str]) -> ShellParse:
     """Read a line's options wherever they stand among its operands, as
-    getopt does.
+    getopt does; every word after a ``--`` is an operand.
 
     Args:
         spec (CommandSpec): the command's options.
         words (list[str]): its words, its name excluded.
     """
     parse = parse_shell_options(spec, words)
+    read = words
     operands: list[str] = []
     while (
         parse.operands
         and parse.invalid is None
         and parse.needs_value is None
         and parse.unexpected_value is None
+        and not _ended(spec, read, parse)
     ):
         operands.append(parse.operands[0])
         rest = parse.operands[1:]
         if not rest:
             return replace(parse, operands=operands)
+        read = rest
         following = parse_shell_options(spec, rest)
         parse = replace(
             following,

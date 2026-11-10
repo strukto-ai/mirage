@@ -15,7 +15,14 @@
 import { describe, expect, it } from 'vitest'
 import { SHELL_SPECS } from '../../../commands/spec/shell.ts'
 import { ProcessTable } from '../../../execution/process/table.ts'
-import { machineScope, optionRefusal, permutedOptions, withMachine } from './machine_view.ts'
+import {
+  inScope,
+  machineScope,
+  optionRefusal,
+  permutedOptions,
+  processScope,
+  withMachine,
+} from './machine_view.ts'
 
 function table(...ids: string[]): ProcessTable {
   const processes = new ProcessTable({ workspaceId: 'w' } as never)
@@ -92,10 +99,47 @@ describe('machine view', () => {
     expect(machineScope(processes, 'mirage')).toBeNull()
   })
 
+  it("takes mirage as Mirage's own for a process search", () => {
+    const processes = table('docker:a')
+    expect(processScope(processes, 'mirage')).toEqual({
+      ids: [],
+      picked: true,
+      several: false,
+      workspace: true,
+    })
+    expect(processScope(processes, 'a')?.ids).toEqual(['docker:a'])
+    expect(processScope(processes, 'nosuch')).toBeNull()
+  })
+
+  it("keeps Mirage's own in scope unless another machine is picked", () => {
+    const one = { ids: ['docker:a'], picked: false, several: false, workspace: false }
+    expect(inScope(one, 'mirage')).toBe(true)
+    expect(inScope(one, 'docker:a')).toBe(true)
+    expect(inScope({ ...one, picked: true }, 'mirage')).toBe(false)
+    const own = { ids: [], picked: true, several: false, workspace: true }
+    expect(inScope(own, 'mirage')).toBe(true)
+    expect(inScope(own, 'docker:a')).toBe(false)
+  })
+
   it('reads options that follow operands', () => {
     const parse = permutedOptions(SHELL_SPECS.pgrep as never, ['sleep', '-c', '-f'])
     expect(parse.operands).toEqual(['sleep'])
     expect([parse.flags.c, parse.flags.f]).toEqual([true, true])
+  })
+
+  it('reads every word after a double dash as an operand', () => {
+    const named = permutedOptions(SHELL_SPECS.killall as never, ['--', 'sleep', '--signal', 'KILL'])
+    expect(named.operands).toEqual(['sleep', '--signal', 'KILL'])
+    expect(named.flags.s).toBeUndefined()
+    const later = permutedOptions(SHELL_SPECS.pgrep as never, ['sleep', '--', '-c'])
+    expect(later.operands).toEqual(['sleep', '-c'])
+    expect(later.flags.c).toBeUndefined()
+  })
+
+  it('keeps a double dash an option takes as its value', () => {
+    const parse = permutedOptions(SHELL_SPECS.pgrep as never, ['-d', '--', 'sleep', '-c'])
+    expect(parse.operands).toEqual(['sleep'])
+    expect([parse.flags.d, parse.flags.c]).toEqual(['--', true])
   })
 
   it('names the option it refuses', () => {

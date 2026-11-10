@@ -42,6 +42,15 @@ export interface MachineScope {
   readonly workspace: boolean
 }
 
+/**
+ * Whether a process on `machine` is in a scope: a machine in it, or Mirage's
+ * own unless the line picked another machine. Mirrors Python's `in_scope`.
+ */
+export function inScope(scope: MachineScope, machine: string): boolean {
+  if (machine === WORKSPACE_MACHINE) return scope.workspace || !scope.picked
+  return scope.ids.includes(machine)
+}
+
 function reachOf(runtime: unknown): string {
   return (runtime as { reach?: string } | null | undefined)?.reach ?? 'workspace'
 }
@@ -78,7 +87,8 @@ function defaultMachine(
 /**
  * Which machines a command answers for: the one `--machine` or the line's
  * placement names; in a command substitution, whose reader is a script, only
- * the default one; otherwise every one. The host counts only while a runtime
+ * the default one, the workspace when there is no machine; otherwise every
+ * one. The host counts only while a runtime
  * runs programs on it. A command that also answers for the workspace passes
  * `workspace`, which is `mirage` to `--machine` as it is to `ps`. Null when
  * `name` names none. Mirrors Python's `machine_scope`.
@@ -118,13 +128,24 @@ export function machineScope(
       several: false,
       workspace: false,
     }
-  const answers = workspace && !substituted
+  const answers = workspace && !(substituted && every.length > 0)
   return {
     ids: every,
     picked: false,
     several: every.length + (answers ? 1 : 0) > 1,
     workspace: answers,
   }
+}
+
+/**
+ * Which machines a process search looks at: those `machineScope` picks, or
+ * Mirage's own alone for `mirage`, as `ps` names them. Null when `name` names
+ * none. Mirrors Python's `process_scope`.
+ */
+export function processScope(processes: ProcessTable, name: string | null): MachineScope | null {
+  if (name !== null && namesMachine(WORKSPACE_MACHINE, name))
+    return { ids: [], picked: true, several: false, workspace: true }
+  return machineScope(processes, name)
 }
 
 /**
@@ -154,19 +175,38 @@ export async function readMachines(
   return [rows, errors.join('')]
 }
 
-/** Read a line's options wherever they stand among its operands, as getopt does. */
+/**
+ * Whether a parse of `words` stopped at a `--` that ends the options, not one
+ * an option took as its value. Mirrors Python's `_ended`.
+ */
+function ended(spec: CommandSpec, words: readonly string[], parse: ShellParse): boolean {
+  const taken = words.length - parse.operands.length
+  return (
+    taken > 0 &&
+    words[taken - 1] === '--' &&
+    parseShellOptions(spec, words.slice(0, taken - 1)).needsValue === null
+  )
+}
+
+/**
+ * Read a line's options wherever they stand among its operands, as getopt
+ * does; every word after a `--` is an operand.
+ */
 export function permutedOptions(spec: CommandSpec, words: readonly string[]): ShellParse {
   let parse = parseShellOptions(spec, words)
+  let read = words
   const operands: string[] = []
   while (
     parse.operands.length > 0 &&
     parse.invalid === null &&
     parse.needsValue === null &&
-    parse.unexpectedValue === null
+    parse.unexpectedValue === null &&
+    !ended(spec, read, parse)
   ) {
     operands.push(parse.operands[0] ?? '')
     const rest = parse.operands.slice(1)
     if (rest.length === 0) return { ...parse, operands }
+    read = rest
     const following = parseShellOptions(spec, rest)
     parse = {
       ...following,

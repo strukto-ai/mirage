@@ -29,7 +29,7 @@ import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { grantsOf, jobResult, scanningWhile, sessionOf } from '../jobspec.ts'
 import { signalOne } from '../kill/kill.ts'
-import { machineScope, optionRefusal, permutedOptions, usagePage } from '../machine_view.ts'
+import { optionRefusal, permutedOptions, processScope, usagePage } from '../machine_view.ts'
 import { NAME_WIDTH, processName, programOf, running } from './shared.ts'
 
 const SIGNAL_NAMES =
@@ -120,7 +120,7 @@ export async function handleKillall(
     return jobResult(cmdStr, `${unknown}: unknown signal; killall -l lists signals.\n`, 1)
   const machine = typeof flags.machine === 'string' ? flags.machine : null
   const processes = jobTable.processes
-  const scope = machineScope(processes, machine)
+  const scope = processScope(processes, machine)
   if (scope === null) return jobResult(cmdStr, `killall: ${machine ?? ''}: no such machine\n`, 1)
   const rows = await running(jobTable, session, scope)
   const sid = sessionOf(session)
@@ -135,10 +135,11 @@ export async function handleKillall(
     if (picks === null) return jobResult(cmdStr, `killall: Bad regular expression: ${name}\n`, 1)
     let killed = 0
     for (const info of picks) {
-      const handle = processes.target(info.id.pid, sid, grantsOf(session))
       const pid = String(shownPid(info))
+      let handle: ReturnType<typeof processes.target>
       let found: boolean | null
       try {
+        handle = processes.target(info.id.pid, sid, grantsOf(session))
         found = await signalOne(jobTable, session, jobs, info.id.pid, signal)
       } catch (err) {
         if ((err as { code?: string }).code !== 'EPERM') throw err
