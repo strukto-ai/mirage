@@ -32,7 +32,8 @@ export class ProcessId {
 
 /**
  * One job of a workspace, named by its console, which no other job shares
- * even when it takes a number a reaped one had.
+ * even when it takes a number a reaped one had, written `job_` and 32 hex
+ * digits.
  */
 export class JobId {
   constructor(

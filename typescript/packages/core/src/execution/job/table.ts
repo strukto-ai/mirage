@@ -346,7 +346,7 @@ export class JobTable {
   }): Promise<JobHandle> {
     await this.claim()
     const sessionId = init.sessionId ?? ''
-    const name = crypto.randomUUID().replaceAll('-', '')
+    const name = `job_${crypto.randomUUID().replaceAll('-', '')}`
     const createdAt = this.clock.now()
     let job: JobHandle | null = null
     let ready!: () => void
@@ -476,7 +476,7 @@ export class JobTable {
    * one rather than hide that job.
    */
   async load(job: JobHandle): Promise<void> {
-    const name = crypto.randomUUID().replaceAll('-', '')
+    const name = `job_${crypto.randomUUID().replaceAll('-', '')}`
     const store = this.store.console(name)
     const [chunks] = await job.console.readFrom(0)
     for (const chunk of chunks) await store.append(chunk.channel, chunk.data)
