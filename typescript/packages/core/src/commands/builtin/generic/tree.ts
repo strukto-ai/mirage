@@ -621,6 +621,19 @@ interface Drawing {
 
 // One directory's own entries, in the order they are drawn. Mirrors Python's
 // `_open_dir`.
+/** The mount roots on a directory, named as the walk draws them: one reached
+ * through a followed link holds the mounts where it really is. Mirrors
+ * Python's _nested_mounts. */
+function nestedMounts(treeOpts: TreeOpts, directory: string): string[] {
+  const { flags, resolve, mounts } = treeOpts
+  if (!flags.follow || resolve === null) return childMounts(mounts, directory)
+  const real = rstripSlash(resolve(directory))
+  const drawn = rstripSlash(directory)
+  return childMounts(mounts, real === '' ? '/' : real).map(
+    (mount) => drawn + mount.slice(real.length),
+  )
+}
+
 async function openDir(
   readdir: ReaddirFn<[p: PathSpec, nofollow?: boolean, limit?: number]>,
   stat: StatFn,
@@ -634,7 +647,7 @@ async function openDir(
   // `/repos/alpha` is mounted) has no backend to list it, so the readdir
   // throws and a merge below it never runs: `tree` reported the one path
   // whose children it could name for certain as unopenable.
-  const nested = childMounts(treeOpts.mounts, path.virtual)
+  const nested = nestedMounts(treeOpts, path.virtual)
   const limit = treeOpts.budget?.listingLimit(path.virtual) ?? null
   let entries: string[]
   try {

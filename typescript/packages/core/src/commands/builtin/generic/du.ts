@@ -421,17 +421,23 @@ async function duOperandExists(
 
 /**
  * A listed name's stat. The line's rules judged what it typed, not what its
- * list holds, so they are asked here, at the name and at where it leads.
- * Mirrors Python's _listed_stat.
+ * list holds, so they are asked here, at the name and at where it leads. A
+ * name the session cannot see stays missing, so a refusal counts only for one
+ * the dispatcher finds. Mirrors Python's _listed_stat.
  */
 async function listedStat(
   stat: (p: PathSpec) => Promise<unknown>,
+  statPath: StatPath | undefined,
   cwd: PathSpec,
   path: PathSpec,
 ): Promise<unknown> {
   const gate = currentCaller().gate
   const named = PathSpec.fromStrPath(path.rawPath, undefined, cwd.virtual).virtual
-  if (gate !== null && (gate.refusal(named) !== null || gate.refusal(path.virtual) !== null)) {
+  if (
+    gate !== null &&
+    (gate.refusal(named) !== null || gate.refusal(path.virtual) !== null) &&
+    (statPath === undefined || (await statPath(path)) !== null)
+  ) {
     throw eacces(path)
   }
   return stat(path)
@@ -980,7 +986,8 @@ export async function duGeneric(
         .map(virtualKey)
     }
     const operandStat = stat
-    stat = (p) => listedStat(operandStat, ctx.cwd, p)
+    const statPath = vfsStatPath(ctx.vfs)
+    stat = (p) => listedStat(operandStat, statPath, ctx.cwd, p)
   }
   const { present, missing } =
     paths.length > 0 || flags.listed === undefined

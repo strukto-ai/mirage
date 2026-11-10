@@ -526,3 +526,24 @@ async def test_tree_host_flags(line, stdout):
     io = await ws.shell(line)
     assert await io.stdout_str() == stdout
     assert await io.stderr_str() == ""
+
+
+@pytest.mark.asyncio
+async def test_tree_lx_stays_out_of_a_mount_below_a_link():
+    ws = Workspace(
+        {"/d": RAMVFS(), "/d/real/m": RAMVFS()}, mode=MountMode.WRITE
+    )
+    await ws.shell(
+        "mkdir -p /d/root /d/real; printf x > /d/real/f; "
+        "printf y > /d/real/m/g; ln -s ../real /d/root/a"
+    )
+    kept = await ws.shell("tree -lx --noreport /d/root")
+    crossed = await ws.shell("tree -l --noreport /d/root")
+    assert (
+        await kept.stdout_str()
+        == "/d/root\n`-- a -> ../real\n    |-- f\n    `-- m\n"
+    )
+    assert (
+        await crossed.stdout_str()
+        == "/d/root\n`-- a -> ../real\n    |-- f\n    `-- m\n        `-- g\n"
+    )

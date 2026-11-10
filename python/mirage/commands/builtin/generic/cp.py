@@ -1725,6 +1725,7 @@ async def _tree_lines(
     target: PathSpec,
     src_base: str,
     dst_base: str,
+    flags: CpFlags,
 ) -> list[str]:
     """GNU ``-v`` lines for a tree about to be copied natively, parents first.
 
@@ -1744,6 +1745,7 @@ async def _tree_lines(
         target (PathSpec): Destination root.
         src_base (str): Source root's virtual path, no trailing slash.
         dst_base (str): Destination root's virtual path, no trailing slash.
+        flags (CpFlags): the options, for what ``--debug`` adds to a file.
     """
     dirs = {src_base, *await strategy.find(src, type="d")}
     files = await strategy.find(src, type="f")
@@ -1757,6 +1759,8 @@ async def _tree_lines(
         if entry_mount in dirs and await is_directory(stat, entry_dst):
             continue
         lines.append(f"'{entry.raw_path}' -> '{entry_dst.raw_path}'")
+        if entry_mount not in dirs:
+            lines += await _debug_line(flags, strategy, stat, entry)
     return lines
 
 
@@ -2718,7 +2722,6 @@ async def cp_generic(
         or backup_displaces(flags.backup)
         or keeper is not None
         or unlink is not None
-        or flags.debug
     )
     lines: list[str] = []
     warned = 0
@@ -3042,7 +3045,7 @@ async def cp_generic(
             if whole_tree and strategy.dir_copy is not None:
                 tree = (
                     await _tree_lines(
-                        strategy, stat, src, target, src_base, dst_base
+                        strategy, stat, src, target, src_base, dst_base, flags
                     )
                     if flags.verbose
                     else []

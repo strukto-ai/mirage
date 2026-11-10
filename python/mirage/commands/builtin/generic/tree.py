@@ -628,6 +628,24 @@ async def _gitignore(
     return _gitignore_lines(text, directory.virtual)
 
 
+def _nested_mounts(opts: _TreeOpts, directory: str) -> list[str]:
+    """The mount roots on a directory, named as the walk draws them: one
+    reached through a followed link holds the mounts where it really is.
+
+    Args:
+        opts (_TreeOpts): the operand's walk.
+        directory (str): absolute virtual path being listed.
+    """
+    if not opts.flags.follow or opts.resolve is None:
+        return _child_mounts(opts.mounts, directory)
+    real = opts.resolve(directory).rstrip("/")
+    drawn = directory.rstrip("/")
+    return [
+        drawn + mount[len(real) :]
+        for mount in _child_mounts(opts.mounts, real or "/")
+    ]
+
+
 async def _open_dir(
     path: PathSpec,
     readdir: ReaddirFn,
@@ -660,7 +678,7 @@ async def _open_dir(
     # readdir raises and a merge below it never runs: `tree` reported the
     # one path whose children it could name for certain as unopenable.
     flags = opts.flags
-    child_mounts = _child_mounts(opts.mounts, path.virtual)
+    child_mounts = _nested_mounts(opts, path.virtual)
     limit = opts.budget.listing_limit(path.virtual)
     try:
         entries = await (

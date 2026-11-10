@@ -334,23 +334,30 @@ def _listed_operands(
 
 async def _listed_stat(
     stat: Callable[[PathSpec], Awaitable[FileStat]],
+    stat_path: StatPath | None,
     cwd: PathSpec,
     path: PathSpec,
 ) -> FileStat:
     """A listed name's stat. The line's rules judged what it typed, not
     what its list holds, so they are asked here, at the name and at where
-    it leads.
+    it leads. A name the session cannot see stays missing, so a refusal
+    counts only for one the dispatcher finds.
 
     Args:
         stat (Callable[[PathSpec], Awaitable[FileStat]]): the command's stat.
+        stat_path (StatPath | None): dispatcher-backed stat.
         cwd (PathSpec): where a relative name is resolved.
         path (PathSpec): the listed operand, its links followed.
     """
     gate = current_caller().gate
     named = PathSpec.from_str_path(path.raw_path, cwd=cwd).virtual
-    if gate is not None and (
-        gate.refusal(named) is not None
-        or gate.refusal(path.virtual) is not None
+    if (
+        gate is not None
+        and (
+            gate.refusal(named) is not None
+            or gate.refusal(path.virtual) is not None
+        )
+        and (stat_path is None or await stat_path(path) is not None)
     ):
         raise eacces(path)
     return await stat(path)
@@ -1236,7 +1243,7 @@ async def du_generic(
                 for item in await follow(list(paths))
                 if isinstance(item, PathSpec)
             ]
-        stat = partial(_listed_stat, stat, ctx.cwd)
+        stat = partial(_listed_stat, stat, vfs_stat_path(ctx.vfs), ctx.cwd)
     present: list[PathSpec] = []
     missing: list[tuple[str, str, int]] = []
     if paths or flags.listed is None:

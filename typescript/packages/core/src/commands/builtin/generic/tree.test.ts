@@ -564,3 +564,20 @@ it.each([
   await ws.close()
   expect([io.stdoutText, io.stderrText]).toEqual([stdout, ''])
 })
+
+it('tree -lx stays out of a mount below a link', async () => {
+  const ws = new Workspace(
+    { '/d': new RAMVFS(), '/d/real/m': new RAMVFS() },
+    { mode: MountMode.WRITE },
+  )
+  await ws.shell(
+    'mkdir -p /d/root /d/real; printf x > /d/real/f; printf y > /d/real/m/g; ln -s ../real /d/root/a',
+  )
+  const kept = await ws.shell('tree -lx --noreport /d/root')
+  const crossed = await ws.shell('tree -l --noreport /d/root')
+  await ws.close()
+  expect(kept.stdoutText).toBe('/d/root\n`-- a -> ../real\n    |-- f\n    `-- m\n')
+  expect(crossed.stdoutText).toBe(
+    '/d/root\n`-- a -> ../real\n    |-- f\n    `-- m\n        `-- g\n',
+  )
+})

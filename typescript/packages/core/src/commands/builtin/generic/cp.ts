@@ -1520,6 +1520,7 @@ async function treeLines(
   target: PathSpec,
   srcBase: string,
   dstBase: string,
+  flags: CpFlags,
 ): Promise<string[]> {
   const dirs = new Set([srcBase, ...(await strategy.find(src, { type: 'd' }))])
   const files = await strategy.find(src, { type: 'f' })
@@ -1533,6 +1534,7 @@ async function treeLines(
     )
     if (dirs.has(entryMount) && (await isDirectory(stat, entryDst))) continue
     lines.push(`'${entry.rawPath}' -> '${entryDst.rawPath}'`)
+    if (!dirs.has(entryMount)) lines.push(...(await debugLine(flags, strategy, stat, entry)))
   }
   return lines
 }
@@ -2056,8 +2058,7 @@ export async function cpGeneric(
     updateGates(flags.update) ||
     backupDisplaces(flags.backup) ||
     keeper !== null ||
-    unlink !== null ||
-    flags.debug
+    unlink !== null
   const lines: string[] = []
   let warned = 0
   // Where each source's first copy went, by source and by link name.
@@ -2328,7 +2329,7 @@ export async function cpGeneric(
       // only a fresh destination takes it.
       if (wholeTree && strategy.dirCopy !== undefined) {
         const tree = flags.verbose
-          ? await treeLines(strategy, stat, src, target, srcBase, dstBase)
+          ? await treeLines(strategy, stat, src, target, srcBase, dstBase, flags)
           : []
         let copied = true
         try {

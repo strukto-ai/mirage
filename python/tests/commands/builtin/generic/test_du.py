@@ -490,3 +490,25 @@ async def test_an_earlier_operand_leaves_no_time_in_a_later_one():
         assert "2030" not in rows[-1]
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_du_listed_name_a_profile_hides_and_denies_stays_missing():
+    ws = Workspace({"/d": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("printf x > /d/s; printf '/d/s\\0' > /d/l")
+        ws.create_session(
+            "agent",
+            profile={
+                "paths": {"hide": ["/d/s"]},
+                "commands": {"deny": [{"reason": "no", "paths": ["/d/s"]}]},
+            },
+        )
+        io = await ws.shell("du --files0-from=/d/l", session_id="agent")
+        assert io.exit_code == 1
+        assert (
+            await io.stderr_str()
+            == "du: cannot access '/d/s': No such file or directory\n"
+        )
+    finally:
+        await ws.close()
