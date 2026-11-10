@@ -18,6 +18,7 @@ from mirage.machine.errors import ConnectionLostError
 from mirage.machine.kubernetes.config import KubernetesConfig
 from mirage.machine.kubernetes.constants import (
     EXIT_PREFIX,
+    EXIT_STATUS,
     KUBECTL_HINT,
     RUNNING_PHASE,
 )
@@ -27,25 +28,30 @@ from mirage.machine.types import MachinePipe
 from mirage.runtime.types import OutputFn, RunResult
 
 
-def may_be_exit_line(line: bytes) -> bool:
-    """Whether a line, as far as it has arrived, can still turn out to
-    be kubectl's report of the exit status.
+def exit_report_start(stderr: bytes) -> int:
+    """Where kubectl's report of the exit status can begin in the stderr
+    so far, or its length when it cannot be there. The report follows
+    the program's last byte directly, on a line of its own or not.
 
     Args:
-        line (bytes): the last line of stderr so far.
+        stderr (bytes): the stderr not yet passed on.
     """
-    if len(line) <= len(EXIT_PREFIX):
-        return EXIT_PREFIX.startswith(line)
-    code = line[len(EXIT_PREFIX) :].removesuffix(b"\n")
-    return line.startswith(EXIT_PREFIX) and code.isdigit()
+    at = stderr.rfind(EXIT_PREFIX)
+    if at >= 0 and EXIT_STATUS.fullmatch(stderr, at + len(EXIT_PREFIX)):
+        return at
+    size = len(stderr)
+    for start in range(max(0, size - len(EXIT_PREFIX) + 1), size):
+        if EXIT_PREFIX.startswith(stderr[start:]):
+            return start
+    return size
 
 
 class ExitLineFilter:
     """kubectl's stderr with its own report of the exit status taken
     out, so a failing program says only what it said itself.
 
-    The report is always the last line, so only a last line that can
-    still become one is held; everything else passes as it arrives.
+    The report comes last, so only an ending that can still become one
+    is held; everything else passes as it arrives.
 
     Args:
         errors (OutputFn | None): receives stderr as it arrives; None
@@ -78,8 +84,7 @@ class ExitLineFilter:
         """
         self._held += data
         held = bytes(self._held)
-        start = held.rfind(b"\n", 0, len(held) - 1) + 1
-        end = start if may_be_exit_line(held[start:]) else len(held)
+        end = exit_report_start(held)
         self._held = bytearray(held[end:])
         await self._emit(held[:end])
 

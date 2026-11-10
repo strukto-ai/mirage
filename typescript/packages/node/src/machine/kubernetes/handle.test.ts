@@ -19,11 +19,12 @@ import { buildMachine } from '@struktoai/mirage-core/machine/registry'
 import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { describe, expect, it } from 'vitest'
 import type { KubernetesConfig } from './config.ts'
-import { ExitLineFilter, KubernetesMachine, mayBeExitLine } from './handle.ts'
+import { ExitLineFilter, exitReportStart, KubernetesMachine } from './handle.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
-const REPORT = 'command terminated with exit code 3\n'
+const PREFIX = 'command terminated with exit code '
+const REPORT = `${PREFIX}3\n`
 
 class FakeKubernetesMachine extends KubernetesMachine {
   phase = 'Running'
@@ -145,6 +146,13 @@ describe('KubernetesMachine', () => {
     expect(result.exitCode).toBe(3)
   })
 
+  it('a failure with no final newline keeps what it wrote', async () => {
+    const machine = makeMachine({ pod: 'p' }, { stderr: `boom${REPORT}`, code: 3 })
+    const result = await machine.execLine('false', null, {}, '/')
+    expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('boom')
+    expect(result.exitCode).toBe(3)
+  })
+
   it('a silent failing program has no stderr', async () => {
     const machine = makeMachine({ pod: 'p' }, { stderr: REPORT, code: 3 })
     const result = await machine.execLine('false', null, {}, '/')
@@ -175,19 +183,23 @@ describe('KubernetesMachine', () => {
   })
 })
 
-describe('mayBeExitLine', () => {
-  it.each<[string, boolean]>([
-    ['', true],
-    ['command', true],
-    ['command terminated with exit code ', true],
-    ['command terminated with exit code 12', true],
-    ['command terminated with exit code 12\n', true],
-    ['command terminated with exit code \n', false],
-    ['command terminated with exit code 1x', false],
-    ['commands', false],
-    ['boom\n', false],
-  ])('%j is %s', (line, held) => {
-    expect(mayBeExitLine(ENC.encode(line))).toBe(held)
+describe('exitReportStart', () => {
+  it.each<[string, number]>([
+    ['', 0],
+    ['boom\n', 5],
+    ['c', 0],
+    ['abc', 2],
+    ['boomcommand', 4],
+    [`boom${REPORT}`, 4],
+    [`${REPORT}${REPORT}`, REPORT.length],
+    [PREFIX, 0],
+    [`${PREFIX}255`, 0],
+    [`${PREFIX}255\n`, 0],
+    [`${PREFIX}1234`, PREFIX.length + 4],
+    [`${PREFIX}\n`, PREFIX.length + 1],
+    [`${PREFIX}1x`, PREFIX.length + 2],
+  ])('%j holds from %i', (stderr, start) => {
+    expect(exitReportStart(Buffer.from(stderr))).toBe(start)
   })
 })
 
@@ -218,6 +230,15 @@ describe('ExitLineFilter', () => {
     expect(chunks).toEqual([])
     await said.write(ENC.encode('s failed\n'))
     expect(text(chunks)).toBe('commands failed\n')
+    expect(await said.finish(0)).toBe(true)
+  })
+
+  it('does not hold a report of endless digits', async () => {
+    const [chunks, collect] = collector()
+    const said = new ExitLineFilter(collect)
+    await said.write(ENC.encode(PREFIX))
+    await said.write(ENC.encode('1'.repeat(100_000)))
+    expect(text(chunks)).toBe(`${PREFIX}${'1'.repeat(100_000)}`)
     expect(await said.finish(0)).toBe(true)
   })
 
