@@ -15,7 +15,7 @@
 import asyncio
 import dataclasses
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
 from mirage.commands.config import Context
@@ -27,6 +27,7 @@ from mirage.policy.types import (
     Claimant,
     CommandContext,
     Deny,
+    Occurrence,
     Pending,
     PolicyCaller,
     Route,
@@ -54,6 +55,8 @@ from mirage.workspace.lookup.lookup import (
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.node.explain import Judged, Walked
+from mirage.workspace.node.inner_lines import Word, inner_lines
+from mirage.workspace.node.occurrence import argv_frame, whole_occurrence
 from mirage.workspace.session import SessionState
 from mirage.workspace.workspace.runtimes import Runtimes
 
@@ -97,19 +100,32 @@ def _apart(
     )
 
 
-def _runs_under(one: Judged, outer: Judged) -> bool:
-    """Whether a judged command stands inside another on its line.
+def _wrapped_programs(
+    words: Sequence[Word],
+    occurrence: Occurrence,
+    by_place: Mapping[Occurrence, Judged],
+) -> list[Judged]:
+    """The judged commands a wrapper's run answers for, as the run walks
+    them: a shell line under the wrapper is the machine's to run, so what
+    it names places nothing.
 
     Args:
-        one (Judged): the command.
-        outer (Judged): the command that may be running it.
+        words (Sequence[Word]): the wrapper's words, name first.
+        occurrence (Occurrence): its place on the line.
+        by_place (Mapping[Occurrence, Judged]): the line's judged commands.
     """
-    at = one.occurrence.parent
-    while at is not None:
-        if at == outer.occurrence:
-            return True
-        at = at.parent
-    return False
+    found: list[Judged] = []
+    for inner in inner_lines(words[0].value, words[1:]):
+        if not inner.argv:
+            continue
+        place = whole_occurrence(
+            argv_frame([w.value for w in inner.argv], occurrence)
+        )
+        held = by_place.get(place)
+        if held is not None:
+            found.append(held)
+            found.extend(_wrapped_programs(inner.argv, place, by_place))
+    return found
 
 
 class Router:
@@ -337,8 +353,8 @@ class Router:
             one (Judged): the command's judgment and the session it was
                 judged in.
             decision (RouteDecision): the line's placement.
-            programs (Sequence[Judged]): the commands it runs, outermost
-                first.
+            programs (Sequence[Judged]): the commands a wrapper's run
+                answers for, outermost first.
         """
         whole = whole_line_runtime(decision.bindings)
         if isinstance(whole, Runtime):
@@ -362,15 +378,18 @@ class Router:
                 decision,
             )
         ):
-            for program in programs:
-                inner = command_route(program.judgment.answers)
-                if inner is not None:
-                    decision = routed(
-                        self._runtimes.entries,
-                        decision.bindings,
-                        inner.runtime,
-                        inner.machine or decision.machine,
-                    )
+            own = command_route(one.judgment.answers)
+            routes = [command_route(p.judgment.answers) for p in programs]
+            answer = agreed(
+                [r for r in (own, *routes) if isinstance(r, Route)]
+            )
+            if isinstance(answer, Route):
+                decision = routed(
+                    self._runtimes.entries,
+                    decision.bindings,
+                    answer.runtime,
+                    answer.machine or decision.machine,
+                )
         return self._serving(one, decision)
 
     def placements(
@@ -407,12 +426,17 @@ class Router:
                         route.runtime,
                         route.machine or line.machine,
                     )
-            if one.judgment.command not in PROGRAM_WRAPPERS:
+            command = one.judgment.command
+            if command not in PROGRAM_WRAPPERS or one.ctx is None:
                 return self.placement_for(one, line)
             return self.placement_for(
                 one,
                 line,
-                [held for held in judged if _runs_under(held, one)],
+                _wrapped_programs(
+                    [Word(w, w) for w in (command, *one.ctx.argv)],
+                    one.occurrence,
+                    by_place,
+                ),
             )
 
         return placed
