@@ -42,8 +42,6 @@ pub(super) const MAX_META: u64 = 1 << 20;
 const MAX_ZEROS: u64 = 1 << 30;
 #[cfg(test)]
 const MAX_ZEROS: u64 = 1 << 20;
-/// What a sparse member's holes are written from.
-static ZEROS: [u8; WINDOW] = [0; WINDOW];
 
 /// A compressor's failure as its stream reports it.
 #[derive(Deserialize)]
@@ -412,9 +410,10 @@ impl Holes {
         if matches!(sink, Sink::Skip) {
             self.at = self.at.max(end);
         }
+        let zeros = vec![0; end.saturating_sub(self.at).min(WINDOW as u64) as usize];
         while self.at < end {
             let n = (end - self.at).min(WINDOW as u64);
-            sink.take(host, &ZEROS[..n as usize]).await;
+            sink.take(host, &zeros[..n as usize]).await;
             self.at += n;
             self.room -= n;
         }
