@@ -390,6 +390,10 @@ def _usage_of(fewest: int, most: int) -> str:
     return f"wrong number of arguments, should be from {fewest} to {most}"
 
 
+async def _every(_value: str | None) -> bool:
+    return True
+
+
 def _value_test(
     pattern: str | None, fixed: bool, utf8: bool
 ) -> Callable[[str | None], Awaitable[bool]]:
@@ -404,11 +408,8 @@ def _value_test(
         utf8 (bool): match characters under a UTF-8 locale.
     """
 
-    async def every(_value: str | None) -> bool:
-        return True
-
     if pattern is None:
-        return every
+        return _every
 
     async def equal(value: str | None) -> bool:
         return value == pattern
