@@ -7954,8 +7954,8 @@ components:
 
             | Path | Description |
             | --- | --- |
-            | `/` | `ram`, write |
-            | `/dev` | `ram`, write |
+            | `/` | write |
+            | `/dev` | write |
 
             ## Supported Unix Commands for VFS
 
