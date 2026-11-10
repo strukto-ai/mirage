@@ -344,9 +344,9 @@ async def test_a_repository_it_cannot_see_keeps_the_overlay():
             assert err == "cat: Not Found\n"
             assert _kept(ws)
             err = await _fails(ws, f"cp {PATH} /r/x")
-            # cp renders a backend error without its own prefix, as it does
-            # for any backend (unchanged here).
-            assert err == "Not Found\n"
+            # A copy across mounts words the backend error as cp, as cat
+            # words its own.
+            assert err == "cp: Not Found\n"
             assert _kept(ws)
         finally:
             await ws.close()
@@ -431,7 +431,7 @@ async def test_the_dispatcher_never_reads_cannot_see_as_gone():
         try:
             await _cleared_with_overlay(ws, hub)
             err = await _fails(ws, f"cp {PATH} /r/x")
-            assert err == "Bad credentials\n"
+            assert err == "cp: Bad credentials\n"
             assert _kept(ws)
         finally:
             await ws.close()

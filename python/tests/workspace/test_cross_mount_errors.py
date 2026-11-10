@@ -171,3 +171,17 @@ async def test_cross_mount_relay_mv_unmatched_glob_stays_literal():
     assert err == (
         "mv: cannot stat '/a/nomatch*.zzz': No such file or directory\n"
     )
+
+
+async def test_cross_mount_relay_out_of_memory_speaks_as_the_command():
+    # A relay run outgrowing max_memory is the command's failure, worded
+    # as one mount's run words it, not the line's.
+    ram1, ram2 = RAMVFS(), RAMVFS()
+    ram1._store.files["/x.json"] = b'{"k":"' + b"v" * 800_000 + b'"}\n'
+    ram2._store.files["/y.json"] = b'{"k":"' + b"w" * 800_000 + b'"}\n'
+    ws = Workspace(
+        {"/a/": (ram1, MountMode.WRITE), "/b/": (ram2, MountMode.WRITE)},
+        max_memory="1MB",
+    )
+    code, _, err = await run_text(ws, "jq -s . /a/x.json /b/y.json")
+    assert (code, err) == (1, "jq: memory exhausted\n")

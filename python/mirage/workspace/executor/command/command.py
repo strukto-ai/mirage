@@ -75,6 +75,7 @@ from mirage.workspace.executor.command.cli import (
 )
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.functions import run_shell_function
+from mirage.workspace.executor.command.handler import framed, mount_voice
 from mirage.workspace.executor.command.routing import (
     CWD_DEFAULT_RAW,
     default_cwd_operand,
@@ -557,27 +558,39 @@ async def _run_cross_mount(
         find=find_expr,
         words=parts,
     )
-    stdout, io = await handle_cross_mount(
-        cmd_name,
-        cross_scopes,
-        cross_texts,
-        cross_flags,
-        dispatch,
-        run_operand,
-        stdin=stdin,
-        storage_key=make_storage_key(registry),
-        vfs=files,
-        session_view=view,
-        cwd=session.cwd,
-        argv=spelled_words(parts[1:]),
-        aggregate=aggregate_for(
-            cmd_name, _operand_mounts(registry, cmd_name, cross_scopes)
-        ),
-        check_unlink=make_check_unlink(registry),
-        diff=registry.diff,
-        ids=registry.ids,
-        follow=follow,
-    )
+    # What fails outside every mount's own run (a relay generic outgrowing
+    # the workspace's memory) is this command's, in the voice one mount's
+    # run gives it, before the output or while it streams.
+    voice = mount_voice(cmd_name, path_scopes)
+    try:
+        stdout, io = await handle_cross_mount(
+            cmd_name,
+            cross_scopes,
+            cross_texts,
+            cross_flags,
+            dispatch,
+            run_operand,
+            stdin=stdin,
+            storage_key=make_storage_key(registry),
+            vfs=files,
+            session_view=view,
+            cwd=session.cwd,
+            argv=spelled_words(parts[1:]),
+            aggregate=aggregate_for(
+                cmd_name, _operand_mounts(registry, cmd_name, cross_scopes)
+            ),
+            check_unlink=make_check_unlink(registry),
+            diff=registry.diff,
+            ids=registry.ids,
+            follow=follow,
+        )
+    except voice.passes:
+        raise
+    except Exception as exc:
+        printed, stderr, code = voice.fail(exc)
+        stdout, io = printed, IOResult(exit_code=code, stderr=stderr)
+    if stdout is not None and not isinstance(stdout, bytes):
+        stdout = framed(stdout, io, voice)
     if find_expr is not None:
         stdout = await _finish_find(
             stdout,
