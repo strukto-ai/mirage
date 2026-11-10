@@ -611,7 +611,7 @@
     "_admit": "Python records the caller's account on the ASGI scope in one helper its three admit paths share; the Fastify hook sets req.account inline."
    },
    "typescript_only": {
-    "authenticator": "The bearer and JWT check as a function of the Authorization header, so the Fastify hook and the edge host's fetch handler share it. Python's AuthMiddleware is its one ASGI host."
+    "authenticator": "The bearer and JWT check as a function of the Authorization header, so the Fastify hook and the Cloudflare host's fetch handler share it. Python's AuthMiddleware is its one ASGI host."
    }
   },
   "server/routers/sessions": {
@@ -1337,7 +1337,7 @@
    "typescript_only": {
     "RAM_OPTIONS": "The TypeScript registry refuses unknown config keys against a per-backend key list, as DISK_OPTIONS does; Python's build_vfs reads the constructor's keywords.",
     "buildVfsFrom": "TypeScript splits its backends across core, node and browser, so each runtime's buildVfs is this one build over its own table; Python keeps every backend in one REGISTRY and needs no table parameter.",
-    "DIRECT_REGISTRY": "The token-holding backends (vfs/direct) node and edge add to core's table and the browser does not, since it reaches the same services through a proxy; Python has one host and one REGISTRY.",
+    "DIRECT_REGISTRY": "The token-holding backends (vfs/direct) node and cloudflare add to core's table and the browser does not, since it reaches the same services through a proxy; Python has one host and one REGISTRY.",
     "CONFIG_SCHEMAS": "A TypeScript registry entry is a factory that imports its config schema inside, so the schemas sit beside it to be read without building a VFS; a Python entry names its config class, which resolve_entry reads.",
     "ConfigSchemaLoader": "A TypeScript registry entry is a factory that imports its config schema inside, so the schemas sit beside it to be read without building a VFS; a Python entry names its config class, which resolve_entry reads."
    }

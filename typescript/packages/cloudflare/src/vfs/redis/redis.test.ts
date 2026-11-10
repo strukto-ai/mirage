@@ -28,7 +28,7 @@ const url = REDIS_URL ?? ''
 const DIRECTORY = new PathSpec({ virtual: '/r/scratch', directory: '/r', vfsPath: 'scratch' })
 const dec = new TextDecoder()
 
-// Node's sockets as the web streams an edge host's TCP API hands back.
+// Node's sockets as the web streams the Workers TCP API hands back.
 const nodeConnect: Connect = (hostname, port, tls) =>
   new Promise((resolve, reject) => {
     const socket = tls ? tlsConnect({ host: hostname, port }) : tcp({ host: hostname, port })
@@ -49,7 +49,7 @@ const nodeConnect: Connect = (hostname, port, tls) =>
     socket.once('error', reject)
   })
 
-describe('edge redis over the host TCP API', () => {
+describe('cloudflare redis over the host TCP API', () => {
   it('is in the registry under the name and options node and python use', async () => {
     const vfs = await buildVfs('redis', { url: 'redis://cache.example:6380/1', key_prefix: 'ws:' })
     expect(vfs).toBeInstanceOf(RedisVFS)
@@ -58,11 +58,11 @@ describe('edge redis over the host TCP API', () => {
   })
 })
 
-describe.skipIf(REDIS_URL === undefined)('edge redis against a live server', () => {
+describe.skipIf(REDIS_URL === undefined)('cloudflare redis against a live server', () => {
   let prefix: string
 
   beforeEach(() => {
-    prefix = `mirage:edge-test:${crypto.randomUUID()}:`
+    prefix = `mirage:cloudflare-test:${crypto.randomUUID()}:`
   })
   afterEach(async () => {
     const vfs = new RedisVFS({ url, keyPrefix: prefix, connect: nodeConnect })

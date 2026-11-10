@@ -150,7 +150,7 @@ export const REGISTRY: Readonly<Record<string, VFSFactory>> = {
 /**
  * The backends a host that may hold their credential builds: each takes
  * its token in the config and reaches its service with `fetch` (`direct/`).
- * Node and edge runtimes build these on top of {@link REGISTRY}; the
+ * Node and Cloudflare build these on top of {@link REGISTRY}; the
  * browser builds its own, which leave the token to a proxy, so this table
  * is kept apart rather than in core's own `buildVfs`.
  */

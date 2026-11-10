@@ -35,7 +35,7 @@ const cloudflareConnect: Connect = async (hostname, port, tls) => {
 }
 
 /**
- * The edge redis mount: the shared VFS over RESP on the host's TCP API.
+ * The Cloudflare redis mount: the shared VFS over RESP on the host's TCP API.
  *
  * It speaks to any redis, Upstash included, at the url the node and python
  * mounts take, and the keyspace is theirs, so one configuration and one
