@@ -70,7 +70,10 @@ class _HostTools(_HostPython):
 
 
 def _fixture() -> tuple[SessionState, Workspace]:
-    ws = Workspace(mounts={"/ram": (RAMVFS(), MountMode.WRITE)})
+    ws = Workspace(
+        mounts={"/ram": (RAMVFS(), MountMode.WRITE)},
+        runtimes=["monty", "workspace"],
+    )
     return SessionState(session_id="t"), ws
 
 

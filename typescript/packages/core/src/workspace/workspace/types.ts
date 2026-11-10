@@ -162,7 +162,7 @@ export interface WorkspaceOptions {
   /**
    * The workspace's ordered runtime world: instances and name
    * shorthands including 'workspace'; the first capturer binds each
-   * command. Unset = the default world (pyodide, quickjs, workspace).
+   * command. Unset = the default world, `workspace` alone.
    */
   runtimes?: RuntimeEntry[]
   /**

@@ -82,7 +82,10 @@ function hiding(): Workspace {
 
 async function seeded(mode: MountMode = MountMode.WRITE): Promise<Workspace> {
   const repo = new RAMVFS()
-  const ws = new Workspace({ '/repo': [repo, mode] as const }, { mode: MountMode.WRITE })
+  const ws = new Workspace(
+    { '/repo': [repo, mode] as const },
+    { mode: MountMode.WRITE, runtimes: ['monty', 'workspace'] },
+  )
   open.push(ws)
   const io = await ws.shell(
     'mkdir -p /repo/secrets /repo/public/docs && ' +

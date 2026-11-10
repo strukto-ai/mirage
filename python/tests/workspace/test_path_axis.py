@@ -29,7 +29,11 @@ CARVE_PROFILE = {
 
 
 def _seeded(mode: MountMode = MountMode.WRITE) -> Workspace:
-    ws = Workspace({"/repo": (RAMVFS(), mode)}, mode=MountMode.WRITE)
+    ws = Workspace(
+        {"/repo": (RAMVFS(), mode)},
+        mode=MountMode.WRITE,
+        runtimes=["monty", "workspace"],
+    )
 
     async def seed():
         io = await ws.shell(

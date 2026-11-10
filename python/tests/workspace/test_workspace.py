@@ -69,6 +69,7 @@ def _ws():
             "/disk/": (disk, MountMode.EXEC),
             "/ram/": (ram, MountMode.EXEC),
         },
+        runtimes=["monty", "workspace"],
     )
     ws.get_session(ws.default_session_id).cwd = "/s3"
     return ws

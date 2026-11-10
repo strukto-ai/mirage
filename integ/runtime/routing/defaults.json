@@ -1,21 +1,31 @@
 {
   "cases": [
     {
-      "id": "default_python_is_monty",
+      "id": "default_world_runs_no_interpreter",
       "world": {},
       "steps": [
         {
-          "command": "python3 -m nosuchmodule",
+          "command": "python3 -c \"print(6 * 7)\"",
           "expect": {
-            "exit": 1,
-            "stderr": "python3: -m is not supported by the 'monty' runtime\n"
+            "exit": 127,
+            "stdout": "",
+            "stderr": "python3: command not found\n"
           }
         },
         {
-          "command": "python3 -c \"print(6 * 7)\"",
+          "command": "node -e \"console.log(1)\"",
           "expect": {
-            "exit": 0,
-            "stdout": "42\n"
+            "exit": 127,
+            "stdout": "",
+            "stderr": "node: command not found\n"
+          }
+        },
+        {
+          "command": "command -v python3",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": ""
           }
         }
       ]

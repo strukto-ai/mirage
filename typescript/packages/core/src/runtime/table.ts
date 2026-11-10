@@ -52,13 +52,11 @@ const NAMED: Record<
 )
 
 /**
- * The default world when no runtimes list is given: one python engine,
- * one js engine, and the builtin command engine, the same three as
- * Python's (integ/runtime/routing/defaults.json pins the python engine).
- * Names, not classes: `name` is an instance field, so `MontyRuntime.name` is the JS
- * function name, not the registry key.
+ * The default world when no runtimes list is given: the builtin command
+ * engine alone, as Python's, so an interpreter runs only where the config
+ * names one (integ/runtime/routing/defaults.json pins it).
  */
-export const DEFAULT_ENTRIES: readonly string[] = ['monty', 'quickjs', 'workspace']
+export const DEFAULT_ENTRIES: readonly string[] = ['workspace']
 
 // The runtimes @struktoai/mirage-node registers when it is imported.
 const NODE_RUNTIMES: readonly string[] = ['local', 'sandlock']
@@ -78,7 +76,7 @@ const MACHINE_PROVIDERS: readonly string[] = [
 
 const NODE_HINT =
   'lives in @struktoai/mirage-node; import that package to register it. Browser ' +
-  "worlds support 'monty' (sandboxed, default), 'pyodide' (WASM CPython), and " +
+  "worlds support 'monty' (sandboxed), 'pyodide' (WASM CPython), and " +
   "'quickjs' (sandboxed JavaScript)"
 
 /** Why a name a config may carry is not registered here, and where it lives. */
@@ -86,7 +84,7 @@ const RUNTIME_HINTS: Record<string, string> = {
   ...Object.fromEntries(NODE_RUNTIMES.map((name) => [name, `runtime '${name}' ${NODE_HINT}`])),
   wasi:
     "runtime 'wasi' is Python-only (a CPython WASI build); TypeScript " +
-    "supports 'monty' (sandboxed, default), 'pyodide' (WASM CPython), " +
+    "supports 'monty' (sandboxed), 'pyodide' (WASM CPython), " +
     "and 'quickjs' (sandboxed JavaScript)",
   sandlock:
     "runtime 'sandlock' lives in @struktoai/mirage-node; import that package " +

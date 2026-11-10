@@ -142,6 +142,8 @@ LOOPBACK_SWAP = {"localhost": "127.0.0.1", "127.0.0.1": "localhost"}
 EMAIL_IMAP_PORT = int(os.environ.get("EMAIL_IMAP_PORT", "3143"))
 EMAIL_SMTP_PORT = int(os.environ.get("EMAIL_SMTP_PORT", "3025"))
 EMAIL_USERNAME = "integ@example.com"
+# The target corpus runs python3 cases (audit, storage, path, env) on Monty.
+TARGET_RUNTIMES = ("monty", "workspace")
 # The repository the `gh` install defaults to, standing in for the current
 # git remote real gh reads. Seeded by the fake alongside the mounted one.
 GH_CLI_REPO = "integ/repo-cli"
@@ -3597,7 +3599,8 @@ async def open_target(
     clock = ManualClock() if target.get("clock") == "manual" else None
     # The corpus pins what the real tools print, and they run under no
     # workspace cap, so max_memory is lifted; the cap has its own cases in
-    # runtime/policy/limits.
+    # runtime/policy/limits. Its python3 cases run on Monty, named here
+    # since no runtime is a default.
     if read is not None:
         ws = Workspace(
             mounts,
@@ -3611,6 +3614,7 @@ async def open_target(
             clock=clock,
             system_time=target.get("system_time"),
             max_memory=None,
+            runtimes=list(TARGET_RUNTIMES),
         )
     else:
         ws = Workspace(
@@ -3624,6 +3628,7 @@ async def open_target(
             clock=clock,
             system_time=target.get("system_time"),
             max_memory=None,
+            runtimes=list(TARGET_RUNTIMES),
         )
     if store is not None:
         cleanups.append(_drop_jobs(store, ws))
@@ -3773,12 +3778,17 @@ async def open_consistency(
             read=read,
             write=write,
             max_memory=None,
+            runtimes=list(TARGET_RUNTIMES),
         )
     except Exception:
         await teardown_target([], [*read_cleanups, *shadow_cleanups], service)
         raise
     shadow_ws = Workspace(
-        shadow_mounts, mode=MountMode.WRITE, write=write, max_memory=None
+        shadow_mounts,
+        mode=MountMode.WRITE,
+        write=write,
+        max_memory=None,
+        runtimes=list(TARGET_RUNTIMES),
     )
     # Same rule as open_target: a target's declared environment reaches
     # every workspace a case can run against, or a consistency scenario

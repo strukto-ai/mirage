@@ -182,23 +182,19 @@ def _failed(label: str, message: str, exit_code: int) -> CommandOutput:
     )
 
 
-def not_bound(label: str, unavailable: str | None) -> CommandOutput:
+def not_bound(label: str) -> CommandOutput:
     """The answer of an interpreter command no runtime runs.
 
     GNU wording (bash prints ``bash: python3: command not found``; the
     shell prefix is dropped workspace-wide), exit 127 whatever the
-    operands say, unless the default world recorded why the entry failed
-    to build. A bound entry without the interpreter entry point (not a
-    ``LanguageRuntime``) is refused the same way: there is nothing to
+    operands say. A bound entry without the interpreter entry point (not
+    a ``LanguageRuntime``) is refused the same way: there is nothing to
     run code on. Mirrors TS ``notBound``.
 
     Args:
         label (str): the command name used in the message.
-        unavailable (str | None): the dispatcher-recorded reason this
-            command has no runtime (a default entry's build error),
-            None when nothing captures it at all.
     """
-    return _failed(label, unavailable or "command not found", NOT_FOUND_STATUS)
+    return _failed(label, "command not found", NOT_FOUND_STATUS)
 
 
 async def runtime_version(

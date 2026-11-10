@@ -30,7 +30,8 @@ def ws() -> Workspace:
         mounts={
             "/": (RAMVFS(), MountMode.WRITE),
             "/work/": (RAMVFS(), MountMode.WRITE),
-        }
+        },
+        runtimes=["monty", "workspace"],
     )
 
 

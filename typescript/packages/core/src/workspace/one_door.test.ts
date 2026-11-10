@@ -87,7 +87,7 @@ function markedWorkspace(
       return marked(bind.call(this, arg))
     })
   }
-  const ws = new Workspace(mounts, { mode })
+  const ws = new Workspace(mounts, { mode, runtimes: ['monty', 'quickjs', 'workspace'] })
   marked((ws as unknown as { dispatcher: Dispatcher }).dispatcher)
   return ws
 }

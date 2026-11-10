@@ -75,7 +75,7 @@ def _workspace(
         "/ram": (RAMVFS(), MountMode.WRITE),
     }
     table.update(mounts)
-    return Workspace(table, mode=mode)
+    return Workspace(table, mode=mode, runtimes=["monty", "workspace"])
 
 
 @pytest_asyncio.fixture

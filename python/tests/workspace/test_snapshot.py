@@ -768,7 +768,7 @@ async def test_script_cli_survives_a_tar_snapshot(tmp_path):
     assert entry[CLIKey.SCRIPT][ScriptKey.LANGUAGE] == "python"
     assert entry[CLIKey.SCRIPT][ScriptKey.MODULE] is False
 
-    restored = await Workspace.load(str(path))
+    restored = await Workspace.load(str(path), runtimes=["monty", "workspace"])
     io = await restored.shell("pager b.txt")
     assert io.exit_code == 0
     assert io.stdout == b'b.txt {"width": 80}\n'
@@ -781,7 +781,11 @@ async def test_script_cli_config_captures_verbatim_without_a_schema():
     # A script spec declares no config_model, so nothing declares which
     # keys are secret: the mapping is captured as-is rather than
     # crashing on model_dump or being guessed at.
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        runtimes=["monty", "workspace"],
+    )
     spec = CLI(
         spec=CommandSpec(name="pager"), script=ScriptSource("print('hi')")
     )
@@ -917,3 +921,19 @@ async def test_a_copy_of_an_mcp_cli_still_authenticates():
             await clone.close()
             await ws.close()
     assert (result.exit_code, result.stdout) == (0, b"apple\nbanana\n")
+
+
+@pytest.mark.asyncio
+async def test_copy_keeps_the_runtimes_named_by_string():
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=["monty", "workspace"],
+    )
+    clone = await ws.copy()
+    try:
+        io = await clone.shell("python3 -c 'print(6 * 7)'")
+        assert (io.exit_code, io.stdout) == (0, b"42\n")
+    finally:
+        await ws.close()
+        await clone.close()

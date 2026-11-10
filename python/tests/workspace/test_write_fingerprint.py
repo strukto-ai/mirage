@@ -61,6 +61,7 @@ def _workspace(
             {"/s3": (S3VFS(config), mode)},
             mode=mode,
             read=read,
+            runtimes=["monty", "workspace"],
         )
         yield ws, session._client
 

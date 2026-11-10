@@ -312,6 +312,21 @@ describe('Workspace.snapshot / Workspace.load', () => {
   })
 })
 
+// Twin of test_copy_keeps_the_runtimes_named_by_string.
+it('a copy keeps the runtimes named by string', async () => {
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.EXEC, runtimes: ['monty', 'workspace'] },
+  )
+  const copied = await ws.copy()
+  try {
+    const io = await copied.shell("python3 -c 'print(6 * 7)'")
+    expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, '42\n'])
+  } finally {
+    await Promise.all([ws.close(), copied.close()])
+  }
+})
+
 // Twin of test_a_rebuilt_local_mount_keeps_its_walk_limit.
 describe('a rebuilt RAM mount', () => {
   it.each([2, -1])('keeps its walk limit (%d)', async (limit) => {

@@ -75,7 +75,9 @@ def make_tree() -> CLI:
 @pytest.fixture
 def ws():
     workspace = Workspace(
-        {"/data": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE
+        {"/data": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        runtimes=["monty", "workspace"],
     )
     yield workspace
 
@@ -564,6 +566,7 @@ async def test_script_cli_pinned_to_local_runs_on_the_host(ws):
 @live_quickjs
 async def test_script_cli_js_runs_on_quickjs(ws):
     # scriptArgs[0] is the installed name, like a qjs script's path.
+    ws.add_runtime("quickjs")
     ws.register_cli(
         "pager",
         pager_spec(
@@ -613,6 +616,7 @@ async def test_yaml_script_entry_executes_end_to_end(tmp_path):
             "clis": {
                 "pager": {"script": str(script), "config": {"width": 80}}
             },
+            "runtimes": ["monty", "workspace"],
         }
     )
     ws = Workspace(**cfg.to_workspace_kwargs())

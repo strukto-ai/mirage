@@ -228,6 +228,7 @@ function recordPaths(node: Record<string, unknown>): unknown[] {
 function executableWorkspace(
   deny?: readonly CommandRule[],
   policies?: readonly Policy[],
+  runtimes?: string[],
 ): Workspace {
   const ram = new RAMVFS()
   return new Workspace(
@@ -236,6 +237,7 @@ function executableWorkspace(
       mode: MountMode.WRITE,
       ...(deny ? { profiles: { default: { commands: { allow: null, ask: [], deny } } } } : {}),
       ...(policies ? { policies } : {}),
+      ...(runtimes ? { runtimes } : {}),
     },
   )
 }
@@ -545,9 +547,9 @@ describe('workspace policies', () => {
   })
 
   it('ws.policies.add wins over runtime placement', async () => {
-    // python3 is runtime-bound in the default world; the preCommand
-    // method fires ahead of runtime resolution, so the refusal wins.
-    const ws = executableWorkspace()
+    // python3 is bound to monty; the preCommand method fires ahead of
+    // runtime resolution, so the refusal wins.
+    const ws = executableWorkspace(undefined, undefined, ['monty', 'workspace'])
     try {
       ws.policies.add(new NoInterpreters())
       const refused = await ws.shell("python3 -c 'print(1)'")

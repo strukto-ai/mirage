@@ -104,9 +104,13 @@ async def test_workspace_guards_refuse_before_backend_io():
 
 @pytest.mark.asyncio
 async def test_policies_add_wins_over_runtime_placement():
-    # python3 is runtime-bound in the default world; the pre_command
-    # method fires ahead of runtime resolution, so the refusal wins.
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    # python3 is bound to monty; the pre_command method fires ahead of
+    # runtime resolution, so the refusal wins.
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.WRITE,
+        runtimes=["monty", "workspace"],
+    )
     try:
         ws.policies.add(NoInterpreters())
         result = await ws.shell("python3 -c 'print(1)'")

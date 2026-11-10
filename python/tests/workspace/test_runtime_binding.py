@@ -51,10 +51,18 @@ async def ws():
 
 
 @pytest.mark.asyncio
-async def test_default_world_binds_python3(ws):
-    io = await ws.shell("python3 -c 'print(40 + 2)'")
-    assert io.exit_code == 0
-    assert await materialize(io.stdout) == b"42\n"
+@pytest.mark.parametrize(
+    ("command", "flag"),
+    [("python3", "-c"), ("python", "-c"), ("node", "-e"), ("js", "-e")],
+)
+async def test_default_world_runs_no_interpreter(ws, command, flag):
+    io = await ws.shell(f"{command} {flag} 'print(1)'")
+    assert io.exit_code == 127
+    assert await materialize(io.stdout) == b""
+    assert (
+        await materialize(io.stderr)
+        == f"{command}: command not found\n".encode()
+    )
 
 
 @pytest.mark.asyncio

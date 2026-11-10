@@ -19,13 +19,17 @@ from mirage.vfs.ram import RAMVFS
 
 
 async def main() -> None:
-    ws = Workspace({"/ram": RAMVFS()}, mode=MountMode.EXEC)
+    ws = Workspace(
+        {"/ram": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=["monty", "workspace"],
+    )
 
     print("=== python3 -c (basic) ===")
     r = await ws.shell('python3 -c "print(42)"')
     print(f"stdout: {(await r.stdout_str()).strip()}  (expected: 42)")
 
-    # The default monty runtime exposes command-line args as the `argv`
+    # The monty runtime exposes command-line args as the `argv`
     # global; `sys.argv` exists under the `local` runtime.
     print("\n=== python3 -c with argv (flag-conditional) ===")
     r = await ws.shell('python3 -c "print(argv[1:])" alpha beta')

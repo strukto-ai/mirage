@@ -418,7 +418,10 @@ async def test_python3_timeout_reclaims_monty_interpreter():
     ram = RAMVFS()
     ram._store.files["/spin.py"] = b"n = 0\nwhile True:\n    n = n + 1\n"
     ws = Workspace(
-        {"/data": ram}, mode=MountMode.EXEC, command_limits=_line(0.2)
+        {"/data": ram},
+        mode=MountMode.EXEC,
+        command_limits=_line(0.2),
+        runtimes=["monty", "workspace"],
     )
     start = time.monotonic()
     r = await ws.shell("python3 /data/spin.py")

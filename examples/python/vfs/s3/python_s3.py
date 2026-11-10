@@ -39,6 +39,7 @@ ws = Workspace(
         "/work/": (mem, MountMode.EXEC),
     },
     mode=MountMode.EXEC,
+    runtimes=["monty", "workspace"],
 )
 
 SCRIPT = r"""

@@ -4,7 +4,7 @@ icon: js
 description: Run JavaScript scripts and pipe transforms in both Mirage SDKs.
 ---
 
-QuickJS is the default runtime for `node` and `js` in both SDKs. It supports
+QuickJS runs `node` and `js` in both SDKs. It supports
 ES2023 for small scripts and pipe transforms, with access to workspace files
 under the same permissions as shell commands. Node.js's most used APIs are
 laid over the engine: `fs`, `path`, `process`, `Buffer`, `require`, the
@@ -41,8 +41,7 @@ point the runtime's `home`, or `MIRAGE_QUICKJS_HOME`, at its directory.
 
 ## Usage
 
-QuickJS is in the default runtimes, so `node` works once its engine is found.
-To list it yourself:
+Name QuickJS in `runtimes` to run `node` on it once its engine is found:
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">

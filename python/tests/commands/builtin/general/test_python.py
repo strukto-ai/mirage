@@ -25,7 +25,9 @@ from mirage.runtime.python import LocalRuntime
 
 @pytest_asyncio.fixture
 async def ws():
-    workspace = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC)
+    workspace = Workspace(
+        {"/": RAMVFS()}, mode=MountMode.EXEC, runtimes=["monty", "workspace"]
+    )
     yield workspace
     await workspace.close()
 
@@ -55,7 +57,10 @@ GUARDED = {
 )
 async def test_a_rule_on_the_script_reads_it_however_it_is_typed(line, shown):
     ws = Workspace(
-        {"/": RAMVFS()}, mode=MountMode.EXEC, profiles={"guarded": GUARDED}
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={"guarded": GUARDED},
+        runtimes=["monty", "workspace"],
     )
     try:
         await ws.shell("printf 'print(1)\\n' > /secret.py")
@@ -74,7 +79,10 @@ async def test_a_rule_on_the_script_reads_it_however_it_is_typed(line, shown):
 @pytest.mark.asyncio
 async def test_a_rule_on_python3_reaches_its_own_open():
     ws = Workspace(
-        {"/": RAMVFS()}, mode=MountMode.EXEC, profiles={"guarded": GUARDED}
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={"guarded": GUARDED},
+        runtimes=["monty", "workspace"],
     )
     try:
         await ws.shell("printf 'print(1)\\n' > /secret.py")
@@ -95,7 +103,10 @@ async def test_a_rule_on_python3_reaches_its_own_open():
 )
 async def test_the_words_after_the_script_stay_its_argv(line):
     ws = Workspace(
-        {"/": RAMVFS()}, mode=MountMode.EXEC, profiles={"guarded": GUARDED}
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={"guarded": GUARDED},
+        runtimes=["monty", "workspace"],
     )
     try:
         await ws.shell("printf 'print(argv[1:])\\n' > /s.py")
@@ -110,7 +121,9 @@ async def test_the_words_after_the_script_stay_its_argv(line):
 @pytest_asyncio.fixture
 async def two_mounts():
     workspace = Workspace(
-        {"/w": RAMVFS(), "/t": RAMVFS()}, mode=MountMode.EXEC
+        {"/w": RAMVFS(), "/t": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=["monty", "workspace"],
     )
     await workspace.shell("mkdir -p /w")
     await workspace.shell("printf 'print(argv[1:])\\n' > /w/s.py")

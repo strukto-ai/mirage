@@ -5,7 +5,7 @@ description: Run Mirage workspaces and the Mirage server API on Cloudflare Worke
 keywords: ["Mirage Cloudflare", "@struktoai/mirage-cloudflare", "Cloudflare Workers", "Durable Objects", "serverless terminal"]
 ---
 
-`@struktoai/mirage-cloudflare` runs Mirage on Cloudflare Workers. A workspace runs in the Worker's own isolate: the shell, the commands built on Rust and `python3` on [Monty](/typescript/runtime/python), all in one thread.
+`@struktoai/mirage-cloudflare` runs Mirage on Cloudflare Workers. A workspace runs in the Worker's own isolate: the shell, the commands built on Rust and, when a workspace names it, `python3` on [Monty](/typescript/runtime/python), all in one thread.
 
 The Worker needs `nodejs_compat` for Node's `buffer`, `crypto`, `path`, `process` and `util` modules. Wrangler loads Mirage's Rust module and Monty as compiled `WebAssembly.Module` imports.
 

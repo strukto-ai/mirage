@@ -24,7 +24,10 @@ import { Workspace } from '../../../workspace/workspace.ts'
 function makeWs(): Workspace {
   const root = new RAMVFS()
   const work = new RAMVFS()
-  return new Workspace({ '/': root, '/work/': work }, { mode: MountMode.WRITE })
+  return new Workspace(
+    { '/': root, '/work/': work },
+    { mode: MountMode.WRITE, runtimes: ['monty', 'workspace'] },
+  )
 }
 
 describe('direct path execution', () => {
