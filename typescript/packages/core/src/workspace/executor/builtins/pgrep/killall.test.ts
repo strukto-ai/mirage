@@ -22,8 +22,8 @@ describe('killall', () => {
     const [table, jobs] = await withJobs('sleep 30')
     expect(text(await handleKillall(table, ['killall', 'slee']))[2]).toBe(1)
     expect(text(await handleKillall(table, ['killall', '-v', 'sleep']))).toEqual([
-      `Killed sleep(${String(jobs[0]?.pid)}) with signal 15\n`,
       '',
+      `Killed sleep(${String(jobs[0]?.pid)}) with signal 15\n`,
       0,
     ])
   })

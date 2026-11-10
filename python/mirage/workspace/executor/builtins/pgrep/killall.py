@@ -199,7 +199,6 @@ async def handle_killall(
     sid = session_of(session)
     jobs = job_table.list_jobs(sid)
     quiet = flags.get("q") is True
-    out: list[str] = []
     errors: list[str] = []
     missed = False
     gone: list[ProcessHandle] = []
@@ -241,7 +240,7 @@ async def handle_killall(
                 if handle is not None:
                     gone.append(handle)
                 if flags.get("v") is True:
-                    out.append(
+                    errors.append(
                         f"Killed {process_name(info)}({info.shown_pid}) "
                         f"with signal {signal}\n"
                     )
@@ -256,7 +255,7 @@ async def handle_killall(
     code = 1 if missed else 0
     err = encode_text("".join(errors)) or None
     return (
-        encode_text("".join(out)),
+        b"",
         IOResult(exit_code=code, stderr=err),
         ExecutionNode(command=cmd_str, exit_code=code, stderr=err or b""),
     )
