@@ -12,14 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage.commands.builtin.dev import COMMANDS as DEV_COMMANDS
-from mirage.commands.config import Command, command, registered_commands
+from mirage.commands.config import command, registered_commands
 from mirage.commands.spec import SPECS
 from mirage.io.types import IOResult
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.dev import DevVFS
 from mirage.vfs.ram import RAMVFS
-from mirage.workspace.mount.backends import commands_for
+from mirage.workspace import Workspace
+from mirage.workspace.mount.backends import backend_commands
 
 
 async def _custom_cat(accessor, paths, texts, opts):
@@ -27,7 +30,7 @@ async def _custom_cat(accessor, paths, texts, opts):
 
 
 def _served(vfs: BaseVFS) -> set:
-    return {(rc.name, rc.fn) for rc in commands_for(vfs)}
+    return {(rc.name, rc.fn) for rc in backend_commands(vfs)}
 
 
 def test_a_builtin_serves_its_own_command_module():
@@ -44,27 +47,25 @@ def test_a_subclass_serves_its_bases_commands():
 
 
 def test_a_vfs_without_a_command_module_serves_none_of_mirages_own():
-    assert commands_for(RAMVFS()) == []
-    assert commands_for(BaseVFS(name="custom")) == []
+    assert backend_commands(RAMVFS()) == []
+    assert backend_commands(BaseVFS(name="custom")) == []
 
 
 def test_a_class_named_like_a_builtin_serves_no_builtin_commands():
     class DevVFS(BaseVFS):
         name = "mydev"
 
-    assert commands_for(DevVFS()) == []
+    assert backend_commands(DevVFS()) == []
 
 
-def test_handed_commands_come_after_the_module_they_replace():
+@pytest.mark.asyncio
+async def test_handed_commands_replace_the_module_they_follow():
     cat = command("cat", vfs="ram", spec=SPECS["cat"])(_custom_cat)
 
     class Handed(DevVFS):
         def commands(self):
             return [cat]
 
-    cats = [
-        rc.fn
-        for rc in commands_for(Handed())
-        if isinstance(rc, Command) and rc.name == "cat"
-    ]
-    assert cats[-1] is registered_commands([cat])[0].fn
+    ws = Workspace({"/h/": Handed()})
+    result = await ws.shell("cat /h/null")
+    assert await result.stdout_str() == "custom"

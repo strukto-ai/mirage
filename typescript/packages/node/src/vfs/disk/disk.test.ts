@@ -16,7 +16,7 @@ import { chmodSync, existsSync, realpathSync, statSync, symlinkSync } from 'node
 import { chmod, mkdir, readFile, symlink, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
+import { backendCommands } from '@struktoai/mirage-core/workspace/mount/backends'
 import { CapacityState, FileType, MountMode, PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
 import { SharedStorageError } from '@struktoai/mirage-core/workspace/mount/errors'
@@ -102,7 +102,7 @@ describe('DiskVFS — identity', () => {
   })
 
   it('serves no commands of its own', () => {
-    expect(commandsFor(res)).toEqual([])
+    expect(backendCommands(res)).toEqual([])
   })
 
   it('capacity reports a real quota (df numbers, not fabricated)', async () => {

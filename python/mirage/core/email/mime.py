@@ -220,9 +220,6 @@ class Stream:
             return True
         return False
 
-    def bytes_between(self, start: int, end: int) -> bytes:
-        return self.data[start:end]
-
     def skip_crlf(self) -> None:
         while (byte := self.peek()) is not None:
             if byte in (RETURN, 0x20, 0x09):

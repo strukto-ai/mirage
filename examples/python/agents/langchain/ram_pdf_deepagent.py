@@ -25,7 +25,7 @@ load_dotenv(".env.development")
 
 ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 backend = LangchainWorkspace(ws)
-backend.upload_files([("/example.pdf", Path("data/example.pdf").read_bytes())])
+backend.upload_files([("/example.pdf", Path("examples/data/example.pdf").read_bytes())])
 
 agent = create_deep_agent(
     model=ChatAnthropic(model="claude-sonnet-4-6"),

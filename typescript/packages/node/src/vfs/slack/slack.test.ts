@@ -16,7 +16,7 @@ import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { parseConfigWithSchema, redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 import { SlackConfig } from '@struktoai/mirage-core/vfs/slack/config'
-import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
+import { backendCommands } from '@struktoai/mirage-core/workspace/mount/backends'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildVfs } from '../registry.ts'
 import { SlackVFS } from '@struktoai/mirage-core/vfs/direct/slack'
@@ -51,7 +51,7 @@ describe('SlackVFS (node)', () => {
 
   it('serves no commands of its own', () => {
     const r = new SlackVFS({ token: 'xoxb-test' })
-    expect(commandsFor(r)).toEqual([])
+    expect(backendCommands(r)).toEqual([])
   })
 
   it('getState() redacts both token and searchToken when both present', async () => {

@@ -14,7 +14,7 @@
 
 import { VFSName } from '@struktoai/mirage-core/types'
 import { parseConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
-import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
+import { backendCommands } from '@struktoai/mirage-core/workspace/mount/backends'
 import { describe, expect, it } from 'vitest'
 import { AliyunVFS } from '@struktoai/mirage-core/vfs/aliyun/aliyun'
 import { AliyunConfig } from '@struktoai/mirage-core/vfs/aliyun/config'
@@ -167,7 +167,7 @@ describe('region-derived S3 aliases', () => {
       const vfs = c.build(c.make(c.region) as never)
       expect(vfs.name).toBe(c.kind)
       expect(vfs).toBeInstanceOf(S3VFS)
-      expect(commandsFor(vfs)).toEqual([])
+      expect(backendCommands(vfs)).toEqual([])
     })
 
     it(`${c.name}: getState redacts creds`, async () => {
@@ -223,7 +223,7 @@ describe('wasabi endpoint defaults', () => {
   it('VFS remaps name and redacts state', async () => {
     const vfs = new WasabiVFS({ ...CREDS })
     expect(vfs.name).toBe(VFSName.WASABI)
-    expect(commandsFor(vfs)).toEqual([])
+    expect(backendCommands(vfs)).toEqual([])
     const blob = JSON.stringify(await vfs.getState())
     expect(blob.includes('SECRET-LEAK')).toBe(false)
     expect(blob.includes('<REDACTED>')).toBe(true)
@@ -295,7 +295,7 @@ describe('endpoint-required S3 aliases (minio/ceph/seaweedfs)', () => {
       expect(vfs.name).toBe(c.kind)
       expect(vfs).toBeInstanceOf(S3VFS)
       expect(vfs.storageLocation()).toBe(new S3VFS(c.toS3(c.make() as never)).storageLocation())
-      expect(commandsFor(vfs)).toEqual([])
+      expect(backendCommands(vfs)).toEqual([])
       const blob = JSON.stringify(await vfs.getState())
       expect(blob.includes('AKIA-LEAK')).toBe(false)
       expect(blob.includes('SECRET-LEAK')).toBe(false)

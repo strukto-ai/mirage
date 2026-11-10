@@ -27,7 +27,7 @@ loadEnv({ path: resolve(__HERE, '../../../../.env.development') })
 const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
 const backend = new LangchainWorkspace(ws)
 await backend.uploadFiles([
-  ['/example.pdf', await readFile(resolve(__HERE, '../../../../data/example.pdf'))],
+  ['/example.pdf', await readFile(resolve(__HERE, '../../../data/example.pdf'))],
 ])
 
 const agent = createDeepAgent({

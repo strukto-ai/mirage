@@ -129,16 +129,6 @@ SEARCH_BOOLEAN = [
     "no-milestone",
     "no-project",
 ]
-SEARCH_ALIASES = {
-    "owner": "user",
-    "match": "in",
-    "visibility": "is",
-    "team-mentions": "team",
-    "checks": "status",
-    "merged-at": "merged",
-    "number-topics": "topics",
-    "include-forks": "fork",
-}
 SEARCH_SORTS = {
     "issues": [
         "comments",

@@ -17,6 +17,7 @@ import pkgutil
 from collections.abc import Mapping, Sequence
 
 import mirage.commands.builtin as builtin
+import mirage.commands.config as command_config
 from mirage.commands.builtin.generic_bind.factory import GENERIC_COMMANDS
 from mirage.commands.config import Command, Context
 from mirage.commands.spec.types import FlagValue
@@ -26,7 +27,7 @@ from mirage.types import PathSpec
 from mirage.vfs.base import BaseVFS
 from mirage.workspace import Workspace
 from mirage.workspace.files import Files
-from mirage.workspace.mount.backends import commands_for
+from mirage.workspace.mount.backends import backend_commands
 
 
 def mount_commands(vfs: BaseVFS) -> list[Command]:
@@ -37,7 +38,10 @@ def mount_commands(vfs: BaseVFS) -> list[Command]:
         vfs (BaseVFS): the VFS.
     """
     served = {rc.name: rc for rc in GENERIC_COMMANDS}
-    for rc in commands_for(vfs):
+    for rc in [
+        *backend_commands(vfs),
+        *command_config.registered_commands(vfs.commands()),
+    ]:
         if rc.filetype is None:
             served[rc.name] = rc
     return list(served.values())

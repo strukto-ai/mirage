@@ -48,7 +48,6 @@
     "bytes": "concat for Uint8Array chunks, which commands and streams join in many places; Python joins bytes with b''.join.",
     "hash": "What Python's standard library already provides: SHA digests over WebCrypto or node:crypto; Python has hashlib.",
     "hex": "What Python's standard library already provides: Bytes to hex; Python has bytes.hex().",
-    "mime": "What Python's standard library already provides: A byte-exact port of the corners of Python's email package (EmailMessage with policy.SMTP) that the himalaya builder rides; Python calls the email package itself.",
     "normalize": "What Python's standard library already provides: Maps the snake_case keys a YAML block spells onto TypeScript's camelCase config fields; Python's config fields are snake_case already.",
     "optional_peer": "What Python's standard library already provides: Loads an optional npm peer with an install hint; Python declares the same optional dependencies as extras and imports them where used.",
     "shlex": "What Python's standard library already provides: POSIX word splitting; Python has the shlex module.",

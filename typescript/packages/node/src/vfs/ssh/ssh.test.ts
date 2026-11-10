@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it } from 'vitest'
-import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
+import { backendCommands } from '@struktoai/mirage-core/workspace/mount/backends'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { type FakeSftp, makeFakeAccessor } from '../../../tests/core/ssh/_test_utils.ts'
@@ -52,7 +52,7 @@ describe('SSHVFS — identity', () => {
   })
 
   it('serves no commands of its own', () => {
-    expect(commandsFor(makeVfs(state))).toEqual([])
+    expect(backendCommands(makeVfs(state))).toEqual([])
   })
 })
 

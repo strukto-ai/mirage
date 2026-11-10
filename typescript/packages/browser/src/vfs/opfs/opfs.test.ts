@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
+import { backendCommands } from '@struktoai/mirage-core/workspace/mount/backends'
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { FileType, MountMode, VFSName } from '@struktoai/mirage-core/types'
 import { copy as copyCore } from '../../core/opfs/copy.ts'
@@ -44,7 +44,7 @@ describe('OPFSVFS — identity', () => {
     expect(res.rootName).toBe('')
   })
   it('serves only the generic set', () => {
-    expect(commandsFor(res)).toEqual([])
+    expect(backendCommands(res)).toEqual([])
   })
 })
 

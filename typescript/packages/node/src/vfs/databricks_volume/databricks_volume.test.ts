@@ -14,7 +14,7 @@
 
 import { VFSName } from '@struktoai/mirage-core/types'
 import { parseConfigWithSchema, redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
-import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
+import { backendCommands } from '@struktoai/mirage-core/workspace/mount/backends'
 import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import { describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../../workspace.ts'
@@ -78,7 +78,7 @@ describe('DatabricksVolumeVFS', () => {
     )
     expect(vfs.name).toBe(VFSName.DATABRICKS_VOLUME)
     expect(vfs.cachesReads).toBe(true)
-    expect(commandsFor(vfs)).toEqual([])
+    expect(backendCommands(vfs)).toEqual([])
     expect(vfs.supports('write')).toBe(true)
     const state = await vfs.getState()
     expect(state.config.token).toBe('<REDACTED>')

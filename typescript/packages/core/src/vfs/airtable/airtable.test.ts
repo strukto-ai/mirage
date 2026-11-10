@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { commandsFor } from '../../workspace/mount/backends.ts'
+import { backendCommands } from '../../workspace/mount/backends.ts'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import { Command } from '../../commands/config.ts'
 import { describe, expect, it } from 'vitest'
@@ -44,9 +44,11 @@ describe('AirtableVFS', () => {
 
   it('exposes a read-only file surface', () => {
     const names = new Set(
-      [...GENERIC_COMMANDS, ...commandsFor(vfs(new FakeAirtable()))].flatMap((c) =>
-        c instanceof Command ? [c.name] : [],
-      ),
+      [
+        ...GENERIC_COMMANDS,
+        ...backendCommands(vfs(new FakeAirtable())),
+        ...vfs(new FakeAirtable()).commands(),
+      ].flatMap((c) => (c instanceof Command ? [c.name] : [])),
     )
     for (const name of ['cat', 'ls', 'find', 'grep', 'head', 'jq', 'wc']) {
       expect(names.has(name)).toBe(true)

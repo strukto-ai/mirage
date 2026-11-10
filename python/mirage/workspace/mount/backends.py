@@ -15,7 +15,6 @@
 import importlib
 from dataclasses import replace
 
-from mirage.commands.cli.types import CLI
 from mirage.commands.config import Command, registered_commands
 from mirage.vfs.base import BaseVFS
 
@@ -55,24 +54,3 @@ def backend_commands(vfs: BaseVFS) -> list[Command]:
         ]
         break
     return found
-
-
-def commands_for(vfs: BaseVFS) -> list[Command | CLI]:
-    """The shell commands a mount of ``vfs`` serves beside the generic set.
-
-    A builtin's backend module's first (``backend_commands``), then the
-    commands the VFS was handed, so they win; a command tree it was handed
-    stays a ``CLI``, which the mount registers under its root's name. A
-    name none of these has falls back to the generic command every mount
-    shares.
-
-    Args:
-        vfs (BaseVFS): the VFS being mounted.
-    """
-    handed: list[Command | CLI] = []
-    for item in vfs.commands():
-        if isinstance(item, CLI):
-            handed.append(item)
-        else:
-            handed.extend(registered_commands([item]))
-    return [*backend_commands(vfs), *handed]

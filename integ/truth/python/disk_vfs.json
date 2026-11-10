@@ -12,14 +12,10 @@
     "=== VFS MODE ===",
     "",
     "--- os.listdir() ---",
-    "  example.feather",
-    "  example.h5",
     "  example.json",
     "  example.jsonl",
-    "  example.orc",
-    "  example.parquet",
     "  example.pdf",
-    "  example.xlsx",
+    "  qdrant.json",
     "",
     "--- open() + read ---",
     {
@@ -39,7 +35,7 @@
     "  matches getsize: True",
     "",
     "--- os.walk() ---",
-    "  /data: 0 dirs, 8 files",
+    "  /data: 0 dirs, 4 files",
     "",
     "--- read-only mount ---",
     "  os.remove: EROFS",
@@ -48,6 +44,6 @@
     "--- the backend's own host paths ---",
     "  host copy readable: True",
     "",
-    "Stats: 17 ops, 15533 bytes transferred"
+    "Stats: 13 ops, 15533 bytes transferred"
   ]
 }

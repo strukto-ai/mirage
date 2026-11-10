@@ -15,7 +15,6 @@
 import asyncio
 import json
 import time
-from pathlib import Path
 
 from mirage.core.jq import JqError
 from mirage.core.jq.eval import read_frames
@@ -189,6 +188,39 @@ SAMPLE_JSONL = (
     b'{"name": "carol", "age": 35}\n'
 )
 
-DATA_DIR = Path(__file__).resolve().parents[5] / "data"
-EXAMPLE_JSON = DATA_DIR / "example.json"
-EXAMPLE_JSONL = DATA_DIR / "example.jsonl"
+EXAMPLE_JSON = json.dumps(
+    {
+        "company": "Strukto",
+        "valuation": 45000000,
+        "departments": [
+            {
+                "name": "Engineering",
+                "budget": 2500000,
+                "quarterly_spend": [580000, 620000, 640000, 660000],
+                "teams": [{"name": "Platform", "lead": "Alice Chen"}],
+            },
+            {
+                "name": "Product",
+                "budget": 1200000,
+                "quarterly_spend": [280000, 300000, 310000, 310000],
+                "teams": [{"name": "Design", "lead": "Priya Shah"}],
+            },
+            {
+                "name": "Sales",
+                "budget": 900000,
+                "quarterly_spend": [210000, 220000, 230000, 240000],
+                "teams": [{"name": "Enterprise", "lead": "Sam Ortiz"}],
+            },
+        ],
+        "metadata": {"generated": "2026-01-05", "version": 1},
+    }
+).encode()
+
+EXAMPLE_JSONL = (
+    b'{"type": "queue-operation", "operation": "enqueue"}\n'
+    b'{"type": "queue-operation", "operation": "dequeue"}\n'
+    b'{"type": "user", "text": "list the mounts"}\n'
+    b'{"type": "assistant", "text": "/data and /tmp"}\n'
+    b'{"type": "user", "text": "copy the report"}\n'
+    b'{"type": "assistant", "text": "done"}\n'
+)

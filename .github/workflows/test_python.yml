@@ -11,6 +11,7 @@ permissions:
       - python/**
       # mirage-rs is built into every Python and TypeScript test run.
       - rust/**
+      - examples/data/**
       - examples/python/**
       - integ/**
       # mypy reads these now. Without the entry a PR touching only a
@@ -69,6 +70,7 @@ jobs:
             hit:
               - 'python/**'
               - 'rust/**'
+              - 'examples/data/**'
               - 'examples/python/**'
               - 'integ/**'
               - 'scripts/**'

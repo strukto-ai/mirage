@@ -16,7 +16,7 @@ import { MemoryOAuthClientProvider } from '@struktoai/mirage-core/core/notion/cl
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { OAuthClientMetadata } from '@modelcontextprotocol/client'
 import { describe, expect, it } from 'vitest'
-import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
+import { backendCommands } from '@struktoai/mirage-core/workspace/mount/backends'
 import { NotionVFS } from './notion.ts'
 
 const clientMetadata: OAuthClientMetadata = {
@@ -45,7 +45,7 @@ describe('NotionVFS (browser)', () => {
 
   it('serves only the generic set', () => {
     const r = new NotionVFS({ authProvider: makeAuthProvider() })
-    expect(commandsFor(r)).toEqual([])
+    expect(backendCommands(r)).toEqual([])
   })
 
   it('getState() returns redacted config for default config', async () => {

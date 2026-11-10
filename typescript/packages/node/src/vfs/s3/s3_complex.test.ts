@@ -12,9 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { openSync, closeSync, readSync, readFileSync } from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
@@ -23,50 +20,22 @@ import { S3VFS } from './s3.ts'
 import type { S3Config } from '@struktoai/mirage-core/vfs/direct/s3'
 import { installS3Mock, type S3Mock } from '../../../tests/vfs/s3/mock.ts'
 
-const DATA_DIR = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../../../../../../data',
-)
 const BUCKET = 'test-bucket'
 const DEC = new TextDecoder()
+const ENC = new TextEncoder()
 
 function decode(bytes: Uint8Array): string {
   return DEC.decode(bytes)
 }
 
-function loadExampleJsonl(limit = 20): Uint8Array {
-  const fd = openSync(path.join(DATA_DIR, 'example.jsonl'), 'r')
-  try {
-    const buffer = Buffer.alloc(1 << 20)
-    let filled = 0
-    while (filled < buffer.byteLength) {
-      const n = readSync(fd, buffer, filled, buffer.byteLength - filled, null)
-      if (n === 0) break
-      filled += n
-    }
-    const all = buffer.subarray(0, filled).toString('utf8')
-    const lines: string[] = []
-    let start = 0
-    for (let i = 0; i < all.length && lines.length < limit; i++) {
-      if (all[i] === '\n') {
-        lines.push(all.slice(start, i + 1))
-        start = i + 1
-      }
-    }
-    return new TextEncoder().encode(lines.join(''))
-  } finally {
-    closeSync(fd)
-  }
-}
-
 function s3Objects(): Record<string, Uint8Array> {
-  const exampleJson = new Uint8Array(readFileSync(path.join(DATA_DIR, 'example.json')))
-  const exampleJsonl = loadExampleJsonl()
   return {
-    'data/example.json': exampleJson,
-    'data/example.jsonl': exampleJsonl,
-    'reports/summary.txt': new TextEncoder().encode('alpha report\nbeta report\n'),
-    'archive/2026/q1/deep.txt': new TextEncoder().encode('deep archive\n'),
+    'data/example.json': ENC.encode('{"company": "Strukto"}\n'),
+    'data/example.jsonl': ENC.encode(
+      '{"type": "user", "text": "open the mirage docs"}\n{"type": "assistant", "text": "done"}\n',
+    ),
+    'reports/summary.txt': ENC.encode('alpha report\nbeta report\n'),
+    'archive/2026/q1/deep.txt': ENC.encode('deep archive\n'),
   }
 }
 

@@ -121,16 +121,6 @@ export const SEARCH_BOOLEAN: string[] = [
   'no-milestone',
   'no-project',
 ]
-export const SEARCH_ALIASES: Record<string, string> = {
-  owner: 'user',
-  match: 'in',
-  visibility: 'is',
-  'team-mentions': 'team',
-  checks: 'status',
-  'merged-at': 'merged',
-  'number-topics': 'topics',
-  'include-forks': 'fork',
-}
 export const SEARCH_SORTS: Record<string, string[]> = {
   issues: [
     'comments',
