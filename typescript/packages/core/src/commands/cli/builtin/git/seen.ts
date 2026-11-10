@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import git, { Errors, type TreeObject } from 'isomorphic-git'
+import git from 'isomorphic-git'
 
 import { getAdmission } from '../../../../context/session_context.ts'
 import { decodeText } from '../../../../shell/bytes.ts'
@@ -22,8 +22,8 @@ import { EmptyTreeNameError } from './errors.ts'
 import { readIndex } from './index_file.ts'
 import { visiblePath } from './pathspec.ts'
 import { loadRefs } from './refs.ts'
-import { objectType, rawObject, repoArgs, type Repo } from './repo.ts'
-import type { GitObject, RepoLocation } from './types.ts'
+import { objectType, rawObject, repoArgs, storedItems, type Repo } from './repo.ts'
+import type { GitObject, RepoLocation, TreeItem } from './types.ts'
 
 /** A leaf as a tree or the index lists it: its mode and its object id. */
 interface Entry {
@@ -216,8 +216,8 @@ export async function shownItems(
   repo: Repo,
   tree: string,
   base: string | null = null,
-): Promise<TreeObject> {
-  const items = decoded((await git.readTree({ ...repoArgs(repo), oid: tree })).tree)
+): Promise<TreeItem[]> {
+  const items = decoded(await storedItems(repo, tree))
   if (!guarded(repo)) return items
   const where = base ?? (await placeOf(repo, tree))
   return items.filter((entry) =>
@@ -375,7 +375,7 @@ async function* sightings(repo: Repo): AsyncGenerator<[string, string], void> {
   ): AsyncGenerator<[string, string], void> {
     if (!fresh(treeId, base)) return
     yield [treeId, base]
-    for (const entry of (await git.readTree({ ...repoArgs(repo), oid: treeId })).tree) {
+    for (const entry of await storedItems(repo, treeId)) {
       const relative = base ? `${base}/${entry.path}` : entry.path
       if (!visiblePath(location, relative)) continue
       if (entry.type === 'tree') yield* walk(entry.oid, relative)
@@ -389,22 +389,13 @@ async function* sightings(repo: Repo): AsyncGenerator<[string, string], void> {
   for (let sha = pending.pop(); sha !== undefined; sha = pending.pop()) {
     if (reached.has(sha)) continue
     reached.add(sha)
-    let read
-    try {
-      // Deprecated upstream for being general, but one read saying which kind
-      // an id names, its fields parsed, is what the walk needs.
-      // eslint-disable-next-line @typescript-eslint/no-deprecated
-      read = await git.readObject({ ...repoArgs(repo), oid: sha })
-    } catch (err) {
-      if (err instanceof Errors.NotFoundError) continue
-      throw err
-    }
-    if (read.format !== 'parsed') continue
-    if (read.type === 'tag') {
-      pending.push(read.object.object)
-    } else if (read.type === 'commit') {
-      for (const item of read.object.parent) pending.push(item)
-      yield* walk(read.object.tree, '')
+    const type = await objectType(repo, sha)
+    if (type === 'tag') {
+      pending.push((await git.readTag({ ...repoArgs(repo), oid: sha })).tag.object)
+    } else if (type === 'commit') {
+      const { commit } = await git.readCommit({ ...repoArgs(repo), oid: sha })
+      for (const item of commit.parent) pending.push(item)
+      yield* walk(commit.tree, '')
     }
   }
 }

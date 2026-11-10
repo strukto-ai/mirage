@@ -1,7 +1,7 @@
 import type { FlagView } from '../../../spec/flag_view.ts'
 import { pairRenames, kindOf } from './changes.ts'
 import { combinedLines } from './combined.ts'
-import { TEMPLATE_KINDS, TERMINATED_KINDS } from './constants.ts'
+import { TEMPLATE_KINDS, TERMINATED_KINDS, TREE_MODE } from './constants.ts'
 import { GitError, DiffFilterError } from './errors.ts'
 import { pathspecSelects } from './pathspec.ts'
 import { commitHeader, type CommitDisplay, type CommitFacts, type Decorations } from './format.ts'
@@ -15,7 +15,7 @@ import { commitFacts, type Repo } from './repo.ts'
 import { readable, shownEntries } from './seen.ts'
 import { BINARY_SNIFF, diffstat, statTable, type FileStat } from './summary.ts'
 import { matches, type Pickaxe } from './pickaxe.ts'
-import { TREE_MODE, treeEntries, treeItems, type TreeEntry } from './tree.ts'
+import { treeEntries, treeItems, type TreeEntry } from './tree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const RENAME_SCORE = 50

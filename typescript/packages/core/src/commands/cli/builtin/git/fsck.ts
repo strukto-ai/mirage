@@ -15,7 +15,7 @@ import { readFile, readNames, readOptional, readRange, statOf } from './io.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 
 import { loadRefs } from './refs.ts'
-import { repoArgs, type Repo } from './repo.ts'
+import { repoArgs, storedItems, type Repo } from './repo.ts'
 import { decoded } from './seen.ts'
 import { opened } from './session.ts'
 import type { Files } from '../../../../workspace/files.ts'
@@ -171,8 +171,8 @@ export async function fsck(
         const { commit } = await git.readCommit({ ...args, oid })
         links.push(commit.tree, ...commit.parent)
       } else if (result.type === 'tree') {
-        const { tree } = await git.readTree({ ...args, oid })
-        for (const entry of decoded(tree)) if (entry.mode !== GITLINK_MODE) links.push(entry.oid)
+        for (const entry of decoded(await storedItems(repo, oid)))
+          if (entry.mode !== GITLINK_MODE) links.push(entry.oid)
       } else if (result.type === 'tag') {
         const { tag } = await git.readTag({ ...args, oid })
         links.push(tag.object)

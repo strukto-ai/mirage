@@ -1,6 +1,11 @@
 {
- "baseline": 1632,
+ "baseline": 1631,
  "modules": {
+  "commands/cli/builtin/git/refs": {
+   "python_only": {
+    "RefTable": "dulwich resolves every ref through one container whose follow raises on a circling chain, so Python overrides it there; TypeScript wraps its resolve in refOid."
+   }
+  },
   "server/app": {
    "python_only": {
     "_drain_on_signals": "Starlette apps learn of SIGTERM only through the server's own handler, so the lifespan wraps it to drain first; Fastify drains in a preClose hook, and the TypeScript daemon calls app.close() on the signal.",
@@ -868,6 +873,10 @@
   "commands/cli/builtin/git/repo": {
    "python_only": {
     "overrides_text": "dulwich reads config from one file's bytes, so command-line values join that text; isomorphic-git asks a hook for each key, and fs.ts answers there."
+   },
+   "typescript_only": {
+    "refOid": "isomorphic-git has no ref table to hand a circling chain to, so each resolve goes through this; Python overrides follow on the one RefTable.",
+    "storedItems": "isomorphic-git's tree reader refuses a whole tree over one reserved name, so TypeScript parses the stored bytes; dulwich's Tree parses every name."
    }
   },
   "commands/cli/builtin/git/cat_file": {

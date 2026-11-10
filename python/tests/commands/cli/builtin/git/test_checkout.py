@@ -861,6 +861,25 @@ async def test_a_branch_naming_paths_git_rejects_is_refused_whole(
 
 
 @pytest.mark.asyncio
+async def test_a_rejected_path_is_read_by_the_verbs_that_only_look(
+    git_parent, repo_path: Path
+):
+    branch_with_paths(repo_path, "odd", INVALID)
+    for line, want in (
+        ("show odd:a.txt", b"one changed\n"),
+        ("show odd:sub/.git/config", b"[core]\n"),
+        ("cat-file -t odd:sub", b"tree\n"),
+    ):
+        result = await git_parent.shell(f"cd /w/work && git {line}")
+        assert (result.exit_code, result.stdout) == (0, want), line
+    listing = await git_parent.shell(
+        "cd /w/work && git cat-file -p 'odd^{tree}'"
+    )
+    assert listing.exit_code == 0
+    assert b"\t..\n" in listing.stdout
+
+
+@pytest.mark.asyncio
 async def test_a_rejected_path_both_branches_hold_unchanged_is_left_alone(
     git_rw, repo_path: Path
 ):

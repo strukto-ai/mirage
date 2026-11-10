@@ -1,6 +1,20 @@
 {
   "cases": [
     {
+      "id": "git_circular_symref_reads_as_missing",
+      "seq": 567841,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'ref: refs/heads/cycle-b\\n' > /repo/.git/refs/heads/cycle-a; printf 'ref: refs/heads/cycle-a\\n' > /repo/.git/refs/heads/cycle-b; git -C /repo rev-parse cycle-a 2>/dev/null; echo $?; git -C /repo log -1 cycle-a 2>/dev/null; echo $?; git -C /repo for-each-ref --format='%(refname:short)' 'refs/heads/*'; rm /repo/.git/refs/heads/cycle-a /repo/.git/refs/heads/cycle-b",
+      "expect": {
+        "exit": 0,
+        "stdout": "cycle-a\n128\n128\nmain\ntopic\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "git_show_blob_parent",
       "seq": 567900,
       "targets": [

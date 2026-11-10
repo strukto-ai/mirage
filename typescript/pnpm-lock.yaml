@@ -644,8 +644,8 @@ importers:
         specifier: ^6.10.4
         version: 6.10.4
       isomorphic-git:
-        specifier: ^1.38.1
-        version: 1.38.1
+        specifier: ^1.38.6
+        version: 1.38.6
       redis:
         specifier: ^5.0.0
         version: 5.12.1(@opentelemetry/api@1.10.0)
@@ -5355,8 +5355,8 @@ packages:
   isexe@2.0.0:
     resolution: {integrity: sha512-RHxMLp9lnKHGHRng9QFhRCMbYAcVpn69smSGcq3f36xjgVVWThj4qqLbTLlq7Ssj8B+fIQ1EuCEGI2lKsyQeIw==}
 
-  isomorphic-git@1.38.1:
-    resolution: {integrity: sha512-Vd2u5qDLa04fA/h5nUMU5UuffPXqg+3D3bJIV3n7Sno2qS3XMinUXRvNHrGPVy2kkC1ad5SPCC3WcpXjn0L9oQ==}
+  isomorphic-git@1.38.6:
+    resolution: {integrity: sha512-lCmZ1m2R0LqbZ4QATtLCxhwNBQPNJc74R81dfyF90yLqP8xs2DZLedcnkVuRj6th/L2HYoIvWP5lBpS1ooAagw==}
     engines: {node: '>=14.17'}
     hasBin: true
 
@@ -12100,7 +12100,7 @@ snapshots:
 
   isexe@2.0.0: {}
 
-  isomorphic-git@1.38.1:
+  isomorphic-git@1.38.6:
     dependencies:
       async-lock: 1.4.1
       clean-git-ref: 2.0.1

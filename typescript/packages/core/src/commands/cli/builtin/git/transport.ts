@@ -26,7 +26,7 @@ import { discover } from './discover.ts'
 import { GitError, MissingRepositoryError } from './errors.ts'
 import { requireVfs } from './util.ts'
 import { loadRefs, readHead, SYMREF_PREFIX } from './refs.ts'
-import { objectType, openRepo, repoArgs, type Repo } from './repo.ts'
+import { objectType, openRepo, refOid, repoArgs, storedItems, type Repo } from './repo.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { concat } from '../../../../utils/bytes.ts'
 
@@ -193,8 +193,7 @@ async function walkTree(
     if (held.has(oid)) continue
     held.add(oid)
     sending?.push(oid)
-    const { tree: entries } = await git.readTree({ ...repoArgs(repo), oid })
-    for (const entry of entries) {
+    for (const entry of await storedItems(repo, oid)) {
       if (entry.mode === GITLINK_MODE || held.has(entry.oid)) continue
       if (entry.type === 'tree') stack.push(entry.oid)
       else {
@@ -229,7 +228,7 @@ export class LocalTransport implements Transport {
     for (const name of names) {
       let oid: string
       try {
-        oid = await git.resolveRef({ ...repoArgs(this.repo), ref: name })
+        oid = await refOid(this.repo, name)
       } catch (err) {
         // A symref to an unborn branch names nothing yet.
         if (err instanceof Errors.NotFoundError) continue

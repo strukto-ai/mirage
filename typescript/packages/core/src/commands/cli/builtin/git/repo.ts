@@ -24,8 +24,9 @@ import { entryName } from '../../../../utils/remnants.ts'
 import { toHex } from '../../../../utils/hex.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { gitBool } from './util.ts'
+import { GITLINK_MODE, TREE_MODE } from './constants.ts'
 import { GitError } from './errors.ts'
-import type { RefObject, RepoLocation } from './types.ts'
+import type { RefObject, RepoLocation, TreeItem } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
 
 const PACK_DIR = 'objects/pack'
@@ -38,6 +39,10 @@ const FANOUT_SIZE = 256 * 4
 // fanout, its entries an offset and a name each rather than names alone.
 const IDX_MAGIC = [0xff, 0x74, 0x4f, 0x63]
 const SHA_BYTES = 20
+const SPACE = 0x20
+const NUL = 0x00
+const SHORT_TREE_MODE = '40000'
+const DEC = new TextDecoder()
 const V1_OFFSET_BYTES = 4
 const OBJECTS_DIR = 'objects'
 const LOOSE_NAME_LENGTH = 38
@@ -192,6 +197,54 @@ export async function rawObject(repo: Repo, oid: string): Promise<RefObject> {
   // eslint-disable-next-line @typescript-eslint/no-deprecated
   const read = await git.readObject({ ...repoArgs(repo), oid, format: 'content' })
   return { oid, type: read.type, raw: read.object as Uint8Array }
+}
+
+/**
+ * The entries of one tree object, read from its stored bytes.
+ *
+ * Parsed here rather than through isomorphic-git's readTree, which refuses a
+ * whole tree over one entry named `..` or `.git`, a tree git stores and reads
+ * and refuses only to write out (`validPath`), and decodes each name as UTF-8,
+ * turning a byte that is not into U+FFFD. A name keeps every byte, a byte UTF-8
+ * cannot read carried as its surrogate escape, so the name quotes and prints
+ * the way git's does. A subtree's `40000` is spelled `040000`, as isomorphic-git
+ * spells it.
+ */
+export async function storedItems(repo: Repo, treeOid: string): Promise<TreeItem[]> {
+  const { raw } = await rawObject(repo, treeOid)
+  const items: TreeItem[] = []
+  for (let at = 0; at < raw.length;) {
+    const space = raw.indexOf(SPACE, at)
+    const nul = space < 0 ? -1 : raw.indexOf(NUL, space)
+    if (nul < 0 || nul + 1 + SHA_BYTES > raw.length)
+      throw new GitError(`unable to read tree (${treeOid})`)
+    const stored = DEC.decode(raw.subarray(at, space))
+    const mode = stored === SHORT_TREE_MODE ? TREE_MODE : stored
+    items.push({
+      path: decodeText(raw.subarray(space + 1, nul)),
+      oid: toHex(raw.subarray(nul + 1, nul + 1 + SHA_BYTES)),
+      mode,
+      type: mode === TREE_MODE ? 'tree' : mode === GITLINK_MODE ? 'commit' : 'blob',
+    })
+    at = nul + 1 + SHA_BYTES
+  }
+  return items
+}
+
+/**
+ * The object id a ref resolves to.
+ *
+ * A chain of symbolic refs that circles resolves to nothing, so it answers as a
+ * ref that is not there does, which is how git reads one.
+ */
+export async function refOid(repo: Repo, ref: string): Promise<string> {
+  try {
+    return await git.resolveRef({ ...repoArgs(repo), ref })
+  } catch (err) {
+    if (err instanceof Errors.InternalError && err.data.message.startsWith('Circular reference'))
+      throw new Errors.NotFoundError(ref)
+    throw err
+  }
 }
 
 /** Which of commit/tag/tree/blob an id names, null when the repository lacks it. */

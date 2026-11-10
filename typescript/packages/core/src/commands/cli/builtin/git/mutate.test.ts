@@ -3506,6 +3506,31 @@ const INVALID = {
   'fresh.txt': 'fresh\n',
 }
 
+describe('a chain of symbolic refs that circles', () => {
+  const circle = (repo: string): void => {
+    writeFileSync(join(repo, '.git/refs/heads/a'), 'ref: refs/heads/b\n')
+    writeFileSync(join(repo, '.git/refs/heads/b'), 'ref: refs/heads/a\n')
+  }
+
+  it('reads as a ref that is not there', async () => {
+    const h = await harness(circle)
+    expect(await h.run('rev-parse --verify a')).toEqual([
+      128,
+      '',
+      'fatal: Needed a single revision\n',
+    ])
+    expect((await h.run('log -1 a'))[0]).toBe(128)
+  })
+
+  it('is left out of a clone', async () => {
+    const h = await harness(circle)
+    const result = await h.ws.shell(
+      "cd /repo && git clone -q . dst && git -C dst for-each-ref --format='%(refname)' refs/heads",
+    )
+    expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'refs/heads/main\n'])
+  })
+})
+
 describe('a tree path git rejects', () => {
   it('refuses the whole checkout and names every one', async () => {
     const h = await harness((repo) => {
@@ -3654,6 +3679,19 @@ describe('a tree path git rejects', () => {
     expect(await h.read('/repo/dst/sub/.git/config')).toBeNull()
     const staged = await h.ws.shell('cd /repo/dst && git ls-files')
     expect(DEC.decode(staged.stdout)).toBe('')
+  })
+
+  it('reads one through the verbs that only look', async () => {
+    const h = await harness((repo) => {
+      branchWithPaths(repo, 'odd', INVALID)
+    })
+    expect(await h.run('show odd:fresh.txt')).toEqual([0, 'fresh\n', ''])
+    expect(await h.run('show odd:sub/.git/config')).toEqual([0, '[core]\n', ''])
+    expect(await h.run('cat-file -t odd:sub')).toEqual([0, 'tree\n', ''])
+    const [code, listing] = await h.run("cat-file -p 'odd^{tree}'")
+    expect(code).toBe(0)
+    expect(listing).toContain('\t..\n')
+    expect((await h.run("show 'odd^{tree}'"))[0]).toBe(0)
   })
 
   it('refuses a reset that would stage one', async () => {

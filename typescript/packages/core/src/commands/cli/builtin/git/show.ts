@@ -44,7 +44,7 @@ import {
 import { exists } from './io.ts'
 import { absoluteOperand, pathspecPatterns } from './pathspec.ts'
 import { identDate } from './ref_fields.ts'
-import { commitFacts, configBool, rawObject, repoArgs, type Repo } from './repo.ts'
+import { commitFacts, configBool, rawObject, repoArgs, storedItems, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { resolveCommit, resolveObject, treeId } from './revparse.ts'
 import { deltas, shownSides, type Delta, type Side } from './rows.ts'
@@ -158,7 +158,7 @@ async function commits(
     while (target.type === 'tag') target = (await tagBlock(repo, target.oid, flags))[1]
     if (target.type === 'tree') {
       if (!tagged || (await located(repo, target)) !== null)
-        decoded((await git.readTree({ ...repoArgs(repo), oid: target.oid })).tree)
+        decoded(await storedItems(repo, target.oid))
     } else if (target.type !== 'blob') found.push(await commitFacts(repo, target.oid))
   }
   return found
