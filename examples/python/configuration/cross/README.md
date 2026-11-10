@@ -130,34 +130,34 @@ Warm the object once (the first S3 read fetches the whole object and can
 take a few seconds; later reads are cache hits):
 
 ```bash
-mirage shell --workspace_id cross_sg --command "head -n 1 /s3/data/example.jsonl"
+mirage shell -w cross_sg --command "head -n 1 /s3/data/example.jsonl"
 ```
 
 `max_lines` + `on_exceed: truncate` — asking for 50 lines yields 10 plus a
 notice on stderr, exit `0`:
 
 ```bash
-mirage shell --workspace_id cross_sg --command "head -n 50 /s3/data/example.jsonl"
+mirage shell -w cross_sg --command "head -n 50 /s3/data/example.jsonl"
 ```
 
 `max_lines` + `on_exceed: error` — `grep` matches thousands of lines, trips
 the 20-line cap, and fails with exit `1`:
 
 ```bash
-mirage shell --workspace_id cross_sg --command "grep mirage /s3/data/example.jsonl"
+mirage shell -w cross_sg --command "grep mirage /s3/data/example.jsonl"
 ```
 
 `timeout` — a 1 ms bound on one command trips on any real read, exit `124`:
 
 ```bash
-mirage shell --workspace_id cross_sg --command "timeout 0.001 rg mirage /s3/data/example.jsonl"
+mirage shell -w cross_sg --command "timeout 0.001 rg mirage /s3/data/example.jsonl"
 ```
 
 Commands below their cap are untouched, so the earlier shapes still work
 unchanged (1 line, no notice):
 
 ```bash
-mirage shell --workspace_id cross_sg --command "head -n 1 /s3/data/example.jsonl"
+mirage shell -w cross_sg --command "head -n 1 /s3/data/example.jsonl"
 ```
 
 Clean up:

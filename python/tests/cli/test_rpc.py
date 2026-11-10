@@ -22,13 +22,20 @@ def test_rpc_is_registered():
     assert "rpc" in result.stdout
 
 
-@pytest.mark.parametrize("flag", ["-w", "--workspace", "--workspace_id"])
+@pytest.mark.parametrize("flag", ["-w", "--workspace"])
 def test_a_config_and_a_workspace_are_exclusive(tree, flag):
     result = runner.invoke(
         app, ["rpc", str(tree / "workspace.yaml"), flag, "ws_1"]
     )
     assert result.exit_code == 2
     assert "pass a config or --workspace, not both" in result.stderr
+
+
+@pytest.mark.parametrize("flag", ["--workspace_id", "--session_id"])
+def test_the_snake_case_spellings_are_usage_errors(flag):
+    result = runner.invoke(app, ["rpc", flag, "x"])
+    assert result.exit_code == 2
+    assert "No such option" in result.stderr
 
 
 def test_env_names_are_rpc_then_shared():

@@ -52,11 +52,17 @@ function resolveVersion(): string {
   return '0.0.0'
 }
 
+/**
+ * The `mirage` program. A usage error exits 2, as the Python CLI's does,
+ * where commander would exit 1; help and the version still exit 0. Every
+ * subcommand inherits that.
+ */
 export function buildProgram(): Command {
   const program = new Command()
   program
     .name('mirage')
     .description('Mirage daemon CLI: manage workspaces and run shell lines.')
+    .exitOverride((err) => process.exit(err.exitCode === 1 ? 2 : err.exitCode))
     .version(resolveVersion())
     .option(
       '--context <name>',

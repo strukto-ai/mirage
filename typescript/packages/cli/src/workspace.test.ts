@@ -145,7 +145,23 @@ async function fakeServer(): Promise<{ url: string; seen: Seen[]; server: Server
 }
 
 async function mirage(url: string, home: string, ...args: string[]): Promise<number | null> {
-  const env: NodeJS.ProcessEnv = { ...process.env, MIRAGE_HOME: home, MIRAGE_DAEMON_URL: url }
+  return mirageWith({}, url, home, ...args)
+}
+
+async function mirageWith(
+  extra: NodeJS.ProcessEnv,
+  url: string,
+  home: string,
+  ...args: string[]
+): Promise<number | null> {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    MIRAGE_WORKSPACE: '',
+    MIRAGE_CONTEXT: '',
+    ...extra,
+    MIRAGE_HOME: home,
+    MIRAGE_DAEMON_URL: url,
+  }
   const child = spawn(process.execPath, [BIN, 'workspace', ...args], { env })
   return new Promise<number | null>((resolve) => child.on('close', resolve))
 }
@@ -319,23 +335,70 @@ describe('mirage workspace list-lines, list-jobs and list-processes', () => {
     tempDirs.push(dir)
     const { url, seen, server } = await fakeServer()
     try {
-      expect(await mirage(url, dir, 'list-lines', 'w', '--state', 'running')).toBe(0)
-      expect(await mirage(url, dir, 'list-jobs', 'w', '--session', 's1')).toBe(0)
-      expect(await mirage(url, dir, 'list-jobs', 'w', '--line', 'line_1')).toBe(0)
+      expect(await mirage(url, dir, 'list-lines', '-w', 'w', '--state', 'running')).toBe(0)
+      expect(await mirage(url, dir, 'list-jobs', '-w', 'w', '-s', 's1')).toBe(0)
+      expect(await mirage(url, dir, 'list-jobs', '--workspace', 'w', '--line', 'line_1')).toBe(0)
       expect(
-        await mirage(url, dir, 'list-processes', 'w', '--line', 'line_1', '--state', 'exited'),
+        await mirage(
+          url,
+          dir,
+          'list-processes',
+          '-w',
+          'w',
+          '--line',
+          'line_1',
+          '--state',
+          'exited',
+        ),
       ).toBe(0)
       expect(
-        await mirage(url, dir, 'list-processes', 'w', '--job', 'j1', '--machine', 'docker:t'),
+        await mirage(
+          url,
+          dir,
+          'list-processes',
+          '-w',
+          'w',
+          '--session',
+          's1',
+          '--job',
+          'j1',
+          '--machine',
+          'docker:t',
+        ),
       ).toBe(0)
-      expect(await mirage(url, dir, 'list-machines', 'w')).toBe(0)
+      expect(await mirage(url, dir, 'list-machines', '-w', 'w')).toBe(0)
       expect(seen.map((s) => [s.method, s.url])).toEqual([
         ['GET', '/v1/workspaces/w/lines?state=running'],
         ['GET', '/v1/workspaces/w/jobs?session_id=s1'],
         ['GET', '/v1/workspaces/w/jobs?line_id=line_1'],
         ['GET', '/v1/workspaces/w/processes?state=exited&line_id=line_1'],
-        ['GET', '/v1/workspaces/w/processes?job_id=j1&machine=docker%3At'],
+        ['GET', '/v1/workspaces/w/processes?session_id=s1&job_id=j1&machine=docker%3At'],
         ['GET', '/v1/workspaces/w/machines'],
+      ])
+    } finally {
+      server.close()
+    }
+  })
+
+  it('read the current workspace, and take no workspace operand', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-records-'))
+    tempDirs.push(dir)
+    const { url, seen, server } = await fakeServer()
+    try {
+      for (const verb of ['list-lines', 'list-jobs', 'list-processes', 'list-machines']) {
+        expect(await mirage(url, dir, verb)).toBe(2)
+        expect(await mirage(url, dir, verb, 'w')).toBe(2)
+        expect(await mirage(url, dir, verb, '--workspace_id', 'w')).toBe(2)
+      }
+      expect(seen).toEqual([])
+      const current = { MIRAGE_WORKSPACE: 'cur' }
+      for (const verb of ['list-lines', 'list-jobs', 'list-processes', 'list-machines'])
+        expect(await mirageWith(current, url, dir, verb)).toBe(0)
+      expect(seen.map((s) => s.url)).toEqual([
+        '/v1/workspaces/cur/lines',
+        '/v1/workspaces/cur/jobs',
+        '/v1/workspaces/cur/processes',
+        '/v1/workspaces/cur/machines',
       ])
     } finally {
       server.close()

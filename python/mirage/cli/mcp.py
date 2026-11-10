@@ -57,14 +57,12 @@ def mcp_cmd(
     ),
     workspace_id: str | None = typer.Option(
         None,
-        "--workspace_id",
         "--workspace",
         "-w",
         help="Serve this daemon workspace instead of loading a config.",
     ),
     session_id: str | None = typer.Option(
         None,
-        "--session_id",
         "--session",
         "-s",
         help="Session the tools act as; the workspace's default when absent.",

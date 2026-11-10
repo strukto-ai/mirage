@@ -207,3 +207,14 @@ def test_the_old_session_form_is_gone():
         )
     assert result.exit_code == 2
     assert fake.last_path is None
+
+
+def test_the_snake_case_spellings_are_usage_errors():
+    for args in (
+        ["create", "--session_id", "s"],
+        ["delete", "--session_id", "s"],
+        ["list", "--workspace_id", "w"],
+    ):
+        result = CliRunner().invoke(session_cli.app, args)
+        assert result.exit_code == 2
+        assert "No such option" in result.stderr

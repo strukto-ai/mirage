@@ -26,9 +26,7 @@ from mirage.cli.workspace import load_profile_argument
 
 app = typer.Typer(no_args_is_help=True, help="Manage workspace sessions.")
 
-SESSION = typer.Option(
-    ..., "--session_id", "--session", "-s", help="Session id."
-)
+SESSION = typer.Option(..., "--session", "-s", help="Session id.")
 PROFILE = typer.Option(
     None, "--profile", "-p", help="Replace the live session's profile."
 )
@@ -104,7 +102,6 @@ def create_cmd(
     workspace_id: str | None = WORKSPACE,
     session_id: str | None = typer.Option(
         None,
-        "--session_id",
         "--session",
         "-s",
         help="Explicit session id.",

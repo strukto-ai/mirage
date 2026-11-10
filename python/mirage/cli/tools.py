@@ -21,7 +21,7 @@ import typer
 from mirage.cli.client import make_client
 from mirage.cli.output import emit, handle_response
 from mirage.cli.settings import resolve_workspace
-from mirage.cli.vfs import WORKSPACE
+from mirage.cli.vfs import SESSION, WORKSPACE
 
 app = typer.Typer(
     help="The session's agent tools, as MCP serves them.", no_args_is_help=True
@@ -61,9 +61,7 @@ def call_tool(
 def read_cmd(
     path: str = typer.Argument(..., help="File to read."),
     workspace_id: str | None = WORKSPACE,
-    session_id: str | None = typer.Option(
-        None, "--session_id", "--session", "-s", help="Session id."
-    ),
+    session_id: str | None = SESSION,
     offset: int | None = typer.Option(
         None, "--offset", help="Line to start at (0-based)."
     ),
@@ -83,9 +81,7 @@ def read_cmd(
 def write_cmd(
     path: str = typer.Argument(..., help="File to write."),
     workspace_id: str | None = WORKSPACE,
-    session_id: str | None = typer.Option(
-        None, "--session_id", "--session", "-s", help="Session id."
-    ),
+    session_id: str | None = SESSION,
     content: str | None = typer.Option(
         None, "--content", help="Text to write; stdin when absent."
     ),
@@ -104,9 +100,7 @@ def edit_cmd(
         ..., help="The text to put in its place."
     ),
     workspace_id: str | None = WORKSPACE,
-    session_id: str | None = typer.Option(
-        None, "--session_id", "--session", "-s", help="Session id."
-    ),
+    session_id: str | None = SESSION,
     replace_all: bool = typer.Option(
         False, "--replace-all", help="Replace every occurrence."
     ),
@@ -128,9 +122,7 @@ def edit_cmd(
 def ls_cmd(
     path: str = typer.Argument(..., help="Directory to list."),
     workspace_id: str | None = WORKSPACE,
-    session_id: str | None = typer.Option(
-        None, "--session_id", "--session", "-s", help="Session id."
-    ),
+    session_id: str | None = SESSION,
 ) -> None:
     """List a directory."""
     call_tool(workspace_id, session_id, "ls", {"path": path})
@@ -142,9 +134,7 @@ def grep_cmd(
     ),
     path: str = typer.Argument(..., help="File or directory to search under."),
     workspace_id: str | None = WORKSPACE,
-    session_id: str | None = typer.Option(
-        None, "--session_id", "--session", "-s", help="Session id."
-    ),
+    session_id: str | None = SESSION,
     ignore_case: bool = typer.Option(
         False, "-i", "--ignore-case", help="Match case-insensitively."
     ),
@@ -208,9 +198,7 @@ def glob_cmd(
         "/", help="Directory a relative pattern is matched under."
     ),
     workspace_id: str | None = WORKSPACE,
-    session_id: str | None = typer.Option(
-        None, "--session_id", "--session", "-s", help="Session id."
-    ),
+    session_id: str | None = SESSION,
 ) -> None:
     """Find files whose path matches a pattern."""
     call_tool(
@@ -221,9 +209,7 @@ def glob_cmd(
 def shell_cmd(
     command: str = typer.Argument(..., help="The command line to run."),
     workspace_id: str | None = WORKSPACE,
-    session_id: str | None = typer.Option(
-        None, "--session_id", "--session", "-s", help="Session id."
-    ),
+    session_id: str | None = SESSION,
 ) -> None:
     """Run a command line and read its output as the agent does."""
     call_tool(workspace_id, session_id, "shell", {"command": command})
