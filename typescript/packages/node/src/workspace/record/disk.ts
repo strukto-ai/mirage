@@ -254,7 +254,7 @@ export class DiskRecordClient {
   }
 
   private async writeRecord(target: string, fields: Record<string, unknown>): Promise<void> {
-    const tmp = `${target}.${randomUUID().replaceAll('-', '')}.tmp`
+    const tmp = path.join(path.dirname(target), `.${randomUUID().replaceAll('-', '')}.tmp`)
     const fh = await open(tmp, 'wx', 0o600)
     try {
       await fh.writeFile(JSON.stringify(fields))

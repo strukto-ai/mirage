@@ -19,6 +19,7 @@ from functools import partial
 import aiofiles
 import aiofiles.os
 
+from mirage.concurrency.limiter import run_blocking
 from mirage.observe.store import ObserverStoreBase
 
 
@@ -50,6 +51,7 @@ class DiskObserverStore(ObserverStoreBase):
         async with aiofiles.open(
             abs_path, "ab", opener=partial(os.open, mode=0o600)
         ) as f:
+            await run_blocking(os.chmod, abs_path, 0o600)
             await f.write(data)
 
     async def write(self, path: str, data: bytes) -> None:
@@ -66,6 +68,7 @@ class DiskObserverStore(ObserverStoreBase):
         async with aiofiles.open(
             abs_path, "wb", opener=partial(os.open, mode=0o600)
         ) as f:
+            await run_blocking(os.chmod, abs_path, 0o600)
             await f.write(data)
 
     async def read_matching(self, suffix: str) -> dict[str, bytes]:

@@ -104,3 +104,16 @@ def test_history_is_owner_only(tmp_path, umask_022, op):
         os.stat(tmp_path / "history" / "day" / "s.jsonl").st_mode & 0o777
         == 0o600
     )
+
+
+@pytest.mark.parametrize("op", ["append", "write"])
+def test_readable_history_is_made_owner_only(tmp_path, umask_022, op):
+    # A history file an earlier version wrote 0644 is reopened, not
+    # replaced, so the store tightens it before adding a line.
+    path = tmp_path / "history" / "s.jsonl"
+    path.parent.mkdir()
+    path.write_bytes(b"old\n")
+    path.chmod(0o644)
+    store = DiskObserverStore(str(tmp_path / "history"))
+    asyncio.run(getattr(store, op)("/s.jsonl", b"export TOKEN=x\n"))
+    assert os.stat(path).st_mode & 0o777 == 0o600

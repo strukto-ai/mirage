@@ -413,3 +413,13 @@ async def test_rewriting_a_readable_record_makes_it_owner_only(
     path.chmod(0o644)
     await client.put("ws", {"api_key": "k"})
     assert _mode(path) == 0o600
+
+
+@pytest.mark.asyncio
+async def test_a_name_near_the_filename_limit_still_saves(tmp_path: Path):
+    # The temp file sits beside the record under a short name of its own,
+    # so a record whose filename nearly fills the limit can still be saved.
+    client = DiskRecordClient(str(tmp_path), "")
+    name = "界" * 24
+    await client.put(name, {"api_key": "k"})
+    assert (await client.get(name))[0] == {"api_key": "k"}

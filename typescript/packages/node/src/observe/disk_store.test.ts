@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { chmodSync, mkdtempSync, rmSync, statSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Observer } from '@struktoai/mirage-core/observe/observer'
@@ -117,5 +117,19 @@ describe('DiskObserverStore', () => {
     } finally {
       process.umask(umask)
     }
+  })
+
+  // A history file an earlier version wrote 0644 is reopened, not replaced,
+  // so the store tightens it before adding a line.
+  it.each(['append', 'write'] as const)('makes readable history owner-only on %s', async (op) => {
+    const file = join(root, 'history', 's.jsonl')
+    mkdirSync(join(root, 'history'))
+    writeFileSync(file, 'old\n', { mode: 0o644 })
+    chmodSync(file, 0o644)
+    await new DiskObserverStore(join(root, 'history'))[op](
+      '/s.jsonl',
+      ENC.encode('export TOKEN=x\n'),
+    )
+    expect(statSync(file).mode & 0o777).toBe(0o600)
   })
 })

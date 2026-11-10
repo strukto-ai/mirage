@@ -224,7 +224,7 @@ class DiskRecordClient:
         await _release_owned(fd, self.path(name) + ".lock")
 
     async def _write_record(self, path: str, fields: dict[str, Any]) -> None:
-        tmp = f"{path}.{uuid.uuid4().hex}.tmp"
+        tmp = os.path.join(os.path.dirname(path), f".{uuid.uuid4().hex}.tmp")
         async with aiofiles.open(
             tmp, "xb", opener=partial(os.open, mode=0o600)
         ) as f:

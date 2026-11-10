@@ -413,4 +413,13 @@ describe('DiskRecordClient owner-only modes', () => {
     await client.put('ws', { api_key: 'k' })
     expect(mode(client.path('ws'))).toBe(0o600)
   })
+
+  // The temp file sits beside the record under a short name of its own, so a
+  // record whose filename nearly fills the limit can still be saved.
+  it('saves a name near the filename limit', async () => {
+    const client = new DiskRecordClient(root, '')
+    const name = '界'.repeat(24)
+    await client.put(name, { api_key: 'k' })
+    expect((await client.get(name))[0]).toEqual({ api_key: 'k' })
+  })
 })

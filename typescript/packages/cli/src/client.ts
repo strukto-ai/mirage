@@ -14,7 +14,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { existsSync, fchmodSync, mkdirSync, openSync } from 'node:fs'
+import { closeSync, existsSync, fchmodSync, mkdirSync, openSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { connect } from 'node:net'
 import { join } from 'node:path'
@@ -260,18 +260,23 @@ export class DaemonClient {
     const logDir = mirageHome()
     mkdirSync(logDir, { recursive: true })
     const out = openSync(join(logDir, 'daemon.log'), 'a', 0o600)
-    fchmodSync(out, 0o600)
-    const daemonEntry = requireFromHere.resolve('@struktoai/mirage-server/bin/daemon')
-    if (!existsSync(daemonEntry)) {
-      throw new Error(
-        `daemon binary not found at ${daemonEntry}; reinstall @struktoai/mirage-server`,
-      )
+    let child: ChildProcess
+    try {
+      fchmodSync(out, 0o600)
+      const daemonEntry = requireFromHere.resolve('@struktoai/mirage-server/bin/daemon')
+      if (!existsSync(daemonEntry)) {
+        throw new Error(
+          `daemon binary not found at ${daemonEntry}; reinstall @struktoai/mirage-server`,
+        )
+      }
+      child = spawn(process.execPath, [daemonEntry], {
+        env,
+        detached: true,
+        stdio: ['ignore', out, out],
+      })
+    } finally {
+      closeSync(out)
     }
-    const child = spawn(process.execPath, [daemonEntry], {
-      env,
-      detached: true,
-      stdio: ['ignore', out, out],
-    })
     child.on('error', (err) => {
       console.error('failed to spawn daemon:', err)
     })

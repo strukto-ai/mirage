@@ -238,8 +238,8 @@ class DaemonClient:
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / "daemon.log"
         fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        os.chmod(log_file, 0o600)
         with os.fdopen(fd, "ab") as f:
+            os.chmod(log_file, 0o600)
             return subprocess.Popen(
                 cmd,
                 env=env,
