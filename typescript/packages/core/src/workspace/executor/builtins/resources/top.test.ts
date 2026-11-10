@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { JobTable } from '../../../../execution/job/index.ts'
-import type { Process } from '../../../../execution/process/types.ts'
+import type { Process, ProcessUsage } from '../../../../execution/process/types.ts'
 import { LineId, MachineId, type MachineResources, ProcessId } from '../../../../execution/types.ts'
 import { PathSpec } from '../../../../types.ts'
 import {
@@ -127,15 +127,17 @@ describe('top', () => {
     expect((await topOf(words)).slice(1)).toEqual([said, 1])
   })
 
-  it('shows the cpu since the frame before in a later frame', () => {
-    const samples = new Map<number, [number, number]>()
+  it('shows the cpu since the reading before in a later frame', () => {
+    const samples = new Map<number, [ProcessUsage, number, number | null]>()
     const first = since([busy(7, 10)], samples, 100)
     expect(first.map((row) => row.usage?.cpuPercent)).toEqual([1])
-    const later = since([busy(7, 11.5), busy(8, 3)], samples, 102)
+    const read = busy(7, 11.5)
+    const later = since([read, busy(8, 3)], samples, 102)
     expect(later.map((row) => row.usage?.cpuPercent)).toEqual([75, 1])
-    expect([...samples]).toEqual([
-      [7, [11.5, 102]],
-      [8, [3, 102]],
-    ])
+    const stale = since([read], samples, 104)
+    expect(stale.map((row) => row.usage?.cpuPercent)).toEqual([75])
+    expect(samples.get(7)?.[1]).toBe(102)
+    const back = since([busy(7, 13.5)], samples, 106)
+    expect(back.map((row) => row.usage?.cpuPercent)).toEqual([50])
   })
 })

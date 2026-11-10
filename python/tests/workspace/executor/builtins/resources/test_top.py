@@ -144,9 +144,14 @@ def _busy(pid: int, cpu_seconds: float) -> Process:
 
 
 def test_a_later_frame_shows_the_cpu_since_the_one_before():
-    samples: dict[int, tuple[float, float]] = {}
+    samples: dict[int, tuple[ProcessUsage, float, float | None]] = {}
     first = _since([_busy(7, 10.0)], samples, 100.0)
     assert [row.usage.cpu_percent for row in first if row.usage] == [1.0]
-    later = _since([_busy(7, 11.5), _busy(8, 3.0)], samples, 102.0)
+    read = _busy(7, 11.5)
+    later = _since([read, _busy(8, 3.0)], samples, 102.0)
     assert [row.usage.cpu_percent for row in later if row.usage] == [75.0, 1.0]
-    assert samples == {7: (11.5, 102.0), 8: (3.0, 102.0)}
+    stale = _since([read], samples, 104.0)
+    assert [row.usage.cpu_percent for row in stale if row.usage] == [75.0]
+    assert samples[7][1] == 102.0
+    back = _since([_busy(7, 13.5)], samples, 106.0)
+    assert [row.usage.cpu_percent for row in back if row.usage] == [50.0]
