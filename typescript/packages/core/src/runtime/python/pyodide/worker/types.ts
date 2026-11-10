@@ -73,6 +73,8 @@ export interface ExecuteRequest {
   wasm?: WebAssembly.Module
   /** Seconds the guest's wall clock runs ahead of the host's: the workspace's system_time. */
   offset?: number
+  /** What the workspace's max_memory has left: how far a run may grow once its program starts. */
+  room?: number
 }
 /**
  * The run's standard streams on the main thread, which the guest's stdio
@@ -86,6 +88,7 @@ export interface HostStdio {
 }
 export type WorkerResult =
   | { kind: 'notice'; message: string }
+  | { kind: 'started' }
   | { kind: 'result'; value: RunResult }
   | { kind: 'error'; message: string; name: string; seconds?: number }
 export type WorkerMessage = VfsRequest | WorkerResult | { kind: 'ready' }

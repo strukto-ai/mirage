@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ProcessUsage } from '../process/types.ts'
 import type { MachineId } from '../types.ts'
 
 /**
@@ -55,4 +56,5 @@ export interface MachineProcess {
   readonly args: string
   readonly state?: string
   readonly program?: number | null
+  readonly usage?: ProcessUsage | null
 }

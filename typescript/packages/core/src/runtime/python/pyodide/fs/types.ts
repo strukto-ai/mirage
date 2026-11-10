@@ -27,6 +27,8 @@ export interface FlushFailure {
 }
 
 export interface SyncVFS {
+  /** The interpreter and its packages are loaded, and the program starts. */
+  started?(): void
   /** Check a requested alias against command rules without issuing a backend op. */
   checkPath(path: string, follow: boolean): void
   process?(payload: string): string

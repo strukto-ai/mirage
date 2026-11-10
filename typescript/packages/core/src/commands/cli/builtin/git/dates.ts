@@ -14,11 +14,9 @@
 
 import { gnuStrftime, winningPad } from '../../../builtin/utils/strftime.ts'
 import {
-  LOCAL_ZONE,
   TZ_VAR,
   posixTransitions,
   posixZone,
-  resolveTz,
   zoneFromEnv,
   type Zone,
 } from '../../../../utils/timezone.ts'
@@ -110,10 +108,8 @@ const NEGATIVE_DST: Readonly<
 // The longest step the search for where a tzdata zone's reading changes takes,
 // and how far it looks, in seconds. No tzdata 2026c zone holds a reading for
 // less than 166 hours after 1970, so a day's step never passes one. A POSIX TZ
-// string is read off its rules instead, and the host's zone, which nothing
-// bounds, an hour at a time.
+// string is read off its rules instead.
 const STANDARD_SCAN_STEP = 86400
-const HOST_SCAN_STEP = 3600
 const STANDARD_SCAN_LIMIT = 800 * 86400
 // The UTC years either side of an instant a POSIX TZ string's daylight saving
 // windows are laid out over, past STANDARD_SCAN_LIMIT.
@@ -123,9 +119,6 @@ const POSIX_SCAN_YEARS = 3
 // time does: every 30 days, out past the longest summer, the US's 1974 one
 // included.
 const SEASON_READINGS = Array.from({ length: 12 }, (_, i) => (i + 1) * 30 * 86400)
-// The host's zone per name Intl gives it, read through one formatter; null
-// for a name Intl does not know, which leaves the host's offsets to Date.
-const HOST_ZONES = new Map<string, Zone | null>()
 // One Intl formatter per zone name, read for the zone's long name, which
 // says whether ICU counts an instant as daylight saving time; null for a name
 // Intl does not know.
@@ -174,8 +167,7 @@ export function dateClock(env: Readonly<Record<string, string>> | null | undefin
     const found = LEADING_INT.exec(test)
     now = found ? parseInt(found[1] ?? '0', 10) : 0
   }
-  const zoneName =
-    env?.[TZ_VAR]?.replace(/^:/, '') ?? new Intl.DateTimeFormat().resolvedOptions().timeZone
+  const zoneName = env?.[TZ_VAR]?.replace(/^:/, '') ?? 'UTC'
   return {
     kind: DateKind.NORMAL,
     local: false,
@@ -239,9 +231,9 @@ function fixedWall(timestamp: number, offsetMinutes: number): Wall {
   }
 }
 
-/** A moment on the session's clock, its `TZ` or the host's zone, and its offset. */
+/** A moment on the session's clock, its `TZ` or UTC, and its offset. */
 function localWall(timestamp: number, mode: DateMode): [Wall, number] {
-  const parts = (mode.zone ?? LOCAL_ZONE).parts(new Date(timestamp * 1000))
+  const parts = mode.zone.parts(new Date(timestamp * 1000))
   return [
     {
       year: parts.year,
@@ -356,7 +348,7 @@ function human(timestamp: number, offsetMinutes: number, mode: DateMode): string
  * @param mode carries the template, `local` and the zone
  */
 function formatted(timestamp: number, offsetMinutes: number, mode: DateMode): string {
-  const zone = mode.local ? (mode.zone ?? LOCAL_ZONE) : GMT
+  const zone = mode.local ? mode.zone : GMT
   const moment = new Date((mode.local ? timestamp : timestamp + offsetMinutes * 60) * 1000)
   const reading = zone.parts(moment)
   const offset = mode.local ? Math.round(reading.offsetSec / 60) : offsetMinutes
@@ -494,15 +486,15 @@ function daylightName(name: string, instant: number): boolean | null {
  * @param mode carries the session's zone and its name
  */
 function zoneReading(instant: number, mode: DateMode): [number, boolean] {
-  const zone = sessionZone(mode)
+  const zone = mode.zone
   const offset = offsetAt(zone, instant)
-  const name = zone === LOCAL_ZONE ? '' : (mode.zoneName ?? '')
+  const name = mode.zoneName ?? ''
   for (const [start, end, standard] of NEGATIVE_DST[name] ?? []) {
     if (start <= instant && (end === null || instant < end)) return [offset, offset === standard]
   }
   const daylight = name === '' ? null : daylightName(name, instant)
   if (daylight !== null) return [offset, !daylight]
-  const posix = mode.zone !== null && longNames(name) === null ? POSIX_STANDARD.exec(name) : null
+  const posix = longNames(name) === null ? POSIX_STANDARD.exec(name) : null
   if (posix !== null) {
     return [offset, zone.parts(new Date(instant * 1000)).abbrev === (posix[1] ?? posix[2])]
   }
@@ -512,41 +504,13 @@ function zoneReading(instant: number, mode: DateMode): [number, boolean] {
 }
 
 /**
- * A zone's offset at an instant, seconds east of UTC; the host's straight from
- * Date, which reads it without building a formatter.
+ * A zone's offset at an instant, seconds east of UTC.
  *
  * @param zone the zone
  * @param instant seconds since the epoch
  */
 function offsetAt(zone: Zone, instant: number): number {
-  const at = new Date(instant * 1000)
-  return zone === LOCAL_ZONE ? -at.getTimezoneOffset() * 60 : zone.parts(at).offsetSec
-}
-
-/**
- * The host's zone as Intl names it, built once per name; null for a name Intl
- * does not know. Mirrors Python's _host_zone.
- *
- * @param name the name Intl gives the host's zone
- */
-function hostZone(name: string): Zone | null {
-  let zone = HOST_ZONES.get(name)
-  if (zone === undefined) {
-    zone = name !== '' && longNames(name) !== null ? resolveTz(name) : null
-    HOST_ZONES.set(name, zone)
-  }
-  return zone
-}
-
-/**
- * The zone a session reads its dates in: its TZ's, else the host's when Intl
- * can name it, else LOCAL_ZONE, whose offsets only Date knows. Mirrors Python's
- * _session_zone.
- *
- * @param mode carries the session's zone and, without TZ, the host's name
- */
-function sessionZone(mode: DateMode): Zone {
-  return mode.zone ?? hostZone(mode.zoneName ?? '') ?? LOCAL_ZONE
+  return zone.parts(new Date(instant * 1000)).offsetSec
 }
 
 /**
@@ -571,7 +535,6 @@ function readingEdge(
     const [offset, standard] = zoneReading(at, mode)
     return offset === reading[0] && standard === reading[1]
   }
-  const longest = sessionZone(mode) === LOCAL_ZONE ? HOST_SCAN_STEP : STANDARD_SCAN_STEP
   let held = instant
   let step = 3600
   while (Math.abs(held - instant) < STANDARD_SCAN_LIMIT) {
@@ -585,7 +548,7 @@ function readingEdge(
       return direction < 0 ? held : probe
     }
     held = probe
-    step = Math.min(2 * step, longest)
+    step = Math.min(2 * step, STANDARD_SCAN_STEP)
   }
   return null
 }
@@ -602,7 +565,6 @@ function readingEdge(
  * @param mode carries the session's zone
  */
 function posixStretch(instant: number, offset: number, mode: DateMode): DaylightStretch | null {
-  if (mode.zone === null) return null
   const year = new Date(instant * 1000).getUTCFullYear()
   const first = year - POSIX_SCAN_YEARS
   const last = year + POSIX_SCAN_YEARS
@@ -666,13 +628,13 @@ function standardBeyond(edge: number, direction: number, mode: DateMode): [numbe
 }
 
 /**
- * The daylight saving stretches found so far in the session's zone, the host's
- * under LOCAL_ZONE. Mirrors Python's _stretches_of.
+ * The daylight saving stretches found so far in the session's zone. Mirrors
+ * Python's _stretches_of.
  *
- * @param mode carries the session's zone, null for the host's
+ * @param mode carries the session's zone
  */
 function stretchesOf(mode: DateMode): DaylightStretch[] {
-  const zone = sessionZone(mode)
+  const zone = mode.zone
   let found = STRETCHES.get(zone)
   if (found === undefined) {
     found = []

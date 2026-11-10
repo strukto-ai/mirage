@@ -17,7 +17,7 @@ import time as _time
 from collections.abc import Iterator
 from concurrent.futures import CancelledError
 from contextlib import contextmanager
-from datetime import date, datetime, timezone, tzinfo
+from datetime import date, datetime, tzinfo
 from pathlib import PurePosixPath
 from stat import S_ISREG
 from typing import Any
@@ -42,6 +42,7 @@ from mirage.runtime.python.monty.stat import stat_result
 from mirage.runtime.types import VFSEntry, VFSStat
 from mirage.utils.clock import bound_system_clock
 from mirage.utils.remnants import entry_name
+from mirage.utils.timezone import TZ_VAR, zone_from_env
 
 logger = logging.getLogger(__name__)
 
@@ -118,13 +119,16 @@ class MontyFs(AbstractOS):
         # engine's own: the engine calls back from its own threads, which
         # the line's binding does not reach.
         self.clock = bound_system_clock()
+        # Whether the engine's own clock, UTC at the host's time, would
+        # answer wrong: a session's TZ or a workspace's system_time.
+        self.answers_clock = self.clock is not None or TZ_VAR in environ
 
     def datetime_now(self, tz: tzinfo | None = None) -> datetime:
-        # A naive now is UTC, as monty's own clock answers.
+        # A naive now is the session's wall clock, its TZ or UTC.
         if tz is None:
-            return datetime.fromtimestamp(self._wall(), timezone.utc).replace(
-                tzinfo=None
-            )
+            return datetime.fromtimestamp(
+                self._wall(), zone_from_env(self._environ)
+            ).replace(tzinfo=None)
         return datetime.fromtimestamp(self._wall(), tz)
 
     def date_today(self) -> date:

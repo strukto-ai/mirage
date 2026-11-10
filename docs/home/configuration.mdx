@@ -58,7 +58,7 @@ not change it. See [From a template](/home/access/cli#from-a-template).
 | `processes` | Set whose processes a session lists and stops, and how many it holds at once; 128 by default. Each profile's block overrides it. See [profiles](/home/profiles). |
 | `command_limits` | Set [output and execution limits](/home/core/output-limits). |
 | `max_body_bytes` | Maximum decoded bytes in one buffered API reply, as a [size](#sizes); `64MB` by default (also when `null`). Per-call caps and the room left under `max_memory` also apply. Error replies retain only their first 64 KiB. |
-| `max_memory` | Bound what the workspace holds in memory, its RAM files and what a command builds, as a [size](#sizes); `32MB` by default, `null` for no cap. See [memory](/home/core/output-limits#limit-a-workspaces-memory). |
+| `max_memory` | Bound what the workspace holds in memory, its RAM files and what a command builds, as a [size](#sizes); `96MB` by default, `null` for no cap. See [memory](/home/core/output-limits#limit-a-workspaces-memory). |
 | `max_env` | Bound what each session's variables, functions, aliases and positional parameters hold, as a [size](#sizes); `2MB` by default, `null` for no cap. A write past it ends the line with exit 2 and `bash: xmalloc: cannot allocate N bytes (past max_env of N bytes, a mirage workspace setting)`. |
 | `network` | Choose where the workspace's connections may go, described [below](#network). |
 | `system_time` | Start the workspace's clock at a set time, described [below](#system-time). |
@@ -191,8 +191,9 @@ all see this time, and so do the
 [WASI](/home/setup/runtime/wasi#time-and-datetime),
 [Pyodide](/home/setup/runtime/pyodide#time-and-datetime) and
 [QuickJS](/home/setup/runtime/quickjs#date) runtimes. `TZ` in `env` picks
-the zone `date` shows it in. Without `system_time`, the workspace uses the
-machine's time.
+the zone `date` shows it in. With no `TZ` a workspace runs on UTC, whatever
+zone the server is in. Without `system_time`, the workspace uses the server's
+clock.
 
 Each workspace keeps its own time, so workspaces on one server can each
 start at a different date. Snapshots keep the setting, and `GET

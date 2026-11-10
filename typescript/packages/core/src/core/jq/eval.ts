@@ -42,15 +42,10 @@ export const MEMORY_REPORT = 'jq memory limit of {} bytes exceeded'
 
 /**
  * The time zone jq's local time reads, as a `TZ` value: the command
- * environment's, else the process's, else the host's own zone.
+ * environment's, UTC without one.
  */
 export function localZone(env: Record<string, string> | undefined): string {
-  const host = globalThis as {
-    process?: { env?: Record<string, string | undefined> }
-  }
-  return (
-    env?.[TZ_VAR] ?? host.process?.env?.[TZ_VAR] ?? Intl.DateTimeFormat().resolvedOptions().timeZone
-  )
+  return env?.[TZ_VAR] ?? 'UTC'
 }
 
 /**

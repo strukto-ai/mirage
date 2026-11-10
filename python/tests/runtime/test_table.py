@@ -265,11 +265,11 @@ def test_register_runtime_makes_a_host_class_buildable_by_name():
 
 
 def test_register_runtime_refuses_a_builtin_name():
-    assert {"monty", "workspace", "machine"} <= BUILTIN_RUNTIMES
+    assert {"monty", "workspace", "remote"} <= BUILTIN_RUNTIMES
     with pytest.raises(ValueError, match="shadows a builtin"):
         register_runtime("monty", FakeRuntime)
     with pytest.raises(ValueError, match="shadows a builtin"):
-        register_runtime("machine", FakeRuntime)
+        register_runtime("remote", FakeRuntime)
 
 
 def test_register_runtime_replaces_a_custom_name():

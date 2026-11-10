@@ -306,10 +306,11 @@ class MontyExecution:
                 }
             ),
             assert_message_annotations=False,
-            # A workspace's system_time answers the wall clocks (MontyFs).
+            # A workspace's system_time and a session's TZ answer the
+            # wall clocks (MontyFs).
             os_policy=(
                 {"sleep_system_max": float("inf")}
-                if fs.clock is None
+                if not fs.answers_clock
                 else {
                     "sleep_system_max": float("inf"),
                     "datetime": "call_host",

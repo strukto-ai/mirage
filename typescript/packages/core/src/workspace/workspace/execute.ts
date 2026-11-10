@@ -94,6 +94,7 @@ import {
   type StatusSnapshot,
 } from '../executor/statement.ts'
 import type { ExecuteFn } from '../expand/types.ts'
+import { runsOnMachine } from '../lookup/lookup.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import { withHandOff } from '../node/execute_node.ts'
@@ -1087,6 +1088,8 @@ async function runPreparedLine(
           // The walker reads it off the frame, which a child evaluation
           // forks with it: nested lines never re-route.
           context.frame.routing = routingDecision
+          context.frame.runsOnMachine = (words, session, routing) =>
+            runsOnMachine(env.registry, words, session, routing)
 
           const dispatch: DispatchFn = env.dispatcher.forSession(effectiveSession).dispatch
 

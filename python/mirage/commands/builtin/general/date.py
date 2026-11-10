@@ -126,14 +126,14 @@ def exclusive_error() -> UsageError:
     )
 
 
-async def _named(expression: str, zone: tzinfo | None) -> datetime | None:
+async def _named(expression: str, zone: tzinfo) -> datetime | None:
     """The moment one ``-d`` or ``-f`` expression names, or None.
 
     A blank expression names today at midnight, as GNU reads it.
 
     Args:
         expression (str): the expression as typed.
-        zone (tzinfo | None): the command's zone; None is the host's.
+        zone (tzinfo): the command's zone.
     """
     if not expression.strip():
         now = system_date(zone)
@@ -144,7 +144,7 @@ async def _named(expression: str, zone: tzinfo | None) -> datetime | None:
 async def _dated(
     first: bytes,
     rest: AsyncIterator[bytes],
-    zone: tzinfo | None,
+    zone: tzinfo,
     fmt: str,
     io: IOResult,
 ) -> AsyncIterator[bytes]:
@@ -155,7 +155,7 @@ async def _dated(
     Args:
         first (bytes): the input's first chunk, already read.
         rest (AsyncIterator[bytes]): the rest of it.
-        zone (tzinfo | None): the command's zone; None is the host's.
+        zone (tzinfo): the command's zone.
         fmt (str): the output format.
         io (IOResult): the result the refusals settle into.
     """
@@ -192,7 +192,7 @@ async def _dated(
 
 
 async def _each_line(
-    ctx: Context, datefile: PathSpec, zone: tzinfo | None, fmt: str
+    ctx: Context, datefile: PathSpec, zone: tzinfo, fmt: str
 ) -> tuple[ByteSource | None, IOResult]:
     """``-f``: each line of the file a ``-d`` expression, printed in turn
     as it is read.
@@ -204,7 +204,7 @@ async def _each_line(
     Args:
         ctx (Context): the command's context.
         datefile (PathSpec): the file of expressions.
-        zone (tzinfo | None): the command's zone; None is the host's.
+        zone (tzinfo): the command's zone.
         fmt (str): the output format.
     """
     try:
@@ -268,7 +268,7 @@ async def date(
 
     The zone is ``-u``'s UTC, else the ``TZ`` of the command's own
     environment (``TZ=Asia/Hong_Kong date`` and an exported ``TZ``
-    alike, as GNU reads it), else the host's local zone. It is read
+    alike, as GNU reads it), else UTC. It is read
     from ``ctx.env``, never from process state, so concurrent
     workspaces cannot move each other's clock. ``%Z`` is tzdata's
     abbreviation (``HKT``), as GNU prints it; the TypeScript twin reads
@@ -332,14 +332,11 @@ async def date(
         except FS_ERRORS as exc:
             line = fs_error_line(CommandName.DATE, reference, exc)
             return None, IOResult(exit_code=1, stderr=encode_text(line))
-        if zone is not None:
-            dt = dt.astimezone(zone)
+        dt = dt.astimezone(zone)
     elif resolution:
-        dt = datetime.fromtimestamp(0, zone or timezone.utc)
+        dt = datetime.fromtimestamp(0, zone)
     else:
         dt = system_date(zone)
-    if zone is None:
-        dt = dt.astimezone()
     fmt = formats[0] if formats else DEFAULT_FORMAT
     # --resolution names one nanosecond past the epoch.
     tick = 1 if resolution else None

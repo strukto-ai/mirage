@@ -26,7 +26,7 @@ from mirage.runtime.constants import (
 )
 from mirage.runtime.js.quickjs import QuickJsRuntime
 from mirage.runtime.language import LanguageRuntime
-from mirage.runtime.machine import MachineRuntime
+from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.python.local import LocalRuntime
 from mirage.runtime.python.monty import MontyRuntime
@@ -46,7 +46,7 @@ NAMED: dict[str, type[Runtime[Any]]] = {
         QuickJsRuntime,
         WorkspaceRuntime,
         SandlockRuntime,
-        MachineRuntime,
+        RemoteRuntime,
     )
 }
 
@@ -146,7 +146,7 @@ def runtime_class(name: str) -> type[Runtime[Any]]:
             raise ValueError(
                 f"{name!r} is a machine provider, not a runtime: declare the"
                 f" machine under machines: with provider: {name}, and run"
-                " its programs with the machine runtime"
+                " its programs with the remote runtime"
             )
         known = ", ".join(repr(n) for n in known_runtimes())
         raise ValueError(

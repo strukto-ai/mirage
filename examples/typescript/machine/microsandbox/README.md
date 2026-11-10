@@ -25,7 +25,7 @@ The microVM guest has no `/dev/fuse`, so Mirage can't run in the guest; the host
 mount is shared in instead.
 
 `msb run` runs as an async child process, as it does in Mirage's
-`MachineRuntime`. The FUSE mount is served by this process's event loop, so
+`RemoteRuntime`. The FUSE mount is served by this process's event loop, so
 the loop must stay free while the guest reads through it.
 
 ## Prerequisites

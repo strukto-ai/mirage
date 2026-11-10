@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 
 from mirage.commands.builtin.utils.stream import stream_output
 from mirage.io.stream import OutputStream
@@ -37,13 +37,13 @@ def _config(
     """The strftime engine's reading of one moment.
 
     Args:
-        dt (datetime): the moment; a naive one is in the local zone.
+        dt (datetime): the moment; a naive one is UTC.
         years (int): whole 400-year cycles to add to the displayed year.
         nanosecond (int | None): the second's nanoseconds, finer than a
             datetime holds; the moment's own microseconds when None.
     """
     if dt.utcoffset() is None:
-        dt = dt.astimezone()
+        dt = dt.replace(tzinfo=timezone.utc)
     offset = dt.utcoffset()
     return {
         "year": dt.year + years,

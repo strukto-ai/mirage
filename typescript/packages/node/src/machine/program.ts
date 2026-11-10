@@ -31,13 +31,18 @@ import {
   RUN_DRAIN_SECONDS,
   STOP_GRACE_SECONDS,
   STOP_POLL_SECONDS,
+  darwinResourcesLine,
+  resourcesLine,
   stopSignal,
 } from '@struktoai/mirage-core/machine/constants'
+import { parseDarwinResources, parseResources } from '@struktoai/mirage-core/machine/resources'
 import { currentCaller } from '@struktoai/mirage-core/context/session_context'
-import { debuglog } from 'node:util'
+import { debuglog, promisify } from 'node:util'
 import { asyncChain, closeQuietly } from '@struktoai/mirage-core/io/stream'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import type { ProcessHandle } from '@struktoai/mirage-core/execution/process/handle'
+import type { ProcessUsage } from '@struktoai/mirage-core/execution/process/types'
+import type { MachineResources } from '@struktoai/mirage-core/execution/types'
 import type { MachineProcess } from '@struktoai/mirage-core/execution/machine/types'
 import type { MachinePid } from '@struktoai/mirage-core/execution/types'
 import { abortable, makeAbortError } from '@struktoai/mirage-core/utils/abort'
@@ -551,16 +556,66 @@ async function groupStarted(group: number): Promise<number[]> {
  * @param groups each program's pid, which is its group's, the tag of the
  *   Mirage process it is and when it started, in epoch seconds.
  */
+/**
+ * A host process's use of the host, from `ps`'s `%cpu`, `%mem`, `rss`, `vsz`
+ * and `time` columns. Mirrors Python's `_host_usage`.
+ */
+function hostUsage(fields: readonly string[]): ProcessUsage | null {
+  const [cpuPercent, memoryPercent, rss, vsz] = fields.slice(0, 4).map(Number) as [
+    number,
+    number,
+    number,
+    number,
+  ]
+  if ([cpuPercent, memoryPercent, rss, vsz].some(Number.isNaN)) return null
+  const time = fields[4] ?? ''
+  const at = time.lastIndexOf(':')
+  const dayAt = time.indexOf('-')
+  const days = dayAt < 0 ? 0 : Number(time.slice(0, dayAt))
+  let cpuSeconds = Number(time.slice(at + 1)) + days * 86400
+  const clock = time.slice(dayAt + 1, Math.max(at, 0))
+  const scales = [60, 3600]
+  clock
+    .split(':')
+    .reverse()
+    .forEach((part, index) => {
+      cpuSeconds += Number(part) * (scales[index] ?? 0)
+    })
+  return { cpuSeconds, cpuPercent, memoryPercent, rss, vsz }
+}
+
+/**
+ * What the host holds now, through the line its system answers. Mirrors
+ * Python's `host_resources`.
+ *
+ * @param machine the host, as `ps` shows it.
+ * @param cpu read the processors' time and the process counts.
+ */
+export async function hostResources(machine: string, cpu: boolean): Promise<MachineResources> {
+  if (process.platform === 'win32') throw new Error('this host says nothing of its resources')
+  const darwin = process.platform === 'darwin'
+  const line = darwin ? darwinResourcesLine(cpu) : resourcesLine(cpu)
+  const { stdout } = await promisify(execFile)('/bin/sh', ['-c', line], {
+    env: { ...process.env, LC_ALL: 'C' },
+    maxBuffer: 16 * 1024 * 1024,
+  })
+  return darwin ? parseDarwinResources(stdout, machine) : parseResources(stdout, machine)
+}
+
 export async function scanHost(
   groups: ReadonlyMap<number, readonly [string, number]>,
 ): Promise<MachineProcess[]> {
   if (groups.size === 0 || process.platform === 'win32') return []
   const found: [number, MachineProcess][] = []
   const reused = new Set<number>()
-  const text = await ps(['-A', '-o', 'pid=,ppid=,pgid=,stat=,lstart=,args='])
+  const text = await ps([
+    '-A',
+    '-o',
+    'pid=,ppid=,pgid=,stat=,lstart=,%cpu=,%mem=,rss=,vsz=,time=,args=',
+  ])
   for (const line of text.split('\n')) {
     const fields = line.trim().split(/\s+/)
-    if (fields.length < 9 || !/^[0-9]+$/.test(fields[2] ?? '')) continue
+    if (fields.length < 14 || !/^[0-9]+$/.test(fields[2] ?? '')) continue
     const group = Number(fields[2])
     const held = groups.get(group)
     if (held === undefined) continue
@@ -572,7 +627,7 @@ export async function scanHost(
       debuglog('mirage')('process %s: no start: %s', fields[0], err)
       continue
     }
-    const args = line.trim().replace(/^(\S+\s+){9}/, '')
+    const args = line.trim().replace(/^(\S+\s+){14}/, '')
     const letter = (fields[3] ?? 'R').charAt(0)
     const pid = Number(fields[0])
     if (pid === group && Math.abs(started - began) > HOST_START_SLACK_SECONDS) reused.add(group)
@@ -583,8 +638,9 @@ export async function scanHost(
         pid,
         ppid: Number(fields[1]),
         started,
-        args: fields.length > 9 ? args : '',
+        args: fields.length > 14 ? args : '',
         state: HOST_STATES[letter] ?? letter,
+        usage: hostUsage(fields.slice(9, 14)),
       },
     ])
   }

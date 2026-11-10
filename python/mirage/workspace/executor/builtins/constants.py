@@ -14,6 +14,13 @@
 
 import re
 
+from mirage.shell.constants import BIN_PREFIX
+from mirage.vfs.history import HISTORY_PREFIX
+
+# Mirage's own views of its programs and its history: paths, as they are
+# on any machine, and no filesystem for ``df`` or ``mount`` to list.
+UNLISTED_MOUNTS = frozenset({BIN_PREFIX + "/", HISTORY_PREFIX + "/"})
+
 IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 # A number as bash's builtins read one: strtoimax's leading whitespace
 # and sign, then the trailing blanks bash skips itself.

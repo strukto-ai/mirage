@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from mirage.commands.config import Context
+from mirage.io.memory import memory_room
 from mirage.runtime.config import HomeConfig, RuntimeConfig, resolve_home
 from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.files import RuntimeFiles
@@ -187,5 +188,6 @@ class QuickJsRuntime(JsRuntime[WasmExecution]):
             fs=fs,
             output=output,
             errors=errors,
+            max_memory=memory_room(),
         )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=exit_code)

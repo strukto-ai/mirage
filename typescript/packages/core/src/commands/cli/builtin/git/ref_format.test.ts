@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { expect, it } from 'vitest'
+import { UTC_ZONE } from '../../../../utils/timezone.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { FormatUsageError, GitError, UnparsableFormatError } from './errors.ts'
 import {
@@ -82,7 +83,7 @@ const CTX: RefContext = {
   abbrev: 7,
   abbreviations: new Map(),
   mailmap: [],
-  date: { kind: DateKind.NORMAL, local: false, strftime: '', now: 0, zone: null },
+  date: { kind: DateKind.NORMAL, local: false, strftime: '', now: 0, zone: UTC_ZONE },
   suffixes: [],
 }
 

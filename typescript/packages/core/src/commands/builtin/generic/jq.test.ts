@@ -71,12 +71,14 @@ async function ranOver(
   flags: Context['flags'] = {},
   stream: typeof read = read,
   signal?: AbortSignal,
+  env?: Record<string, string>,
 ): Promise<Ran> {
   const ctx = {
     stdin: null,
     flags: { compact_output: true, ...flags },
     cwd: PathSpec.fromStrPath('/'),
     signal,
+    ...(env !== undefined ? { env } : {}),
   } as Context
   const specs = paths.map((path) => PathSpec.fromStrPath(path))
   const result = await jqGeneric(specs, [program], ctx, stream)
@@ -595,21 +597,19 @@ describe('jq_eval', () => {
   })
 
   it('runs dates, the clock and a rule zone in jq_eval', async () => {
-    const saved = process.env.TZ
-    process.env.TZ = 'EST5EDT,M3.2.0,M11.1.0'
-    try {
-      const result = await ranOver([], '1425599507 | todate, (localtime | .[3]), (now | type)', {
-        null_input: true,
-      })
-      expect(result).toEqual({
-        stdout: '"2015-03-05T23:51:47Z"\n18\n"number"\n',
-        stderr: '',
-        exitCode: 0,
-      })
-    } finally {
-      if (saved === undefined) delete process.env.TZ
-      else process.env.TZ = saved
-    }
+    const result = await ranOver(
+      [],
+      '1425599507 | todate, (localtime | .[3]), (now | type)',
+      { null_input: true },
+      read,
+      undefined,
+      { TZ: 'EST5EDT,M3.2.0,M11.1.0' },
+    )
+    expect(result).toEqual({
+      stdout: '"2015-03-05T23:51:47Z"\n18\n"number"\n',
+      stderr: '',
+      exitCode: 0,
+    })
   })
 
   it("answers get_prog_origin with the program file's directory, else the cwd", async () => {
@@ -665,30 +665,25 @@ describe('jq_eval clock', () => {
 
 describe('local time', () => {
   it("reads the session's zone from the tz database", async () => {
-    const saved = process.env.TZ
-    process.env.TZ = '/usr/share/zoneinfo/Europe/Paris'
     const program =
       '1690000000 | strflocaltime("%H:%M %Z %z"), strftime("%Z"), ' +
       '(1 | debug | (0 | localtime) | .[3])'
-    try {
-      expect(await ranOver([], program, { null_input: true })).toEqual({
-        stdout: '"06:26 CEST +0200"\n"GMT"\n1\n',
-        stderr: '["DEBUG:",1]\n',
-        exitCode: 0,
-      })
-      const ctx = {
-        stdin: null,
-        flags: { compact_output: true, null_input: true },
-        cwd: PathSpec.fromStrPath('/'),
-        env: { TZ: 'Asia/Kolkata' },
-      } as Context
-      const result = await jqGeneric([], [program], ctx, read)
-      if (result === null) throw new Error('jq returned no result')
-      expect(DEC.decode(await materialize(result[0]))).toBe('"09:56 IST +0530"\n"GMT"\n5\n')
-    } finally {
-      if (saved === undefined) delete process.env.TZ
-      else process.env.TZ = saved
-    }
+    const flags = { null_input: true }
+    expect(
+      await ranOver([], program, flags, read, undefined, {
+        TZ: '/usr/share/zoneinfo/Europe/Paris',
+      }),
+    ).toEqual({ stdout: '"06:26 CEST +0200"\n"GMT"\n1\n', stderr: '["DEBUG:",1]\n', exitCode: 0 })
+    expect(await ranOver([], program, flags, read, undefined, { TZ: 'Asia/Kolkata' })).toEqual({
+      stdout: '"09:56 IST +0530"\n"GMT"\n5\n',
+      stderr: '["DEBUG:",1]\n',
+      exitCode: 0,
+    })
+    expect(await ranOver([], program, flags)).toEqual({
+      stdout: '"04:26 UTC +0000"\n"GMT"\n0\n',
+      stderr: '["DEBUG:",1]\n',
+      exitCode: 0,
+    })
   })
 })
 

@@ -28,7 +28,7 @@ from mirage.machine.constants import (
 from mirage.machine.microsandbox import MicrosandboxMachine
 from mirage.machine.microsandbox.constants import own_session
 from mirage.machine.registry import build_machine
-from mirage.runtime.machine import MachineRuntime
+from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.types import RunResult
 from mirage.types import PathSpec
 from tests.fixtures.machine import machine_runtime
@@ -251,7 +251,7 @@ async def test_real_guest_process_shell_and_fuse():
         mode=MountMode.EXEC,
         machines={"box": MicrosandboxMachine("box", {"sandbox": SANDBOX})},
         runtimes=[
-            MachineRuntime(["python3", "@external"], machine="box"),
+            RemoteRuntime(["python3", "@external"], machine="box"),
             "workspace",
         ],
     )
@@ -291,7 +291,7 @@ async def test_real_ssh_mount_serves_the_host_session_and_unmounts(mount_type):
         mode=MountMode.EXEC,
         profiles={"agent": {"paths": {"hide": [f"{prefix}/secret.txt"]}}},
         machines={"box": runtime},
-        runtimes=[MachineRuntime(["python3"], machine="box"), "workspace"],
+        runtimes=[RemoteRuntime(["python3"], machine="box"), "workspace"],
     )
     try:
         assert (

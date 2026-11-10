@@ -16,18 +16,23 @@ import { UNKNOWN_NAME } from '../../../../commands/builtin/utils/identity.ts'
 import { gnuStrftime } from '../../../../commands/builtin/utils/strftime.ts'
 import { currentCaller, type RedirectResult } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
-import { shownMachine, shownPid, type Process } from '../../../../execution/process/types.ts'
+import {
+  shownMachine,
+  shownPid,
+  type Process,
+  type ProcessUsage,
+} from '../../../../execution/process/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { endsLine } from '../../../../shell/helpers.ts'
 import { ProcessId } from '../../../../execution/types.ts'
 import type { JobTable } from '../../../../execution/job/index.ts'
 import { systemNow } from '../../../../utils/clock.ts'
-import { LOCAL_ZONE, zoneFromEnv } from '../../../../utils/timezone.ts'
+import { zoneFromEnv } from '../../../../utils/timezone.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { MAX_PID_OPERAND } from '../constants.ts'
-import { grantsOf, jobResult, sessionOf } from '../jobspec.ts'
+import { grantsOf, jobResult, onMachine, sessionOf } from '../jobspec.ts'
 import * as constants from './constants.ts'
 import type { PsContext, PsOptions } from './types.ts'
 
@@ -75,6 +80,7 @@ function parsePs(words: string[]): PsOptions {
   const columns: [string, string][] = []
   let all = false
   let forest = false
+  let machine: string | null = null
   let at = 0
   while (at < words.length) {
     const word = words[at++] ?? ''
@@ -85,9 +91,11 @@ function parsePs(words: string[]): PsOptions {
     if (word.startsWith('--')) {
       const equal = word.indexOf('=')
       const option = equal < 0 ? word : word.slice(0, equal)
-      if (option !== '--pid' && option !== '--format') throw new Error('unknown gnu long option')
+      if (option !== '--pid' && option !== '--format' && option !== '--machine')
+        throw new Error('unknown gnu long option')
       const value = equal < 0 ? (words[at++] ?? '') : word.slice(equal + 1)
-      if (option === '--pid') select(psPids(value, option))
+      if (option === '--machine') machine = value
+      else if (option === '--pid') select(psPids(value, option))
       else for (const item of psColumns(value, option)) columns.push(item)
       continue
     }
@@ -113,7 +121,7 @@ function parsePs(words: string[]): PsOptions {
       else for (const item of psColumns(value, '-o')) columns.push(item)
     }
   }
-  return { pids, all, columns, forest }
+  return { pids, all, columns, forest, machine }
 }
 
 /** One row in procps's layout: each column padded but the last. */
@@ -171,10 +179,29 @@ function started(fact: string, info: Process, ctx: PsContext): string {
  * program's pid on its machine. `branch` is what a forest draws before its
  * command.
  */
+/**
+ * One usage column of a program a scan read; what procps prints for nothing
+ * used where there is no reading, as for Mirage's own. Mirrors Python's
+ * `_usage_cell`.
+ */
+function usageCell(fact: string, usage: ProcessUsage | null): string {
+  if (usage === null) return constants.USAGE_FACTS[fact] ?? ''
+  if (fact === 'cpu_percent') return usage.cpuPercent.toFixed(1)
+  if (fact === 'mem_percent') return usage.memoryPercent.toFixed(1)
+  if (fact === 'rss') return String(usage.rss)
+  if (fact === 'vsz') return String(usage.vsz)
+  const total = Math.trunc(usage.cpuSeconds)
+  const days = Math.floor(total / 86400)
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  const clock = `${pad(Math.floor((total % 86400) / 3600))}:${pad(Math.floor((total % 3600) / 60))}:${pad(total % 60)}`
+  return days > 0 ? `${String(days)}-${clock}` : clock
+}
+
 function psCell(key: string, info: Process, ctx: PsContext, branch: string): string {
   const fact = constants.COLUMNS[key]?.[3] ?? ''
   const fixed = constants.FIXED[fact]
   if (fixed !== undefined) return fixed
+  if (fact in constants.USAGE_FACTS) return usageCell(fact, info.usage ?? null)
   if (fact === 'machine') return shownMachine(info)
   const session =
     info.sessionId === ctx.sessionId && ctx.shellPid !== null
@@ -314,12 +341,14 @@ export async function handlePs(
     jobTable.processes.lastPid + 1,
     session?.lineNode != null && endsLine(session.lineNode),
   )
-  const rows = listed.filter((info) => every || options.pids.has(shownPid(info)))
+  const rows = listed.filter(
+    (info) => (every || options.pids.has(shownPid(info))) && onMachine(info, options.machine),
+  )
   const columns = options.columns.length > 0 ? options.columns : constants.PLAIN
   const keys = columns.map(([key]) => key)
   const ctx: PsContext = {
     now: systemNow(),
-    zone: (session !== null ? zoneFromEnv(session.env) : null) ?? LOCAL_ZONE,
+    zone: zoneFromEnv(session?.env),
     group: session?.profile ?? null,
     sessionId: sid,
     shellPid: session?.shellPid ?? null,

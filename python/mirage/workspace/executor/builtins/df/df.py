@@ -24,6 +24,7 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import CapacityResult, CapacityState, PathSpec
 from mirage.utils.hidden import path_visible
+from mirage.workspace.executor.builtins.constants import UNLISTED_MOUNTS
 from mirage.workspace.executor.builtins.df.constants import (
     BLOCK_SUFFIX,
     SI_UNITS,
@@ -240,7 +241,8 @@ async def _target_mounts(
         (
             m
             for m in registry.visible_mounts()
-            if path_visible(session.visibility, m.prefix.rstrip("/") or "/")
+            if m.prefix not in UNLISTED_MOUNTS
+            and path_visible(session.visibility, m.prefix.rstrip("/") or "/")
         ),
         key=lambda m: m.prefix,
     )
@@ -265,6 +267,8 @@ async def _target_mounts(
                     out.append(m)
             continue
         mount = registry.try_mount_for(virtual)
+        if mount is not None and mount.prefix in UNLISTED_MOUNTS:
+            mount = registry.try_mount_for("/")
         if mount is None or mount not in ordered:
             errors.append(fs_error_line("df", spec, enoent(spec)))
             continue

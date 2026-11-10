@@ -205,7 +205,7 @@ terminal:
     from pydantic import BaseModel
 
     from mirage import MountMode, Workspace
-    from mirage.runtime.machine import MachineRuntime
+    from mirage.runtime.machine import RemoteRuntime
     from mirage.runtime.python.monty import MontyRuntime
     from mirage.vfs.redis import RedisVFS
     from mirage.workspace.store import RedisWorkspaceStateStore
@@ -231,9 +231,9 @@ terminal:
                 },
                 runtimes=[
                     MontyRuntime(captures=["python", "python3"]),
-                    MachineRuntime(["@python", "@external"], machine="box"),
+                    RemoteRuntime(["@python", "@external"], machine="box"),
                 ],
-                route_policy=lambda ctx: "machine" if re.search(r"\b(numpy|pandas)\b", ctx.line) else None,
+                route_policy=lambda ctx: "remote" if re.search(r"\b(numpy|pandas)\b", ctx.line) else None,
             )
         return terminals[terminal_id]
 
@@ -281,7 +281,7 @@ terminal:
     import {
       MontyRuntime,
       MountMode,
-      MachineRuntime,
+      RemoteRuntime,
       RedisVFS,
       RedisWorkspaceStateStore,
       Workspace,
@@ -306,9 +306,9 @@ terminal:
               },
               runtimes: [
                 new MontyRuntime({ captures: ['python', 'python3'] }),
-                new MachineRuntime({ captures: ['@python', '@external'], machine: 'box' }),
+                new RemoteRuntime({ captures: ['@python', '@external'], machine: 'box' }),
               ],
-              routePolicy: (ctx) => (/\b(numpy|pandas)\b/.test(ctx.line) ? 'machine' : null),
+              routePolicy: (ctx) => (/\b(numpy|pandas)\b/.test(ctx.line) ? 'remote' : null),
             },
           ),
         )

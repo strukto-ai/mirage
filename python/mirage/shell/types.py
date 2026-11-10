@@ -346,6 +346,13 @@ class ShellBuiltin(StrEnum):
     JOBS = "jobs"
     DISOWN = "disown"
     PS = "ps"
+    PGREP = "pgrep"
+    PKILL = "pkill"
+    PIDOF = "pidof"
+    KILLALL = "killall"
+    FREE = "free"
+    UPTIME = "uptime"
+    TOP = "top"
     # -- clock
     SLEEP = "sleep"
     # -- nested shells

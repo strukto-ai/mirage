@@ -27,6 +27,7 @@ import { type ByteSource, materialize } from '../../../io/types.ts'
 import { abortable } from '../../../utils/abort.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { memoryLimit, type ConfigFields, type RuntimeOptions } from '../../config.ts'
+import { memoryRoom } from '../../../io/memory.ts'
 import type { WorkspaceBinding } from '../../binding.ts'
 import {
   createPyodideInterrupter,
@@ -276,6 +277,10 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
   private interrupter: PyodideInterrupter | null = null
   // In the worker, the numbers the main thread found for the program.
   ids: ProgramIds | null = null
+  // In the worker, what the workspace's max_memory left for the run.
+  room: number | null = null
+  // The heap when the program started, past which the run is charged.
+  private startHeap = 0
   // The runtime of this run, which each run builds afresh.
   private running: PyodideRuntime | null = null
   private interrupterTried = false
@@ -371,16 +376,18 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
   }
 
   /**
-   * The MemoryError for an interpreter whose heap is past `maxMemory`, null
-   * while it is within it. The heap never shrinks, so its size when a run
-   * ends is the most the run used, however fast it was. A run in the worker
-   * is checked there, and on Node the worker is also watched while it runs
-   * (`watchMemory`).
+   * The MemoryError for an interpreter whose heap is past `maxMemory`, or
+   * without one past what the workspace's max_memory left over what its
+   * program started on; null while it is within it. The heap never shrinks,
+   * so its size when a run ends is the most the run used, however fast it
+   * was. A run in the worker is checked there, and on Node the worker is
+   * also watched while it runs (`watchMemory`).
    */
   private passedCap(runtime: PyodideRuntime): string | null {
     const heap = (runtime.pyodide?._module as { HEAP8?: Int8Array } | undefined)?.HEAP8
-    if (this.maxMemory === null || heap === undefined || heap.length <= this.maxMemory) return null
-    const cap = (this.config as PyodideConfig).maxMemory ?? this.maxMemory
+    const limit = this.maxMemory ?? (this.room === null ? null : runtime.startHeap + this.room)
+    if (limit === null || heap === undefined || heap.length <= limit) return null
+    const cap = (this.config as PyodideConfig).maxMemory ?? this.room
     return new PyodideMemoryError(String(cap)).message
   }
 
@@ -879,6 +886,7 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
     if (worker instanceof PyodideUnavailableError) throw worker
     if (worker !== null && files !== null && binding !== null) {
       const stdio = hostStdio(program.stdin, output, errors)
+      const room = memoryRoom()
       try {
         const result = await this.onWorker(() =>
           worker.execute(
@@ -895,6 +903,7 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
               ids: programIds(),
               ...(ctx.timeoutSeconds !== undefined ? { timeoutSeconds: ctx.timeoutSeconds } : {}),
               ...(boundSystemClock() !== null ? { offset: systemNow() - Date.now() / 1000 } : {}),
+              ...(room !== null ? { room } : {}),
             },
             ctx,
             files,
@@ -927,6 +936,8 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
       ...decodeNoticeLines(unhonoredNotice(ctx.flags, this.name, HONORED_FLAGS)),
     ]
     await this.loadImports(pyodide, program.code)
+    this.startHeap = (pyodide._module as { HEAP8?: Int8Array }).HEAP8?.length ?? 0
+    this.sync?.started?.()
     // sys.argv[0] is the program's own name when the caller has one (a
     // CLI install's head word), else CPython's own -c spelling.
     const argv = [program.prog ?? '-c', ...program.args]

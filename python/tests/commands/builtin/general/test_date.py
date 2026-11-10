@@ -73,31 +73,23 @@ async def test_tz_never_leaks_between_workspaces():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "host_zone,summer,winter",
-    [
-        ("America/Los_Angeles", "PDT -0700", "PST -0800"),
-        ("Asia/Hong_Kong", "HKT +0800", "HKT +0800"),
-        ("UTC", "UTC +0000", "UTC +0000"),
-    ],
+    "host_zone", ["America/Los_Angeles", "Asia/Hong_Kong", "UTC"]
 )
-async def test_implicit_host_timezone(monkeypatch, host_zone, summer, winter):
+async def test_no_tz_is_utc_whatever_zone_the_server_is_in(
+    monkeypatch, host_zone
+):
     try:
         with monkeypatch.context() as patch:
             patch.setenv("TZ", host_zone)
             time.tzset()
             ws = Workspace({"/": RAMVFS()})
             try:
-                for epoch, expected in [
-                    (1789430400, summer),
-                    (1767225600, winter),
-                ]:
+                for epoch in (1789430400, 1767225600):
                     assert await _run(
                         ws, f"unset TZ; date -d @{epoch} '+%Z %z'"
-                    ) == (expected + "\n", "", 0)
+                    ) == ("UTC +0000\n", "", 0)
                     implicit = await _run(ws, f"unset TZ; date -d @{epoch}")
-                    explicit = await _run(
-                        ws, f"TZ={host_zone} date -d @{epoch}"
-                    )
+                    explicit = await _run(ws, f"TZ=UTC date -d @{epoch}")
                     assert implicit == explicit
             finally:
                 await ws.close()

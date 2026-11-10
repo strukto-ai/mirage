@@ -1692,7 +1692,7 @@ paths:
           description: Filter processes by job ID (`job_` and 32 hex digits), including descendant processes.
           schema:
             type: string
-        - name: machine
+        - name: remote
           in: query
           required: false
           description: Filter by machine identifier in `provider:name` format.

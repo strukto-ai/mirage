@@ -645,6 +645,51 @@
           }
         }
       ]
+    },
+    {
+      "id": "dates_read_utc",
+      "note": "The engine has no zone of its own, so the server's never reaches it.",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "node -e \"console.log(new Date(0).getTimezoneOffset(), new Date(0).getHours())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "0 0\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_run_holds_no_more_than_the_workspaces_memory",
+      "note": "Past what max_memory has left the engine's own error, which a program can catch, and the next run is fine.",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "node -e \"var a = []; for (var i = 0; i < 400; i++) a.push('x'.repeat(1 << 20) + i); console.log(a.length)\"",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "InternalError: out of memory"
+          }
+        },
+        {
+          "command": "node -e \"var a = []; for (var i = 0; i < 4; i++) a.push('x'.repeat(1 << 20) + i); console.log(a.length)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "4\n"
+          }
+        }
+      ]
     }
   ]
 }

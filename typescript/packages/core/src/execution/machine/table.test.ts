@@ -16,7 +16,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { CHECK_LINE, CHECK_MARK } from '../../machine/constants.ts'
 import type * as machineConstants from '../../machine/constants.ts'
 import { MachineHandle } from '../../machine/handle.ts'
-import { MachineRuntime } from '../../runtime/machine/runtime.ts'
+import { RemoteRuntime } from '../../runtime/machine/runtime.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
@@ -280,7 +280,7 @@ function sleepers(boxes: Record<string, Sleeper>): Workspace {
     {
       mode: MountMode.EXEC,
       machines: boxes,
-      runtimes: [new MachineRuntime({ captures: ['train'], machine: Object.keys(boxes)[0] ?? '' })],
+      runtimes: [new RemoteRuntime({ captures: ['train'], machine: Object.keys(boxes)[0] ?? '' })],
     },
   )
 }
@@ -845,7 +845,7 @@ describe('MachineTable scans', () => {
           {
             mode: MountMode.EXEC,
             machines: { a: box },
-            runtimes: [new MachineRuntime({ machine: 'c' }), 'workspace'],
+            runtimes: [new RemoteRuntime({ machine: 'c' }), 'workspace'],
           },
         ),
     ).toThrow("unknown machine: 'c'")

@@ -17,10 +17,10 @@ import { MemoryExhausted } from './errors.ts'
 
 /**
  * The max_memory a workspace runs under when it names none: with the 32 MB
- * read cache, 64 MB a workspace, 32 of them on a 2 GiB machine. Mirrors
+ * read cache, 128 MB a workspace, 16 of them on a 2 GiB machine. Mirrors
  * Python's MAX_MEMORY.
  */
-export const MAX_MEMORY = 32 * 1024 * 1024
+export const MAX_MEMORY = 96 * 1024 * 1024
 
 /** The default decoded-byte ceiling for one buffered API reply. */
 export const MAX_BODY_BYTES = 64 * 1024 * 1024
@@ -67,16 +67,22 @@ export function bodyLimit(): number {
 }
 
 /**
- * The bytes left in the running workspace's budget, null for no cap. A
- * browser cannot tell one task's binding from another's, so there it is the
- * least any live budget has left. Mirrors Python's `memory_room`.
+ * The running workspace's budget, null for no cap. A browser cannot tell one
+ * task's binding from another's, so there it is the live budget with the least
+ * left. Mirrors Python's `memory_budget`.
  */
-export function memoryRoom(): number | null {
-  let room: number | null = null
+export function memoryBudget(): MemoryBudget | null {
+  let least: MemoryBudget | null = null
   for (const live of budget.liveStores()) {
-    if (live.memory !== null) room = Math.min(room ?? Infinity, live.memory.room())
+    if (live.memory !== null && (least === null || live.memory.room() < least.room()))
+      least = live.memory
   }
-  return room
+  return least
+}
+
+/** The bytes left in the running workspace's budget, null for no cap. Mirrors Python's `memory_room`. */
+export function memoryRoom(): number | null {
+  return memoryBudget()?.room() ?? null
 }
 
 /**

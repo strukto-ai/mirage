@@ -26,7 +26,7 @@ import {
 import { QuickJsRuntime } from './js/quickjs/runtime.ts'
 import { LanguageRuntime } from './language.ts'
 import { isLineExecutor, isProcessExecutor, type LineExecutorMixin } from './mixin.ts'
-import { MachineRuntime } from './machine/runtime.ts'
+import { RemoteRuntime } from './machine/runtime.ts'
 import { MontyRuntime } from './python/monty/index.ts'
 import { PyodideRuntime } from './python/pyodide/runtime.ts'
 import { WorkspaceRuntime } from './workspace.ts'
@@ -47,7 +47,7 @@ const NAMED: Record<
     monty: MontyRuntime,
     quickjs: QuickJsRuntime,
     workspace: WorkspaceRuntime,
-    machine: MachineRuntime,
+    remote: RemoteRuntime,
   },
 )
 
@@ -95,7 +95,7 @@ const RUNTIME_HINTS: Record<string, string> = {
     MACHINE_PROVIDERS.map((name) => [
       name,
       `'${name}' is a machine provider, not a runtime: declare the machine under ` +
-        `machines: with provider: ${name}, and run its programs with the machine runtime`,
+        `machines: with provider: ${name}, and run its programs with the remote runtime`,
     ]),
   ),
 }
@@ -150,11 +150,11 @@ export function knownRuntimes(): string[] {
  */
 export function checkRuntimeOptions(name: string, options: Record<string, unknown>): void {
   for (const key of Object.keys(options)) {
-    if (key === 'machine' && name !== 'machine' && name in NAMED)
+    if (key === 'machine' && name !== 'remote' && name in NAMED)
       throw new Error(
-        `runtime '${name}' runs on the workspace's machine; a machine takes the machine runtime`,
+        `runtime '${name}' runs on the workspace's machine; a machine takes the remote runtime`,
       )
-    if (!(name === 'machine' ? MACHINE_KEYS : ENTRY_KEYS).includes(key)) {
+    if (!(name === 'remote' ? MACHINE_KEYS : ENTRY_KEYS).includes(key)) {
       const knownKeys = ENTRY_KEYS.map((k) => `'${k}'`).join(', ')
       throw new Error(`unknown ${name} runtime option '${key}' (expected: ${knownKeys})`)
     }

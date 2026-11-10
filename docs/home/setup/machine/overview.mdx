@@ -9,7 +9,7 @@ sandbox or a host over SSH. You create and stop it; Mirage only runs programs
 on it.
 
 Declare each machine under `machines:` with the `provider` that reaches it,
-and run captured programs there with the `machine` runtime. `captures`
+and run captured programs there with the `remote` runtime. `captures`
 defaults to [`@external`](/home/setup/runtime/overview#captures), every
 program Mirage does not have itself.
 
@@ -19,7 +19,7 @@ machines:
     provider: docker
     container: my-sandbox
 runtimes:
-  - name: machine
+  - name: remote
     machine: box
 ```
 
@@ -129,7 +129,8 @@ the program started under it:
 ```
 
 `ps -o pid,machine` selects those columns, and `ps f` draws each command
-under its parent's. `$!` is the program's real pid, and `STAT` is what the
+under its parent's. `$!` is the program's real pid, through `nohup` and other
+wrappers too, and `STAT` is what the
 machine reports, `T` for a program `kill -STOP` paused.
 
 `kill` sends a signal to a program as you sent it: a program that traps `USR1`
@@ -138,9 +139,69 @@ reports. KILL is sent only when you ask for it (`kill -9`, `timeout -k`) or
 when Mirage shuts the workspace down.
 
 Mirage's own commands have pids from 4194305 up. A pid two machines both have
-is refused as an ambiguous job spec, so name the machine with `-m`, as `ps`
-shows it or without the provider: `kill -m box 13` or `wait -m ssh:gpu 13`. All
-of this follows the session's `processes` grants.
+is refused as an ambiguous job spec, so name the machine with `-m` or
+`--machine`, as `ps` shows it or without the provider: `kill -m box 13` or
+`wait --machine ssh:gpu 13`. All of this follows the session's `processes`
+grants.
+
+`pgrep`, `pkill`, `pidof` and `killall` search the processes `ps` shows, so they
+reach every machine at once and do not see processes Mirage did not start.
+
+## Reading machines
+
+`hostname`, `nproc`, `lscpu` and `free` answer for the workspace, as `mirage`,
+and for each machine. `uptime` and `top -b` answer for the machines. One answer
+prints what the real command prints. Several print a row each with the machine
+on the right, so a column you read by position stays where it is; `hostname`
+prints one name a line. Figures are never added up, as one program cannot use another machine's memory.
+
+```bash
+$ nproc
+1  mirage
+5  apple_container:mac
+1  microsandbox:local
+2  e2b:cloud
+
+$ hostname
+mirage
+mirage-box
+e2b.local
+
+$ lscpu
+                      mirage         microsandbox:local  e2b:cloud
+Architecture:         -              aarch64             x86_64
+Byte Order:           Little Endian  Little Endian       Little Endian
+CPU(s):               1              1                   2
+Model name:           -              -                   Intel(R) Xeon(R) Processor @ 2.60GHz
+
+$ free -h
+               total        used        free      shared  buff/cache   available  MACHINE
+Mem:            96Mi       1.2Mi        94Mi           -           -        94Mi  mirage
+Swap:             0B          0B          0B                                      mirage
+Mem:           1.1Gi       107Mi       794Mi       4.0Ki       213Mi       994Mi  apple_container:mac
+Swap:             0B          0B          0B                                      apple_container:mac
+Mem:           1.9Gi       139Mi       1.8Gi          0B        70Mi       1.8Gi  microsandbox:local
+Swap:             0B          0B          0B                                      microsandbox:local
+```
+
+The workspace reports one processor, little-endian byte order and, in `free`,
+its [`max_memory`](/home/core/output-limits) with what it holds of that. It
+prints `-` for everything else, so nothing about the server Mirage runs on shows. `lscpu` leaves the flags and
+vulnerability rows out of its table; `lscpu --machine cloud` prints that
+machine's full output, and any other option goes to the default machine's own
+`lscpu`. `df` and `mount` list the workspace's mounts, not a machine's disks.
+
+Inside `$( )` they answer for the machine programs run on by default, so
+`make -j$(nproc)` gets one number. `--machine` picks another:
+`workers=$(nproc --machine cloud)`. `--machine mirage` picks the workspace. The
+host counts as a machine only while a runtime runs programs on it, and prints
+`-` for figures it has no such thing for. `uptime`, `top` and `lscpu` exist only
+in a workspace that runs programs on a machine or the host; there `top` needs
+`-b`, as it does without a terminal.
+
+`ps -o %cpu,%mem,rss,vsz,time` shows what each program has used, and
+`ps --machine cloud` narrows it to one machine. `top` reads each
+machine's processors twice a second apart, so it takes about a second.
 
 ## Machine states
 

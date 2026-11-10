@@ -27,6 +27,7 @@ import type { DispatchFn } from '../../../../runtime/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { CapacityState, PathSpec, type CapacityResult } from '../../../../types.ts'
 import { pathVisible } from '../../../../utils/hidden.ts'
+import { UNLISTED_MOUNTS } from '../constants.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { MountEntry } from '../../../mount/mount.ts'
@@ -167,7 +168,11 @@ async function targetMounts(
   operands: (string | PathSpec)[],
 ): Promise<[MountEntry[], string[]]> {
   const ordered = [...registry.visibleMounts()]
-    .filter((m) => pathVisible(session.visibility, m.prefix.replace(/\/+$/, '') || '/'))
+    .filter(
+      (m) =>
+        !UNLISTED_MOUNTS.has(m.prefix) &&
+        pathVisible(session.visibility, m.prefix.replace(/\/+$/, '') || '/'),
+    )
     .sort((a, b) => compareCodePoints(a.prefix, b.prefix))
   if (operands.length === 0) return [ordered, []]
   const seen = new Set<string>()
@@ -192,7 +197,9 @@ async function targetMounts(
       }
       continue
     }
-    const mount = registry.tryMountFor(virtual)
+    const held = registry.tryMountFor(virtual)
+    const mount =
+      held !== null && UNLISTED_MOUNTS.has(held.prefix) ? registry.tryMountFor('/') : held
     if (mount === null || !ordered.includes(mount)) {
       errors.push(fsErrorLine('df', spec, enoent(spec)))
       continue

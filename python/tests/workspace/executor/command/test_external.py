@@ -36,6 +36,7 @@ from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.types import Program, RunResult
 from mirage.workspace.expand import argv as argv_module
 from mirage.workspace.lookup import SHELL_NAMES, Consumer, lookup, lookup_all
+from mirage.workspace.lookup.constants import CAPTURABLE_BUILTINS
 from mirage.workspace.session import SessionState
 
 
@@ -647,14 +648,7 @@ async def test_native_captures_preserve_shell_builtins(kind):
         {"/work": RAMVFS()}, mode=MountMode.EXEC, runtimes=[probe]
     ) as ws:
         session = SessionState(session_id="lookup")
-        for name in SHELL_NAMES - {
-            "python",
-            "python3",
-            "node",
-            "js",
-            "ps",
-            "kill",
-        }:
+        for name in SHELL_NAMES - CAPTURABLE_BUILTINS:
             assert lookup(name, session, ws._registry) is Consumer.SESSION, (
                 name
             )

@@ -19,7 +19,7 @@ import { CONTINUE_SIGNALS, STOP_SIGNALS } from '../../shell/constants.ts'
 import type { ProcessHandle } from '../process/handle.ts'
 import type { ProcessTable } from '../process/table.ts'
 import type { Process } from '../process/types.ts'
-import { ProcessId, type MachineId, type MachinePid } from '../types.ts'
+import { ProcessId, type MachineId, type MachinePid, type MachineResources } from '../types.ts'
 import type { RecordFields } from '../../workspace/record/types.ts'
 import type { Machine, MachineProcess, MachineState } from './types.ts'
 
@@ -35,6 +35,9 @@ export type HostStop = (
   seenAt: number | null,
   signum: number,
 ) => Promise<boolean>
+
+/** Reads what the host holds, given its id and whether to sample its processors. */
+export type HostResources = (machine: string, cpu: boolean) => Promise<MachineResources>
 
 // The table that holds each machine handle, so a second workspace cannot
 // take, and close, a handle another one runs on; a table's close lets go.
@@ -84,6 +87,7 @@ export class MachineTable {
     private readonly scanHost: HostStatus | null = null,
     private readonly signalHost: HostSignal | null = null,
     private readonly stopHost: HostStop | null = null,
+    private readonly hostResources: HostResources | null = null,
   ) {
     for (const [name, spec] of Object.entries(machines)) {
       const handle = buildMachine(name, spec)
@@ -133,6 +137,13 @@ export class MachineTable {
    *
    * @param machine a machine id as a process record names it.
    */
+  async resources(machine: string, cpu: boolean): Promise<MachineResources> {
+    const handle = this.byId(machine)
+    if (handle !== null) return handle.resources(cpu)
+    if (this.hostResources === null) throw new Error(`unknown machine: '${machine}'`)
+    return this.hostResources(machine, cpu)
+  }
+
   byId(machine: string): MachineHandle | null {
     return this.handles().find((h) => h.id.toString() === machine) ?? null
   }
@@ -367,6 +378,7 @@ export class MachineTable {
         const root = programRow(run, pids, known)
         if (root !== null) {
           handle.showState(root.state ?? 'R')
+          handle.showUsage(root.usage ?? null)
           placed.set(root.pid, handle.record.id.pid)
           if (known?.pid !== root.pid)
             handle.setMachinePid({ pid: root.pid, started: root.started, exited: null })
@@ -382,6 +394,7 @@ export class MachineTable {
           const found = this.placeFound(processes, machine, row, parent, owner)
           if (found !== null) {
             found.showState(row.state ?? 'R')
+            found.showUsage(row.usage ?? null)
             placed.set(row.pid, found.record.id.pid)
             seen.add(foundKey(machine, row))
           }

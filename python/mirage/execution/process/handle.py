@@ -13,6 +13,7 @@ from mirage.execution.process.types import (
     Process,
     ProcessRunner,
     ProcessState,
+    ProcessUsage,
 )
 from mirage.execution.types import MachineId, MachinePid
 from mirage.shell.constants import SIGTERM
@@ -245,6 +246,16 @@ class ProcessHandle:
         """
         with self._lock:
             self._record = replace(self._record, shown_state=state)
+
+    def show_usage(self, usage: ProcessUsage | None) -> None:
+        """Note what a scan read of the program's use of its machine,
+        which is ``ps``'s to show and no store's to keep.
+
+        Args:
+            usage (ProcessUsage | None): what it read; None for nothing.
+        """
+        with self._lock:
+            self._record = replace(self._record, usage=usage)
 
     @property
     def paused(self) -> bool:

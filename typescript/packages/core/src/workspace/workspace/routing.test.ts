@@ -24,7 +24,7 @@ import {
   type Route,
   type ShellNode,
 } from '../../policy/types.ts'
-import { MachineRuntime } from '../../runtime/machine/runtime.ts'
+import { RemoteRuntime } from '../../runtime/machine/runtime.ts'
 import { RouteError } from '../../runtime/routing/index.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
@@ -52,7 +52,7 @@ function workspace(...policies: Policy[]): Workspace {
     {
       mode: MountMode.EXEC,
       machines: { a: new Box('a'), b: new Box('b') },
-      runtimes: [new MachineRuntime({ captures: ['hostname'], machine: 'a' }), 'workspace'],
+      runtimes: [new RemoteRuntime({ captures: ['hostname'], machine: 'a' }), 'workspace'],
       policies,
     },
   )
@@ -64,7 +64,7 @@ function whole(...policies: Policy[]): Workspace {
     {
       mode: MountMode.EXEC,
       machines: { a: new Box('a'), b: new Box('b') },
-      runtimes: [new MachineRuntime({ captures: ['@line'], machine: 'a' })],
+      runtimes: [new RemoteRuntime({ captures: ['@line'], machine: 'a' })],
       policies,
     },
   )
@@ -206,7 +206,7 @@ describe('routing on machines', () => {
       {
         mode: MountMode.EXEC,
         machines: { a: new Box('a') },
-        runtimes: [new MachineRuntime({ captures: ['@line'], machine: 'a' }), 'monty'],
+        runtimes: [new RemoteRuntime({ captures: ['@line'], machine: 'a' }), 'monty'],
         policies: [new HostnameOnMonty()],
       },
     )
@@ -243,8 +243,8 @@ describe('routing on machines', () => {
     try {
       const said = await ws.explain('hostname; hostname -s; ls')
       expect([...commands(said.node)].map((c) => [c.command, c.runtime, c.machine])).toEqual([
-        ['hostname', 'machine', 'box:a'],
-        ['hostname', 'machine', 'box:b'],
+        ['hostname', 'remote', 'box:a'],
+        ['hostname', 'remote', 'box:b'],
         ['ls', '', ''],
       ])
     } finally {
@@ -271,7 +271,7 @@ describe('routing on machines', () => {
       {
         mode: MountMode.EXEC,
         machines: { a: new Box('a'), b: new Box('b') },
-        runtimes: [new MachineRuntime({ captures: ['nohup', 'hostname'], machine: 'a' })],
+        runtimes: [new RemoteRuntime({ captures: ['nohup', 'hostname'], machine: 'a' })],
         policies: [new ProgramOnB()],
       },
     )

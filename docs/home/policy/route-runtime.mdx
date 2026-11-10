@@ -22,7 +22,7 @@ machines:
     container: my-box
 runtimes:
   - monty
-  - name: machine
+  - name: remote
     captures: ["@python"]
     machine: box
   - workspace
@@ -33,7 +33,7 @@ route_policy: {script: ./route.py, runtime: monty}
 def pre_execute(ctx):
     paths = [p for c in ctx["commands"] for p in c["paths"]]
     if any(p.startswith("/jobs/") for p in paths):
-        return {"kind": "route", "runtime": "machine"}
+        return {"kind": "route", "runtime": "remote"}
 ```
 
 `python3 /jobs/train.py` runs in the container; `cat data.csv | python3
@@ -48,9 +48,9 @@ resolved paths, and the session. It returns its answer:
 
 | Returns | Effect |
 | --- | --- |
-| `{"kind": "route", "runtime": "machine"}` | that runtime serves every command it captures |
-| `{"kind": "route", "machine": "box"}` | the `machine` runtime runs the line's programs on that machine |
-| `{"kind": "route", "runtime": "machine", "reason": "..."}` | the same, with why for `ws.explain(line)` to show |
+| `{"kind": "route", "runtime": "remote"}` | that runtime serves every command it captures |
+| `{"kind": "route", "machine": "box"}` | the `remote` runtime runs the line's programs on that machine |
+| `{"kind": "route", "runtime": "remote", "reason": "..."}` | the same, with why for `ws.explain(line)` to show |
 | `{"kind": "route", "runtime": "workspace"}` | entries that capture `@line` are excluded entirely; other entries still serve their captures, and a command only an excluded entry captures is refused |
 | `None` | the first capturer in `runtimes` order serves each command |
 | `{"kind": "deny", "reason": "..."}` | the line is refused, as by any `pre_execute` program |
@@ -68,7 +68,7 @@ from mirage.policy import RouteContext
 
 def policy(ctx: RouteContext) -> str | None:
     paths = [p.virtual for c in ctx.commands for p in c.paths]
-    return "machine" if any(p.startswith("/jobs/") for p in paths) else None
+    return "remote" if any(p.startswith("/jobs/") for p in paths) else None
 
 ws = Workspace(mounts, runtimes=runtimes, route_policy=policy)
 ```

@@ -16,7 +16,7 @@ import type { MachineTable } from '../../execution/machine/table.ts'
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
 import type { WorkspaceBinding } from '../../runtime/binding.ts'
 import { LanguageRuntime } from '../../runtime/language.ts'
-import { MachineRuntime } from '../../runtime/machine/runtime.ts'
+import { RemoteRuntime } from '../../runtime/machine/runtime.ts'
 import {
   bindCommands,
   buildRuntime,
@@ -106,7 +106,7 @@ export class Runtimes {
    *   workspace holds the entry.
    */
   private bindEntry(entry: Runtime): void {
-    const onMachine = entry instanceof MachineRuntime
+    const onMachine = entry instanceof RemoteRuntime
     if (onMachine && entry.defaultMachine !== null) this.machines.get(entry.defaultMachine)
     entry.bind(this.binding)
     if (onMachine) entry.bindMachines(this.machines)

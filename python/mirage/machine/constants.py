@@ -379,6 +379,7 @@ SCAN_WAIT_SECONDS = 10.0
 # a process, or a run's report.
 SCAN_MARK = "M"
 SCAN_RUN_MARK = "R"
+SCAN_FACTS_MARK = "F"
 
 
 def _report_name(text: str) -> str:
@@ -472,10 +473,14 @@ def scan_line(workspace: str) -> str:
     processes, found through ``/proc``, prints one row: ``SCAN_MARK``,
     the tag, its pid, its parent's pid, when it started in clock ticks
     after boot (``stat``'s 22nd field), its state letter (``stat``'s
-    third) and its arguments, space separated. A process that exits
-    mid-scan is skipped. Each run's report prints one row as well:
-    ``SCAN_RUN_MARK``, the process it is, then the report's first line and
-    its second after a ``;``. Nothing else is printed. It needs what
+    third), its CPU time in user and system mode, its virtual size and
+    resident pages (``stat``'s 14th, 15th, 23rd and 24th) and its
+    arguments, space separated. A process that exits mid-scan is skipped.
+    Each run's report prints one row as well: ``SCAN_RUN_MARK``, the
+    process it is, then the report's first line and its second after a
+    ``;``. One row, ``SCAN_FACTS_MARK``, gives what turns those into
+    usage: seconds since boot, clock ticks a second, the page size and
+    the machine's memory in KiB. Nothing else is printed. It needs what
     ``stop_line`` does.
 
     Args:
@@ -491,16 +496,124 @@ def scan_line(workspace: str) -> str:
         '{ read -r a; read -r b; } <"$f"; '
         f'printf \'{SCAN_RUN_MARK} %s %s;%s\\n\' "${{f##*-}}" "$a" "$b"; '
         "done; "
+        "read -r u _ 2>/dev/null </proc/uptime; "
+        "h=$(getconf CLK_TCK 2>/dev/null) || h=100; "
+        "b=$(getconf PAGESIZE 2>/dev/null) || b=4096; "
+        "k=$(grep -m1 '^MemTotal:' /proc/meminfo 2>/dev/null); "
+        "set -- $k; "
+        f"printf '{SCAN_FACTS_MARK} %s %s %s %s\\n' "
+        '"$u" "$h" "$b" "$2"; '
         "for p in /proc/[0-9]*; do "
         "t=$(tr '\\000' '\\n' 2>/dev/null < \"$p/environ\" "
         f"| grep -m1 '^{PROCESS}=') || continue; "
         'case $t in "$m"*) ;; *) continue ;; esac; '
         's=$(cat "$p/stat" 2>/dev/null) || continue; '
         "set -- ${s##*)}; "
-        f"printf '{SCAN_MARK} %s %s %s %s %s %s\\n' "
+        f"printf '{SCAN_MARK} %s %s %s %s %s %s %s %s %s %s\\n' "
         f'"${{t#{PROCESS}=}}" "${{p#/proc/}}" "$2" "${{20}}" "$1" '
+        '"${12}" "${13}" "${21}" "${22}" '
         "\"$(tr '\\000\\n' '  ' 2>/dev/null < \"$p/cmdline\")\"; "
         "done; true"
+    )
+
+
+# Marks the rows ``resources_line`` prints, so what a provider mixes in
+# is left out.
+RESOURCE_MARK = "X"
+
+# How long a machine has to say what it holds.
+RESOURCE_WAIT_SECONDS = 10.0
+
+# How far apart the two reads of the processors' time are.
+CPU_SAMPLE_SECONDS = 1
+
+
+def resources_line(cpu: bool) -> str:
+    """The shell line that prints what a Linux machine holds, a row
+    each, ``RESOURCE_MARK`` first: its name, ``lscpu``'s rows, processors,
+    clock, load, uptime, users and each ``/proc/meminfo`` entry. Asked
+    for ``cpu`` it also reads the processors' time twice
+    ``CPU_SAMPLE_SECONDS`` apart, as one read says nothing of now, and
+    each process's state letter. It
+    needs a POSIX shell, ``/proc``, ``date`` and ``grep``; ``nproc``,
+    ``who`` and ``lscpu`` where the machine has them.
+
+    Args:
+        cpu (bool): read the processors' time and the process states.
+    """
+    mark = RESOURCE_MARK
+    sample = (
+        (
+            "read -r a 2>/dev/null </proc/stat; "
+            f"sleep {CPU_SAMPLE_SECONDS}; "
+            "read -r b 2>/dev/null </proc/stat; "
+            f"printf '{mark} before %s\\n' \"$a\"; "
+            f"printf '{mark} after %s\\n' \"$b\"; "
+            "t=; for f in /proc/[0-9]*/stat; do "
+            'IFS= read -r s 2>/dev/null <"$f" || continue; '
+            "s=${s##*) }; t=$t${s%% *}; done; "
+            f"printf '{mark} states %s\\n' \"$t\"; "
+        )
+        if cpu
+        else ""
+    )
+    return (
+        f"PATH={TOOLS_PATH}; "
+        "read -r h 2>/dev/null </proc/sys/kernel/hostname; "
+        f"printf '{mark} host %s\\n' \"$h\"; "
+        "LC_ALL=C lscpu 2>/dev/null | while IFS= read -r c; do "
+        f"printf '{mark} lscpu %s\\n' \"$c\"; done; "
+        "n=$(nproc 2>/dev/null) || n=$(grep -c ^processor /proc/cpuinfo); "
+        "a=$(nproc --all 2>/dev/null) || a=$n; "
+        f'printf \'{mark} cpus %s %s\\n\' "$n" "$a"; '
+        f"printf '{mark} clock %s\\n' \"$(date '+%s %H:%M:%S %z')\"; "
+        "read -r l 2>/dev/null </proc/loadavg; "
+        f"printf '{mark} load %s\\n' \"$l\"; "
+        "read -r u _ 2>/dev/null </proc/uptime; "
+        f"printf '{mark} up %s\\n' \"$u\"; "
+        f"printf '{mark} users %s\\n' \"$(who 2>/dev/null | grep -c .)\"; "
+        "while read -r k v _; do "
+        f'printf \'{mark} mem %s %s\\n\' "$k" "$v"; '
+        "done </proc/meminfo; " + sample + "true"
+    )
+
+
+def darwin_resources_line(cpu: bool) -> str:
+    """The shell line that prints what a Mac holds, which has no
+    ``/proc``, a row each as ``resources_line`` does, from ``sysctl``,
+    ``vm_stat`` and, asked for ``cpu``, two reads of ``top``.
+
+    Args:
+        cpu (bool): read the processors' time and the process counts.
+    """
+    mark = RESOURCE_MARK
+    sample = (
+        (
+            f"top -l 2 -n 0 -s {CPU_SAMPLE_SECONDS} 2>/dev/null | "
+            "grep -E '^(Processes|CPU usage)' | tail -n 2 | "
+            "while IFS= read -r l; do "
+            f"printf '{mark} top %s\\n' \"$l\"; done; "
+        )
+        if cpu
+        else ""
+    )
+    return (
+        "PATH=/usr/bin:/bin:/usr/sbin:/sbin; "
+        "n=$(sysctl -n hw.ncpu); "
+        f"printf '{mark} host %s\\n' \"$(hostname)\"; "
+        f"printf '{mark} lscpu %-41s%s\\n' Architecture: \"$(uname -m)\"; "
+        f"printf '{mark} lscpu %-41s%s\\n' 'CPU(s):' \"$n\"; "
+        f"printf '{mark} lscpu %-41s%s\\n' 'Model name:' "
+        '"$(sysctl -n machdep.cpu.brand_string)"; '
+        f'printf \'{mark} cpus %s %s\\n\' "$n" "$n"; '
+        f"printf '{mark} clock %s\\n' \"$(date '+%s %H:%M:%S %z')\"; "
+        f"printf '{mark} load %s\\n' \"$(sysctl -n vm.loadavg)\"; "
+        f"printf '{mark} boot %s\\n' \"$(sysctl -n kern.boottime)\"; "
+        f"printf '{mark} users %s\\n' \"$(who 2>/dev/null | grep -c .)\"; "
+        f"printf '{mark} memsize %s\\n' \"$(sysctl -n hw.memsize)\"; "
+        f"printf '{mark} swap %s\\n' \"$(sysctl -n vm.swapusage)\"; "
+        "vm_stat | while IFS= read -r l; do "
+        f"printf '{mark} vm %s\\n' \"$l\"; done; " + sample + "true"
     )
 
 

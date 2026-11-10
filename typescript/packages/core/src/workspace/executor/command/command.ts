@@ -62,8 +62,9 @@ import type { EvaluationContext } from '../../evaluation.ts'
 import { globOptions, resolveGlobs } from '../../expand/globs.ts'
 import type { ExecuteFn } from '../../expand/types.ts'
 import { Files } from '../../files.ts'
-import { EXEC_WRAPPERS } from '../../lookup/constants.ts'
+import { EXEC_WRAPPERS, MACHINE_VIEW } from '../../lookup/constants.ts'
 import { Consumer, JOB_BUILTINS, lineFacts, lookup, runsAs } from '../../lookup/index.ts'
+import { picksMachine, runsPrograms } from '../../lookup/lookup.ts'
 import { MountCommandAmbiguous } from '../../mount/errors.ts'
 import type { MountEntry } from '../../mount/mount.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
@@ -80,7 +81,16 @@ import { resolveNewerRefs } from '../find_refs.ts'
 import { handleDisown } from '../builtins/disown/disown.ts'
 import { handleJobs } from '../builtins/jobs/jobs.ts'
 import { handleKill } from '../builtins/kill/kill.ts'
+import { handleKillall } from '../builtins/pgrep/killall.ts'
+import { handlePgrep, handlePkill } from '../builtins/pgrep/pgrep.ts'
+import { handlePidof } from '../builtins/pgrep/pidof.ts'
 import { handlePs } from '../builtins/ps/ps.ts'
+import { handleFree } from '../builtins/resources/free.ts'
+import { handleHostname } from '../builtins/resources/hostname.ts'
+import { handleLscpu } from '../builtins/resources/lscpu.ts'
+import { handleNproc } from '../builtins/resources/nproc.ts'
+import { handleTop } from '../builtins/resources/top.ts'
+import { handleUptime } from '../builtins/resources/uptime.ts'
 import { handleWait } from '../builtins/wait/wait.ts'
 import {
   handleCli,
@@ -122,6 +132,31 @@ const JOB_HANDLERS: Record<
   kill: handleKill,
   jobs: handleJobs,
   disown: handleDisown,
+  pgrep: handlePgrep,
+  pkill: handlePkill,
+  pidof: handlePidof,
+  killall: handleKillall,
+}
+
+// The builtins that report on the machines programs run on; `nproc` answers
+// for them only once there are any.
+const MACHINE_HANDLERS: Record<
+  string,
+  (
+    jobTable: JobTable,
+    textParts: string[],
+    session: SessionState | null,
+    view: SessionView | null,
+    signal?: AbortSignal,
+    sink?: JobConsole,
+  ) => RedirectResult | Promise<RedirectResult>
+> = {
+  free: handleFree,
+  uptime: handleUptime,
+  top: handleTop,
+  nproc: handleNproc,
+  hostname: handleHostname,
+  lscpu: handleLscpu,
 }
 
 /**
@@ -791,6 +826,23 @@ export async function handleCommand(
   let cmdName = typeof head === 'string' ? head : head.virtual
   const cmdStr = parts.map((p) => (typeof p === 'string' ? p : p.virtual)).join(' ')
 
+  const machineHandler = MACHINE_HANDLERS[cmdName]
+  if (
+    machineHandler !== undefined &&
+    jobTable !== null &&
+    (cmdName === 'free' ||
+      runsPrograms(context.frame.routing?.bindings ?? registry.runtimeBindings)) &&
+    !(cmdName === 'nproc' && parts.some((p) => p === '--help' || p === '--version')) &&
+    ((cmdName !== 'hostname' && cmdName !== MACHINE_VIEW) ||
+      picksMachine(parts.slice(1).map((p) => (typeof p === 'string' ? p : p.virtual))))
+  ) {
+    return machineHandler(
+      jobTable,
+      parts.map((p) => (typeof p === 'string' ? p : p.rawPath !== '' ? p.rawPath : p.virtual)),
+      session,
+      view,
+    )
+  }
   if (JOB_BUILTINS.has(cmdName) && jobTable !== null) {
     const textParts = parts.map((p) =>
       typeof p === 'string' ? p : p.rawPath !== '' ? p.rawPath : p.virtual,

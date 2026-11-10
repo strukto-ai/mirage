@@ -71,4 +71,7 @@ FALLBACK_TMPDIR = "/tmp"
 
 # The one name every host answers with; hostname and uname -n print it.
 HOSTNAME = "mirage"
+# The processors the workspace itself has: a session runs its lines one
+# at a time, and no host detail leaks.
+CPUS = 1
 MACHINE = "x86_64"

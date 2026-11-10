@@ -3,7 +3,7 @@ import type { MachineId, MachinePid } from '../types.ts'
 import { settledWithin, SignalStop } from '../../utils/abort.ts'
 import { SIGTERM } from '../../shell/constants.ts'
 import { NEVER_TAKEN } from './constants.ts'
-import type { Process, ProcessRunner } from './types.ts'
+import type { Process, ProcessRunner, ProcessUsage } from './types.ts'
 
 /**
  * Runs a runner as the process it is, so what it records names it. The
@@ -215,6 +215,16 @@ export class ProcessHandle {
    */
   showState(state: string | null): void {
     this.current = Object.freeze({ ...this.current, shownState: state })
+  }
+
+  /**
+   * Note what a scan read of the program's use of its machine, which is
+   * `ps`'s to show and no store's to keep. Mirrors Python's `show_usage`.
+   *
+   * @param usage what it read; null for nothing.
+   */
+  showUsage(usage: ProcessUsage | null): void {
+    this.current = Object.freeze({ ...this.current, usage })
   }
 
   /** Whether a `kill -STOP` holds this process or one above it. */

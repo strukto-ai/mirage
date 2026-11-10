@@ -18,7 +18,7 @@ from typing import Any
 
 from mirage.execution.machine.table import MachineTable
 from mirage.machine.handle import MachineHandle
-from mirage.runtime.machine import MachineRuntime
+from mirage.runtime.machine import RemoteRuntime
 
 # One table per handle, as one workspace holds a handle however many
 # runtimes a test binds to it.
@@ -27,14 +27,14 @@ _TABLES: "weakref.WeakKeyDictionary[MachineHandle, MachineTable]" = (
 )
 
 
-def machine_runtime(handle: MachineHandle) -> MachineRuntime:
-    """A machine runtime on one machine, bound to it as a workspace binds
+def machine_runtime(handle: MachineHandle) -> RemoteRuntime:
+    """A remote runtime on one machine, bound to it as a workspace binds
     its entries, capturing what a fake handle's ``captures`` names.
 
     Args:
         handle (MachineHandle): the machine.
     """
-    runtime = MachineRuntime(captures_of(handle), machine=handle.name)
+    runtime = RemoteRuntime(captures_of(handle), machine=handle.name)
     table = _TABLES.get(handle)
     if table is None:
         table = _TABLES[handle] = MachineTable({handle.name: handle})
@@ -51,7 +51,7 @@ def on(handle: MachineHandle, *rest: Any) -> dict[str, Any]:
         handle (MachineHandle): the machine.
         rest (Any): the entries listed after it.
     """
-    entry = MachineRuntime(captures_of(handle), machine=handle.name)
+    entry = RemoteRuntime(captures_of(handle), machine=handle.name)
     return {"machines": {handle.name: handle}, "runtimes": [entry, *rest]}
 
 

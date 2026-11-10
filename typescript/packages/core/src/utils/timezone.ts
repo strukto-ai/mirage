@@ -115,35 +115,6 @@ class UtcZone implements Zone {
   }
 }
 
-// Resolve the host zone at the instant being formatted, just as explicit TZ does.
-class LocalZone implements Zone {
-  parts(dt: Date): ZoneParts {
-    return {
-      year: dt.getFullYear(),
-      month: dt.getMonth(),
-      day: dt.getDate(),
-      hour: dt.getHours(),
-      minute: dt.getMinutes(),
-      second: dt.getSeconds(),
-      ms: dt.getMilliseconds(),
-      weekday: dt.getDay(),
-      offsetSec: -dt.getTimezoneOffset() * 60,
-      abbrev: tzAbbreviation(
-        new Intl.DateTimeFormat().resolvedOptions().timeZone,
-        -dt.getTimezoneOffset() * 60,
-        Math.floor(dt.getTime() / 1000),
-      ),
-    }
-  }
-
-  fromWall(p: WallParts): Date {
-    const d = new Date(0)
-    d.setFullYear(p.year, p.month, p.day)
-    d.setHours(p.hour, p.minute, p.second, p.ms)
-    return d
-  }
-}
-
 /** One offset under one abbreviation: `UTC0`, `JST-9`, `<+0530>-5:30`. */
 class FixedZone implements Zone {
   constructor(
@@ -422,16 +393,14 @@ export function posixTransitions(zone: Zone, year: number): [number, number] | n
 }
 
 export const UTC_ZONE: Zone = new UtcZone()
-export const LOCAL_ZONE: Zone = new LocalZone()
 
 /**
- * The zone a command environment's TZ names, or null when TZ is unset (or
- * there is no environment), which means the host's local zone.
+ * The zone a command environment's TZ names, UTC when TZ is unset (or there
+ * is no environment), so the server's own zone never shows in a workspace.
  */
-export function zoneFromEnv(env: Readonly<Record<string, string>> | null | undefined): Zone | null {
+export function zoneFromEnv(env: Readonly<Record<string, string>> | null | undefined): Zone {
   const spec = env?.[TZ_VAR]
-  if (spec === undefined) return null
-  return resolveTz(spec)
+  return spec === undefined ? UTC_ZONE : resolveTz(spec)
 }
 
 /**

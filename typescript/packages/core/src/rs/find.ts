@@ -19,7 +19,7 @@ import { textView, utf8Locale } from '../shell/bytes.ts'
 import type { JsonValue } from '../types.ts'
 import { systemNow } from '../utils/clock.ts'
 import { parseDateExpr } from '../utils/dates.ts'
-import { LOCAL_ZONE, UTC_ZONE, zoneFromEnv, type Zone } from '../utils/timezone.ts'
+import { UTC_ZONE, zoneFromEnv, type Zone } from '../utils/timezone.ts'
 import { scanned } from './scan.ts'
 
 export const OPERAND = ''
@@ -228,12 +228,11 @@ export function ageBounds(cmp: string, amount: number, minutes: boolean, origin:
 
 /**
  * `-daystart`'s origin: the midnight that ends today in `zone`, the
- * session's `TZ`, or in the host's local zone when null.
+ * session's `TZ`, UTC without one.
  */
-export function nextMidnight(now: number, zone: Zone | null): number {
-  const here = zone ?? LOCAL_ZONE
-  const today = here.parts(new Date(now * 1000))
-  const midnight = here.fromWall({
+export function nextMidnight(now: number, zone: Zone): number {
+  const today = zone.parts(new Date(now * 1000))
+  const midnight = zone.fromWall({
     year: today.year,
     month: today.month,
     day: today.day + 1,
@@ -303,7 +302,7 @@ function action(raw: Obj): FindAction {
 interface Binding {
   readonly refs: readonly number[]
   readonly now: number
-  readonly zone: Zone | null
+  readonly zone: Zone
   readonly utf8: boolean
   readonly profile: string | null
   window: Bounds | null

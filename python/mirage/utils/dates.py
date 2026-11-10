@@ -14,7 +14,6 @@
 import json
 import logging
 import math
-import time
 from collections.abc import Generator, Mapping
 from contextlib import closing
 from datetime import datetime, timezone, tzinfo
@@ -31,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 def _date_request(
     header: Mapping[str, JsonValue],
-    tz: tzinfo | None,
+    tz: tzinfo,
     zones: dict[str, tzinfo],
 ) -> bytes:
     name = header["zone"]
@@ -41,40 +40,18 @@ def _date_request(
         if name not in zones:
             zones[name] = resolve_tz(name)
         zone = zones[name]
-    if "wall" in header:
-        wall = header["wall"]
-        assert isinstance(wall, list)
-        values = [value for value in wall if isinstance(value, int)]
-        assert len(values) == 6
-        return json.dumps(
-            round(
-                datetime(
-                    values[0],
-                    values[1],
-                    values[2],
-                    values[3],
-                    values[4],
-                    values[5],
-                ).timestamp()
-            )
-        ).encode()
     if "year" in header:
         year = header["year"]
         assert isinstance(year, int)
-        return json.dumps(
-            [] if zone is None else posix_transitions(zone, year) or []
-        ).encode()
+        return json.dumps(posix_transitions(zone, year) or []).encode()
     instant = header["instant"]
     assert isinstance(instant, int)
-    if zone is None:
-        shown = time.localtime(instant)
-        offset, abbreviation = shown.tm_gmtoff, shown.tm_zone
-    else:
-        moment = datetime.fromtimestamp(instant, zone)
-        shift = moment.utcoffset()
-        offset = 0 if shift is None else int(shift.total_seconds())
-        abbreviation = moment.tzname() or ""
-    return json.dumps({"offset": offset, "name": abbreviation}).encode()
+    moment = datetime.fromtimestamp(instant, zone)
+    shift = moment.utcoffset()
+    offset = 0 if shift is None else int(shift.total_seconds())
+    return json.dumps(
+        {"offset": offset, "name": moment.tzname() or ""}
+    ).encode()
 
 
 def clock_reply() -> bytes:
@@ -87,14 +64,14 @@ def clock_reply() -> bytes:
 
 def date_reply(
     header: Mapping[str, JsonValue],
-    tz: tzinfo | None,
+    tz: tzinfo,
     zones: dict[str, tzinfo],
 ) -> tuple[dict[str, JsonValue], bytes]:
     """The answer to one of a date stream's zone questions.
 
     Args:
         header (Mapping[str, JsonValue]): the question.
-        tz (tzinfo | None): the command's zone; None is the host's.
+        tz (tzinfo): the command's zone.
         zones (dict[str, tzinfo]): the named zones resolved so far.
     """
     try:
@@ -104,7 +81,7 @@ def date_reply(
 
 
 def _date_steps(
-    text: str, mode: str, tz: tzinfo | None, now: datetime | None
+    text: str, mode: str, tz: tzinfo, now: datetime | None
 ) -> Generator[bytes, None, None]:
     if now is None:
         current, nanos = divmod(
@@ -120,7 +97,6 @@ def _date_steps(
             "mode": mode,
             "now": current,
             "nanos": nanos,
-            "local": tz is None,
         },
     )
     zones: dict[str, tzinfo] = {}
@@ -135,7 +111,7 @@ def _date_steps(
 
 
 def _date_result(
-    text: str, mode: str, tz: tzinfo | None, now: datetime | None
+    text: str, mode: str, tz: tzinfo, now: datetime | None
 ) -> dict[str, JsonValue] | None:
     result: dict[str, JsonValue] | None = json.loads(
         b"".join(_date_steps(text, mode, tz, now))
@@ -144,7 +120,7 @@ def _date_result(
 
 
 async def _date_async(
-    text: str, mode: str, tz: tzinfo | None, now: datetime | None
+    text: str, mode: str, tz: tzinfo, now: datetime | None
 ) -> datetime | None:
     try:
         budget = YieldBudget()
@@ -159,20 +135,20 @@ async def _date_async(
 
 
 async def parse_date_expr_async(
-    text: str, tz: tzinfo | None = None, now: datetime | None = None
+    text: str, tz: tzinfo = timezone.utc, now: datetime | None = None
 ) -> datetime | None:
     """Parse a date expression, yielding between shared-core steps.
 
     Args:
         text (str): The date expression.
-        tz (tzinfo | None): The result's zone, or the host's local zone.
+        tz (tzinfo): The result's zone.
         now (datetime | None): The current moment, injectable for tests.
     """
     return await _date_async(text, "expr", tz, now)
 
 
 async def parse_posix_time_async(
-    text: str, *, tz: tzinfo | None = None, now: datetime | None = None
+    text: str, *, tz: tzinfo = timezone.utc, now: datetime | None = None
 ) -> datetime | None:
     """Parse the ``MMDDhhmm[[CC]YY][.ss]`` a bare ``date`` operand is,
     yielding between shared-core steps.
@@ -188,32 +164,24 @@ async def parse_posix_time_async(
 
     Args:
         text (str): the operand as typed.
-        tz (tzinfo | None): the zone the wall clock is read in, None for
-            the host's local zone.
+        tz (tzinfo): the zone the wall clock is read in.
         now (datetime | None): the current moment, injectable for tests.
     """
     return await _date_async(text, "posix", tz, now)
 
 
 def _date_placed(
-    result: dict[str, JsonValue] | None, tz: tzinfo | None
+    result: dict[str, JsonValue] | None, tz: tzinfo
 ) -> datetime | None:
     if result is None:
         return None
-    wall = result["wall"]
-    if isinstance(wall, list):
-        values = [value for value in wall if isinstance(value, int)]
-        assert len(values) == 6
-        return datetime(
-            values[0], values[1], values[2], values[3], values[4], values[5]
-        )
     epoch, nanos = result["epoch"], result["nanos"]
     assert isinstance(epoch, int) and isinstance(nanos, int)
     return datetime.fromtimestamp(epoch, tz).replace(microsecond=nanos // 1000)
 
 
 def parse_date_expr(
-    text: str, tz: tzinfo | None = None, now: datetime | None = None
+    text: str, tz: tzinfo = timezone.utc, now: datetime | None = None
 ) -> datetime | None:
     """Parse a free-form date expression as ``date -d`` reads it.
 
@@ -229,8 +197,7 @@ def parse_date_expr(
 
     Args:
         text (str): the expression.
-        tz (tzinfo | None): the zone it is read and returned in, None for
-            the host's local zone (and a naive result).
+        tz (tzinfo): the zone it is read and returned in.
         now (datetime | None): the current moment, injectable for tests;
             a naive one is the host's local time.
     """

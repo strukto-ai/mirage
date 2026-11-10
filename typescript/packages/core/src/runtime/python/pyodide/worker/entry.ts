@@ -22,6 +22,8 @@ import { PyodideRuntime } from '../runtime.ts'
 import type { FlushFailure, SyncVFS } from '../fs/types.ts'
 import { failureText, requestOverBridge, requestSync } from '../../../wasm/transport.ts'
 import { signalled } from '../interrupt.ts'
+import { zoneFromEnv } from '../../../../utils/timezone.ts'
+import { zonedDate } from './clock.ts'
 import type { ExecuteRequest, VfsRequest, WorkerMessage } from './types.ts'
 
 const node = (globalThis as { process?: { versions?: { node?: string } } }).process?.versions?.node
@@ -56,6 +58,9 @@ console.warn = (...messages: unknown[]) => {
   post({ kind: 'notice', message: messages.map(String).join(' ') })
 }
 const sync: SyncVFS = {
+  started: () => {
+    post({ kind: 'started' })
+  },
   checkPath: (path, follow) => {
     call({
       op: 'dispatch',
@@ -113,9 +118,14 @@ async function execute(request: ExecuteRequest): Promise<void> {
     // worker is this runtime's own and its interpreter runs one program
     // at a time.
     runtime.ids = request.ids
+    runtime.room = request.room ?? null
+    const hostDate = Date
     const hostNow = Date.now
     const offset = request.offset ?? 0
     if (offset !== 0) Date.now = () => hostNow() + offset * 1000
+    // Its local time, which Emscripten reads from this worker's `Date` too,
+    // is the session's TZ, or UTC, and never the server's.
+    globalThis.Date = zonedDate(zoneFromEnv(request.env))
     const value = await runtime
       .interpret(
         undefined,
@@ -134,6 +144,7 @@ async function execute(request: ExecuteRequest): Promise<void> {
         },
       )
       .finally(() => {
+        globalThis.Date = hostDate
         Date.now = hostNow
       })
     post({ kind: 'result', value })

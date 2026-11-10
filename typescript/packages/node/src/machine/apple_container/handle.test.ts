@@ -27,7 +27,7 @@ import { isLineExecutor, isProcessExecutor } from '@struktoai/mirage-core/runtim
 import { describe, expect, it, vi } from 'vitest'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import type { Route, RouteContext } from '@struktoai/mirage-core/policy/types'
-import { MachineRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
+import { RemoteRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
 import type { AppleContainerConfig } from './config.ts'
 import { AppleContainerMachine } from './handle.ts'
 import { Workspace } from '../../workspace.ts'
@@ -368,7 +368,7 @@ it('gives each session a container of its own through a route', async () => {
     {
       mode: MountMode.EXEC,
       machines: boxes,
-      runtimes: [new MachineRuntime({ captures: ['uname'] }), 'workspace'],
+      runtimes: [new RemoteRuntime({ captures: ['uname'] }), 'workspace'],
       policies: [new OwnBox()],
     },
   )

@@ -69,8 +69,8 @@ COLUMNS: dict[str, tuple[str, int, bool, str]] = {
     "tty": ("TT", 8, False, "tty"),
     "tt": ("TT", 8, False, "tty"),
     "tname": ("TTY", 8, False, "tty"),
-    "time": ("TIME", 8, True, "time"),
-    "cputime": ("TIME", 8, True, "time"),
+    "time": ("TIME", 8, True, "cpu_time"),
+    "cputime": ("TIME", 8, True, "cpu_time"),
     "cputimes": ("TIME", 8, True, "zero"),
     "etime": ("ELAPSED", 11, True, "etime"),
     "etimes": ("ELAPSED", 7, True, "etimes"),
@@ -79,11 +79,11 @@ COLUMNS: dict[str, tuple[str, int, bool, str]] = {
     "start_time": ("START", 5, False, "stime"),
     "stime": ("STIME", 5, False, "stime"),
     "bsdstart": ("START", 6, True, "bsdstart"),
-    "rss": ("RSS", 5, True, "zero"),
-    "rssize": ("RSS", 5, True, "zero"),
-    "rsz": ("RSZ", 5, True, "zero"),
-    "vsz": ("VSZ", 6, True, "zero"),
-    "vsize": ("VSZ", 6, True, "zero"),
+    "rss": ("RSS", 5, True, "rss"),
+    "rssize": ("RSS", 5, True, "rss"),
+    "rsz": ("RSZ", 5, True, "rss"),
+    "vsz": ("VSZ", 6, True, "vsz"),
+    "vsize": ("VSZ", 6, True, "vsz"),
     "sz": ("SZ", 5, True, "zero"),
     "trs": ("TRS", 4, True, "zero"),
     "drs": ("DRS", 5, True, "zero"),
@@ -95,10 +95,10 @@ COLUMNS: dict[str, tuple[str, int, bool, str]] = {
     "min_flt": ("MINFL", 6, True, "zero"),
     "majflt": ("MAJFLT", 6, True, "zero"),
     "minflt": ("MINFLT", 6, True, "zero"),
-    "%cpu": ("%CPU", 4, True, "percent"),
-    "pcpu": ("%CPU", 4, True, "percent"),
-    "%mem": ("%MEM", 4, True, "percent"),
-    "pmem": ("%MEM", 4, True, "percent"),
+    "%cpu": ("%CPU", 4, True, "cpu_percent"),
+    "pcpu": ("%CPU", 4, True, "cpu_percent"),
+    "%mem": ("%MEM", 4, True, "mem_percent"),
+    "pmem": ("%MEM", 4, True, "mem_percent"),
     "c": ("C", 2, True, "zero"),
     "cp": ("CP", 3, True, "zero"),
     "ni": ("NI", 3, True, "zero"),
@@ -144,15 +144,24 @@ GAP = "    "
 FIXED = {
     "tpgid": "-1",
     "tty": "?",
-    "time": "00:00:00",
     "zero": "0",
     "one": "1",
-    "percent": "0.0",
     "pri": "19",
     "priority": "20",
     "opri": "80",
     "dash": "-",
     "cls": "TS",
+}
+
+
+# The columns a scan of a machine answers, and what each prints for a
+# process it read nothing of.
+USAGE_FACTS = {
+    "cpu_percent": "0.0",
+    "mem_percent": "0.0",
+    "cpu_time": "00:00:00",
+    "rss": "0",
+    "vsz": "0",
 }
 
 

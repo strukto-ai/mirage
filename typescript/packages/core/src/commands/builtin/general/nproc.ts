@@ -18,20 +18,13 @@ import { IOResult } from '../../../io/types.ts'
 import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { quoteText } from '../../quote.ts'
+import { CPUS, HOSTNAME } from '../constants.ts'
+import { threadLimit } from '../utils/threads.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 
 const ENC = new TextEncoder()
-// A workspace runs a session's lines one at a time, and no host detail leaks,
-// so every host answers the same.
-const CPUS = 1
 const DIGITS = /^[0-9]+$/
-const LEADING_COUNT = /^\s*([0-9]+)\s*(?:,|$)/
-
-function threadCount(value: string | undefined): number | null {
-  const count = value === undefined ? 0 : Number(LEADING_COUNT.exec(value)?.[1] ?? 0)
-  return count > 0 ? count : null
-}
 
 function nproc(
   _accessor: Accessor,
@@ -47,13 +40,12 @@ function nproc(
   }
   const extra = texts[0]
   if (extra !== undefined) throw extraOperandError('nproc', extra)
-  let count = CPUS
-  if (!fl.asBool('all')) {
-    const env = ctx.env ?? {}
-    count = threadCount(env.OMP_NUM_THREADS) ?? CPUS
-    const limit = threadCount(env.OMP_THREAD_LIMIT)
-    if (limit !== null) count = Math.min(count, limit)
+  const machine = fl.asStr('machine')
+  if (machine !== undefined && machine !== HOSTNAME) {
+    const line = `nproc: ${quoteText(machine)}: no such machine\n`
+    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(line) })]
   }
+  const count = fl.asBool('all') ? CPUS : threadLimit(ctx.env ?? {}, CPUS)
   return [ENC.encode(`${String(Math.max(1, count - Number(ignore ?? 0)))}\n`), new IOResult()]
 }
 

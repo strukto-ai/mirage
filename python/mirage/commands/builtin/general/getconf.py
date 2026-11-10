@@ -17,6 +17,7 @@ from mirage.commands.builtin.utils.paths import vfs_stat_path
 from mirage.commands.config import Context, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.io.memory import memory_budget
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -25,6 +26,7 @@ USAGE = (
     b"       getconf -a [pathname]\n"
 )
 UNDEFINED = "undefined"
+PAGE_SIZE = 4096
 
 # The table `getconf -a` prints, in Mirage's order: POSIX.1-2024's
 # tables first, then earlier standards, then Linux's names. None is
@@ -432,6 +434,22 @@ def variable(name: str) -> tuple[str, str | None] | None:
     return None
 
 
+def live_value(name: str, value: str | None) -> str | None:
+    """A variable's answer: the memory ones are the workspace's
+    ``max_memory`` and what it has left, in pages, and undefined with no
+    cap; the rest are the table's.
+
+    Args:
+        name (str): the variable.
+        value (str | None): its entry in the table.
+    """
+    budget = memory_budget()
+    if budget is None or name not in ("_PHYS_PAGES", "_AVPHYS_PAGES"):
+        return value
+    size = budget.limit if name == "_PHYS_PAGES" else budget.room()
+    return str(size // PAGE_SIZE)
+
+
 async def path_exists(ctx: Context, word: str) -> bool:
     """Whether the PATH operand names something pathconf could open.
 
@@ -465,7 +483,11 @@ async def getconf(
         found = await path_exists(ctx, texts[0] if texts else "/")
         lines = [
             f"{name:<35}"
-            + ((value or "") if found or name not in PATH_VARIABLES else "")
+            + (
+                (live_value(name, value) or "")
+                if found or name not in PATH_VARIABLES
+                else ""
+            )
             + "\n"
             for name, value in GETCONF_VARIABLES
         ]
@@ -476,7 +498,7 @@ async def getconf(
     if row is None:
         err = f"getconf: Unrecognized variable `{texts[0]}'\n"
         return None, IOResult(exit_code=2, stderr=err.encode())
-    name, value = row
+    name, value = row[0], live_value(*row)
     if (name in PATH_VARIABLES) != (len(texts) == 2):
         return None, IOResult(exit_code=2, stderr=USAGE)
     if len(texts) == 2 and not await path_exists(ctx, texts[1]):

@@ -52,3 +52,16 @@ class MachinePipe:
     writer: PipeWriter
     stop: Callable[[], Awaitable[None]]
     diagnostic: Callable[[], Awaitable[str]] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ScanFacts:
+    """What turns a scan's raw figures into usage: ``up_seconds`` since
+    the machine booted, its clock ``ticks`` a second, its ``page`` size
+    in bytes and its ``memory`` in KiB.
+    """
+
+    up_seconds: float
+    ticks: int
+    page: int
+    memory: int

@@ -34,7 +34,7 @@ Python on the machine too.
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.runtime.machine import MachineRuntime
+    from mirage.runtime.machine import RemoteRuntime
 
     ws = Workspace(
         {"/data": RAMVFS()},
@@ -47,14 +47,14 @@ Python on the machine too.
                 "identity_file": "~/.ssh/id_ed25519",
             }
         },
-        runtimes=[MachineRuntime(["@python", "@external"], machine="box")],
+        runtimes=[RemoteRuntime(["@python", "@external"], machine="box")],
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { MountMode, MachineRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { MountMode, RemoteRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const ws = new Workspace(
       { '/data': new RAMVFS() },
@@ -68,7 +68,7 @@ Python on the machine too.
             identityFile: '~/.ssh/id_ed25519',
           },
         },
-        runtimes: [new MachineRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+        runtimes: [new RemoteRuntime({ captures: ['@python', '@external'], machine: 'box' })],
       },
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
@@ -84,7 +84,7 @@ Python on the machine too.
         username: deploy
         identity_file: ~/.ssh/id_ed25519
     runtimes:
-      - name: machine
+      - name: remote
         captures: ["@python", "@external"]
         machine: box
     mounts:
@@ -117,7 +117,7 @@ machines:
     provider: ssh
     host: mybox
 runtimes:
-  - name: machine
+  - name: remote
     captures: ["@python", "@external"]
     machine: box
 ```

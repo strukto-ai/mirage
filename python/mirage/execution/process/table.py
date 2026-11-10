@@ -15,7 +15,12 @@ from mirage.execution.process.constants import FIRST_PID, KEPT_SIGNALS
 from mirage.execution.process.handle import ExecutionBind, ProcessHandle
 from mirage.execution.process.session import SessionProcesses
 from mirage.execution.process.types import Process, ProcessRunner, ProcessState
-from mirage.execution.types import LineId, MachineId, ProcessId
+from mirage.execution.types import (
+    LineId,
+    MachineId,
+    MachineResources,
+    ProcessId,
+)
 from mirage.shell.constants import SIGCONT, SIGKILL, SIGSTOP
 from mirage.types import PathSpec, under_ceiling
 from mirage.utils.clock import system_now
@@ -105,6 +110,12 @@ class ProcessTable:
         # process Mirage stops itself. The workspace sets it.
         self.sender: (
             Callable[[ProcessHandle, int], Awaitable[bool] | None] | None
+        ) = None
+        # The machines the workspace runs programs on, by id as ``ps``
+        # shows them, and what one of them holds now.
+        self.machine_ids: Callable[[], list[str]] | None = None
+        self.machine_resources: (
+            Callable[[str, bool], Awaitable[MachineResources]] | None
         ) = None
 
     def start(

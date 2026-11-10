@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { ShellBuiltin } from '../../../shell/types.ts'
 import { JOB_BUILTINS } from '../../lookup/index.ts'
+import { MACHINE_BUILTINS } from '../../lookup/constants.ts'
 import { BUILTINS } from './table.ts'
 
 // Interpreters are general mount commands (commands/builtin/general),
@@ -25,7 +26,8 @@ describe('the builtin table', () => {
   it('covers every executor-run builtin', () => {
     const expected = new Set<string>()
     for (const word of Object.values(ShellBuiltin)) {
-      if (!JOB_BUILTINS.has(word) && !INTERPRETERS.has(word)) expected.add(word)
+      if (!JOB_BUILTINS.has(word) && !MACHINE_BUILTINS.has(word) && !INTERPRETERS.has(word))
+        expected.add(word)
     }
     expect(new Set(BUILTINS.keys())).toEqual(expected)
   })

@@ -27,6 +27,7 @@ import {
   respond,
   serviceWorkerBridge,
 } from './transport.ts'
+import { capMemory, KEPT_COMPILATIONS, pagesFor } from './limit.ts'
 import type { WasmView } from './view.ts'
 
 /** One run the host hands a worker: the module and what the guest starts with. */
@@ -375,7 +376,9 @@ export class GuestHost {
  * @param trapPrefix - the command name a wasm trap's stderr line starts with.
  */
 export class WasmExecution {
-  private compiled: Promise<WebAssembly.Module> | null = null
+  private loaded: Promise<Uint8Array> | null = null
+  // The compilations kept, by the pages their memory is held to.
+  private readonly compiled = new Map<number | null, Promise<WebAssembly.Module>>()
   private idle: Port[] = []
   private closed = false
 
@@ -384,15 +387,37 @@ export class WasmExecution {
     private readonly trapPrefix: string,
   ) {}
 
-  /** The compiled module; a load that failed is tried again on the next run. */
-  private module(): Promise<WebAssembly.Module> {
-    this.compiled ??= this.source()
-      .then((bytes) => WebAssembly.compile(bytes as Uint8Array<ArrayBuffer>))
+  private load(): Promise<Uint8Array> {
+    this.loaded ??= this.source().catch((error: unknown) => {
+      this.loaded = null
+      throw error
+    })
+    return this.loaded
+  }
+
+  /**
+   * The compiled module, its memory held to `maxMemory` bytes when one is
+   * named; a load that failed is tried again on the next run.
+   */
+  private module(maxMemory: number | null): Promise<WebAssembly.Module> {
+    const pages = maxMemory === null ? null : pagesFor(maxMemory)
+    const known = this.compiled.get(pages)
+    if (known !== undefined) return known
+    if (this.compiled.size >= KEPT_COMPILATIONS) {
+      this.compiled.delete(this.compiled.keys().next().value as number | null)
+    }
+    const made = this.load()
+      .then((bytes) =>
+        WebAssembly.compile(
+          (pages === null ? bytes : capMemory(bytes, pages)) as Uint8Array<ArrayBuffer>,
+        ),
+      )
       .catch((error: unknown) => {
-        this.compiled = null
+        this.compiled.delete(pages)
         throw error
       })
-    return this.compiled
+    this.compiled.set(pages, made)
+    return made
   }
 
   /**
@@ -409,6 +434,7 @@ export class WasmExecution {
    * @param output - receives stdout as the guest writes it; absent returns it.
    * @param errors - the same for stderr.
    * @param stop - ends the run.
+   * @param maxMemory - the linear memory this run may grow to, in bytes.
    */
   async run(
     argv: string[],
@@ -418,9 +444,10 @@ export class WasmExecution {
     output?: OutputFn,
     errors?: OutputFn,
     stop?: AbortSignal,
+    maxMemory: number | null = null,
   ): Promise<[Uint8Array, Uint8Array | null, number]> {
     this.checkOpen()
-    const module = await abortable(this.module(), stop)
+    const module = await abortable(this.module(maxMemory), stop)
     const port = this.idle.pop() ?? (await this.started(stop))
     const buffers = new Set<SharedArrayBuffer>()
     const answers = new Set<Promise<void>>()

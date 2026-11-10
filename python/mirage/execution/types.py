@@ -84,3 +84,74 @@ class MachinePid:
     pid: int
     started: float
     exited: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CpuShares:
+    """What a machine's processors spent a moment on, in percent, each
+    None where the machine does not say.
+    """
+
+    user: float
+    system: float
+    idle: float
+    nice: float | None = None
+    wait: float | None = None
+    hardware: float | None = None
+    software: float | None = None
+    stolen: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TaskCounts:
+    """How many processes a machine holds, by what they are doing; only
+    ``total``, ``running`` and ``sleeping`` where it says no more.
+    """
+
+    total: int
+    running: int
+    sleeping: int
+    stopped: int = 0
+    zombie: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class MachineResources:
+    """What one machine holds right now, in bytes where it is memory:
+    ``machine`` as ``ps`` shows it; ``cpus`` the processors a program
+    there may use and ``all_cpus`` those it has; ``epoch``, ``clock`` and
+    ``offset`` its time as seconds, ``HH:MM:SS`` and ``+hhmm``;
+    ``up_seconds`` since it booted; ``load`` its three load averages;
+    ``users`` logged in. A memory figure is None where the machine has no
+    such thing. ``tasks`` and ``cpu`` are read only when asked for.
+    ``hostname`` is the name it calls itself and ``cpu_info`` what
+    ``lscpu`` prints there, empty where it has none.
+    """
+
+    machine: str
+    cpus: int
+    all_cpus: int
+    epoch: float
+    clock: str
+    offset: str
+    up_seconds: float
+    load: tuple[float, float, float]
+    users: int
+    mem_total: int
+    mem_free: int
+    mem_available: int
+    swap_total: int
+    swap_free: int
+    shared: int | None = None
+    buffers: int | None = None
+    cached: int | None = None
+    commit_limit: int | None = None
+    committed: int | None = None
+    low_total: int | None = None
+    low_free: int | None = None
+    high_total: int | None = None
+    high_free: int | None = None
+    tasks: TaskCounts | None = None
+    cpu: CpuShares | None = None
+    hostname: str = ""
+    cpu_info: str = ""

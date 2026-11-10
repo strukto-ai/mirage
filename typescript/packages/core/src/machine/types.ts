@@ -43,3 +43,15 @@ export interface MachinePipe {
   /** Bounded startup diagnostics, when available. */
   diagnostic?(): Promise<string>
 }
+
+/**
+ * What turns a scan's raw figures into usage: seconds since boot, clock ticks
+ * a second, the page size in bytes and the memory in KiB. Mirrors Python's
+ * `ScanFacts`.
+ */
+export interface ScanFacts {
+  readonly upSeconds: number
+  readonly ticks: number
+  readonly page: number
+  readonly memory: number
+}

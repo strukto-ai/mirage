@@ -109,7 +109,7 @@ class Route:
 
     The runtime serves every command it captures there, as a
     ``route_policy`` verdict naming it does; the machine is where the
-    machine runtime runs what it serves, over its entry's own machine. A
+    remote runtime runs what it serves, over its entry's own machine. A
     Deny at the stage outranks it, and two policies placing one line on
     different runtimes or machines refuse it, since neither choice is
     the line's.
@@ -122,7 +122,7 @@ class Route:
         policy (str): the policy that placed the line; the chain fills
             it in.
         machine (str | None): the machine's name under ``machines:``;
-            None leaves each machine runtime on its own.
+            None leaves each remote runtime on its own.
     """
 
     kind: ClassVar[str] = "route"

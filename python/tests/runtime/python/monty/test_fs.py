@@ -14,6 +14,7 @@
 
 import asyncio
 import errno
+from datetime import datetime, timezone
 
 import pytest
 
@@ -502,3 +503,13 @@ def test_monty_a_link_to_an_ancestor_stops_at_scan_link_depth():
     assert asyncio.run(_walk_a_link_to_an_ancestor()) == (
         f"{depth + 1} {depth + 1}\n"
     )
+
+
+def test_a_naive_now_reads_the_sessions_zone():
+    tokyo = monty_fs.MontyFs(None, {"TZ": "Asia/Tokyo"})
+    shift = tokyo.datetime_now() - datetime.now(timezone.utc).replace(
+        tzinfo=None
+    )
+    assert round(shift.total_seconds() / 3600) == 9
+    assert tokyo.answers_clock
+    assert not monty_fs.MontyFs(None, {}).answers_clock

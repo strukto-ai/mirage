@@ -33,6 +33,8 @@ from mirage.workspace.lookup.constants import (
     INTERPRETER_NAMES,
     KEYWORDS,
     LOWEST_PRIORITY,
+    MACHINE_ONLY_BUILTINS,
+    MACHINE_VIEW,
     NAMESPACE_COMMANDS,
     PROGRAM_WRAPPERS,
     ROUTED_COMMANDS,
@@ -67,6 +69,36 @@ def is_tool(name: str, session: SessionState) -> bool:
     if "/" in name:
         return False
     return not (name in session.functions and name not in SHELL_NAMES)
+
+
+def runs_programs(
+    bindings: Mapping[str, RuntimeIdentity | None],
+) -> bool:
+    """Whether a line's placement runs programs anywhere past the
+    workspace: a machine, or the host.
+
+    Args:
+        bindings (Mapping[str, RuntimeIdentity | None]): the line's
+            command bindings.
+    """
+    return any(
+        getattr(runtime, "reach", "workspace") != "workspace"
+        for runtime in bindings.values()
+    )
+
+
+def picks_machine(words: Sequence[str]) -> bool:
+    """Whether a command's words are at most one ``--machine``, all that
+    a view of its machines reads; any other option is the program's.
+
+    Args:
+        words (Sequence[str]): its words, its name excluded.
+    """
+    return (
+        not words
+        or (len(words) == 1 and words[0].startswith("--machine="))
+        or (len(words) == 2 and words[0] == "--machine")
+    )
 
 
 def runtime_refused(
@@ -122,6 +154,14 @@ def routed_consumer(
         registry (MountRegistry): mount registry (command registration).
         routing (RouteDecision | None): the line's placement.
     """
+    if (
+        name == MACHINE_VIEW
+        and routing is not None
+        and name not in routing.bindings
+        and runs_programs(routing.bindings)
+        and picks_machine(args)
+    ):
+        return Consumer.SESSION, routing
     consumer = lookup(name, session, registry, routing)
     if routing is None or not _outside_mirage(consumer):
         return consumer, routing
@@ -130,6 +170,42 @@ def routed_consumer(
         return consumer, routing
     bindings = {**routing.bindings, name: routing.bindings[program]}
     return Consumer.EXTERNAL, dataclasses.replace(routing, bindings=bindings)
+
+
+def runs_on_machine(
+    registry: "MountRegistry",
+    words: Sequence[str | None],
+    session: SessionState,
+    routing: RouteDecision[RuntimeIdentity],
+) -> bool:
+    """Whether a job's one program runs past the workspace, with a pid
+    of its own there: what the executor answers when it runs the word,
+    so a wrapper or any program no layer of the workspace holds counts
+    as one a name captures does.
+
+    Args:
+        registry (MountRegistry): mount registry (command registration).
+        words (Sequence[str | None]): the program's words, None for one
+            only known when it runs.
+        session (SessionState): shell session (function table).
+        routing (RouteDecision): the line's placement.
+    """
+    head = str(words[0])
+    runtime = routing.bindings.get(head, routing.fallback)
+    args = [word for word in words[1:] if word is not None]
+    if (
+        head not in routing.bindings
+        and len(args) == len(words) - 1
+        and mirage_program_at(head, args, session, registry, routing) is None
+    ):
+        consumer, placed = routed_consumer(
+            head, args, session, registry, routing
+        )
+        if consumer is Consumer.EXTERNAL and placed is not None:
+            runtime = placed.bindings.get(
+                head, placed.bindings.get(EXTERNAL_COMMANDS)
+            )
+    return getattr(runtime, "reach", "workspace") != "workspace"
 
 
 def without_capture(
@@ -422,7 +498,9 @@ def _layers(
     bound = bindings.get(name)
     native = _is_native(bound, name)
     refused = runtime_refused(name, session, registry, routing)
-    if name in SHELL_NAMES:
+    if name in SHELL_NAMES and (
+        name not in MACHINE_ONLY_BUILTINS or runs_programs(bindings)
+    ):
         found = True
         yield (
             Consumer.EXTERNAL

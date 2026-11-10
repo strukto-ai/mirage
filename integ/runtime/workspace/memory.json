@@ -1,0 +1,40 @@
+{
+  "cases": [
+    {
+      "id": "getconf_counts_pages_of_max_memory",
+      "note": "The default 96 MB is 24576 pages, and a workspace's own max_memory replaces it.",
+      "world": {
+        "runtimes": [
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "getconf _PHYS_PAGES",
+          "expect": {
+            "exit": 0,
+            "stdout": "24576\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "getconf_follows_a_workspaces_max_memory",
+      "world": {
+        "runtimes": [
+          "workspace"
+        ],
+        "max_memory": "64MB"
+      },
+      "steps": [
+        {
+          "command": "getconf _PHYS_PAGES",
+          "expect": {
+            "exit": 0,
+            "stdout": "16384\n"
+          }
+        }
+      ]
+    }
+  ]
+}

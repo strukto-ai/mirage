@@ -45,7 +45,7 @@ machines:
 
 runtimes:
   - monty
-  - name: machine
+  - name: remote
     captures: ["python3"]
     machine: gpu
   - workspace
@@ -63,7 +63,7 @@ any line that names PyTorch or CUDA to the GPU:
 ```python route.py
 def pre_execute(ctx):
     if any(word in ctx["line"] for word in ("torch", "cuda")):
-        return {"kind": "route", "runtime": "machine", "reason": "the line uses PyTorch or CUDA"}
+        return {"kind": "route", "runtime": "remote", "reason": "the line uses PyTorch or CUDA"}
 ```
 
 A line the script stays silent on runs on the first runtime that captures
@@ -91,7 +91,7 @@ RUNTIMES = {
         "language and part of the standard library, with no packages, GPU, "
         "network or subprocesses"
     ),
-    "machine": (
+    "remote": (
         "a cloud sandbox with an NVIDIA GPU, CUDA, PyTorch and the full "
         "standard library, billed while it runs"
     ),

@@ -23,7 +23,7 @@ import type { ReadStreamFn, StatFn } from '../../../../types.ts'
 import { Follow, LineFacts, PathSpec } from '../../../../types.ts'
 import { parseDateExprAsync, statEpoch } from '../../../../utils/dates.ts'
 import { mountKey } from '../../../../utils/key_prefix.ts'
-import { LOCAL_ZONE, zoneFromEnv } from '../../../../utils/timezone.ts'
+import { zoneFromEnv } from '../../../../utils/timezone.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { specOf } from '../../../spec/builtins.ts'
@@ -337,7 +337,7 @@ async function storedTime(
       })
     }
   }
-  const zone = zoneFromEnv(ctx.env) ?? LOCAL_ZONE
+  const zone = zoneFromEnv(ctx.env)
   const placed = await parseDateExprAsync(text, zone, undefined, ctx.signal)
   if (placed === null) {
     return [0, `tar: Substituting -9223372036854775807 for unknown date format '${text}'`]

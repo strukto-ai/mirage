@@ -226,7 +226,7 @@ uses `fuse` or none.
 
 `new Workspace(mounts, { runtimes: [...] })` takes names and runtime objects,
 and adds `workspace` when the list leaves it out. On a live workspace,
-`addRuntime` appends an entry (a `machine` runtime goes after the last one
+`addRuntime` appends an entry (a `remote` runtime goes after the last one
 listed, else ahead of Monty and QuickJS), `removeRuntime` takes one out, and
 `runtimes()` lists them:
 

@@ -44,6 +44,7 @@ export class ExecutionFrame {
     child.shell = this.shell
     child.substitution = this.substitution
     if (this.routing !== undefined) child.routing = this.routing
+    if (this.runsOnMachine !== undefined) child.runsOnMachine = this.runsOnMachine
     return child
   }
 }

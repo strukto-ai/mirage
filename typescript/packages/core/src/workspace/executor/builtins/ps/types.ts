@@ -25,6 +25,7 @@ export interface PsOptions {
   readonly all: boolean
   readonly columns: readonly (readonly [string, string])[]
   readonly forest: boolean
+  readonly machine: string | null
 }
 
 /**

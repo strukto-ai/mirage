@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { gnuStrftime } from './strftime.ts'
-import { LOCAL_ZONE, UTC_ZONE } from '../../../utils/timezone.ts'
+import { UTC_ZONE, resolveTz } from '../../../utils/timezone.ts'
 
 const MOMENT = new Date(Date.UTC(2026, 0, 1, 0, 0, 1, 123))
 
@@ -151,21 +151,17 @@ describe('strftime GNU directives', () => {
     expect(gnuStrftime(narrow, '%5a|%05a|%-5a|%_5a', UTC_ZONE)).toBe('  Sat|00Sat|Sat|  Sat')
   })
 
-  it('renders the local zone with its colon forms', () => {
-    const prior = process.env.TZ
-    process.env.TZ = 'Asia/Kolkata'
-    try {
-      expect(
-        gnuStrftime(new Date(0), '%:z|%::z|%:::z|%_:z|%8:z|%-z|%_z|%3z|%08z', LOCAL_ZONE),
-      ).toBe('+05:30|+05:30:00|+05:30| +5:30|+0005:30|+530| +530|+530|+0000530')
-      process.env.TZ = 'Etc/GMT-1'
-      expect(gnuStrftime(new Date(0), '%z|%-z|%_z|%6z|%_8z|%3z|%-:z|%_:::z', LOCAL_ZONE)).toBe(
-        '+0100|+100| +100|+00100|    +100|+100|+1:00| +1',
-      )
-    } finally {
-      if (prior === undefined) delete process.env.TZ
-      else process.env.TZ = prior
-    }
+  it('renders a named zone with its colon forms', () => {
+    expect(
+      gnuStrftime(
+        new Date(0),
+        '%:z|%::z|%:::z|%_:z|%8:z|%-z|%_z|%3z|%08z',
+        resolveTz('Asia/Kolkata'),
+      ),
+    ).toBe('+05:30|+05:30:00|+05:30| +5:30|+0005:30|+530| +530|+530|+0000530')
+    expect(
+      gnuStrftime(new Date(0), '%z|%-z|%_z|%6z|%_8z|%3z|%-:z|%_:::z', resolveTz('Etc/GMT-1')),
+    ).toBe('+0100|+100| +100|+00100|    +100|+100|+1:00| +1')
   })
 })
 

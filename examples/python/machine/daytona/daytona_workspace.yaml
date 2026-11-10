@@ -43,7 +43,7 @@ machines:
     api_key: ${DAYTONA_API_KEY}
 
 runtimes:
-  - name: machine
+  - name: remote
     captures: ["python3", "pip"]
     machine: daytona
   - workspace

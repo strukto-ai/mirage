@@ -15,7 +15,6 @@
 import { describe, expect, it } from 'vitest'
 import { gnuStrftime } from '../commands/builtin/utils/strftime.ts'
 import {
-  LOCAL_ZONE,
   UTC_ZONE,
   numericAbbreviation,
   posixZone,
@@ -117,11 +116,11 @@ describe('resolveTz: GNU fallbacks', () => {
 
 describe('zoneFromEnv', () => {
   it('reads only the command environment', () => {
-    expect(zoneFromEnv(null)).toBeNull()
-    expect(zoneFromEnv(undefined)).toBeNull()
-    expect(zoneFromEnv({})).toBeNull()
-    expect(zoneFromEnv({ TZ: 'UTC' })?.parts(new Date(0)).abbrev).toBe('UTC')
-    expect(zoneFromEnv({ TZ: 'Asia/Hong_Kong' })?.parts(new Date(0)).hour).toBe(8)
+    expect(zoneFromEnv(null)).toBe(UTC_ZONE)
+    expect(zoneFromEnv(undefined)).toBe(UTC_ZONE)
+    expect(zoneFromEnv({})).toBe(UTC_ZONE)
+    expect(zoneFromEnv({ TZ: 'UTC' }).parts(new Date(0)).abbrev).toBe('UTC')
+    expect(zoneFromEnv({ TZ: 'Asia/Hong_Kong' }).parts(new Date(0)).hour).toBe(8)
   })
 })
 
@@ -163,14 +162,7 @@ describe('Zone.fromWall', () => {
 
   it('round-trips an ordinary wall clock in every zone shape', () => {
     const p = { year: 2026, month: 8, day: 3, hour: 5, minute: 7, second: 9, ms: 0 }
-    for (const zone of [
-      UTC_ZONE,
-      LOCAL_ZONE,
-      cet,
-      berlin,
-      resolveTz('JST-9'),
-      resolveTz('Bogus'),
-    ]) {
+    for (const zone of [UTC_ZONE, cet, berlin, resolveTz('JST-9'), resolveTz('Bogus')]) {
       const shown = zone.parts(zone.fromWall(p))
       expect([shown.year, shown.month, shown.day, shown.hour, shown.minute, shown.second]).toEqual([
         2026, 8, 3, 5, 7, 9,

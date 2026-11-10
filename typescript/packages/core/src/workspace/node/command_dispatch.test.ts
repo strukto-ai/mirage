@@ -19,7 +19,7 @@ import { MachineHandle } from '../../machine/handle.ts'
 import type { Policy } from '../../policy/base.ts'
 import { Outcome, Scope } from '../../policy/index.ts'
 import type { CommandContext, Route } from '../../policy/types.ts'
-import { MachineRuntime } from '../../runtime/machine/runtime.ts'
+import { RemoteRuntime } from '../../runtime/machine/runtime.ts'
 import { Runtime } from '../../runtime/base.ts'
 import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import { LanguageRuntime } from '../../runtime/language.ts'
@@ -350,7 +350,7 @@ describe('a wrapper whose program is routed', () => {
       {
         mode: MountMode.EXEC,
         machines: { a: new Named('a'), b: new Named('b') },
-        runtimes: [new MachineRuntime({ captures: ['hostname'], machine: 'a' }), 'workspace'],
+        runtimes: [new RemoteRuntime({ captures: ['hostname'], machine: 'a' }), 'workspace'],
         policies: [new HostnameOn(machine)],
       },
     )
@@ -412,7 +412,7 @@ function routedWs(routes: Record<string, Route>): Workspace {
     {
       mode: MountMode.EXEC,
       machines: { a: new Named('a'), b: new Named('b') },
-      runtimes: [new MachineRuntime({ captures: ['find', 'hostname'], machine: 'a' }), 'workspace'],
+      runtimes: [new RemoteRuntime({ captures: ['find', 'hostname'], machine: 'a' }), 'workspace'],
       policies: [new Routes(routes)],
     },
   )

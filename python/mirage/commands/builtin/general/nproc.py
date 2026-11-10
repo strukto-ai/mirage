@@ -14,6 +14,8 @@
 import re
 
 from mirage.accessor.base import Accessor
+from mirage.commands.builtin.constants import CPUS, HOSTNAME
+from mirage.commands.builtin.utils.threads import thread_limit
 from mirage.commands.config import Context, command
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
@@ -22,22 +24,7 @@ from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
-# A workspace runs a session's lines one at a time, and no host detail
-# leaks, so every host answers the same.
-CPUS = 1
 DIGITS = re.compile(r"[0-9]+")
-LEADING_COUNT = re.compile(r"\s*([0-9]+)\s*(?:,|\Z)")
-
-
-def _thread_count(value: str | None) -> int | None:
-    """The first positive count an OpenMP variable holds, None without one.
-
-    Args:
-        value (str | None): the variable's value.
-    """
-    found = LEADING_COUNT.match(value) if value is not None else None
-    count = int(found.group(1)) if found is not None else 0
-    return count if count > 0 else None
 
 
 @command("nproc", vfs=None, spec=SPECS["nproc"])
@@ -57,10 +44,11 @@ async def nproc(
         return None, IOResult(exit_code=1, stderr=line.encode())
     if texts:
         raise extra_operand_error("nproc", texts[0])
+    machine = fl.as_str("machine")
+    if machine is not None and machine != HOSTNAME:
+        line = f"nproc: {quote_text(machine)}: no such machine\n"
+        return None, IOResult(exit_code=1, stderr=line.encode())
     count = CPUS
     if not fl.as_bool("all"):
-        env = ctx.env or {}
-        count = _thread_count(env.get("OMP_NUM_THREADS")) or CPUS
-        limit = _thread_count(env.get("OMP_THREAD_LIMIT"))
-        count = min(count, limit) if limit is not None else count
+        count = thread_limit(ctx.env or {}, CPUS)
     return f"{max(1, count - int(ignore or 0))}\n".encode(), IOResult()

@@ -16,7 +16,6 @@ import asyncio
 
 import pytest
 
-from mirage.core.jq import eval as eval_module
 from mirage.core.jq.errors import JqCompileError
 from mirage.core.jq.eval import Ending, Engine, local_zone, read_frames
 from mirage.core.jq.types import JqError, JqHalt
@@ -45,20 +44,12 @@ def test_frames_fold_into_outputs_and_the_stop_that_ended_the_run():
         read_frames(_frame(9, b""), [])
 
 
-def test_local_zone_is_the_sessions_tz_else_the_hosts(monkeypatch):
+def test_local_zone_is_the_sessions_tz_else_utc(monkeypatch):
     monkeypatch.setenv("TZ", "EST5EDT")
     assert local_zone({"TZ": ":Asia/Tokyo"}) == ":Asia/Tokyo"
     assert local_zone({"TZ": ""}) == ""
-    assert local_zone({}) == "EST5EDT"
-    monkeypatch.delenv("TZ")
-    monkeypatch.setattr(
-        eval_module.os.path,
-        "realpath",
-        lambda _path: "/usr/share/zoneinfo/Europe/Paris",
-    )
-    assert local_zone(None) == "Europe/Paris"
-    monkeypatch.setattr(eval_module.os.path, "realpath", lambda path: path)
-    assert local_zone(None) is None
+    assert local_zone({}) == "UTC"
+    assert local_zone(None) == "UTC"
 
 
 async def _outputs(engine: Engine, doc: str) -> tuple[list[str], Ending]:

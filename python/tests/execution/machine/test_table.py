@@ -23,7 +23,7 @@ from mirage.execution.process.table import ProcessTable
 from mirage.execution.types import MachinePid
 from mirage.machine.constants import CHECK_LINE, CHECK_MARK
 from mirage.machine.handle import MachineHandle
-from mirage.runtime.machine import MachineRuntime
+from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.types import RunResult
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -134,7 +134,7 @@ def _sleepers(**boxes: MachineHandle) -> Workspace:
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
         machines=boxes,
-        runtimes=[MachineRuntime(["train"], machine=next(iter(boxes)))],
+        runtimes=[RemoteRuntime(["train"], machine=next(iter(boxes)))],
     )
 
 
@@ -821,7 +821,7 @@ async def test_a_workspace_that_fails_to_build_holds_no_machine():
             {"/": RAMVFS()},
             mode=MountMode.EXEC,
             machines={"a": box},
-            runtimes=[MachineRuntime(machine="c"), "workspace"],
+            runtimes=[RemoteRuntime(machine="c"), "workspace"],
         )
     await Workspace(
         {"/": RAMVFS()}, mode=MountMode.EXEC, machines={"a": box}

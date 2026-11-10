@@ -71,12 +71,11 @@ pub(crate) enum Opening {
 /// What the host is asked to do, in the order the run asks.
 #[derive(Debug)]
 pub(crate) enum Request {
-    /// Time-zone facts; a wall lookup preserves host-local date operands.
+    /// Time-zone facts.
     Date {
         zone: Option<String>,
         instant: Option<i64>,
         year: Option<i64>,
-        wall: Option<[i64; 6]>,
     },
     /// The time now, as whole seconds and nanoseconds.
     Clock,
@@ -285,7 +284,6 @@ impl Request {
                 zone,
                 instant,
                 year,
-                wall,
             } => {
                 put("op", "date".into());
                 put("zone", zone.clone().map_or(Json::Null, Json::String));
@@ -294,9 +292,6 @@ impl Request {
                 }
                 if let Some(year) = year {
                     put("year", (*year).into());
-                }
-                if let Some(wall) = wall {
-                    put("wall", serde_json::to_value(wall).unwrap());
                 }
             }
             Request::Clock => put("op", "clock".into()),

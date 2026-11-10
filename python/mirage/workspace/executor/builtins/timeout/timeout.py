@@ -43,6 +43,7 @@ from mirage.context import (
 from mirage.execution.process.config import ProcessPermissions
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
+from mirage.execution.process.types import ProcessState
 from mirage.io import IOResult
 from mirage.io.stream import (
     OutputStream,
@@ -463,7 +464,10 @@ async def _supervise(
                 own_job,
             )
         finally:
-            if not process.task.done():
+            if process.record.state == ProcessState.STOPPING:
+                # A second cancel would cut the stop it is making short.
+                await asyncio.wait({process.task})
+            elif not process.task.done():
                 await _cancel(process.task)
             console.end()
 

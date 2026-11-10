@@ -25,6 +25,7 @@ import { asGuestError, guestError } from './errors.ts'
 import { childPaths } from './list.ts'
 import { isDirRow, isRegularRow, statResult } from './stat.ts'
 import { boundSystemClock, type Clock } from '../../../utils/clock.ts'
+import { zoneFromEnv } from '../../../utils/timezone.ts'
 
 function pathArg(value: unknown): string | null {
   if (typeof value === 'string') return value
@@ -188,6 +189,12 @@ export class MontyFs {
     return this.clock === null ? Date.now() / 1000 : this.clock.now()
   }
 
+  /** The session's wall clock, its `TZ` or UTC, as seconds a naive moment reads as UTC. */
+  private sessionWall(): number {
+    const wall = this.wall()
+    return wall + zoneFromEnv(this.env).parts(new Date(wall * 1000)).offsetSec
+  }
+
   readonly handle = (
     name: string,
     args: unknown[],
@@ -211,8 +218,11 @@ export class MontyFs {
     // The clock callbacks: python's engine defaults these to the host
     // clock, so declining them (a guest RuntimeError) was a divergence
     // for any program that stamps its output.
-    if (name === 'datetime.now') return dateTimeMarker(this.wall(), timeZoneArg(args[0]))
-    if (name === 'date.today') return dateMarker(this.wall())
+    if (name === 'datetime.now') {
+      const zone = timeZoneArg(args[0])
+      return dateTimeMarker(zone === null ? this.sessionWall() : this.wall(), zone)
+    }
+    if (name === 'date.today') return dateMarker(this.sessionWall())
     // Every `time` module clock asks here, naming itself: the wall clocks
     // read the system clock; monotonic and perf_counter keep the host's.
     if (name === 'time.time') {

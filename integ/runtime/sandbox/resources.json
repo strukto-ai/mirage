@@ -1,0 +1,421 @@
+{
+  "cases": [
+    {
+      "id": "nproc_is_the_machines",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "microsandbox",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "@python",
+          "perl"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "nproc | grep -c ' mirage$'",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n"
+          }
+        },
+        {
+          "command": "nproc | grep -c .",
+          "expect": {
+            "exit": 0,
+            "stdout": "2\n"
+          }
+        },
+        {
+          "command": "nproc --machine mirage",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n"
+          }
+        },
+        {
+          "command": "n=$(nproc); echo \"$n\" | grep -c '^[0-9][0-9]*$'",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "hostname_lists_the_workspace_and_its_machine",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "microsandbox",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "@python",
+          "perl"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "hostname | head -n 1",
+          "expect": {
+            "exit": 0,
+            "stdout": "mirage\n"
+          }
+        },
+        {
+          "command": "hostname | wc -l",
+          "expect": {
+            "exit": 0,
+            "stdout": "2\n"
+          }
+        },
+        {
+          "command": "hostname -s",
+          "expect": {
+            "exit": 0,
+            "stdout": "mirage\n"
+          }
+        },
+        {
+          "command": "[ \"$(hostname)\" != mirage ] && echo real",
+          "expect": {
+            "exit": 0,
+            "stdout": "real\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "lscpu_has_a_column_for_the_workspace_and_its_machine",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "microsandbox",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "@python",
+          "perl"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "lscpu | head -n 1 | grep -c mirage",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n"
+          }
+        },
+        {
+          "command": "lscpu | awk '/^CPU\\(s\\):/{print $2}'",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n"
+          }
+        },
+        {
+          "command": "lscpu | awk '/^Architecture:/{print $2}'",
+          "expect": {
+            "exit": 0,
+            "stdout": "-\n"
+          }
+        },
+        {
+          "command": "lscpu | grep -c '^Flags:' || true",
+          "expect": {
+            "exit": 0,
+            "stdout": "0\n"
+          }
+        },
+        {
+          "command": "lscpu | awk '/^Byte Order:/{print $3, $4}'",
+          "expect": {
+            "exit": 0,
+            "stdout": "Little Endian\n"
+          }
+        },
+        {
+          "command": "lscpu --machine mirage",
+          "expect": {
+            "exit": 0,
+            "stdout": "Byte Order:                              Little Endian\nCPU(s):                                  1\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "free_reads_the_machine",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "microsandbox",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "@python",
+          "perl"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "free | grep -c '^Mem:'",
+          "expect": {
+            "exit": 0,
+            "stdout": "2\n"
+          }
+        },
+        {
+          "command": "free -m | awk '/^Mem:/ && !/mirage$/{exit !($2 > 0)}'; echo $?",
+          "expect": {
+            "exit": 0,
+            "stdout": "0\n"
+          }
+        },
+        {
+          "command": "free -m | awk '/^Mem:/ && /mirage$/{print $2, $5, $6}'",
+          "expect": {
+            "exit": 0,
+            "stdout": "96 - -\n"
+          }
+        },
+        {
+          "command": "free -m --machine mirage | awk '/^Mem:/{print $2, NF}'",
+          "expect": {
+            "exit": 0,
+            "stdout": "96 7\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "uptime_reads_the_machine",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "microsandbox",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "@python",
+          "perl"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "uptime | grep -c 'load average:'",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "top_samples_the_machine",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "microsandbox",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "@python",
+          "perl"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "top -bn1 | grep -c '^%Cpu(s):'",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "an_unknown_machine_is_refused",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "microsandbox",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "@python",
+          "perl"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "nproc --machine nosuch 2>&1; echo $?",
+          "expect": {
+            "exit": 0,
+            "stdout": "nproc: nosuch: no such machine\n1\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_wrapper_gives_the_programs_own_pid",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "microsandbox",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "@external"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "nohup perl -e 'sleep 29' >/dev/null 2>&1 & p=$!; [ \"$p\" -lt 4194304 ] && echo real; kill $p; wait $p; echo $?",
+          "expect": {
+            "exit": 0,
+            "stdout": "real\n143\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "kill_of_timeout_stops_its_program",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "microsandbox",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "@python",
+          "perl"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "timeout 29 perl -e 'sleep 28' & p=$!; sleep 0.5; kill $p; wait $p; echo $?; sleep 1; pgrep -c perl; true",
+          "expect": {
+            "exit": 0,
+            "stdout": "143\n0\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "pkill_full_reads_the_program_not_the_wrapper",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "microsandbox",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "@python",
+          "perl"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "perl -e 'sleep 27' & p=$!; sleep 0.5; pgrep -c -f 'sleep 27'; pkill -f 'sleep 27'; echo $?; wait $p; echo $?",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n0\n143\n"
+          }
+        }
+      ]
+    }
+  ]
+}

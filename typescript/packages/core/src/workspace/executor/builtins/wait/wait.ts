@@ -131,6 +131,22 @@ export async function handleWait(
       for (const item of parts.slice(i + 1)) specs.push(item)
       break
     }
+    if (word.startsWith('--machine=')) {
+      machine = word.slice('--machine='.length)
+      i++
+      continue
+    }
+    if (word === '--machine') {
+      if (i + 1 >= parts.length)
+        return jobResult(
+          cmdStr,
+          `${shellVoice()}wait: --machine: option requires an argument\n${builtinUsage('wait')}`,
+          2,
+        )
+      machine = parts[i + 1] ?? ''
+      i += 2
+      continue
+    }
     let j = 1
     let bad: string | null = null
     while (j < word.length) {

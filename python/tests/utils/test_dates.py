@@ -18,53 +18,51 @@ from mirage.utils.dates import (
 )
 from mirage.utils.timezone import resolve_tz
 
-NOW = datetime(2026, 8, 16, 13, 45, 30)
+NOW = datetime(2026, 8, 16, 13, 45, 30, tzinfo=timezone.utc)
 BERLIN = ZoneInfo("Europe/Berlin")
 POSIX_CET = resolve_tz("CET-1CEST,M3.5.0,M10.5.0/3")
 NEW_YORK = ZoneInfo("America/New_York")
 
 
+def _utc(*fields: int) -> datetime:
+    return datetime(*fields, tzinfo=timezone.utc)
+
+
 def test_relative_hours_ago():
-    assert parse_date_expr("24 hours ago", now=NOW) == datetime(
+    assert parse_date_expr("24 hours ago", now=NOW) == _utc(
         2026, 8, 15, 13, 45, 30
     )
 
 
 def test_relative_days_and_weeks():
-    assert parse_date_expr("3 days", now=NOW) == datetime(
-        2026, 8, 19, 13, 45, 30
-    )
-    assert parse_date_expr("-2 weeks", now=NOW) == datetime(
-        2026, 8, 2, 13, 45, 30
-    )
+    assert parse_date_expr("3 days", now=NOW) == _utc(2026, 8, 19, 13, 45, 30)
+    assert parse_date_expr("-2 weeks", now=NOW) == _utc(2026, 8, 2, 13, 45, 30)
 
 
 def test_relative_words():
-    assert parse_date_expr("yesterday", now=NOW) == datetime(
+    assert parse_date_expr("yesterday", now=NOW) == _utc(
         2026, 8, 15, 13, 45, 30
     )
-    assert parse_date_expr("tomorrow", now=NOW) == datetime(
+    assert parse_date_expr("tomorrow", now=NOW) == _utc(
         2026, 8, 17, 13, 45, 30
     )
     assert parse_date_expr("now", now=NOW) == NOW
-    assert parse_date_expr("last year", now=NOW) == datetime(
+    assert parse_date_expr("last year", now=NOW) == _utc(
         2025, 8, 16, 13, 45, 30
     )
-    assert parse_date_expr("next month", now=NOW) == datetime(
+    assert parse_date_expr("next month", now=NOW) == _utc(
         2026, 9, 16, 13, 45, 30
     )
 
 
 def test_month_overflow_normalizes_like_gnu():
-    assert parse_date_expr("2026-01-31 1 month", now=NOW) == datetime(
-        2026, 3, 3
-    )
+    assert parse_date_expr("2026-01-31 1 month", now=NOW) == _utc(2026, 3, 3)
 
 
 def test_iso_base_with_relative_tail():
     assert parse_date_expr(
         "2026-08-16 12:00:00 24 hours ago", now=NOW
-    ) == datetime(2026, 8, 15, 12, 0, 0)
+    ) == _utc(2026, 8, 15, 12, 0, 0)
 
 
 # GNU date on debian:stable-slim: a shift landing in the hour a zone skips
@@ -156,14 +154,12 @@ def test_invalid_returns_none():
 
 
 def test_empty_is_midnight_today():
-    assert parse_date_expr("", now=NOW) == datetime(2026, 8, 16)
-    assert parse_date_expr("   ", now=NOW) == datetime(2026, 8, 16)
+    assert parse_date_expr("", now=NOW) == _utc(2026, 8, 16)
+    assert parse_date_expr("   ", now=NOW) == _utc(2026, 8, 16)
 
 
 def test_number_attached_to_unit():
-    assert parse_date_expr("2days", now=NOW) == datetime(
-        2026, 8, 18, 13, 45, 30
-    )
+    assert parse_date_expr("2days", now=NOW) == _utc(2026, 8, 18, 13, 45, 30)
 
 
 def test_timestamp_iso_round_trips_through_iso_timestamp():

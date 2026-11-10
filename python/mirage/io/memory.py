@@ -21,8 +21,8 @@ from mirage.io.errors import MemoryExhausted
 T = TypeVar("T")
 
 # The max_memory a workspace runs under when it names none: with the
-# 32 MB read cache, 64 MB a workspace, 32 of them on a 2 GiB machine.
-MAX_MEMORY = 32 << 20
+# 32 MB read cache, 128 MB a workspace, 16 of them on a 2 GiB machine.
+MAX_MEMORY = 96 << 20
 MAX_BODY_BYTES = 64 * 1024 * 1024
 
 
@@ -87,10 +87,16 @@ async def run_with_memory(
         _body_limit.reset(body_token)
 
 
+def memory_budget() -> MemoryBudget | None:
+    """The running workspace's budget, None for no cap. Mirrors
+    TypeScript's ``memoryBudget``."""
+    return _budget.get()
+
+
 def memory_room() -> int | None:
     """The bytes left in the running workspace's budget, None for no cap.
     Mirrors TypeScript's ``memoryRoom``."""
-    budget = _budget.get()
+    budget = memory_budget()
     return None if budget is None else budget.room()
 
 

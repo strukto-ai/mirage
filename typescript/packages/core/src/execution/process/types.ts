@@ -5,10 +5,25 @@ import type { LineId, MachineId, MachinePid, ProcessId } from '../types.ts'
 export type ProcessState = 'running' | 'stopping' | 'exited'
 
 /**
+ * What a scan read of a program's use of its machine: CPU seconds so far,
+ * that time over the time it has run, its resident memory over the
+ * machine's, and its resident and virtual size in KiB. Mirrors Python's
+ * `ProcessUsage`.
+ */
+export interface ProcessUsage {
+  readonly cpuSeconds: number
+  readonly cpuPercent: number
+  readonly memoryPercent: number
+  readonly rss: number
+  readonly vsz: number
+}
+
+/**
  * One managed runner, as every instance on its store reads it: not an OS
  * process or a shell job number. Its machine is where its program runs and
  * its runtime what Mirage runs it with; a native program's own pid there is
- * `machinePid`.
+ * `machinePid`, and what the last scan read of its use of the machine
+ * `usage`.
  *
  * `endedAt` is set exactly when `state` is final, with `exit` the status,
  * `signal` the signal that ended it, if one did, and `error` why its runner
@@ -37,6 +52,7 @@ export interface Process {
   readonly ancestors: readonly number[]
   readonly shownState?: string | null
   readonly stages?: readonly number[]
+  readonly usage?: ProcessUsage | null
 }
 
 /** Whether a process is a program on a machine, not Mirage's own. */

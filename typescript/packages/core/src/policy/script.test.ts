@@ -319,10 +319,10 @@ describe('scriptAction', () => {
   it('may name a machine alone', () => {
     const printed = bytes(answer({ kind: 'route', machine: 'gpu' }))
     expect(scriptAction(printed, 'preCommand')).toEqual({ kind: 'route', machine: 'gpu' })
-    const both = bytes(answer({ kind: 'route', runtime: 'machine', machine: 'gpu' }))
+    const both = bytes(answer({ kind: 'route', runtime: 'remote', machine: 'gpu' }))
     expect(scriptAction(both, 'preExecute')).toEqual({
       kind: 'route',
-      runtime: 'machine',
+      runtime: 'remote',
       machine: 'gpu',
     })
   })

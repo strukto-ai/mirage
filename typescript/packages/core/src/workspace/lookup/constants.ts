@@ -82,13 +82,20 @@ export const INTERPRETER_NAMES: ReadonlySet<string> = new Set(
     .map(([name]) => name),
 )
 
-// Shell words a machine runtime's captures can take from the session: the
+// Shell words a remote runtime's captures can take from the session: the
 // interpreters, and the process tools whose host programs see that
 // runtime's own processes rather than mirage's managed runners.
 export const CAPTURABLE_BUILTINS: ReadonlySet<string> = new Set([
   ...INTERPRETER_NAMES,
   'ps',
   'kill',
+  'pgrep',
+  'pkill',
+  'pidof',
+  'killall',
+  'free',
+  'uptime',
+  'top',
 ])
 
 // bash reserved words that mirage's grammar implements. The parser, not
@@ -127,7 +134,23 @@ export const JOB_BUILTINS: ReadonlySet<string> = new Set([
   'jobs',
   'disown',
   'ps',
+  'pgrep',
+  'pkill',
+  'pidof',
+  'killall',
 ])
+
+// Builtins that exist only to report on the machines programs run on, so a
+// workspace that runs programs on none has no such command.
+// A program of each machine's that Mirage also answers for all of them, when
+// the line asks nothing the program alone can say.
+export const MACHINE_VIEW = 'lscpu'
+
+export const MACHINE_BUILTINS: ReadonlySet<string> = new Set(['free', 'uptime', 'top'])
+
+// Those with nothing to say of the workspace itself, so a workspace that runs
+// programs on no machine has no such command.
+export const MACHINE_ONLY_BUILTINS: ReadonlySet<string> = new Set(['uptime', 'top'])
 
 // Commands the router must not resolve the last component for, even
 // under a trailing slash, because none of them acts on the link's

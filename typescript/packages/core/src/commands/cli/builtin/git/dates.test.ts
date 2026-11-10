@@ -19,7 +19,13 @@ import { dateClock, parseDateMode, relativeDate, showDate } from './dates.ts'
 import { DateFormatColonError, UnknownDateFormatError } from './errors.ts'
 import { DateKind, type DateMode } from './types.ts'
 
-const BASE: DateMode = { kind: DateKind.NORMAL, local: false, strftime: '', now: 0, zone: null }
+const BASE: DateMode = {
+  kind: DateKind.NORMAL,
+  local: false,
+  strftime: '',
+  now: 0,
+  zone: UTC_ZONE,
+}
 const CLOCK: DateMode = { ...BASE, now: 1768561800, zone: UTC_ZONE }
 
 describe('showDate', () => {
@@ -346,10 +352,9 @@ it('finds a short standard window far off', () => {
   expect(showDate(1792304967, -420, mode)).toBe('  1792297767')
 })
 
-// Without TZ in the session, a host Intl names America/New_York is read as that
-// tzdata zone through formatters built once, not one per reading. Mirrors
-// test_dates.py.
-it('reads a named host zone through formatters built once', () => {
+// A session's America/New_York is read through formatters built once, not one
+// per reading. Mirrors test_dates.py.
+it('reads a named zone through formatters built once', () => {
   const Built = Intl.DateTimeFormat
   let built = 0
   const counted = new Proxy(Built, {
@@ -358,20 +363,13 @@ it('reads a named host zone through formatters built once', () => {
       return new target(...args)
     },
   })
-  const host = parseDateMode('format:%12s', {
-    ...dateClock({}),
-    zone: null,
-    zoneName: 'America/New_York',
-  })
   const named = parseDateMode('format:%12s', dateClock({ TZ: 'America/New_York' }))
   const stamps = Array.from({ length: 1000 }, (_, i) => 1420070400 + i * 315619)
   Intl.DateTimeFormat = counted
-  let shown: string[]
   try {
-    shown = stamps.map((stamp) => showDate(stamp, 0, host))
+    for (const stamp of stamps) showDate(stamp, 0, named)
   } finally {
     Intl.DateTimeFormat = Built
   }
   expect(built).toBeLessThanOrEqual(2)
-  expect(shown).toEqual(stamps.map((stamp) => showDate(stamp, 0, named)))
 })

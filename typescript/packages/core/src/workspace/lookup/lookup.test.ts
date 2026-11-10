@@ -51,6 +51,7 @@ import {
   programs,
   SHELL_CONSUMERS,
 } from './index.ts'
+import { routedConsumer } from './lookup.ts'
 
 class Sandbox extends Runtime implements ProcessExecutorMixin {
   readonly [PROCESS_EXECUTOR] = true as const
@@ -1250,4 +1251,28 @@ describe('a wrapper Mirage runs a program for', () => {
       await ws.close()
     }
   }, 10000)
+})
+
+describe('lscpu, the view of the machines', () => {
+  it.each([
+    [[], Consumer.SESSION],
+    [['--machine', 'a'], Consumer.SESSION],
+    [['--machine=a'], Consumer.SESSION],
+    [['-J'], Consumer.EXTERNAL],
+  ])('reads %j as %s', (args, expected) => {
+    const { session, ws } = fixture()
+    const sandbox = new Sandbox()
+    const routing = { bindings: { [EXTERNAL_COMMANDS]: sandbox }, fallback: sandbox } as never
+    expect(routedConsumer('lscpu', args, session, ws.registry, routing)[0]).toBe(expected)
+  })
+
+  it('stays the program when a runtime captures it by name', () => {
+    const { session, ws } = fixture()
+    const sandbox = new Sandbox()
+    const routing = {
+      bindings: { lscpu: sandbox, [EXTERNAL_COMMANDS]: sandbox },
+      fallback: sandbox,
+    } as never
+    expect(routedConsumer('lscpu', [], session, ws.registry, routing)[0]).toBe(Consumer.EXTERNAL)
+  })
 })

@@ -25,7 +25,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.python.base import PythonRuntime
-from mirage.runtime.types import Program, RunResult
+from mirage.runtime.types import Program, RouteDecision, RunResult
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -39,6 +39,7 @@ from mirage.workspace.lookup import (
     program_note,
     programs,
 )
+from mirage.workspace.lookup.lookup import routed_consumer
 from mirage.workspace.session import SessionState
 
 
@@ -750,3 +751,33 @@ async def test_a_wrapped_program_streams_its_output():
         assert await io.stdout_str() == "one\n"
     finally:
         await ws.close()
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        ((), Consumer.SESSION),
+        (("--machine", "a"), Consumer.SESSION),
+        (("--machine=a",), Consumer.SESSION),
+        (("-J",), Consumer.EXTERNAL),
+    ],
+)
+def test_lscpu_is_the_machine_view_until_it_asks_the_program(args, expected):
+    session, ws = _fixture()
+    sandbox = _Sandbox()
+    routing = RouteDecision(
+        bindings={EXTERNAL_COMMANDS: sandbox}, fallback=sandbox
+    )
+    consumer, _ = routed_consumer("lscpu", args, session, ws.registry, routing)
+    assert consumer is expected
+
+
+def test_lscpu_captured_by_name_stays_the_program():
+    session, ws = _fixture()
+    sandbox = _Sandbox()
+    routing = RouteDecision(
+        bindings={"lscpu": sandbox, EXTERNAL_COMMANDS: sandbox},
+        fallback=sandbox,
+    )
+    consumer, _ = routed_consumer("lscpu", (), session, ws.registry, routing)
+    assert consumer is Consumer.EXTERNAL

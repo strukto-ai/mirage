@@ -36,6 +36,7 @@ import { abortable, sleep } from '../../../utils/abort.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import * as globs from '../../expand/globs.ts'
 import { Consumer, lookup, lookupAll, SHELL_NAMES } from '../../lookup/index.ts'
+import { CAPTURABLE_BUILTINS } from '../../lookup/constants.ts'
 import { SessionState } from '../../session/session.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 
@@ -133,7 +134,7 @@ describe('external program capture', () => {
     }
   })
 
-  it('hands a machine runtime chosen for the line the words as typed', async () => {
+  it('hands a remote runtime chosen for the line the words as typed', async () => {
     const probe = new ProcessProbe({ captures: ['python3'] })
     const ws = workspace(new InProcessPython(), [probe])
     try {
@@ -626,7 +627,7 @@ describe.each(['process', 'shell'] as const)('native %s builtin precedence', (ki
     try {
       const session = new SessionState({ sessionId: 'lookup' })
       for (const name of SHELL_NAMES) {
-        if (['python', 'python3', 'node', 'js', 'ps', 'kill'].includes(name)) continue
+        if (CAPTURABLE_BUILTINS.has(name)) continue
         expect(lookup(name, session, ws.registry), name).toBe(Consumer.SESSION)
         const layers = lookupAll(name, session, ws.registry)
         expect(layers[0], name).toBe(Consumer.SESSION)

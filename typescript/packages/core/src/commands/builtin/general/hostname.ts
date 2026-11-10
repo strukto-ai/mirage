@@ -16,6 +16,7 @@ import type { PathSpec } from '../../../types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
 import { command, type CommandFnResult, type Context } from '../../config.ts'
+import { quoteText } from '../../quote.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { SYNOPSES } from '../../spec/synopsis.ts'
@@ -53,6 +54,11 @@ function hostname(
   ctx: Context,
 ): CommandFnResult {
   const fl = new FlagView(ctx.flags, specOf('hostname'))
+  const machine = fl.asStr('machine')
+  if (machine !== undefined && machine !== HOSTNAME) {
+    const line = `hostname: ${quoteText(machine)}: no such machine\n`
+    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(line) })]
+  }
   const typed = fl.typedOrder(...Object.keys(DISPLAY))
   if (texts.length > 1 || (texts.length > 0 && typed.length > 0)) {
     return [null, new IOResult({ exitCode: usageExitCode('hostname'), stderr: ENC.encode(USAGE) })]

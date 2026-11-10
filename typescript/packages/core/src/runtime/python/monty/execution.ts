@@ -21,6 +21,7 @@ import { materialize } from '../../../io/types.ts'
 import { boundDeadline } from '../../../utils/abort.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { boundSystemClock } from '../../../utils/clock.ts'
+import { TZ_VAR } from '../../../utils/timezone.ts'
 import type { RuntimeFiles } from '../../files.ts'
 import type { OutputFn, Program, RunResult } from '../../types.ts'
 import { mainFilename } from '../execution.ts'
@@ -249,6 +250,7 @@ export class MontyExecution {
       const checkout = this.checkout(
         program.scriptPath === undefined ? undefined : mainFilename(program, ctx.cwd),
         shared ? (binds ? left : SHARED_THREAD_SECONDS) : null,
+        ctx.env,
       )
       const session = await Promise.race([checkout, interruption.promise])
       if (session === INTERRUPTED) {
@@ -406,6 +408,7 @@ export class MontyExecution {
   private async checkout(
     scriptName: string | null | undefined,
     seconds: number | null,
+    env: Readonly<Record<string, string>> | undefined,
   ): Promise<MontySessionLike> {
     const pool = await this.ensurePool()
     const room = memoryRoom()
@@ -418,9 +421,10 @@ export class MontyExecution {
       ...(scriptName === undefined ? {} : { scriptName }),
       limits: seconds === null ? limits : { ...limits, maxFeedDurationSecs: seconds },
       assertMessageAnnotations: false,
-      // A workspace's system_time answers the wall clocks (MontyFs).
+      // A workspace's system_time and a session's TZ answer the wall clocks
+      // (MontyFs).
       osPolicy:
-        boundSystemClock() === null
+        boundSystemClock() === null && env?.[TZ_VAR] === undefined
           ? { sleepSystemMax: Infinity }
           : { sleepSystemMax: Infinity, datetime: 'call_host' },
     })

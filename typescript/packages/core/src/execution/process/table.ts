@@ -5,7 +5,7 @@ import { newPauseGate, ProcessHandle, type ExecutionBind, type PauseGate } from 
 import type { Process, ProcessRunner } from './types.ts'
 import type { SessionProcesses } from './session.ts'
 import { HISTORY_MAX_RECORDS, HISTORY_SECONDS, LOCAL_MACHINE } from '../constants.ts'
-import { type LineId, type MachineId, ProcessId } from '../types.ts'
+import { type LineId, type MachineId, type MachineResources, ProcessId } from '../types.ts'
 import { SIGCONT, SIGKILL, SIGSTOP } from '../../shell/constants.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { systemNow } from '../../utils/clock.ts'
@@ -55,6 +55,10 @@ export class ProcessTable {
    * itself. The workspace sets it. Mirrors Python's `sender`.
    */
   sender: ((handle: ProcessHandle, signal: number) => Promise<boolean> | null) | null = null
+  /** The machines the workspace runs programs on, by id as `ps` shows them. */
+  machineIds: (() => string[]) | null = null
+  /** What one of those machines holds now. */
+  machineResources: ((machine: string, cpu: boolean) => Promise<MachineResources>) | null = null
 
   /**
    * @param workspaceId the workspace whose pids these are.

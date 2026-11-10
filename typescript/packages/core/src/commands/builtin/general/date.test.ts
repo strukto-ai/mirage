@@ -160,14 +160,13 @@ describe('date honors the command environment TZ', () => {
   })
 })
 
-it('renders the implicit host zone in explicit and default formats', async () => {
-  const hostZone = new Intl.DateTimeFormat().resolvedOptions().timeZone
+it('is UTC with no TZ, whatever zone the server is in', async () => {
   for (const d of ['@1789430400', '@1767225600']) {
     for (const format of [[], ['+%Z %z']]) {
       const implicit = await runDateEnv({}, format, { date: d })
-      expect(implicit).toEqual(await runDateEnv({ TZ: hostZone }, format, { date: d }))
-      expect(implicit[0].trim()).not.toBe('')
+      expect(implicit).toEqual(await runDateEnv({ TZ: 'UTC' }, format, { date: d }))
     }
+    expect((await runDateEnv({}, ['+%Z %z'], { date: d }))[0]).toBe('UTC +0000\n')
   }
 })
 

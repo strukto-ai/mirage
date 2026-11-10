@@ -15,13 +15,13 @@
 import { MachineTable } from '../../src/execution/machine/table.ts'
 import type { MachineHandle } from '../../src/machine/handle.ts'
 import type { RuntimeEntry } from '../../src/runtime/base.ts'
-import { MachineRuntime } from '../../src/runtime/machine/runtime.ts'
+import { RemoteRuntime } from '../../src/runtime/machine/runtime.ts'
 
 // One table per handle, as one workspace holds a handle however many
 // runtimes a test binds to it.
 const TABLES = new WeakMap<MachineHandle, MachineTable>()
 
-/** A handle whose machine runtime captures `captures`, for a test. */
+/** A handle whose remote runtime captures `captures`, for a test. */
 export function captured<T extends MachineHandle>(handle: T, captures: readonly string[]): T {
   ;(handle as { captures?: readonly string[] }).captures = captures
   return handle
@@ -33,13 +33,13 @@ function capturesOf(handle: MachineHandle): readonly string[] | undefined {
 }
 
 /**
- * A machine runtime on one machine, bound to it as a workspace binds its
+ * A remote runtime on one machine, bound to it as a workspace binds its
  * entries, capturing what a fake handle's `captures` names. Mirrors
  * Python's `tests/fixtures/machine.machine_runtime`.
  */
-export function machineRuntime(handle: MachineHandle): MachineRuntime {
+export function machineRuntime(handle: MachineHandle): RemoteRuntime {
   const captures = capturesOf(handle)
-  const runtime = new MachineRuntime({
+  const runtime = new RemoteRuntime({
     machine: handle.name,
     ...(captures !== undefined ? { captures } : {}),
   })
@@ -62,7 +62,7 @@ export function on(
   ...rest: RuntimeEntry[]
 ): { machines: Record<string, MachineHandle>; runtimes: RuntimeEntry[] } {
   const captures = capturesOf(handle)
-  const entry = new MachineRuntime({
+  const entry = new RemoteRuntime({
     machine: handle.name,
     ...(captures !== undefined ? { captures } : {}),
   })

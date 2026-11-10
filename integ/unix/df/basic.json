@@ -152,6 +152,19 @@
         "stdout": "- - - /data\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "df_lists_only_filesystems",
+      "seq": 612019,
+      "targets": [
+        "ram"
+      ],
+      "command": "df | grep -c -e /usr/bin -e /.bash_history; df /usr/bin | tail -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\nram                    -    -         -    - /\n",
+        "stderr": ""
+      }
     }
   ]
 }

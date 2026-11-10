@@ -28,13 +28,22 @@ from mirage.execution.process.constants import MAX_PROCESSES
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.process.types import Process, ProcessState
-from mirage.execution.types import MachineId, MachinePid, ProcessId
+from mirage.execution.types import (
+    MachineId,
+    MachinePid,
+    MachineResources,
+    ProcessId,
+)
 from mirage.machine.handle import MachineHandle
 from mirage.machine.registry import build_machine
 from mirage.shell.constants import CONTINUE_SIGNALS, STOP_SIGNALS
 from mirage.workspace.record.types import RecordFields
 
 logger = logging.getLogger(__name__)
+
+# Reads what the host holds, given its id and whether to sample its
+# processors.
+HostResources = Callable[[str, bool], Awaitable[MachineResources]]
 
 # The table that holds each machine handle, so a second workspace cannot
 # take, and close, a handle another one runs on; a table's close lets go.
@@ -64,6 +73,10 @@ class MachineTable:
         stop_host (Callable[[MachinePid, float | None, int],
             Awaitable[bool]] | None): stops a host program a lapsed
             workspace left; None reaches none.
+        host_resources (Callable[[str, bool],
+            Awaitable[MachineResources]] | None): reads what the host
+            holds, given its id and whether to sample its processors;
+            None reads nothing.
 
     Raises:
         ValueError: an entry no provider builds.
@@ -82,6 +95,7 @@ class MachineTable:
         | None = None,
         stop_host: Callable[[MachinePid, float | None, int], Awaitable[bool]]
         | None = None,
+        host_resources: HostResources | None = None,
     ) -> None:
         self._handles = {
             name: build_machine(name, spec)
@@ -96,6 +110,7 @@ class MachineTable:
         self._scan_host = scan_host
         self._signal_host = signal_host
         self._stop_host = stop_host
+        self._host_resources = host_resources
         # The processes scans found, by machine, pid and start, each
         # with the event that ends it once a scan no longer sees it and
         # the tag of the run that started it.
@@ -156,6 +171,25 @@ class MachineTable:
         return next(
             (h for h in self._handles.values() if str(h.id) == machine), None
         )
+
+    async def resources(self, machine: str, cpu: bool) -> MachineResources:
+        """What one machine holds now.
+
+        Args:
+            machine (str): its id as ``ps`` shows it, the host's among
+                them.
+            cpu (bool): sample its processors too.
+
+        Raises:
+            ValueError: no such machine, or a host nothing reads.
+            Exception: the machine could not be reached.
+        """
+        handle = self.by_id(machine)
+        if handle is not None:
+            return await handle.resources(cpu)
+        if self._host_resources is None:
+            raise ValueError(f"unknown machine: {machine!r}")
+        return await self._host_resources(machine, cpu)
 
     async def check(
         self, now: Callable[[], float], machine: str | None = None
@@ -423,6 +457,7 @@ class MachineTable:
                 root = _program_row(run, pids, handle.record.machine_pid)
                 if root is not None:
                     handle.show_state(root.state)
+                    handle.show_usage(root.usage)
                     placed[root.pid] = handle.record.pid
                     known = handle.record.machine_pid
                     if known is None or known.pid != root.pid:
@@ -442,6 +477,7 @@ class MachineTable:
                     )
                     if found is not None:
                         found.show_state(row.state)
+                        found.show_usage(row.usage)
                         placed[row.pid] = found.record.pid
                         seen.add((str(machine), row.pid, row.started))
                 waiting = [

@@ -436,6 +436,7 @@ SPECS: dict[str, CommandSpec] = {
                 "-y", "--yp", action="store_true", help="NIS/YP domain name."
             ),
             Argument("--nis", action="store_true", help="NIS/YP domain name."),
+            Argument("--machine", help="Answer for this machine only."),
             TEXTS_OPERAND,
         ),
     ),
@@ -660,6 +661,7 @@ SPECS: dict[str, CommandSpec] = {
         arguments=(
             Argument("--all", action="store_true"),
             Argument("--ignore"),
+            Argument("--machine", help="Answer for this machine only."),
             TEXTS_OPERAND,
         ),
     ),

@@ -23,7 +23,7 @@ import {
   toIsoZ,
   utcDateFolder,
 } from './dates.ts'
-import { LOCAL_ZONE, UTC_ZONE, resolveTz } from './timezone.ts'
+import { UTC_ZONE, resolveTz } from './timezone.ts'
 
 describe('inMtimeWindow', () => {
   it('keeps everything under an unbounded window', () => {
@@ -464,7 +464,7 @@ describe('parseDateExpr years below 100', () => {
     expect(parseDateExpr('0042-01-01', UTC_ZONE)?.getUTCFullYear()).toBe(42)
     expect(parseDateExpr('0042-01-01T00:00:00Z', UTC_ZONE)?.getUTCFullYear()).toBe(42)
     expect(parseDateExpr('0042-01-01T00:00+01:00', UTC_ZONE)?.getUTCFullYear()).toBe(41)
-    expect(parseDateExpr('0099-12-31', LOCAL_ZONE)?.getFullYear()).toBe(99)
+    expect(parseDateExpr('0099-12-31', UTC_ZONE)?.getUTCFullYear()).toBe(99)
     expect(parseDateExpr('0042-01-01', UTC_ZONE)?.getTime()).toBe(-60841756800 * 1000)
   })
 })

@@ -63,7 +63,21 @@ from mirage.workspace.executor.builtins.disown.disown import handle_disown
 from mirage.workspace.executor.builtins.jobs.jobs import handle_jobs
 from mirage.workspace.executor.builtins.kill.kill import handle_kill
 from mirage.workspace.executor.builtins.links.links import operand_follow
+from mirage.workspace.executor.builtins.pgrep.killall import handle_killall
+from mirage.workspace.executor.builtins.pgrep.pgrep import (
+    handle_pgrep,
+    handle_pkill,
+)
+from mirage.workspace.executor.builtins.pgrep.pidof import handle_pidof
 from mirage.workspace.executor.builtins.ps.ps import handle_ps
+from mirage.workspace.executor.builtins.resources.free import handle_free
+from mirage.workspace.executor.builtins.resources.hostname import (
+    handle_hostname,
+)
+from mirage.workspace.executor.builtins.resources.lscpu import handle_lscpu
+from mirage.workspace.executor.builtins.resources.nproc import handle_nproc
+from mirage.workspace.executor.builtins.resources.top import handle_top
+from mirage.workspace.executor.builtins.resources.uptime import handle_uptime
 from mirage.workspace.executor.builtins.wait.wait import handle_wait
 from mirage.workspace.executor.command.cli import (
     CLIContext,
@@ -116,7 +130,8 @@ from mirage.workspace.lookup import (
     lookup,
     runs_as,
 )
-from mirage.workspace.lookup.constants import EXEC_WRAPPERS
+from mirage.workspace.lookup.constants import EXEC_WRAPPERS, MACHINE_VIEW
+from mirage.workspace.lookup.lookup import picks_machine, runs_programs
 from mirage.workspace.mount import (
     MountCommandUnsupported,
     MountEntry,
@@ -137,6 +152,21 @@ JOB_HANDLERS = {
     "kill": handle_kill,
     "jobs": handle_jobs,
     "disown": handle_disown,
+    "pgrep": handle_pgrep,
+    "pkill": handle_pkill,
+    "pidof": handle_pidof,
+    "killall": handle_killall,
+}
+
+# The builtins that report on the machines programs run on; ``nproc``
+# answers for them only once there are any.
+MACHINE_HANDLERS = {
+    "free": handle_free,
+    "uptime": handle_uptime,
+    "top": handle_top,
+    "nproc": handle_nproc,
+    "hostname": handle_hostname,
+    "lscpu": handle_lscpu,
 }
 
 
@@ -983,6 +1013,33 @@ async def handle_command(
             return await handle_ps(job_table, text_parts, session, view)
         return await JOB_HANDLERS[cmd_name](
             job_table, text_parts, session, view
+        )
+
+    if (
+        cmd_name in MACHINE_HANDLERS
+        and job_table is not None
+        and (
+            cmd_name == "free"
+            or runs_programs(
+                context.frame.routing.bindings
+                if context.frame.routing is not None
+                else registry.runtime_bindings
+            )
+        )
+        and not (cmd_name == "nproc" and {"--help", "--version"} & set(parts))
+        and (
+            cmd_name not in ("hostname", MACHINE_VIEW)
+            or picks_machine([str(part) for part in parts[1:]])
+        )
+    ):
+        return await MACHINE_HANDLERS[cmd_name](
+            job_table,
+            [
+                (p.raw_path or p.virtual) if isinstance(p, PathSpec) else p
+                for p in parts
+            ],
+            session,
+            view,
         )
 
     # Shell functions
