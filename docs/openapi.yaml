@@ -1589,7 +1589,7 @@ paths:
                 signal: null
                 error: null
                 jobs:
-                  - 019a5e2c7b417c3e9f204d8e1a6b5c38
+                  - job_019a5e2c7b417c3e9f204d8e1a6b5c38
                 processes:
                   - 42
                 machines:
@@ -1643,6 +1643,9 @@ paths:
           $ref: '#/components/responses/404'
         '409':
           $ref: '#/components/responses/409'
+        '499':
+          description: The caller disconnected before the bytes were buffered. The bytes not
+            yet buffered are dropped. The response has no body.
         '422':
           description: Validation Error
           content:
@@ -1725,7 +1728,7 @@ paths:
                   $ref: '#/components/schemas/JobResponse'
                 title: Response List Jobs V1 Workspaces  Workspace Id  Jobs Get
               example:
-                - id: 019a5e2c7b417c3e9f204d8e1a6b5c38
+                - id: job_019a5e2c7b417c3e9f204d8e1a6b5c38
                   number: 1
                   session_id: default
                   command: sleep 30
@@ -1767,7 +1770,7 @@ paths:
         - name: job_id
           in: path
           required: true
-          description: Job ID returned by the job list endpoint.
+          description: Job ID returned as `id` by the job list endpoint, written `job_` and 32 hex digits.
           schema:
             type: string
       responses:
@@ -1778,7 +1781,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/JobDetailResponse'
               example:
-                id: 019a5e2c7b417c3e9f204d8e1a6b5c38
+                id: job_019a5e2c7b417c3e9f204d8e1a6b5c38
                 number: 1
                 session_id: default
                 command: sleep 30
@@ -1840,7 +1843,7 @@ paths:
         - name: job_id
           in: query
           required: false
-          description: Filter processes by job ID, including descendant processes.
+          description: Filter processes by job ID (`job_` and 32 hex digits), including descendant processes.
           schema:
             type: string
         - name: machine
@@ -2044,9 +2047,10 @@ paths:
         - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
-          description: Return the policy decision for the command without running it. The body
-            may carry only `command`; `cwd`, `runtime`, `machine`, `open_stdin` and a stdin part
-            are rejected. Cannot be combined with `stream`.
+          description: Return the policy decision for the command without running it. Only
+            `command` is evaluated; `record` is ignored and `open_stdin` may be `false`. A
+            multipart body, or a body with `cwd`, `runtime`, `machine` or `open_stdin` set to
+            `true`, is rejected with `400`. Cannot be combined with `stream`.
           required: false
           schema:
             type: boolean
@@ -2088,7 +2092,8 @@ paths:
           description: The request is malformed. The body is not valid JSON, has an unknown or
             invalid field, or its multipart parts are missing or out of order. Or the options
             conflict, as `stream` with `explain`, `open_stdin` without `stream=true` or with a
-            stdin part, or `explain` with anything but `command`.
+            stdin part, or `explain` with a multipart body, `cwd`, `runtime`, `machine` or
+            `open_stdin` set to `true`.
           content:
             application/json:
               schema:
@@ -2161,7 +2166,7 @@ paths:
         | Stream | `stream=true` | NDJSON output records as they are produced, then a status record. |
         | Explain | `explain=true` | The policy decision. Nothing runs. |
 
-        A `200` means the request was accepted, not that the command succeeded. Check `exit_code`. A command refused by a policy also returns `200`, with a non-zero `exit_code` (usually `126`) and the reason in `refusal`.
+        A `200` means the request was accepted, not that the command succeeded. Check `exit_code`. A policy refusal also returns `200`; check `refusal` to know whether a policy refused anything. See Refused commands below.
 
         The request stays open until the command ends, and closing it cancels the command. To leave work running, end the command with `&`; it returns at once and the work appears under [jobs](/api/operations/jobs/list-jobs). Every result carries a `line_id` for the [lines](/api/operations/lines/get-command) endpoints.
 
@@ -2221,7 +2226,16 @@ paths:
 
         ## Refused commands
 
-        A command a policy refuses does not run. The response is still `200`, with exit code `126` and the reason in `refusal`.
+        A policy refusal returns `200`. `refusal` is set whenever a policy refused something on the line, and is `null` otherwise. The exit code alone does not tell you:
+
+        - A command refused before it runs usually exits `126` with `<command>: Permission denied`.
+        - A refusal about a path appears as that path's own error, such as exit `1`.
+        - A policy that judges a command after it ran sets exit `126` but does not undo its effects, and output already sent stays sent. A policy that judges the whole line after it ran drops the line's output.
+        - A pipeline exits with its last stage's status unless `pipefail` is set, so a refused earlier stage can leave the exit code at `0`.
+
+        A refusal does not always mean nothing ran, so do not retry a refused command blindly.
+
+        A command denied before it ran:
 
         ```json
         {
@@ -5745,6 +5759,7 @@ components:
         id:
           title: Id
           type: string
+          description: Job ID, written `job_` and 32 hex digits. Use it with `GET /v1/workspaces/{workspace_id}/jobs/{job_id}`.
         line_id:
           anyOf:
             - type: string
@@ -5820,6 +5835,7 @@ components:
         id:
           title: Id
           type: string
+          description: Job ID, written `job_` and 32 hex digits. Use it with `GET /v1/workspaces/{workspace_id}/jobs/{job_id}`.
         line_id:
           anyOf:
             - type: string
@@ -5898,6 +5914,7 @@ components:
             type: string
           title: Jobs
           type: array
+          description: IDs of the jobs the line started, each `job_` and 32 hex digits.
         machines:
           items:
             type: string
@@ -7694,7 +7711,8 @@ components:
         - detail
     Refusal:
       type: object
-      description: Why a policy refused a command.
+      description: Why a policy refused a command or part of it. A refusal can come after the
+        command ran and does not undo what it did.
       properties:
         kind:
           type: string
@@ -7726,8 +7744,9 @@ components:
       properties:
         exit_code:
           type: integer
-          description: Exit status of the command. `0` is success, `126` a policy refusal, `127`
-            command not found.
+          description: Exit status of the command. `0` is success and `127` command not found.
+            `126` usually means a policy refused the command before it ran, but a refusal can
+            leave another code; check `refusal`.
         stdout:
           type: string
           description: Standard output, decoded as UTF-8. Empty in a stream's final record.
@@ -7738,7 +7757,8 @@ components:
           anyOf:
             - $ref: '#/components/schemas/Refusal'
             - type: 'null'
-          description: Set when a policy refused the command, otherwise `null`.
+          description: Set when a policy refused the command or any part of it, otherwise
+            `null`. Part of the command may have run, and the exit code need not be `126`.
         line_id:
           type: string
           description: Command execution ID. Use it with `GET /v1/workspaces/{workspace_id}/lines/{line_id}`.
