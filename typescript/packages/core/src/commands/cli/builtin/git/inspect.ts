@@ -331,7 +331,7 @@ async function independent(repo: Repo, revisions: readonly string[]): Promise<st
 function validRefname(name: string, onelevel: boolean, pattern: boolean): boolean {
   if (name === '@' || (!onelevel && !name.includes('/'))) return false
   const once = pattern && name.split('*').length === 2
-  return validRefName(once ? name.replace('*', 'x') : name)
+  return validRefName(once ? name.replaceAll('*', 'x') : name)
 }
 
 function normalized(name: string): string {
