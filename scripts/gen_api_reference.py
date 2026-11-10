@@ -54,14 +54,14 @@ SAMPLES = {
     ("/v1/workspaces/{workspace_id}/shell", "post"): [
         {
             "lang": "bash",
-            "label": "Keep stdin open",
+            "label": "Run a command",
             "source": (
-                "curl --no-buffer --request POST \\\n"
+                "curl --request POST \\\n"
                 "  --url 'http://127.0.0.1:8765/v1/workspaces/"
-                "{workspace_id}/shell?stream=true' \\\n"
+                "{workspace_id}/shell' \\\n"
                 "  --header 'Authorization: Bearer <token>' \\\n"
                 "  --header 'Content-Type: application/json' \\\n"
-                '  --data \'{"command":"cat","open_stdin":true}\'\n'
+                '  --data \'{"command":"echo hello"}\'\n'
             ),
         }
     ]
@@ -257,10 +257,7 @@ def response_content(doc: dict[str, Any], op: dict[str, Any]) -> str:
         responses.get("200", {}).get("content", {}).get("application/json", {})
     )
     streamed = (
-        responses.get("200", {})
-        .get("content", {})
-        .get("application/x-ndjson", {})
-        .get("examples", {})
+        responses.get("200", {}).get("content", {}).get("application/x-ndjson")
     )
     example = []
     if "200" in responses and "example" in created:
@@ -282,19 +279,12 @@ def response_content(doc: dict[str, Any], op: dict[str, Any]) -> str:
             "HTTP/1.1 200 OK\nContent-Type: application/json",
             "```",
         ]
-    elif streamed:
+    elif streamed is not None and "example" not in streamed:
         example = [
             "```json 200",
             json.dumps(generic["example"], indent=2),
             "```",
         ]
-        for item in streamed.values():
-            example += [
-                "",
-                f"```json 200 {item['summary']}",
-                item["value"].rstrip("\n"),
-                "```",
-            ]
     if example:
         lines += [
             '<div className="hidden">',
@@ -340,8 +330,11 @@ def response_content(doc: dict[str, Any], op: dict[str, Any]) -> str:
 def render_overlay(doc: dict[str, Any]) -> str:
     """Presentation changes that leave the source API contract complete.
 
-    A generated request sample cannot set a query parameter, so one that
-    needs its own comes from `SAMPLES`.
+    A request sample that must differ from the generated one comes from
+    `SAMPLES`. An operation that also streams NDJSON documents the stream
+    in its description, so its response pane shows the JSON example only.
+    A description moves below the method and path: it leads the page
+    content, and the description field itself is removed.
 
     Args:
         doc (dict[str, Any]): the OpenAPI document.
@@ -349,7 +342,10 @@ def render_overlay(doc: dict[str, Any]) -> str:
     actions: list[dict[str, Any]] = []
     for path, method, op in operations(doc):
         update: dict[str, Any] = {}
-        content = response_content(doc, op)
+        description = op.get("description", "").strip()
+        content = "\n\n".join(
+            part for part in (description, response_content(doc, op)) if part
+        )
         if content:
             update["x-mint"] = {"content": content}
         if (path, method) in SAMPLES:
@@ -359,6 +355,14 @@ def render_overlay(doc: dict[str, Any]) -> str:
                 {
                     "target": f"$.paths[{json.dumps(path)}].{method}",
                     "update": update,
+                }
+            )
+        if description:
+            actions.append(
+                {
+                    "target": f"$.paths[{json.dumps(path)}].{method}"
+                    ".description",
+                    "remove": True,
                 }
             )
         for code in op.get("responses", {}):
@@ -468,14 +472,77 @@ def selftest() -> None:
     original = json.dumps(doc)
     overlay = json.loads(render_overlay(doc))
     assert json.dumps(doc) == original
-    assert len(overlay["actions"]) == 2
+    assert len(overlay["actions"]) == 3
     content = overlay["actions"][0]["update"]["x-mint"]["content"]
+    assert content.startswith(op["description"] + "\n\n")
     assert "201 Created" in content and "Conflicting configuration" in content
     assert '<Accordion title="Errors">' in content
+    assert overlay["actions"][1] == {
+        "target": '$.paths["/visible"].get.description',
+        "remove": True,
+    }
     assert overlay["actions"][-1] == {
         "target": '$.paths["/visible"].get.responses["409"]',
         "remove": True,
     }
+    assert "description" not in overlay["actions"][0]["update"]
+
+    op["description"] = (
+        "Run a line.\n\n| Mode | Use |\n| --- | --- |\n\n## Examples\n"
+    )
+    assert "examples" in render(doc)
+    overlay = json.loads(render_overlay(doc))
+    update = overlay["actions"][0]["update"]
+    assert "description" not in update
+    content = update["x-mint"]["content"]
+    assert content.startswith(
+        "Run a line.\n\n| Mode | Use |\n| --- | --- |\n\n## Examples\n\n"
+    )
+    assert content.index("## Examples") < content.index("201 Created")
+    bare = json.loads(
+        render_overlay(
+            {
+                "paths": {
+                    "/bare": {
+                        "get": {
+                            "tags": ["VFS"],
+                            "description": " \n",
+                            "responses": {"404": {"description": "Gone"}},
+                        }
+                    }
+                }
+            }
+        )
+    )
+    assert [action["target"] for action in bare["actions"]] == [
+        '$.paths["/bare"].get',
+        '$.paths["/bare"].get.responses["404"]',
+    ]
+    assert bare["actions"][0]["update"]["x-mint"]["content"].startswith(
+        '<Accordion title="Errors">'
+    )
+    lone = json.loads(
+        render_overlay(
+            {
+                "paths": {
+                    "/lone": {
+                        "get": {
+                            "tags": ["VFS"],
+                            "description": "Lead.\n\nMore.",
+                            "responses": {"200": {"description": "OK"}},
+                        }
+                    }
+                }
+            }
+        )
+    )
+    assert lone["actions"] == [
+        {
+            "target": '$.paths["/lone"].get',
+            "update": {"x-mint": {"content": "Lead.\n\nMore."}},
+        },
+        {"target": '$.paths["/lone"].get.description', "remove": True},
+    ]
     empty_response = response_content(
         doc, {"responses": {"204": {"description": "No content"}}}
     )
@@ -513,23 +580,14 @@ def selftest() -> None:
                 "200": {
                     "content": {
                         "application/json": {"example": {"id": "demo"}},
-                        "application/x-ndjson": {
-                            "examples": {
-                                "live": {
-                                    "summary": "Stream",
-                                    "value": '{"line_id":"a"}\n',
-                                }
-                            }
-                        },
+                        "application/x-ndjson": {"schema": {"type": "string"}},
                     }
                 }
             }
         },
     )
-    assert (
-        '"id": "demo"' in streamed_response
-        and '```json 200 Stream\n{"line_id":"a"}\n```' in streamed_response
-    )
+    assert streamed_response.count("```json 200") == 1
+    assert '```json 200\n{\n  "id": "demo"\n}\n```' in streamed_response
     print("API reference self-test passed")
 
 

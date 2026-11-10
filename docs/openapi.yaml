@@ -1589,7 +1589,7 @@ paths:
                 signal: null
                 error: null
                 jobs:
-                  - job_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c38
+                  - 019a5e2c7b417c3e9f204d8e1a6b5c38
                 processes:
                   - 42
                 machines:
@@ -1725,7 +1725,7 @@ paths:
                   $ref: '#/components/schemas/JobResponse'
                 title: Response List Jobs V1 Workspaces  Workspace Id  Jobs Get
               example:
-                - id: job_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c38
+                - id: 019a5e2c7b417c3e9f204d8e1a6b5c38
                   number: 1
                   session_id: default
                   command: sleep 30
@@ -1778,7 +1778,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/JobDetailResponse'
               example:
-                id: job_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c38
+                id: 019a5e2c7b417c3e9f204d8e1a6b5c38
                 number: 1
                 session_id: default
                 command: sleep 30
@@ -2044,23 +2044,26 @@ paths:
         - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
-          description: Return what the call would do without running it.
+          description: Return the policy decision for the command without running it. The body
+            may carry only `command`; `cwd`, `runtime`, `machine`, `open_stdin` and a stdin part
+            are rejected. Cannot be combined with `stream`.
           required: false
           schema:
             type: boolean
             default: false
         - name: stream
           in: query
-          description: Stream stdout, stderr and the final status as NDJSON. Cannot be combined
-            with explain.
+          description: Return output as it is produced, as NDJSON records ending with a status
+            record. Cannot be combined with `explain`.
           required: false
           schema:
             type: boolean
             default: false
       responses:
         '200':
-          description: Command result, policy evaluation when `explain=true`, or streamed output ending
-            with a status record when `stream=true`. With `open_stdin`, the first record contains `line_id`.
+          description: The request was accepted. By default the body is one JSON result. With
+            `explain=true` it is the policy decision and nothing ran. With `stream=true` it is
+            NDJSON. A `200` does not mean the command succeeded; check `exit_code`.
           content:
             application/json:
               schema:
@@ -2069,26 +2072,31 @@ paths:
                   - $ref: '#/components/schemas/ShellExplanation'
               example:
                 exit_code: 0
-                stdout: 'hello
-
-                  '
+                stdout: "hello\n"
                 stderr: ''
                 refusal: null
                 line_id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
             application/x-ndjson:
               schema:
                 type: string
-              examples:
-                open_stdin:
-                  summary: Stream with open_stdin
-                  value: |
-                    {"line_id":"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37"}
-                    {"stream":"stdout","data":"aGVsbG8K"}
-                    {"status":"done","result":{"exit_code":0,"stdout":"","stderr":"","refusal":null,"line_id":"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37"},"error":null}
+                description: One JSON record per line. An output record has `stream` (`stdout` or
+                  `stderr`) and base64 `data`. The last record has `status` (`done`, `failed` or
+                  `canceled`), `result` and `error`; its `result.stdout` and `result.stderr` are
+                  empty because the output was already sent. With `open_stdin`, a `line_id`
+                  record comes first.
+        '400':
+          description: The request is malformed. The body is not valid JSON, has an unknown or
+            invalid field, or its multipart parts are missing or out of order. Or the options
+            conflict, as `stream` with `explain`, `open_stdin` without `stream=true` or with a
+            stdin part, or `explain` with anything but `command`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                detail: open_stdin takes stream=true and no stdin part
         '401':
           $ref: '#/components/responses/401'
-        '403':
-          $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
         '409':
@@ -2099,7 +2107,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '422':
-          description: Validation Error
+          description: A query parameter has an invalid value, such as `explain=maybe`.
           content:
             application/json:
               schema:
@@ -2112,6 +2120,12 @@ paths:
           $ref: '#/components/responses/499'
         '500':
           $ref: '#/components/responses/500'
+        '503':
+          description: The server is shutting down and accepts no new commands.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
       tags:
         - Shell
       x-hosts:
@@ -2137,9 +2151,96 @@ paths:
               required:
                 - request
       description: |-
-        Run a shell command or script in the workspace. Check `exit_code` to determine whether it succeeded.
+        Run a shell command or script in the workspace and return its exit code and output.
 
-        Set `stream=true` for live output. Add `open_stdin=true` to send more input while the command runs. See [Streaming and stdin](/api/streaming) for output formats and input examples.
+        One endpoint serves three modes:
+
+        | Mode | Request | Response |
+        | --- | --- | --- |
+        | Run (default) | no query flags | One JSON result when the command ends. |
+        | Stream | `stream=true` | NDJSON output records as they are produced, then a status record. |
+        | Explain | `explain=true` | The policy decision. Nothing runs. |
+
+        A `200` means the request was accepted, not that the command succeeded. Check `exit_code`. A command refused by a policy also returns `200`, with a non-zero `exit_code` (usually `126`) and the reason in `refusal`.
+
+        The request stays open until the command ends, and closing it cancels the command. To leave work running, end the command with `&`; it returns at once and the work appears under [jobs](/api/operations/jobs/list-jobs). Every result carries a `line_id` for the [lines](/api/operations/lines/get-command) endpoints.
+
+        To send input, use a `multipart/form-data` body with a `stdin` part, or set `open_stdin=true` with `stream=true` to write while the command runs. See [Streaming and stdin](/api/streaming).
+
+        ## Stream output
+
+        Set `stream=true` to receive output as it is produced. Each line is one JSON record: output records carry base64 `data`, and the last record carries `status` and the final `result`.
+
+        ```bash
+        curl --no-buffer --request POST \
+          --url 'http://127.0.0.1:8765/v1/workspaces/{workspace_id}/shell?stream=true' \
+          --header 'Authorization: Bearer <token>' \
+          --header 'Content-Type: application/json' \
+          --data '{"command":"echo hello"}'
+        ```
+
+        ```json
+        {"stream":"stdout","data":"aGVsbG8K"}
+        {"status":"done","result":{"exit_code":0,"stdout":"","stderr":"","refusal":null,"line_id":"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37"},"error":null}
+        ```
+
+        ## Explain a command
+
+        Set `explain=true` to get the policy decision without running the command. The response has one `node` per part of the line; the example below is trimmed to one command.
+
+        ```bash
+        curl --request POST \
+          --url 'http://127.0.0.1:8765/v1/workspaces/{workspace_id}/shell?explain=true' \
+          --header 'Authorization: Bearer <token>' \
+          --header 'Content-Type: application/json' \
+          --data '{"command":"echo hello"}'
+        ```
+
+        ```json
+        {
+          "line": "echo hello",
+          "outcome": "allow",
+          "reason": "",
+          "refusal": null,
+          "exit_code": 0,
+          "node": {
+            "type": "line",
+            "text": "echo hello",
+            "children": [
+              {
+                "type": "command",
+                "text": "echo hello",
+                "command": "echo",
+                "outcome": "allow",
+                "children": []
+              }
+            ]
+          }
+        }
+        ```
+
+        ## Refused commands
+
+        A command a policy refuses does not run. The response is still `200`, with exit code `126` and the reason in `refusal`.
+
+        ```json
+        {
+          "exit_code": 126,
+          "stdout": "",
+          "stderr": "rm: Permission denied\n",
+          "refusal": {
+            "kind": "deny",
+            "reason": "rm is not allowed in this workspace",
+            "policy": "PermissionsPolicy",
+            "ask_id": null
+          },
+          "line_id": "line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c38"
+        }
+        ```
+
+        ## Keep stdin open
+
+        With `stream=true` and `"open_stdin": true`, the first record carries the `line_id`, and you write input to that line while the command runs. See [Streaming and stdin](/api/streaming) for the full flow.
   /v1/workspaces/{workspace_id}/tools/shell:
     post:
       summary: Shell tool
@@ -5819,8 +5920,7 @@ components:
           title: Started At
           type: number
         state:
-          title: State
-          type: string
+          $ref: '#/components/schemas/LineState'
       required:
         - id
         - session_id
@@ -5871,8 +5971,7 @@ components:
           title: Started At
           type: number
         state:
-          title: State
-          type: string
+          $ref: '#/components/schemas/LineState'
       required:
         - id
         - session_id
@@ -7593,19 +7692,53 @@ components:
           description: The policy refusal, when a policy refused the call.
       required:
         - detail
+    Refusal:
+      type: object
+      description: Why a policy refused a command.
+      properties:
+        kind:
+          type: string
+          enum:
+            - deny
+            - pending
+            - failed
+          description: '`deny` when a policy refused it, `pending` when it waits for an approval,
+            `failed` when a policy raised an error and so refused by default.'
+        reason:
+          type: string
+          description: Reason given by the policy or the approval request.
+        policy:
+          type: string
+          description: Name of the policy that refused. Empty for `pending`.
+        ask_id:
+          anyOf:
+            - type: string
+            - type: 'null'
+          description: Approval request ID, for `pending`.
+      required:
+        - kind
+        - reason
+        - policy
+        - ask_id
     ShellResult:
       type: object
+      description: Returned by default, when the command has ended.
       properties:
         exit_code:
           type: integer
+          description: Exit status of the command. `0` is success, `126` a policy refusal, `127`
+            command not found.
         stdout:
           type: string
+          description: Standard output, decoded as UTF-8. Empty in a stream's final record.
         stderr:
           type: string
+          description: Standard error, decoded as UTF-8. Empty in a stream's final record.
         refusal:
           anyOf:
-            - type: object
+            - $ref: '#/components/schemas/Refusal'
             - type: 'null'
+          description: Set when a policy refused the command, otherwise `null`.
         line_id:
           type: string
           description: Command execution ID. Use it with `GET /v1/workspaces/{workspace_id}/lines/{line_id}`.
@@ -7613,8 +7746,9 @@ components:
         - exit_code
         - stdout
         - stderr
+        - refusal
         - line_id
-      title: Shell result
+      title: Result
     ShellRequest:
       type: object
       properties:
@@ -7626,20 +7760,24 @@ components:
           description: Working directory for this command only.
         runtime:
           type: string
-          description: Runtime name to use instead of automatic runtime selection.
+          description: Name of an entry under `runtimes` in the workspace config. If omitted, the
+            runtime is selected automatically.
         machine:
           type: string
-          description: Machine name to use for this command instead of automatic machine selection.
+          description: Name of an entry under `machines` in the workspace config. If omitted, the
+            machine is selected automatically.
         record:
           type: boolean
           default: true
-          description: Include this command in session history.
+          description: Include this command in session history. Set `false` to keep it out.
         open_stdin:
           type: boolean
           default: false
-          description: Keep stdin open for additional input. Requires `stream=true`; the first response record contains `line_id`.
+          description: Keep stdin open for additional input. Requires `stream=true` and no stdin
+            part; the first response record contains `line_id`.
       required:
         - command
+      additionalProperties: false
     LoadRequest:
       type: object
       properties:
@@ -7663,9 +7801,9 @@ components:
         outcome:
           type: string
           enum:
-            - ALLOW
-            - DENY
-            - ASK
+            - allow
+            - deny
+            - ask
         reason:
           type: string
           description: Reason returned by the policy that determined the outcome.
@@ -7679,7 +7817,7 @@ components:
           description: Evaluation results from each policy.
         refusal:
           anyOf:
-            - type: object
+            - $ref: '#/components/schemas/Refusal'
             - type: 'null'
       required:
         - outcome
@@ -7698,7 +7836,7 @@ components:
             node:
               type: object
               description: Parsed command structure and policy evaluation for each command.
-      title: Shell explanation
+      title: Explanation (explain=true)
     VfsExplanation:
       allOf:
         - $ref: '#/components/schemas/Explanation'
