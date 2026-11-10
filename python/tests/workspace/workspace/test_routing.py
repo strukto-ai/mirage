@@ -16,7 +16,8 @@ import pytest
 
 from mirage import Policy, Workspace
 from mirage.machine.handle import MachineHandle
-from mirage.policy import Outcome, Route
+from mirage.policy import Ask, Deny, Outcome, Route
+from mirage.policy.types import Scope
 from mirage.runtime.machine import MachineRuntime
 from mirage.runtime.routing import RouteError
 from mirage.runtime.types import RunResult
@@ -274,6 +275,62 @@ async def test_explain_refuses_a_wrapper_whose_routes_disagree():
         assert wrapper.stderr == await run.stderr_str()
         echo = next(n for n in _commands(said.node) if n.command == "echo")
         assert (echo.outcome, echo.exit_code) == (Outcome.ALLOW, 0)
+    finally:
+        await ws.close()
+
+
+class _Answers(Policy):
+    def __init__(self, command, answer):
+        self._command = command
+        self._answer = answer
+
+    def pre_command(self, ctx):
+        return self._answer if ctx.command == self._command else None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command", "answer", "outcome"),
+    [
+        ("nohup", Ask("sign-off"), Outcome.ASK),
+        ("hostname", Ask("sign-off"), Outcome.ASK),
+        ("nohup", Deny("no"), Outcome.DENY),
+    ],
+)
+async def test_explain_keeps_what_stops_a_wrapper_before_its_routes(
+    command, answer, outcome
+):
+    ws = _workspace(_Answers(command, answer), _WrapperApart())
+    try:
+        said = await ws.explain("nohup hostname")
+        nodes = {n.command: n for n in _commands(said.node)}
+        run = await ws.shell("nohup hostname")
+        assert nodes[command].outcome is outcome
+        assert (
+            nodes[command].refusal.reason
+            == run.refusal.reason
+            == answer.reason
+        )
+        assert nodes["nohup"].outcome is (
+            outcome if command == "nohup" else Outcome.ALLOW
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_explain_refuses_disagreeing_routes_once_an_approval_is_given():
+    ws = _workspace(_Answers("nohup", Ask("sign-off")), _WrapperApart())
+    try:
+        first = await ws.shell("nohup hostname")
+        await ws.decisions.answer(
+            first.refusal.ask_id, Outcome.ALLOW, Scope.SESSION
+        )
+        said = await ws.explain("nohup hostname")
+        wrapper = next(n for n in _commands(said.node) if n.command == "nohup")
+        run = await ws.shell("nohup hostname")
+        assert (wrapper.outcome, wrapper.exit_code) == (Outcome.DENY, 126)
+        assert wrapper.refusal == run.refusal
     finally:
         await ws.close()
 

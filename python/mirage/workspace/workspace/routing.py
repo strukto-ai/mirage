@@ -478,7 +478,9 @@ class Router:
         decision: RouteDecision[RuntimeIdentity],
     ) -> list[Judged]:
         """A line's judged commands, each wrapper whose routes one run
-        cannot honor refused at its own node, as its run refuses it.
+        cannot honor refused at its own node, as its run refuses it. A
+        wrapper or program its gate stops keeps that answer: the run
+        stops there before it compares routes.
 
         Args:
             judged (Sequence[Judged]): the line's judged commands.
@@ -497,6 +499,9 @@ class Router:
                     programs,
                 )
                 if programs
+                and not any(
+                    held.judgment.exit_code for held in (one, *programs)
+                )
                 else None
             )
             kept.append(

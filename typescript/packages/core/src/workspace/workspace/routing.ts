@@ -343,13 +343,15 @@ export class Router {
 
   /**
    * A line's judged commands, each wrapper whose routes one run cannot honor
-   * refused at its own node, as its run refuses it. Mirrors Python's
-   * `Router.refuse_disagreeing`.
+   * refused at its own node, as its run refuses it. A wrapper or program its
+   * gate stops keeps that answer: the run stops there before it compares
+   * routes. Mirrors Python's `Router.refuse_disagreeing`.
    */
   refuseDisagreeing(judged: readonly Judged[], decision: RouteDecision<Runtime>): Judged[] {
     return judged.map((one) => {
       const programs = programsOf(one, judged)
       if (programs.length === 0) return one
+      if ([one, ...programs].some((held) => held.judgment.exitCode !== 0)) return one
       const answer = this.wrapperAnswer(
         one,
         this.ownPlaced(one, this.outerPlaced(one, judged, decision)),
