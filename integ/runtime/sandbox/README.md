@@ -22,7 +22,7 @@ error, though the program saw it succeed.
 | `connection.json` | a line whose connection drops ends with 129 and `connection lost`, keeping the output it read; the next line reconnects | ssh, where a line can end its own session                                   |
 | `captures.json`   | only captured commands go to the box; the rest stay in mirage                                                           | every box                                                                   |
 | `kernel.json`     | the box runs its own Linux kernel                                                                                       | smolvm, microsandbox, apple_container                                       |
-| `resources.json`  | `nproc`, `free`, `uptime` and `top` read the box; `$!`, a `kill` of `timeout` and `pkill -f` reach the program | docker, ssh, e2b, microsandbox, apple_container, kubernetes |
+| `resources.json`  | `nproc`, `free`, `uptime` and `top` read the box; `$!`, a `kill` of `timeout` and `pkill -f` reach the program          | docker, ssh, e2b, microsandbox, apple_container, kubernetes                 |
 | `mounts.json`     | `mount_type` serves the session's view into the box                                                                     | docker, e2b, microsandbox, kubernetes                                       |
 
 The boxes are docker, ssh, e2b, smolvm, microsandbox, apple_container and kubernetes. CI runs docker

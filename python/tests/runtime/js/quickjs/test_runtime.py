@@ -74,7 +74,15 @@ class _ArgvSpy:
         self.argv: list[str] = []
 
     async def run(
-        self, *, argv, stdin, env, fs, output=None, errors=None, max_memory=None
+        self,
+        *,
+        argv,
+        stdin,
+        env,
+        fs,
+        output=None,
+        errors=None,
+        max_memory=None,
     ):
         self.argv = list(argv)
         return b"", b"", 0
