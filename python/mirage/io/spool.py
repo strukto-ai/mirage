@@ -200,11 +200,20 @@ class ByteSpool:
             return self._file
 
     async def output(self) -> ByteSource:
-        """Transfer the stored contents to a reader that owns their lifetime."""
+        """Transfer the stored contents to a reader that owns their
+        lifetime, every write to scratch storage done first, so one that
+        fails fails here, with the spool closed."""
         if self.size <= self.memory_limit:
             data = await self.read(0, self.size)
             await self.close()
             return data
+        try:
+            async with self._lock:
+                self._usable()
+                await self._flush()
+        except BaseException:
+            await self.close()
+            raise
         return OutputStream(self.stream(piece=IO_BUFFER_SIZE), self.close)
 
     def hold(self) -> None:
