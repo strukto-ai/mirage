@@ -181,8 +181,10 @@ export class KubernetesMachine extends ProgramMachine<KubernetesConfig> {
         (data) => said.write(data),
       )
     } catch (error) {
-      // A stopped kubectl reports nothing, so what is held is the program's.
-      await said.finish(0)
+      // A failed kubectl reports nothing, so what is held is the program's.
+      // A cancel skips this: a receiver that stopped reading would hold up
+      // the stop.
+      if (signal?.aborted !== true) await said.finish(0)
       throw error
     }
     if (!(await said.finish(done.exitCode))) {
