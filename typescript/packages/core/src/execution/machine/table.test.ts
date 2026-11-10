@@ -27,9 +27,13 @@ import { shownPid } from '../process/types.ts'
 import { MachineTable } from './table.ts'
 import type { MachineProcess } from './types.ts'
 
+const startWait = vi.hoisted(() => ({ seconds: 10 }))
+
 vi.mock('../../machine/constants.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof machineConstants>()),
-  RUN_START_WAIT_SECONDS: 0.01,
+  get RUN_START_WAIT_SECONDS() {
+    return startWait.seconds
+  },
 }))
 
 const DEC = new TextDecoder()
@@ -318,6 +322,7 @@ describe('MachineTable scans', () => {
   })
 
   it('signals a program no scan placed by its tag', async () => {
+    startWait.seconds = 0.01
     const box = new Unreported('a')
     const ws = sleepers({ a: box })
     try {
@@ -326,6 +331,7 @@ describe('MachineTable scans', () => {
       expect((await ws.shell(`kill ${pid}; wait ${pid}`)).exitCode).toBe(143)
       expect(box.sent).toEqual([[`${ws.workspaceId}:${pid}`, 15]])
     } finally {
+      startWait.seconds = 10
       box.finish()
       await ws.close()
     }
