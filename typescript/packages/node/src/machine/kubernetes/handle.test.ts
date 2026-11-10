@@ -54,8 +54,8 @@ class FakeKubernetesMachine extends KubernetesMachine {
 }
 
 class CutOffMachine extends KubernetesMachine {
-  streamed(errors: OutputFn): Promise<RunResult> {
-    return this.execArgv(['x'], null, {}, '/', null, errors)
+  streamed(errors: OutputFn, signal?: AbortSignal): Promise<RunResult> {
+    return this.execArgv(['x'], null, {}, '/', null, errors, signal)
   }
 
   protected override async execProgram(
@@ -156,12 +156,22 @@ describe('KubernetesMachine', () => {
     expect(DEC.decode(stdin ?? new Uint8Array())).toBe('a\n')
   })
 
-  it('a cut off run keeps what was held', async () => {
+  it('a failed kubectl keeps what was held', async () => {
     const [chunks, collect] = collector()
     await expect(new CutOffMachine('box', { pod: 'p' }).streamed(collect)).rejects.toThrow(
       'aborted',
     )
     expect(text(chunks)).toBe('command')
+  })
+
+  it('a cancel does not wait on the receiver', async () => {
+    const [chunks, collect] = collector()
+    const stop = new AbortController()
+    stop.abort()
+    await expect(
+      new CutOffMachine('box', { pod: 'p' }).streamed(collect, stop.signal),
+    ).rejects.toThrow('aborted')
+    expect(chunks).toEqual([])
   })
 
   it('a failing program says only what it said', async () => {
