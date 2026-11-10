@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use super::buffer::Buffer;
 use super::text::{RecordSearch, Regexes, take_record};
@@ -329,7 +329,7 @@ pub(super) struct Io {
     pub(super) pipes_in: Ordered<(Reader, f64)>,
     pub(super) files_out: Ordered<OutFile>,
     /// The files the record has printed to, which alone its end settles.
-    pub(super) written: Vec<Text>,
+    pub(super) written: HashSet<Text>,
     pub(super) pipes_out: Ordered<OutPipe>,
     pub(super) requests: VecDeque<Request>,
     pub(super) in_flight: Option<Request>,
@@ -401,7 +401,7 @@ impl Io {
     }
 
     pub(super) fn retire(&mut self) -> Retirement {
-        self.written = Vec::new();
+        self.written = HashSet::new();
         Retirement {
             files_in: self.files_in.retire(),
             pipes_in: self.pipes_in.retire(),
@@ -498,7 +498,7 @@ impl Io {
     /// The end of a record: what files hold so far is settled, and held
     /// standard output goes once no output pipe is open.
     pub(super) fn settle(&mut self) {
-        for name in self.written.drain(..) {
+        for name in self.written.drain() {
             if let Some(file) = self.files_out.get_mut(&name) {
                 file.settled = file.buf.len();
                 file.written = false;
