@@ -35,6 +35,8 @@ beforeAll(() => {
       outdir,
       '--config',
       fileURLToPath(new URL('./wrangler.toml', import.meta.url)),
+      '--alias',
+      `cpu-features:${fileURLToPath(new URL('./cpu_features.ts', import.meta.url))}`,
     ],
     { stdio: 'pipe', env: { ...process.env, WRANGLER_SEND_METRICS: 'false' } },
   )

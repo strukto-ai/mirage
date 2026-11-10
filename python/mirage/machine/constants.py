@@ -93,7 +93,7 @@ SSHFS_OPTIONS = (
 # stdout is the SFTP stream, so its stderr cannot share the pipe.
 SSHFS_LOG_PREFIX = "/tmp/.mirage_sshfs"
 
-# How an sshfs source names the mirage serving it: ``mirage-<id>:<prefix>``,
+# How an sshfs source names the mirage serving it: ``mirage-<id>-<n>:<prefix>``,
 # so each instance knows its own mounts from another's on the same machine.
 SSHFS_SOURCE_PREFIX = "mirage-"
 
