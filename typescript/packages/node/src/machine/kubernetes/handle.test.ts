@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
 import { wrapLine } from '@struktoai/mirage-core/machine/constants'
 import { ConnectionLostError } from '@struktoai/mirage-core/machine/errors'
@@ -283,5 +286,39 @@ describe('ExitLineFilter', () => {
     await said.write(ENC.encode('command'))
     expect(await said.finish(0)).toBe(true)
     expect(text(chunks)).toBe('command')
+  })
+})
+
+describe.skipIf(process.platform === 'win32')('KubernetesMachine pipe', () => {
+  it('holds kubectl exec open byte for byte, with a stdin of its own', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'fake-kubectl-'))
+    const fake = join(dir, 'kubectl')
+    await writeFile(fake, `#!/bin/sh\nprintf '%s\\n' "$@" > "$0.args"\nexec cat\n`, { mode: 0o755 })
+    const path = process.env.PATH
+    process.env.PATH = `${dir}:${path ?? ''}`
+    try {
+      const pipe = await new KubernetesMachine('box', { pod: 'p' }).openPipe('exec sshfs x y')
+      const payload = Uint8Array.from({ length: 256 }, (_, i) => i)
+      pipe.writer.write(payload)
+      pipe.writer.end()
+      const got: number[] = []
+      for await (const chunk of pipe.reader) got.push(...chunk)
+      expect(got).toEqual([...payload])
+      await pipe.stop()
+      expect((await readFile(`${fake}.args`, 'utf8')).split('\n')).toEqual([
+        'exec',
+        '--stdin',
+        '--quiet',
+        'p',
+        '--',
+        '/bin/sh',
+        '-c',
+        'cat 2>/dev/null | { (exec sshfs x y); kill "$$"; }',
+        '',
+      ])
+    } finally {
+      process.env.PATH = path
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

@@ -21,6 +21,7 @@ from mirage.machine.kubernetes.constants import (
     EXIT_STATUS,
     KUBECTL_HINT,
     RUNNING_PHASE,
+    own_stdin,
 )
 from mirage.machine.program import open_program_pipe, reported_state
 from mirage.machine.transport import ProgramMachine
@@ -206,5 +207,5 @@ class KubernetesMachine(ProgramMachine):
     async def open_pipe(self, command: str) -> MachinePipe:
         head, tail = self.exec_words()
         return await open_program_pipe(
-            self.program, [*head, *tail, "/bin/sh", "-c", command]
+            self.program, [*head, *tail, "/bin/sh", "-c", own_stdin(command)]
         )

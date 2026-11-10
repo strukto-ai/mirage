@@ -23,7 +23,7 @@ import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { openProgramPipe, reportedState } from '../program.ts'
 import { ProgramMachine } from '../transport.ts'
 import { KUBERNETES_CONFIG_FIELDS, type KubernetesConfig } from './config.ts'
-import { EXIT_PREFIX, EXIT_STATUS, KUBECTL_HINT, RUNNING_PHASE } from './constants.ts'
+import { EXIT_PREFIX, EXIT_STATUS, KUBECTL_HINT, ownStdin, RUNNING_PHASE } from './constants.ts'
 
 /**
  * Where kubectl's report of the exit status can begin in the stderr so
@@ -199,7 +199,7 @@ export class KubernetesMachine extends ProgramMachine<KubernetesConfig> {
 
   override openPipe(command: string): Promise<MachinePipe> {
     const [head, tail] = this.execWords()
-    return openProgramPipe(this.program, [...head, ...tail, '/bin/sh', '-c', command])
+    return openProgramPipe(this.program, [...head, ...tail, '/bin/sh', '-c', ownStdin(command)])
   }
 }
 
