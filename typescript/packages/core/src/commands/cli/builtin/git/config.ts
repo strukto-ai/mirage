@@ -27,6 +27,7 @@ import { inside } from './session.ts'
 import type { RepoLocation } from './types.ts'
 import {
   commandLineConfig,
+  WIDE_INT_BITS,
   configInt,
   maybeBool,
   parseConfigKey,
@@ -204,13 +205,16 @@ function typedValue(
   if (kind === null) return value
   if (kind === 'path')
     return value?.startsWith('~/') === true ? `${env.HOME ?? ''}/${value.slice(2)}` : value
-  if (kind === 'int') return String(configInt(value ?? '', name))
+  if (kind === 'int') return String(configInt(value ?? '', name, WIDE_INT_BITS))
   if (kind === 'bool-or-int') {
     if (value === null) return 'true'
     try {
       return String(configInt(value, name))
     } catch (err) {
       if (!(err instanceof BadNumericConfigError)) throw err
+      const answer = maybeBool(value)
+      if (answer === null) throw err
+      return answer ? 'true' : 'false'
     }
   }
   const answer = value === null ? true : maybeBool(value)

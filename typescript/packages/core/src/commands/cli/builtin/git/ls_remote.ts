@@ -41,7 +41,7 @@ import {
   type RefSortKey,
   type RepoLocation,
 } from './types.ts'
-import { optionOperand, requireVfs, startPoint, verbUsage } from './util.ts'
+import { commandLineConfig, optionOperand, requireVfs, startPoint, verbUsage } from './util.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -56,13 +56,17 @@ const NOTHING_LISTED = 2
 type Row = readonly [string, string]
 
 /** The repository's config lines, the command line's after them. */
-async function configOf(repo: RepoLocation | null, vfs: Files): Promise<ConfigLine[]> {
-  if (repo === null) return []
-  const data = await readOptional(vfs, repo.commondir.join('config'))
-  const lines = await configLines(DEC.decode(data ?? new Uint8Array()))
-  const typed = (repo.overrides ?? []).map(
+async function configOf(
+  ctx: Context,
+  repo: RepoLocation | null,
+  vfs: Files,
+): Promise<ConfigLine[]> {
+  const typed = commandLineConfig(ctx).map(
     ([name, value]) => ({ path: configKey(name), value: value ?? 'true' }) as ConfigLine,
   )
+  if (repo === null) return typed
+  const data = await readOptional(vfs, repo.commondir.join('config'))
+  const lines = await configLines(DEC.decode(data ?? new Uint8Array()))
   return [...lines, ...typed]
 }
 
@@ -183,7 +187,7 @@ export async function lsRemote(
   if (optionOperand(ctx, texts) !== null) throw new UsageError('', verbUsage(ctx))
   const keys = sortKeys(fl, [])
   const location = await inside(ctx, fl)
-  const cfg = await configOf(location, vfs)
+  const cfg = await configOf(ctx, location, vfs)
   const named = texts[0] ?? null
   let remote = named
   if (remote === null) {

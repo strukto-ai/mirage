@@ -865,7 +865,7 @@
   },
   "commands/cli/builtin/git/repo": {
    "python_only": {
-    "_overrides_text": "dulwich reads config from one file's bytes, so command-line values join that text; isomorphic-git asks a hook for each key, and fs.ts answers there."
+    "overrides_text": "dulwich reads config from one file's bytes, so command-line values join that text; isomorphic-git asks a hook for each key, and fs.ts answers there."
    }
   },
   "commands/cli/builtin/git/cat_file": {

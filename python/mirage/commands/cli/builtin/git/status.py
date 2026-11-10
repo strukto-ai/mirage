@@ -13,12 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.branch import branch_upstream
 from mirage.commands.cli.builtin.git.changes import (
     RENAME_THRESHOLD,
+    UNTRACKED,
     StatusRow,
     assembled,
     collect,
@@ -27,6 +29,8 @@ from mirage.commands.cli.builtin.git.diff_output import similarity
 from mirage.commands.cli.builtin.git.errors import GitError
 from mirage.commands.cli.builtin.git.io import read_optional
 from mirage.commands.cli.builtin.git.pathspec import (
+    named_whole,
+    narrowed_untracked,
     pathspec_patterns,
     pathspec_selects,
     repo_relative,
@@ -253,6 +257,52 @@ async def report_rows(
     return Rows(rows, render)
 
 
+async def _selected_rows(
+    vfs: Files,
+    repo: Repo,
+    location: RepoLocation,
+    rows: list[StatusRow],
+    show_ignored: bool,
+    patterns: Sequence[str],
+) -> list[StatusRow]:
+    """The rows a pathspec keeps, reading inside any untracked directory
+    it does not name whole.
+
+    Args:
+        vfs (Files): the session's files.
+        repo (Repo): the opened repository.
+        location (RepoLocation): the discovered repository.
+        rows (list[StatusRow]): the report's rows.
+        show_ignored (bool): whether ignored files are reported.
+        patterns (Sequence[str]): the pathspecs.
+    """
+    kept = [
+        row
+        for row in rows
+        if row.index_status != UNTRACKED
+        and pathspec_selects(row.name.rstrip("/"), patterns)
+    ]
+    names = [row.name for row in rows if row.index_status == UNTRACKED]
+    files: list[str] = []
+    if any(
+        name.endswith("/") and not named_whole(name[:-1], patterns)
+        for name in names
+    ):
+        every, _, _ = await collect(
+            vfs, repo, location, UNTRACKED_ALL, show_ignored
+        )
+        files = [row.name for row in every if row.index_status == UNTRACKED]
+    return kept + [
+        StatusRow(
+            location.worktree.join(name.rstrip("/")),
+            name,
+            UNTRACKED,
+            UNTRACKED,
+        )
+        for name in narrowed_untracked(names, files, patterns)
+    ]
+
+
 async def status(
     accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
@@ -302,11 +352,9 @@ async def status(
         parsed.ignored,
     )
     if patterns:
-        rows = [
-            row
-            for row in rows
-            if pathspec_selects(row.name.rstrip("/"), patterns)
-        ]
+        rows = await _selected_rows(
+            vfs, repo, location, rows, parsed.ignored, patterns
+        )
     fully = await config_bool(vfs, location, b"core", b"quotepath", True)
     prefix = (
         "" if parsed.porcelain else await relative_prefix(vfs, location, start)

@@ -33,6 +33,7 @@ const NARROWEST_NAME = 10
 const NARROWEST_GRAPH = 6
 const ELIDED = '...'
 const BINARY_COUNT = 'Bin'
+const UNMERGED_COUNT = 'Unmerged'
 // What a row spends besides the name, count and graph: the leading space,
 // " | ", the space after the count, and the last column, left free.
 const FRAME = 6
@@ -49,6 +50,8 @@ export interface FileStat {
   readonly deletions: number
   /** Whether either side sniffs as binary. */
   readonly binary: boolean
+  /** Whether the row only says the path is in conflict. */
+  readonly unmerged?: boolean
   /** Byte length of the old blob, 0 when created. */
   readonly oldSize: number
   /** Byte length of the new blob, 0 when deleted. */
@@ -204,6 +207,7 @@ export function statTable(stats: readonly FileStat[], width: number = STAT_WIDTH
   const rows = stats.map((stat) => {
     const name = fittedName(stat.path, column)
     const cell = ` ${name}${' '.repeat(Math.max(0, column - textWidth(name)))} | `
+    if (stat.unmerged === true) return `${cell}${UNMERGED_COUNT}`
     if (stat.binary)
       return `${cell}${BINARY_COUNT.padStart(countColumn)} ${String(stat.oldSize)} -> ${String(stat.newSize)} bytes`
     let plus = stat.insertions
@@ -224,7 +228,7 @@ export function statTable(stats: readonly FileStat[], width: number = STAT_WIDTH
   })
   const insertions = stats.reduce((sum, s) => sum + s.insertions, 0)
   const deletions = stats.reduce((sum, s) => sum + s.deletions, 0)
-  return [...rows, statLine(stats.length, insertions, deletions)]
+  return [...rows, statLine(stats.filter((s) => s.unmerged !== true).length, insertions, deletions)]
 }
 
 /**

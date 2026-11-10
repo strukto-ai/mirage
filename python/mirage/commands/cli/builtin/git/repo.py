@@ -126,7 +126,7 @@ async def open_repo(
     )
 
 
-def _overrides_text(overrides: tuple[tuple[str, str | None], ...]) -> bytes:
+def overrides_text(overrides: tuple[tuple[str, str | None], ...]) -> bytes:
     """Command-line config as the lines a config file would hold.
 
     Args:
@@ -163,7 +163,7 @@ async def read_config(vfs: Files, location: RepoLocation) -> ConfigFile:
     """
     data = await read_optional(vfs, location.commondir.join("config"))
     return ConfigFile.from_file(
-        BytesIO((data or b"") + _overrides_text(location.overrides))
+        BytesIO((data or b"") + overrides_text(location.overrides))
     )
 
 

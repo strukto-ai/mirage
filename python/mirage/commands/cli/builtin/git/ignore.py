@@ -128,8 +128,13 @@ class IgnoreStack:
             and the filter parsed from the file it holds.
     """
 
-    def __init__(self, filters: list[tuple[str, IgnoreFilter]]) -> None:
+    def __init__(
+        self,
+        filters: list[tuple[str, IgnoreFilter]],
+        commanded: IgnoreFilter | None = None,
+    ) -> None:
         self._filters = filters
+        self._commanded = commanded
 
     def push(self, prefix: str, patterns: bytes) -> "IgnoreStack":
         """A new stack with one more ``.gitignore`` on top.
@@ -140,7 +145,18 @@ class IgnoreStack:
             patterns (bytes): the file's contents.
         """
         parsed = list(read_ignore_patterns(cast(BinaryIO, BytesIO(patterns))))
-        return IgnoreStack(self._filters + [(prefix, IgnoreFilter(parsed))])
+        return IgnoreStack(
+            self._filters + [(prefix, IgnoreFilter(parsed))], self._commanded
+        )
+
+    def commanded(self, patterns: bytes) -> "IgnoreStack":
+        """A new stack whose command-line rules outrank every file's.
+
+        Args:
+            patterns (bytes): the rules, one per line.
+        """
+        parsed = list(read_ignore_patterns(cast(BinaryIO, BytesIO(patterns))))
+        return IgnoreStack(self._filters, IgnoreFilter(parsed))
 
     def is_ignored(self, path: str, is_dir: bool = False) -> bool:
         """Whether git would leave a path out of an untracked listing.
@@ -151,6 +167,10 @@ class IgnoreStack:
                 decides whether a ``build/`` pattern can match it.
         """
         spelled = f"{path}/" if is_dir else path
+        if self._commanded is not None:
+            verdict = self._commanded.is_ignored(spelled)
+            if verdict is not None:
+                return verdict
         for prefix, ignore_filter in reversed(self._filters):
             verdict = ignore_filter.is_ignored(_relative(prefix, spelled))
             if verdict is not None:

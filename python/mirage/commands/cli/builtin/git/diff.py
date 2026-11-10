@@ -13,8 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import Sequence
 from dataclasses import replace
 
+from dulwich.index import IndexEntry
 from dulwich.repo import BaseRepo
 
 from mirage.accessor.base import Accessor
@@ -32,6 +34,7 @@ from mirage.commands.cli.builtin.git.diff_output import (
     prefix_config,
     renames_enabled,
     render_changes,
+    with_unmerged,
 )
 from mirage.commands.cli.builtin.git.errors import (
     GitError,
@@ -47,7 +50,9 @@ from mirage.commands.cli.builtin.git.io import exists
 from mirage.commands.cli.builtin.git.pathspec import (
     absolute_operand,
     pathspec_patterns,
+    pathspec_selects,
     pattern_roots,
+    visible_path,
 )
 from mirage.commands.cli.builtin.git.repo import config_bool
 from mirage.commands.cli.builtin.git.revparse import (
@@ -65,7 +70,7 @@ from mirage.commands.cli.builtin.git.rows import (
 from mirage.commands.cli.builtin.git.seen import shown_entries
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.tree import tree_entries
-from mirage.commands.cli.builtin.git.types import RepoLocation
+from mirage.commands.cli.builtin.git.types import IndexState, RepoLocation
 from mirage.commands.cli.builtin.git.util import (
     STDERR,
     lone_help,
@@ -78,6 +83,7 @@ from mirage.commands.cli.builtin.git.util import (
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult, Rows
+from mirage.shell.bytes import decode_text
 from mirage.types import PathSpec
 from mirage.workspace.files import Files
 
@@ -94,6 +100,7 @@ from mirage.workspace.files import Files
 
 
 Tree = dict[bytes, tuple[int, bytes]]
+
 # What makes a word a pattern git reads as a path unseen.
 WILDCARDS = "*?[\\"
 
@@ -187,7 +194,10 @@ def _output(
         flags (DiffFlags): output options.
     """
     rows = compare(repo, before, after, flags.renames)
-    return render_changes(repo, rows, flags), bool(filtered(rows, flags))
+    return (
+        render_changes(repo, rows, flags),
+        bool(filtered(with_unmerged(rows, flags), flags)),
+    )
 
 
 async def diff(
@@ -361,6 +371,62 @@ async def _plumbing_flags(
     )
 
 
+def _unmerged_sides(
+    location: RepoLocation,
+    state: IndexState,
+    patterns: Sequence[str],
+    before: Tree,
+    after: Tree,
+) -> dict[
+    bytes,
+    tuple[
+        tuple[int, bytes] | None,
+        tuple[int, bytes] | None,
+        tuple[int, bytes] | None,
+    ],
+]:
+    """Each conflicted path's stages and work file, and the sides fitted.
+
+    The index side of a conflict is its stage 2, which is what the
+    ordinary row beside the ``U`` compares the file with; a path with no
+    stage 2 has no such row.
+
+    Args:
+        location (RepoLocation): the discovered repository.
+        state (IndexState): the parsed index.
+        patterns (Sequence[str]): the pathspecs, empty for everything.
+        before (Tree): the index side, filled in here.
+        after (Tree): the working tree side, emptied of a path with no
+            stage 2.
+    """
+    sides: dict[
+        bytes,
+        tuple[
+            tuple[int, bytes] | None,
+            tuple[int, bytes] | None,
+            tuple[int, bytes] | None,
+        ],
+    ] = {}
+    for path, conflict in state.conflicts.items():
+        name = decode_text(path)
+        if not visible_path(location, name):
+            after.pop(path, None)
+            continue
+        ours = _stage_of(conflict.this)
+        work = after.get(path)
+        if not patterns or pathspec_selects(name, patterns):
+            sides[path] = (ours, _stage_of(conflict.other), work)
+        if ours is None:
+            after.pop(path, None)
+        else:
+            before[path] = ours
+    return sides
+
+
+def _stage_of(entry: IndexEntry | None) -> tuple[int, bytes] | None:
+    return None if entry is None else (entry.mode, entry.sha)
+
+
 async def diff_files(
     accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
@@ -387,13 +453,12 @@ async def diff_files(
     after = await work_entries(
         vfs, repo, location, state, pattern_roots(patterns)
     )
-    for path in state.conflicts:
-        after.pop(path, None)
     before = shown_entries(repo, staged_entries(state))
+    unmerged = _unmerged_sides(location, state, patterns, before, after)
     return _compared(
         repo,
         location,
-        replace(parsed, pathspecs=patterns, work_tree=True),
+        replace(parsed, pathspecs=patterns, work_tree=True, unmerged=unmerged),
         (before, after),
         fl,
     )

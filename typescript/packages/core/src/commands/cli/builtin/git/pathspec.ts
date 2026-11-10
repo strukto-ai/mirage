@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { compareCodePoints } from '../../../../utils/sort.ts'
 import { posixNormpath } from '../../../../utils/path.ts'
 import { byteView } from '../../../../shell/bytes.ts'
 import { fnmatch } from '../../../../utils/fnmatch.ts'
@@ -212,6 +213,49 @@ function selects(path: string, pattern: string, directory: boolean): boolean {
  * deletion. What git prints it hands over as rows, which the command
  * boundary filters.
  */
+/** Whether a pathspec names a directory as a whole. */
+export function namedWhole(directory: string, patterns: readonly string[]): boolean {
+  return pathspecSelects(directory, patterns) || pathspecSelects(`${directory}/`, patterns)
+}
+
+/** The first directory below `directory` a pathspec names whole on the way to a file, else the file. */
+function deepestNamed(directory: string, path: string, patterns: readonly string[]): string {
+  let at = directory
+  for (const piece of path
+    .slice(directory.length + 1)
+    .split('/')
+    .slice(0, -1)) {
+    at = `${at}/${piece}`
+    if (namedWhole(at, patterns)) return `${at}/`
+  }
+  return path
+}
+
+/** The untracked names a pathspec keeps, a directory collapsing only where the pathspec names it whole. */
+export function narrowedUntracked(
+  names: Iterable<string>,
+  files: readonly string[],
+  patterns: readonly string[],
+): string[] {
+  const kept = new Set<string>()
+  for (const name of names) {
+    if (!name.endsWith('/')) {
+      if (pathspecSelects(name, patterns)) kept.add(name)
+      continue
+    }
+    const directory = name.slice(0, -1)
+    if (namedWhole(directory, patterns)) {
+      kept.add(name)
+      continue
+    }
+    for (const path of files) {
+      if (path.startsWith(name) && pathspecSelects(path, patterns))
+        kept.add(deepestNamed(directory, path, patterns))
+    }
+  }
+  return [...kept].sort(compareCodePoints)
+}
+
 export function visiblePath(location: RepoLocation, relative: string): boolean {
   const vfs = location.vfs
   return (

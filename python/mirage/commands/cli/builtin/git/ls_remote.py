@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from io import BytesIO
+from typing import BinaryIO, cast
+
 from dulwich.config import ConfigFile
 
 from mirage.accessor.base import Accessor
@@ -35,7 +38,7 @@ from mirage.commands.cli.builtin.git.ref_list import (
     sort_keys,
 )
 from mirage.commands.cli.builtin.git.refs import read_head
-from mirage.commands.cli.builtin.git.repo import read_config
+from mirage.commands.cli.builtin.git.repo import overrides_text, read_config
 from mirage.commands.cli.builtin.git.session import inside, opened
 from mirage.commands.cli.builtin.git.transport import (
     PEELED,
@@ -51,6 +54,7 @@ from mirage.commands.cli.builtin.git.types import (
     RepoLocation,
 )
 from mirage.commands.cli.builtin.git.util import (
+    command_line_config,
     multivar,
     option_operand,
     require_vfs,
@@ -75,15 +79,19 @@ NOTHING_LISTED = 2
 _Row = tuple[str, str]
 
 
-async def _config_of(vfs: Files, location: RepoLocation | None) -> ConfigFile:
-    """The repository's configuration, empty outside one.
+async def _config_of(
+    ctx: Context, vfs: Files, location: RepoLocation | None
+) -> ConfigFile:
+    """The repository's configuration; outside one, the command line's.
 
     Args:
+        ctx (Context): the line's context.
         vfs (Files): the session's files.
         location (RepoLocation | None): the discovered repository.
     """
     if location is None:
-        return ConfigFile()
+        typed = overrides_text(tuple(command_line_config(ctx)))
+        return ConfigFile.from_file(cast(BinaryIO, BytesIO(typed)))
     return await read_config(vfs, location)
 
 
@@ -220,7 +228,7 @@ async def ls_remote(
         raise UsageError("", verb_usage(ctx))
     keys = sort_keys(fl, ())
     location = await inside(ctx, fl)
-    cfg = await _config_of(vfs, location)
+    cfg = await _config_of(ctx, vfs, location)
     named = texts[0] if texts else None
     remote = named
     if remote is None:

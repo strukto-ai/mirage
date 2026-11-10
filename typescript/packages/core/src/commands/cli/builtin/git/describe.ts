@@ -29,7 +29,7 @@ import { readIndex } from './index_file.ts'
 import { resolveRef, uniqueAbbreviations } from './ref_list.ts'
 import { loadRefs } from './refs.ts'
 import { commitFacts, objectType, repoArgs, type Repo } from './repo.ts'
-import { resolveCommit, resolveObject } from './revparse.ts'
+import { resolveCommit, resolveObject, shallowCommits } from './revparse.ts'
 import { shownEntries } from './seen.ts'
 import { opened } from './session.ts'
 import type { TreeEntry } from './tree.ts'
@@ -122,18 +122,25 @@ async function parentsOf(
   repo: Repo,
   oid: string,
   firstParent: boolean,
+  shallow: ReadonlySet<string>,
 ): Promise<readonly string[]> {
+  if (shallow.has(oid)) return []
   const parents = (await commitFacts(repo, oid)).parents
   return firstParent ? parents.slice(0, 1) : parents
 }
 
 /** Every commit a walk from one commit reaches, itself included. */
-async function reach(repo: Repo, start: string, firstParent: boolean): Promise<Set<string>> {
+async function reach(
+  repo: Repo,
+  start: string,
+  firstParent: boolean,
+  shallow: ReadonlySet<string>,
+): Promise<Set<string>> {
   const seen = new Set([start])
   const pending = [start]
   while (pending.length > 0) {
     const oid = pending.pop() ?? ''
-    for (const parent of await parentsOf(repo, oid, firstParent)) {
+    for (const parent of await parentsOf(repo, oid, firstParent, shallow)) {
       if (!seen.has(parent)) {
         seen.add(parent)
         pending.push(parent)
@@ -155,6 +162,7 @@ async function nearest(
   names: ReadonlyMap<string, Name>,
   limit: number,
   firstParent: boolean,
+  shallow: ReadonlySet<string>,
 ): Promise<[Name, number] | null> {
   const time = async (oid: string): Promise<number> => (await commitFacts(repo, oid)).committerTime
   const queue: [number, string][] = [[-(await time(target)), target]]
@@ -165,17 +173,17 @@ async function nearest(
     const [, oid] = queue.shift() ?? [0, '']
     const name = names.get(oid)
     if (name !== undefined) met.push(name)
-    for (const parent of await parentsOf(repo, oid, firstParent)) {
+    for (const parent of await parentsOf(repo, oid, firstParent, shallow)) {
       if (seen.has(parent)) continue
       seen.add(parent)
       queue.push([-(await time(parent)), parent])
     }
   }
   if (met.length === 0) return null
-  const reached = await reach(repo, target, firstParent)
+  const reached = await reach(repo, target, firstParent, shallow)
   let best: [Name, number] | null = null
   for (const name of met) {
-    const theirs = await reach(repo, name.commit, firstParent)
+    const theirs = await reach(repo, name.commit, firstParent, shallow)
     let depth = 0
     for (const oid of reached) if (!theirs.has(oid)) depth += 1
     if (best === null || depth < best[1]) best = [name, depth]
@@ -196,16 +204,16 @@ async function described(
   fl: FlagView,
   width: number,
   lightweight: ReadonlyMap<string, Name>,
+  shallow: ReadonlySet<string>,
 ): Promise<string> {
   const exact = fl.asBool('exact_match')
   const limit = numberOf(fl.raw('candidates'), 'candidates')
   const candidates = exact ? 0 : (limit ?? DEFAULT_CANDIDATES)
   const firstParent = fl.asBool('first_parent')
-  let found: [Name, number] | null
-  if (candidates === 0) {
-    const name = names.get(target)
-    found = name === undefined ? null : [name, 0]
-  } else found = await nearest(repo, target, names, candidates, firstParent)
+  const named = names.get(target)
+  let found: [Name, number] | null = named === undefined ? null : [named, 0]
+  if (found === null && candidates !== 0)
+    found = await nearest(repo, target, names, candidates, firstParent, shallow)
   if (found === null) {
     if (exact || candidates === 0) throw new GitError(`no tag exactly matches '${target}'`)
     if (fl.asBool('always')) return short(repo, target, width === 0 ? target.length : width)
@@ -213,7 +221,7 @@ async function described(
       throw new GitError('No names found, cannot describe anything.')
     if (
       lightweight.size > 0 &&
-      (await nearest(repo, target, lightweight, DEFAULT_CANDIDATES, firstParent)) !== null
+      (await nearest(repo, target, lightweight, DEFAULT_CANDIDATES, firstParent, shallow)) !== null
     ) {
       throw new GitError(
         `No annotated tags can describe '${target}'.\nHowever, there were unannotated tags: try --tags.`,
@@ -253,6 +261,7 @@ async function describeAll(
   const light = fl.asBool('all') || fl.asBool('tags')
   const names = await namesOf(repo, fl, light)
   const lightweight = light ? new Map<string, Name>() : await namesOf(repo, fl, true)
+  const shallow = await shallowCommits(repo)
   const lines: string[] = []
   for (const revision of revisions) {
     let found
@@ -264,7 +273,15 @@ async function describeAll(
     }
     if (found.type === 'tree') throw new GitError(`${revision} is neither a commit nor blob`)
     lines.push(
-      await described(repo, await resolveCommit(repo, revision), names, fl, width, lightweight),
+      await described(
+        repo,
+        await resolveCommit(repo, revision),
+        names,
+        fl,
+        width,
+        lightweight,
+        shallow,
+      ),
     )
   }
   return lines

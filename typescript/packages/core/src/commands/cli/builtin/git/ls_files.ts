@@ -27,10 +27,17 @@ import {
   UsageError,
 } from './errors.ts'
 import { readIndex } from './index_file.ts'
-import { GITIGNORE, IgnoreStack, loadIgnores } from './ignore.ts'
+import { GITIGNORE, IgnoreStack, INFO_EXCLUDE } from './ignore.ts'
 import { abbrevWidth } from './format.ts'
 import { readOptional } from './io.ts'
-import { pathspecPatterns, pathspecSelects, repoRelative, visibleEntries } from './pathspec.ts'
+import {
+  namedWhole,
+  narrowedUntracked,
+  pathspecPatterns,
+  pathspecSelects,
+  repoRelative,
+  visibleEntries,
+} from './pathspec.ts'
 import { uniqueAbbreviations } from './ref_list.ts'
 import { quotePath, relativePath } from './render.ts'
 import { configBool, readBlobBytes, type Repo } from './repo.ts'
@@ -59,21 +66,27 @@ async function excludes(
 ): Promise<[IgnoreStack, string | null]> {
   const vfs = requireVfs(ctx)
   let stack = new IgnoreStack()
-  let perDirectory = fl.asStr('exclude_per_directory') ?? null
-  if (fl.asBool('exclude_standard')) {
-    stack = await loadIgnores(vfs, repo.location.commondir, repo.location.worktree)
-    perDirectory = GITIGNORE
-  } else if (perDirectory !== null) {
+  for (const [option, value] of fl.occurrences('exclude_from', 'exclude_standard')) {
+    if (option === 'exclude_standard') {
+      const shared = await readOptional(vfs, repo.location.commondir.join(INFO_EXCLUDE))
+      if (shared !== null) stack = stack.push('', shared)
+      continue
+    }
+    for (const name of Array.isArray(value) ? value : [value]) {
+      const data = await readOptional(vfs, startPoint(fl).join(String(name)))
+      if (data === null) throw new GitError(`cannot use ${String(name)} as an exclude file`)
+      stack = stack.push('', data)
+    }
+  }
+  const perDirectory = fl.asBool('exclude_standard')
+    ? GITIGNORE
+    : (fl.asStr('exclude_per_directory') ?? null)
+  if (perDirectory !== null) {
     const root = await readOptional(vfs, repo.location.worktree.join(perDirectory))
     if (root !== null) stack = stack.push('', root)
   }
-  for (const name of fl.asList('exclude_from')) {
-    const data = await readOptional(vfs, startPoint(fl).join(name))
-    if (data === null) throw new GitError(`cannot use ${name} as an exclude file`)
-    stack = stack.push('', data)
-  }
   const typed = fl.asList('exclude')
-  if (typed.length) stack = stack.push('', encodeText(typed.map((p) => `${p}\n`).join('')))
+  if (typed.length) stack = stack.commanded(encodeText(typed.map((p) => `${p}\n`).join('')))
   return [stack, perDirectory]
 }
 
@@ -191,12 +204,31 @@ export async function lsFiles(
       null,
       stack,
       perDirectory,
+      fl.asBool('directory') && !fl.asBool('no_empty_directory'),
     )
     changes = await workChanges(repo, vfs, repo.location.worktree, state.entries, found)
     if (others) {
-      for (const name of [...(ignored ? found.ignored : found.untracked)].sort(compareCodePoints)) {
+      let untracked = found.untracked
+      if (!ignored) {
+        let files: string[] = []
+        if (untracked.some((name) => name.endsWith('/') && !namedWhole(name.slice(0, -1), scope))) {
+          const every = await scan(
+            vfs,
+            repo.location,
+            tracked,
+            UNTRACKED_ALL,
+            false,
+            null,
+            stack,
+            perDirectory,
+          )
+          files = every.untracked
+        }
+        untracked = narrowedUntracked(untracked, files, scope)
+      }
+      for (const name of [...(ignored ? found.ignored : untracked)].sort(compareCodePoints)) {
         const bare = name.replace(/\/$/, '')
-        if (!pathspecSelects(bare, scope)) continue
+        if (ignored && !pathspecSelects(bare, scope)) continue
         listed.push(bare)
         out.push({
           path: repo.location.worktree.join(bare),

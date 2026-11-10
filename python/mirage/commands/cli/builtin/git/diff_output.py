@@ -13,8 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import stat
-from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field, replace
 
 from dulwich.objects import Commit, ObjectID, Tree
 from dulwich.repo import BaseRepo
@@ -74,6 +74,7 @@ CHANGE_CLASSES = "ACDMRTUXB"
 # What a combined diff's mode line starts with; ``log --graph`` prints
 # that line with no graph in front of it.
 COMBINED_MODE = "mode "
+UNMERGED = "U"
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +105,14 @@ class DiffFlags:
     raw_width: int | None = None
     work_tree: bool = False
     same_as_index: frozenset[bytes] = frozenset()
+    unmerged: Mapping[
+        bytes,
+        tuple[
+            tuple[int, bytes] | None,
+            tuple[int, bytes] | None,
+            tuple[int, bytes] | None,
+        ],
+    ] = field(default_factory=dict)
 
 
 def diff_filter_of(spelled: str | None) -> tuple[frozenset[str], bool] | None:
@@ -433,6 +442,50 @@ def _shows_new_id(row: Change, flags: DiffFlags) -> bool:
     return not flags.work_tree or row.path in flags.same_as_index
 
 
+def with_unmerged(rows: list[Change], flags: DiffFlags) -> list[Change]:
+    """The rows with a ``U`` row before each conflicted path's own.
+
+    Args:
+        rows (list[Change]): the paired deltas.
+        flags (DiffFlags): carrying the conflicted paths.
+    """
+    if not flags.unmerged:
+        return rows
+    marks = [
+        Change(path, path, None, ends[2], UNMERGED)
+        for path, ends in flags.unmerged.items()
+    ]
+    return sorted(
+        [*marks, *rows], key=lambda row: (row.path, row.status != UNMERGED)
+    )
+
+
+def _unmerged_patch(repo: BaseRepo, path: bytes, flags: DiffFlags) -> bytes:
+    """A conflicted path's dense combined diff against the working tree.
+
+    Args:
+        repo (BaseRepo): repository to read blobs from.
+        path (bytes): the conflicted path.
+        flags (DiffFlags): carrying the path's stages.
+    """
+    ours, theirs, work = flags.unmerged[path]
+    maps = [
+        {path: Change(path, path, ours, work, "M")},
+        {path: Change(path, path, theirs, work, "M")},
+    ]
+    return combined_patch(
+        repo,
+        maps,
+        {path},
+        True,
+        flags.quote_path_fully,
+        flags.context,
+        flags.prefixes,
+        flags.index_width,
+        True,
+    )
+
+
 def render_changes(
     repo: BaseRepo, rows: list[Change], flags: DiffFlags
 ) -> bytes:
@@ -447,7 +500,7 @@ def render_changes(
         rows (list[Change]): the paired tree deltas.
         flags (DiffFlags): the parsed invocation.
     """
-    rows = filtered(rows, flags)
+    rows = filtered(with_unmerged(rows, flags), flags)
     if flags.no_patch:
         return b""
     width = (
@@ -463,6 +516,7 @@ def render_changes(
     numbers: list[str] = []
     summaries: list[str] = []
     patches: list[bytes] = []
+    combined: set[bytes] = set()
     for row in rows:
         name = row.path.decode("utf-8", errors="surrogateescape")
         origin = row.old_path.decode("utf-8", errors="surrogateescape")
@@ -490,7 +544,11 @@ def render_changes(
             rename_name(origin, name, fully) if row.status == "R" else shown
         )
         if flags.stat or flags.numstat or flags.shortstat:
-            stats.append(_row_stat(repo, row, display))
+            stats.append(
+                FileStat(display, 0, 0, False, 0, 0, True)
+                if row.status == UNMERGED
+                else _row_stat(repo, row, display)
+            )
         if flags.numstat:
             counts = (
                 "-\t-"
@@ -500,7 +558,11 @@ def render_changes(
             numbers.append(f"{counts}\t{display}")
         if flags.summary:
             summaries.extend(_summary_lines(row, display, shown))
-        if flags.patch:
+        if flags.patch and row.path in flags.unmerged:
+            if row.path not in combined:
+                combined.add(row.path)
+                patches.append(_unmerged_patch(repo, row.path, flags))
+        elif flags.patch:
             patches.append(
                 file_patch(
                     repo,
@@ -719,7 +781,7 @@ def _block(
         flags (DiffFlags): the diff flags.
     """
     rows = _rows_of(repo, before, after, flags)
-    return render_changes(repo, rows, flags) if rows else None
+    return render_changes(repo, rows, flags) if filtered(rows, flags) else None
 
 
 def commit_sides(
@@ -858,6 +920,7 @@ def commit_output(
         *({row.path for row in rows} for rows in comparisons)
     )
     maps = [{row.path: row for row in rows} for rows in comparisons]
+    common = _combined_paths(maps, common, flags)
     if flags.no_patch:
         return []
     width = abbrev_for(repo) if flags.abbrev else OID_HEX
@@ -904,11 +967,37 @@ def commit_output(
             flags.merge == "dense-combined",
             flags.quote_path_fully,
             flags.context,
+            flags.prefixes,
+            flags.index_width,
         )
         if flags.patch and not names
         else b""
     )
     return [head + (b"\n" if head and patch else b"") + patch]
+
+
+def _combined_paths(
+    maps: list[dict[bytes, Change]], paths: set[bytes], flags: DiffFlags
+) -> set[bytes]:
+    """The paths ``--diff-filter`` keeps in a combined diff.
+
+    A path stays only when its status against every parent is one the
+    filter keeps; with ``*`` one kept status anywhere keeps them all.
+
+    Args:
+        maps (list[dict[bytes, Change]]): per parent, its rows by path.
+        paths (set[bytes]): the paths changed against every parent.
+        flags (DiffFlags): the parsed invocation.
+    """
+    if flags.diff_filter is None:
+        return paths
+    chosen, star = flags.diff_filter
+    if star:
+        met = any(m[path].status in chosen for path in paths for m in maps)
+        return paths if met else set()
+    return {
+        path for path in paths if all(m[path].status in chosen for m in maps)
+    }
 
 
 def combined_patch(
@@ -918,6 +1007,9 @@ def combined_patch(
     dense: bool,
     fully: bool = True,
     context: int = HUNK_CONTEXT,
+    prefixes: tuple[str, str] = ("a/", "b/"),
+    index_width: int | None = None,
+    work_tree: bool = False,
 ) -> bytes:
     """Render ``-c``/``--cc`` for the paths that differ from every parent.
 
@@ -932,6 +1024,11 @@ def combined_patch(
         dense (bool): ``--cc`` rather than ``-c``.
         fully (bool): ``core.quotePath``.
         context (int): the requested number of context lines.
+        prefixes (tuple[str, str]): what precedes the old and new names.
+        index_width (int | None): the digits of each id, None for the
+            repository's abbreviation.
+        work_tree (bool): whether the new side is the working tree, whose
+            id git shows as zeros.
     """
     out = []
     for path in sorted(paths):
@@ -960,7 +1057,7 @@ def combined_patch(
         deleted = new is None
         created = not deleted and all(row.status == "A" for row in changes)
         name = path.decode("utf-8", errors="surrogateescape")
-        width = abbrev_for(repo)
+        width = abbrev_for(repo) if index_width is None else index_width
         out.append(
             f"diff --{'cc' if dense else 'combined'} "
             f"{quote_path(name, False, fully)}\n"
@@ -969,7 +1066,7 @@ def combined_patch(
             "index "
             + ",".join(short_oid(entry, width) for entry in old)
             + ".."
-            + short_oid(new, width)
+            + short_oid(None if work_tree else new, width)
             + "\n"
         )
         if moved and created:
@@ -986,12 +1083,20 @@ def combined_patch(
             continue
         out.append(
             "--- "
-            + (DEV_NULL if created else quote_path(f"a/{name}", False, fully))
+            + (
+                DEV_NULL
+                if created
+                else quote_path(f"{prefixes[0]}{name}", False, fully)
+            )
             + "\n"
         )
         out.append(
             "+++ "
-            + (DEV_NULL if deleted else quote_path(f"b/{name}", False, fully))
+            + (
+                DEV_NULL
+                if deleted
+                else quote_path(f"{prefixes[1]}{name}", False, fully)
+            )
             + "\n"
         )
         out.extend(body)

@@ -38,7 +38,7 @@ export const ADDED = 'A'
 export const DELETED = 'D'
 export const TYPE_CHANGED = 'T'
 const RENAMED = 'R'
-const UNTRACKED = '?'
+export const UNTRACKED = '?'
 const IGNORED = '!'
 // git's own two rename knobs: a pair counts as a rename at 60% shared content,
 // and the search is abandoned entirely once the add-by-delete matrix would

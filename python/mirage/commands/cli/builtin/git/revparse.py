@@ -328,16 +328,7 @@ def merge_bases(
         other (Commit): the other side.
         others (Commit): further tips of the hypothetical merged side.
     """
-    if isinstance(repo, Repo):
-        data = run_async_from_sync(
-            read_optional(
-                repo.dispatch, repo.location.commondir.join("shallow")
-            ),
-            repo.loop,
-        )
-        shallow = set((data or b"").split())
-    else:
-        shallow = set(repo.get_shallow())
+    shallow = shallow_commits(repo)
     known = {commit.id: commit for commit in (one, other, *others)}
 
     def load(oid: ObjectID) -> Commit:
@@ -841,6 +832,52 @@ def _selected_branch(repo: Repo, stem: str) -> str:
     return stem
 
 
+def _push_remote(cfg: ConfigFile, branch: str) -> str:
+    """The remote a branch pushes to, by the settings in git's order.
+
+    Args:
+        cfg (ConfigFile): the repository's config.
+        branch (str): the branch's short name.
+    """
+    section = (b"branch", branch.encode())
+    named = (
+        multivar(cfg, section, b"pushremote")
+        or multivar(cfg, (b"remote",), b"pushdefault")
+        or multivar(cfg, section, b"remote")
+    )
+    return named[-1].decode() if named else "origin"
+
+
+def _pushed_as(cfg: ConfigFile, remote: str, branch: str) -> str | None:
+    """Where a remote's push refspecs send a branch; None without any.
+
+    Args:
+        cfg (ConfigFile): the repository's config.
+        remote (str): the remote's name.
+        branch (str): the branch's short name.
+
+    Raises:
+        SelectorError: a refspec is malformed, or none takes the branch.
+    """
+    texts = multivar(cfg, (b"remote", remote.encode()), b"push")
+    if not texts:
+        return None
+    specs = []
+    for raw in texts:
+        text = raw.decode()
+        spec = parse_refspec(text)
+        if spec.dst and ("*" in spec.src) != ("*" in spec.dst):
+            raise SelectorError(f"invalid refspec '{text}'")
+        specs.append(spec)
+    for spec in specs:
+        target = mapped(spec, f"{BRANCH_PREFIX}{branch}")
+        if target:
+            return target
+    raise SelectorError(
+        f"push refspecs for '{remote}' do not include '{branch}'"
+    )
+
+
 def _upstream_of(repo: Repo, branch: str) -> tuple[ConfigFile, RefUpstream]:
     """The ref a branch tracks.
 
@@ -886,13 +923,21 @@ def _push_target(repo: Repo, branch: str, revision: str) -> str:
     modes = multivar(cfg, (b"push",), b"default")
     mode = modes[-1].decode().lower() if modes else "simple"
     section = (b"branch", branch.encode())
+    remote = _push_remote(cfg, branch)
+    destination = _pushed_as(cfg, remote, branch)
+    if destination is not None:
+        tracked = _fetched_as(cfg, remote, destination)
+        if tracked is None:
+            raise SelectorError(
+                f"push destination '{destination}' on remote '{remote}' "
+                "has no local tracking branch"
+            )
+        return tracked
     if mode == "nothing":
         raise SelectorError(
             "push has no destination (push.default is 'nothing')"
         )
     if mode in ("current", "matching"):
-        remotes = multivar(cfg, section, b"remote")
-        remote = remotes[-1].decode() if remotes else "origin"
         target = _fetched_as(cfg, remote, f"{BRANCH_PREFIX}{branch}")
         if target is None:
             raise AmbiguousArgumentError(revision)
@@ -914,6 +959,23 @@ def _push_target(repo: Repo, branch: str, revision: str) -> str:
             "cannot resolve 'simple' push to a single destination"
         )
     return upstream.ref
+
+
+def shallow_commits(repo: BaseRepo) -> set[bytes]:
+    """The commits a shallow repository holds without their parents.
+
+    Args:
+        repo (BaseRepo): the opened repository.
+    """
+    if isinstance(repo, Repo):
+        data = run_async_from_sync(
+            read_optional(
+                repo.dispatch, repo.location.commondir.join("shallow")
+            ),
+            repo.loop,
+        )
+        return set((data or b"").split())
+    return set(repo.get_shallow())
 
 
 def expand_selector(repo: BaseRepo, name: str, revision: str) -> str:

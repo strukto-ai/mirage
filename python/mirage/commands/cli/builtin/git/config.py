@@ -30,6 +30,7 @@ from mirage.commands.cli.builtin.git.io import read_optional
 from mirage.commands.cli.builtin.git.session import inside
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
+    WIDE_INT_BITS,
     command_line_config,
     config_int,
     maybe_bool,
@@ -336,14 +337,17 @@ def _typed_value(
             return posixpath.join(env.get("HOME", ""), value[2:])
         return value
     if kind == "int":
-        return str(config_int(raw, value or "", name))
+        return str(config_int(raw, value or "", name, WIDE_INT_BITS))
     if kind == "bool-or-int":
         if value is None:
             return "true"
         try:
             return str(config_int(raw, value, name))
         except BadNumericConfigError:
-            pass
+            decided = maybe_bool(raw)
+            if decided is None:
+                raise
+            return "true" if decided else "false"
     answer = True if value is None else maybe_bool(raw)
     if answer is None:
         raise BadConfigValueError(value or "", name)

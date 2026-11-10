@@ -40,6 +40,7 @@ from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandSpec
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import byte_char
 from mirage.types import PathSpec
 from mirage.workspace.files import Files
 
@@ -64,6 +65,7 @@ CONFIG_OPTION = "-c"
 CONFIG_ENV_OPTION = "--config-env"
 VALUE_GLOBALS = ("-C", "--git-dir", "--work-tree")
 INT_BITS = 31
+WIDE_INT_BITS = 63
 COLOR_WORDS = ("always", "auto", "never")
 VALUE_ESCAPES = {"\n": "\\n", "\t": "\\t", '"': '\\"', "\\": "\\\\"}
 COMMENT_STARTS = (";", "#")
@@ -486,18 +488,21 @@ def command_line_config(ctx: Context) -> tuple[tuple[str, str | None], ...]:
     return tuple(rows)
 
 
-def config_int(value: bytes, spelled: str, key: str) -> int:
+def config_int(
+    value: bytes, spelled: str, key: str, bits: int = INT_BITS
+) -> int:
     """An integer-typed config value, or git's refusal of it.
 
     Args:
         value (bytes): the value.
         spelled (str): the value as it prints in the refusal.
         key (str): the variable.
+        bits (int): the magnitude bits the value may use.
 
     Raises:
         BadNumericConfigError: no integer, or one out of range.
     """
-    number = _integer(value)
+    number = _integer(value, bits)
     if number is not None:
         return number
     reason = "out of range" if INTEGER.fullmatch(value) else "invalid unit"
@@ -531,7 +536,7 @@ def render_format(template: str, atoms: Mapping[str, str], verb: str) -> str:
             and len(template) >= at + 4
             and all(c in hexdigits for c in template[at + 2 : at + 4])
         ):
-            out.append(chr(int(template[at + 2 : at + 4], 16)))
+            out.append(byte_char(int(template[at + 2 : at + 4], 16)))
             at += 4
         else:
             end = template.find(")", at)
@@ -737,14 +742,15 @@ def _continues(value: bytes, inside: bool) -> tuple[bool, bool]:
     return False, False
 
 
-def _integer(value: bytes) -> int | None:
+def _integer(value: bytes, bits: int = INT_BITS) -> int | None:
     """The integer a config value spells as git reads it, None for none.
 
     Hex after ``0x`` and octal after a leading zero, then an optional
-    ``k``, ``m`` or ``g``; a product outside an int is no integer.
+    ``k``, ``m`` or ``g``; a product outside the range is no integer.
 
     Args:
         value (bytes): the value as the config file spells it.
+        bits (int): the magnitude bits the value may use.
     """
     match = INTEGER.fullmatch(value)
     if match is None:
@@ -756,8 +762,8 @@ def _integer(value: bytes) -> int | None:
         magnitude = int(digits, 8 if digits.startswith(b"0") else 10)
     number = -magnitude if sign == b"-" else magnitude
     shift = UNIT_SHIFTS[unit.lower()]
-    lowest = -(1 << INT_BITS) >> shift
-    highest = ((1 << INT_BITS) - 1) >> shift
+    lowest = -(1 << bits) >> shift
+    highest = ((1 << bits) - 1) >> shift
     if not lowest <= number <= highest:
         return None
     return number << shift

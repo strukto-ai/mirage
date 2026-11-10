@@ -3149,6 +3149,174 @@
         "stdout": "8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\n8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\n8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\n8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\n[128]\n8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\n[0]\n8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\n[0]\n[0]\n[2]\n[128]\n[128]\n[128]\n",
         "stderr": "fatal: '..' does not appear to be a git repository\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\nfatal: 'nope' does not appear to be a git repository\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\nfatal: '/no/such/path' does not appear to be a git repository\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\nfatal: './docs' does not appear to be a git repository\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\n"
       }
+    },
+    {
+      "id": "git_diff_tree_exit_follows_the_filter",
+      "seq": 567868,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git diff-tree --quiet --no-commit-id HEAD; echo \"[$?]\"; git diff-tree --exit-code --diff-filter=U HEAD; echo \"[$?]\"; git diff-tree --exit-code --no-commit-id HEAD; echo \"[$?]\"; git diff-tree --exit-code --no-commit-id --diff-filter=U HEAD; echo \"[$?]\"; git diff-tree --quiet --diff-filter=U HEAD; echo \"[$?]\"; git diff-tree --quiet HEAD; echo \"[$?]\"; git diff-tree --exit-code HEAD; echo \"[$?]\"; git diff-tree --diff-filter=U HEAD; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1]\n[0]\n:100644 100644 5626abf0f72e58d7a153368ba57db4c673c0e171 814f4a422927b82f5f8a43f8fab6d3839e3983f2 M\tnumbers.txt\n[1]\n[0]\n[0]\n8ef25423772bbfe671c8e285ae1d63991d59db19\n[1]\n8ef25423772bbfe671c8e285ae1d63991d59db19\n:100644 100644 5626abf0f72e58d7a153368ba57db4c673c0e171 814f4a422927b82f5f8a43f8fab6d3839e3983f2 M\tnumbers.txt\n[1]\n[0]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_ls_remote_outside_reads_the_command_line",
+      "seq": 567869,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /; git -c remote.origin.url=/repo ls-remote --get-url origin; echo \"[$?]\"; git -c remote.origin.url=/repo ls-remote origin HEAD; echo \"[$?]\"; git -c url./repo.insteadOf=zz ls-remote --get-url zz; echo \"[$?]\"; git -c url./repo.insteadOf=zz ls-remote zz HEAD; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "/repo\n[0]\n8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\n[0]\n/repo\n[0]\n8ef25423772bbfe671c8e285ae1d63991d59db19\tHEAD\n[0]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_config_int_takes_wide_values",
+      "seq": 567870,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git -c x.a=4g config --int x.a; echo \"[$?]\"; git -c x.a=4G config --int x.a; echo \"[$?]\"; git -c x.a=9999999999 config --int x.a; echo \"[$?]\"; git -c x.a=2147483648 config --int x.a; echo \"[$?]\"; git -c x.a=-2g config --int x.a; echo \"[$?]\"; git -c x.a=99999999999g config --int x.a; echo \"[$?]\"; git -c x.a=4g config --type=int x.a; echo \"[$?]\"; git -c x.a=x config --type=int x.a; echo \"[$?]\"; git -c x.a=4g config --bool-or-int x.a; echo \"[$?]\"; git -c x.a=9999999999 config --bool-or-int x.a; echo \"[$?]\"; git -c x.a=x config --bool-or-int x.a; echo \"[$?]\"; git -c x.a=1x config --bool-or-int x.a; echo \"[$?]\"; git -c x.a=yes config --bool-or-int x.a; echo \"[$?]\"; git -c x.a=0 config --bool-or-int x.a; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "4294967296\n[0]\n4294967296\n[0]\n9999999999\n[0]\n2147483648\n[0]\n-2147483648\n[0]\n[128]\n4294967296\n[0]\n[128]\n[128]\n[128]\n[128]\n[128]\ntrue\n[0]\n0\n[0]\n",
+        "stderr": "fatal: bad numeric config value '99999999999g' for 'x.a': out of range\nfatal: bad numeric config value 'x' for 'x.a': invalid unit\nfatal: bad numeric config value '4g' for 'x.a': out of range\nfatal: bad numeric config value '9999999999' for 'x.a': out of range\nfatal: bad numeric config value 'x' for 'x.a': invalid unit\nfatal: bad numeric config value '1x' for 'x.a': invalid unit\n"
+      }
+    },
+    {
+      "id": "git_ls_files_command_line_excludes_win",
+      "seq": 567871,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/xc && cd /repo/xc || exit 1; printf '!keep.tmp\\n' > docs/.gitignore; echo x > docs/keep.tmp; echo y > keep.tmp; git ls-files -o -x '*.tmp' --exclude-per-directory=.gitignore; echo \"[$?]\"; git ls-files -o -x '*.tmp' --exclude-standard; echo \"[$?]\"; git ls-files -i -o -x '*.tmp' --exclude-standard; echo \"[$?]\"; printf '!readme.md\\n' > docs/.gitignore; git ls-files -c -i -x '*.md' --exclude-per-directory=.gitignore; echo \"[$?]\"; printf '*.md\\n' > docs/.gitignore; git ls-files -c -i -x '!readme.md' --exclude-per-directory=.gitignore; echo \"[$?]\"); rm -rf /repo/xc",
+      "expect": {
+        "exit": 0,
+        "stdout": "docs/.gitignore\n[0]\ndocs/.gitignore\n[0]\ndocs/keep.tmp\nkeep.tmp\n[0]\ndocs/readme.md\n[0]\n[0]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_ls_files_exclude_file_order",
+      "seq": 567872,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/xc && cd /repo/xc || exit 1; mkdir -p .git/info; echo a > a; echo b > b; printf '!a\\n' > .gitignore; printf 'a\\nb\\n' > ex; git ls-files -o -X ex --exclude-per-directory=.gitignore; echo \"[$?]\"; printf 'a\\n' > .gitignore; printf '!a\\n' > ex; git ls-files -o -X ex --exclude-per-directory=.gitignore; echo \"[$?]\"; rm .gitignore; printf 'a\\n' > .git/info/exclude; git ls-files -o -X ex --exclude-standard; echo \"[$?]\"; git ls-files -o --exclude-standard -X ex; echo \"[$?]\"; printf '!a\\n' > .git/info/exclude; printf 'a\\n' > ex; git ls-files -o -X ex --exclude-standard; echo \"[$?]\"; git ls-files -o --exclude-standard -X ex; echo \"[$?]\"); rm -rf /repo/xc",
+      "expect": {
+        "exit": 0,
+        "stdout": ".gitignore\na\nex\n[0]\n.gitignore\nb\nex\n[0]\nb\nex\n[0]\na\nb\nex\n[0]\na\nb\nex\n[0]\nb\nex\n[0]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_ls_files_empty_directories",
+      "seq": 567873,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/ed && cd /repo/ed || exit 1; mkdir -p e1/e2 e3 d3 docs/emp; echo x > e3/f; echo x > d3/ig; printf 'ig\\n' > .gitignore; git ls-files -o --directory --exclude-standard; echo \"[$?]\"; git ls-files -o --directory --no-empty-directory --exclude-standard; echo \"[$?]\"; git ls-files -o --exclude-standard; echo \"[$?]\"; git ls-files -o --no-empty-directory --exclude-standard; echo \"[$?]\"; git ls-files -o --directory --exclude-standard -- docs/emp; echo \"[$?]\"; git ls-files -o --directory --exclude-standard -- docs; echo \"[$?]\"; git ls-files -o --directory --exclude-standard -- nope; echo \"[$?]\"; git status --short; echo \"[$?]\"); rm -rf /repo/ed",
+      "expect": {
+        "exit": 0,
+        "stdout": ".gitignore\nd3/\ndocs/emp/\ne1/\ne3/\n[0]\n.gitignore\ne3/\n[0]\n.gitignore\ne3/f\n[0]\n.gitignore\ne3/f\n[0]\ndocs/emp/\n[0]\ndocs/emp/\n[0]\n[0]\n?? .gitignore\n?? e3/\n[0]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_pathspec_inside_untracked_directory",
+      "seq": 567874,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/us && cd /repo/us || exit 1; mkdir -p new/in; echo x > new/in/file.txt; echo y > new/other.txt; git status --short -- new/in/file.txt; echo \"[$?]\"; git status --short -- new; echo \"[$?]\"; git status --short -- new/; echo \"[$?]\"; git status --short -- new/in; echo \"[$?]\"; git status --short -- 'new/in/*'; echo \"[$?]\"; git status --short -- 'new/*.txt'; echo \"[$?]\"; git status --porcelain new/in/file.txt new/other.txt; echo \"[$?]\"; git status --short -- new/nope; echo \"[$?]\"; git status --porcelain -uall -- new; echo \"[$?]\"; git status --short -uno -- new; echo \"[$?]\"; git ls-files -o --directory -- new/in/file.txt; echo \"[$?]\"; git ls-files -o --directory -- new; echo \"[$?]\"; git ls-files -o --directory -- new/in; echo \"[$?]\"; cd new; git status --short -- in; echo \"[$?]\"; git status --short -- in/file.txt; echo \"[$?]\"); rm -rf /repo/us",
+      "expect": {
+        "exit": 0,
+        "stdout": "?? new/in/file.txt\n[0]\n?? new/\n[0]\n?? new/\n[0]\n?? new/in/\n[0]\n?? new/in/\n[0]\n?? new/in/file.txt\n?? new/other.txt\n[0]\n?? new/in/file.txt\n?? new/other.txt\n[0]\n[0]\n?? new/in/file.txt\n?? new/other.txt\n[0]\n[0]\nnew/in/file.txt\n[0]\nnew/\n[0]\nnew/in/\n[0]\n?? in/\n[0]\n?? in/file.txt\n[0]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_selector_push_refspecs",
+      "seq": 567875,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/pu && cd /repo/pu || exit 1; cp .git/config c0; printf '[remote \"origin\"]\\n\\tpush = refs/heads/main:refs/heads/topic\\n' >> .git/config; git rev-parse --symbolic-full-name @{push} main@{push}; echo \"[$?]\"; git -c push.default=upstream rev-parse --symbolic-full-name @{push} main@{push}; echo \"[$?]\"; git -c push.default=current rev-parse --symbolic-full-name @{push} main@{push}; echo \"[$?]\"; git -c push.default=matching rev-parse --symbolic-full-name @{push} main@{push}; echo \"[$?]\"; git -c push.default=nothing rev-parse --symbolic-full-name @{push} main@{push}; echo \"[$?]\"; cp c0 .git/config; printf '[remote \"origin\"]\\n\\tpush = refs/heads/x:refs/heads/y\\n' >> .git/config; git rev-parse --symbolic-full-name @{push} main@{push}; echo \"[$?]\"; cp c0 .git/config; printf '[remote \"origin\"]\\n\\tpush = refs/heads/*:refs/heads/topic\\n' >> .git/config; git rev-parse --symbolic-full-name @{push} main@{push}; echo \"[$?]\"; cp c0 .git/config; printf '[remote \"origin\"]\\n\\tpush = main\\n' >> .git/config; git rev-parse --symbolic-full-name @{push} main@{push}; echo \"[$?]\"; cp c0 .git/config; printf '[remote \"origin\"]\\n\\tpush = +refs/heads/main:topic\\n' >> .git/config; git rev-parse --symbolic-full-name @{push} main@{push}; echo \"[$?]\"; cp c0 .git/config; printf '[remote \"origin\"]\\n\\tpush = refs/heads/*:refs/heads/x/*\\n\\tfetch = +refs/heads/x/*:refs/remotes/origin/x/*\\n' >> .git/config; o=$(git rev-parse HEAD); mkdir -p .git/refs/remotes/origin/x; printf '%s\\n' $o > .git/refs/remotes/origin/x/main; git rev-parse --symbolic-full-name @{push} main@{push}; echo \"[$?]\"); rm -rf /repo/pu",
+      "expect": {
+        "exit": 0,
+        "stdout": "refs/remotes/origin/topic\nrefs/remotes/origin/topic\n[0]\nrefs/remotes/origin/topic\nrefs/remotes/origin/topic\n[0]\nrefs/remotes/origin/topic\nrefs/remotes/origin/topic\n[0]\nrefs/remotes/origin/topic\nrefs/remotes/origin/topic\n[0]\nrefs/remotes/origin/topic\nrefs/remotes/origin/topic\n[0]\n[128]\n[128]\n[128]\n[128]\nrefs/remotes/origin/x/main\nrefs/remotes/origin/x/main\n[0]\n",
+        "stderr": "fatal: push refspecs for 'origin' do not include 'main'\nfatal: invalid refspec 'refs/heads/*:refs/heads/topic'\nfatal: push refspecs for 'origin' do not include 'main'\nfatal: push destination 'topic' on remote 'origin' has no local tracking branch\n"
+      }
+    },
+    {
+      "id": "git_selector_push_remote",
+      "seq": 567876,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/pu && cd /repo/pu || exit 1; o=$(git rev-parse HEAD); mkdir -p .git/refs/remotes/other; printf '%s\\n' $o > .git/refs/remotes/other/main; printf '[remote \"other\"]\\n\\turl = /x\\n\\tfetch = +refs/heads/*:refs/remotes/other/*\\n' >> .git/config; for m in upstream current matching simple nothing; do git -c push.default=$m -c branch.main.pushRemote=other rev-parse --symbolic-full-name @{push} main@{push}; echo \"[$?]\"; git -c push.default=$m -c remote.pushDefault=other rev-parse --symbolic-full-name @{push} main@{push}; echo \"[$?]\"; done); rm -rf /repo/pu",
+      "expect": {
+        "exit": 0,
+        "stdout": "refs/remotes/origin/main\nrefs/remotes/origin/main\n[0]\nrefs/remotes/origin/main\nrefs/remotes/origin/main\n[0]\nrefs/remotes/other/main\nrefs/remotes/other/main\n[0]\nrefs/remotes/other/main\nrefs/remotes/other/main\n[0]\nrefs/remotes/other/main\nrefs/remotes/other/main\n[0]\nrefs/remotes/other/main\nrefs/remotes/other/main\n[0]\n[128]\n[128]\n[128]\n[128]\n",
+        "stderr": "fatal: cannot resolve 'simple' push to a single destination\nfatal: cannot resolve 'simple' push to a single destination\nfatal: push has no destination (push.default is 'nothing')\nfatal: push has no destination (push.default is 'nothing')\n"
+      }
+    },
+    {
+      "id": "git_format_byte_escapes",
+      "seq": 567877,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; git ls-files --format='%x41%xFF|%(path)' | LC_ALL=C tr '\\377' '#'; echo \"[$?]\"; git ls-tree --format='%xFF%xc3%(path)' HEAD | LC_ALL=C tr '\\377\\303' '#@'; echo \"[$?]\"; git log --format=%xFF%xE9 -1 | LC_ALL=C tr '\\377\\351' '#@'; echo \"[$?]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "A#|docs/readme.md\nA#|letters.txt\nA#|numbers.txt\n[0]\n#@docs\n#@letters.txt\n#@numbers.txt\n[0]\n#@\n[0]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_grep_context_follows_option_order",
+      "seq": 567878,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/gc && cd /repo/gc || exit 1; for i in 1 2 3 4 5 6 7 8 9; do echo l$i; done > n.txt; git add n.txt; git grep -n -A1 -C2 l5 n.txt; echo \"[$?]\"; git grep -n -C2 -A1 l5 n.txt; echo \"[$?]\"; git grep -n -B1 -C2 l5 n.txt; echo \"[$?]\"; git grep -n -C2 -B1 l5 n.txt; echo \"[$?]\"; git grep -n -C2 -A1 -B0 l5 n.txt; echo \"[$?]\"; git grep -n -2 -A1 l5 n.txt; echo \"[$?]\"; git grep -n -A1 -2 l5 n.txt; echo \"[$?]\"); rm -rf /repo/gc",
+      "expect": {
+        "exit": 0,
+        "stdout": "n.txt-3-l3\nn.txt-4-l4\nn.txt:5:l5\nn.txt-6-l6\nn.txt-7-l7\n[0]\nn.txt-3-l3\nn.txt-4-l4\nn.txt:5:l5\nn.txt-6-l6\n[0]\nn.txt-3-l3\nn.txt-4-l4\nn.txt:5:l5\nn.txt-6-l6\nn.txt-7-l7\n[0]\nn.txt-4-l4\nn.txt:5:l5\nn.txt-6-l6\nn.txt-7-l7\n[0]\nn.txt:5:l5\nn.txt-6-l6\n[0]\nn.txt-3-l3\nn.txt-4-l4\nn.txt:5:l5\nn.txt-6-l6\n[0]\nn.txt-3-l3\nn.txt-4-l4\nn.txt:5:l5\nn.txt-6-l6\nn.txt-7-l7\n[0]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_describe_stops_at_shallow_commits",
+      "seq": 567879,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git clone -q /repo /repo/ds && cd /repo/ds || exit 1; export GIT_COMMITTER_NAME=A GIT_COMMITTER_EMAIL=a@example.com GIT_AUTHOR_NAME=A GIT_AUTHOR_EMAIL=a@example.com; git tag -a -m m ann HEAD~1; o=$(git rev-parse HEAD~1); printf '%s\\n' $o > .git/shallow; git describe; echo \"[$?]\"; git describe --long; echo \"[$?]\"; git describe --all; echo \"[$?]\"; git describe --always; echo \"[$?]\"; git describe --tags HEAD~1; echo \"[$?]\"; git tag light; git describe --tags; echo \"[$?]\"); rm -rf /repo/ds",
+      "expect": {
+        "exit": 0,
+        "stdout": "ann-1-g8ef2542\n[0]\nann-1-g8ef2542\n[0]\nheads/main\n[0]\nann-1-g8ef2542\n[0]\nann\n[0]\nlight\n[0]\n",
+        "stderr": ""
+      }
     }
   ]
 }
