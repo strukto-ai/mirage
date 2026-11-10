@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import type { SessionProfile } from '../../../../policy/profile.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
@@ -59,8 +60,8 @@ async function run(line: string): Promise<[number, string, string]> {
   return [result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]
 }
 
-async function mounted(): Promise<Workspace> {
-  const workspace = new Workspace({ '/repo': new RAMVFS() }, { mode: MountMode.WRITE })
+async function mounted(profiles: Record<string, SessionProfile> = {}): Promise<Workspace> {
+  const workspace = new Workspace({ '/repo': new RAMVFS() }, { mode: MountMode.WRITE, profiles })
   for (const rel of walk(repoPath)) {
     const target = `/repo/${rel}`
     await ensureDir(workspace.vfs, PathSpec.fromStrPath(target).parent)
@@ -131,5 +132,25 @@ describe('a merge that resolved a conflict', () => {
     'show --format= --cc --full-index HEAD',
   ])('matches git: %s', async (command) => {
     expect(await run(command)).toEqual(native(command.split(' ')))
+  })
+})
+
+describe('a conflict whose file is gone', () => {
+  beforeAll(async () => {
+    conflicted()
+    rmSync(join(repoPath, 'a.txt'))
+    ws = await mounted({
+      sealed: { commands: { deny: [{ reason: 'sealed', paths: ['/repo/a.txt'] }] } },
+    })
+    ws.createSession('sealed', { profile: 'sealed' })
+  })
+
+  it('keeps its saved stages behind the rules', async () => {
+    const result = await ws.shell('git -C /repo diff-files -p', { sessionId: 'sealed' })
+    expect([result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]).toEqual([
+      1,
+      '',
+      'git diff-files: /repo/a.txt: Permission denied\n',
+    ])
   })
 })

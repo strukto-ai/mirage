@@ -65,13 +65,13 @@ export function diffFilterOf(
   if (spelled === undefined || spelled === '') return null
   const letters = Array.from(spelled).filter((char) => char !== '*')
   const star = spelled.includes('*')
-  const lower = (char: string): boolean =>
-    char === char.toLowerCase() && char !== char.toUpperCase()
-  const chosen = new Set<string>(letters.length > 0 && letters.every(lower) ? CHANGE_CLASSES : '')
+  const dropsOnly = letters.length > 0 && letters.every((char) => char !== char.toUpperCase())
+  const chosen = new Set<string>(dropsOnly ? CHANGE_CLASSES : '')
   for (const char of letters) {
-    if (!CHANGE_CLASSES.includes(char.toUpperCase())) throw new DiffFilterError(char, spelled)
-    if (lower(char)) chosen.delete(char.toUpperCase())
-    else chosen.add(char)
+    const upper = char.toUpperCase()
+    if (!CHANGE_CLASSES.includes(upper)) throw new DiffFilterError(char, spelled)
+    if (char === upper) chosen.add(char)
+    else chosen.delete(upper)
   }
   return [chosen, star]
 }

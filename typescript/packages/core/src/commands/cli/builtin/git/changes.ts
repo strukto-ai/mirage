@@ -557,6 +557,7 @@ export async function collect(
   vfs: Files,
   mode: string,
   showIgnored = false,
+  roots: readonly string[] | null = null,
 ): Promise<[StatusRow[], IndexState, boolean]> {
   const state = await readIndex(repo, vfs)
   const head = await headEntries(repo)
@@ -569,7 +570,7 @@ export async function collect(
     ...visibleEntries(repo.location, state.entries).keys(),
     ...visibleEntries(repo.location, state.conflicts).keys(),
   ])
-  const found = await scan(vfs, repo.location, tracked, mode, showIgnored)
+  const found = await scan(vfs, repo.location, tracked, mode, showIgnored, roots)
   const unstaged = await workChanges(repo, vfs, repo.location.worktree, state.entries, found)
   const at = (name: string): PathSpec => repo.location.worktree.join(name.replace(/\/+$/, ''))
   const row = (

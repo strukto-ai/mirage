@@ -858,6 +858,11 @@
     "INFLATE_CHUNK": "Python's reply cap inflates a body in bounded steps with zlib; fetch inflates every body before TypeScript's replyCap reads it."
    }
   },
+  "commands/cli/builtin/git/describe": {
+   "typescript_only": {
+    "same": "Python compares two dicts with !=; a Map has no value equality."
+   }
+  },
   "commands/cli/builtin/git/ls_files": {
    "typescript_only": {
     "parentOf": "Python has posixpath.dirname; the runtime-neutral core has no path module."

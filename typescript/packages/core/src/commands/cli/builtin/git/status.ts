@@ -23,7 +23,13 @@ import { similarity } from './diff_output.ts'
 import { GitError } from './errors.ts'
 import { configValues } from './fs.ts'
 import { readOptional } from './io.ts'
-import { namedWhole, narrowedUntracked, pathspecPatterns, pathspecSelects } from './pathspec.ts'
+import {
+  namedWhole,
+  narrowedUntracked,
+  pathspecPatterns,
+  pathspecSelects,
+  patternRoots,
+} from './pathspec.ts'
 import { detachedLine } from './ref_list.ts'
 import { readHead } from './refs.ts'
 import { branchLine, longFormat, relativeEntries, shortFormat } from './render.ts'
@@ -177,7 +183,7 @@ async function selectedRows(
   const names = rows.filter((row) => row.indexStatus === UNTRACKED).map((row) => row.name)
   let files: string[] = []
   if (names.some((name) => name.endsWith('/') && !namedWhole(name.slice(0, -1), patterns))) {
-    const [every] = await collect(repo, vfs, UNTRACKED_ALL, showIgnored)
+    const [every] = await collect(repo, vfs, UNTRACKED_ALL, showIgnored, patternRoots(patterns))
     files = every.filter((row) => row.indexStatus === UNTRACKED).map((row) => row.name)
   }
   return [

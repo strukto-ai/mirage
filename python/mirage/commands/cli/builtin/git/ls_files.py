@@ -44,6 +44,7 @@ from mirage.commands.cli.builtin.git.pathspec import (
     narrowed_untracked,
     pathspec_patterns,
     pathspec_selects,
+    pattern_roots,
     repo_relative,
     visible_entries,
 )
@@ -276,7 +277,7 @@ async def ls_files(
                         tracked,
                         UNTRACKED_ALL,
                         False,
-                        None,
+                        pattern_roots(scope),
                         stack,
                         per_directory,
                     )

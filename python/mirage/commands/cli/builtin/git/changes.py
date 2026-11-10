@@ -646,6 +646,7 @@ async def collect(
     location: RepoLocation,
     mode: str,
     show_ignored: bool = False,
+    roots: tuple[str, ...] | None = None,
 ) -> tuple[list[StatusRow], IndexState, bool]:
     """Everything ``status`` reports, in one pass over the three sources.
 
@@ -655,6 +656,8 @@ async def collect(
         location (RepoLocation): the discovered repository.
         mode (str): which untracked files to report.
         show_ignored (bool): whether to report ignored files too.
+        roots (tuple[str, ...] | None): the paths the walk may reach, a
+            tracked file outside them reading as gone. None walks all.
     """
     state = await read_index(vfs, location.gitdir)
     staged, shas, kinds, head = await asyncio.to_thread(
@@ -666,7 +669,7 @@ async def collect(
     # untracked, as it would in a checkout of what the session sees.
     tracked = decoded(visible_entries(location, state.entries))
     tracked |= decoded(visible_entries(location, state.conflicts))
-    found = await scan(vfs, location, tracked, mode, show_ignored)
+    found = await scan(vfs, location, tracked, mode, show_ignored, roots)
     unstaged = await work_changes(vfs, location.worktree, state.entries, found)
     conflicts = conflict_codes(state.conflicts)
 

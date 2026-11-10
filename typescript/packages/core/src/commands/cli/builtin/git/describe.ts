@@ -234,16 +234,20 @@ async function described(
   return `${name.text}-${String(depth)}-g${await short(repo, target, width)}`
 }
 
-async function isDirty(ctx: Context, fl: FlagView): Promise<boolean> {
-  const vfs = requireVfs(ctx)
-  const repo = await opened(ctx, fl, true)
-  const state = await readIndex(repo, repo.vfs)
-  const same = (a: ReadonlyMap<string, TreeEntry>, b: ReadonlyMap<string, TreeEntry>): boolean =>
+function same(a: ReadonlyMap<string, TreeEntry>, b: ReadonlyMap<string, TreeEntry>): boolean {
+  return (
     a.size === b.size &&
     [...a].every(([path, side]) => {
       const other = b.get(path)
       return other?.oid === side.oid && other.mode === side.mode
     })
+  )
+}
+
+async function isDirty(ctx: Context, fl: FlagView): Promise<boolean> {
+  const vfs = requireVfs(ctx)
+  const repo = await opened(ctx, fl, true)
+  const state = await readIndex(repo, repo.vfs)
   const head = shownEntries(repo, (await headEntries(repo)) ?? new Map())
   const staged = shownEntries(repo, stagedEntries(state))
   if (!same(head, staged)) return true

@@ -57,7 +57,7 @@ import {
   requireVfs,
 } from './util.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
-import type { IndexEntry, IndexState, RepoLocation } from './types.ts'
+import type { IndexEntry, IndexState } from './types.ts'
 
 const ENC = new TextEncoder()
 
@@ -247,8 +247,12 @@ async function plumbingFlags(fl: FlagView, repo: Repo): Promise<DiffFlags> {
   )
 }
 
-function stageOf(entry: IndexEntry | null): TreeEntry | null {
-  return entry === null ? null : { oid: entry.oid, mode: entry.mode.toString(8).padStart(6, '0') }
+/** One conflict stage as a side, its blob guarded by the path's rules. */
+function stageOf(repo: Repo, path: string, entry: IndexEntry | null): TreeEntry | null {
+  if (entry === null) return null
+  const stage = { oid: entry.oid, mode: entry.mode.toString(8).padStart(6, '0') }
+  shownEntries(repo, new Map([[path, stage]]))
+  return stage
 }
 
 /**
@@ -257,7 +261,7 @@ function stageOf(entry: IndexEntry | null): TreeEntry | null {
  * `U` compares the file with; a path with no stage 2 has no such row.
  */
 function unmergedSides(
-  location: RepoLocation,
+  repo: Repo,
   state: IndexState,
   patterns: readonly string[],
   before: Tree,
@@ -265,14 +269,14 @@ function unmergedSides(
 ): Map<string, readonly [TreeEntry | null, TreeEntry | null, TreeEntry | null]> {
   const sides = new Map<string, readonly [TreeEntry | null, TreeEntry | null, TreeEntry | null]>()
   for (const [path, conflict] of state.conflicts) {
-    if (!visiblePath(location, path)) {
+    if (!visiblePath(repo.location, path)) {
       after.delete(path)
       continue
     }
-    const ours = stageOf(conflict.this)
+    const ours = stageOf(repo, path, conflict.this)
     const work = after.get(path) ?? null
     if (patterns.length === 0 || pathspecSelects(path, patterns))
-      sides.set(path, [ours, stageOf(conflict.other), work])
+      sides.set(path, [ours, stageOf(repo, path, conflict.other), work])
     if (ours === null) after.delete(path)
     else before.set(path, ours)
   }
@@ -299,7 +303,7 @@ export async function diffFiles(
   const state = await readIndex(repo, repo.vfs)
   const after = await workEntries(repo, vfs, state, patternRoots(pathspecs))
   const before = new Map(shownEntries(repo, stagedEntries(state)))
-  const unmerged = unmergedSides(repo.location, state, pathspecs, before, after)
+  const unmerged = unmergedSides(repo, state, pathspecs, before, after)
   return compared(repo, { ...parsed, pathspecs, workTree: true, unmerged }, [before, after], fl)
 }
 
