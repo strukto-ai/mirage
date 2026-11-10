@@ -11,6 +11,9 @@ const env = {
   PATH: [process.env.PATH, join(homedir(), '.cargo', 'bin')].filter(Boolean).join(delimiter),
 }
 const browserLimit = 8 * 1024 * 1024
+// A dependency's panic messages carry its source path. Dropping the registry
+// prefix keeps a module the same bytes wherever cargo lives, and smaller.
+const registry = join(process.env.CARGO_HOME ?? join(homedir(), '.cargo'), 'registry', 'src')
 const output = new URL('../src/generated/', import.meta.url)
 const built = new URL('../dist/generated/', import.meta.url)
 
@@ -31,6 +34,8 @@ function embed(crate, name, build, small = []) {
         '--target',
         target,
         '--message-format=json-render-diagnostics',
+        '--config',
+        `target.${target}.rustflags=[${JSON.stringify(`--remap-path-prefix=${registry}=`)}]`,
         ...small.flatMap((name) => ['--config', `profile.release.package."${name}".opt-level="s"`]),
         ...build,
       ],

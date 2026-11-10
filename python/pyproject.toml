@@ -235,7 +235,6 @@ e2b = [
 ]
 
 [tool.uv]
-constraint-dependencies = ["pypdf>=6.19.0"]
 # uv rebuilds the project only when one of these changes; by default that
 # is pyproject.toml alone, which would leave a Rust edit unbuilt.
 cache-keys = [

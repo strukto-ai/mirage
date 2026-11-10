@@ -37,7 +37,6 @@ import {
   visibleAssocs,
   visibleEnv,
 } from './state.ts'
-import { RANDOM } from '../../shell/constants.ts'
 import { makeVar } from '../../shell/variable.ts'
 import { makeArray } from '../../shell/array.ts'
 import { parseProgram } from '../../shell/parse/parse.ts'
@@ -299,7 +298,7 @@ describe('subscriptIndex', () => {
   it('lands the assignments a subscript makes and seeds RANDOM', async () => {
     const s = new SessionState({ sessionId: 's' })
     seedVar(s, 'i', '1')
-    s.vars.set(RANDOM, makeVar('1'))
+    s.vars.set('RANDOM', makeVar('1'))
     expect(await subscriptIndex(s, '3')).toBe(3n)
     expect(await subscriptIndex(s, 'i+1')).toBe(2n)
     // The subscript's assignment lands, bash's `a[x=3]`.
@@ -357,7 +356,7 @@ describe('a failing coercion', () => {
     // bash: `declare -i n; x='y=5,1/0'; n=x` refuses the assignment but
     // leaves y at 5, and a RANDOM seed in the expression seeds.
     const [view, s] = makeView()
-    s.vars.set(RANDOM, makeVar('1'))
+    s.vars.set('RANDOM', makeVar('1'))
     seedVar(s, 'n', '0')
     setAttr(s, 'n', VarAttr.Integer)
     seedVar(s, 'x', 'y=5,1/0')

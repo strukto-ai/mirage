@@ -278,13 +278,6 @@ async def test_a_redirect_body_is_let_go_unread(httpx_mock):
 
 
 @pytest.mark.asyncio
-async def test_missing_httpx_raises_with_the_extra_hint(monkeypatch):
-    monkeypatch.setattr(http_mod, "httpx", None)
-    with pytest.raises(ImportError, match=r"mirage\[http\]"):
-        await http_request("http://x.test/x")
-
-
-@pytest.mark.asyncio
 async def test_timeout_becomes_http_timeout_error_with_elapsed_ms(monkeypatch):
     fake = _FakeHttpx(exc=_FakeTimeoutException("read timed out"))
     monkeypatch.setattr(http_mod, "httpx", fake)

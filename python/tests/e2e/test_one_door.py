@@ -306,11 +306,13 @@ async def test_a_replacement_hands_the_builtin_what_it_does_not_answer():
 
 # Lines whose output names a time or a random name, compared without it.
 STEADY = {
+    "dir": "dir -aR /t",
     "ls": "ls -aR /t",
     "mktemp": "mktemp -p /t > /dev/null && ls /t | wc -l && rm /t/tmp.*",
     "shuf": "shuf -o /t/shuffled.txt /t/a.txt"
     " && sort -o /t/shuffled.txt /t/shuffled.txt && cat /t/shuffled.txt",
     "stat": "stat -c '%n %s %F' /t/a.txt /t/dir",
+    "vdir": "vdir -1aR /t",
 }
 # What a line leaves behind: every entry by name and size, and every file's
 # bytes but an archive's, which carry times.

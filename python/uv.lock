@@ -8,9 +8,6 @@ resolution-markers = [
     "python_full_version < '3.13'",
 ]
 
-[manifest]
-constraints = [{ name = "pypdf", specifier = ">=6.19.0" }]
-
 [[package]]
 name = "agno"
 version = "3.1.12"
