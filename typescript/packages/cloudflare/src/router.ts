@@ -12,7 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { errorOf, errorResponse, HttpError } from '@struktoai/mirage-server/errors'
+import {
+  EXPECTATION,
+  errorOf,
+  errorResponse,
+  HttpError,
+  paramOf,
+} from '@struktoai/mirage-server/errors'
 import type {
   BodySchema,
   RouteApp,
@@ -27,6 +33,7 @@ import type {
 /** Fastify's default: the largest body a route reads unless it names its own. */
 const BODY_LIMIT = 1024 * 1024
 const BODY_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'])
+const RAW_BODIES = ['multipart/', 'application/octet-stream']
 
 interface Route {
   readonly method: string
@@ -82,11 +89,12 @@ function typeOf(value: unknown): string {
  */
 function validate(body: unknown, schema: BodySchema): unknown {
   if (typeOf(body) !== 'object')
-    throw new RouteError(400, 'FST_ERR_VALIDATION', 'body must be object')
+    throw new HttpError('invalid_request', 'body must be a JSON object')
   const given = body as Record<string, unknown>
   for (const field of schema.required ?? []) {
     if (!Object.hasOwn(given, field)) {
-      throw new RouteError(400, 'FST_ERR_VALIDATION', `body must have required property '${field}'`)
+      const param = paramOf([field])
+      throw new HttpError('missing_field', `${param} is required`, { param })
     }
   }
   const record: Record<string, unknown> = {}
@@ -100,7 +108,13 @@ function validate(body: unknown, schema: BodySchema): unknown {
       typeof declared.type === 'string' ? [declared.type] : declared.type
     const actual = typeOf(value)
     if (!types.includes(actual) && !(actual === 'integer' && types.includes('number'))) {
-      throw new RouteError(400, 'FST_ERR_VALIDATION', `body/${field} must be ${types.join(',')}`)
+      const param = paramOf([field])
+      const must = EXPECTATION[types[0] ?? '']
+      throw new HttpError(
+        'invalid_value',
+        must === undefined ? `${param} is not valid` : `${param} must be ${must}`,
+        { param },
+      )
     }
     record[field] = value
   }
@@ -134,40 +148,22 @@ async function readBody(request: Request, limit: number): Promise<string> {
   return new TextDecoder().decode(bytes)
 }
 
-/** The parsed body Fastify's default parsers would hand a route, JSON and plain text. */
+/**
+ * The body read as JSON whatever its Content-Type says, save a multipart or
+ * raw byte upload, which a route reads as sent. An empty body is none.
+ * Mirrors the Node server's `lenientJson`.
+ */
 async function parseBody(request: Request, config: RouteConfig): Promise<unknown> {
   if (!BODY_METHODS.has(request.method) || request.body === null) return undefined
   const contentType = (request.headers.get('content-type') ?? '').toLowerCase()
-  if (contentType.startsWith('multipart/') || contentType.startsWith('application/octet-stream')) {
-    return undefined
+  if (RAW_BODIES.some((raw) => contentType.startsWith(raw))) return undefined
+  const text = await readBody(request, config.bodyLimit ?? BODY_LIMIT)
+  if (text === '') return undefined
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    throw new RouteError(400, 'FST_ERR_CTP_INVALID_JSON_BODY', 'Body is not valid JSON')
   }
-  const limit = config.bodyLimit ?? BODY_LIMIT
-  if (contentType === '') {
-    const text = await readBody(request, limit)
-    if (text === '') return undefined
-    throw new RouteError(415, 'FST_ERR_CTP_INVALID_MEDIA_TYPE', 'Unsupported Media Type')
-  }
-  if (contentType.startsWith('application/json')) {
-    const text = await readBody(request, limit)
-    if (text === '') {
-      throw new RouteError(
-        400,
-        'FST_ERR_CTP_EMPTY_JSON_BODY',
-        "Body cannot be empty when content-type is set to 'application/json'",
-      )
-    }
-    try {
-      return JSON.parse(text) as unknown
-    } catch {
-      throw new RouteError(400, 'FST_ERR_CTP_INVALID_JSON_BODY', 'Body is not valid JSON')
-    }
-  }
-  if (contentType.startsWith('text/plain')) return readBody(request, limit)
-  throw new RouteError(
-    415,
-    'FST_ERR_CTP_INVALID_MEDIA_TYPE',
-    `Unsupported Media Type: ${contentType}`,
-  )
 }
 
 class WebReply implements RouteReply {
@@ -228,22 +224,11 @@ function failure(error: unknown, config: RouteConfig): WebReply {
   if (
     error instanceof RouteError &&
     config.invalidJson !== undefined &&
-    (error.code === 'FST_ERR_CTP_INVALID_JSON_BODY' || error.code === 'FST_ERR_CTP_EMPTY_JSON_BODY')
+    error.code === 'FST_ERR_CTP_INVALID_JSON_BODY'
   ) {
     return reply.status(error.statusCode).send(config.invalidJson)
   }
-  return errorResponse(reply, error instanceof RouteError ? routeError(error) : errorOf(error))
-}
-
-/**
- * A body this router refused before the route ran, as the error the Node
- * server answers: a body it cannot read as JSON or past the limit as
- * Fastify's are, a media type or schema miss as a bad request.
- */
-function routeError(error: RouteError): HttpError {
-  if (error.statusCode === 415) return new HttpError('invalid_request', 'body must be JSON')
-  if (error.code === 'FST_ERR_VALIDATION') return new HttpError('invalid_request', error.message)
-  return errorOf(error)
+  return errorResponse(reply, errorOf(error))
 }
 
 /**

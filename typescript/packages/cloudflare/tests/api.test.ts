@@ -268,6 +268,25 @@ describe('the server API in workerd', () => {
     expect(disk.text).toContain('memory')
   })
 
+  it('reads a body as JSON whatever its Content-Type says', async () => {
+    const send = async (body: string): Promise<unknown> => {
+      const response = await worker.fetch('http://edge.test/v1/workspaces/api/shell', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'text/plain' },
+        body,
+      })
+      return [response.status, await response.json()]
+    }
+    expect(await send('{"command": 1}')).toEqual([
+      400,
+      { error: { code: 'invalid_value', message: 'command must be a string', param: 'command' } },
+    ])
+    expect(await send('not json')).toEqual([
+      400,
+      { error: { code: 'invalid_json', message: 'body must be JSON' } },
+    ])
+  })
+
   it("names the edge's own backends when a mount names none of them", async () => {
     const unknown = await call('POST', '/v1/workspaces', {
       config: { mounts: { '/': { vfs: 'disk' } } },
