@@ -14,7 +14,6 @@
 
 import weakref
 from collections.abc import Mapping
-from functools import partial
 from typing import Any, TypeGuard
 
 from mirage.machine.registry import MACHINE_MODULES
@@ -110,10 +109,6 @@ RUNTIME_HINTS: dict[str, str] = {
 _BUILT_FROM: dict[int, tuple[weakref.ref[Runtime[Any]], str]] = {}
 
 
-def _forget(key: int, _gone: weakref.ref[Runtime[Any]]) -> None:
-    _BUILT_FROM.pop(key, None)
-
-
 def build_runtime(name: str, **options: Any) -> Runtime[Any]:
     """Construct a runtime by name, failing loud on unknown names.
 
@@ -129,7 +124,11 @@ def build_runtime(name: str, **options: Any) -> Runtime[Any]:
     runtime = runtime_class(name)(**options)
     if not options:
         key = id(runtime)
-        _BUILT_FROM[key] = (weakref.ref(runtime, partial(_forget, key)), name)
+
+        def forget(_gone: weakref.ref[Runtime[Any]]) -> None:
+            _BUILT_FROM.pop(key, None)
+
+        _BUILT_FROM[key] = (weakref.ref(runtime, forget), name)
     return runtime
 
 
