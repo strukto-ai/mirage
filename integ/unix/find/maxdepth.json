@@ -78,7 +78,7 @@
       ]
     },
     {
-      "id": "find_delete_mount_root_noop",
+      "id": "find_delete_mount_root_busy",
       "seq": 500311,
       "targets": [
         "ram",
@@ -108,9 +108,10 @@
       "command": "find /data -maxdepth 0 -delete; echo rc=$?; ls /data/f4/sub1",
       "expect": {
         "exit": 0,
-        "stdout": "rc=0\ninner.txt\nskipme\n",
-        "stderr": ""
+        "stdout": "rc=1\ninner.txt\nskipme\n",
+        "stderr": "find: cannot delete '/data': Device or resource busy\n"
       },
+      "note": "coreutils 9.7 over a tmpfs: a mount root is a mountpoint, which rmdir refuses with EBUSY; the walk leaves everything else in place.",
       "flags": [
         "maxdepth",
         "delete"

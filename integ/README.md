@@ -633,6 +633,14 @@ The program cases cover program files read across mounts (`grep -f`, `sed -f`,
 manifest; the shared parity job also compares it and `ram-nested`. The existing `python/**`, `typescript/**`, and `integ/**`
 filters cover these modules and cases.
 
+The `ram-chain` core target mounts `/`, `/workspace`, `/workspace/workspace2`
+and `/another`: a root mount, a mount on it, a mount on that, and a sibling.
+`crossmount/chain/basic.json` pins what changes at each boundary: walks reach
+the third level, `tree` draws a link below a nested mount as a link and `-x`
+stops at a crossed one, `find -delete` meets a busy mount root, and a hard link
+cannot leave its mount. The core shards discover it and the shared parity job
+compares it; the `integ/**` filter covers its cases.
+
 The parser ownership and execution-frame modules are covered by the existing
 `python/**` and `typescript/**` filters; their shared Bash regressions and Chrome
 suite are covered by `integ/**`. No new filter is needed for those modules.

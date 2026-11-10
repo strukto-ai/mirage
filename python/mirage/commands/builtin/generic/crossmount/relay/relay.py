@@ -103,13 +103,14 @@ async def run_relay(
         raise ValueError(f"Unsupported cross-mount relay command: {cmd_name}")
     if cmd_name == Cmd.AWK:
         return await run_awk(scopes, text_args, flag_kwargs, run_single, stdin)
-    if cmd_name == Cmd.BC:
-        # bc runs its files, then standard input, as one program: once, on
-        # its first file's mount, reading the rest through the dispatcher.
-        # Only that file names the mount, so none of the others is checked
-        # against a backend that does not hold it.
+    if cmd_name in (Cmd.BC, Cmd.LINK, Cmd.SYNC):
+        # bc runs its files, then standard input, as one program, and link
+        # and sync reach their operands through the session's files: once,
+        # on the first operand's mount, reading the rest through the
+        # dispatcher. Only that operand names the mount, so none of the
+        # others is checked against a backend that does not hold it.
         return await run_single(
-            Cmd.BC,
+            cmd_name,
             scopes,
             text_args,
             flag_kwargs,

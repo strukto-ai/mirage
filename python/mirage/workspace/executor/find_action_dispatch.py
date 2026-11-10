@@ -38,7 +38,7 @@ from mirage.core.generic import find_eval
 from mirage.core.generic import types as find_types
 from mirage.core.generic.find import depth_first_key
 from mirage.errors.classify import is_entry_error
-from mirage.errors.fs import enoent, strerror_of
+from mirage.errors.fs import ebusy, enoent, enotempty, strerror_of
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.stream import SharedStdin, ensure_stream, materialize
@@ -247,6 +247,7 @@ async def _delete_row(
     dispatch: DispatchFn | None,
     errors: list[bytes],
     stat_path: StatPath | None,
+    registry: MountRegistry,
 ) -> bool:
     """Remove a matched entry through the dispatcher.
 
@@ -259,6 +260,7 @@ async def _delete_row(
         dispatch (DispatchFn | None): the workspace dispatcher.
         errors (list[bytes]): receives a failure in find's voice.
         stat_path (StatPath | None): distinguishes files from directories.
+        registry (MountRegistry): the mount table, which pins its roots.
     """
     links = link_view(vfs)
     path = ps.raw_path or ps.virtual
@@ -266,6 +268,7 @@ async def _delete_row(
         errors.append(b"find: -delete requires an operation dispatcher\n")
         return False
     try:
+        _check_unpinned(ps, registry)
         link = links is not None and links.stat_at(ps.virtual) is not None
         st = (
             await stat_path(ps) if not link and stat_path is not None else None
@@ -600,20 +603,24 @@ async def run_listed_find(
     return io
 
 
-def _structural(path: PathSpec, registry: MountRegistry) -> bool:
-    """Whether a row is a mount point or a namespace-only ancestor of
-    one, which are not unlinkable entries. Ancestors use the raw mount
-    table like ``is_mount_root``: an ungranted mount still pins its
-    ancestors in the namespace.
+def _check_unpinned(path: PathSpec, registry: MountRegistry) -> None:
+    """Refuse a row the mount table pins, as the kernel refuses its rmdir.
+
+    A mount point is busy, and a directory holding one is never empty,
+    even once ``-delete`` has removed everything else under it
+    (coreutils' find over a tmpfs). Ancestors use the raw mount table
+    like ``is_mount_root``: an ungranted mount still pins its ancestors
+    in the namespace.
 
     Args:
         path (PathSpec): the selected row.
         registry (MountRegistry): the mount table.
     """
     virtual = path.virtual
-    return registry.is_mount_root(virtual) or bool(
-        registry.descendant_mounts(virtual)
-    )
+    if registry.is_mount_root(virtual):
+        raise ebusy(path)
+    if registry.descendant_mounts(virtual):
+        raise enotempty(path)
 
 
 async def _apply_find_actions(
@@ -851,12 +858,8 @@ async def _apply_find_actions(
                         )
                     )
                 elif action.kind == "delete":
-                    # A structural row is skipped, not refused, the way Unix
-                    # leaves a mount point in place.
-                    if _structural(match, registry):
-                        continue
                     if not await _delete_row(
-                        match, vfs, dispatch, errors, stat_path
+                        match, vfs, dispatch, errors, stat_path, registry
                     ):
                         exit_code = 1
                         break

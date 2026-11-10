@@ -651,7 +651,10 @@ async function openDir(
   // throws and a merge below it never runs: `tree` reported the one path
   // whose children it could name for certain as unopenable.
   const linked = linkedMounts(treeOpts, path.virtual)
-  const nested = linked === null ? childMounts(treeOpts.mounts, path.virtual) : []
+  // A mount point -x keeps the walk out of is drawn empty, the mounts on it
+  // included (tree 2.2.1).
+  const nested =
+    linked === null && readdir !== notCrossed ? childMounts(treeOpts.mounts, path.virtual) : []
   const limit = treeOpts.budget?.listingLimit(path.virtual) ?? null
   let entries: string[]
   try {
@@ -1330,6 +1333,11 @@ export async function treeGeneric(
       statPath === undefined
         ? null
         : async (p: PathSpec) => {
+            // The dispatcher's stat follows a link, so a link is answered
+            // from the namespace, as this mount's own stat answers it:
+            // drawn as `name -> target`, gone through only under -l.
+            const own = links?.statAt(p.virtual) ?? null
+            if (own !== null) return own
             const s = await statPath(p)
             // Stamped, not a bare Error: `isWalkError` keys on the code,
             // so an unstamped throw escapes the walk's catch and rejects

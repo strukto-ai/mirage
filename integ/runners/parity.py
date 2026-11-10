@@ -28,6 +28,7 @@ SHARED_TARGETS = [
     "redis",
     "ram-history",
     "ram-nested",
+    "ram-chain",
     "command-service",
 ]
 S3_TARGETS = ["s3", "s3-prefix", "object-storage-prefix"]

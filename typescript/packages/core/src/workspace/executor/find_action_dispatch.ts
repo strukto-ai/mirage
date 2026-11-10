@@ -26,7 +26,7 @@ import { linkView } from '../../commands/builtin/utils/links.ts'
 import { currentCaller, getCurrentSession, runAsProgram } from '../../context/session_context.ts'
 import { compareDepthFirst, modifiedTs } from '../../core/generic/find.ts'
 import { printfKind, treeHas, treeHasTime } from '../../core/generic/find_eval.ts'
-import { enoent, isFsError, strerrorOf } from '../../errors/fs.ts'
+import { ebusy, enoent, enotempty, isFsError, strerrorOf } from '../../errors/fs.ts'
 import { posixPhrase } from '../../errors/posix.ts'
 import { ensureStream, SharedStdin } from '../../io/stream.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
@@ -184,6 +184,7 @@ async function deleteRow(
   dispatch: DispatchFn | null,
   errors: Uint8Array[],
   statPath: StatPath | null,
+  registry: MountRegistry,
 ): Promise<boolean> {
   const path = ps.rawPath || ps.virtual
   if (dispatch === null) {
@@ -191,6 +192,7 @@ async function deleteRow(
     return false
   }
   try {
+    checkUnpinned(ps, registry)
     const link = (linkView(vfs ?? undefined)?.statAt(ps.virtual) ?? null) !== null
     const st = link || statPath === null ? null : await statPath(ps)
     if (!link && statPath !== null && st === null) throw enoent(ps)
@@ -296,13 +298,15 @@ function startBase(start: PathSpec | undefined): string {
   return start === undefined ? '.' : start.rawPath || start.virtual
 }
 
-/** Whether a row is a mount point or a namespace-only ancestor of one,
- * which are not unlinkable entries. Ancestors use the raw mount table
- * like isMountRoot: an ungranted mount still pins its ancestors in the
- * namespace. */
-function structural(path: PathSpec, registry: MountRegistry): boolean {
+/** Refuse a row the mount table pins, as the kernel refuses its rmdir: a
+ * mount point is busy, and a directory holding one is never empty, even
+ * once `-delete` has removed everything else under it (coreutils' find
+ * over a tmpfs). Ancestors use the raw mount table like isMountRoot: an
+ * ungranted mount still pins its ancestors in the namespace. */
+function checkUnpinned(path: PathSpec, registry: MountRegistry): void {
   const virtual = path.virtual
-  return registry.isMountRoot(virtual) || registry.descendantMounts(virtual).length > 0
+  if (registry.isMountRoot(virtual)) throw ebusy(path)
+  if (registry.descendantMounts(virtual).length > 0) throw enotempty(path)
 }
 
 /** Whether the actions differ from the implicit print: one explicit
@@ -650,10 +654,7 @@ export async function applyFindActions(
             await renderPrintf(formatter, path, base, null, identity, signal),
           )
         } else if (action.kind === 'delete') {
-          // A structural row is skipped, not refused, the way Unix leaves
-          // a mount point in place.
-          if (structural(match, registry)) continue
-          if (!(await deleteRow(match, vfs, dispatch, errors, statPath))) {
+          if (!(await deleteRow(match, vfs, dispatch, errors, statPath, registry))) {
             exitCode = 1
             break
           }

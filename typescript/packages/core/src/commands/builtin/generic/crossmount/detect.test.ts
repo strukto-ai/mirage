@@ -104,13 +104,14 @@ describe('isCrossMount — mirrors tests/commands/builtin/generic/crossmount/tes
     expect(aggregateFor('sort', both)).toBeNull()
   })
 
-  it('crosses cp for a source holding a mount, not the destination', () => {
+  it.each(['cp', 'mv'])('crosses %s for a source holding a mount, not the destination', (cmd) => {
     const tree = on('/a/d', '/a/', null, true)
     const file = on('/a/f.txt', '/a/')
     const into = on('/a/e', '/a/')
-    expect(isCrossMount('cp', [tree, into])).toBe(true)
-    expect(isCrossMount('cp', [file, tree])).toBe(false)
-    expect(isCrossMount('cp', [into, tree], [into.path])).toBe(true)
-    expect(isCrossMount('cp', [tree, file], [tree.path])).toBe(false)
+    expect(isCrossMount(cmd, [tree, into])).toBe(true)
+    expect(isCrossMount(cmd, [file, tree])).toBe(false)
+    expect(isCrossMount(cmd, [into, tree], [into.path])).toBe(true)
+    expect(isCrossMount(cmd, [tree, file], [tree.path])).toBe(false)
+    expect(isCrossMount('tee', [tree, into])).toBe(false)
   })
 })

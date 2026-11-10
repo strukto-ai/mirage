@@ -100,23 +100,21 @@ def test_delete_with_print_emits_matches() -> None:
     _run(_go())
 
 
-def test_delete_skips_mount_roots() -> None:
-    # A mount root in the match set must not be unlinked: mounts
-    # are structural metadata.
+def test_delete_refuses_mount_roots() -> None:
+    # A mount's contents go and its root is busy, as the kernel answers
+    # find's rmdir of a mountpoint (coreutils 9.7 over a tmpfs).
     async def _go():
         ws = _ws_two_mounts()
         ws.create_session("s")
         await ws.shell("touch /a/x.html /b/y.html", session_id="s")
-        # Force mount roots into the match set via -type d, then
-        # -delete must skip them while still listing them in find.
-        # Without a -name pattern the synthetic /a and /b appear.
-        await ws.shell("find / -type d -delete", session_id="s")
-        # Mount roots survive (delete may report errors for other
-        # dir entries, that's fine).
-        ls = await ws.shell("ls /", session_id="s")
-        out = await ls.stdout_str()
-        assert "a" in out
-        assert "b" in out
+        r = await ws.shell("find /a /b -delete", session_id="s")
+        assert r.exit_code == 1
+        assert await r.stderr_str() == (
+            "find: cannot delete '/a': Device or resource busy\n"
+            "find: cannot delete '/b': Device or resource busy\n"
+        )
+        ls = await ws.shell("ls -A /a /b", session_id="s")
+        assert await ls.stdout_str() == "/a:\n\n/b:\n"
 
     _run(_go())
 

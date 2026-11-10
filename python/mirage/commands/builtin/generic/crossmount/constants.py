@@ -61,6 +61,8 @@ RELAY_COMMANDS = frozenset(
         Cmd.LS,
         Cmd.SED,
         Cmd.BC,
+        Cmd.LINK,
+        Cmd.SYNC,
     }
 ) | (DISPATCH_BUILDERS.keys() - STREAM_COMMANDS - FANOUT_COMMANDS)
 CROSS_MOUNT_COMMANDS = STREAM_COMMANDS | FANOUT_COMMANDS | RELAY_COMMANDS

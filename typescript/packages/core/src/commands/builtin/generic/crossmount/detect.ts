@@ -49,9 +49,11 @@ export function isCrossMount(
   // a scope outside any mount cannot make the command cross-mount
   const mounts = new Set(operands.flatMap((o) => (o.mount === null ? [] : [o.mount])))
   // A copy of a tree that holds a mount reads both filesystems, the way GNU
-  // cp -r copies across one, even from a single mount's operands. Only a
-  // source counts: the destination (-t's directory, else the last operand)
-  // lands beside a mount and crosses nothing.
+  // cp -r copies across one, even from a single mount's operands. A move of
+  // one cannot be a rename, since the mount stays where it is, so it moves
+  // as GNU mv does across devices: copy, then remove. Only a source counts:
+  // the destination (-t's directory, else the last operand) lands beside a
+  // mount and crosses nothing.
   const landing = new Set(
     (flagScopes.length > 0 ? flagScopes : operands.slice(-1).map((o) => o.path)).map(
       (s) => s.virtual,
@@ -59,7 +61,8 @@ export function isCrossMount(
   )
   return (
     mounts.size > 1 ||
-    (cmdName === 'cp' && operands.some((o) => !landing.has(o.path.virtual) && o.nests))
+    ((cmdName === 'cp' || cmdName === 'mv') &&
+      operands.some((o) => !landing.has(o.path.virtual) && o.nests))
   )
 }
 

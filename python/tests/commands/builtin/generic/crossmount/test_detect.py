@@ -131,13 +131,15 @@ def test_aggregate_for_takes_one_shared_reducer_only():
     assert aggregate_for("sort", both) is None
 
 
-def test_cp_crosses_for_a_source_holding_a_mount_not_the_destination():
+@pytest.mark.parametrize("cmd", ["cp", "mv"])
+def test_crosses_for_a_source_holding_a_mount_not_the_destination(cmd):
     tree = _on("/a/d", "/a/", nests=True)
     file, into = _on("/a/f.txt", "/a/"), _on("/a/e", "/a/")
-    assert is_cross_mount("cp", [tree, into])
-    assert not is_cross_mount("cp", [file, tree])
-    assert is_cross_mount("cp", [into, tree], [into.path])
-    assert not is_cross_mount("cp", [tree, file], [tree.path])
+    assert is_cross_mount(cmd, [tree, into])
+    assert not is_cross_mount(cmd, [file, tree])
+    assert is_cross_mount(cmd, [into, tree], [into.path])
+    assert not is_cross_mount(cmd, [tree, file], [tree.path])
+    assert not is_cross_mount("tee", [tree, into])
 
 
 def test_strategy_rejects_unregistered_commands():
