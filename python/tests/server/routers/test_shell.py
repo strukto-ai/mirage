@@ -304,8 +304,11 @@ async def test_shell_refuses_a_runtime_or_machine_the_workspace_lacks():
     async with AsyncClient(
         transport=transport, base_url="http://test"
     ) as client:
-        wid = await _create_workspace(client)
-        route = f"/v1/workspaces/{wid}/shell"
+        config = _minimal_config()
+        config["config"]["runtimes"] = ["monty", "workspace"]
+        r = await client.post("/v1/workspaces", json=config)
+        assert r.status_code == 201
+        route = f"/v1/workspaces/{r.json()['id']}/shell"
         runtime = await client.post(
             route, json={"command": "echo hi", "runtime": "no-such-runtime"}
         )
