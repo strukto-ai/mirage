@@ -21,7 +21,7 @@ from mirage.machine.kubernetes.constants import (
     EXIT_STATUS,
     KUBECTL_HINT,
     RUNNING_PHASE,
-    no_stdin,
+    empty_stdin,
     own_stdin,
 )
 from mirage.machine.program import open_program_pipe, reported_state
@@ -195,7 +195,7 @@ class KubernetesMachine(ProgramMachine):
                     *tail,
                     "/bin/sh",
                     "-c",
-                    line if given else no_stdin(line),
+                    line if given else empty_stdin(line),
                 ],
                 stdin=stdin if given else None,
                 output=output,

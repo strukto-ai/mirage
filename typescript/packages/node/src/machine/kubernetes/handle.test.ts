@@ -159,7 +159,7 @@ describe('KubernetesMachine', () => {
     expect(DEC.decode(stdin ?? new Uint8Array())).toBe('a\n')
   })
 
-  it('takes no stdin for a run with no input, which reads /dev/null in the pod', async () => {
+  it('takes no stdin for a run with no input, which reads an empty pipe made in the pod', async () => {
     const machine = makeMachine({ pod: 'p' })
     await machine.execLine('wc -c', new Uint8Array(), {}, '/')
     const [args, stdin] = machine.calls[machine.calls.length - 1] ?? [[], null]
@@ -170,7 +170,7 @@ describe('KubernetesMachine', () => {
       '--',
       '/bin/sh',
       '-c',
-      `exec </dev/null\n${wrapLine(['/bin/sh', '-c', 'wc -c'], {}, '/')}`,
+      `: | {\n${wrapLine(['/bin/sh', '-c', 'wc -c'], {}, '/')}\n}`,
     ])
     expect(stdin).toBeNull()
   })

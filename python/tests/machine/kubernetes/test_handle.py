@@ -153,7 +153,7 @@ async def test_exec_line_with_no_input_takes_no_stdin():
         "--",
         "/bin/sh",
         "-c",
-        "exec </dev/null\n" + wrap_line(("/bin/sh", "-c", "wc -c"), {}, "/"),
+        ": | {\n" + wrap_line(("/bin/sh", "-c", "wc -c"), {}, "/") + "\n}",
     ]
     assert stdin is None
 
