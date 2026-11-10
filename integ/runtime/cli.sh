@@ -318,7 +318,7 @@ run_case() {
 
   if jq -e 'has("build_error")' >/dev/null <<<"$case_json"; then
     local want
-    want=$(jq -r '.build_error.contains' <<<"$case_json")
+    want=$(jq -r '.build_error.http_contains // .build_error.contains' <<<"$case_json")
     if $cli workspace create "$work/ws.yaml" --id "$wsid" \
         >"$work/create.out" 2>&1 </dev/null; then
       failures+=("$case_id: expected workspace create to fail")

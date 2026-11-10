@@ -57,7 +57,8 @@
         ]
       },
       "build_error": {
-        "contains": "cpython-wasi-build"
+        "contains": "cpython-wasi-build",
+        "http_contains": "config could not be built"
       }
     }
   ]
