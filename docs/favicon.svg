@@ -1,28 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg"
-     viewBox="0 0 160 160"
-     width="160" height="160">
-
-  <polygon points="19,45 80,10 80,45 50,63"
-           fill="#000000" stroke="#ffffff" stroke-width="3"/>
-  <polygon points="80,10 141,45 110,63 80,45"
-           fill="#000000" stroke="#ffffff" stroke-width="3"/>
-  <polygon points="141,45 141,115 110,98 110,63"
-           fill="#000000" stroke="#ffffff" stroke-width="3"/>
-  <polygon points="141,115 80,150 80,115 110,98"
-           fill="#000000" stroke="#ffffff" stroke-width="3"/>
-  <polygon points="80,150 19,115 50,98 80,115"
-           fill="#000000" stroke="#ffffff" stroke-width="3"/>
-  <polygon points="19,115 19,45 50,63 50,98"
-           fill="#000000" stroke="#ffffff" stroke-width="3"/>
-
-  <polygon points="80,45 110,63 110,98 80,115 50,98 50,63"
-           fill="#000000" stroke="#ffffff" stroke-width="3"/>
-
-  <line x1="80" y1="80" x2="50" y2="63"
-        stroke="#ffffff" stroke-width="3"/>
-  <line x1="80" y1="80" x2="110" y2="63"
-        stroke="#ffffff" stroke-width="3"/>
-  <line x1="80" y1="80" x2="80" y2="115"
-        stroke="#ffffff" stroke-width="3"/>
-
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="8 8 144 144" width="144" height="144">
+  <style>
+    g { fill: #000000; stroke: #FFFFFF; }
+    @media (prefers-color-scheme: dark) { g { fill: #FFFFFF; stroke: #000000; } }
+  </style>
+  <g stroke-width="2.5">
+    <polygon points="19,45 80,10 80,45 50,63"/>
+    <polygon points="80,10 141,45 110,63 80,45"/>
+    <polygon points="141,45 141,115 110,98 110,63"/>
+    <polygon points="141,115 80,150 80,115 110,98"/>
+    <polygon points="80,150 19,115 50,98 80,115"/>
+    <polygon points="19,115 19,45 50,63 50,98"/>
+    <polygon points="80,45 110,63 110,98 80,115 50,98 50,63"/>
+    <line x1="80" y1="80" x2="50" y2="63"/>
+    <line x1="80" y1="80" x2="110" y2="63"/>
+    <line x1="80" y1="80" x2="80" y2="115"/>
+  </g>
 </svg>
