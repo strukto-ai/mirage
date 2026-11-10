@@ -75,7 +75,7 @@ retains every response schema.
 
 Some bodies are not this shape. The [RPC](/home/access/rpc#errors) and
 [MCP](/home/access/mcp) endpoints answer JSON-RPC errors. A failed file call
-carries the inner object above, `{code, message, errno, refusal}`, in an RPC
+carries the inner object above, `{code, message, errno, decision}`, in an RPC
 error's `data`, and as the text of a failed MCP `vfs_<call>` tool. Records
 inside an NDJSON stream follow the stream's own format once the `200` is sent.
 The readiness endpoint answers `503` with `{"status": "full"}` or
