@@ -68,6 +68,15 @@ export interface CreateWorkspaceRequest {
 
 /** A request config rejected by its schema, before operator-only runtime checks. */
 export class ConfigValidationError extends Error {
+  static readonly shape = z
+    .object({
+      mounts: z.record(z.string(), z.unknown()),
+      system_time: z.string().nullable().optional(),
+      profile: z.string().nullable().optional(),
+      default_session_id: z.string().nullable().optional(),
+      workspace_id: z.string().nullable().optional(),
+    })
+    .passthrough()
   readonly detail: { type: string; loc: string[]; msg: string; input: unknown }[] = []
 
   constructor(config: unknown, cause: Error) {
@@ -81,20 +90,29 @@ export class ConfigValidationError extends Error {
       })
       return
     }
-    if (!Object.hasOwn(config, 'mounts')) {
-      this.detail.push({
-        type: 'missing',
-        loc: ['body', 'config', 'mounts'],
-        msg: 'Field required',
-        input: config,
-      })
-    } else if (!isPlainObject(config.mounts)) {
-      this.detail.push({
-        type: 'dict_type',
-        loc: ['body', 'config', 'mounts'],
-        msg: 'Input should be a valid dictionary',
-        input: config.mounts,
-      })
+    const checked = ConfigValidationError.shape.safeParse(config)
+    if (!checked.success) {
+      for (const issue of checked.error.issues) {
+        const field = issue.path[0]
+        if (issue.code !== 'invalid_type' || typeof field !== 'string') throw checked.error
+        const input = config[field]
+        this.detail.push({
+          type:
+            input === undefined
+              ? 'missing'
+              : issue.expected === 'string'
+                ? 'string_type'
+                : 'dict_type',
+          loc: ['body', 'config', field],
+          msg:
+            input === undefined
+              ? 'Field required'
+              : issue.expected === 'string'
+                ? 'Input should be a valid string'
+                : 'Input should be a valid dictionary',
+          input: input === undefined ? config : input,
+        })
+      }
     }
     // The shared engine checks allowed keys without running field validators.
     for (const [key, value] of Object.entries(config)) {
@@ -130,6 +148,7 @@ export function checkConfig(config: unknown): WorkspaceConfigRaw {
   let cfg: WorkspaceConfigRaw
   try {
     if (!isPlainObject(config)) throw new Error('config must be a mapping')
+    ConfigValidationError.shape.parse(config)
     cfg = loadWorkspaceConfig(config, null)
   } catch (error) {
     if (!(error instanceof Error)) throw error

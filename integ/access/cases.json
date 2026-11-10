@@ -148,6 +148,73 @@
          }
        ]
      }
+   },
+   {
+     "id": "invalid_field_type",
+     "config": {
+       "mounts": {},
+       "system_time": 123
+     },
+     "expect": {
+       "status": 422,
+       "detail": [
+         {
+           "type": "string_type",
+           "loc": [
+             "body",
+             "config",
+             "system_time"
+           ],
+           "msg": "Input should be a valid string",
+           "input": 123
+         }
+       ]
+     }
+   },
+   {
+     "id": "missing_unknown_and_invalid_type",
+     "config": {
+       "system_time": 123,
+       "unknown_setting": true
+     },
+     "expect": {
+       "status": 422,
+       "detail": [
+         {
+           "type": "missing",
+           "loc": [
+             "body",
+             "config",
+             "mounts"
+           ],
+           "msg": "Field required",
+           "input": {
+             "system_time": 123,
+             "unknown_setting": true
+           }
+         },
+         {
+           "type": "string_type",
+           "loc": [
+             "body",
+             "config",
+             "system_time"
+           ],
+           "msg": "Input should be a valid string",
+           "input": 123
+         },
+         {
+           "type": "extra_forbidden",
+           "loc": [
+             "body",
+             "config",
+             "unknown_setting"
+           ],
+           "msg": "Extra inputs are not permitted",
+           "input": true
+         }
+       ]
+     }
    }
  ],
  "suites": [

@@ -124,12 +124,20 @@ def _make_app_with_short_grace(grace: float = 0.2):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "mounts,extra", [(False, False), (True, True), (False, True)]
+    "mounts,extra,invalid_time",
+    [
+        (False, False, False),
+        (True, True, False),
+        (False, True, False),
+        (True, False, True),
+        (False, True, True),
+    ],
 )
-async def test_create_validates_config(mounts, extra):
+async def test_create_validates_config(mounts, extra, invalid_time):
     app, _ = _make_app_with_short_grace(grace=10.0)
     config = {
         **({"mounts": {}} if mounts else {}),
+        **({"system_time": 123} if invalid_time else {}),
         **({"unknown_setting": True} if extra else {}),
     }
     detail = []
@@ -140,6 +148,15 @@ async def test_create_validates_config(mounts, extra):
                 "loc": ["body", "config", "mounts"],
                 "msg": "Field required",
                 "input": config,
+            }
+        )
+    if invalid_time:
+        detail.append(
+            {
+                "type": "string_type",
+                "loc": ["body", "config", "system_time"],
+                "msg": "Input should be a valid string",
+                "input": 123,
             }
         )
     if extra:

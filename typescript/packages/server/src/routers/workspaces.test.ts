@@ -800,51 +800,67 @@ describe('workspaces router', () => {
   })
 
   it.each([
-    { mounts: false, extra: false },
-    { mounts: true, extra: true },
-    { mounts: false, extra: true },
-  ])('POST /v1/workspaces validates config $mounts/$extra', async ({ mounts, extra }) => {
-    const app = buildApp()
-    const config = {
-      ...(mounts ? { mounts: {} } : {}),
-      ...(extra ? { unknown_setting: true } : {}),
-    }
-    try {
-      const res = await app.inject({
-        method: 'POST',
-        url: '/v1/workspaces',
-        payload: { id: 'bad', config },
-      })
-      expect(res.statusCode).toBe(422)
-      expect(res.json()).toEqual({
-        detail: [
-          ...(!mounts
-            ? [
-                {
-                  type: 'missing',
-                  loc: ['body', 'config', 'mounts'],
-                  msg: 'Field required',
-                  input: config,
-                },
-              ]
-            : []),
-          ...(extra
-            ? [
-                {
-                  type: 'extra_forbidden',
-                  loc: ['body', 'config', 'unknown_setting'],
-                  msg: 'Extra inputs are not permitted',
-                  input: true,
-                },
-              ]
-            : []),
-        ],
-      })
-      expect(app.registry.has('bad')).toBe(false)
-    } finally {
-      await app.close()
-    }
-  })
+    { mounts: false, extra: false, invalidTime: false },
+    { mounts: true, extra: true, invalidTime: false },
+    { mounts: false, extra: true, invalidTime: false },
+    { mounts: true, extra: false, invalidTime: true },
+    { mounts: false, extra: true, invalidTime: true },
+  ])(
+    'POST /v1/workspaces validates config $mounts/$extra/$invalidTime',
+    async ({ mounts, extra, invalidTime }) => {
+      const app = buildApp()
+      const config = {
+        ...(mounts ? { mounts: {} } : {}),
+        ...(invalidTime ? { system_time: 123 } : {}),
+        ...(extra ? { unknown_setting: true } : {}),
+      }
+      try {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/v1/workspaces',
+          payload: { id: 'bad', config },
+        })
+        expect(res.statusCode).toBe(422)
+        expect(res.json()).toEqual({
+          detail: [
+            ...(!mounts
+              ? [
+                  {
+                    type: 'missing',
+                    loc: ['body', 'config', 'mounts'],
+                    msg: 'Field required',
+                    input: config,
+                  },
+                ]
+              : []),
+            ...(invalidTime
+              ? [
+                  {
+                    type: 'string_type',
+                    loc: ['body', 'config', 'system_time'],
+                    msg: 'Input should be a valid string',
+                    input: 123,
+                  },
+                ]
+              : []),
+            ...(extra
+              ? [
+                  {
+                    type: 'extra_forbidden',
+                    loc: ['body', 'config', 'unknown_setting'],
+                    msg: 'Extra inputs are not permitted',
+                    input: true,
+                  },
+                ]
+              : []),
+          ],
+        })
+        expect(app.registry.has('bad')).toBe(false)
+      } finally {
+        await app.close()
+      }
+    },
+  )
 
   it('POST /v1/workspaces returns 502 when VFS build fails', async () => {
     const app = buildApp()
