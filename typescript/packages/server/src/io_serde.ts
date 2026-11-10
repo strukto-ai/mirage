@@ -156,7 +156,7 @@ export async function checked(call: VfsCall, params: unknown): Promise<Record<st
   const result = await fromJsonSchema(schemaOf(call))['~standard'].validate(params)
   const issue = result.issues?.[0]
   if (issue !== undefined) {
-    const at = /^data((?:\/\S+)*) /.exec(issue.message)?.[1] ?? ''
+    const at = /^data(\/\S+)? /.exec(issue.message)?.[1] ?? ''
     const param = paramOf(
       at
         .split('/')
