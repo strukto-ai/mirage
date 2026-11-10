@@ -611,9 +611,9 @@ def load_cmd(
 
 @app.command("logs")
 def logs_cmd(
-    workspace_id: str = typer.Argument(..., help="Workspace id."),
+    workspace_id: str | None = WORKSPACE,
     session: str = typer.Option(
-        "", "--session", help="Only this session's commands."
+        "", "--session", "-s", help="Only this session's commands."
     ),
     limit: int = typer.Option(
         50, "--limit", help="Commands per page (1-200)."
@@ -628,6 +628,7 @@ def logs_cmd(
     ),
 ) -> None:
     """Show completed commands, newest first."""
+    workspace_id = resolve_workspace(workspace_id)
     params = {"limit": str(limit)}
     if session:
         params["session"] = session
@@ -651,9 +652,9 @@ def logs_cmd(
 
 @app.command("list-asks")
 def list_asks_cmd(
-    workspace_id: str = typer.Argument(..., help="Workspace id."),
+    workspace_id: str | None = WORKSPACE,
     session: str = typer.Option(
-        "", "--session", help="Only this session's asks."
+        "", "--session", "-s", help="Only this session's asks."
     ),
     all_records: bool = typer.Option(
         False,
@@ -662,6 +663,7 @@ def list_asks_cmd(
     ),
 ) -> None:
     """List pending asks (every decision with --all)."""
+    workspace_id = resolve_workspace(workspace_id)
     params: dict[str, str] = {}
     if session:
         params["session_id"] = session

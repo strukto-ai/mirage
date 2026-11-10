@@ -182,19 +182,19 @@ probe() {
   $cli workspace create "$ASKS_YAML" --id aw >/dev/null </dev/null
   $cli shell -w aw -c 'touch /f.txt /g.txt' </dev/null >/dev/null
   echo "ask.refused=$($cli shell --json -w aw -c 'rm /f.txt' </dev/null | sexit)"
-  echo "ask.pending_count=$($cli workspace list-asks aw </dev/null | jq 'length')"
-  echo "ask.reason=$($cli workspace list-asks aw </dev/null | jq -r '.[0].reason')"
-  ask_id="$($cli workspace list-asks aw </dev/null | jq -r '.[0].id')"
+  echo "ask.pending_count=$($cli workspace list-asks -w aw </dev/null | jq 'length')"
+  echo "ask.reason=$($cli workspace list-asks -w aw </dev/null | jq -r '.[0].reason')"
+  ask_id="$($cli workspace list-asks -w aw </dev/null | jq -r '.[0].id')"
   echo "ask.allow_scope=$($cli workspace allow aw "$ask_id" </dev/null | jq -r '.scope')"
   echo "ask.retry=$($cli shell --json -w aw -c 'rm /f.txt' </dev/null | sexit)"
-  echo "ask.spent=$($cli workspace list-asks aw --all </dev/null | jq 'length')"
+  echo "ask.spent=$($cli workspace list-asks -w aw --all </dev/null | jq 'length')"
   $cli shell -w aw -c 'rm /g.txt' </dev/null >/dev/null
-  ask_id="$($cli workspace list-asks aw </dev/null | jq -r '.[0].id')"
+  ask_id="$($cli workspace list-asks -w aw </dev/null | jq -r '.[0].id')"
   echo "ask.deny_outcome=$($cli workspace deny aw "$ask_id" --note veto </dev/null | jq -r '.outcome')"
   denied="$($cli shell --json -w aw -c 'rm /g.txt' </dev/null)"
   echo "ask.denied_err=$(printf '%s' "$denied" | serr)"
   echo "ask.denied_reason=$(printf '%s' "$denied" | sreason)"
-  echo "ask.drained=$($cli workspace list-asks aw </dev/null | jq 'length')"
+  echo "ask.drained=$($cli workspace list-asks -w aw </dev/null | jq 'length')"
   $cli workspace delete aw >/dev/null 2>&1 </dev/null || true
 
   # ── workspaces: get, list, and clone the live state ──

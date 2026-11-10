@@ -215,7 +215,7 @@ a `workspace_id`.
 | `mirage workspace stop ID` | Stop a workspace and keep its state and config. A `ram` mount, and the sessions on a `ram` store, come back empty. Stopping a stopped workspace does nothing. |
 | `mirage workspace start ID` | Start a stopped workspace again from the config it was created with. Starting a running workspace does nothing. |
 | `mirage workspace set-profile ID NAME FILE` | Add a [profile](/home/policy/overview) from a YAML or JSON file, or replace what `NAME` means. Sessions keep their rules until `session update` moves them, and the workspace's config is not rewritten. |
-| `mirage workspace logs ID [--session S] [--limit N] [--after CURSOR] [--jsonl]` | Show completed commands newest first, with cursor pagination. `--jsonl` exports all retained matching commands oldest first. |
+| `mirage workspace logs [-w ID] [-s S] [--limit N] [--after CURSOR] [--jsonl]` | Show completed commands newest first, with cursor pagination. `--jsonl` exports all retained matching commands oldest first. |
 | `mirage workspace clone SRC [--id ID]` | Copy a workspace. |
 | `mirage workspace snapshot ID FILE.tar` | Save it to a tar here: the server sends the tar back, on this machine or another. |
 | `mirage workspace snapshot ID --key KEY` | Save it to the server's snapshot store instead. |
@@ -284,7 +284,7 @@ name the daemon has no saved policy for is read as a file too.
 
 | Command | Does |
 | --- | --- |
-| `mirage workspace list-asks ID [--session S] [--all]` | List pending [asks](/home/policy/policies#asks). |
+| `mirage workspace list-asks [-w ID] [-s S] [--all]` | List pending [asks](/home/policy/policies#asks). |
 | `mirage workspace allow ID ASK [--scope once\|session]` | Allow one. |
 | `mirage workspace deny ID ASK` | Deny one. |
 

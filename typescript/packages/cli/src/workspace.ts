@@ -536,16 +536,20 @@ export function registerWorkspaceCommands(program: Command): Command {
 
   ws.command('logs')
     .description('Show completed commands, newest first.')
-    .argument('<id>')
-    .option('--session <sessionId>', "Only this session's commands")
+    .option(WORKSPACE_FLAGS, WORKSPACE_HELP)
+    .option('-s, --session <id>', "Only this session's commands")
     .option('--limit <count>', 'Commands per page (1-200)', '50')
     .option('--after <cursor>', 'Cursor from the previous page')
     .option('--jsonl', 'Export all matching retained commands, oldest first')
     .action(
-      async (
-        id: string,
-        opts: { session?: string; limit: string; after?: string; jsonl?: boolean },
-      ) => {
+      async (opts: {
+        workspace?: string
+        session?: string
+        limit: string
+        after?: string
+        jsonl?: boolean
+      }) => {
+        const id = resolveWorkspace(opts.workspace)
         const params = new URLSearchParams({ limit: opts.limit })
         if (opts.session !== undefined) params.set('session', opts.session)
         if (opts.after !== undefined) params.set('after', opts.after)
@@ -574,10 +578,11 @@ export function registerWorkspaceCommands(program: Command): Command {
     )
   ws.command('list-asks')
     .description('List pending asks (every decision with --all).')
-    .argument('<id>')
-    .option('--session <sessionId>', "Only this session's asks")
+    .option(WORKSPACE_FLAGS, WORKSPACE_HELP)
+    .option('-s, --session <id>', "Only this session's asks")
     .option('--all', 'Include settled decisions, not just pending asks')
-    .action(async (id: string, opts: { session?: string; all?: boolean }) => {
+    .action(async (opts: { workspace?: string; session?: string; all?: boolean }) => {
+      const id = resolveWorkspace(opts.workspace)
       const params = new URLSearchParams()
       if (opts.session !== undefined) params.set('session_id', opts.session)
       if (opts.all === true) params.set('all', 'true')

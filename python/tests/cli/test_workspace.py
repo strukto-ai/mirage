@@ -214,7 +214,7 @@ def test_an_explained_create_reads_as_its_verdict_and_answers():
 def test_logs_queries_and_preserves_json_page(fake):
     fake.answer = _FakeResponse(200, b'{"items": [], "next": null}')
     result = _invoke(
-        "logs", "w", "--session", "s1", "--limit", "2", "--after", "cursor"
+        "logs", "-w", "w", "-s", "s1", "--limit", "2", "--after", "cursor"
     )
     assert result.exit_code == 0, result.output
     assert json.loads(result.output) == {"items": [], "next": None}
@@ -231,7 +231,7 @@ def test_logs_help_and_removed_options():
     for flag in ("--session", "--limit", "--after", "--jsonl"):
         assert flag in unstyle(result.output)
     for flag in ("--since", "--last", "--vfs"):
-        assert _invoke("logs", "w", flag, "1").exit_code != 0
+        assert _invoke("logs", "-w", "w", flag, "1").exit_code != 0
     assert _invoke("history", "w").exit_code != 0
 
 
@@ -267,7 +267,7 @@ def test_logs_jsonl_streams_without_json_wrapping(fake, monkeypatch):
         yield httpx.Response(200, content=b'{"command":"echo hi"}\n')
 
     monkeypatch.setattr(fake, "stream", stream, raising=False)
-    result = _invoke("logs", "w", "--jsonl", "--session", "s1")
+    result = _invoke("logs", "-w", "w", "--jsonl", "--session", "s1")
     assert result.exit_code == 0, result.exception
     assert result.output == '{"command":"echo hi"}\n'
     assert fake.calls[0][2]["params"]["format"] == "jsonl"
