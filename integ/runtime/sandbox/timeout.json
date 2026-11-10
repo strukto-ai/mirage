@@ -8,7 +8,8 @@
         "e2b",
         "smolvm",
         "microsandbox",
-        "apple_container"
+        "apple_container",
+        "kubernetes"
       ],
       "world": {
         "mounts": {

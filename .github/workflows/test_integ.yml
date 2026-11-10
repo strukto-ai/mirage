@@ -2475,6 +2475,116 @@ jobs:
           msb list || true
           msb logs "$MIRAGE_INTEG_MICROSANDBOX_SANDBOX" || true
 
+  # The sandbox suites run on a pod too: kind gives the runner a real
+  # cluster, reached the way a user's is, through kubectl.
+  integ-kubernetes:
+    needs: [changes, typescript-build]
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.runtime == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KIND_VERSION: v0.33.0
+      INTEG_RUNTIME_STRICT: "1"
+      # The shared sandbox cases, run through the kubernetes runtime only.
+      INTEG_RUNTIMES: kubernetes
+      MIRAGE_INTEG_KUBERNETES_POD: mirage-integ
+      MIRAGE_INTEG_BOX_MOUNTS: "1"
+      PYTHONFAULTHANDLER: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install kind
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/kind" "https://github.com/kubernetes-sigs/kind/releases/download/$KIND_VERSION/kind-linux-amd64"
+          mkdir -p "$HOME/.local/bin"
+          install -m 755 "$RUNNER_TEMP/kind" "$HOME/.local/bin/kind"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/kind" version
+          kubectl version --client
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: ./.github/actions/setup-uv
+
+      - name: Install Python dependencies
+        working-directory: python
+        run: uv sync --all-extras
+
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: '24'
+
+      - name: Install TypeScript dependencies
+        working-directory: typescript
+        # Reuse dist/generated from this run. Build the native addon explicitly:
+        # pnpm rebuild misses fuse-native's implicit binding.gyp install.
+        run: |
+          pnpm install --frozen-lockfile=false --ignore-scripts
+          pnpm --dir packages/node/node_modules/@zkochan/fuse-native run buildgyp
+
+      - name: Download TypeScript build outputs
+        uses: actions/download-artifact@v8
+        with:
+          github-token: ${{ github.token }}
+          name: integ-typescript-dist
+          path: typescript/packages
+
+      - name: Create a pod
+        timeout-minutes: 10
+        # Privileged for FUSE, so mount_type can serve the workspace into
+        # the pod over sshfs; /boxdata is a mount of its own, for `both`.
+        run: |
+          kind create cluster --name mirage-integ --wait 180s
+          kubectl apply -f - <<EOF
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: $MIRAGE_INTEG_KUBERNETES_POD
+          spec:
+            terminationGracePeriodSeconds: 0
+            containers:
+              - name: main
+                image: debian:trixie-slim
+                command: ["sleep", "infinity"]
+                securityContext:
+                  privileged: true
+          EOF
+          kubectl wait --for=condition=Ready "pod/$MIRAGE_INTEG_KUBERNETES_POD" --timeout=300s
+          kubectl exec "$MIRAGE_INTEG_KUBERNETES_POD" -- sh -eu -c '
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sshfs >/dev/null
+            mkdir -p /boxdata
+            mount -t tmpfs tmpfs /boxdata
+            echo box > /boxdata/own.txt
+          '
+
+      - name: Run the sandbox suites on kubernetes (python)
+        run: ./python/.venv/bin/python integ/runtime/run.py sandbox
+
+      - name: Run the sandbox suites on kubernetes (typescript)
+        if: ${{ !cancelled() }}
+        working-directory: integ
+        run: pnpm exec tsx runtime/run.ts sandbox
+
+      - name: Run the sandbox suites on kubernetes through the CLI and both daemons
+        if: ${{ !cancelled() }}
+        run: |
+          bash integ/runtime/cli.sh \
+            "python/.venv/bin/mirage" \
+            "node typescript/packages/cli/dist/bin/mirage.js" \
+            sandbox
+
+      - name: kubernetes logs
+        if: ${{ failure() }}
+        run: |
+          kubectl describe pod "$MIRAGE_INTEG_KUBERNETES_POD" || true
+          kubectl get events --sort-by=.lastTimestamp || true
+
   integ-observability:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.observability == 'true') }}
@@ -2877,7 +2987,7 @@ jobs:
     name: integ-gate
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [changes, typescript-build, integ-edge, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-selftests, integ-shared-parity, integ-database, integ-data, integ-tidb-filesystem, integ-events, integ-fuse, integ-observability, integ-facets, integ-microsandbox, integ-runtime, integ-e2b, integ-wandb, integ-shell-coverage]
+    needs: [changes, typescript-build, integ-edge, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-selftests, integ-shared-parity, integ-database, integ-data, integ-tidb-filesystem, integ-events, integ-fuse, integ-observability, integ-facets, integ-microsandbox, integ-kubernetes, integ-runtime, integ-e2b, integ-wandb, integ-shell-coverage]
     if: always()
     steps:
       - name: Check required jobs

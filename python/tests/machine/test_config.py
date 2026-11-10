@@ -53,6 +53,7 @@ def test_coerce_rejects_a_sibling_provider_config():
         ("daytona", "sandbox_id"),
         ("docker", "container"),
         ("e2b", "sandbox_id"),
+        ("kubernetes", "pod"),
         ("microsandbox", "sandbox"),
         ("smolvm", "machine"),
         ("ssh", "host"),

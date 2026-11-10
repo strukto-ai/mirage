@@ -1,6 +1,11 @@
 {
  "baseline": 1631,
  "modules": {
+  "machine/kubernetes/config": {
+   "typescript_only": {
+    "KUBERNETES_CONFIG_FIELDS": "TypeScript has no dataclass to read a config's fields from, so the provider declares them for the shared field check."
+   }
+  },
   "commands/cli/builtin/git/refs": {
    "python_only": {
     "RefTable": "dulwich resolves every ref through one container whose follow raises on a circling chain, so Python overrides it there; TypeScript wraps its resolve in refOid."

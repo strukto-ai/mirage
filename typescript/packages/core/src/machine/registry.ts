@@ -28,6 +28,7 @@ const NODE_PROVIDERS: readonly string[] = [
   'apple_container',
   'daytona',
   'docker',
+  'kubernetes',
   'microsandbox',
   'smolvm',
   'ssh',

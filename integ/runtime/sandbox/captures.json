@@ -8,7 +8,8 @@
         "e2b",
         "smolvm",
         "microsandbox",
-        "apple_container"
+        "apple_container",
+        "kubernetes"
       ],
       "entry": {
         "captures": [
@@ -86,7 +87,8 @@
       "id": "a_signal_reaches_the_program_as_sent",
       "runtimes": [
         "docker",
-        "microsandbox"
+        "microsandbox",
+        "kubernetes"
       ],
       "entry": {
         "captures": [

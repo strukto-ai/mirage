@@ -70,6 +70,7 @@ const MACHINE_PROVIDERS: readonly string[] = [
   'daytona',
   'docker',
   'e2b',
+  'kubernetes',
   'microsandbox',
   'smolvm',
   'ssh',

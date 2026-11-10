@@ -8,7 +8,8 @@
         "e2b",
         "smolvm",
         "microsandbox",
-        "apple_container"
+        "apple_container",
+        "kubernetes"
       ],
       "steps": [
         {
@@ -28,7 +29,8 @@
         "e2b",
         "smolvm",
         "microsandbox",
-        "apple_container"
+        "apple_container",
+        "kubernetes"
       ],
       "steps": [
         {
@@ -47,7 +49,8 @@
         "e2b",
         "smolvm",
         "microsandbox",
-        "apple_container"
+        "apple_container",
+        "kubernetes"
       ],
       "entry": {
         "captures": [
@@ -85,7 +88,8 @@
         "e2b",
         "smolvm",
         "microsandbox",
-        "apple_container"
+        "apple_container",
+        "kubernetes"
       ],
       "world": {
         "mounts": {
@@ -142,7 +146,8 @@
       "id": "quoting",
       "runtimes": [
         "ssh",
-        "e2b"
+        "e2b",
+        "kubernetes"
       ],
       "steps": [
         {
@@ -161,7 +166,8 @@
         "ssh",
         "e2b",
         "microsandbox",
-        "apple_container"
+        "apple_container",
+        "kubernetes"
       ],
       "entry": {
         "captures": [

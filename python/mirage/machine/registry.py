@@ -27,6 +27,7 @@ MACHINE_MODULES: dict[str, str] = {
     "daytona": "mirage.machine.daytona:DaytonaMachine",
     "docker": "mirage.machine.docker:DockerMachine",
     "e2b": "mirage.machine.e2b:E2BMachine",
+    "kubernetes": "mirage.machine.kubernetes:KubernetesMachine",
     "microsandbox": "mirage.machine.microsandbox:MicrosandboxMachine",
     "smolvm": "mirage.machine.smolvm:SmolvmMachine",
     "ssh": "mirage.machine.ssh:SSHMachine",
