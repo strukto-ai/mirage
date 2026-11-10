@@ -353,7 +353,7 @@ class JobTable:
                 lease (``claim``).
         """
         await self.claim()
-        name = uuid.uuid4().hex
+        name = f"job_{uuid.uuid4().hex}"
         created_at = self.clock.now()
         job: JobHandle | None = None
         ready = asyncio.Event()
@@ -458,7 +458,7 @@ class JobTable:
         Args:
             job (JobHandle): the restored job.
         """
-        name = uuid.uuid4().hex
+        name = f"job_{uuid.uuid4().hex}"
         console = self.store.console(name)
         chunks, _, _ = await job.console.read_from(0)
         for chunk in chunks:

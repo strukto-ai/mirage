@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -58,9 +60,16 @@ async def test_a_running_job_is_listed_and_found_by_id():
                 job["line_id"],
                 job["pid"],
             ) == (1, "sleep 30", result["line_id"], pid)
+            assert re.fullmatch(r"job_[0-9a-f]{32}", job["id"])
             r = await client.get(f"/v1/workspaces/{wid}/jobs/{job['id']}")
             assert r.status_code == 200, r.text
             assert r.json() == {**job, "processes": [pid]}
+            bare = job["id"].removeprefix("job_")
+            r = await client.get(f"/v1/workspaces/{wid}/jobs/{bare}")
+            assert (r.status_code, r.json()) == (
+                404,
+                {"detail": "job not found"},
+            )
             r = await client.get(
                 f"/v1/workspaces/{wid}/jobs",
                 params={"line_id": result["line_id"]},

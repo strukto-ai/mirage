@@ -59,7 +59,9 @@ async def test_a_line_is_listed_and_found_by_the_id_its_result_names():
             r = await client.get(f"/v1/workspaces/{wid}/lines/{line['id']}")
             assert r.status_code == 200, r.text
             detail = r.json()
-            assert len(detail["jobs"]) == 1
+            [job] = (await client.get(f"/v1/workspaces/{wid}/jobs")).json()
+            assert detail["jobs"] == [job["id"]]
+            assert job["id"].startswith("job_")
             assert pid in detail["processes"]
             r = await client.get(f"/v1/workspaces/{wid}/processes/{pid}")
             assert detail["machines"] == [r.json()["machine"]]

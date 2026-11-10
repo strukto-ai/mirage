@@ -63,6 +63,11 @@ async def test_a_process_is_listed_live_and_after_it_ends():
         assert (live["pid"], live["machine_pid"]) == (pid, None)
         r = await client.get(
             f"/v1/workspaces/{wid}/processes",
+            params={"job_id": job["id"].removeprefix("job_")},
+        )
+        assert (r.status_code, r.json()) == (200, [])
+        r = await client.get(
+            f"/v1/workspaces/{wid}/processes",
             params={"machine": live["machine"]},
         )
         assert pid in [p["pid"] for p in r.json()]
