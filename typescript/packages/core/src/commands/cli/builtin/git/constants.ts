@@ -42,6 +42,8 @@ export const GITLINK = 0o160000
 // them.
 export const REGULAR_MODE = '100644'
 export const EXECUTABLE_MODE = '100755'
+// A subtree's mode, as a tree entry spells it.
+export const TREE_MODE = '040000'
 // The object types git knows, in its own order.
 export const OBJECT_TYPES = ['blob', 'tree', 'commit', 'tag'] as const
 

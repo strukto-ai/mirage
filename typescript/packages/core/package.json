@@ -119,7 +119,7 @@
     "@octokit/request-error": "^7.1.1",
     "@opentelemetry/api": "^1.10.0",
     "bson": "^6.10.4",
-    "isomorphic-git": "^1.38.1",
+    "isomorphic-git": "^1.38.6",
     "zod": "^4.6.6"
   },
   "peerDependencies": {

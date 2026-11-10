@@ -12,10 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import re
 from io import BytesIO
 
-from dulwich.refs import DictRefsContainer, Ref, read_packed_refs_with_peeled
+from dulwich.objects import ObjectID
+from dulwich.refs import (
+    DictRefsContainer,
+    Ref,
+    SymrefLoop,
+    read_packed_refs_with_peeled,
+)
 
 from mirage.commands.cli.builtin.git.constants import HEAD, HEAD_REF
 from mirage.commands.cli.builtin.git.errors import BadRefNameUpdateError
@@ -34,6 +41,8 @@ from mirage.commands.cli.builtin.git.types import (
 from mirage.types import PathSpec
 from mirage.utils.remnants import entry_name
 from mirage.workspace.files import Files
+
+logger = logging.getLogger(__name__)
 
 HEAD_FILE = "HEAD"
 PACKED_REFS = "packed-refs"
@@ -220,6 +229,27 @@ async def detach_head(vfs: Files, gitdir: PathSpec, sha: bytes) -> None:
     await write_file(vfs, gitdir.join(HEAD_FILE), sha + b"\n")
 
 
+class RefTable(DictRefsContainer):
+    """Every ref, where a chain of symbolic refs that circles resolves to
+    nothing, which is how git reads one."""
+
+    def follow(self, name: Ref) -> tuple[list[Ref], ObjectID | None]:
+        """The refs a name's chain passes through and the id it ends at.
+
+        Args:
+            name (Ref): the ref to follow.
+
+        Returns:
+            tuple[list[Ref], ObjectID | None]: the chain, and None for an
+            id when it ends at nothing or circles.
+        """
+        try:
+            return super().follow(name)
+        except SymrefLoop as exc:
+            logger.debug("symbolic ref %s circles: %s", name, exc)
+            return [name], None
+
+
 async def load_refs(
     vfs: Files, gitdir: PathSpec, commondir: PathSpec | None = None
 ) -> DictRefsContainer:
@@ -268,7 +298,7 @@ async def load_refs(
         refs[HEAD_REF] = f"{SYMREF_PREFIX}{head.ref}".encode()
     elif head.commit is not None:
         refs[HEAD_REF] = head.commit.encode()
-    return DictRefsContainer(refs)
+    return RefTable(refs)
 
 
 # Every byte git forbids anywhere in a ref name, on top of the control

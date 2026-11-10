@@ -25,7 +25,7 @@ import {
   NotACommitError,
 } from './errors.ts'
 import { peelToCommit } from './history.ts'
-import { commitFacts, repoArgs, type Repo } from './repo.ts'
+import { commitFacts, rawObject, repoArgs, type Repo } from './repo.ts'
 import { COMMIT, TAG, resolveObject, tagObject, unwrapped } from './revparse.ts'
 
 const CONTAINS = '--contains'
@@ -260,10 +260,7 @@ async function reaches(
 /** Whether a ref points at one of the objects, directly or through its tag. */
 async function pointsAt(repo: Repo, oid: string, objects: readonly string[]): Promise<boolean> {
   if (objects.includes(oid)) return true
-  // Deprecated upstream for being general, but the general answer is what
-  // telling a tag from anything else needs.
-  // eslint-disable-next-line @typescript-eslint/no-deprecated
-  const { type } = await git.readObject({ ...repoArgs(repo), oid })
+  const { type } = await rawObject(repo, oid)
   if (type !== TAG) return false
   return objects.includes((await git.readTag({ ...repoArgs(repo), oid })).tag.object)
 }

@@ -302,3 +302,42 @@ async def test_write_ref_refuses_a_name_that_leaves_the_ref_tree():
 )
 def test_a_new_branch_name_follows_git_branch_rules(name: str, valid: bool):
     assert valid_branch_name(name) is valid
+
+
+def _circle(repo_path) -> None:
+    heads = repo_path / ".git" / "refs" / "heads"
+    (heads / "a").write_bytes(b"ref: refs/heads/b\n")
+    (heads / "b").write_bytes(b"ref: refs/heads/a\n")
+
+
+@pytest.mark.asyncio
+async def test_a_chain_of_symbolic_refs_that_circles_ends_at_nothing(
+    repo_path, workspace
+):
+    _circle(repo_path)
+    refs = await load_refs(workspace.vfs, GITDIR)
+    name = Ref(b"refs/heads/a")
+    assert refs.follow(name) == ([name], None)
+
+
+@pytest.mark.asyncio
+async def test_a_circling_ref_reads_as_a_ref_that_is_not_there(
+    git_parent, repo_path
+):
+    _circle(repo_path)
+    result = await git_parent.shell("cd /w/work && git rev-parse --verify a")
+    assert (result.exit_code, result.stderr) == (
+        128,
+        b"fatal: Needed a single revision\n",
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_circling_ref_is_left_out_of_a_clone(git_parent, repo_path):
+    _circle(repo_path)
+    result = await git_parent.shell(
+        "cd /w/work && git clone -q . ../dst && "
+        "git -C ../dst for-each-ref --format='%(refname)' refs/heads"
+    )
+    assert result.exit_code == 0
+    assert result.stdout == b"refs/heads/main\n"

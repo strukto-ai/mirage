@@ -32,7 +32,7 @@ import { isEnotdir } from '../../../../errors/fs.ts'
 import type { CommitFacts } from './format.ts'
 import { MINIMUM_ABBREV } from './ref_fields.ts'
 import { BRANCH_PREFIX, loadRefs, mapped, parseRefspec, SYMREF_PREFIX, TAG_PREFIX } from './refs.ts'
-import { commitFacts, repoArgs, type Repo } from './repo.ts'
+import { commitFacts, rawObject, refOid, repoArgs, storedItems, type Repo } from './repo.ts'
 import { decoded, guarded, located, placeOf, placed, rooted } from './seen.ts'
 import type { AncestryStep, GitObject, RefUpstream, RevOp } from './types.ts'
 import { configValues } from './fs.ts'
@@ -235,7 +235,7 @@ async function namedObject(repo: Repo, spelled: string, revision: string): Promi
   const base = await expandSelector(repo, spelled, revision)
   let oid: string
   try {
-    oid = await git.resolveRef({ ...repoArgs(repo), ref: base })
+    oid = await refOid(repo, base)
   } catch (err) {
     if (!(err instanceof Errors.NotFoundError)) throw err
     if (base.length < MINIMUM_ABBREV) throw new AmbiguousArgumentError(revision)
@@ -531,11 +531,7 @@ export async function noteAmbiguity(repo: Repo, name: string): Promise<void> {
 /** The type isomorphic-git records for one object id. */
 async function typeOf(repo: Repo, oid: string, revision: string): Promise<string> {
   try {
-    // Deprecated upstream for being general, but the general answer is what
-    // peeling needs: which of commit/tag/tree/blob this id names, without
-    // reading it as each in turn until one does not throw.
-    // eslint-disable-next-line @typescript-eslint/no-deprecated
-    return (await git.readObject({ ...repoArgs(repo), oid })).type
+    return (await rawObject(repo, oid)).type
   } catch (err) {
     if (err instanceof Errors.NotFoundError) throw new AmbiguousArgumentError(revision)
     throw err
@@ -636,21 +632,18 @@ async function atPath(repo: Repo, rev: string, path: string, revision: string): 
     rooted(repo, tree)
     holder = { oid: tree, type: TREE }
   }
-  let found: GitObject
+  let found = holder
   try {
+    if (holder.type !== TREE) throw new Errors.NotFoundError(path)
     // Every tree the path passes through has its entries read, as git reads them.
-    let through = holder.type === TREE ? holder.oid : null
     for (const part of path.split('/').filter(Boolean)) {
-      if (through === null) break
-      const { tree } = await git.readTree({ ...repoArgs(repo), oid: through })
-      const entry = decoded(tree).find((item) => item.path === part)
-      through = entry?.type === TREE ? entry.oid : null
+      const items = found.type === TREE ? decoded(await storedItems(repo, found.oid)) : []
+      const entry = items.find((item) => item.path === part)
+      if (entry === undefined) throw new Errors.NotFoundError(path)
+      found = { oid: entry.oid, type: entry.type }
     }
-    // eslint-disable-next-line @typescript-eslint/no-deprecated
-    const read = await git.readObject({ ...repoArgs(repo), oid: holder.oid, filepath: path })
-    found = { oid: read.oid, type: read.type }
   } catch (err) {
-    if (err instanceof Errors.NotFoundError || err instanceof Errors.ObjectTypeError)
+    if (err instanceof Errors.NotFoundError)
       throw new PathNotInRevisionError(path, rev, await onDisk(repo, path))
     throw err
   }
@@ -727,7 +720,7 @@ async function inIndex(repo: Repo, spec: string): Promise<GitObject> {
 export async function tagObject(repo: Repo, stem: string): Promise<GitObject | null> {
   let oid: string
   try {
-    oid = await git.resolveRef({ ...repoArgs(repo), ref: `${TAG_PREFIX}${stem}` })
+    oid = await refOid(repo, `${TAG_PREFIX}${stem}`)
   } catch (err) {
     if (!(err instanceof Errors.NotFoundError)) throw err
     if (stem.length < MINIMUM_ABBREV) return null

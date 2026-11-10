@@ -14,21 +14,12 @@
 
 import git from 'isomorphic-git'
 
-import { decodeText } from '../../../../shell/bytes.ts'
-import { toHex } from '../../../../utils/hex.ts'
-import { SYMLINK } from './constants.ts'
+import { SYMLINK, TREE_MODE } from './constants.ts'
 import { GitError } from './errors.ts'
 import { resolveObject, unwrapped } from './revparse.ts'
-import { rawObject, repoArgs, type Repo } from './repo.ts'
+import { repoArgs, storedItems, type Repo } from './repo.ts'
 import { decoded, rooted } from './seen.ts'
-import type { GitObject } from './types.ts'
-
-const SPACE = 0x20
-const NUL = 0x00
-const OID_BYTES = 20
-const SHORT_TREE_MODE = '40000'
-export const TREE_MODE = '040000'
-const DEC = new TextDecoder()
+import type { GitObject, TreeItem } from './types.ts'
 
 /** One tree entry, flattened to a repository-relative path. */
 export interface TreeEntry {
@@ -37,42 +28,9 @@ export interface TreeEntry {
   readonly mode: string
 }
 
-/** One entry of one tree object, not descended into. */
-export interface TreeItem {
-  readonly path: string
-  readonly oid: string
-  /** git's own octal spelling, e.g. `100644`; a subtree reads `040000`. */
-  readonly mode: string
-}
-
-/**
- * The entries of one tree object, read from its raw bytes.
- *
- * Parsed here rather than through isomorphic-git's readTree, which decodes each
- * name as UTF-8 and turns a byte that is not into U+FFFD. A name keeps every
- * byte, a byte UTF-8 cannot read carried as its surrogate escape, so the name
- * quotes and prints the way git's does. A subtree's `40000` is spelled
- * `040000`, as isomorphic-git spells it.
- */
+/** The entries of one tree object, refusing an empty name as git does. */
 export async function treeItems(repo: Repo, treeOid: string): Promise<TreeItem[]> {
-  // The raw content is exactly what a byte-faithful name needs.
-  const { raw } = await rawObject(repo, treeOid)
-  const items: TreeItem[] = []
-  for (let at = 0; at < raw.length;) {
-    const space = raw.indexOf(SPACE, at)
-    const nul = space < 0 ? -1 : raw.indexOf(NUL, space)
-    if (nul < 0 || nul + 1 + OID_BYTES > raw.length)
-      throw new GitError(`unable to read tree (${treeOid})`)
-    const mode = DEC.decode(raw.subarray(at, space))
-    const oid = toHex(raw.subarray(nul + 1, nul + 1 + OID_BYTES))
-    items.push({
-      path: decodeText(raw.subarray(space + 1, nul)),
-      oid,
-      mode: mode === SHORT_TREE_MODE ? TREE_MODE : mode,
-    })
-    at = nul + 1 + OID_BYTES
-  }
-  return decoded(items)
+  return decoded(await storedItems(repo, treeOid))
 }
 
 /**

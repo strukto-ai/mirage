@@ -37,13 +37,13 @@ import { takeLock } from './io.ts'
 
 import { record } from './reflog.ts'
 import { detachHead, readHead, safeRefName, writeRef } from './refs.ts'
-import { configBool, repoArgs, type Repo } from './repo.ts'
+import { configBool, refOid, repoArgs, type Repo } from './repo.ts'
 import { deltas, shownSides, type Delta } from './rows.ts'
 import { opened } from './session.ts'
 import { reportRows } from './status.ts'
 import { report } from './summary.ts'
-import { TREE_MODE } from './tree.ts'
 import type { IndexState } from './types.ts'
+import { TREE_MODE } from './constants.ts'
 import { checkSwitches, startPoint, requireVfs } from './util.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
@@ -238,7 +238,7 @@ export async function commit(
     const reportOf = await reportRows(repo, vfs, head, startPoint(fl).virtual)
     return [null, new IOResult({ exitCode: 1, rows: reportOf })]
   }
-  const parents = before === null ? [] : [await git.resolveRef({ ...repoArgs(repo), ref: 'HEAD' })]
+  const parents = before === null ? [] : [await refOid(repo, 'HEAD')]
   const who = identity(fl, ctx.session)
   const when = Math.floor(systemNow())
   const oid = await buildCommit(repo, state, message, who, parents, when)

@@ -95,6 +95,15 @@ export interface HeadRef {
  * as legal as one that names a commit wherever an object is wanted, and the
  * type is what a tag records about its target.
  */
+/** One entry of one tree object, not descended into. */
+export interface TreeItem {
+  readonly path: string
+  readonly oid: string
+  /** git's own octal spelling, e.g. `100644`; a subtree reads `040000`. */
+  readonly mode: string
+  readonly type: 'blob' | 'tree' | 'commit'
+}
+
 export interface GitObject {
   readonly oid: string
   readonly type: string

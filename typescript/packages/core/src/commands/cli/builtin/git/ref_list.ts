@@ -42,7 +42,15 @@ import {
 } from './refs.ts'
 import { DETACHED_AT, DETACHED_FROM, NO_BRANCH } from './render.ts'
 import { refsNamed, trackingRef } from './revparse.ts'
-import { commitFacts, idsUnder, objectType, rawObject, repoArgs, type Repo } from './repo.ts'
+import {
+  commitFacts,
+  idsUnder,
+  objectType,
+  rawObject,
+  refOid,
+  repoArgs,
+  type Repo,
+} from './repo.ts'
 import { guarded, shownRaw, visibleObject } from './seen.ts'
 import {
   RefKind,
@@ -354,7 +362,7 @@ async function detachedLabel(repo: Repo, target: string, moved: string): Promise
   const found = refsNamed(refs, target)
   const [only] = found
   if (target !== 'HEAD' && found.length === 1 && only !== undefined) {
-    let oid = await git.resolveRef({ ...repoArgs(repo), ref: only })
+    let oid = await refOid(repo, only)
     while ((await objectType(repo, oid)) === 'tag')
       oid = (await git.readTag({ ...repoArgs(repo), oid })).tag.object
     if (oid === moved) return only.replace(/^refs\/tags\//, '').replace(/^refs\/remotes\//, '')
