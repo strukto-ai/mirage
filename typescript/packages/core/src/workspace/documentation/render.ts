@@ -38,6 +38,11 @@ const SHARED: ReadonlySet<string> = new Set(
 )
 const SEARCHES: readonly string[] = ['grep -r', 'rg']
 const FINDS: readonly string[] = ['grep', 'rg']
+const ANSWERS: readonly string[] = [
+  'files_containing',
+  'lines_containing',
+  ...ASKS.map(([op]) => op),
+]
 
 /**
  * The mounts the documents describe, each with its prefix and the mode in
@@ -259,6 +264,20 @@ function granted(
   return mode
 }
 
+/**
+ * Whether the mount is plain files to an agent: no layout of its own and
+ * nothing it answers in place of reading them. Which VFS holds such files
+ * changes nothing a command does, so the documents leave its name out.
+ */
+function plain(mount: MountEntry): boolean {
+  return mount.vfs.vfsMd.trim() === '' && !ANSWERS.some((op) => mount.answers(op))
+}
+
+/** What VFS.md's first table says of a path: its mode, after its VFS unless that is plain files. */
+function description(mount: MountEntry, mode: MountMode): string {
+  return plain(mount) ? mode : `${code(mount.vfs.name)}, ${mode}`
+}
+
 /** What one path supports, as VFS.md states it. */
 function supported(
   session: SessionState,
@@ -368,7 +387,7 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
   const vis = session.visibility
   for (const [mount, prefix, mode] of listed(registry, session)) {
     const shown = granted(session, mount, prefix, mode)
-    paths.push([code(prefix), `${code(mount.vfs.name)}, ${shown}`])
+    paths.push([code(prefix), description(mount, shown)])
     commands.push([code(prefix), supported(session, mount, prefix, shown)])
     limits.push([code(prefix), limitations(session, mount, prefix, shown)])
     // Backend prose is not a permission document. Under a restricted view
@@ -401,7 +420,7 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
           effectivePathMode(entry.path, mount.prefix, mount.mode, session),
         )
         const at = code(entry.path)
-        paths.push([at, `${code(mount.vfs.name)}, ${effective}`])
+        paths.push([at, description(mount, effective)])
         commands.push([at, supported(session, mount, entry.path, effective)])
         limits.push([at, limitations(session, mount, entry.path, effective)])
       }
@@ -431,11 +450,12 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
 }
 
 /**
- * The help pages of one CLI node and its descendants the profile allows. A
- * node gets a page when the profile allows it or leads to a descendant it
- * allows, so a group's own options stay documented; a page lists only the
- * children leading to an allowed one. A leaf counts a longer form its allow
- * list names (`gws gmail read --id`).
+ * The help pages of one CLI node and the descendants the profile refuses
+ * `--help` above. A node gets a page when the profile allows it or leads to a
+ * descendant it allows, so a group's own options stay documented; a page lists
+ * only the children leading to an allowed one. A node the profile allows
+ * answers `--help` for what is under it, so it stops there. A leaf counts a
+ * longer form its allow list names (`gws gmail read --id`).
  */
 export function cliPages(
   head: string,
@@ -463,7 +483,8 @@ export function cliPages(
     const text = nodeHelp(name, new CommandSpec({ ...init, subcommands: kept }), style).trimEnd()
     pages.push(`## \`${name}\`\n\n${fenced(text, 'text')}`)
   }
-  for (const [, found] of children) pages.push(...found)
+  if (!allowed(session, session.cwd, words, false, registry))
+    for (const [, found] of children) pages.push(...found)
   return pages
 }
 
@@ -489,7 +510,7 @@ export function skillMd(registry: MountRegistry, session: SessionState): string 
   }
   if (pages.length > 0) {
     parts.push(
-      "These commands are registered with this shell; `<cmd> --help` shows each one's usage.",
+      'These commands are registered with this shell; `--help` after a command or subcommand shows its usage.',
       ...pages,
     )
   } else {

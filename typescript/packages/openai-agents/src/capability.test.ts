@@ -37,7 +37,7 @@ describe('MirageCapability', () => {
       .bind(session)
       .instructions(new Manifest({ root: '/' }))
     expect(text.startsWith(MOUNTS_INTRO)).toBe(true)
-    expect(text).toContain('| `/data` | `ram`, read |')
+    expect(text).toContain('| `/data` | read |')
   })
 
   it('refuses a session from another backend', () => {

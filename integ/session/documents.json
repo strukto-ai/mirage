@@ -88,7 +88,7 @@
         "redis",
         "opfs"
       ],
-      "command": "grep -cE '^\\| `/data2` \\| `[a-z0-9_]+`, (read|write|exec) \\|$' /VFS.md",
+      "command": "grep -cE '^\\| `/data2` \\| (`[a-z0-9_]+`, )?(read|write|exec) \\|$' /VFS.md",
       "expect": {
         "exit": 0,
         "stdout": "1\n",
@@ -208,7 +208,7 @@
           }
         }
       },
-      "command": "grep -c '^| `/data/mirage-guides` | `[a-z0-9_]*`, read |$' /VFS.md",
+      "command": "grep -cE '^\\| `/data/mirage-guides` \\| (`[a-z0-9_]*`, )?read \\|$' /VFS.md",
       "expect": {
         "exit": 0,
         "stdout": "1\n",
