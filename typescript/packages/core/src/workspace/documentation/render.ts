@@ -454,8 +454,9 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
  * `--help` above. A node gets a page when the profile allows it or leads to a
  * descendant it allows, so a group's own options stay documented; a page lists
  * only the children leading to an allowed one. A node the profile allows
- * answers `--help` for what is under it, so it stops there. A leaf counts a
- * longer form its allow list names (`gws gmail read --id`).
+ * answers `--help` for what is under it, so it stops there, but for a child
+ * built with no `--help`, which keeps its page. A leaf counts a longer form
+ * its allow list names (`gws gmail read --id`).
  */
 export function cliPages(
   head: string,
@@ -483,8 +484,9 @@ export function cliPages(
     const text = nodeHelp(name, new CommandSpec({ ...init, subcommands: kept }), style).trimEnd()
     pages.push(`## \`${name}\`\n\n${fenced(text, 'text')}`)
   }
-  if (!allowed(session, session.cwd, words, false, registry))
-    for (const [, found] of children) pages.push(...found)
+  const helps = allowed(session, session.cwd, words, false, registry)
+  for (const [child, found] of children)
+    pages.push(...(helps && child.addHelp ? found.slice(1) : found))
   return pages
 }
 

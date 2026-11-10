@@ -576,7 +576,8 @@ def cli_pages(
     it or leads to a descendant it allows, so a group's own options stay
     documented; a page lists only the children leading to an allowed
     one. A node the profile allows answers ``--help`` for what is under
-    it, so it stops there. A leaf counts a longer form its allow list
+    it, so it stops there, but for a child built with no ``--help``,
+    which keeps its page. A leaf counts a longer form its allow list
     names (``gws gmail read --id``).
 
     Args:
@@ -608,9 +609,9 @@ def cli_pages(
             name, replace(node, subcommands=kept), style
         ).rstrip()
         pages.append(f"## `{name}`\n\n{fenced(help_text, 'text')}")
-    if not allowed(session, session.cwd, words, registry=registry):
-        for _, found in children:
-            pages.extend(found)
+    helps = allowed(session, session.cwd, words, registry=registry)
+    for child, found in children:
+        pages.extend(found[1:] if helps and child.add_help else found)
     return pages
 
 

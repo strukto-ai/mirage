@@ -608,6 +608,35 @@ describe('skillMd', () => {
     expect(skill).not.toContain('## `gws drive')
   })
 
+  it('keeps the page of a subcommand with no --help, however deep', async () => {
+    const ws = new Workspace({ '/': [new RAMVFS(), MountMode.WRITE] })
+    ws.registerCli(
+      'tool',
+      new CLI({
+        spec: new CommandSpec({
+          name: 'tool',
+          subcommands: [
+            new CommandSpec({
+              name: 'group',
+              subcommands: [
+                new CommandSpec({ name: 'raw', description: 'Takes anything.', addHelp: false }),
+                new CommandSpec({ name: 'plain', description: 'Takes nothing.' }),
+              ],
+            }),
+          ],
+        }),
+        handlers: {
+          'group raw': new CLIHandler({ fn: () => null }),
+          'group plain': new CLIHandler({ fn: () => null }),
+        },
+      }),
+    )
+    const skill = await ws.skillMd()
+    expect(skill).toContain('## `tool group raw`')
+    expect(skill).not.toContain('## `tool group`\n')
+    expect(skill).not.toContain('## `tool group plain`')
+  })
+
   it('stops below the top where the profile allows only a group', async () => {
     const ws = new Workspace(
       { '/': [new RAMVFS(), MountMode.WRITE] },
