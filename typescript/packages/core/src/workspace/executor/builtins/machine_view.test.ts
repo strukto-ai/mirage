@@ -15,12 +15,15 @@
 import { describe, expect, it } from 'vitest'
 import { SHELL_SPECS } from '../../../commands/spec/shell.ts'
 import { ProcessTable } from '../../../execution/process/table.ts'
+import { IOResult } from '../../../io/types.ts'
+import { ExecutionNode } from '../../types.ts'
 import {
   inScope,
   machineScope,
   optionRefusal,
   permutedOptions,
   processScope,
+  tellOnce,
   withMachine,
 } from './machine_view.ts'
 
@@ -149,5 +152,19 @@ describe('machine view', () => {
 
   it('pads to the columns', () => {
     expect(withMachine('ab  ', 'm', 6)).toBe('ab      m')
+  })
+
+  it('tells a later error once, after what stderr holds', async () => {
+    const enc = new TextEncoder()
+    const down = 'free: e2b:down: machine did not answer\n'
+    const gone = 'free: e2b:gone: machine did not answer\n'
+    const cut = 'free: output truncated\n'
+    const node = new ExecutionNode({ command: 'free', stderr: enc.encode(down) })
+    const io = new IOResult({ stderr: enc.encode(down + cut) })
+    await tellOnce(io, node, down + gone)
+    await tellOnce(io, node, gone)
+    expect(io.stderr).toEqual(enc.encode(down + cut + gone))
+    expect(node.stderr).toEqual(enc.encode(down + gone))
+    expect([io.exitCode, node.exitCode]).toEqual([1, 1])
   })
 })

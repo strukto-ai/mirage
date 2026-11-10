@@ -20,6 +20,9 @@ import {
   tableOf,
 } from '../../../../../tests/workspace/fixtures/machine_resources.ts'
 import { MemoryBudget, runWithMemory } from '../../../../io/memory.ts'
+import { Limit, MountMode } from '../../../../types.ts'
+import { RAMVFS } from '../../../../vfs/ram/ram.ts'
+import { Workspace } from '../../../workspace/workspace.ts'
 import { handleFree, humanSize } from './free.ts'
 
 const HEADER = '               total        used        free      shared  buff/cache   available'
@@ -183,6 +186,20 @@ describe('free', () => {
     expect(out).not.toContain('e2b:down')
     expect(err).toBe('free: e2b:down: machine did not answer\n')
     expect(code).toBe(1)
+  })
+
+  it('keeps the limit notice when a repeat is cut short', async () => {
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      { mode: MountMode.WRITE, commandLimits: { free: new Limit({ maxBytes: 100 }) } },
+    )
+    try {
+      const result = await ws.shell('free -s 0.01 -c 3')
+      expect(result.stdout.byteLength).toBe(100)
+      expect(decoded(result.stderr)).toContain('free: output truncated at limit (100 bytes)')
+    } finally {
+      await ws.close()
+    }
   })
 
   it.each([

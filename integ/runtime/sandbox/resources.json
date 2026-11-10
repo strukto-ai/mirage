@@ -7,7 +7,8 @@
         "ssh",
         "e2b",
         "microsandbox",
-        "apple_container"
+        "apple_container",
+        "kubernetes"
       ],
       "entry": {
         "captures": [
@@ -60,7 +61,8 @@
         "ssh",
         "e2b",
         "microsandbox",
-        "apple_container"
+        "apple_container",
+        "kubernetes"
       ],
       "entry": {
         "captures": [
@@ -113,7 +115,8 @@
         "ssh",
         "e2b",
         "microsandbox",
-        "apple_container"
+        "apple_container",
+        "kubernetes"
       ],
       "entry": {
         "captures": [
@@ -180,7 +183,8 @@
         "ssh",
         "e2b",
         "microsandbox",
-        "apple_container"
+        "apple_container",
+        "kubernetes"
       ],
       "entry": {
         "captures": [
@@ -233,7 +237,8 @@
         "ssh",
         "e2b",
         "microsandbox",
-        "apple_container"
+        "apple_container",
+        "kubernetes"
       ],
       "entry": {
         "captures": [
@@ -265,7 +270,8 @@
         "ssh",
         "e2b",
         "microsandbox",
-        "apple_container"
+        "apple_container",
+        "kubernetes"
       ],
       "entry": {
         "captures": [
@@ -297,7 +303,8 @@
         "ssh",
         "e2b",
         "microsandbox",
-        "apple_container"
+        "apple_container",
+        "kubernetes"
       ],
       "entry": {
         "captures": [
@@ -329,7 +336,8 @@
         "ssh",
         "e2b",
         "microsandbox",
-        "apple_container"
+        "apple_container",
+        "kubernetes"
       ],
       "entry": {
         "captures": [
@@ -360,7 +368,8 @@
         "ssh",
         "e2b",
         "microsandbox",
-        "apple_container"
+        "apple_container",
+        "kubernetes"
       ],
       "entry": {
         "captures": [
@@ -392,7 +401,8 @@
         "ssh",
         "e2b",
         "microsandbox",
-        "apple_container"
+        "apple_container",
+        "kubernetes"
       ],
       "entry": {
         "captures": [

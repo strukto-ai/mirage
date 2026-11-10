@@ -26,7 +26,6 @@ import type { CpuShares, MachineResources, TaskCounts } from '../../../../execut
 import { IOResult, OutputState } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { sleep } from '../../../../utils/abort.ts'
-import { concat } from '../../../../utils/bytes.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -38,6 +37,7 @@ import {
   type MachineScope,
   optionRefusal,
   readMachines,
+  tellOnce,
   usagePage,
   withMachine,
 } from '../machine_view.ts'
@@ -245,23 +245,17 @@ async function* framesOf(
   node: ExecutionNode,
   signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
-  const told = [node.stderr]
   try {
     yield encodeText(first)
     let done = 1
     while (options.iterations === null || done < options.iterations) {
       await sleep(options.delay * 1000, signal)
       const [text, errors] = await frameOf(jobTable, session, scope, options)
-      if (errors !== '') {
-        told.push(encodeText(errors))
-        io.exitCode = node.exitCode = 1
-      }
+      if (errors !== '') await tellOnce(io, node, errors)
       yield encodeText(`\n${text}`)
       done += 1
     }
   } finally {
-    node.stderr = concat(told)
-    io.stderr = node.stderr.length > 0 ? node.stderr : null
     io.output?.finish()
   }
 }
