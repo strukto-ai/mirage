@@ -512,6 +512,7 @@ export class Workspace {
       this.clock,
       this.wsId,
       this.processTable.machine.toString(),
+      () => this.processTable.records(),
     )
     this.registry.observer = this.observer
     this.planes = [stores.namespace, stores.observe, stores.sessions]

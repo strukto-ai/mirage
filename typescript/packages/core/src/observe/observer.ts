@@ -126,9 +126,9 @@ function tracer(): Tracer {
 
 /**
  * Open a typed line's `command` span as it starts (`start`, epoch
- * milliseconds), naming the line, its session, its workspace, the machine
- * it runs on (`host.id`) and the cwd it starts in; the spans of its jobs and
- * processes go under it. Mirrors Python's `_start_line`.
+ * milliseconds), naming the line, its session, its workspace, the host
+ * running Mirage (`host.id`) and the cwd it starts in; the spans of its jobs
+ * and processes go under it. Mirrors Python's `_start_line`.
  */
 function startLine(
   workspaceId: string | undefined,
@@ -167,9 +167,11 @@ function endLine(
   exitCode: number,
   output: [Uint8Array, Uint8Array],
   records: readonly OpRecord[],
+  machines: readonly string[],
 ): void {
   const content = traceContent()
   line.setAttribute('mirage.exit_code', exitCode)
+  if (machines.length > 0) line.setAttribute('mirage.machine.ids', [...machines])
   line.setAttribute('mirage.duration_ms', span[1] - span[0])
   const calls = records.slice(0, positiveEnv(TRACE_MAX_SPANS_ENV, TRACE_MAX_SPANS))
   if (content) {
@@ -283,7 +285,9 @@ function later(a: number | null, b: number | null): number | null {
  * lines' spans are known; nothing leaves the process until an SDK is set
  * up. Tracing stops at the workspace's own machine and runtimes: a program
  * a runtime runs elsewhere starts no trace of its own there. `machine` is
- * the workspace's, named on its lines' spans.
+ * the workspace's, `host.id` on its command, job and process spans;
+ * `processes` gives the process records the workspace keeps, whose machines
+ * a line's span lists.
  */
 export class Observer {
   private readonly _store: ObserverStore
@@ -300,9 +304,27 @@ export class Observer {
     clock: Clock = new SystemClock(),
     private readonly workspaceId?: string,
     private readonly machine?: string,
+    private readonly processes?: () => Process[],
   ) {
     this._store = store ?? new RAMObserverStore()
     this.clock = clock
+  }
+
+  /**
+   * The machines a line's processes ran on, while the workspace keeps their
+   * records. `line` is the line's id or one of its
+   * history entries'. Mirrors Python's `_machines_of`.
+   */
+  private machinesOf(line: string): string[] {
+    if (this.processes === undefined) return []
+    const base = line.split('.', 1)[0]
+    return [
+      ...new Set(
+        this.processes()
+          .filter((process) => process.line?.value === base)
+          .map((process) => process.machine.toString()),
+      ),
+    ]
   }
 
   /** The clock's wall time in epoch milliseconds, an entry's stamp. */
@@ -383,7 +405,7 @@ export class Observer {
       'process.pid': record.id.pid,
       'process.command_line': record.command,
       'process.group_leader.pid': record.group,
-      'host.id': record.machine.toString(),
+      'mirage.machine.id': record.machine.toString(),
       'mirage.workspace.id': record.id.workspaceId,
       'mirage.session.id': record.sessionId,
       'mirage.cwd': record.cwd.virtual,
@@ -406,7 +428,7 @@ export class Observer {
       'mirage.job.id': record.id.console,
       'mirage.job.number': record.number,
       'mirage.command': record.command,
-      'host.id': machine.toString(),
+      'mirage.machine.id': machine.toString(),
       'mirage.workspace.id': record.id.workspaceId,
       'mirage.session.id': record.sessionId,
       'mirage.cwd': record.cwd,
@@ -429,6 +451,7 @@ export class Observer {
     startedAt: number,
     endedAt: number | null,
   ): void {
+    if (this.machine !== undefined) attributes['host.id'] = this.machine
     let parent = context.active()
     if (line !== null) {
       attributes['mirage.line.id'] = line.value
@@ -477,7 +500,14 @@ export class Observer {
     const took =
       started === undefined ? undefined : Math.round((this.clock.monotonic() - started[1]) * 1000)
     if (started !== undefined && took !== undefined) {
-      endLine(started[2], [started[0], started[0] + took], io.exitCode, [out, err], opRecords)
+      endLine(
+        started[2],
+        [started[0], started[0] + took],
+        io.exitCode,
+        [out, err],
+        opRecords,
+        line === undefined ? [] : this.machinesOf(line),
+      )
     }
     const init: LogEntryInit = {
       type: EVENT_RESULT,

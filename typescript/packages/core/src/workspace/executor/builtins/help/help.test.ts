@@ -129,7 +129,12 @@ describe('help', () => {
       ),
     ).toBe(true)
     expect(out).toContain('    Options:\n      -f\twait until each ID ends')
+    expect(out).toContain('      -m machine\tthe machine the IDs are on')
     expect(Math.max(...out.split('\n').map((line) => line.length))).toBeLessThanOrEqual(80)
+  })
+
+  it('names the machine option of kill', async () => {
+    expect((await run('help kill'))[0]).toContain('      -m machine\tthe machine the IDs are on')
   })
 
   it('ends the manual layout with the implementation', async () => {
