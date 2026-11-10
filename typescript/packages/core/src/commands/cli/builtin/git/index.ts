@@ -36,13 +36,25 @@ import { branch, branchReadOnly } from './branch.ts'
 import { catFile } from './cat_file.ts'
 import { checkout, checkoutReadOnly } from './checkout.ts'
 import { commit } from './commit.ts'
-import { diff } from './diff.ts'
+import { checkIgnore } from './check_ignore.ts'
+import { lsRemote } from './ls_remote.ts'
+import { describe } from './describe.ts'
+import { diff, diffFiles, diffIndex } from './diff.ts'
 import { log } from './log.ts'
 import { mv } from './mv.ts'
 import { reset } from './reset.ts'
 import { restore } from './restore.ts'
 import { rm } from './rm.ts'
-import { revParse, config, mergeBase, remote, revList, version, showRef } from './inspect.ts'
+import { config } from './config.ts'
+import {
+  checkRefFormat,
+  revParse,
+  mergeBase,
+  remote,
+  revList,
+  version,
+  showRef,
+} from './inspect.ts'
 import { shortlog } from './shortlog.ts'
 import { symbolicRef, symbolicRefReadOnly } from './symbolic_ref.ts'
 import { indexLocked, verb } from './session.ts'
@@ -89,7 +101,54 @@ const DATE_OPTION = new Argument('--date', {
     'human or format:<strftime>',
 })
 
+// Commands never paint, so these only have to be accepted and checked.
+const COLOR_OPTIONS = [
+  new Argument('--color', {
+    nargs: '?',
+    attachedOnly: true,
+    metavar: 'when',
+    help: 'Accepted; output stays plain',
+  }),
+  new Argument('--no-color', { action: 'store_true', help: 'Accepted; output stays plain' }),
+]
+
+const NO_COLUMN_OPTION = new Argument('--no-column', {
+  action: 'store_true',
+  help: 'List one entry per line',
+})
+
+// Where a comparison answers by exit status, and takes the id width.
+const DIFF_RESULT_OPTIONS = [
+  new Argument('--quiet', {
+    action: 'store_true',
+    help: 'Print nothing; exit 1 if there are differences',
+  }),
+  new Argument('--exit-code', { action: 'store_true', help: 'Exit 1 if there are differences' }),
+  new Argument('--abbrev', {
+    nargs: '?',
+    attachedOnly: true,
+    help: 'Abbreviate ids to this many digits',
+  }),
+  new Argument('--no-abbrev', { action: 'store_true', help: 'Show whole ids in --raw' }),
+]
+
 const DIFF_OPTIONS = [
+  ...COLOR_OPTIONS,
+  new Argument('--diff-filter', {
+    metavar: '[ACDMRTUXB*]',
+    help: 'Show only the paths with these change classes',
+  }),
+  new Argument('--no-prefix', {
+    action: 'store_true',
+    help: 'Show no source or destination prefix',
+  }),
+  new Argument('--default-prefix', { action: 'store_true', help: 'Use the a/ and b/ prefixes' }),
+  new Argument('--src-prefix', { help: 'Show this source prefix' }),
+  new Argument('--dst-prefix', { help: 'Show this destination prefix' }),
+  new Argument('--full-index', {
+    action: 'store_true',
+    help: 'Show whole blob ids on the index line',
+  }),
   new Argument(['-a', '--text'], { action: 'store_true', help: 'Treat binary files as text' }),
   new Argument(['-W', '--function-context'], {
     action: 'store_true',
@@ -263,6 +322,26 @@ const SHOW_OPTIONS = [
 ]
 
 const STATUS_OPTIONS = [
+  NO_COLUMN_OPTION,
+  new Argument(['-z', '--null'], {
+    action: 'store_true',
+    help: 'End each entry with NUL; implies --porcelain',
+  }),
+  new Argument('--long', { action: 'store_true', help: 'Give the output in the long format' }),
+  new Argument('--show-stash', { action: 'store_true', help: 'Say how many stashes there are' }),
+  new Argument('--no-show-stash', { action: 'store_true' }),
+  new Argument('--ahead-behind', {
+    action: 'store_true',
+    help: 'Count how far the branch and its upstream have moved',
+  }),
+  new Argument('--no-ahead-behind', { action: 'store_true' }),
+  new Argument('--renames', { action: 'store_true', help: 'Pair renamed files' }),
+  new Argument('--no-renames', { action: 'store_true' }),
+  new Argument('--find-renames', {
+    nargs: '?',
+    attachedOnly: true,
+    help: 'Pair renames with an optional similarity threshold',
+  }),
   new Argument('--ignored', { action: 'store_true', help: 'Show ignored files' }),
   new Argument('--porcelain', {
     nargs: '?',
@@ -438,6 +517,7 @@ const IGNORE_CASE_OPTION = new Argument(['-i', '--ignore-case'], {
 })
 
 const FOR_EACH_REF_OPTIONS = [
+  ...COLOR_OPTIONS,
   new Argument(['-s', '--shell'], {
     action: 'store_true',
     help: 'Quote fields suitably for shells',
@@ -467,6 +547,8 @@ const FOR_EACH_REF_OPTIONS = [
 ]
 
 const TAG_OPTIONS = [
+  ...COLOR_OPTIONS,
+  NO_COLUMN_OPTION,
   new Argument(['-l', '--list'], { action: 'store_true', help: 'List tag names' }),
   // git spells the count attached (`-n2`) or not at all, never as a separate
   // token, which is what valueOptional says: a bare -n means one line and the
@@ -495,11 +577,19 @@ const TAG_OPTIONS = [
 ]
 
 const BRANCH_OPTIONS = [
+  ...COLOR_OPTIONS,
+  NO_COLUMN_OPTION,
   new Argument('--show-current', { action: 'store_true', help: 'Show the current branch name' }),
   new Argument(['-q', '--quiet'], { action: 'store_true', help: 'Suppress feedback messages' }),
   new Argument(['-v', '--verbose'], { action: 'count', help: 'Show commit and upstream details' }),
-  new Argument('-a', { action: 'store_true', help: 'List local and remote-tracking branches' }),
-  new Argument('-r', { action: 'store_true', help: 'List remote-tracking branches' }),
+  new Argument(['-a', '--all'], {
+    action: 'store_true',
+    help: 'List local and remote-tracking branches',
+  }),
+  new Argument(['-r', '--remotes'], {
+    action: 'store_true',
+    help: 'List remote-tracking branches',
+  }),
   new Argument(['-d', '--delete'], { action: 'store_true', help: 'Delete a fully merged branch' }),
   new Argument('-D', { action: 'store_true', help: 'Delete a branch even if not merged' }),
   new Argument('--delete-merged', {
@@ -571,6 +661,35 @@ export const GIT = new CLI({
     operandBase: '-C',
     arguments: [
       DIRECTORY_OPTION,
+      new Argument(['--config-env', '-c'], {
+        action: 'append',
+        metavar: 'name=value',
+        help: 'Set a config variable for this one command',
+      }),
+      new Argument(['-p', '--paginate'], {
+        action: 'store_true',
+        help: 'Accepted; there is no pager to run',
+      }),
+      new Argument(['-P', '--no-pager'], {
+        action: 'store_true',
+        help: 'Accepted; there is no pager to run',
+      }),
+      new Argument('--no-optional-locks', {
+        action: 'store_true',
+        help: 'Accepted; only the locks a write needs are taken',
+      }),
+      new Argument('--no-replace-objects', {
+        action: 'store_true',
+        help: 'Accepted; replace refs are not followed',
+      }),
+      new Argument('--no-lazy-fetch', {
+        action: 'store_true',
+        help: 'Accepted; objects are never fetched lazily',
+      }),
+      new Argument('--no-advice', {
+        action: 'store_true',
+        help: 'Accepted; hints stay as they are',
+      }),
       new Argument('--git-dir', {
         type: 'path',
         env: 'GIT_DIR',
@@ -704,6 +823,52 @@ export const GIT = new CLI({
             action: 'store_true',
             help: 'Treat binary files as text',
           }),
+          ...COLOR_OPTIONS,
+          new Argument(['-A', '--after-context'], {
+            type: 'int',
+            help: 'Print this many lines after each match',
+          }),
+          new Argument(['-B', '--before-context'], {
+            type: 'int',
+            help: 'Print this many lines before each match',
+          }),
+          new Argument(['-C', '--context'], {
+            type: 'int',
+            numericShorthand: true,
+            help: 'Print this many lines around each match',
+          }),
+          new Argument(['-m', '--max-count'], {
+            type: 'int',
+            help: 'Stop after this many matches in a file',
+          }),
+          new Argument('--threads', {
+            type: 'int',
+            help: 'Accepted; files are searched in order',
+          }),
+          new Argument('--heading', {
+            action: 'store_true',
+            help: "Print each file's name once, above its matches",
+          }),
+          new Argument('--break', {
+            action: 'store_true',
+            help: 'Print a blank line between files',
+          }),
+          new Argument('--full-name', {
+            action: 'store_true',
+            help: 'Name paths from the top of the work tree',
+          }),
+          new Argument('--untracked', {
+            action: 'store_true',
+            help: 'Also search untracked files',
+          }),
+          new Argument('--exclude-standard', {
+            action: 'store_true',
+            help: 'With --untracked, skip ignored files',
+          }),
+          new Argument('--no-exclude-standard', {
+            action: 'store_true',
+            help: 'With --untracked, search ignored files too',
+          }),
           new Argument('-I', { action: 'store_true', help: 'Skip binary files' }),
           new Argument(['-z', '--null'], {
             action: 'store_true',
@@ -728,6 +893,17 @@ export const GIT = new CLI({
             action: 'store_true',
             help: 'Show paths relative to the repository root',
           }),
+          new Argument(['-l', '--long'], { action: 'store_true', help: "Show each blob's size" }),
+          new Argument('--object-only', {
+            action: 'store_true',
+            help: 'Print only each object id',
+          }),
+          new Argument('--abbrev', {
+            nargs: '?',
+            attachedOnly: true,
+            help: 'Abbreviate ids to this many digits',
+          }),
+          new Argument('--format', { help: 'Format each row: %(atom) placeholders' }),
           new Argument('--full-tree', {
             action: 'store_true',
             help: 'List the whole tree, ignoring the current directory',
@@ -745,6 +921,64 @@ export const GIT = new CLI({
             help: 'Show staged object metadata',
           }),
           new Argument(['-c', '--cached'], { action: 'store_true', help: 'Show cached files' }),
+          new Argument(['-o', '--others'], { action: 'store_true', help: 'Show untracked files' }),
+          new Argument(['-m', '--modified'], {
+            action: 'store_true',
+            help: 'Show files that differ from the index',
+          }),
+          new Argument(['-d', '--deleted'], {
+            action: 'store_true',
+            help: 'Show files missing from the work tree',
+          }),
+          new Argument(['-i', '--ignored'], {
+            action: 'store_true',
+            help: 'Show only excluded files; needs -o or -c',
+          }),
+          new Argument(['-u', '--unmerged'], {
+            action: 'store_true',
+            help: 'Show only unmerged entries',
+          }),
+          new Argument('-t', { action: 'store_true', help: 'Prefix each row with its status' }),
+          new Argument('-v', { action: 'store_true', help: 'Same as -t' }),
+          new Argument('-f', { action: 'store_true', help: 'Same as -t' }),
+          new Argument('--directory', {
+            action: 'store_true',
+            help: 'Show an untracked directory by its name',
+          }),
+          new Argument('--no-empty-directory', {
+            action: 'store_true',
+            help: 'Leave out empty directories',
+          }),
+          new Argument('--exclude-standard', {
+            action: 'store_true',
+            help: "Apply the repository's ignore files",
+          }),
+          new Argument(['-x', '--exclude'], {
+            action: 'append',
+            help: 'Leave out what matches this pattern',
+          }),
+          new Argument(['-X', '--exclude-from'], {
+            action: 'append',
+            help: 'Read exclude patterns from a file',
+          }),
+          new Argument('--exclude-per-directory', {
+            help: 'Read this exclude file in each directory',
+          }),
+          new Argument('--error-unmatch', {
+            action: 'store_true',
+            help: 'Fail for a pathspec that matches nothing',
+          }),
+          new Argument('--full-name', {
+            action: 'store_true',
+            help: 'Name paths from the top of the work tree',
+          }),
+          new Argument('--deduplicate', { action: 'store_true', help: 'List each path once' }),
+          new Argument('--abbrev', {
+            nargs: '?',
+            attachedOnly: true,
+            help: 'Abbreviate ids to this many digits',
+          }),
+          new Argument('--format', { help: 'Format each row: %(atom) placeholders' }),
           REVISION,
         ],
       }),
@@ -840,7 +1074,64 @@ export const GIT = new CLI({
         description: 'Read repository configuration',
         arguments: [
           new Argument('--global', { action: 'store_true', help: 'Read global configuration' }),
+          new Argument('--system', {
+            action: 'store_true',
+            help: 'Read the machine-wide configuration',
+          }),
+          new Argument('--local', {
+            action: 'store_true',
+            help: "Read the repository's configuration",
+          }),
+          new Argument('--worktree', {
+            action: 'store_true',
+            help: "Read the work tree's configuration",
+          }),
+          new Argument(['-f', '--file'], { help: 'Read the named config file' }),
           new Argument('--get', { action: 'store_true', help: 'Get a configuration value' }),
+          new Argument('--get-all', {
+            action: 'store_true',
+            help: 'Get every value of a variable',
+          }),
+          new Argument('--all', { action: 'store_true', help: 'With get, print every value' }),
+          new Argument('--regexp', {
+            action: 'store_true',
+            help: 'With get, read the name as a pattern',
+          }),
+          new Argument('--value', { help: 'With get, keep values that match' }),
+          new Argument('--fixed-value', {
+            action: 'store_true',
+            help: 'Compare the value pattern literally',
+          }),
+          new Argument('--show-names', {
+            action: 'store_true',
+            help: 'With get, print names too',
+          }),
+          new Argument('--default', { help: 'Answer when the variable is unset' }),
+          new Argument('--type', { help: 'Print as bool, int, bool-or-int or path' }),
+          new Argument('--bool', { action: 'store_true', help: 'Print as a boolean' }),
+          new Argument('--int', { action: 'store_true', help: 'Print as an integer' }),
+          new Argument('--bool-or-int', {
+            action: 'store_true',
+            help: 'Print as a boolean or an integer',
+          }),
+          new Argument('--path', { action: 'store_true', help: 'Expand a leading ~/' }),
+          new Argument(['-z', '--null'], { action: 'store_true', help: 'End each value with NUL' }),
+          new Argument('--name-only', {
+            action: 'store_true',
+            help: 'Print names without values',
+          }),
+          new Argument('--show-scope', {
+            action: 'store_true',
+            help: 'Show the scope of each value',
+          }),
+          new Argument('--includes', {
+            action: 'store_true',
+            help: 'Accepted; include files are not followed',
+          }),
+          new Argument('--no-includes', {
+            action: 'store_true',
+            help: 'Accepted; include files are not followed',
+          }),
           new Argument(['-l', '--list'], {
             action: 'store_true',
             help: 'List every variable and value',
@@ -862,6 +1153,14 @@ export const GIT = new CLI({
         name: 'merge-base',
         description: 'Find best common ancestors of commits',
         arguments: [
+          new Argument('--octopus', {
+            action: 'store_true',
+            help: 'Find the common ancestor of all the commits',
+          }),
+          new Argument('--independent', {
+            action: 'store_true',
+            help: 'List the commits no other commit reaches',
+          }),
           new Argument(['-a', '--all'], {
             action: 'store_true',
             help: 'Show all best common ancestors',
@@ -873,7 +1172,40 @@ export const GIT = new CLI({
           REVISION,
         ],
       }),
-      new CommandSpec({ name: 'show-ref', description: 'List references', arguments: [REVISION] }),
+      new CommandSpec({
+        name: 'show-ref',
+        description: 'List references',
+        arguments: [
+          new Argument('--heads', { action: 'store_true', help: 'Only list branches' }),
+          new Argument('--branches', { action: 'store_true', help: 'Only list branches' }),
+          new Argument('--tags', { action: 'store_true', help: 'Only list tags' }),
+          new Argument('--head', { action: 'store_true', help: 'List HEAD first' }),
+          new Argument(['-d', '--dereference'], {
+            action: 'store_true',
+            help: 'Also list what an annotated tag points at',
+          }),
+          new Argument(['-s', '--hash'], {
+            nargs: '?',
+            attachedOnly: true,
+            help: 'Print only the id, of this many digits',
+          }),
+          new Argument('--abbrev', {
+            nargs: '?',
+            attachedOnly: true,
+            help: 'Abbreviate the id to this many digits',
+          }),
+          new Argument(['-q', '--quiet'], {
+            action: 'store_true',
+            help: 'Print nothing; the exit status answers',
+          }),
+          new Argument('--verify', {
+            action: 'store_true',
+            help: 'Each operand must be a whole ref name',
+          }),
+          new Argument('--exists', { action: 'store_true', help: 'Test whether one ref exists' }),
+          REVISION,
+        ],
+      }),
       // symbolic-ref has every option git's has, so its rows carry git's own
       // help and its usage block reads exactly as git's.
       new CommandSpec({
@@ -915,6 +1247,7 @@ export const GIT = new CLI({
         name: 'shortlog',
         description: 'Summarize commit history',
         arguments: [
+          ...COLOR_OPTIONS,
           ...LOG_OPTIONS.filter((opt) => !opt.names.includes('-n')),
           new Argument('--max-count', { type: 'int', help: 'Limit the number of commits' }),
           new Argument(['-s', '--summary'], {
@@ -950,6 +1283,98 @@ export const GIT = new CLI({
             action: 'store_true',
             help: 'Print whether the repository is shallow',
           }),
+          new Argument('--is-inside-git-dir', {
+            action: 'store_true',
+            help: 'Print whether the current directory is inside the git directory',
+          }),
+          new Argument('--is-bare-repository', {
+            action: 'store_true',
+            help: 'Print whether the repository is bare',
+          }),
+          new Argument('--show-cdup', {
+            action: 'store_true',
+            help: 'Show the way up to the worktree root',
+          }),
+          new Argument('--absolute-git-dir', {
+            action: 'store_true',
+            help: "Show the git directory's absolute path",
+          }),
+          new Argument('--git-common-dir', {
+            action: 'store_true',
+            help: 'Show the directory shared by linked worktrees',
+          }),
+          new Argument('--git-path', {
+            nargs: '?',
+            metavar: 'path',
+            help: 'Show where a file of the git directory lives',
+          }),
+          new Argument('--path-format', {
+            nargs: '?',
+            attachedOnly: true,
+            metavar: 'absolute|relative',
+            help: 'Print later paths in this form',
+          }),
+          new Argument('--show-object-format', {
+            nargs: '?',
+            attachedOnly: true,
+            metavar: 'mode',
+            help: 'Show the hash the repository uses',
+          }),
+          new Argument('--show-ref-format', {
+            action: 'store_true',
+            help: 'Show how the repository stores refs',
+          }),
+          new Argument('--symbolic', {
+            action: 'store_true',
+            help: 'Print later revisions as they were typed',
+          }),
+          new Argument('--symbolic-full-name', {
+            action: 'store_true',
+            help: 'Print later revisions as whole ref names, dropping what names no ref',
+          }),
+          new Argument('--not', {
+            action: 'store_true',
+            help: 'Print later revisions with their sign flipped',
+          }),
+          new Argument('--default', {
+            nargs: '?',
+            metavar: 'revision',
+            help: 'Use this revision if the line gives none',
+          }),
+          new Argument('--all', {
+            action: 'store_true',
+            help: 'List every ref under refs/',
+          }),
+          new Argument('--branches', {
+            nargs: '?',
+            attachedOnly: true,
+            metavar: 'pattern',
+            help: 'List branches, or those matching a pattern',
+          }),
+          new Argument('--tags', {
+            nargs: '?',
+            attachedOnly: true,
+            metavar: 'pattern',
+            help: 'List tags, or those matching a pattern',
+          }),
+          new Argument('--remotes', {
+            nargs: '?',
+            attachedOnly: true,
+            metavar: 'pattern',
+            help: 'List remote-tracking branches, or those matching a pattern',
+          }),
+          new Argument('--glob', {
+            nargs: '?',
+            attachedOnly: true,
+            metavar: 'pattern',
+            help: 'List the refs a pattern matches',
+          }),
+          new Argument('--exclude', {
+            nargs: '?',
+            attachedOnly: true,
+            metavar: 'pattern',
+            help: 'Leave matching refs out of the next listing',
+          }),
           new Argument('--is-inside-work-tree', {
             action: 'store_true',
             help: 'Print whether the current directory is inside the work tree',
@@ -975,25 +1400,198 @@ export const GIT = new CLI({
         description: 'List reachable commits',
         arguments: [
           ...LOG_OPTIONS,
+          ...COLOR_OPTIONS,
           new Argument('--count', { action: 'store_true', help: 'Print commit count' }),
           REVISION,
         ],
       }),
       new CommandSpec({
         name: 'diff-tree',
-        description: 'Compare a commit with its parent',
+        description: 'Compare a commit with its parent, or two trees',
         arguments: [
           ...SHOW_OPTIONS,
+          ...DIFF_RESULT_OPTIONS,
           new Argument('--no-commit-id', { action: 'store_true', help: 'Suppress commit ID' }),
           new Argument('-r', { action: 'store_true', help: 'Recurse into subtrees' }),
+          new Argument('--root', {
+            action: 'store_true',
+            help: 'Show a root commit as all additions',
+          }),
           new Argument('commit'),
+          PATHSPEC,
+        ],
+      }),
+      new CommandSpec({
+        name: 'diff-files',
+        description: 'Compare the index with the working tree',
+        arguments: [
+          ...DIFF_OPTIONS,
+          ...DIFF_RESULT_OPTIONS,
+          new Argument('-q', { action: 'store_true', help: 'Stay silent about missing files' }),
+          PATHSPEC,
+        ],
+      }),
+      new CommandSpec({
+        name: 'diff-index',
+        description: 'Compare a tree with the working tree or index',
+        arguments: [
+          ...DIFF_OPTIONS,
+          ...DIFF_RESULT_OPTIONS,
+          new Argument('--cached', { action: 'store_true', help: 'Compare with the index' }),
+          new Argument('-m', {
+            action: 'store_true',
+            help: 'Count missing files as unchanged',
+          }),
+          new Argument('tree-ish', { nargs: '?' }),
+          PATHSPEC,
+        ],
+      }),
+      new CommandSpec({
+        name: 'check-ref-format',
+        description: 'Check that a ref name is well formed',
+        arguments: [
+          new Argument('--normalize', {
+            action: 'store_true',
+            help: 'Print the name with redundant slashes removed',
+          }),
+          new Argument('--print', { action: 'store_true', help: 'Alias of --normalize' }),
+          new Argument('--allow-onelevel', {
+            action: 'store_true',
+            help: 'Take a name with one component',
+          }),
+          new Argument('--no-allow-onelevel', {
+            action: 'store_true',
+            help: 'Need more than one component',
+          }),
+          new Argument('--refspec-pattern', {
+            action: 'store_true',
+            help: 'Take a name holding one *',
+          }),
+          new Argument('--branch', {
+            action: 'store_true',
+            help: 'Check a branch name and print it',
+          }),
+          PATHSPEC,
+        ],
+      }),
+      new CommandSpec({
+        name: 'ls-remote',
+        description: 'List the refs another repository publishes',
+        arguments: [
+          new Argument(['-h', '--heads'], { action: 'store_true', help: 'Only list branches' }),
+          new Argument(['-b', '--branches'], { action: 'store_true', help: 'Only list branches' }),
+          new Argument(['-t', '--tags'], { action: 'store_true', help: 'Only list tags' }),
+          new Argument('--refs', {
+            action: 'store_true',
+            help: 'Leave out pseudorefs and peeled tags',
+          }),
+          new Argument('--symref', {
+            action: 'store_true',
+            help: 'Show what symbolic refs point at',
+          }),
+          new Argument(['-q', '--quiet'], {
+            action: 'store_true',
+            help: 'Do not print the remote URL',
+          }),
+          new Argument('--exit-code', {
+            action: 'store_true',
+            help: 'Exit 2 when nothing is listed',
+          }),
+          new Argument('--get-url', {
+            action: 'store_true',
+            help: "Print the remote's URL and stop",
+          }),
+          ...SORT_OPTIONS,
+          PATHSPEC,
+        ],
+      }),
+      new CommandSpec({
+        name: 'check-ignore',
+        description: 'Show which paths the ignore rules cover',
+        arguments: [
+          new Argument(['-q', '--quiet'], {
+            action: 'store_true',
+            help: 'Answer by exit status alone',
+          }),
+          new Argument(['-v', '--verbose'], {
+            action: 'store_true',
+            help: 'Show the rule that decided each path',
+          }),
+          new Argument('--stdin', {
+            action: 'store_true',
+            help: 'Read the paths from standard input',
+          }),
+          new Argument('-z', { action: 'store_true', help: 'Separate input and output with NUL' }),
+          new Argument(['-n', '--non-matching'], {
+            action: 'store_true',
+            help: 'Also show paths no rule matches',
+          }),
+          new Argument('--no-index', {
+            action: 'store_true',
+            help: 'Apply the rules to tracked paths too',
+          }),
+          PATHSPEC,
+        ],
+      }),
+      new CommandSpec({
+        name: 'describe',
+        description: 'Name a commit after the nearest tag',
+        arguments: [
+          new Argument('--all', { action: 'store_true', help: 'Use any ref' }),
+          new Argument('--tags', { action: 'store_true', help: 'Use lightweight tags too' }),
+          new Argument('--always', {
+            action: 'store_true',
+            help: 'Fall back to the abbreviated id',
+          }),
+          new Argument('--long', { action: 'store_true', help: 'Always print the long form' }),
+          new Argument('--exact-match', {
+            action: 'store_true',
+            help: 'Only a tag on the commit itself',
+          }),
+          new Argument('--first-parent', {
+            action: 'store_true',
+            help: 'Follow first parents only',
+          }),
+          new Argument('--abbrev', {
+            nargs: '?',
+            attachedOnly: true,
+            help: 'Digits of the commit id; 0 drops the suffix',
+          }),
+          new Argument('--candidates', {
+            nargs: '?',
+            attachedOnly: true,
+            metavar: 'n',
+            help: 'How many tags to weigh',
+          }),
+          new Argument('--match', {
+            action: 'append',
+            metavar: 'pattern',
+            help: 'Only names matching this glob',
+          }),
+          new Argument('--exclude', {
+            action: 'append',
+            metavar: 'pattern',
+            help: 'Leave out names matching this glob',
+          }),
+          new Argument('--dirty', {
+            nargs: '?',
+            attachedOnly: true,
+            metavar: 'mark',
+            help: 'Add a mark when the work tree differs',
+          }),
+          new Argument('--broken', {
+            nargs: '?',
+            attachedOnly: true,
+            metavar: 'mark',
+            help: 'Like --dirty',
+          }),
           PATHSPEC,
         ],
       }),
       new CommandSpec({
         name: 'status',
         description: 'Show the working tree status',
-        arguments: [...STATUS_OPTIONS],
+        arguments: [...STATUS_OPTIONS, PATHSPEC],
       }),
       new CommandSpec({
         name: 'log',
@@ -1010,6 +1608,7 @@ export const GIT = new CLI({
         description: 'Show changes between commits',
         arguments: [
           ...DIFF_OPTIONS,
+          ...DIFF_RESULT_OPTIONS,
           new Argument('--cached', {
             action: 'store_true',
             help: 'Compare the index with a commit',
@@ -1098,6 +1697,12 @@ export const GIT = new CLI({
     'rev-parse': new CLIHandler({ fn: verb(revParse) }),
     'rev-list': new CLIHandler({ fn: verb(revList) }),
     'diff-tree': new CLIHandler({ fn: verb(diffTree) }),
+    'diff-files': new CLIHandler({ fn: verb(diffFiles) }),
+    'diff-index': new CLIHandler({ fn: verb(diffIndex) }),
+    'ls-remote': new CLIHandler({ fn: verb(lsRemote) }),
+    'check-ignore': new CLIHandler({ fn: verb(checkIgnore) }),
+    'check-ref-format': new CLIHandler({ fn: verb(checkRefFormat) }),
+    describe: new CLIHandler({ fn: verb(describe) }),
     status: new CLIHandler({ fn: verb(status) }),
     log: new CLIHandler({ fn: verb(log) }),
     show: new CLIHandler({ fn: verb(show) }),

@@ -24,7 +24,7 @@ import { isBare } from './discover.ts'
 import { FetchHeadReadOnlyError, GitError, MissingRepositoryError } from './errors.ts'
 import { configLines, configValues } from './fs.ts'
 import { resolvedRefs } from './history.ts'
-import { globalSources } from './inspect.ts'
+import { globalSources } from './config.ts'
 import { writeFile } from './io.ts'
 import { append, entry, IDENTITY, ZERO } from './reflog.ts'
 import {
@@ -67,7 +67,7 @@ const REFCOL_MIN = 10
 // column at core.abbrev=12 as well, and a 24-character one at neither.
 const ROW_LEAD = ' * '.length + 2 * 7 + 3 + ' '.length
 const ROW_ARROW = ' -> '.length
-const UNREACHABLE =
+export const UNREACHABLE =
   'fatal: Could not read from remote repository.\n\n' +
   'Please make sure you have the correct access rights\n' +
   'and the repository exists.'

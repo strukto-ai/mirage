@@ -20,28 +20,34 @@ import git from 'isomorphic-git'
 
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import { concat } from '../../../../utils/bytes.ts'
-import type { PathSpec } from '../../../../types.ts'
+import { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { UsageError } from './errors.ts'
+import { AmbiguousArgumentError, GitError, UsageError } from './errors.ts'
 import type { CommitFacts, LogFormat } from './format.ts'
 import { decorations, displayed, prettyFormat } from './history.ts'
 import {
   commitDeltas,
   commitEntry,
+  shows,
   commitOutput,
   commitShown,
   commitSides,
+  compare,
+  entries,
+  filtered,
   parseDiffFlags,
+  renderChanges,
   renamesEnabled,
   type DiffFlags,
 } from './diff_output.ts'
-import { pathspecPatterns } from './pathspec.ts'
+import { exists } from './io.ts'
+import { absoluteOperand, pathspecPatterns } from './pathspec.ts'
 import { identDate } from './ref_fields.ts'
 import { commitFacts, configBool, rawObject, repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
-import { resolveCommit, resolveObject } from './revparse.ts'
-import { deltas, shownSides, type Delta } from './rows.ts'
+import { resolveCommit, resolveObject, treeId } from './revparse.ts'
+import { deltas, shownSides, type Delta, type Side } from './rows.ts'
 import { decoded, located, placeNamed, shownItems } from './seen.ts'
 import {
   checkOperands,
@@ -237,6 +243,7 @@ export async function show(
       if (shownCommits.has(target.oid)) continue
       shownCommits.add(target.oid)
       const facts = await commitFacts(repo, target.oid)
+      if (parsed.diff.diffFilter && !(await shows(repo, facts, parsed.diff))) continue
       const entry = await commitEntry(
         repo,
         facts,
@@ -254,14 +261,50 @@ export async function show(
   return [null, new IOResult({ rows: { items: rows, render } })]
 }
 
+async function twoTrees(
+  repo: Repo,
+  first: string,
+  second: string,
+  flags: DiffFlags,
+  recursive: boolean,
+): Promise<Side[]> {
+  return [
+    [
+      await entries(repo, await treeId(repo, first), recursive, flags.pathspecs),
+      await entries(repo, await treeId(repo, second), recursive, flags.pathspecs),
+    ],
+  ]
+}
+
+async function treesOutput(repo: Repo, side: Side, flags: DiffFlags): Promise<[string, boolean]> {
+  const rows = await compare(repo, side[0], side[1], flags.renames)
+  return [await renderChanges(repo, rows, flags), filtered(rows, flags).length > 0]
+}
+
 /**
- * Compare a commit with its parents.
- *
- * Every block opens with the commit id unless `--no-commit-id`, and a parent
- * the commit does not differ from prints nothing, id included. Operands after
- * `--` are pathspecs, read once the commit has resolved; they limit every block
- * to the paths they name.
+ * The other tree-ish a line names, and the paths that follow it: the word after
+ * the first is a tree-ish if it resolves, and a path when it does not but
+ * exists; anything else names nothing.
  */
+async function secondTree(
+  fl: FlagView,
+  repo: Repo,
+  words: readonly string[],
+): Promise<[string | null, readonly string[]]> {
+  const word = words[0]
+  if (word === undefined) return [null, []]
+  try {
+    await resolveObject(repo, word)
+  } catch (err) {
+    if (!(err instanceof GitError)) throw err
+    const where = absoluteOperand(startPoint(fl).virtual, word)
+    if (await exists(repo.vfs, PathSpec.fromStrPath(where))) return [null, words]
+    throw new AmbiguousArgumentError(word)
+  }
+  return [word, words.slice(1)]
+}
+
+/** Compare a commit with its parents, or two trees. */
 export async function diffTree(
   _accessor: NOOPAccessor,
   _paths: PathSpec[],
@@ -273,26 +316,57 @@ export async function diffTree(
     throw new UsageError('', verbUsage(ctx))
   }
   const repo = await opened(ctx, fl)
-  const parsed = parseDiffFlags(
+  let parsed = parseDiffFlags(
     fl,
     false,
     'off',
     false,
-    true,
+    false,
     await configBool(repo, 'core.quotepath', true),
   )
+  const quiet = fl.asBool('quiet')
+  const report = quiet || fl.asBool('exit_code')
+  if (quiet) parsed = { ...parsed, noPatch: true }
   const [revisions, paths] = splitMarked(texts, ctx.argv ?? [])
-  const commit = await commitFacts(repo, await resolveCommit(repo, revisionArg(revisions)))
-  const pathspecs = pathspecPatterns(repo.location, startPoint(fl).virtual, paths)
+  const first = revisionArg(revisions)
+  const [second, spare] = await secondTree(fl, repo, revisions.slice(1))
+  const pathspecs = pathspecPatterns(repo.location, startPoint(fl).virtual, [...spare, ...paths])
   const flags = { ...parsed, pathspecs }
-  const sides = await commitSides(repo, commit, flags, fl.asBool('r'), false)
+  const recursive = fl.asBool('r') || flags.patch
+  if (second !== null) {
+    const pair = await twoTrees(repo, first, second, flags, recursive)
+    const renderTrees = async (shown: Delta[]): Promise<ByteSource | null> => {
+      const side = shownSides(shown, 1)[0] ?? [new Map(), new Map()]
+      const [body, differs] = await treesOutput(repo, side, flags)
+      if (report && differs) treesIo.exitCode = 1
+      if (quiet) return null
+      return body === '' ? null : encodeText(body)
+    }
+    const treesIo = new IOResult({
+      rows: { items: deltas(repo.location, pair), render: renderTrees },
+    })
+    return [null, treesIo]
+  }
+  const found = await resolveObject(repo, first)
+  if (found.type === 'tree') {
+    return [
+      null,
+      new IOResult({
+        stderr: new TextEncoder().encode(`error: object ${found.oid} is a tree, not a commit\n`),
+      }),
+    ]
+  }
+  const commit = await commitFacts(repo, await resolveCommit(repo, first))
+  const sides = await commitSides(repo, commit, flags, recursive, fl.asBool('root'))
   const render = async (shown: Delta[]): Promise<ByteSource> => {
     const bodies = await commitOutput(repo, commit, flags, shownSides(shown, sides.length))
     const out = bodies
       .filter((body) => body !== null)
       .map((body) => (fl.asBool('no_commit_id') ? '' : commit.oid + '\n') + body)
       .join('')
+    if (report && out !== '') io.exitCode = 1
     return encodeText(out)
   }
-  return [null, new IOResult({ rows: { items: deltas(repo.location, sides), render } })]
+  const io = new IOResult({ rows: { items: deltas(repo.location, sides), render } })
+  return [null, io]
 }

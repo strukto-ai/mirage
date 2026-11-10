@@ -178,13 +178,23 @@ def _must_quote(byte: int, fully: bool) -> bool:
     )
 
 
-def short_line(entry: StatusEntry, fully: bool = True) -> str:
+def short_line(
+    entry: StatusEntry, fully: bool = True, nul: bool = False
+) -> str:
     """One row of ``--short`` / ``--porcelain`` output.
 
     Args:
         entry (StatusEntry): the row.
         fully (bool): ``core.quotePath``.
+        nul (bool): the raw ``-z`` form, the new name first.
     """
+    if nul:
+        names = (
+            entry.path
+            if entry.original is None
+            else f"{entry.path}\0{entry.original}"
+        )
+        return f"{entry.index_status}{entry.tree_status} {names}"
     path = quote_path(entry.path, True, fully)
     if entry.original is not None:
         path = f"{quote_path(entry.original, True, fully)} -> {path}"
@@ -192,7 +202,10 @@ def short_line(entry: StatusEntry, fully: bool = True) -> str:
 
 
 def branch_line(
-    branch: str | None, no_commits: bool, upstream: Upstream | None = None
+    branch: str | None,
+    no_commits: bool,
+    upstream: Upstream | None = None,
+    ahead_behind: bool = True,
 ) -> str:
     """The ``## `` header ``--branch`` prepends to the short formats.
 
@@ -200,6 +213,7 @@ def branch_line(
         branch (str | None): the branch HEAD names, None when detached.
         no_commits (bool): whether HEAD resolves to nothing yet.
         upstream (Upstream | None): the branch's upstream, if any.
+        ahead_behind (bool): count the commits, or only say they differ.
     """
     if branch is None:
         return f"{BRANCH_MARK}HEAD (no branch)"
@@ -208,10 +222,13 @@ def branch_line(
     if upstream is None:
         return f"{BRANCH_MARK}{branch}"
     counts = ["gone"] if upstream.gone else []
-    if upstream.ahead:
-        counts.append(f"ahead {upstream.ahead}")
-    if upstream.behind:
-        counts.append(f"behind {upstream.behind}")
+    if not ahead_behind and (upstream.ahead or upstream.behind):
+        counts.append("different")
+    elif upstream.ahead or upstream.behind:
+        if upstream.ahead:
+            counts.append(f"ahead {upstream.ahead}")
+        if upstream.behind:
+            counts.append(f"behind {upstream.behind}")
     shown = f" [{', '.join(counts)}]" if counts else ""
     return f"{BRANCH_MARK}{branch}...{upstream.label}{shown}"
 
@@ -220,7 +237,7 @@ def _commits(count: int) -> str:
     return f"{count} commit" + ("" if count == 1 else "s")
 
 
-def tracking_lines(upstream: Upstream) -> list[str]:
+def tracking_lines(upstream: Upstream, ahead_behind: bool = True) -> list[str]:
     """What the long status says about a branch and its upstream.
 
     Pinned against git 2.47.3 and 2.50.1.
@@ -236,6 +253,11 @@ def tracking_lines(upstream: Upstream) -> list[str]:
         ]
     if not upstream.ahead and not upstream.behind:
         return [f"Your branch is up to date with '{name}'."]
+    if not ahead_behind:
+        return [
+            f"Your branch and '{name}' refer to different commits.",
+            '  (use "git status --ahead-behind" for details)',
+        ]
     if not upstream.behind:
         return [
             f"Your branch is ahead of '{name}' by {_commits(upstream.ahead)}.",
@@ -257,7 +279,10 @@ def tracking_lines(upstream: Upstream) -> list[str]:
 
 
 def short_format(
-    rows: list[StatusEntry], header: str | None, fully: bool = True
+    rows: list[StatusEntry],
+    header: str | None,
+    fully: bool = True,
+    nul: bool = False,
 ) -> str:
     """The whole of ``--short`` / ``--porcelain`` output.
 
@@ -266,10 +291,12 @@ def short_format(
         header (str | None): the ``## `` line, or None without
             ``--branch``.
         fully (bool): ``core.quotePath``.
+        nul (bool): the raw ``-z`` form.
     """
     lines = [] if header is None else [header]
-    lines.extend(short_line(row, fully) for row in rows)
-    return "".join(f"{line}\n" for line in lines)
+    lines.extend(short_line(row, fully, nul) for row in rows)
+    end = "\0" if nul else "\n"
+    return "".join(f"{line}{end}" for line in lines)
 
 
 def _section(
@@ -419,6 +446,7 @@ def long_format(
     hide_untracked: bool,
     fully: bool = True,
     upstream: Upstream | None = None,
+    ahead_behind: bool = True,
 ) -> str:
     """The default, human-readable status report.
 
@@ -432,6 +460,7 @@ def long_format(
         hide_untracked (bool): whether ``-uno`` suppressed the scan.
         fully (bool): ``core.quotePath``.
         upstream (Upstream | None): the branch's upstream, if any.
+        ahead_behind (bool): count the commits, or only say they differ.
     """
     staged = _staged_entries(rows, fully)
     unmerged = _unmerged_entries(rows, fully)
@@ -439,7 +468,7 @@ def long_format(
     untracked = _untracked_entries(rows, fully)
     lines = [f"{ON_BRANCH}{branch}" if branch is not None else detached]
     if upstream is not None:
-        lines.extend([*tracking_lines(upstream), ""])
+        lines.extend([*tracking_lines(upstream, ahead_behind), ""])
     if no_commits:
         lines.extend(["", NO_COMMITS, ""])
     if merging:

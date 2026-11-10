@@ -44,6 +44,11 @@ export interface RepoLocation {
   readonly mountRoot: PathSpec
   /** The session's files, whose hides the repository's entries are shown under. */
   readonly vfs?: Files | null
+  /**
+   * What `-c` and `--config-env` set, dotted key then value, null for a bare
+   * name; read after every config file.
+   */
+  readonly overrides?: readonly (readonly [string, string | null])[]
 }
 
 /** What HEAD points at: a branch, some other ref, or a raw commit. */

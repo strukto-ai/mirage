@@ -490,8 +490,12 @@ export const GIT_SYNOPSES: ReadonlyMap<string, readonly string[]> = new Map([
   [
     '',
     [
-      'git [-v | --version] [--help] [-C <path>] [--git-dir=<path>]\n' +
-        '           [--work-tree=<path>] <command> [<args>]',
+      'git [-v | --version] [--help] [-C <path>] [-c <name>=<value>]\n' +
+        '           [-p | --paginate | -P | --no-pager] [--no-replace-objects]' +
+        ' [--no-lazy-fetch]\n' +
+        '           [--no-optional-locks] [--no-advice] [--git-dir=<path>]\n' +
+        '           [--work-tree=<path>] [--config-env=<name>=<envvar>]\n' +
+        '           <command> [<args>]',
     ],
   ],
   ['add', ['git add [<options>] [--] <pathspec>...']],
@@ -528,9 +532,14 @@ export const GIT_SYNOPSES: ReadonlyMap<string, readonly string[]> = new Map([
   [
     'config',
     [
-      'git config [--global] [--show-origin] (-l | --list)',
-      'git config [--global] [--show-origin] [--get] <name>',
-      'git config [--global] [--show-origin] --get-regexp <name-regex>',
+      'git config list [<file-option>] [<display-option>]',
+      'git config get [<file-option>] [<display-option>] [--all] [--regexp]' +
+        ' [--value=<value>] [--fixed-value] [--default=<default>] <name>',
+      'git config [<file-option>] [<display-option>] (-l | --list)',
+      'git config [<file-option>] [<display-option>] [--get | --get-all]' +
+        ' <name> [<value-pattern>]',
+      'git config [<file-option>] [<display-option>] --get-regexp' +
+        ' <name-regex> [<value-pattern>]',
     ],
   ],
   [
@@ -543,6 +552,34 @@ export const GIT_SYNOPSES: ReadonlyMap<string, readonly string[]> = new Map([
     ],
   ],
   ['diff-tree', ['git diff-tree [<options>] <tree-ish> [<path>...]']],
+  ['diff-files', ['git diff-files [-q] [<common-diff-options>] [<path>...]']],
+  ['diff-index', ['git diff-index [-m] [--cached] [<common-diff-options>] <tree-ish> [<path>...]']],
+  [
+    'ls-remote',
+    [
+      'git ls-remote [--branches] [--tags] [--refs] [--upload-pack=<exec>]',
+      '              [-q | --quiet] [--exit-code] [--get-url] [--sort=<key>]',
+      '              [--symref] [<repository> [<patterns>...]]',
+    ],
+  ],
+  [
+    'check-ignore',
+    ['git check-ignore [<options>] <pathname>...', 'git check-ignore [<options>] --stdin'],
+  ],
+  [
+    'check-ref-format',
+    [
+      'git check-ref-format [--normalize] [<options>] <refname>',
+      'git check-ref-format --branch <branchname-shorthand>',
+    ],
+  ],
+  [
+    'describe',
+    [
+      'git describe [--all] [--tags] [--abbrev=<n>] [<commit-ish>...]',
+      'git describe [--all] [--tags] [--abbrev=<n>] --dirty[=<mark>]',
+    ],
+  ],
   ['fetch', ['git fetch [<options>] [<repository> [<refspec>...]]']],
   [
     'for-each-ref',

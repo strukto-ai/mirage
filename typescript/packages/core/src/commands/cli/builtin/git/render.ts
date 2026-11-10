@@ -151,7 +151,11 @@ function mustQuote(byte: number, fully: boolean): boolean {
 }
 
 /** One row of `--short` / `--porcelain` output. */
-function shortLine(entry: StatusEntry, fully: boolean): string {
+function shortLine(entry: StatusEntry, fully: boolean, nul: boolean): string {
+  if (nul) {
+    const names = entry.original === null ? entry.path : `${entry.path}\0${entry.original}`
+    return `${entry.indexStatus}${entry.treeStatus} ${names}`
+  }
   let path = quotePath(entry.path, true, fully)
   if (entry.original !== null) path = `${quotePath(entry.original, true, fully)} -> ${path}`
   return `${entry.indexStatus}${entry.treeStatus} ${path}`
@@ -167,13 +171,17 @@ export function branchLine(
   branch: string | null,
   noCommits: boolean,
   upstream: Upstream | null = null,
+  aheadBehind = true,
 ): string {
   if (branch === null) return `${BRANCH_MARK}HEAD (no branch)`
   if (noCommits) return `${BRANCH_MARK}${NO_COMMITS_BRANCH}${branch}`
   if (upstream === null) return `${BRANCH_MARK}${branch}`
   const counts = upstream.gone ? ['gone'] : []
-  if (upstream.ahead) counts.push(`ahead ${String(upstream.ahead)}`)
-  if (upstream.behind) counts.push(`behind ${String(upstream.behind)}`)
+  if (!aheadBehind && (upstream.ahead || upstream.behind)) counts.push('different')
+  else {
+    if (upstream.ahead) counts.push(`ahead ${String(upstream.ahead)}`)
+    if (upstream.behind) counts.push(`behind ${String(upstream.behind)}`)
+  }
   const shown = counts.length ? ` [${counts.join(', ')}]` : ''
   return `${BRANCH_MARK}${branch}...${upstream.label}${shown}`
 }
@@ -187,7 +195,7 @@ function commits(count: number): string {
  *
  * Pinned against git 2.47.3 and 2.50.1.
  */
-export function trackingLines(upstream: Upstream): string[] {
+export function trackingLines(upstream: Upstream, aheadBehind = true): string[] {
   const name = upstream.label
   if (upstream.gone)
     return [
@@ -195,6 +203,11 @@ export function trackingLines(upstream: Upstream): string[] {
       '  (use "git branch --unset-upstream" to fixup)',
     ]
   if (!upstream.ahead && !upstream.behind) return [`Your branch is up to date with '${name}'.`]
+  if (!aheadBehind)
+    return [
+      `Your branch and '${name}' refer to different commits.`,
+      '  (use "git status --ahead-behind" for details)',
+    ]
   if (!upstream.behind)
     return [
       `Your branch is ahead of '${name}' by ${commits(upstream.ahead)}.`,
@@ -217,10 +230,12 @@ export function shortFormat(
   rows: readonly StatusEntry[],
   header: string | null,
   fully = true,
+  nul = false,
 ): string {
   const lines = header === null ? [] : [header]
-  for (const item of rows.map((row) => shortLine(row, fully))) lines.push(item)
-  return lines.map((line) => `${line}\n`).join('')
+  for (const item of rows.map((row) => shortLine(row, fully, nul))) lines.push(item)
+  const end = nul ? '\0' : '\n'
+  return lines.map((line) => `${line}${end}`).join('')
 }
 
 /** One block of the long format, or nothing when it has no entries. */
@@ -321,13 +336,14 @@ export function longFormat(
   hideUntracked: boolean,
   fully = true,
   upstream: Upstream | null = null,
+  aheadBehind = true,
 ): string {
   const staged = stagedEntries(rows, fully)
   const unmerged = unmergedEntries(rows, fully)
   const work = workEntries(rows, fully)
   const untracked = untrackedEntries(rows, fully)
   const lines: string[] = [branch !== null ? `${ON_BRANCH}${branch}` : detached]
-  if (upstream !== null) lines.push(...trackingLines(upstream), '')
+  if (upstream !== null) lines.push(...trackingLines(upstream, aheadBehind), '')
   if (noCommits) lines.push('', NO_COMMITS, '')
   if (merging) {
     lines.push(...(unmerged.length > 0 ? CONFLICT_HEADER : RESOLVED_HEADER), '')

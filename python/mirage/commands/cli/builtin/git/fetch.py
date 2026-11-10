@@ -21,13 +21,13 @@ from dulwich.refs import Ref
 from dulwich.repo import BaseRepo
 
 from mirage.accessor.base import Accessor
+from mirage.commands.cli.builtin.git.config import global_sources
 from mirage.commands.cli.builtin.git.discover import is_bare
 from mirage.commands.cli.builtin.git.errors import (
     FetchHeadReadOnlyError,
     GitError,
     MissingRepositoryError,
 )
-from mirage.commands.cli.builtin.git.inspect import global_sources
 from mirage.commands.cli.builtin.git.io import write_file
 from mirage.commands.cli.builtin.git.objects import abbrev_for, store_pack
 from mirage.commands.cli.builtin.git.reflog import (

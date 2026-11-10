@@ -22,7 +22,9 @@ import {
 } from './errors.ts'
 import { readIndex } from './index_file.ts'
 import { exists, isLink, readOptional } from './io.ts'
-import { pathspecPatterns, pathspecSelects, repoRelative } from './pathspec.ts'
+import { GITIGNORE, IgnoreStack } from './ignore.ts'
+import { pathspecPatterns, pathspecSelects, repoRelative, visibleEntries } from './pathspec.ts'
+import { UNTRACKED_ALL, scan } from './worktree.ts'
 import { quotePath, relativePath } from './render.ts'
 import { EXECUTABLE, EXECUTABLE_MODE, REGULAR, REGULAR_MODE } from './constants.ts'
 import { blobData } from './patch.ts'
@@ -48,6 +50,11 @@ interface GrepFlags {
   readonly nul: boolean
   readonly binary: string
   readonly utf8: boolean
+  readonly before: number
+  readonly after: number
+  readonly heading: boolean
+  readonly between: boolean
+  readonly limit: number
 }
 
 // A line test for one pattern; under -w only a match that consumes something
@@ -105,6 +112,7 @@ function parseFlags(
   for (const name of fl.typedOrder('h', 'H')) filename = name === 'H'
   let binary = 'binary'
   for (const name of fl.typedOrder('text', 'args_I')) binary = name === 'text' ? 'text' : 'skip'
+  const around = fl.asInt('context', 0)
   return {
     patterns: compiled,
     invert: fl.asBool('invert_match'),
@@ -116,6 +124,11 @@ function parseFlags(
     nul: fl.asBool('null'),
     binary,
     utf8,
+    before: Math.max(fl.asInt('before_context', around), 0),
+    after: Math.max(fl.asInt('after_context', around), 0),
+    heading: fl.asBool('heading'),
+    between: fl.asBool('break'),
+    limit: fl.asInt('max_count', -1),
   }
 }
 
@@ -133,6 +146,7 @@ async function searched(
   const selected: [number, string][] = []
   const budget = new YieldBudget(signal)
   for (const [index, line] of lines.entries()) {
+    if (selected.length === flags.limit) break
     await budget.run()
     let hit = false
     for (const matches of flags.patterns) {
@@ -151,16 +165,33 @@ async function searched(
   const prefix = flags.filename ? label + sep : ''
   if (flags.count) return [encodeText(prefix + String(selected.length) + '\n'), true]
   if (binary) return [encodeText(`Binary file ${label} matches\n`), true]
-  return [
-    concat(
-      selected.flatMap(([lineNumber, line]) => [
-        encodeText(prefix + (flags.numbers ? String(lineNumber) + sep : '')),
-        fromByteView(line, flags.utf8),
-        encodeText('\n'),
-      ]),
-    ),
-    true,
+  const named = flags.filename && !flags.heading
+  const contextSep = flags.nul ? '\0' : '-'
+  const row = (lineNumber: number, text: string, mark: string): Uint8Array[] => [
+    encodeText((named ? label + mark : '') + (flags.numbers ? String(lineNumber) + mark : '')),
+    fromByteView(text, flags.utf8),
+    encodeText('\n'),
   ]
+  const chosen = new Set(selected.map(([lineNumber]) => lineNumber))
+  const rows: Uint8Array[] = flags.filename && flags.heading ? [encodeText(`${label}\n`)] : []
+  let last = 0
+  let openedGroup = false
+  for (const [lineNumber, line] of selected) {
+    const first = Math.max(lineNumber - flags.before, last + 1)
+    if ((flags.before > 0 || flags.after > 0) && openedGroup && first > last + 1)
+      rows.push(encodeText('--\n'))
+    for (let above = first; above < lineNumber; above += 1)
+      rows.push(...row(above, lines[above - 1] ?? '', contextSep))
+    rows.push(...row(lineNumber, line, sep))
+    openedGroup = true
+    last = lineNumber
+    for (let below = lineNumber + 1; below <= lineNumber + flags.after; below += 1) {
+      if (below > lines.length || chosen.has(below)) break
+      rows.push(...row(below, lines[below - 1] ?? '', contextSep))
+      last = below
+    }
+  }
+  return [concat(rows), true]
 }
 
 /**
@@ -209,6 +240,15 @@ export async function grep(
   const start = startPoint(fl).virtual
   const prefix = repoRelative(repo.location, start, '.')
   const cached = fl.asBool('cached')
+  const untracked = fl.asBool('untracked')
+  if (untracked && cached)
+    throw new GitError("options '--untracked' and '--cached' cannot be used together")
+  if (!untracked && (fl.asBool('exclude_standard') || fl.asBool('no_exclude_standard')))
+    throw new GitError('--[no-]exclude-standard cannot be used for tracked contents')
+  if (untracked) {
+    paths = [...words, ...paths]
+    words = []
+  }
   const sources: [string, Map<string, TreeEntry>][] = []
   for (const [index, word] of words.entries()) {
     if (word.startsWith('-'))
@@ -252,11 +292,33 @@ export async function grep(
         }
       }
     }
-    sources.push(['', shownEntries(repo, entries)])
+    const shown = shownEntries(repo, entries)
+    if (untracked) {
+      const tracked = new Set([
+        ...visibleEntries(repo.location, state.entries).keys(),
+        ...visibleEntries(repo.location, state.conflicts).keys(),
+      ])
+      const keepIgnored =
+        fl.typedOrder('exclude_standard', 'no_exclude_standard').at(-1) === 'no_exclude_standard'
+      const walked = await scan(
+        requireVfs(ctx),
+        repo.location,
+        tracked,
+        UNTRACKED_ALL,
+        false,
+        null,
+        keepIgnored ? new IgnoreStack() : null,
+        keepIgnored ? null : GITIGNORE,
+      )
+      for (const name of walked.untracked) shown.set(name, { mode: REGULAR_MODE, oid: '' })
+    }
+    sources.push(['', shown])
   }
   const mounts = mountsOf(ctx)
   const out: Uint8Array[] = []
   let found = false
+  let printedAny = false
+  const fullName = fl.asBool('full_name')
   const read = new Map<string, number>()
   for (const [revision, entries] of sources) {
     for (const [path, entry] of [...entries].sort(([a], [b]) =>
@@ -299,12 +361,17 @@ export async function grep(
         data = await readOptional(repo.vfs, target)
         if (data === null) continue
       }
-      let label = relativePath(path || revision, prefix)
+      let label = fullName ? path || revision : relativePath(path || revision, prefix)
       if (!flags.nul) label = quotePath(label, false, fully)
       if (revision && path) label = revision + ':' + label
       const [rendered, hit] = await searched(data, label, flags, ctx.signal)
       found ||= hit
       if (hit && flags.quiet) return [null, new IOResult()]
+      if (rendered.length > 0 && printedAny && !flags.listing && !flags.count) {
+        if (flags.between) out.push(encodeText('\n'))
+        else if (flags.before > 0 || flags.after > 0) out.push(encodeText('--\n'))
+      }
+      printedAny ||= rendered.length > 0
       out.push(rendered)
     }
   }

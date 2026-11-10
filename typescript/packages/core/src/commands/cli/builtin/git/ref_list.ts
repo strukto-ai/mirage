@@ -35,15 +35,13 @@ import {
   BRANCH_PREFIX,
   HEAD_FILE,
   loadRefs,
-  mapped,
   MAX_SYMREF_DEPTH,
-  parseRefspec,
   REMOTE_PREFIX,
   SYMREF_PREFIX,
   TAG_PREFIX,
 } from './refs.ts'
 import { DETACHED_AT, DETACHED_FROM, NO_BRANCH } from './render.ts'
-import { refsNamed } from './revparse.ts'
+import { refsNamed, trackingRef } from './revparse.ts'
 import { commitFacts, idsUnder, objectType, rawObject, repoArgs, type Repo } from './repo.ts'
 import { guarded, shownRaw, visibleObject } from './seen.ts'
 import {
@@ -55,7 +53,6 @@ import {
   type RefItem,
   type RefObject,
   type RefSortKey,
-  type RefUpstream,
 } from './types.ts'
 import { gitBool } from './util.ts'
 
@@ -187,6 +184,12 @@ const OBJECT_HEADER = 'object '
  * read off each tag's `object` line; null when one names an object the
  * repository lacks.
  */
+/** An object's type and bytes; a tree's list only what the session sees there. */
+export async function refObject(repo: Repo, oid: string): Promise<RefObject> {
+  const obj = await rawObject(repo, oid)
+  return obj.type === 'tree' && guarded(repo) ? { ...obj, raw: await shownRaw(repo, obj) } : obj
+}
+
 async function peeled(repo: Repo, obj: RefObject): Promise<RefObject | null> {
   let shown = obj
   const seen = new Set([obj.oid])
@@ -246,10 +249,7 @@ export async function listedRefs(
       worktree: '',
     }
     if (objects) {
-      let obj = await rawObject(repo, oid)
-      // A tree's bytes name its entries, so a ref to one lists only those the
-      // session sees there.
-      if (obj.type === 'tree' && guarded(repo)) obj = { ...obj, raw: await shownRaw(repo, obj) }
+      const obj = await refObject(repo, oid)
       item = {
         ...item,
         obj,
@@ -259,32 +259,6 @@ export async function listedRefs(
     items.push(item)
   }
   return [items, errors.join('')]
-}
-
-/**
- * The ref a branch's upstream lands in.
- * `branch.<name>.merge` is mapped through the remote's fetch refspecs; a branch
- * following a remote with none that map it has no upstream at all, and one
- * following `.` follows a local ref.
- */
-export async function trackingRef(
-  repo: Repo,
-  branch: string,
-  known: ReadonlySet<string>,
-): Promise<RefUpstream | null> {
-  const values = (path: string): Promise<string[]> => configValues(repo.vfs, repo.location, path)
-  const remote = (await values(`branch.${branch}.remote`)).at(-1)
-  const merge = (await values(`branch.${branch}.merge`))[0]
-  if (remote === undefined || merge === undefined) return null
-  const up = { remote, merge, ahead: 0, behind: 0, gone: false }
-  for (const text of await values(`remote.${remote}.fetch`)) {
-    const spec = parseRefspec(text)
-    if (spec.src.startsWith('^')) continue
-    const dst = mapped(spec, merge)
-    if (dst) return { ...up, ref: dst }
-  }
-  if (remote !== '.') return null
-  return { ...up, ref: refsNamed(known, merge)[0] ?? merge }
 }
 
 /** The commits a walk from one tip reaches. */

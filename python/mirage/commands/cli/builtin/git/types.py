@@ -70,6 +70,9 @@ class RepoLocation:
             bounded the discovery walk.
         vfs (Files | None): the session's files, whose hides the
             repository's entries are shown under.
+        overrides (tuple[tuple[str, str | None], ...]): what ``-c`` and
+            ``--config-env`` set, dotted key then value, None for a
+            bare name; read after every config file.
     """
 
     gitdir: PathSpec
@@ -77,6 +80,7 @@ class RepoLocation:
     worktree: PathSpec
     mount_root: PathSpec
     vfs: "Files | None" = None
+    overrides: tuple[tuple[str, str | None], ...] = ()
 
 
 # git's refusal for a verb a read-only mount turned down, built from the

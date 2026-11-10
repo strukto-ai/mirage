@@ -64,16 +64,17 @@ export async function filePatch(
   count = HUNK_CONTEXT,
   functionContext = false,
   forceText = false,
+  prefixes: readonly [string, string] = ['a/', 'b/'],
 ): Promise<string> {
   if (before && after && before.mode.slice(0, 3) !== after.mode.slice(0, 3)) {
-    const rest = [score, width, fully, count, functionContext, forceText] as const
+    const rest = [score, width, fully, count, functionContext, forceText, prefixes] as const
     return (
       (await filePatch(repo, path, oldPath, before, null, ...rest)) +
       (await filePatch(repo, path, oldPath, null, after, ...rest))
     )
   }
-  const source = quotePath(`a/${oldPath}`, false, fully),
-    target = quotePath(`b/${path}`, false, fully)
+  const source = quotePath(`${prefixes[0]}${oldPath}`, false, fully),
+    target = quotePath(`${prefixes[1]}${path}`, false, fully)
   const head = [`diff --git ${source} ${target}`]
   if (!before && after) head.push(`new file mode ${after.mode}`)
   else if (!after && before) head.push(`deleted file mode ${before.mode}`)

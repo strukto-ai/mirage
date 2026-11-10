@@ -16,6 +16,7 @@ import type { PathSpec } from '../../../../types.ts'
 import { readOptional } from './io.ts'
 
 import type { Files } from '../../../../workspace/files.ts'
+import type { RepoLocation } from './types.ts'
 
 export const GITIGNORE = '.gitignore'
 const INFO_EXCLUDE = 'info/exclude'
@@ -23,7 +24,7 @@ const INFO_EXCLUDE = 'info/exclude'
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
 /** One parsed `.gitignore` line. */
-interface Rule {
+export interface Rule {
   /** Matches the named path itself. */
   readonly self: RegExp
   /** Matches anything below the named path, whatever type it is. */
@@ -32,6 +33,19 @@ interface Rule {
   readonly negated: boolean
   /** True for a trailing `/`, which can only match a directory itself. */
   readonly dirOnly: boolean
+  /** The line's number, from one. */
+  readonly line: number
+  /** The pattern as the file spells it. */
+  readonly text: string
+}
+
+/** One ignore file's rules and where they came from. */
+export interface IgnoreFile {
+  /** The directory the rules govern, repository-relative, empty at the root. */
+  readonly prefix: string
+  /** The file's name as `check-ignore` reports it. */
+  readonly source: string
+  readonly rules: readonly Rule[]
 }
 
 /**
@@ -98,13 +112,14 @@ function translate(pattern: string, anchored: boolean): string {
 }
 
 /** Parse one `.gitignore` file's contents into rules, in file order. */
-function parseRules(text: string): Rule[] {
+export function parseRules(text: string): Rule[] {
   const rules: Rule[] = []
-  for (const raw of text.split('\n')) {
+  for (const [index, raw] of text.split('\n').entries()) {
     // Trailing whitespace is not part of a pattern unless it was escaped, and a
     // blank or commented line is not a pattern at all.
     let line = raw.replace(/\r$/, '').replace(/(?<!\\)\s+$/, '')
     if (line === '' || line.startsWith('#')) continue
+    const spelled = line
     const negated = line.startsWith('!')
     if (negated) line = line.slice(1)
     const dirOnly = line.endsWith('/')
@@ -123,6 +138,8 @@ function parseRules(text: string): Rule[] {
       under: new RegExp(`${body}/`),
       negated,
       dirOnly,
+      line: index + 1,
+      text: spelled,
     })
   }
   return rules
@@ -154,6 +171,27 @@ function verdict(rules: readonly Rule[], path: string, isDir: boolean): boolean 
  */
 function relative(prefix: string, path: string): string {
   return prefix === '' ? path : path.slice(prefix.length + 1)
+}
+
+/**
+ * The rule that decides a path: the deepest file's last matching line.
+ *
+ * @param files the files governing the path's directory, innermost last
+ * @param path repository-relative path
+ * @param isDir whether the path names a directory
+ */
+export function lastMatch(
+  files: readonly IgnoreFile[],
+  path: string,
+  isDir: boolean,
+): [IgnoreFile, Rule] | null {
+  for (const found of [...files].reverse()) {
+    const own = relative(found.prefix, path)
+    for (const rule of [...found.rules].reverse()) {
+      if (rule.self.test(own) && (!rule.dirOnly || isDir)) return [found, rule]
+    }
+  }
+  return null
 }
 
 /**
@@ -230,4 +268,22 @@ export async function loadIgnores(
   const root = await readOptional(vfs, worktree.join(GITIGNORE))
   if (root !== null) stack = stack.push('', root)
   return stack
+}
+
+/** The repository's two rule files, as `check-ignore` reports them. */
+export async function loadIgnoreFiles(vfs: Files, location: RepoLocation): Promise<IgnoreFile[]> {
+  const files: IgnoreFile[] = []
+  const exclude = location.commondir.join(INFO_EXCLUDE)
+  const privateRules = await readOptional(vfs, exclude)
+  if (privateRules !== null) {
+    const top = `${location.worktree.virtual.replace(/\/$/, '')}/`
+    const source = exclude.virtual.startsWith(top)
+      ? exclude.virtual.slice(top.length)
+      : exclude.virtual
+    files.push({ prefix: '', source, rules: parseRules(DEC.decode(privateRules)) })
+  }
+  const root = await readOptional(vfs, location.worktree.join(GITIGNORE))
+  if (root !== null)
+    files.push({ prefix: '', source: GITIGNORE, rules: parseRules(DEC.decode(root)) })
+  return files
 }

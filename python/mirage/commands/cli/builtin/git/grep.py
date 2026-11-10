@@ -19,6 +19,7 @@ from mirage.commands.cli.builtin.git.errors import (
     PatternCompileError,
     UsageError,
 )
+from mirage.commands.cli.builtin.git.ignore import GITIGNORE, IgnoreStack
 from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.io import (
     exists,
@@ -27,9 +28,11 @@ from mirage.commands.cli.builtin.git.io import (
 )
 from mirage.commands.cli.builtin.git.patch import blob_data
 from mirage.commands.cli.builtin.git.pathspec import (
+    decoded,
     pathspec_patterns,
     pathspec_selects,
     repo_relative,
+    visible_entries,
 )
 from mirage.commands.cli.builtin.git.render import quote_path, relative_path
 from mirage.commands.cli.builtin.git.repo import config_bool
@@ -48,6 +51,7 @@ from mirage.commands.cli.builtin.git.util import (
     start_point,
     verb_usage,
 )
+from mirage.commands.cli.builtin.git.worktree import UNTRACKED_ALL, scan
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -81,6 +85,11 @@ class GrepFlags:
         nul (bool): terminate filename and number fields with NUL.
         binary (str): binary, text, or skip.
         utf8 (bool): match characters under a UTF-8 locale.
+        before (int): context lines above a match.
+        after (int): context lines below a match.
+        heading (bool): name a file once, on its own line.
+        between (bool): print a blank line between files.
+        limit (int): most matches a file reports, -1 for no limit.
     """
 
     patterns: tuple[Callable[[str], Awaitable[bool]], ...]
@@ -93,6 +102,11 @@ class GrepFlags:
     nul: bool
     binary: str
     utf8: bool
+    before: int = 0
+    after: int = 0
+    heading: bool = False
+    between: bool = False
+    limit: int = -1
 
 
 def _line_matcher(
@@ -169,6 +183,7 @@ def parse_flags(
     binary = "binary"
     for name in fl.typed_order("text", "args_I"):
         binary = "text" if name == "text" else "skip"
+    around = fl.as_int("context", 0)
     return GrepFlags(
         tuple(compiled),
         fl.as_bool("invert_match"),
@@ -180,6 +195,11 @@ def parse_flags(
         fl.as_bool("null"),
         binary,
         utf8,
+        max(fl.as_int("before_context", around), 0),
+        max(fl.as_int("after_context", around), 0),
+        fl.as_bool("heading"),
+        fl.as_bool("break"),
+        fl.as_int("max_count", -1),
     )
 
 
@@ -199,9 +219,11 @@ async def searched(
     lines = byte_view(data, flags.utf8).split("\n")
     if lines[-1] == "":
         lines.pop()
-    selected = []
+    selected: list[tuple[int, str]] = []
     budget = YieldBudget()
     for number, line in enumerate(lines, 1):
+        if len(selected) == flags.limit:
+            break
         await budget.run()
         hit = False
         for matches in flags.patterns:
@@ -218,18 +240,43 @@ async def searched(
     sep = b"\0" if flags.nul else b":"
     if flags.listing:
         return name + (b"\0" if flags.nul else b"\n"), True
+    named = flags.filename and not flags.heading
     prefix = name + sep if flags.filename else b""
     if flags.count:
         return prefix + str(len(selected)).encode() + b"\n", True
     if binary:
         return b"Binary file " + name + b" matches\n", True
-    return b"".join(
-        prefix
-        + (str(number).encode() + sep if flags.numbers else b"")
-        + from_byte_view(line, flags.utf8)
-        + b"\n"
-        for number, line in selected
-    ), True
+    context_sep = b"\0" if flags.nul else b"-"
+
+    def row(number: int, text: str, mark: bytes) -> bytes:
+        return (
+            (name + mark if named else b"")
+            + (str(number).encode() + mark if flags.numbers else b"")
+            + from_byte_view(text, flags.utf8)
+            + b"\n"
+        )
+
+    chosen = {number for number, _ in selected}
+    rows = [name + b"\n"] if flags.filename and flags.heading else []
+    last = 0
+    opened_group = False
+    for number, line in selected:
+        first = max(number - flags.before, last + 1)
+        if (flags.before or flags.after) and opened_group and first > last + 1:
+            rows.append(b"--\n")
+        rows.extend(
+            row(above, lines[above - 1], context_sep)
+            for above in range(first, number)
+        )
+        rows.append(row(number, line, sep))
+        opened_group = True
+        last = number
+        for below in range(number + 1, number + flags.after + 1):
+            if below > len(lines) or below in chosen:
+                break
+            rows.append(row(below, lines[below - 1], context_sep))
+            last = below
+    return b"".join(rows), True
 
 
 def search_entries(repo: BaseRepo, name: str) -> Tree:
@@ -286,6 +333,20 @@ async def grep(
     start = start_point(fl).virtual
     prefix = repo_relative(location, start, ".")
     cached = fl.as_bool("cached")
+    untracked = fl.as_bool("untracked")
+    if untracked and cached:
+        raise GitError(
+            "options '--untracked' and '--cached' cannot be used together"
+        )
+    if not untracked and (
+        fl.as_bool("exclude_standard") or fl.as_bool("no_exclude_standard")
+    ):
+        raise GitError(
+            "--[no-]exclude-standard cannot be used for tracked contents"
+        )
+    if untracked:
+        pathspecs = words + pathspecs
+        words = []
     sources: list[tuple[str, Tree]] = []
     for index, word in enumerate(words):
         if word.startswith("-"):
@@ -336,10 +397,30 @@ async def grep(
                     ):
                         entries[path] = (entry.mode, entry.sha)
                         break
-        sources.append(("", shown_entries(repo, entries)))
+        shown = shown_entries(repo, entries)
+        if untracked:
+            tracked = decoded(visible_entries(location, state.entries))
+            tracked |= decoded(visible_entries(location, state.conflicts))
+            keep_ignored = fl.typed_order(
+                "exclude_standard", "no_exclude_standard"
+            )[-1:] == ["no_exclude_standard"]
+            found = await scan(
+                ctx.vfs,
+                location,
+                tracked,
+                UNTRACKED_ALL,
+                False,
+                None,
+                IgnoreStack([]) if keep_ignored else None,
+                None if keep_ignored else GITIGNORE,
+            )
+            for name in found.untracked:
+                shown[name.encode("utf-8", "surrogateescape")] = (REGULAR, b"")
+        sources.append(("", shown))
     mounts = mounts_of(ctx)
     out: list[bytes] = []
-    found = False
+    matched = False
+    printed_any = False
     read: dict[str, int] = {}
     for revision, entries in sources:
         for path, (mode, oid) in sorted(entries.items()):
@@ -380,14 +461,30 @@ async def grep(
                 data = await read_optional(ctx.vfs, target)
                 if data is None:
                     continue
-            label = relative_path(relative or revision, prefix)
+            full_name = fl.as_bool("full_name")
+            label = (
+                relative or revision
+                if full_name
+                else relative_path(relative or revision, prefix)
+            )
             if not flags.nul:
                 label = quote_path(label, False, fully)
             if revision and relative:
                 label = revision + ":" + label
             rendered, hit = await searched(data, label, flags)
-            found = found or hit
+            matched = matched or hit
             if hit and flags.quiet:
                 return None, IOResult()
+            if (
+                rendered
+                and printed_any
+                and not flags.listing
+                and not flags.count
+            ):
+                if flags.between:
+                    out.append(b"\n")
+                elif flags.before or flags.after:
+                    out.append(b"--\n")
+            printed_any = printed_any or bool(rendered)
             out.append(rendered)
-    return b"".join(out), IOResult(exit_code=0 if found else 1)
+    return b"".join(out), IOResult(exit_code=0 if matched else 1)

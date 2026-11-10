@@ -1,5 +1,5 @@
 {
- "baseline": 1638,
+ "baseline": 1633,
  "modules": {
   "server/app": {
    "python_only": {
@@ -859,6 +859,16 @@
     "CONNECT_TIMEOUT": "httpx takes connect, write and pool timeouts of its own; fetch takes none, so TypeScript leaves them to the runtime's defaults.",
     "INFLATED": "Python's reply cap inflates a gzip or deflate body itself so it counts inflated bytes; fetch inflates every body before TypeScript's replyCap reads it.",
     "INFLATE_CHUNK": "Python's reply cap inflates a body in bounded steps with zlib; fetch inflates every body before TypeScript's replyCap reads it."
+   }
+  },
+  "commands/cli/builtin/git/ls_files": {
+   "typescript_only": {
+    "parentOf": "Python has posixpath.dirname; the runtime-neutral core has no path module."
+   }
+  },
+  "commands/cli/builtin/git/repo": {
+   "python_only": {
+    "_overrides_text": "dulwich reads config from one file's bytes, so command-line values join that text; isomorphic-git asks a hook for each key, and fs.ts answers there."
    }
   },
   "commands/cli/builtin/git/cat_file": {

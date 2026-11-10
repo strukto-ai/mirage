@@ -45,8 +45,6 @@ from mirage.commands.cli.builtin.git.refs import (
     REMOTE_PREFIX,
     SYMREF_PREFIX,
     TAG_PREFIX,
-    mapped,
-    parse_refspec,
 )
 from mirage.commands.cli.builtin.git.render import (
     DETACHED_AT,
@@ -54,7 +52,7 @@ from mirage.commands.cli.builtin.git.render import (
     NO_BRANCH,
 )
 from mirage.commands.cli.builtin.git.repo import Repo, config_bool
-from mirage.commands.cli.builtin.git.revparse import refs_named
+from mirage.commands.cli.builtin.git.revparse import refs_named, tracking_ref
 from mirage.commands.cli.builtin.git.seen import (
     guarded,
     shown_raw,
@@ -69,7 +67,6 @@ from mirage.commands.cli.builtin.git.types import (
     RefKind,
     RefObject,
     RefSortKey,
-    RefUpstream,
 )
 from mirage.commands.cli.builtin.git.util import git_bool
 from mirage.commands.spec.flag_view import FlagView
@@ -257,7 +254,7 @@ OBJECT_TYPES = {1: "commit", 2: "tree", 3: "blob", 4: "tag"}
 OBJECT_HEADER = b"object "
 
 
-def _object(repo: BaseRepo, oid: str) -> RefObject:
+def ref_object(repo: BaseRepo, oid: str) -> RefObject:
     """An object's type and bytes, read without parsing it, so an
     object git lists despite a malformed header lists here too.
 
@@ -293,7 +290,7 @@ def _peeled(repo: BaseRepo, obj: RefObject) -> RefObject | None:
         if target in seen or not visible_object(repo, target.encode()):
             return None
         seen.add(target)
-        shown = _object(repo, target)
+        shown = ref_object(repo, target)
     return shown
 
 
@@ -338,7 +335,7 @@ def listed_refs(
             continue
         item = RefItem(name=name, oid=oid, kind=ref_kind(name), symref=symref)
         if objects:
-            obj = _object(repo, oid)
+            obj = ref_object(repo, oid)
             item = replace(
                 item,
                 obj=obj,
@@ -380,39 +377,6 @@ def config_values(
     if not cfg.has_section(section):
         return []
     return [value for key, value in cfg.items(section) if key.lower() == name]
-
-
-def tracking_ref(
-    cfg: ConfigFile, branch: str, known: frozenset[str]
-) -> RefUpstream | None:
-    """The ref a branch's upstream lands in.
-
-    ``branch.<name>.merge`` is mapped through the remote's fetch
-    refspecs; a branch following a remote with none that map it has no
-    upstream at all, and one following ``.`` follows a local ref.
-
-    Args:
-        cfg (ConfigFile): the repository's config.
-        branch (str): the branch's short name.
-        known (frozenset[str]): every name that resolves, for ``.``.
-    """
-    section = (b"branch", branch.encode())
-    remotes = config_values(cfg, section, b"remote")
-    merges = config_values(cfg, section, b"merge")
-    if not remotes or not merges:
-        return None
-    remote, merged = remotes[-1].decode(), merges[0].decode()
-    for text in config_values(cfg, (b"remote", remote.encode()), b"fetch"):
-        spec = parse_refspec(text.decode())
-        if spec.src.startswith("^"):
-            continue
-        dst = mapped(spec, merged)
-        if dst:
-            return RefUpstream(ref=dst, remote=remote, merge=merged)
-    if remote != ".":
-        return None
-    found = next(iter(refs_named(known, merged)), merged)
-    return RefUpstream(ref=found, remote=remote, merge=merged)
 
 
 def reached(repo: BaseRepo, oid: ObjectID) -> set[bytes]:

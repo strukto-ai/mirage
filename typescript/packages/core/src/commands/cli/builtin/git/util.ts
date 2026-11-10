@@ -19,8 +19,12 @@ import { HEAD } from './constants.ts'
 import type { FlagView } from '../../../spec/flag_view.ts'
 import { IOResult } from '../../../../io/types.ts'
 import {
-  type GitError,
+  GitError,
   BadConfigValueError,
+  BadNumericConfigError,
+  ColorValueError,
+  CommandLineConfigError,
+  ConfigKeyError,
   NotAWorkTreeError,
   UnrecognizedArgumentError,
   UsageError,
@@ -42,7 +46,13 @@ const FALSE_WORDS = ['false', 'no', 'off', '']
 // fit an int.
 const INTEGER = /^[ \t\n\v\f\r]*([-+]?)(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)([kKmMgG]?)$/
 const UNIT_SHIFTS: Readonly<Record<string, number>> = { '': 0, k: 10, m: 20, g: 30 }
+// The options before the verb that set a config variable for one line, and the
+// others there that take a separate value.
+const CONFIG_OPTION = '-c'
+const CONFIG_ENV_OPTION = '--config-env'
+const VALUE_GLOBALS = ['-C', '--git-dir', '--work-tree']
 const INT_BITS = 31
+const COLOR_WORDS = ['always', 'auto', 'never']
 const VALUE_ESCAPES: Readonly<Record<string, string>> = {
   '\n': '\\n',
   '\t': '\\t',
@@ -343,6 +353,147 @@ export function gitBool(values: readonly string[], key: string, fallback: boolea
     answer = parsed
   }
   return answer
+}
+
+/**
+ * One row of a `--format` template, with `%(atom)`, `%%` and `%xNN`
+ * placeholders.
+ *
+ * @param template the template
+ * @param atoms each atom's text for this row
+ * @param verb the command, named in the refusal
+ * @throws GitError a placeholder the command does not have
+ */
+export function renderFormat(
+  template: string,
+  atoms: Readonly<Record<string, string>>,
+  verb: string,
+): string {
+  let out = ''
+  let at = 0
+  while (at < template.length) {
+    if (template[at] !== '%') {
+      out += template[at] ?? ''
+      at += 1
+    } else if (template.startsWith('%%', at)) {
+      out += '%'
+      at += 2
+    } else if (
+      template.startsWith('%x', at) &&
+      /^[0-9a-fA-F]{2}$/.test(template.slice(at + 2, at + 4))
+    ) {
+      out += String.fromCharCode(Number.parseInt(template.slice(at + 2, at + 4), 16))
+      at += 4
+    } else {
+      const end = template.indexOf(')', at)
+      const name = template.startsWith('%(', at) && end !== -1 ? template.slice(at + 2, end) : null
+      const value = name === null ? undefined : atoms[name]
+      if (value === undefined) throw new GitError(`bad ${verb} format: ${template.slice(at)}`)
+      out += value
+      at = end + 1
+    }
+  }
+  return out
+}
+
+/**
+ * Refuse a `--color` value git refuses; a good one changes nothing.
+ *
+ * @param fl the leaf's flags
+ */
+export function checkColor(fl: FlagView): void {
+  const when = fl.raw('color')
+  if (
+    typeof when === 'string' &&
+    !COLOR_WORDS.includes(when.toLowerCase()) &&
+    maybeBool(when) === null
+  )
+    throw new ColorValueError()
+}
+
+/**
+ * A config name as git keys it, section and name lowercased.
+ *
+ * @param key the name as typed
+ * @param error the refusal to raise for one that is not
+ *   `section[.subsection].name`
+ */
+export function parseConfigKey(
+  key: string,
+  error: new (message: string) => GitError = ConfigKeyError,
+): string {
+  const first = key.indexOf('.')
+  if (first === -1) throw new error(`key does not contain a section: ${key}`)
+  const last = key.lastIndexOf('.')
+  const section = key.slice(0, first)
+  const name = key.slice(last + 1)
+  if (name === '') throw new error(`key does not contain variable name: ${key}`)
+  if (!/^[A-Za-z0-9-]+$/.test(section) || !/^[A-Za-z][A-Za-z0-9-]*$/.test(name))
+    throw new error(`invalid key: ${key}`)
+  return `${section.toLowerCase()}${key.slice(first, last)}.${name.toLowerCase()}`
+}
+
+function assignment(text: string): readonly [string, string | null] {
+  const at = text.indexOf('=')
+  const name = at === -1 ? text : text.slice(0, at)
+  if (name === '') throw new CommandLineConfigError('empty config key')
+  return [parseConfigKey(name, CommandLineConfigError), at === -1 ? null : text.slice(at + 1)]
+}
+
+function fromEnv(
+  text: string,
+  env: Readonly<Record<string, string>>,
+): readonly [string, string | null] {
+  const at = text.lastIndexOf('=')
+  if (at === -1) throw new GitError(`invalid config format: ${text}`)
+  const name = text.slice(0, at)
+  const variable = text.slice(at + 1)
+  const value = env[variable]
+  if (value === undefined)
+    throw new GitError(`missing environment variable '${variable}' for configuration '${name}'`)
+  return [parseConfigKey(name, CommandLineConfigError), value]
+}
+
+/**
+ * What the words before the verb set with `-c` and `--config-env`. The two are
+ * one spec option, whose values alone cannot say which spelling each came from,
+ * so this reads the verbatim line. Only the words before the verb count: a
+ * later `-c` is the verb's own.
+ *
+ * @param ctx the line's context
+ */
+export function commandLineConfig(ctx: Context): readonly (readonly [string, string | null])[] {
+  const words = ctx.argv ?? []
+  const env = ctx.env ?? {}
+  const rows: (readonly [string, string | null])[] = []
+  let at = 0
+  while (at < words.length && (words[at] ?? '').startsWith('-')) {
+    const word = words[at] ?? ''
+    const next = words[at + 1]
+    if (word === CONFIG_OPTION && next !== undefined) {
+      rows.push(assignment(next))
+      at += 2
+    } else if (word === CONFIG_ENV_OPTION && next !== undefined) {
+      rows.push(fromEnv(next, env))
+      at += 2
+    } else if (word.startsWith(`${CONFIG_ENV_OPTION}=`)) {
+      rows.push(fromEnv(word.slice(CONFIG_ENV_OPTION.length + 1), env))
+      at += 1
+    } else at += VALUE_GLOBALS.includes(word) ? 2 : 1
+  }
+  return rows
+}
+
+/**
+ * An integer-typed config value, or git's refusal of it.
+ *
+ * @param value the value as spelled
+ * @param key the variable
+ */
+export function configInt(value: string, key: string): number {
+  const number = integer(value)
+  if (number !== null) return number
+  throw new BadNumericConfigError(value, key, INTEGER.test(value) ? 'out of range' : 'invalid unit')
 }
 
 /**

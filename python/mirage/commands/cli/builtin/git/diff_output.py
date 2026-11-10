@@ -15,9 +15,7 @@
 import stat
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from io import BytesIO
 
-from dulwich.config import ConfigFile
 from dulwich.objects import Commit, ObjectID, Tree
 from dulwich.repo import BaseRepo
 
@@ -27,13 +25,13 @@ from mirage.commands.cli.builtin.git.constants import (
     TEMPLATE_KINDS,
     TERMINATED_KINDS,
 )
-from mirage.commands.cli.builtin.git.errors import GitError
+from mirage.commands.cli.builtin.git.errors import DiffFilterError, GitError
 from mirage.commands.cli.builtin.git.format import (
     CommitDisplay,
     Decorations,
+    abbrev_width,
     commit_header,
 )
-from mirage.commands.cli.builtin.git.io import read_optional
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.patch import (
     DEV_NULL,
@@ -46,6 +44,7 @@ from mirage.commands.cli.builtin.git.patch import (
 from mirage.commands.cli.builtin.git.pathspec import pathspec_selects
 from mirage.commands.cli.builtin.git.pickaxe import Pickaxe, matches
 from mirage.commands.cli.builtin.git.render import quote_path
+from mirage.commands.cli.builtin.git.repo import read_config
 from mirage.commands.cli.builtin.git.rows import (
     Delta,
     Side,
@@ -65,11 +64,13 @@ from mirage.commands.cli.builtin.git.summary import (
 )
 from mirage.commands.cli.builtin.git.tree import tree_entries
 from mirage.commands.cli.builtin.git.types import RepoLocation
+from mirage.commands.cli.builtin.git.util import maybe_bool, multivar
 from mirage.commands.spec.flag_view import FlagView
 from mirage.shell.bytes import encode_text
 from mirage.workspace.files import Files
 
 RENAME_SCORE = 50
+CHANGE_CLASSES = "ACDMRTUXB"
 # What a combined diff's mode line starts with; ``log --graph`` prints
 # that line with no graph in front of it.
 COMBINED_MODE = "mode "
@@ -97,6 +98,131 @@ class DiffFlags:
     quote_path_fully: bool = True
     pathspecs: tuple[str, ...] = ()
     pickaxe: Pickaxe | None = None
+    diff_filter: tuple[frozenset[str], bool] | None = None
+    prefixes: tuple[str, str] = ("a/", "b/")
+    index_width: int | None = None
+    raw_width: int | None = None
+    work_tree: bool = False
+    same_as_index: frozenset[bytes] = frozenset()
+
+
+def diff_filter_of(spelled: str | None) -> tuple[frozenset[str], bool] | None:
+    """A ``--diff-filter`` value as the classes it keeps.
+
+    Capitals keep a class and small letters drop one, so only small
+    letters start from every class. ``*`` keeps a whole comparison when
+    any of its paths matches.
+
+    Args:
+        spelled (str | None): the option's value.
+
+    Returns:
+        tuple[frozenset[str], bool] | None: the classes and the ``*``.
+
+    Raises:
+        DiffFilterError: a letter with no class.
+    """
+    if not spelled:
+        return None
+    letters = [char for char in spelled if char != "*"]
+    star = "*" in spelled
+    chosen: set[str] = (
+        set(CHANGE_CLASSES)
+        if letters and all(char.islower() for char in letters)
+        else set()
+    )
+    for char in letters:
+        if char.upper() not in CHANGE_CLASSES:
+            raise DiffFilterError(char, spelled)
+        if char.isupper():
+            chosen.add(char)
+        else:
+            chosen.discard(char.upper())
+    return frozenset(chosen), star
+
+
+def filtered(rows: list["Change"], flags: DiffFlags) -> list["Change"]:
+    """The changes ``--diff-filter`` keeps.
+
+    Args:
+        rows (list[Change]): the paired deltas.
+        flags (DiffFlags): the parsed invocation.
+    """
+    if flags.diff_filter is None:
+        return rows
+    chosen, star = flags.diff_filter
+    kept = [row for row in rows if row.status in chosen]
+    return (rows if kept else []) if star else kept
+
+
+def _prefixes_of(
+    fl: FlagView, config: dict[str, str | None]
+) -> tuple[str, str]:
+    """The two labels a patch's paths go under.
+
+    Options apply in the order typed, on top of what config says.
+
+    Args:
+        fl (FlagView): parsed flags.
+        config (dict[str, str | None]): ``diff.noprefix``,
+            ``diff.srcprefix`` and ``diff.dstprefix``.
+    """
+    source, target = "a/", "b/"
+    if config.get("noprefix") is not None and maybe_bool(
+        (config["noprefix"] or "").encode()
+    ):
+        source, target = "", ""
+    source = config.get("srcprefix") or source
+    target = config.get("dstprefix") or target
+    for name, value in fl.occurrences(
+        "no_prefix", "default_prefix", "src_prefix", "dst_prefix"
+    ):
+        if name == "no_prefix":
+            source, target = "", ""
+        elif name == "default_prefix":
+            source, target = "a/", "b/"
+        elif name == "src_prefix" and isinstance(value, str):
+            source = value
+        elif name == "dst_prefix" and isinstance(value, str):
+            target = value
+    return source, target
+
+
+async def prefix_config(
+    vfs: Files, location: RepoLocation
+) -> dict[str, str | None]:
+    """The ``diff`` variables that choose a patch's prefixes.
+
+    Args:
+        vfs (Files): the session's files.
+        location (RepoLocation): the discovered repository.
+    """
+    values: dict[str, str | None] = {}
+    cfg = await read_config(vfs, location)
+    for name in ("noprefix", "srcprefix", "dstprefix"):
+        found = multivar(cfg, (b"diff",), name.encode())
+        values[name] = found[-1].decode() if found else None
+    return values
+
+
+def similarity(spelled: str) -> int:
+    """A similarity option's value as a percentage.
+
+    Args:
+        spelled (str): ``50%``, or a fraction's digits as in ``-M5``.
+
+    Raises:
+        GitError: neither.
+    """
+    value = spelled.removesuffix("%")
+    try:
+        return (
+            int(value)
+            if spelled.endswith("%")
+            else int(float("0." + value) * 100)
+        )
+    except ValueError as exc:
+        raise GitError(f"invalid similarity index {spelled}") from exc
 
 
 def parse_diff_flags(
@@ -107,6 +233,7 @@ def parse_diff_flags(
     porcelain: bool = True,
     default_renames: bool = True,
     quote_path_fully: bool = True,
+    prefix_settings: dict[str, str | None] | None = None,
 ) -> DiffFlags:
     modes = [
         fl.as_bool(key)
@@ -125,15 +252,7 @@ def parse_diff_flags(
     if rename is not None and rename is not False:
         threshold = RENAME_SCORE
         if isinstance(rename, str) and rename:
-            value = rename.removesuffix("%")
-            try:
-                threshold = (
-                    int(value)
-                    if rename.endswith("%")
-                    else int(float("0." + value) * 100)
-                )
-            except ValueError as exc:
-                raise GitError(f"invalid similarity index {rename}") from exc
+            threshold = similarity(rename)
     elif porcelain and default_renames:
         threshold = RENAME_SCORE
     if fl.as_bool("no_renames"):
@@ -179,7 +298,25 @@ def parse_diff_flags(
             and not any(modes)
         )
     )
+    abbrev_wanted = fl.raw("abbrev")
+    full_index = fl.as_bool("full_index")
     return DiffFlags(
+        diff_filter=diff_filter_of(fl.as_str("diff_filter")),
+        prefixes=_prefixes_of(fl, prefix_settings or {}),
+        index_width=(
+            OID_HEX
+            if full_index
+            else None
+            if not isinstance(abbrev_wanted, str)
+            else abbrev_width(abbrev_wanted, OID_HEX)
+        ),
+        raw_width=(
+            OID_HEX
+            if fl.as_bool("no_abbrev")
+            else None
+            if not isinstance(abbrev_wanted, str)
+            else abbrev_width(abbrev_wanted, OID_HEX)
+        ),
         function_context=fl.as_bool("function_context"),
         force_text=fl.as_bool("text"),
         context=HUNK_CONTEXT if context is None else context,
@@ -194,7 +331,7 @@ def parse_diff_flags(
         renames=threshold,
         merge=merge,
         raw=modes[6] or not porcelain and not any(modes) and not patch,
-        abbrev=porcelain,
+        abbrev=porcelain or abbrev_wanted is True,
         quote_path_fully=quote_path_fully,
     )
 
@@ -292,6 +429,10 @@ def rename_name(old: str, new: str, fully: bool = True) -> str:
     )
 
 
+def _shows_new_id(row: Change, flags: DiffFlags) -> bool:
+    return not flags.work_tree or row.path in flags.same_as_index
+
+
 def render_changes(
     repo: BaseRepo, rows: list[Change], flags: DiffFlags
 ) -> bytes:
@@ -306,9 +447,16 @@ def render_changes(
         rows (list[Change]): the paired tree deltas.
         flags (DiffFlags): the parsed invocation.
     """
+    rows = filtered(rows, flags)
     if flags.no_patch:
         return b""
-    width = abbrev_for(repo) if flags.abbrev else OID_HEX
+    width = (
+        flags.raw_width
+        if flags.raw_width is not None
+        else abbrev_for(repo)
+        if flags.abbrev
+        else OID_HEX
+    )
     fully = flags.quote_path_fully
     lines: list[str] = []
     stats: list[FileStat] = []
@@ -334,7 +482,8 @@ def render_changes(
         if flags.raw:
             lines.append(
                 f":{_mode(row.old):06o} {_mode(row.new):06o} "
-                f"{short_oid(row.old, width)} {short_oid(row.new, width)} "
+                f"{short_oid(row.old, width)} "
+                f"{short_oid(row.new if _shows_new_id(row, flags) else None, width)} "
                 f"{status}\t{paths}"
             )
         display = (
@@ -360,11 +509,14 @@ def render_changes(
                     row.old,
                     row.new,
                     row.score if row.status == "R" else None,
-                    abbrev_for(repo),
+                    flags.index_width
+                    if flags.index_width is not None
+                    else abbrev_for(repo),
                     fully,
                     flags.context,
                     flags.function_context,
                     flags.force_text,
+                    flags.prefixes,
                 )
             )
     if not (flags.name_only or flags.name_status):
@@ -610,7 +762,7 @@ def commit_sides(
 
 
 def shows(repo: BaseRepo, commit: Commit, flags: DiffFlags) -> bool:
-    """Whether a log the pickaxe filters prints a commit.
+    """Whether a log the pickaxe or ``--diff-filter`` narrows prints a commit.
 
     A commit with one parent or none is printed when the pickaxe keeps a
     pair of its diff. A merge follows the merge diff: never by default,
@@ -623,10 +775,12 @@ def shows(repo: BaseRepo, commit: Commit, flags: DiffFlags) -> bool:
         commit (Commit): the commit.
         flags (DiffFlags): the diff flags, carrying the pickaxe.
     """
-    if flags.pickaxe is None or is_combined(commit, flags):
+    if (flags.pickaxe is None and flags.diff_filter is None) or is_combined(
+        commit, flags
+    ):
         return True
     return any(
-        _rows_of(repo, before, after, flags)
+        filtered(_rows_of(repo, before, after, flags), flags)
         for before, after in commit_sides(repo, commit, flags)
     )
 
@@ -855,10 +1009,7 @@ def text_lines(data: bytes) -> list[str]:
 
 
 async def renames_enabled(vfs: Files, location: RepoLocation) -> bool:
-    data = await read_optional(vfs, location.commondir.join("config"))
-    if data is None:
-        return True
-    cfg = ConfigFile.from_file(BytesIO(data))
+    cfg = await read_config(vfs, location)
     try:
         value = cfg.get((b"diff",), b"renames")
     except KeyError:

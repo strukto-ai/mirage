@@ -77,3 +77,4 @@ export const DWIM_RULES = [
 // The branch a new repository, or a clone whose remote names no usable HEAD,
 // starts on when nothing says otherwise.
 export const DEFAULT_BRANCH = 'master'
+export const LOGS_DIR = 'logs'

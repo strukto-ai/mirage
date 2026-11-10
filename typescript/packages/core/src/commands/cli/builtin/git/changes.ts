@@ -44,7 +44,7 @@ const IGNORED = '!'
 // and the search is abandoned entirely once the add-by-delete matrix would
 // exceed 200 by 200. Matching both is what makes mirage give up exactly where
 // git gives up rather than answer differently.
-const RENAME_THRESHOLD = 60
+export const RENAME_THRESHOLD = 60
 const MAX_RENAME_FILES = 200
 // A regular file, as the mode's type bits spell it. Only these are scored for
 // similarity: a symlink is paired only with another symlink holding the same
@@ -516,7 +516,11 @@ export interface StatusRow {
  * The status entries the rows a session sees make, renames paired. Mirrors
  * Python's `assembled`.
  */
-export async function assembled(repo: Repo, shown: readonly StatusRow[]): Promise<StatusEntry[]> {
+export async function assembled(
+  repo: Repo,
+  shown: readonly StatusRow[],
+  threshold: number | null = RENAME_THRESHOLD,
+): Promise<StatusEntry[]> {
   const staged = new Map<string, string>()
   const oids = new Map<string, string>()
   const kinds = new Map<string, string>()
@@ -537,7 +541,11 @@ export async function assembled(repo: Repo, shown: readonly StatusRow[]): Promis
       }
     }
   }
-  const rows = merge(await pairRenames(repo, staged, oids, kinds), unstaged, conflicts, untracked)
+  const paired =
+    threshold === null
+      ? new Map([...staged].map(([path, letter]) => [path, [letter, null, 0] as StagedRow]))
+      : await pairRenames(repo, staged, oids, kinds, threshold)
+  const rows = merge(paired, unstaged, conflicts, untracked)
   for (const path of ignored.sort(compareCodePoints))
     rows.push({ path, indexStatus: IGNORED, treeStatus: IGNORED, original: null })
   return rows

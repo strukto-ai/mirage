@@ -25,7 +25,11 @@ from mirage.commands.cli.builtin.git.io import read_optional
 from mirage.commands.cli.builtin.git.objects import load_object_store
 from mirage.commands.cli.builtin.git.refs import load_refs
 from mirage.commands.cli.builtin.git.types import RepoLocation
-from mirage.commands.cli.builtin.git.util import git_bool, multivar
+from mirage.commands.cli.builtin.git.util import (
+    VALUE_ESCAPES,
+    git_bool,
+    multivar,
+)
 from mirage.workspace.files import Files
 
 
@@ -122,18 +126,45 @@ async def open_repo(
     )
 
 
+def _overrides_text(overrides: tuple[tuple[str, str | None], ...]) -> bytes:
+    """Command-line config as the lines a config file would hold.
+
+    Args:
+        overrides (tuple[tuple[str, str | None], ...]): dotted key then
+            value, None for a bare name.
+    """
+    lines = ["\n"] if overrides else []
+    for key, value in overrides:
+        section, _, rest = key.partition(".")
+        subsection, dot, name = rest.rpartition(".")
+        if dot:
+            quoted = subsection.replace("\\", "\\\\").replace('"', '\\"')
+            lines.append(f'[{section} "{quoted}"]\n')
+        else:
+            lines.append(f"[{section}]\n")
+        if value is None:
+            lines.append(f"\t{name}\n")
+        else:
+            escaped = "".join(VALUE_ESCAPES.get(ch, ch) for ch in value)
+            lines.append(f'\t{name} = "{escaped}"\n')
+    return "".join(lines).encode("utf-8", "surrogateescape")
+
+
 async def read_config(vfs: Files, location: RepoLocation) -> ConfigFile:
     """The repository's own config, empty when it has none.
 
     Only the repository's own config is reachable from a mount, and a
-    linked worktree's config is its repository's.
+    linked worktree's config is its repository's. What the line set with
+    ``-c`` follows the file, so it wins as the last value does.
 
     Args:
         vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
     """
     data = await read_optional(vfs, location.commondir.join("config"))
-    return ConfigFile.from_file(BytesIO(data or b""))
+    return ConfigFile.from_file(
+        BytesIO((data or b"") + _overrides_text(location.overrides))
+    )
 
 
 async def config_values(

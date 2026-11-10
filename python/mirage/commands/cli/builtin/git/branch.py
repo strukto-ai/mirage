@@ -75,7 +75,6 @@ from mirage.commands.cli.builtin.git.ref_list import (
     resolve_ref,
     root_names,
     sort_keys,
-    tracking_ref,
     worktree_heads,
 )
 from mirage.commands.cli.builtin.git.reflog import (
@@ -107,6 +106,7 @@ from mirage.commands.cli.builtin.git.revparse import (
     note_ambiguity,
     refs_named,
     resolve_object,
+    tracking_ref,
     unwrapped,
 )
 from mirage.commands.cli.builtin.git.session import opened
@@ -1056,8 +1056,8 @@ async def branch(
     operands = without_filter_values(texts, words)
     flags = ctx.flags
     fl = FlagView(flags)
-    remotes_only = fl.as_bool("r")
-    include_remotes = remotes_only or fl.as_bool("a")
+    remotes_only = fl.as_bool("remotes")
+    include_remotes = remotes_only or fl.as_bool("all")
     forked = tuple(fl.as_list("forked"))
     merged = tuple(fl.as_list("delete_merged"))
     dry_run = fl.typed_order("dry_run", "no_dry_run")[-1:] == ["dry_run"]

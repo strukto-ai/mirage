@@ -18,12 +18,19 @@ from dataclasses import dataclass
 from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.branch import branch_upstream
 from mirage.commands.cli.builtin.git.changes import (
+    RENAME_THRESHOLD,
     StatusRow,
     assembled,
     collect,
 )
+from mirage.commands.cli.builtin.git.diff_output import similarity
 from mirage.commands.cli.builtin.git.errors import GitError
-from mirage.commands.cli.builtin.git.pathspec import repo_relative
+from mirage.commands.cli.builtin.git.io import read_optional
+from mirage.commands.cli.builtin.git.pathspec import (
+    pathspec_patterns,
+    pathspec_selects,
+    repo_relative,
+)
 from mirage.commands.cli.builtin.git.ref_list import detached_line
 from mirage.commands.cli.builtin.git.refs import read_head
 from mirage.commands.cli.builtin.git.render import (
@@ -32,10 +39,19 @@ from mirage.commands.cli.builtin.git.render import (
     relative_entries,
     short_format,
 )
-from mirage.commands.cli.builtin.git.repo import Repo, config_bool
+from mirage.commands.cli.builtin.git.repo import (
+    Repo,
+    config_bool,
+    config_values,
+)
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import HeadRef, RepoLocation
-from mirage.commands.cli.builtin.git.util import require_vfs, start_point
+from mirage.commands.cli.builtin.git.util import (
+    check_switches,
+    maybe_bool,
+    require_vfs,
+    start_point,
+)
 from mirage.commands.cli.builtin.git.worktree import (
     UNTRACKED_ALL,
     UNTRACKED_NO,
@@ -57,6 +73,8 @@ class StatusFlags:
         short (bool): ``-s``, the same rows meant for a person.
         branch (bool): ``-b``, prepend the ``##`` branch line.
         untracked (str): ``-u``, which untracked files to report.
+        ignored (bool): ``--ignored``, report ignored files too.
+        nul (bool): ``-z``, end entries with NUL.
     """
 
     porcelain: bool
@@ -64,6 +82,7 @@ class StatusFlags:
     branch: bool
     untracked: str
     ignored: bool = False
+    nul: bool = False
 
 
 def parse_flags(fl: FlagView) -> StatusFlags:
@@ -86,13 +105,80 @@ def parse_flags(fl: FlagView) -> StatusFlags:
     version = fl.as_str("porcelain")
     if version is not None and version not in ("1", "v1"):
         raise GitError(f"unsupported porcelain version '{version}'")
+    nul = fl.as_bool("null")
+    formats = fl.typed_order("short", "long", "porcelain")
+    last = formats[-1] if formats else ""
+    if nul and fl.as_bool("long"):
+        raise GitError("options '--long' and '-z' cannot be used together")
     return StatusFlags(
-        porcelain=fl.as_bool("porcelain") or version is not None,
-        short=fl.as_bool("short"),
+        porcelain=last == "porcelain" or (nul and last != "short"),
+        short=last == "short",
         branch=fl.as_bool("branch"),
         untracked=mode,
         ignored=fl.as_bool("ignored"),
+        nul=nul,
     )
+
+
+async def _chosen(
+    vfs: Files,
+    location: RepoLocation,
+    fl: FlagView,
+    on: str,
+    off: str,
+    variable: bytes,
+    default: bool,
+) -> bool:
+    """A setting the line can turn on or off and config otherwise decides.
+
+    Args:
+        vfs (Files): the session's files.
+        location (RepoLocation): the discovered repository.
+        fl (FlagView): parsed flags.
+        on (str): the flag turning it on.
+        off (str): the flag turning it off.
+        variable (bytes): the name in the ``status`` section.
+        default (bool): the answer with neither flag nor config.
+    """
+    typed = fl.typed_order(on, off)
+    if typed:
+        return typed[-1] == on
+    return await config_bool(vfs, location, b"status", variable, default)
+
+
+async def _rename_threshold(
+    vfs: Files, location: RepoLocation, fl: FlagView
+) -> int | None:
+    """The similarity a status rename needs, None for no pairing.
+
+    Args:
+        vfs (Files): the session's files.
+        location (RepoLocation): the discovered repository.
+        fl (FlagView): parsed flags.
+    """
+    typed = fl.typed_order("renames", "no_renames", "find_renames")
+    if typed and typed[-1] == "no_renames":
+        return None
+    if typed and typed[-1] == "find_renames":
+        value = fl.raw("find_renames")
+        return similarity(value) if isinstance(value, str) and value else 50
+    if typed:
+        return RENAME_THRESHOLD
+    values = await config_values(vfs, location, b"status", b"renames")
+    if values and maybe_bool(values[-1]) is False:
+        return None
+    return RENAME_THRESHOLD
+
+
+async def _stash_count(vfs: Files, location: RepoLocation) -> int:
+    """How many stashes the repository holds.
+
+    Args:
+        vfs (Files): the session's files.
+        location (RepoLocation): the discovered repository.
+    """
+    data = await read_optional(vfs, location.commondir.join("logs/refs/stash"))
+    return len([row for row in (data or b"").splitlines() if row])
 
 
 async def relative_prefix(
@@ -190,8 +276,24 @@ async def status(
     flags = ctx.flags
     fl = FlagView(flags)
     parsed = parse_flags(fl)
+    check_switches(ctx, texts)
     repo, location = await opened(ctx, fl, work_tree=True)
     head = await read_head(vfs, location.gitdir)
+    start = start_point(fl).virtual
+    patterns = pathspec_patterns(location, start, texts)
+    show_stash = await _chosen(
+        vfs, location, fl, "show_stash", "no_show_stash", b"showstash", False
+    )
+    ahead_behind = await _chosen(
+        vfs,
+        location,
+        fl,
+        "ahead_behind",
+        "no_ahead_behind",
+        b"aheadbehind",
+        True,
+    )
+    threshold = await _rename_threshold(vfs, location, fl)
     rows, state, no_commits = await collect(
         vfs,
         repo,
@@ -199,12 +301,17 @@ async def status(
         parsed.untracked,
         parsed.ignored,
     )
+    if patterns:
+        rows = [
+            row
+            for row in rows
+            if pathspec_selects(row.name.rstrip("/"), patterns)
+        ]
     fully = await config_bool(vfs, location, b"core", b"quotepath", True)
     prefix = (
-        ""
-        if parsed.porcelain
-        else await relative_prefix(vfs, location, start_point(fl).virtual)
+        "" if parsed.porcelain else await relative_prefix(vfs, location, start)
     )
+    stashes = await _stash_count(vfs, location) if show_stash else 0
     upstream = await branch_upstream(repo, head, no_commits)
     detached = (
         "" if head.branch is not None else await detached_line(repo, head)
@@ -212,16 +319,18 @@ async def status(
 
     async def render(shown: list[StatusRow]) -> ByteSource:
         entries = relative_entries(
-            await asyncio.to_thread(assembled, repo.object_store, shown),
+            await asyncio.to_thread(
+                assembled, repo.object_store, shown, threshold
+            ),
             prefix,
         )
         if parsed.porcelain or parsed.short:
             header = (
-                branch_line(head.branch, no_commits, upstream)
+                branch_line(head.branch, no_commits, upstream, ahead_behind)
                 if parsed.branch
                 else None
             )
-            body = short_format(entries, header, fully)
+            body = short_format(entries, header, fully, parsed.nul)
         else:
             body = long_format(
                 entries,
@@ -232,7 +341,11 @@ async def status(
                 parsed.untracked == UNTRACKED_NO,
                 fully,
                 upstream,
+                ahead_behind,
             )
+            if stashes:
+                noun = "entry" if stashes == 1 else "entries"
+                body += f"Your stash currently has {stashes} {noun}\n"
         return body.encode()
 
     return None, IOResult(rows=Rows(rows, render))

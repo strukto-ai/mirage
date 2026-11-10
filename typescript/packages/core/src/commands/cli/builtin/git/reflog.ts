@@ -22,13 +22,12 @@ import { opened } from './session.ts'
 import { checkOperands, maybeBool } from './util.ts'
 import { readOptional, writeFile } from './io.ts'
 
-import { HEAD } from './constants.ts'
+import { HEAD, LOGS_DIR } from './constants.ts'
 import { isBare } from './discover.ts'
 import { configValues } from './fs.ts'
 import type { RepoLocation } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
 
-export const LOGS_DIR = 'logs'
 const HEAD_LOG = 'logs/HEAD'
 export const ZERO = '0'.repeat(40)
 // What a move of HEAD or a new branch records in the reflog. There is no

@@ -307,6 +307,21 @@ async def ensure_dir(vfs: Files, path: PathSpec) -> None:
         await vfs.mkdir(target)
 
 
+async def is_directory(vfs: Files, path: PathSpec) -> bool:
+    """Whether a path names a directory, asked with a stat.
+
+    Args:
+        vfs (Files): the session's files.
+        path (PathSpec): absolute virtual path.
+    """
+    try:
+        return (await vfs.stat(path)).type is FileType.DIRECTORY
+    except MISS_ERRORS:
+        return False
+    except (NotADirectoryError, IsADirectoryError):
+        return False
+
+
 async def exists(vfs: Files, path: PathSpec) -> bool:
     """Whether a point lookup finds anything at a path.
 

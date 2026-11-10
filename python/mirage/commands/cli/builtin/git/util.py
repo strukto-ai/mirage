@@ -13,13 +13,18 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from string import hexdigits
 
 from dulwich.config import ConfigFile
 
 from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.errors import (
     BadConfigValueError,
+    BadNumericConfigError,
+    ColorValueError,
+    CommandLineConfigError,
+    ConfigKeyError,
     GitError,
     NotAWorkTreeError,
     UnrecognizedArgumentError,
@@ -53,7 +58,13 @@ INTEGER = re.compile(
     rb"(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)([kKmMgG]?)"
 )
 UNIT_SHIFTS = {b"": 0, b"k": 10, b"m": 20, b"g": 30}
+# The options before the verb that set a config variable for one line,
+# and the others there that take a separate value.
+CONFIG_OPTION = "-c"
+CONFIG_ENV_OPTION = "--config-env"
+VALUE_GLOBALS = ("-C", "--git-dir", "--work-tree")
 INT_BITS = 31
+COLOR_WORDS = ("always", "auto", "never")
 VALUE_ESCAPES = {"\n": "\\n", "\t": "\\t", '"': '\\"', "\\": "\\\\"}
 COMMENT_STARTS = (";", "#")
 COMMENT_BYTES = (b";", b"#")
@@ -378,6 +389,180 @@ def git_bool(values: Sequence[bytes], key: str, default: bool) -> bool:
             raise BadConfigValueError(value.decode(errors="replace"), key)
         answer = parsed
     return answer
+
+
+def parse_config_key(key: str, error: type[GitError] = ConfigKeyError) -> str:
+    """A config name as git keys it, section and name lowercased.
+
+    Args:
+        key (str): the name as typed.
+        error (type[GitError]): the refusal to raise.
+
+    Raises:
+        GitError: a name that is not ``section[.subsection].name``.
+    """
+    if "." not in key:
+        raise error(f"key does not contain a section: {key}")
+    section, _, rest = key.partition(".")
+    subsection, dot, name = rest.rpartition(".")
+    if not name:
+        raise error(f"key does not contain variable name: {key}")
+    if (
+        not section
+        or not all(
+            char.isascii() and (char.isalnum() or char == "-")
+            for char in section
+        )
+        or not (name[0].isalpha() and name[0].isascii())
+        or not all(
+            char.isascii() and (char.isalnum() or char == "-") for char in name
+        )
+    ):
+        raise error(f"invalid key: {key}")
+    middle = f".{subsection}" if dot else ""
+    return f"{section.lower()}{middle}.{name.lower()}"
+
+
+def _assignment(text: str) -> tuple[str, str | None]:
+    """One ``-c`` operand as a key and its value.
+
+    Args:
+        text (str): ``name=value``, or ``name`` for a bare true.
+    """
+    name, equals, value = text.partition("=")
+    if not name:
+        raise CommandLineConfigError("empty config key")
+    return (
+        parse_config_key(name, CommandLineConfigError),
+        value if equals else None,
+    )
+
+
+def _from_env(text: str, env: Mapping[str, str]) -> tuple[str, str | None]:
+    """One ``--config-env`` operand as a key and the value it points at.
+
+    Args:
+        text (str): ``name=envvar``.
+        env (Mapping[str, str]): the session environment.
+    """
+    name, equals, variable = text.rpartition("=")
+    if not equals:
+        raise GitError(f"invalid config format: {text}")
+    if variable not in env:
+        raise GitError(
+            f"missing environment variable '{variable}' "
+            f"for configuration '{name}'"
+        )
+    return parse_config_key(name, CommandLineConfigError), env[variable]
+
+
+def command_line_config(ctx: Context) -> tuple[tuple[str, str | None], ...]:
+    """What the words before the verb set with ``-c`` and ``--config-env``.
+
+    The two are one spec option, whose values alone cannot say which
+    spelling each came from, so this reads the verbatim line. Only the
+    words before the verb count: a later ``-c`` is the verb's own.
+
+    Args:
+        ctx (Context): the line's context.
+    """
+    words = ctx.argv or ()
+    env = ctx.env or {}
+    rows: list[tuple[str, str | None]] = []
+    at = 0
+    while at < len(words) and words[at].startswith("-"):
+        word = words[at]
+        if word == CONFIG_OPTION and at + 1 < len(words):
+            rows.append(_assignment(words[at + 1]))
+            at += 2
+        elif word == CONFIG_ENV_OPTION and at + 1 < len(words):
+            rows.append(_from_env(words[at + 1], env))
+            at += 2
+        elif word.startswith(f"{CONFIG_ENV_OPTION}="):
+            rows.append(_from_env(word[len(CONFIG_ENV_OPTION) + 1 :], env))
+            at += 1
+        else:
+            at += 2 if word in VALUE_GLOBALS else 1
+    return tuple(rows)
+
+
+def config_int(value: bytes, spelled: str, key: str) -> int:
+    """An integer-typed config value, or git's refusal of it.
+
+    Args:
+        value (bytes): the value.
+        spelled (str): the value as it prints in the refusal.
+        key (str): the variable.
+
+    Raises:
+        BadNumericConfigError: no integer, or one out of range.
+    """
+    number = _integer(value)
+    if number is not None:
+        return number
+    reason = "out of range" if INTEGER.fullmatch(value) else "invalid unit"
+    raise BadNumericConfigError(spelled, key, reason)
+
+
+def render_format(template: str, atoms: Mapping[str, str], verb: str) -> str:
+    """One row of a ``--format`` template.
+
+    Args:
+        template (str): the template, with ``%(atom)``, ``%%`` and
+            ``%xNN`` placeholders.
+        atoms (Mapping[str, str]): each atom's text for this row.
+        verb (str): the command, named in the refusal.
+
+    Raises:
+        GitError: a placeholder the command does not have.
+    """
+    out: list[str] = []
+    at = 0
+    while at < len(template):
+        char = template[at]
+        if char != "%":
+            out.append(char)
+            at += 1
+        elif template.startswith("%%", at):
+            out.append("%")
+            at += 2
+        elif (
+            template.startswith("%x", at)
+            and len(template) >= at + 4
+            and all(c in hexdigits for c in template[at + 2 : at + 4])
+        ):
+            out.append(chr(int(template[at + 2 : at + 4], 16)))
+            at += 4
+        else:
+            end = template.find(")", at)
+            name = (
+                template[at + 2 : end]
+                if template.startswith("%(", at) and end != -1
+                else None
+            )
+            if name is None or name not in atoms:
+                raise GitError(f"bad {verb} format: {template[at:]}")
+            out.append(atoms[name])
+            at = end + 1
+    return "".join(out)
+
+
+def check_color(fl: FlagView) -> None:
+    """Refuse a ``--color`` value git refuses; a good one changes nothing.
+
+    Args:
+        fl (FlagView): the leaf's flags.
+
+    Raises:
+        ColorValueError: neither a color word nor a boolean.
+    """
+    when = fl.raw("color")
+    if (
+        isinstance(when, str)
+        and when.lower() not in COLOR_WORDS
+        and maybe_bool(when.encode("utf-8", "surrogateescape")) is None
+    ):
+        raise ColorValueError()
 
 
 def maybe_bool(value: bytes) -> bool | None:

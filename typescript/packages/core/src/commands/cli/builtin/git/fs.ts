@@ -236,7 +236,11 @@ export async function configValues(
   const last = path.lastIndexOf('.')
   const key =
     path.slice(0, first).toLowerCase() + path.slice(first, last) + path.slice(last).toLowerCase()
-  return variables(config.parsedConfig as readonly ParsedLine[])
+  const inFile = variables(config.parsedConfig as readonly ParsedLine[])
     .filter((line) => line.path === key)
     .map((line) => line.value ?? '')
+  const typed = (location.overrides ?? [])
+    .filter(([name]) => name === key)
+    .map(([, value]) => value ?? 'true')
+  return [...inFile, ...typed]
 }

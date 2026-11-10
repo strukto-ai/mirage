@@ -78,6 +78,7 @@ class Scanner {
     private readonly mode: string,
     private readonly showIgnored = false,
     private readonly roots: readonly string[] | null = null,
+    private readonly perDirectory: string | null = GITIGNORE,
   ) {
     this.directories = trackedDirectories(tracked)
     this.mounts = mountView(vfs, true)
@@ -212,7 +213,8 @@ class Scanner {
   /** The ignore rules inside a directory, given the ones outside. */
   private async descend(relative: string, ignores: IgnoreStack): Promise<IgnoreStack> {
     if (relative === '') return ignores
-    const local = await readOptional(this.vfs, this.absolute(relative).join(GITIGNORE))
+    if (this.perDirectory === null) return ignores
+    const local = await readOptional(this.vfs, this.absolute(relative).join(this.perDirectory))
     return local === null ? ignores : ignores.push(relative, local)
   }
 
@@ -315,9 +317,19 @@ export async function scan(
   mode: string,
   showIgnored = false,
   roots: readonly string[] | null = null,
+  ignores: IgnoreStack | null = null,
+  perDirectory: string | null = GITIGNORE,
 ): Promise<WorkTree> {
-  const ignores = await loadIgnores(vfs, location.commondir, location.worktree)
-  const scanner = new Scanner(vfs, location.worktree, tracked, mode, showIgnored, roots)
-  await scanner.walk('', false, ignores)
+  const rules = ignores ?? (await loadIgnores(vfs, location.commondir, location.worktree))
+  const scanner = new Scanner(
+    vfs,
+    location.worktree,
+    tracked,
+    mode,
+    showIgnored,
+    roots,
+    perDirectory,
+  )
+  await scanner.walk('', false, rules)
   return scanner.found
 }

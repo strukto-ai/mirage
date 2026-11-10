@@ -20,11 +20,14 @@ from dataclasses import replace
 from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.discover import (
     discover,
+    in_git_dir,
     require_work_tree,
 )
 from mirage.commands.cli.builtin.git.errors import (
     GitError,
     IndexLockError,
+    NotARepositoryError,
+    NotAWorkTreeError,
 )
 from mirage.commands.cli.builtin.git.repo import (
     Repo,
@@ -33,6 +36,8 @@ from mirage.commands.cli.builtin.git.repo import (
 )
 from mirage.commands.cli.builtin.git.types import ReadOnlyRefusal, RepoLocation
 from mirage.commands.cli.builtin.git.util import (
+    check_color,
+    command_line_config,
     fatal,
     git_bool,
     require_vfs,
@@ -137,6 +142,7 @@ def verb(
         placed = LOCATIONS.set(None)
         try:
             try:
+                check_color(FlagView(ctx.flags))
                 out, io = await fn(accessor, paths, texts, ctx)
             except GitError as exc:
                 out, io = fatal(exc)
@@ -192,6 +198,8 @@ async def opened(
     if work_tree:
         named = fl.as_path("work_tree") is not None
         await require_work_tree(vfs, location, named)
+        if not named and in_git_dir(start_point(fl).virtual, location):
+            raise NotAWorkTreeError()
     warn = git_bool(
         await config_values(vfs, location, b"core", b"warnambiguousrefs"),
         "core.warnambiguousrefs",
@@ -199,6 +207,19 @@ async def opened(
     )
     repo = await open_repo(vfs, location, AMBIGUOUS.get() if warn else None)
     return repo, location
+
+
+async def inside(ctx: Context, fl: FlagView) -> RepoLocation | None:
+    """The repository the line runs in, None outside one.
+
+    Args:
+        ctx (Context): the line's context.
+        fl (FlagView): parsed flags.
+    """
+    try:
+        return await located(ctx, fl)
+    except NotARepositoryError:
+        return None
 
 
 async def located(ctx: Context, fl: FlagView) -> RepoLocation:
@@ -209,7 +230,8 @@ async def located(ctx: Context, fl: FlagView) -> RepoLocation:
         fl (FlagView): repository-selection flags.
     """
     vfs = require_vfs(ctx)
+    overrides = command_line_config(ctx)
     chosen = fl.as_path("work_tree")
     gitdir = fl.as_path("git_dir")
     location = await discover(vfs, start_point(fl), gitdir, chosen)
-    return replace(location, vfs=vfs)
+    return replace(location, vfs=vfs, overrides=overrides)

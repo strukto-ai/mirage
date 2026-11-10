@@ -189,6 +189,79 @@ class BadConfigValueError(GitError):
         super().__init__(f"bad boolean config value '{value}' for '{key}'")
 
 
+class BadNumericConfigError(GitError):
+    """A config value an integer type cannot read.
+
+    Args:
+        value (str): the value as spelled.
+        key (str): the variable, section and name lowercased.
+        reason (str): git's reason, ``invalid unit`` or ``out of range``.
+    """
+
+    def __init__(self, value: str, key: str, reason: str) -> None:
+        super().__init__(
+            f"bad numeric config value '{value}' for '{key}': {reason}"
+        )
+
+
+class ColorValueError(GitError):
+    """A ``--color`` value that is not one git knows."""
+
+    prefix = "error"
+    exit_code = USAGE_EXIT
+
+    def __init__(self) -> None:
+        super().__init__(
+            'option `color\' expects "always", "auto", or "never"'
+        )
+
+
+class DiffFilterError(GitError):
+    """A ``--diff-filter`` letter git has no change class for.
+
+    Args:
+        letter (str): the letter.
+        spelled (str): the whole value.
+    """
+
+    prefix = "error"
+    exit_code = USAGE_EXIT
+
+    def __init__(self, letter: str, spelled: str) -> None:
+        super().__init__(
+            f"unknown change class '{letter}' in --diff-filter={spelled}"
+        )
+
+
+class ConfigKeyError(GitError):
+    """A config name git cannot read as ``section.name``."""
+
+    prefix = "error"
+    exit_code = 1
+
+
+class ConfigUsageError(GitError):
+    """``git config`` asked for something its usage rules out."""
+
+    prefix = "error"
+    exit_code = USAGE_EXIT
+
+
+class CommandLineConfigError(GitError):
+    """A ``-c`` git cannot read: it says why, then that it gave up.
+
+    Args:
+        reason (str): what is wrong with the key.
+    """
+
+    prefix = "error"
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(
+            f"{reason}\nfatal: unable to parse command-line config"
+        )
+
+
 class BadDateError(GitError):
     """A date flag whose value could not be read.
 
@@ -234,6 +307,12 @@ class WorkTreeLimitError(GitError):
         super().__init__(
             f"more than {limit} files in the work tree (walk_limit)"
         )
+
+
+class SelectorError(GitError):
+    """A ``@{...}`` selector git refuses in its own words, where a name
+    that resolves to nothing would be answered as an unknown revision.
+    """
 
 
 class SingleRevisionError(GitError):
