@@ -17,7 +17,7 @@ import { eexist, enoent, enotdir } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
 import type { SqlStatement } from '../../vfs/sql/types.ts'
-import { DIR, ROOT_INO } from './constants.ts'
+import { DIR } from './constants.ts'
 import { byEntry, byIno, isDir, makeNode, nowStamp } from './inode.ts'
 import { checkDestParents, leaf, parentRef, target, walk } from './path.ts'
 
@@ -45,8 +45,10 @@ export async function mkdir(accessor: SqlAccessor, path: PathSpec, parents = fal
     await accessor.batch(makeNode(accessor, parentRef(w), leaf(w), DIR, 0, now))
     return
   }
+  const top = w.chain[0] ?? null
+  if (top === null) throw enoent(path)
   const statements: SqlStatement[] = []
-  let parent = byIno(ROOT_INO)
+  let parent = byIno(top.ino)
   let levels = 0
   for (const [i, name] of w.names.entries()) {
     const node = w.chain[i + 1] ?? null

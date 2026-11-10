@@ -30,10 +30,11 @@ from mirage.utils.path import norm
 
 @dataclass(frozen=True)
 class Walk:
-    """A mount path resolved one name at a time from the root.
-    ``chain[0]`` is the root and ``chain[i]`` the inode the first ``i``
-    names reach, None from the first name the tree does not hold (or
-    that a file stands above). Mirrors TypeScript's ``Walk``.
+    """A mount path resolved one name at a time from the mount's
+    folder. ``chain[0]`` is the folder and ``chain[i]`` the inode the
+    first ``i`` names reach, None from the first name the tree does not
+    hold (or that a file stands above), and all None when the folder is
+    gone. Mirrors TypeScript's ``Walk``.
     """
 
     p: str
@@ -89,21 +90,22 @@ async def _walk_from(
 
 
 async def walk(accessor: SqlAccessor, path: PathSpec | str) -> Walk:
-    """Resolve ``path`` from the root, ``_NAMES_PER_QUERY`` names a
-    query, so the database walks every name and answers every inode on
-    the way, and a miss stops the chain where it happens. Mirrors
-    TypeScript's ``walk``."""
+    """Resolve ``path`` from the database's root through the mount's
+    folder, ``_NAMES_PER_QUERY`` names a query, so the database walks
+    every name and answers every inode on the way, and a miss stops the
+    chain where it happens. Mirrors TypeScript's ``walk``."""
     p = norm(path if isinstance(path, str) else path.mount_path)
     names = names_of(p)
-    chain = await _walk_from(accessor, ROOT_INO, names[:_NAMES_PER_QUERY])
-    for at in range(_NAMES_PER_QUERY, len(names), _NAMES_PER_QUERY):
-        part = names[at : at + _NAMES_PER_QUERY]
+    every = (*accessor.root_names, *names)
+    chain = await _walk_from(accessor, ROOT_INO, every[:_NAMES_PER_QUERY])
+    for at in range(_NAMES_PER_QUERY, len(every), _NAMES_PER_QUERY):
+        part = every[at : at + _NAMES_PER_QUERY]
         last = chain[-1]
         if last is None:
             chain += [None] * len(part)
         else:
             chain += (await _walk_from(accessor, last.ino, part))[1:]
-    return Walk(p, names, tuple(chain))
+    return Walk(p, names, tuple(chain[len(accessor.root_names) :]))
 
 
 def target(w: Walk) -> Inode | None:
@@ -132,8 +134,8 @@ def _broken_parent(w: Walk, spec: PathSpec) -> OSError | None:
     # The first error resolving the path's parents meets: a name the
     # tree does not hold is ENOENT, a plain file where a directory has
     # to be ENOTDIR, at any depth, as open(2) and rename(2) resolve a
-    # path.
-    for i in range(1, len(w.names)):
+    # path. The mount's folder gone is ENOENT too.
+    for i in range(len(w.names)):
         node = w.chain[i]
         if node is None:
             return enoent(spec)

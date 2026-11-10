@@ -105,7 +105,7 @@ curl -s localhost:8787/v1/workspaces/demo/shell -H "Authorization: Bearer $MIRAG
 
 ## Keep a workspace's files
 
-A Worker's memory goes with its isolate. To keep a workspace's files and sessions, put them in SQL: [`SqlVFS`](/typescript/setup/sql) over a Durable Object's own storage or a D1 database, and `SqlWorkspaceStateStore` over the same driver for each session's working directory, variables and functions, its jobs, and the lines and processes it ran. Pass the Durable Object's own id as `daemonId`, so a Durable Object woken again takes its workspace back at once. One database holds one filesystem, so a Durable Object per workspace gives each workspace its own. It does not give each its own memory: Cloudflare may run several Durable Objects of one class in one isolate, where they share its 128 MB and run one at a time.
+A Worker's memory goes with its isolate. To keep a workspace's files and sessions, put them in SQL: [`SqlVFS`](/typescript/setup/sql) over a Durable Object's own storage or a D1 database, and `SqlWorkspaceStateStore` over the same driver for each session's working directory, variables and functions, its jobs, and the lines and processes it ran. Pass the Durable Object's own id as `daemonId`, so a Durable Object woken again takes its workspace back at once. A Durable Object per workspace gives each workspace a database of its own, and its mounts can each serve a folder of it with `root`. It does not give each its own memory: Cloudflare may run several Durable Objects of one class in one isolate, where they share its 128 MB and run one at a time.
 
 ```ts
 import { DurableObjectSqlDriver, SqlVFS, SqlWorkspaceStateStore, Workspace } from '@struktoai/mirage-cloudflare'

@@ -72,11 +72,23 @@ WORKERD_LIMITS = (
 )
 
 
-@pytest_asyncio.fixture(params=["sqlite", "workerd_limits", ON_POSTGRES])
+# A Postgres database again, the suite's mount on a folder of it.
+ON_POSTGRES_FOLDER = pytest.param("postgres_folder", marks=ON_POSTGRES.marks)
+
+
+@pytest_asyncio.fixture(
+    params=[
+        "sqlite",
+        "workerd_limits",
+        "folder",
+        ON_POSTGRES,
+        ON_POSTGRES_FOLDER,
+    ]
+)
 async def vfs(request: pytest.FixtureRequest) -> AsyncIterator[SqlVFS]:
     database = contextlib.ExitStack()
     driver: SqlDriver
-    if request.param == "postgres":
+    if request.param.startswith("postgres"):
         driver = PostgresSqlDriver(database.enter_context(fresh_database()))
     else:
         sqlite = SqliteDriver()
@@ -85,7 +97,12 @@ async def vfs(request: pytest.FixtureRequest) -> AsyncIterator[SqlVFS]:
             for limit in WORKERD_LIMITS:
                 db.setlimit(limit, 100)
         driver = sqlite
-    v = SqlVFS(driver=driver)
+    root = "/"
+    if request.param.endswith("folder"):
+        # A file beside the folder, which the suite's mount never sees.
+        await SqlVFS(driver=driver).write(at("/beside"), b"kept")
+        root = "/a/b"
+    v = SqlVFS(driver=driver, root=root)
     yield v
     await v.close()
     driver.close()
@@ -103,13 +120,15 @@ async def test_a_file_across_chunk_boundaries_reads_whole_and_in_windows(
     vfs: SqlVFS,
 ):
     data = bytes(i % 251 for i in range(CS * 2 + 5))
+    rows = await vfs.accessor.query("SELECT COUNT(*) AS n FROM fs_data")
+    before = rows[0]["n"]
     await vfs.write(at("/big"), data)
     assert (await vfs.stat(at("/big"))).size == len(data)
     assert await whole(vfs, "/big") == data
     assert await vfs.read(at("/big"), CS - 2, 6) == data[CS - 2 : CS + 4]
     assert await vfs.read(at("/big"), CS * 2, None) == data[CS * 2 :]
     rows = await vfs.accessor.query("SELECT COUNT(*) AS n FROM fs_data")
-    assert rows[0]["n"] == 3
+    assert rows[0]["n"] - before == 3
 
 
 @pytest.mark.asyncio
@@ -143,6 +162,8 @@ async def test_a_stream_lands_as_it_arrives(vfs: SqlVFS):
 
 @pytest.mark.asyncio
 async def test_a_tree_moves_with_one_entry_and_goes_whole(vfs: SqlVFS):
+    count = "SELECT COUNT(*) AS n FROM fs_inode"
+    before = (await vfs.accessor.query(count))[0]["n"]
     await vfs.mkdir(at("/a/b"), parents=True)
     await vfs.write(at("/a/b/f"), b"hi")
     await vfs.rename(at("/a"), at("/z"))
@@ -152,8 +173,7 @@ async def test_a_tree_moves_with_one_entry_and_goes_whole(vfs: SqlVFS):
         await vfs.rename(at("/z"), at("/z/b/in"))
     await vfs.rm_r(at("/z"))
     assert await vfs.readdir(at("/")) == []
-    rows = await vfs.accessor.query("SELECT COUNT(*) AS n FROM fs_inode")
-    assert rows[0]["n"] == 1
+    assert (await vfs.accessor.query(count))[0]["n"] == before
 
 
 @pytest.mark.asyncio
@@ -199,6 +219,7 @@ async def test_it_makes_writes_reads_moves_copies_and_removes_deep(
 async def test_a_move_onto_a_directory_written_into_since_its_check_fails(
     vfs: SqlVFS,
 ):
+    top = vfs.accessor.root_ino()
     await vfs.mkdir(at("/src"))
     await vfs.mkdir(at("/dst"))
     racing(
@@ -207,7 +228,7 @@ async def test_a_move_onto_a_directory_written_into_since_its_check_fails(
             "INSERT INTO fs_inode (ino, mode, size, mtime)"
             f" VALUES (1000, {FILE}, 0, 0)",
             "INSERT INTO fs_dentry (name, parent_ino, ino) SELECT 'new',"
-            " ino, 1000 FROM fs_dentry WHERE parent_ino = 1 AND name = 'dst'",
+            f" ino, 1000 FROM fs_dentry WHERE parent_ino = {top} AND name = 'dst'",
         ],
     )
     with pytest.raises(OSError) as raised:
@@ -221,27 +242,33 @@ async def test_a_move_onto_a_directory_written_into_since_its_check_fails(
 async def test_a_write_whose_directory_went_since_its_lookup_strands_nothing(
     vfs: SqlVFS,
 ):
+    top = vfs.accessor.root_ino()
     await vfs.mkdir(at("/d"))
     racing(
         vfs,
         [
             "DELETE FROM fs_inode WHERE ino IN (SELECT ino FROM fs_dentry"
-            " WHERE parent_ino = 1 AND name = 'd')",
-            "DELETE FROM fs_dentry WHERE parent_ino = 1 AND name = 'd'",
+            f" WHERE parent_ino = {top} AND name = 'd')",
+            f"DELETE FROM fs_dentry WHERE parent_ino = {top} AND name = 'd'",
         ],
     )
     with pytest.raises(Exception):
         await vfs.write(at("/d/f"), b"x")
-    rows = await vfs.accessor.query("SELECT ino FROM fs_inode")
-    assert [r["ino"] for r in rows] == [1]
+    rows = await vfs.accessor.query(
+        f"SELECT ino FROM fs_inode WHERE ino > {top}"
+    )
+    assert rows == []
 
 
 @pytest.mark.asyncio
 async def test_an_append_raced_by_another_lands_at_the_end_it_left(
     vfs: SqlVFS,
 ):
+    top = vfs.accessor.root_ino()
     await vfs.write(at("/f"), b"a")
-    named = "(SELECT ino FROM fs_dentry WHERE parent_ino = 1 AND name = 'f')"
+    named = (
+        f"(SELECT ino FROM fs_dentry WHERE parent_ino = {top} AND name = 'f')"
+    )
     ab = (
         "'\\x6162'::bytea"
         if vfs.accessor.driver.dialect == SqlDialect.POSTGRES
@@ -262,11 +289,13 @@ async def test_an_append_raced_by_another_lands_at_the_end_it_left(
 async def test_a_file_moved_while_its_old_name_is_unlinked_is_kept(
     vfs: SqlVFS,
 ):
+    top = vfs.accessor.root_ino()
     await vfs.write(at("/a"), b"kept")
     racing(
         vfs,
         [
-            "UPDATE fs_dentry SET name = 'b' WHERE parent_ino = 1 AND name = 'a'"
+            "UPDATE fs_dentry SET name = 'b'"
+            f" WHERE parent_ino = {top} AND name = 'a'"
         ],
     )
     await vfs.unlink(at("/a"))
@@ -277,17 +306,21 @@ async def test_a_file_moved_while_its_old_name_is_unlinked_is_kept(
 async def test_an_append_retries_on_its_own_file_not_its_old_path(
     vfs: SqlVFS,
 ):
+    top = vfs.accessor.root_ino()
     await vfs.write(at("/f"), b"a")
-    named = "(SELECT ino FROM fs_dentry WHERE parent_ino = 1 AND name = 'g')"
+    named = (
+        f"(SELECT ino FROM fs_dentry WHERE parent_ino = {top} AND name = 'g')"
+    )
     racing(
         vfs,
         [
-            "UPDATE fs_dentry SET name = 'g' WHERE parent_ino = 1 AND name = 'f'",
+            "UPDATE fs_dentry SET name = 'g'"
+            f" WHERE parent_ino = {top} AND name = 'f'",
             f"UPDATE fs_inode SET mtime = mtime + 1 WHERE ino = {named}",
             "INSERT INTO fs_inode (ino, mode, size, mtime)"
             f" VALUES (1000, {DIR}, 0, 0)",
             "INSERT INTO fs_dentry (name, parent_ino, ino)"
-            " VALUES ('f', 1, 1000)",
+            f" VALUES ('f', {top}, 1000)",
         ],
     )
     await vfs.append(at("/f"), b"c")
@@ -301,9 +334,11 @@ async def test_a_restore_takes_fresh_inode_numbers(vfs: SqlVFS):
     await vfs.mkdir(at(deep), parents=True)
     await vfs.write(at(f"{deep}/f"), b"x")
 
+    top = vfs.accessor.root_ino()
+
     async def inos() -> list[int]:
         rows = await vfs.accessor.query(
-            "SELECT ino FROM fs_inode WHERE ino > 1"
+            f"SELECT ino FROM fs_inode WHERE ino > {top}"
         )
         return [int(r["ino"] or 0) for r in rows]
 
@@ -462,7 +497,10 @@ async def test_a_snapshot_carries_the_files_into_a_fresh_mount():
 @pytest.mark.asyncio
 async def test_an_uncapped_database_grows(vfs: SqlVFS):
     assert (await vfs.capacity()).state == CapacityState.ELASTIC
-    assert vfs.storage_location() == f"sql:{vfs.accessor.driver.location}"
+    folder = "" if vfs.accessor.root == "/" else vfs.accessor.root
+    assert vfs.storage_location() == (
+        f"sql:{vfs.accessor.driver.location}{folder}"
+    )
 
 
 def test_two_memory_databases_differ_and_two_names_of_one_file_agree(
@@ -492,3 +530,110 @@ async def test_its_ops_are_recorded_under_its_own_name(vfs: SqlVFS):
 def test_it_takes_a_path_or_a_driver_not_both():
     with pytest.raises(ValueError, match="a path or a driver, not both"):
         SqlVFS(":memory:", driver=SqliteDriver())
+
+
+async def names(vfs: SqlVFS) -> list[str]:
+    return [e.name for e in await vfs.readdir(at("/"))]
+
+
+@pytest.mark.asyncio
+async def test_a_folder_of_the_database_is_made_and_the_whole_shows_it():
+    driver = SqliteDriver()
+    whole_db = SqlVFS(driver=driver)
+    folder = SqlVFS(driver=driver, root="/workspace/")
+    await folder.write(at("/a.txt"), b"hi")
+    assert await names(folder) == ["a.txt"]
+    assert await names(whole_db) == ["workspace"]
+    assert await whole(whole_db, "/workspace/a.txt") == b"hi"
+    assert folder.storage_location() == (
+        f"{whole_db.storage_location()}/workspace"
+    )
+    driver.close()
+
+
+@pytest.mark.asyncio
+async def test_a_folder_a_file_stands_at_or_gone_since_is_refused():
+    driver = SqliteDriver()
+    whole_db = SqlVFS(driver=driver)
+    await whole_db.write(at("/f"), b"x")
+    with pytest.raises(NotADirectoryError):
+        await SqlVFS(driver=driver, root="/f").readdir(at("/"))
+    folder = SqlVFS(driver=driver, root="/d")
+    await folder.write(at("/a"), b"x")
+    await whole_db.rm_r(at("/d"))
+    with pytest.raises(FileNotFoundError):
+        await folder.write(at("/b"), b"x")
+    with pytest.raises(FileNotFoundError):
+        await folder.readdir(at("/"))
+    assert await names(whole_db) == ["f"]
+    driver.close()
+
+
+@pytest.mark.asyncio
+async def test_mounts_on_one_driver_count_against_one_capacity():
+    driver = SqliteDriver()
+    whole_db = SqlVFS(driver=driver, capacity=10)
+    folder = SqlVFS(driver=driver, root="/w", capacity=10)
+    assert folder.usage is whole_db.usage
+    assert SqlVFS(driver=driver, capacity=20).usage is not whole_db.usage
+    assert SqlVFS(capacity=10).usage is not whole_db.usage
+    await whole_db.write(at("/x"), b"123456")
+    with pytest.raises(OSError) as raised:
+        await folder.write(at("/y"), b"123456")
+    assert raised.value.errno == errno.EDQUOT
+    await folder.write(at("/y"), b"1234")
+    assert await folder.capacity() == await whole_db.capacity()
+    report = await whole_db.capacity()
+    assert (report.used, report.available) == (10, 0)
+    driver.close()
+
+
+@pytest.mark.asyncio
+async def test_a_folder_snapshots_and_restores_alone():
+    driver = SqliteDriver()
+    whole_db = SqlVFS(driver=driver)
+    folder = SqlVFS(driver=driver, root="/w")
+    await whole_db.write(at("/keep"), b"k")
+    await folder.mkdir(at("/d"))
+    await folder.write(at("/d/a"), b"a")
+    state = folder.get_state()
+    assert list(state["files"]) == ["/d/a"]
+    assert state["dirs"] == ["/", "/d"]
+    await folder.write(at("/b"), b"b")
+    await folder.rm_r(at("/d"))
+    folder.load_state(state)
+    assert await names(folder) == ["d"]
+    assert await whole(folder, "/d/a") == b"a"
+    assert await names(whole_db) == ["keep", "w"]
+    assert await whole(whole_db, "/keep") == b"k"
+    # Every inode but the root has one entry naming it: the restore
+    # stranded none, its own counting inode included.
+    inodes = driver.query("SELECT COUNT(*) AS n FROM fs_inode")[0]["n"]
+    entries = driver.query("SELECT COUNT(*) AS n FROM fs_dentry")[0]["n"]
+    assert inodes == entries + 1
+    driver.close()
+
+
+@pytest.mark.asyncio
+async def test_the_shell_gets_root_and_workspace_on_one_database():
+    driver = SqliteDriver()
+    ws = Workspace(
+        {
+            "/": SqlVFS(driver=driver, capacity=1000),
+            "/workspace": SqlVFS(
+                driver=driver, root="/workspace", capacity=1000
+            ),
+        },
+        mode=MountMode.WRITE,
+    )
+    try:
+        r = await ws.shell(
+            "printf hi > /workspace/a.txt && printf yo > /b.txt"
+            " && ls /workspace && cat /workspace/a.txt && du -s /workspace"
+        )
+        assert await r.stderr_str() == ""
+        assert await r.stdout_str() == "a.txt\nhi2\t/workspace\n"
+        assert await whole(SqlVFS(driver=driver), "/workspace/a.txt") == b"hi"
+    finally:
+        await ws.close()
+        driver.close()

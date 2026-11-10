@@ -98,7 +98,7 @@ Each mount key is an absolute virtual prefix, such as `/data`.
 
 ## Capacity
 
-A RAM, disk, Redis or OPFS store takes `capacity` in its `config`, as a
+A RAM, disk, Redis, OPFS or SQL store takes `capacity` in its `config`, as a
 [size](#sizes):
 
 ```yaml
@@ -116,8 +116,10 @@ it when it syncs or closes the file. Stored data stays readable and
 removable, and `df` shows the capacity as the store's size.
 
 Two workspaces on one disk folder, Redis key prefix or OPFS directory each
-count only their own writes. A RAM store's files also count against its
-workspace's `max_memory`, which refuses a write the same way.
+count only their own writes. A SQL store counts every file in its database,
+and SQL mounts handed one driver with the same `capacity` share one count. A
+RAM store's files also count against its workspace's `max_memory`, which
+refuses a write the same way.
 
 ## Network
 

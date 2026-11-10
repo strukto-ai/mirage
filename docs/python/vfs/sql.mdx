@@ -17,11 +17,12 @@ vfs = SqlVFS("./workspace.db")
 ws = Workspace({"/sql": vfs}, mode=MountMode.WRITE)
 ```
 
-| Parameter  | Required | Default   | Description                                              |
-| ---------- | -------- | --------- | -------------------------------------------------------- |
-| `path`     | no       | in memory | The SQLite file, opened and closed with the mount        |
-| `capacity` | no       | none      | The most bytes the files may hold, like `100MB`          |
-| `driver`   | no       | none      | A `SqlDriver` to borrow instead of a file; you close it |
+| Parameter  | Required | Default   | Description                                                   |
+| ---------- | -------- | --------- | ------------------------------------------------------------- |
+| `path`     | no       | in memory | The SQLite file, opened and closed with the mount             |
+| `capacity` | no       | none      | The most bytes the database's files may hold, like `100MB`    |
+| `driver`   | no       | none      | A `SqlDriver` to borrow instead of a file; you close it      |
+| `root`     | no       | `/`       | The folder of the database the mount serves, made if missing |
 
 The tables are laid out as
 [AgentFS](https://github.com/tursodatabase/agentfs)'s:
@@ -31,8 +32,34 @@ The tables are laid out as
 - `fs_data`: a file's bytes, in rows of the database's chunk size (4 KiB unless the database says otherwise)
 - `fs_config`: the chunk size
 
-One database holds one filesystem. The TypeScript mount reads and writes the
-same tables, so a Python and a Node process on one file serve one filesystem.
+The TypeScript mount reads and writes the same tables, so a Python and a Node
+process on one file serve one filesystem.
+
+## Several mounts on one database
+
+A mount serves one folder of its database, `/` by default. Hand two mounts one
+driver to serve the whole database at `/` and its `/workspace` folder as a mount
+of its own:
+
+```python
+from mirage.vfs.sql import SqliteDriver
+
+driver = SqliteDriver("./workspace.db")
+ws = Workspace(
+    {
+        "/": SqlVFS(driver=driver, capacity="1GB"),
+        "/workspace": SqlVFS(driver=driver, root="/workspace", capacity="1GB"),
+    },
+    mode=MountMode.WRITE,
+)
+```
+
+- `capacity` counts every file in the database, whichever mount wrote it.
+  Mounts on one driver with the same `capacity` share one count, so their writes
+  together stay within it. Mounts on separate drivers count apart, even on one
+  file, and together they can pass it.
+- `get_state` and `load_state` keep and replace the mount's own folder. A
+  restore leaves the rest of the database as it was.
 
 ## VFS.md
 

@@ -68,7 +68,7 @@ const REGISTRY: Record<string, VFSFactory> = {
     return new RedisVFS(norm)
   },
   sql: async (config) => {
-    refuseUnknownKeys(config, ['path', 'capacity'] satisfies (keyof SqlVFSOptions)[])
+    refuseUnknownKeys(config, ['path', 'capacity', 'root'] satisfies (keyof SqlVFSOptions)[])
     const { SqlVFS } = await import('./sql/sql.ts')
     return new SqlVFS(normalizeFields(config))
   },

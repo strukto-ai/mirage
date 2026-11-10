@@ -43,10 +43,32 @@ import type { Handed, VFSStateBase } from '../types.ts'
 import type { SqlDriver } from './types.ts'
 
 export interface SqlVFSOptions {
-  /** The most bytes the mount's files may hold: a size like `100MB` or a count of bytes. */
+  /** The most bytes the database's files may hold: a size like `100MB` or a count of bytes. */
   capacity?: number | string | null
+  /** The folder of the database the mount serves, made when missing; `/` for all of it. */
+  root?: string
   /** Whether closing the mount closes `driver`; a passed driver is borrowed by default. */
   ownsDriver?: boolean
+}
+
+// The usages of the mounts on one driver, by limit. Each counts every file
+// of the database, so mounts with one limit count against one usage and
+// their writes together stay within it.
+const shared = new WeakMap<SqlDriver, Map<number, StorageUsage>>()
+
+function sharedUsage(
+  name: string,
+  driver: SqlDriver,
+  capacity: number | string | null,
+): StorageUsage | null {
+  const usage = storageUsage(name, capacity)
+  if (usage === null) return null
+  const byLimit = shared.get(driver) ?? new Map<number, StorageUsage>()
+  shared.set(driver, byLimit)
+  const known = byLimit.get(usage.limit)
+  if (known !== undefined) return known
+  byLimit.set(usage.limit, usage)
+  return usage
 }
 
 /**
@@ -56,7 +78,8 @@ export interface SqlVFSOptions {
  * The tables are laid out as AgentFS's: an inode per file and directory, an
  * entry naming each under its parent, and a file's bytes in rows of the
  * database's chunk size. Each op resolves its path in one query and lands its
- * change in one transaction. One database holds one filesystem. Mirrors
+ * change in one transaction. A mount serves one folder of its database (`/`,
+ * all of it, by default), so several mounts can share one database. Mirrors
  * Python's `SqlVFS`.
  */
 export class SqlVFS extends BaseVFS<SqlAccessor> {
@@ -72,16 +95,19 @@ export class SqlVFS extends BaseVFS<SqlAccessor> {
   private readonly ownsDriver: boolean
 
   /**
-   * `capacity` is the most bytes the mount's files may hold, a size like
-   * `100MB` or a count of bytes; null for no limit. Counted at the first
-   * write or `df`; a writer in another process is counted at the next `df`.
+   * `capacity` is the most bytes the database's files may hold, whichever
+   * folder they are in, a size like `100MB` or a count of bytes; null for no
+   * limit. Mounts handed one driver with one capacity share it. Counted at
+   * the first write or `df`; a writer in another process is counted at the
+   * next `df`. `root` is the folder of the database the mount serves, made
+   * with its parents on the first op when missing.
    *
    * @throws VFSConfigError when `capacity` is not a size.
    */
   constructor(driver: SqlDriver, options: SqlVFSOptions = {}) {
     super()
-    this.accessor = new SqlAccessor(driver)
-    this.usage = storageUsage(this.name, options.capacity ?? null)
+    this.accessor = new SqlAccessor(driver, options.root ?? '/')
+    this.usage = sharedUsage(this.name, driver, options.capacity ?? null)
     this.ownsDriver = options.ownsDriver ?? false
   }
 
@@ -95,8 +121,11 @@ export class SqlVFS extends BaseVFS<SqlAccessor> {
     )
   }
 
+  // The folder joins the location, so a file reads as one key through every
+  // mount on the database, as `/` and its folder `/a` name `/a/x` and `/x`.
   override storageLocation(): string {
-    return `${this.name}:${this.accessor.driver.location}`
+    const { root } = this.accessor
+    return `${this.name}:${this.accessor.driver.location}${root === '/' ? '' : root}`
   }
 
   override async close(): Promise<void> {
@@ -192,7 +221,7 @@ export class SqlVFS extends BaseVFS<SqlAccessor> {
     })
   }
 
-  /** The mount's own quota when capped, counted afresh so a writer in
+  /** The database's quota when capped, counted afresh so a writer in
    * another process shows; else a database that grows (ELASTIC). Mirrors
    * Python's. */
   override async capacity(): Promise<CapacityResult> {

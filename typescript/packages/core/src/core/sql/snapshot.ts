@@ -16,7 +16,16 @@ import type { SqlAccessor } from '../../accessor/sql.ts'
 import { gnuBasename, parent } from '../../utils/path.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { SqlStatement } from '../../vfs/sql/types.ts'
-import { CLEAR, DIR, FILE, RENUMBERED, RESTORED_INO, ROOT_INO, SQL } from './constants.ts'
+import {
+  CLEAR,
+  clearUnder,
+  DIR,
+  FILE,
+  RENUMBERED,
+  RESTORED_INO,
+  ROOT_INO,
+  SQL,
+} from './constants.ts'
 import { placeBytes, readBytes } from './data.ts'
 import { byIno, inodeOf, isDir, isFile, isoOf, nowStamp, stampOf, type InoRef } from './inode.ts'
 
@@ -35,10 +44,10 @@ function depth(p: string): number {
   return p.split('/').length
 }
 
-/** Every file and directory of the database, read in one walk of the tree. */
+/** Every file and directory of the mount's folder, read in one walk of the tree. */
 export async function snapshot(accessor: SqlAccessor): Promise<SqlSnapshot> {
   const out: SqlSnapshot = { files: {}, dirs: ['/'], modified: {} }
-  for (const row of await accessor.query(SQL.subtree, [ROOT_INO])) {
+  for (const row of await accessor.query(SQL.subtree, [await accessor.rootIno()])) {
     const node = inodeOf(row)
     if (node === null || !(isDir(node) || isFile(node))) continue
     const p = `/${String(row.rel)}`
@@ -51,22 +60,24 @@ export async function snapshot(accessor: SqlAccessor): Promise<SqlSnapshot> {
 }
 
 /**
- * Replace everything the database holds with `state`, in one transaction:
- * the directories outermost first, then each file under its directory. A
- * path whose directory the state does not hold is dropped. The inodes take
- * fresh numbers counted from one the database gives first, so an entry
- * names its parent by number however deep the tree, and an op that read an
- * inode before the restore reaches none it made.
+ * Replace everything the mount's folder holds with `state`, in one
+ * transaction: the directories outermost first, then each file under its
+ * directory. A path whose directory the state does not hold is dropped. The
+ * inodes take fresh numbers counted from one the database gives first, so
+ * an entry names its parent by number however deep the tree, and an op that
+ * read an inode before the restore reaches none it made. Outside the folder,
+ * the database keeps what it holds.
  */
 export async function restore(accessor: SqlAccessor, state: SqlSnapshot): Promise<void> {
   const now = nowStamp()
+  const root = await accessor.rootIno()
   const statements: SqlStatement[] = [
     { sql: SQL.dropBase },
     { sql: SQL.newInode, params: [FILE, 0, ...now] },
     { sql: SQL.setBase },
-    ...CLEAR.map((sql) => ({ sql })),
+    ...(root === ROOT_INO ? CLEAR : clearUnder(root)).map((sql) => ({ sql })),
   ]
-  const dirs = new Map<string, InoRef>([['/', byIno(ROOT_INO)]])
+  const dirs = new Map<string, InoRef>([['/', byIno(root)]])
   let made = 0
   const place = async (p: string, mode: number, data: Uint8Array | null): Promise<void> => {
     const up = dirs.get(parent(p))
