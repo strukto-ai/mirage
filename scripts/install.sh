@@ -1,11 +1,11 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 # Mirage installer (TypeScript CLI)
 # Usage: curl -fsSL https://strukto.ai/mirage/install.sh | sh
 
 PKG="@struktoai/mirage-cli"
-MIN_NODE_MAJOR=20
+SUPPORTED_NODE="22.20+, 24.12+, or 25+"
 
 RESET='\033[0m'
 RED='\033[0;31m'
@@ -34,30 +34,27 @@ if ! command -v curl >/dev/null 2>&1; then
   err "curl is required but not installed."
 fi
 
-node_major() {
-  node -e 'process.stdout.write(String(process.versions.node.split(".")[0]))' 2>/dev/null || echo 0
-}
-
 ensure_node() {
   if command -v node >/dev/null 2>&1; then
-    local major
-    major=$(node_major)
-    if [ "$major" -ge "$MIN_NODE_MAJOR" ]; then
-      return 0
+    if ! node -e '
+      const [major, minor] = process.versions.node.split(".").map(Number)
+      process.exit((major === 22 && minor >= 20) || (major === 24 && minor >= 12) || major >= 25 ? 0 : 1)
+    '; then
+      warn "Node $(node --version) is outside the supported versions: ${SUPPORTED_NODE}. Continuing with the installed version."
     fi
-    warn "Node $(node --version) is older than required v${MIN_NODE_MAJOR}."
-  else
-    info "Node.js not found."
+    return 0
   fi
+  info "Node.js not found."
 
   info "Installing Node.js via fnm..."
   if ! command -v fnm >/dev/null 2>&1; then
-    curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell
+    FNM_INSTALLER=$(curl -fsSL https://fnm.vercel.app/install) || err "Failed to download fnm."
+    printf '%s\n' "$FNM_INSTALLER" | bash -s -- --skip-shell
     export PATH="$HOME/.local/share/fnm:$PATH"
     eval "$(fnm env --shell bash 2>/dev/null || true)"
   fi
   if ! command -v fnm >/dev/null 2>&1; then
-    err "Failed to install fnm. Install Node.js >= ${MIN_NODE_MAJOR} manually: https://nodejs.org/"
+    err "Failed to install fnm. Install Node.js ${SUPPORTED_NODE} manually: https://nodejs.org/"
   fi
   fnm install --lts
   fnm use lts-latest
@@ -82,7 +79,8 @@ if ! npm install -g "${PKG}"; then
 fi
 
 if ! command -v mirage >/dev/null 2>&1; then
-  NPM_BIN="$(npm bin -g 2>/dev/null || echo "")"
+  NPM_PREFIX="$(npm prefix -g 2>/dev/null || echo "")"
+  NPM_BIN="${NPM_PREFIX:+${NPM_PREFIX}/bin}"
   warn "'mirage' is not on your PATH yet."
   if [ -n "$NPM_BIN" ]; then
     warn "Add this to your shell profile (~/.zshrc, ~/.bashrc):"

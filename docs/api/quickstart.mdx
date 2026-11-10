@@ -4,7 +4,17 @@ description: Create a workspace and run your first shell command with the OSS Se
 icon: bolt
 ---
 
-Set your access token in the terminal that sends requests:
+First, [start a local server](/home/access/http#launch-a-server) and leave it
+running. The examples below use `http://127.0.0.1:8765`.
+
+In a second terminal, check that the server is reachable:
+
+```bash
+curl --fail --silent --show-error http://127.0.0.1:8765/v1/health
+```
+
+The response includes `"status": "ok"`. Set the same token you configured on
+the server in this terminal before sending authenticated requests:
 
 ```bash
 export MIRAGE_AUTH_TOKEN='replace-with-your-token'
@@ -13,7 +23,7 @@ export MIRAGE_AUTH_TOKEN='replace-with-your-token'
 Create a workspace with an in-memory mount:
 
 ```bash
-curl --request POST \
+curl --fail-with-body --request POST \
   --url 'http://127.0.0.1:8765/v1/workspaces' \
   --header "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
   --header 'Content-Type: application/json' \
@@ -27,7 +37,7 @@ configuration returns `409`.
 Run a shell command:
 
 ```bash
-curl --request POST \
+curl --fail-with-body --request POST \
   --url 'http://127.0.0.1:8765/v1/workspaces/demo/shell' \
   --header "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
   --header 'Content-Type: application/json' \
@@ -43,7 +53,7 @@ The response contains the output and command exit status:
 Read workspace command logs:
 
 ```bash
-curl --request GET \
+curl --fail-with-body --request GET \
   --url 'http://127.0.0.1:8765/v1/workspaces/demo/logs?limit=50' \
   --header "Authorization: Bearer $MIRAGE_AUTH_TOKEN"
 ```
@@ -53,4 +63,3 @@ query parameter for another page. See [List workspace logs](/api/operations/work
 for the fields and a complete response example.
 
 Browse the resource groups on the left or use [endpoint search](/api/reference).
-For local daemon setup, see the [HTTP guide](/home/access/http).
