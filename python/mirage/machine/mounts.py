@@ -445,6 +445,8 @@ class MachineMounts:
 
     async def close(self) -> None:
         """Unmount every served prefix and end its SFTP server."""
+        for kill in self._kills:
+            kill.cancel()
         async with self._lock:
             await self._unmount()
             self._session = None
@@ -790,7 +792,8 @@ class MachineMounts:
         error rather than hanging. The next line unmounts it and serves the
         prefix again, as for any server that ended; a kill that lands late
         reaches only this serve's sshfs, never the one serving the prefix
-        again.
+        again. A kill the machine does not answer is let go after
+        ``UNMOUNT_WAIT_SECONDS``, or when the mounts close.
 
         Args:
             prefix (str): the served mountpoint.
@@ -811,7 +814,9 @@ class MachineMounts:
             source (str): the sshfs's source.
         """
         try:
-            killed = await self._run(kill_line(source))
+            killed = await asyncio.wait_for(
+                self._run(kill_line(source)), UNMOUNT_WAIT_SECONDS
+            )
         except Exception:
             logger.warning(
                 "%s: killing the sshfs for %s failed",

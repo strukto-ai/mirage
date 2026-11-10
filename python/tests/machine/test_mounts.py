@@ -100,6 +100,8 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
         self.fail_check = False
         self.fail_kill = False
         self.hang_kill = False
+        # Kills that never answered and were let go.
+        self.kills_stopped = 0
         self.commands: list[str] = []
         self.pipes: list[str] = []
         self.requests: dict[str, asyncio.StreamReader] = {}
@@ -135,7 +137,10 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
         if line.startswith("for p in /proc/[0-9]*") and self.kill_seconds:
             await asyncio.sleep(self.kill_seconds)
         if line.startswith("for p in /proc/[0-9]*") and self.hang_kill:
-            await asyncio.Event().wait()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                self.kills_stopped += 1
         if line.startswith("for p in /proc/[0-9]*") and self.fail_kill:
             raise RuntimeError("the machine went away")
         if line.startswith("for p in /proc/[0-9]*"):
@@ -1063,6 +1068,42 @@ async def test_the_next_line_runs_while_an_ended_servers_kill_is_unanswered():
     assert (await agent.shell("python3 job.py")).exit_code == 0
     assert served(sandbox) == ["/data", "/my notes", "/data"]
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_an_unanswered_kill_is_let_go_at_its_deadline_with_a_warning(
+    monkeypatch, caplog
+):
+    monkeypatch.setattr(mounts, "UNMOUNT_WAIT_SECONDS", 0.05)
+    sandbox = FakeMachine("ssh")
+    sandbox.hang_kill = True
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    sandbox.requests["/data"].feed_eof()
+    await _until(
+        lambda: "fake: killing the sshfs for /data failed" in caplog.text
+    )
+    assert sandbox.kills_stopped == 1
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_an_unanswered_kill_is_let_go_quietly_when_the_mounts_close(
+    caplog,
+):
+    sandbox = FakeMachine("ssh")
+    sandbox.hang_kill = True
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    sandbox.requests["/data"].feed_eof()
+    await _until(
+        lambda: any(c.startswith("for p in /proc/") for c in sandbox.commands)
+    )
+    await ws.close()
+    await _until(lambda: sandbox.kills_stopped == 1)
+    assert "killing the sshfs" not in caplog.text
 
 
 # Each serve's sshfs carries a source of its own, so the ended one's kill
