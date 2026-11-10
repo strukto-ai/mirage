@@ -63,15 +63,16 @@ def test_build_app_makes_the_state_root_owner_only(
     assert os.stat(root).st_mode & 0o777 == 0o700
 
 
+def _refuse_chmod(self: Path, mode: int) -> None:
+    raise PermissionError(1, "Operation not permitted", str(self))
+
+
 def test_build_app_warns_when_it_cannot_tighten_the_state_root(
     tmp_path, monkeypatch, caplog
 ):
     # A volume owned by another user (a k8s fsGroup mount) refuses the
     # chmod; the daemon still starts, and says the root stays readable.
-    def refuse(self, mode):
-        raise PermissionError(1, "Operation not permitted", str(self))
-
-    monkeypatch.setattr(Path, "chmod", refuse)
+    monkeypatch.setattr(Path, "chmod", _refuse_chmod)
     build_app(state_root=tmp_path / "state")
     assert "is not owned by this user" in caplog.text
 
