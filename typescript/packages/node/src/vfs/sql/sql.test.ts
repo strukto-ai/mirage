@@ -25,7 +25,7 @@ import { checkMutationContract } from '@struktoai/mirage-core/vfs/testing'
 import type { SqlDriver } from '@struktoai/mirage-core/vfs/sql/types'
 import { SqlRecordClient } from '@struktoai/mirage-core/workspace/record/sql'
 import { SqlWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/sql'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../../workspace.ts'
 import { SqliteDriver } from './driver.ts'
 import { PostgresSqlDriver } from './postgres.ts'
@@ -479,8 +479,9 @@ describe('SqlVFS', () => {
 
 // A workspace on a Postgres state store keeps its execution plane there:
 // another daemon on the database lists the lines, jobs and processes the
-// holder runs, kills its job, and a workspace opened later lists the lines
-// that ended.
+// holder runs, once the holder has written them a moment after the line
+// returns, kills its job, and a workspace opened later lists the lines that
+// ended.
 describe.skipIf(POSTGRES_URL === undefined)('SqlWorkspaceStateStore over Postgres', () => {
   it('keeps the execution plane in the database', async () => {
     const scope = `test/${randomUUID()}/`
@@ -504,8 +505,14 @@ describe.skipIf(POSTGRES_URL === undefined)('SqlWorkspaceStateStore over Postgre
       const pid = Number(
         new TextDecoder().decode((await a.shell('sleep 30 & echo $!', { sessionId: 's' })).stdout),
       )
-      const [line] = await b.lines()
-      expect([line?.command, line?.state]).toEqual(['sleep 30 & echo $!', 'exited'])
+      // The holder writes its records a moment after the line returns.
+      await vi.waitFor(
+        async () => {
+          const [line] = await b.lines()
+          expect([line?.command, line?.state]).toEqual(['sleep 30 & echo $!', 'exited'])
+        },
+        { timeout: 5000, interval: 10 },
+      )
       const [running] = await b.processes({ state: 'running' })
       expect(running?.id.pid).toBe(pid)
       const [job] = await b.jobs()
