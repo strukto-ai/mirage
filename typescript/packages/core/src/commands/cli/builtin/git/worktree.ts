@@ -79,6 +79,7 @@ class Scanner {
     private readonly showIgnored = false,
     private readonly roots: readonly string[] | null = null,
     private readonly perDirectory: string | null = GITIGNORE,
+    private readonly keepEmpty = false,
   ) {
     this.directories = trackedDirectories(tracked)
     this.mounts = mountView(vfs, true)
@@ -257,7 +258,10 @@ class Scanner {
         this.found.ignored.splice(ignoredFirst, Infinity, `${relative}/`)
       return
     }
-    if (this.mode === UNTRACKED_NORMAL && (await this.holdsAFile(relative, ignores))) {
+    if (
+      this.mode === UNTRACKED_NORMAL &&
+      (this.keepEmpty || (await this.holdsAFile(relative, ignores)))
+    ) {
       this.found.untracked.push(`${relative}/`)
     }
   }
@@ -319,6 +323,7 @@ export async function scan(
   roots: readonly string[] | null = null,
   ignores: IgnoreStack | null = null,
   perDirectory: string | null = GITIGNORE,
+  keepEmpty = false,
 ): Promise<WorkTree> {
   const rules = ignores ?? (await loadIgnores(vfs, location.commondir, location.worktree))
   const scanner = new Scanner(
@@ -329,6 +334,7 @@ export async function scan(
     showIgnored,
     roots,
     perDirectory,
+    keepEmpty,
   )
   await scanner.walk('', false, rules)
   return scanner.found

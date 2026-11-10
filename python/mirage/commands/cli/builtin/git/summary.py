@@ -33,6 +33,7 @@ NARROWEST_NAME = 10
 NARROWEST_GRAPH = 6
 ELIDED = "..."
 BINARY_COUNT = "Bin"
+UNMERGED_COUNT = "Unmerged"
 # What a row spends besides the name, count and graph: the leading space,
 # " | ", the space after the count, and the last column, left free.
 FRAME = 6
@@ -49,6 +50,7 @@ class FileStat:
         deletions (int): lines removed, 0 for a binary file.
         binary (bool): whether either side sniffs as binary.
         old_size (int): byte length of the old blob, 0 when created.
+        unmerged (bool): whether the row only says the path is in conflict.
         new_size (int): byte length of the new blob, 0 when deleted.
     """
 
@@ -58,6 +60,7 @@ class FileStat:
     binary: bool
     old_size: int
     new_size: int
+    unmerged: bool = False
 
 
 def _blob_data(store: BaseObjectStore, sha: bytes | None) -> bytes:
@@ -228,6 +231,9 @@ def stat_table(stats: list[FileStat], width: int = STAT_WIDTH) -> list[str]:
     for stat in stats:
         name = _fitted_name(stat.path, column)
         cell = f" {name}{' ' * (column - text_width(name))} | "
+        if stat.unmerged:
+            rows.append(f"{cell}{UNMERGED_COUNT}")
+            continue
         if stat.binary:
             rows.append(
                 f"{cell}{BINARY_COUNT:>{count_column}} "
@@ -251,7 +257,7 @@ def stat_table(stats: list[FileStat], width: int = STAT_WIDTH) -> list[str]:
         rows.append(f"{cell}{count}{' ' + bar if bar else ''}")
     rows.append(
         stat_line(
-            len(stats),
+            sum(not s.unmerged for s in stats),
             sum(s.insertions for s in stats),
             sum(s.deletions for s in stats),
         )

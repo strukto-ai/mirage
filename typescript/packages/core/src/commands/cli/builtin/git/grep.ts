@@ -112,7 +112,13 @@ function parseFlags(
   for (const name of fl.typedOrder('h', 'H')) filename = name === 'H'
   let binary = 'binary'
   for (const name of fl.typedOrder('text', 'args_I')) binary = name === 'text' ? 'text' : 'skip'
-  const around = fl.asInt('context', 0)
+  let before = 0
+  let after = 0
+  for (const [name, spelled] of fl.occurrences('context', 'before_context', 'after_context')) {
+    const amount = Math.max(Number(spelled), 0)
+    if (name !== 'after_context') before = amount
+    if (name !== 'before_context') after = amount
+  }
   return {
     patterns: compiled,
     invert: fl.asBool('invert_match'),
@@ -124,8 +130,8 @@ function parseFlags(
     nul: fl.asBool('null'),
     binary,
     utf8,
-    before: Math.max(fl.asInt('before_context', around), 0),
-    after: Math.max(fl.asInt('after_context', around), 0),
+    before,
+    after,
     heading: fl.asBool('heading'),
     between: fl.asBool('break'),
     limit: fl.asInt('max_count', -1),

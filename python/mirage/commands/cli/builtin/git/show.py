@@ -401,7 +401,7 @@ def _diff_tree(
     flags: DiffFlags,
     no_commit_id: bool,
     sides: list[Side],
-) -> bytes:
+) -> tuple[bytes, bool]:
     """A resolved commit's diff against its parents, synchronously.
 
     Every block opens with the commit id unless ``--no-commit-id``, and a
@@ -414,12 +414,15 @@ def _diff_tree(
         no_commit_id (bool): whether to leave the commit id out.
         sides (list[Side]): its comparisons, as the session sees them.
     """
-    bodies = commit_output(repo, commit, flags, sides)
-    return b"".join(
-        (b"" if no_commit_id else commit.id + b"\n") + body
-        for body in bodies
+    bodies = [
+        body
+        for body in commit_output(repo, commit, flags, sides)
         if body is not None
+    ]
+    text = b"".join(
+        (b"" if no_commit_id else commit.id + b"\n") + body for body in bodies
     )
+    return text, bool(bodies)
 
 
 async def _second_tree(
@@ -543,7 +546,7 @@ async def diff_tree(
     rows = deltas(location, sides)
 
     async def render(shown: list[Delta]) -> ByteSource | None:
-        body = await asyncio.to_thread(
+        body, differs = await asyncio.to_thread(
             _diff_tree,
             repo,
             commit,
@@ -551,7 +554,7 @@ async def diff_tree(
             fl.as_bool("no_commit_id"),
             shown_sides(shown, len(sides)),
         )
-        if report and body:
+        if report and differs:
             io.exit_code = 1
         return body or None
 

@@ -191,6 +191,65 @@ def pathspec_selects(
     return any(_selects(path, pattern, directory) for pattern in patterns)
 
 
+def named_whole(directory: str, patterns: Sequence[str]) -> bool:
+    """Whether a pathspec names a directory as a whole.
+
+    Args:
+        directory (str): repository-relative directory, no trailing slash.
+        patterns (Sequence[str]): patterns from ``pathspec_patterns``.
+    """
+    return pathspec_selects(directory, patterns) or pathspec_selects(
+        f"{directory}/", patterns
+    )
+
+
+def narrowed_untracked(
+    names: Iterable[str], files: Iterable[str], patterns: Sequence[str]
+) -> list[str]:
+    """The untracked names a pathspec keeps, a directory collapsing only
+    where the pathspec names it whole.
+
+    Args:
+        names (Iterable[str]): the names a walk listed, a collapsed
+            directory ending in ``/``.
+        files (Iterable[str]): every untracked file under the collapsed
+            directories the pathspec does not name whole.
+        patterns (Sequence[str]): patterns from ``pathspec_patterns``.
+    """
+    every = list(files)
+    kept: set[str] = set()
+    for name in names:
+        if not name.endswith("/"):
+            if pathspec_selects(name, patterns):
+                kept.add(name)
+            continue
+        directory = name[:-1]
+        if named_whole(directory, patterns):
+            kept.add(name)
+            continue
+        for path in every:
+            if path.startswith(name) and pathspec_selects(path, patterns):
+                kept.add(_deepest_named(directory, path, patterns))
+    return sorted(kept)
+
+
+def _deepest_named(directory: str, path: str, patterns: Sequence[str]) -> str:
+    """The first directory below ``directory`` a pathspec names whole on
+    the way to a file, else the file.
+
+    Args:
+        directory (str): the collapsed directory, itself not named whole.
+        path (str): the untracked file under it.
+        patterns (Sequence[str]): patterns from ``pathspec_patterns``.
+    """
+    at = directory
+    for piece in path[len(directory) + 1 :].split("/")[:-1]:
+        at = f"{at}/{piece}"
+        if named_whole(at, patterns):
+            return f"{at}/"
+    return path
+
+
 def pattern_roots(
     patterns: Iterable[str], literal: bool = False
 ) -> tuple[str, ...] | None:

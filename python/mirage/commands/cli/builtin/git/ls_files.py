@@ -32,14 +32,16 @@ from mirage.commands.cli.builtin.git.errors import (
 from mirage.commands.cli.builtin.git.format import abbrev_width
 from mirage.commands.cli.builtin.git.ignore import (
     GITIGNORE,
+    INFO_EXCLUDE,
     IgnoreStack,
-    load_ignores,
 )
 from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.io import read_optional
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.pathspec import (
     decoded,
+    named_whole,
+    narrowed_untracked,
     pathspec_patterns,
     pathspec_selects,
     repo_relative,
@@ -113,23 +115,32 @@ async def _excludes(
     """
     vfs = require_vfs(ctx)
     stack = IgnoreStack([])
-    per_directory = fl.as_str("exclude_per_directory")
-    if fl.as_bool("exclude_standard"):
-        stack = await load_ignores(vfs, location.commondir, location.worktree)
-        per_directory = GITIGNORE
-    elif per_directory is not None:
+    for option, value in fl.occurrences("exclude_from", "exclude_standard"):
+        if option == "exclude_standard":
+            private = await read_optional(
+                vfs, location.commondir.join(INFO_EXCLUDE)
+            )
+            if private is not None:
+                stack = stack.push("", private)
+            continue
+        for name in value if isinstance(value, list) else [value]:
+            data = await read_optional(vfs, start_point(fl).join(str(name)))
+            if data is None:
+                raise GitError(f"cannot use {name} as an exclude file")
+            stack = stack.push("", data)
+    per_directory = (
+        GITIGNORE
+        if fl.as_bool("exclude_standard")
+        else fl.as_str("exclude_per_directory")
+    )
+    if per_directory is not None:
         root = await read_optional(vfs, location.worktree.join(per_directory))
         if root is not None:
             stack = stack.push("", root)
-    for name in fl.as_list("exclude_from"):
-        data = await read_optional(vfs, start_point(fl).join(name))
-        if data is None:
-            raise GitError(f"cannot use {name} as an exclude file")
-        stack = stack.push("", data)
     typed = fl.as_list("exclude")
     if typed:
         text = "".join(f"{pattern}\n" for pattern in typed)
-        stack = stack.push("", encode_text(text))
+        stack = stack.commanded(encode_text(text))
     return stack, per_directory
 
 
@@ -246,14 +257,34 @@ async def ls_files(
             None,
             stack,
             per_directory,
+            fl.as_bool("directory") and not fl.as_bool("no_empty_directory"),
         )
         changes = await work_changes(
             vfs, location.worktree, state.entries, found
         )
         if others:
-            for name in sorted(found.ignored if ignored else found.untracked):
+            untracked = found.untracked
+            if not ignored:
+                files: list[str] = []
+                if any(
+                    name.endswith("/") and not named_whole(name[:-1], scope)
+                    for name in untracked
+                ):
+                    every = await scan(
+                        vfs,
+                        location,
+                        tracked,
+                        UNTRACKED_ALL,
+                        False,
+                        None,
+                        stack,
+                        per_directory,
+                    )
+                    files = every.untracked
+                untracked = narrowed_untracked(untracked, files, scope)
+            for name in sorted(found.ignored if ignored else untracked):
                 bare = name.rstrip("/")
-                if not pathspec_selects(bare, scope):
+                if ignored and not pathspec_selects(bare, scope):
                     continue
                 tag = f"{TAG_OTHER} " if tags else ""
                 listed.append(bare)

@@ -183,7 +183,15 @@ def parse_flags(
     binary = "binary"
     for name in fl.typed_order("text", "args_I"):
         binary = "text" if name == "text" else "skip"
-    around = fl.as_int("context", 0)
+    before = after = 0
+    for name, spelled in fl.occurrences(
+        "context", "before_context", "after_context"
+    ):
+        if spelled is None:
+            continue
+        amount = max(int(str(spelled)), 0)
+        before = before if name == "after_context" else amount
+        after = after if name == "before_context" else amount
     return GrepFlags(
         tuple(compiled),
         fl.as_bool("invert_match"),
@@ -195,8 +203,8 @@ def parse_flags(
         fl.as_bool("null"),
         binary,
         utf8,
-        max(fl.as_int("before_context", around), 0),
-        max(fl.as_int("after_context", around), 0),
+        before,
+        after,
         fl.as_bool("heading"),
         fl.as_bool("break"),
         fl.as_int("max_count", -1),

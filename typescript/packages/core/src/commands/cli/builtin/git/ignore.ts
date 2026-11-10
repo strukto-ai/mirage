@@ -19,7 +19,7 @@ import type { Files } from '../../../../workspace/files.ts'
 import type { RepoLocation } from './types.ts'
 
 export const GITIGNORE = '.gitignore'
-const INFO_EXCLUDE = 'info/exclude'
+export const INFO_EXCLUDE = 'info/exclude'
 
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
@@ -206,8 +206,11 @@ export function lastMatch(
 export class IgnoreStack {
   private readonly filters: readonly [string, Rule[]][]
 
-  constructor(filters: readonly [string, Rule[]][] = []) {
+  private readonly commandLine: Rule[] | null
+
+  constructor(filters: readonly [string, Rule[]][] = [], commandLine: Rule[] | null = null) {
     this.filters = filters
+    this.commandLine = commandLine
   }
 
   /**
@@ -217,7 +220,19 @@ export class IgnoreStack {
    * @param patterns the file's contents
    */
   push(prefix: string, patterns: Uint8Array): IgnoreStack {
-    return new IgnoreStack([...this.filters, [prefix, parseRules(DEC.decode(patterns))]])
+    return new IgnoreStack(
+      [...this.filters, [prefix, parseRules(DEC.decode(patterns))]],
+      this.commandLine,
+    )
+  }
+
+  /**
+   * A new stack whose command-line rules outrank every file's.
+   *
+   * @param patterns the rules, one per line
+   */
+  commanded(patterns: Uint8Array): IgnoreStack {
+    return new IgnoreStack(this.filters, parseRules(DEC.decode(patterns)))
   }
 
   /**
@@ -228,6 +243,10 @@ export class IgnoreStack {
    *   `build/` pattern can match it
    */
   isIgnored(path: string, isDir = false): boolean {
+    if (this.commandLine !== null) {
+      const typed = verdict(this.commandLine, path, isDir)
+      if (typed !== null) return typed
+    }
     for (let i = this.filters.length - 1; i >= 0; i--) {
       const held = this.filters[i]
       if (held === undefined) continue

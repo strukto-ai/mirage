@@ -359,12 +359,13 @@ export async function diffTree(
   const commit = await commitFacts(repo, await resolveCommit(repo, first))
   const sides = await commitSides(repo, commit, flags, recursive, fl.asBool('root'))
   const render = async (shown: Delta[]): Promise<ByteSource> => {
-    const bodies = await commitOutput(repo, commit, flags, shownSides(shown, sides.length))
+    const bodies = (
+      await commitOutput(repo, commit, flags, shownSides(shown, sides.length))
+    ).filter((body) => body !== null)
     const out = bodies
-      .filter((body) => body !== null)
       .map((body) => (fl.asBool('no_commit_id') ? '' : commit.oid + '\n') + body)
       .join('')
-    if (report && out !== '') io.exitCode = 1
+    if (report && bodies.length > 0) io.exitCode = 1
     return encodeText(out)
   }
   const io = new IOResult({ rows: { items: deltas(repo.location, sides), render } })

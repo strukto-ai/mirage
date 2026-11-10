@@ -389,14 +389,65 @@ async function upstreamOf(repo: Repo, branch: string): Promise<RefUpstream> {
  *
  * @throws SelectorError the branch has no such destination
  */
+/** The commits a shallow repository holds without their parents. */
+export async function shallowCommits(repo: Repo): Promise<Set<string>> {
+  const data = await readOptional(repo.vfs, repo.location.commondir.join('shallow'))
+  return new Set(
+    new TextDecoder()
+      .decode(data ?? new Uint8Array())
+      .trim()
+      .split(/\s+/),
+  )
+}
+
+/** The remote a branch pushes to, by the settings in git's order. */
+async function pushRemote(repo: Repo, branch: string): Promise<string> {
+  const values = (path: string): Promise<string[]> => configValues(repo.vfs, repo.location, path)
+  for (const key of [
+    `branch.${branch}.pushRemote`,
+    'remote.pushDefault',
+    `branch.${branch}.remote`,
+  ]) {
+    const named = (await values(key)).at(-1)
+    if (named !== undefined) return named
+  }
+  return 'origin'
+}
+
+/** Where a remote's push refspecs send a branch; null without any. */
+async function pushedAs(repo: Repo, remote: string, branch: string): Promise<string | null> {
+  const texts = await configValues(repo.vfs, repo.location, `remote.${remote}.push`)
+  if (texts.length === 0) return null
+  const specs = texts.map((text) => {
+    const spec = parseRefspec(text)
+    if (spec.dst && spec.src.includes('*') !== spec.dst.includes('*'))
+      throw new SelectorError(`invalid refspec '${text}'`)
+    return spec
+  })
+  for (const spec of specs) {
+    const target = mapped(spec, `${BRANCH_PREFIX}${branch}`)
+    if (target) return target
+  }
+  throw new SelectorError(`push refspecs for '${remote}' do not include '${branch}'`)
+}
+
 async function pushTarget(repo: Repo, branch: string, revision: string): Promise<string> {
   const values = (path: string): Promise<string[]> => configValues(repo.vfs, repo.location, path)
   const full = `${BRANCH_PREFIX}${branch}`
   const mode = (await values('push.default')).at(-1)?.toLowerCase() ?? 'simple'
+  const remote = await pushRemote(repo, branch)
+  const destination = await pushedAs(repo, remote, branch)
+  if (destination !== null) {
+    const tracked = await fetchedAs(repo, remote, destination)
+    if (tracked === null)
+      throw new SelectorError(
+        `push destination '${destination}' on remote '${remote}' has no local tracking branch`,
+      )
+    return tracked
+  }
   if (mode === 'nothing')
     throw new SelectorError("push has no destination (push.default is 'nothing')")
   if (mode === 'current' || mode === 'matching') {
-    const remote = (await values(`branch.${branch}.remote`)).at(-1) ?? 'origin'
     const target = await fetchedAs(repo, remote, full)
     if (target === null) throw new AmbiguousArgumentError(revision)
     return target
@@ -774,13 +825,7 @@ export async function mergeBases(
   other: CommitFacts,
   others: readonly CommitFacts[] = [],
 ): Promise<CommitFacts[]> {
-  const data = await readOptional(repo.vfs, repo.location.commondir.join('shallow'))
-  const shallow = new Set(
-    new TextDecoder()
-      .decode(data ?? new Uint8Array())
-      .trim()
-      .split(/\s+/),
-  )
+  const shallow = await shallowCommits(repo)
   const tips = [one, other, ...others]
   const known = new Map(tips.map((commit) => [commit.oid, commit]))
   const load = async (oid: string): Promise<CommitFacts> => {

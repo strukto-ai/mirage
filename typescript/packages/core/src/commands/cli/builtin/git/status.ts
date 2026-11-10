@@ -18,12 +18,12 @@ import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { branchUpstream } from './branch.ts'
-import { assembled, collect, RENAME_THRESHOLD, type StatusRow } from './changes.ts'
+import { assembled, collect, RENAME_THRESHOLD, type StatusRow, UNTRACKED } from './changes.ts'
 import { similarity } from './diff_output.ts'
 import { GitError } from './errors.ts'
 import { configValues } from './fs.ts'
 import { readOptional } from './io.ts'
-import { pathspecPatterns, pathspecSelects } from './pathspec.ts'
+import { namedWhole, narrowedUntracked, pathspecPatterns, pathspecSelects } from './pathspec.ts'
 import { detachedLine } from './ref_list.ts'
 import { readHead } from './refs.ts'
 import { branchLine, longFormat, relativeEntries, shortFormat } from './render.ts'
@@ -162,6 +162,37 @@ export async function reportRows(
   return { items: rows, render }
 }
 
+/** The rows a pathspec keeps, reading inside any untracked directory it does not name whole. */
+async function selectedRows(
+  repo: Repo,
+  vfs: Files,
+  rows: readonly StatusRow[],
+  showIgnored: boolean,
+  patterns: readonly string[],
+): Promise<StatusRow[]> {
+  const kept = rows.filter(
+    (row) =>
+      row.indexStatus !== UNTRACKED && pathspecSelects(row.name.replace(/\/$/, ''), patterns),
+  )
+  const names = rows.filter((row) => row.indexStatus === UNTRACKED).map((row) => row.name)
+  let files: string[] = []
+  if (names.some((name) => name.endsWith('/') && !namedWhole(name.slice(0, -1), patterns))) {
+    const [every] = await collect(repo, vfs, UNTRACKED_ALL, showIgnored)
+    files = every.filter((row) => row.indexStatus === UNTRACKED).map((row) => row.name)
+  }
+  return [
+    ...kept,
+    ...narrowedUntracked(names, files, patterns).map((name): StatusRow => ({
+      path: repo.location.worktree.join(name.replace(/\/$/, '')),
+      name,
+      indexStatus: UNTRACKED,
+      treeStatus: UNTRACKED,
+      end: null,
+      unmerged: false,
+    })),
+  ]
+}
+
 /**
  * Show the working tree status.
  *
@@ -190,7 +221,7 @@ export async function status(
   const threshold = await renameThreshold(repo, fl)
   const [collected, state, noCommits] = await collect(repo, vfs, parsed.untracked, parsed.ignored)
   const rows = patterns.length
-    ? collected.filter((row) => pathspecSelects(row.name.replace(/\/$/, ''), patterns))
+    ? await selectedRows(repo, vfs, collected, parsed.ignored, patterns)
     : collected
   const fully = await configBool(repo, 'core.quotepath', true)
   const prefix = parsed.porcelain ? '' : await relativePrefix(repo, start)

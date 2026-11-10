@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import shlex
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -94,3 +97,96 @@ async def test_an_unreadable_work_tree_file_is_refused_in_git_words(
     assert result.stderr == (
         b'error: open("a.txt"): Permission denied\nfatal: cannot hash a.txt\n'
     )
+
+
+COMMITTER = {
+    "GIT_AUTHOR_NAME": "Ada",
+    "GIT_AUTHOR_EMAIL": "ada@example.com",
+    "GIT_COMMITTER_NAME": "Ada",
+    "GIT_COMMITTER_EMAIL": "ada@example.com",
+}
+
+
+async def native(repo_path, line):
+    """Run real git in the repository.
+
+    Args:
+        repo_path (Path): the working tree.
+        line (str): the words after ``git``.
+    """
+    return await asyncio.to_thread(
+        subprocess.run,
+        ["git", "-C", str(repo_path), *shlex.split(line)],
+        capture_output=True,
+        env=COMMITTER,
+    )
+
+
+async def conflicted(repo_path):
+    """Stop a real merge of ``side`` on a conflict in ``a.txt``.
+
+    Args:
+        repo_path (Path): the working tree.
+    """
+    await native(repo_path, "checkout -q -b side HEAD~1")
+    (repo_path / "a.txt").write_text("one side\n", encoding="utf-8")
+    await native(repo_path, "commit -q -am side")
+    await native(repo_path, "checkout -q main")
+    await native(repo_path, "merge -q side")
+
+
+async def assert_matches_git(ws, repo_path, command):
+    """Compare a Mirage run with real git's.
+
+    Args:
+        ws (Workspace): the workspace mounting the repository.
+        repo_path (Path): the working tree.
+        command (str): the words after ``git``.
+    """
+    expected = await native(repo_path, command)
+    actual = await ws.shell("git -C /repo " + command)
+    assert (actual.exit_code, actual.stdout or b"", actual.stderr or b"") == (
+        expected.returncode,
+        expected.stdout,
+        expected.stderr,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command",
+    [
+        "diff-files",
+        "diff-files --name-status",
+        "diff-files --stat",
+        "diff-files --numstat",
+        "diff-files -p",
+    ],
+)
+async def test_diff_files_on_a_conflict_matches_git(
+    git_ws, repo_path, command
+):
+    await conflicted(repo_path)
+    await assert_matches_git(git_ws, repo_path, command)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command",
+    [
+        "diff-tree -c HEAD",
+        "diff-tree --cc HEAD",
+        "diff-tree -c --full-index HEAD",
+        "diff-tree -c --diff-filter=M HEAD",
+        "diff-tree -c --diff-filter=A HEAD",
+        "diff-tree -c --diff-filter=m HEAD",
+        "show --format= --cc --no-prefix HEAD",
+        "show --format= --cc --full-index HEAD",
+    ],
+)
+async def test_a_resolved_merge_matches_git(git_ws, repo_path, command):
+    await conflicted(repo_path)
+    (repo_path / "a.txt").write_text("resolved\n", encoding="utf-8")
+    await native(repo_path, "add a.txt")
+    await native(repo_path, "commit -q -m merge")
+    await assert_matches_git(git_ws, repo_path, command)

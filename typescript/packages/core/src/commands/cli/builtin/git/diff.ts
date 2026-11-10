@@ -23,6 +23,7 @@ import {
   parseDiffFlags,
   renamesEnabled,
   filtered,
+  withUnmerged,
   prefixConfig,
   type DiffFlags,
 } from './diff_output.ts'
@@ -34,7 +35,13 @@ import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { GitError, InvalidOptionError, NoMergeBaseError, UsageError } from './errors.ts'
 import { exists } from './io.ts'
-import { absoluteOperand, pathspecPatterns, patternRoots } from './pathspec.ts'
+import {
+  absoluteOperand,
+  pathspecPatterns,
+  pathspecSelects,
+  patternRoots,
+  visiblePath,
+} from './pathspec.ts'
 import { configBool, type Repo } from './repo.ts'
 import { deltas, shownSides, type Delta } from './rows.ts'
 import { shownEntries } from './seen.ts'
@@ -50,6 +57,7 @@ import {
   requireVfs,
 } from './util.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import type { IndexEntry, IndexState, RepoLocation } from './types.ts'
 
 const ENC = new TextEncoder()
 
@@ -195,7 +203,7 @@ function compared(
   const render = async (shown: Delta[]): Promise<ByteSource | null> => {
     const [oldSide, newSide] = shownSides(shown, 1)[0] ?? [new Map(), new Map()]
     const changes = await compare(repo, oldSide, newSide, flags.renames)
-    if (report && filtered(changes, flags).length) io.exitCode = 1
+    if (report && filtered(withUnmerged(changes, flags), flags).length) io.exitCode = 1
     if (quiet) return null
     const body = await renderChanges(repo, changes, flags)
     return body === '' ? null : encodeText(body)
@@ -239,6 +247,38 @@ async function plumbingFlags(fl: FlagView, repo: Repo): Promise<DiffFlags> {
   )
 }
 
+function stageOf(entry: IndexEntry | null): TreeEntry | null {
+  return entry === null ? null : { oid: entry.oid, mode: entry.mode.toString(8).padStart(6, '0') }
+}
+
+/**
+ * Each conflicted path's stages and work file, and the sides fitted. The index
+ * side of a conflict is its stage 2, which is what the ordinary row beside the
+ * `U` compares the file with; a path with no stage 2 has no such row.
+ */
+function unmergedSides(
+  location: RepoLocation,
+  state: IndexState,
+  patterns: readonly string[],
+  before: Tree,
+  after: Tree,
+): Map<string, readonly [TreeEntry | null, TreeEntry | null, TreeEntry | null]> {
+  const sides = new Map<string, readonly [TreeEntry | null, TreeEntry | null, TreeEntry | null]>()
+  for (const [path, conflict] of state.conflicts) {
+    if (!visiblePath(location, path)) {
+      after.delete(path)
+      continue
+    }
+    const ours = stageOf(conflict.this)
+    const work = after.get(path) ?? null
+    if (patterns.length === 0 || pathspecSelects(path, patterns))
+      sides.set(path, [ours, stageOf(conflict.other), work])
+    if (ours === null) after.delete(path)
+    else before.set(path, ours)
+  }
+  return sides
+}
+
 /** `git diff-files`: compare the index with the working tree, in plumbing's defaults. */
 export async function diffFiles(
   _accessor: NOOPAccessor,
@@ -258,9 +298,9 @@ export async function diffFiles(
   const pathspecs = pathspecPatterns(repo.location, startPoint(fl).virtual, [...words, ...marked])
   const state = await readIndex(repo, repo.vfs)
   const after = await workEntries(repo, vfs, state, patternRoots(pathspecs))
-  for (const path of state.conflicts.keys()) after.delete(path)
-  const before = shownEntries(repo, stagedEntries(state))
-  return compared(repo, { ...parsed, pathspecs, workTree: true }, [before, after], fl)
+  const before = new Map(shownEntries(repo, stagedEntries(state)))
+  const unmerged = unmergedSides(repo.location, state, pathspecs, before, after)
+  return compared(repo, { ...parsed, pathspecs, workTree: true, unmerged }, [before, after], fl)
 }
 
 /**

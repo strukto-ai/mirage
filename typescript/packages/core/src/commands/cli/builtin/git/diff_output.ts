@@ -19,6 +19,7 @@ import { TREE_MODE, treeEntries, treeItems, type TreeEntry } from './tree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const RENAME_SCORE = 50
+const UNMERGED = 'U'
 const CHANGE_CLASSES = 'ACDMRTUXB'
 // What a combined diff's mode line starts with; `log --graph` prints that line
 // with no graph in front of it.
@@ -50,6 +51,7 @@ export interface DiffFlags {
   rawWidth?: number | null
   workTree?: boolean
   sameAsIndex?: ReadonlySet<string>
+  unmerged?: ReadonlyMap<string, readonly [TreeEntry | null, TreeEntry | null, TreeEntry | null]>
 }
 
 /**
@@ -287,12 +289,48 @@ function showsNewId(row: Change, flags: DiffFlags): boolean {
   return flags.workTree !== true || flags.sameAsIndex?.has(row.path) === true
 }
 
+/** The rows with a `U` row before each conflicted path's own. */
+export function withUnmerged(rows: Change[], flags: DiffFlags): Change[] {
+  if (flags.unmerged === undefined || flags.unmerged.size === 0) return rows
+  const marks = [...flags.unmerged].map(([path, ends]): Change => ({
+    path,
+    oldPath: path,
+    old: null,
+    new: ends[2],
+    status: UNMERGED,
+    score: 0,
+  }))
+  return [...marks, ...rows].sort(
+    (a, b) =>
+      compareCodePoints(a.path, b.path) ||
+      Number(a.status !== UNMERGED) - Number(b.status !== UNMERGED),
+  )
+}
+
+/** A conflicted path's dense combined diff against the working tree. */
+async function unmergedPatch(repo: Repo, path: string, flags: DiffFlags): Promise<string> {
+  const [ours, theirs, work] = flags.unmerged?.get(path) ?? [null, null, null]
+  const against = (old: TreeEntry | null): Map<string, Change> =>
+    new Map([[path, { path, oldPath: path, old, new: work, status: 'M', score: 0 }]])
+  return combinedPatch(
+    repo,
+    [against(ours), against(theirs)],
+    [path],
+    true,
+    flags.quotePathFully,
+    flags.context,
+    flags.prefixes,
+    flags.indexWidth,
+    true,
+  )
+}
+
 export async function renderChanges(
   repo: Repo,
   input: Change[],
   flags: DiffFlags,
 ): Promise<string> {
-  const rows = filtered(input, flags)
+  const rows = filtered(withUnmerged(input, flags), flags)
   if (flags.noPatch) return ''
   const width = flags.rawWidth ?? (flags.abbrev ? repo.abbrev : OID_HEX)
   const fully = flags.quotePathFully
@@ -301,6 +339,7 @@ export async function renderChanges(
     summaries: string[] = []
   const stats: FileStat[] = [],
     patches: string[] = []
+  const combined = new Set<string>()
   for (const row of rows) {
     const shown = quotePath(row.path, false, fully)
     const status = row.status === 'R' ? `R${String(row.score).padStart(3, '0')}` : row.status
@@ -319,14 +358,31 @@ export async function renderChanges(
       )
     const display = row.status === 'R' ? renameName(row.oldPath, row.path, fully) : shown
     if (flags.stat || flags.numstat || flags.shortstat)
-      stats.push(await rowStat(repo, row, display))
+      stats.push(
+        row.status === UNMERGED
+          ? {
+              path: display,
+              insertions: 0,
+              deletions: 0,
+              binary: false,
+              oldSize: 0,
+              newSize: 0,
+              unmerged: true,
+            }
+          : await rowStat(repo, row, display),
+      )
     const stat = stats.at(-1)
     if (flags.numstat && stat)
       numbers.push(
         `${stat.binary ? '-\t-' : `${String(stat.insertions)}\t${String(stat.deletions)}`}\t${display}`,
       )
     if (flags.summary) for (const item of summaryLines(row, display, shown)) summaries.push(item)
-    if (flags.patch)
+    if (flags.patch && flags.unmerged?.has(row.path) === true) {
+      if (!combined.has(row.path)) {
+        combined.add(row.path)
+        patches.push(await unmergedPatch(repo, row.path, flags))
+      }
+    } else if (flags.patch)
       patches.push(
         await filePatch(
           repo,
@@ -514,7 +570,7 @@ async function block(
   flags: DiffFlags,
 ): Promise<string | null> {
   const rows = await rowsOf(repo, before, after, flags)
-  return rows.length ? renderChanges(repo, rows, flags) : null
+  return filtered(rows, flags).length ? renderChanges(repo, rows, flags) : null
 }
 
 /**
@@ -644,9 +700,13 @@ export async function commitOutput(
   const comparisons: Change[][] = []
   for (const [before, after] of sides) comparisons.push(await rowsOf(repo, before, after, flags))
   const maps = comparisons.map((rows) => new Map(rows.map((row) => [row.path, row])))
-  const common = [...(maps[0]?.keys() ?? [])]
-    .filter((path) => maps.every((m) => m.has(path)))
-    .sort(compareCodePoints)
+  const common = combinedPaths(
+    maps,
+    [...(maps[0]?.keys() ?? [])]
+      .filter((path) => maps.every((m) => m.has(path)))
+      .sort(compareCodePoints),
+    flags,
+  )
   if (flags.noPatch) return []
   const width = flags.abbrev ? repo.abbrev : OID_HEX
   const names = flags.nameOnly || flags.nameStatus
@@ -681,9 +741,29 @@ export async function commitOutput(
           flags.merge === 'dense-combined',
           flags.quotePathFully,
           flags.context,
+          flags.prefixes,
+          flags.indexWidth,
         )
       : ''
   return [head + (head && body ? '\n' : '') + body]
+}
+
+/**
+ * The paths `--diff-filter` keeps in a combined diff: a path stays only when its
+ * status against every parent is one the filter keeps, and with `*` one kept
+ * status anywhere keeps them all.
+ */
+function combinedPaths(
+  maps: readonly Map<string, Change>[],
+  paths: string[],
+  flags: DiffFlags,
+): string[] {
+  if (flags.diffFilter === undefined || flags.diffFilter === null) return paths
+  const [chosen, star] = flags.diffFilter
+  const kept = (path: string, m: Map<string, Change>): boolean =>
+    chosen.has(m.get(path)?.status ?? '')
+  if (star) return paths.some((path) => maps.some((m) => kept(path, m))) ? paths : []
+  return paths.filter((path) => maps.every((m) => kept(path, m)))
 }
 
 /** Binary combined patches stay binary under `--text`, as in Git 2.50.1. */
@@ -694,6 +774,9 @@ async function combinedPatch(
   dense: boolean,
   fully = true,
   context = 3,
+  prefixes: readonly [string, string] = ['a/', 'b/'],
+  indexWidth: number | null | undefined = null,
+  workTree = false,
 ): Promise<string> {
   const output: string[] = []
   for (const path of paths) {
@@ -715,9 +798,9 @@ async function combinedPatch(
     output.push(`diff --${dense ? 'cc' : 'combined'} ${quotePath(path, false, fully)}\n`)
     output.push(
       'index ' +
-        old.map((e) => shortOid(e, repo.abbrev)).join(',') +
+        old.map((e) => shortOid(e, indexWidth ?? repo.abbrev)).join(',') +
         '..' +
-        shortOid(fresh, repo.abbrev) +
+        shortOid(workTree ? null : fresh, indexWidth ?? repo.abbrev) +
         '\n',
     )
     if (moved && created) output.push(`new file mode ${mode}\n`)
@@ -733,8 +816,8 @@ async function combinedPatch(
       continue
     }
     output.push(
-      `--- ${created ? DEV_NULL : quotePath(`a/${path}`, false, fully)}\n`,
-      `+++ ${deleted ? DEV_NULL : quotePath(`b/${path}`, false, fully)}\n`,
+      `--- ${created ? DEV_NULL : quotePath(`${prefixes[0]}${path}`, false, fully)}\n`,
+      `+++ ${deleted ? DEV_NULL : quotePath(`${prefixes[1]}${path}`, false, fully)}\n`,
     )
     for (const line of body) output.push(line)
   }

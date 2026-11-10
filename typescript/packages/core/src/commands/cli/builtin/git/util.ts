@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { byteChar } from '../../../../shell/bytes.ts'
 import { compileSpec } from '../../../spec/compile.ts'
 import { CommandSpec } from '../../../spec/types.ts'
 
@@ -52,6 +53,7 @@ const CONFIG_OPTION = '-c'
 const CONFIG_ENV_OPTION = '--config-env'
 const VALUE_GLOBALS = ['-C', '--git-dir', '--work-tree']
 const INT_BITS = 31
+export const WIDE_INT_BITS = 63
 const COLOR_WORDS = ['always', 'auto', 'never']
 const VALUE_ESCAPES: Readonly<Record<string, string>> = {
   '\n': '\\n',
@@ -382,7 +384,7 @@ export function renderFormat(
       template.startsWith('%x', at) &&
       /^[0-9a-fA-F]{2}$/.test(template.slice(at + 2, at + 4))
     ) {
-      out += String.fromCharCode(Number.parseInt(template.slice(at + 2, at + 4), 16))
+      out += byteChar(Number.parseInt(template.slice(at + 2, at + 4), 16))
       at += 4
     } else {
       const end = template.indexOf(')', at)
@@ -490,8 +492,8 @@ export function commandLineConfig(ctx: Context): readonly (readonly [string, str
  * @param value the value as spelled
  * @param key the variable
  */
-export function configInt(value: string, key: string): number {
-  const number = integer(value)
+export function configInt(value: string, key: string, bits = INT_BITS): bigint {
+  const number = integer(value, bits)
   if (number !== null) return number
   throw new BadNumericConfigError(value, key, INTEGER.test(value) ? 'out of range' : 'invalid unit')
 }
@@ -508,7 +510,7 @@ export function maybeBool(value: string): boolean | null {
   if (TRUE_WORDS.includes(word)) return true
   if (FALSE_WORDS.includes(word)) return false
   const number = integer(value)
-  return number === null ? null : number !== 0
+  return number === null ? null : number !== 0n
 }
 
 /**
@@ -644,18 +646,16 @@ function continues(value: string, inside: boolean): [boolean, boolean] {
  * Hex after `0x` and octal after a leading zero, then an optional `k`, `m` or
  * `g`; a product outside an int is no integer.
  */
-function integer(value: string): number | null {
+function integer(value: string, bits = INT_BITS): bigint | null {
   const match = INTEGER.exec(value)
   if (match === null) return null
   const [, sign = '', digits = '', unit = ''] = match
-  const hex = /^0[xX]/.test(digits)
-  const magnitude = hex
-    ? parseInt(digits.slice(2), 16)
-    : parseInt(digits, digits.startsWith('0') ? 8 : 10)
+  const spelled = /^0[xX]/.test(digits) || !digits.startsWith('0') ? digits : `0o${digits}`
+  const magnitude = BigInt(spelled)
   const number = sign === '-' ? -magnitude : magnitude
-  const factor = 2 ** (UNIT_SHIFTS[unit.toLowerCase()] ?? 0)
-  const lowest = Math.floor(-(2 ** INT_BITS) / factor)
-  const highest = Math.floor((2 ** INT_BITS - 1) / factor)
+  const shift = BigInt(UNIT_SHIFTS[unit.toLowerCase()] ?? 0)
+  const lowest = -(1n << BigInt(bits)) >> shift
+  const highest = ((1n << BigInt(bits)) - 1n) >> shift
   if (number < lowest || number > highest) return null
-  return number * factor
+  return number << shift
 }

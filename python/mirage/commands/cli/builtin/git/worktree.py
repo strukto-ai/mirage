@@ -80,6 +80,7 @@ class Scanner:
             ``UNTRACKED_NO`` / ``UNTRACKED_NORMAL`` / ``UNTRACKED_ALL``.
         roots (tuple[str, ...] | None): the repository-relative paths
             the walk is narrowed to; None for the whole tree.
+        keep_empty (bool): list a directory holding nothing to report.
     """
 
     def __init__(
@@ -91,9 +92,11 @@ class Scanner:
         show_ignored: bool = False,
         roots: tuple[str, ...] | None = None,
         per_directory: str | None = GITIGNORE,
+        keep_empty: bool = False,
     ) -> None:
         self._vfs = vfs
         self._per_directory = per_directory
+        self._keep_empty = keep_empty
         self._worktree = worktree
         self._tracked = tracked
         self._directories = tracked_directories(tracked)
@@ -313,8 +316,8 @@ class Scanner:
             elif len(self.found.ignored) > ignored_first:
                 self.found.ignored[ignored_first:] = [f"{relative}/"]
             return
-        if self._mode == UNTRACKED_NORMAL and await self._holds_a_file(
-            relative, ignores
+        if self._mode == UNTRACKED_NORMAL and (
+            self._keep_empty or await self._holds_a_file(relative, ignores)
         ):
             self.found.untracked.append(f"{relative}/")
 
@@ -364,6 +367,7 @@ async def scan(
     roots: tuple[str, ...] | None = None,
     ignores: IgnoreStack | None = None,
     per_directory: str | None = GITIGNORE,
+    keep_empty: bool = False,
 ) -> WorkTree:
     """Walk a working tree once, for both halves of a status report.
 
@@ -387,6 +391,7 @@ async def scan(
             None for the repository's own files.
         per_directory (str | None): the exclude file each directory may
             hold, None for none.
+        keep_empty (bool): list a directory holding nothing to report.
     """
     rules = (
         ignores
@@ -401,6 +406,7 @@ async def scan(
         show_ignored,
         roots,
         per_directory,
+        keep_empty,
     )
     await scanner.walk("", False, rules)
     return scanner.found
