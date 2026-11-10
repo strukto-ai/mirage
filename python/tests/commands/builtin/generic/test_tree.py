@@ -561,3 +561,16 @@ async def test_tree_l_keeps_a_hidden_mount_below_a_link_hidden():
     ws.create_session("agent", profile={"paths": {"hide": ["/d/root/a/m"]}})
     io = await ws.shell("tree -lx --noreport /d/root", session_id="agent")
     assert await io.stdout_str() == "/d/root\n`-- a -> ../real\n    `-- f\n"
+
+
+@pytest.mark.asyncio
+async def test_tree_l_draws_no_mount_added_under_a_link_name():
+    ws = Workspace({"/d": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell(
+        "mkdir -p /d/root /d/real; printf x > /d/real/f; "
+        "ln -s ../real /d/root/a"
+    )
+    ws.add_mount("/d/root/a/m", RAMVFS(), mode=MountMode.WRITE)
+    io = await ws.shell("tree -l --noreport /d/root")
+    assert await io.stdout_str() == "/d/root\n`-- a -> ../real\n    `-- f\n"
+    assert io.exit_code == 0

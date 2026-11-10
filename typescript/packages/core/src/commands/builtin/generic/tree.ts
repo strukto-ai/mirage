@@ -622,14 +622,16 @@ interface Drawing {
 // One directory's own entries, in the order they are drawn. Mirrors Python's
 // `_open_dir`.
 /** The mount roots on a directory reached through a followed link, named as
- * the walk draws them. They only mark a boundary: such an entry is still
- * stat'ed, which a session's hides answer. Mirrors Python's _linked_mounts. */
-function linkedMounts(treeOpts: TreeOpts, directory: string): string[] {
+ * the walk draws them, null for one that was not. A mount holds where the link
+ * leads, not at the name it is drawn under. They only mark a boundary: such an
+ * entry is still stat'ed, which a session's hides answer. Mirrors Python's
+ * _linked_mounts. */
+function linkedMounts(treeOpts: TreeOpts, directory: string): string[] | null {
   const { flags, resolve, mounts } = treeOpts
-  if (!flags.follow || resolve === null) return []
+  if (!flags.follow || resolve === null) return null
   const real = rstripSlash(resolve(directory))
   const drawn = rstripSlash(directory)
-  if (real === drawn) return []
+  if (real === drawn) return null
   return childMounts(mounts, real === '' ? '/' : real).map(
     (mount) => drawn + mount.slice(real.length),
   )
@@ -648,8 +650,8 @@ async function openDir(
   // `/repos/alpha` is mounted) has no backend to list it, so the readdir
   // throws and a merge below it never runs: `tree` reported the one path
   // whose children it could name for certain as unopenable.
-  const nested = childMounts(treeOpts.mounts, path.virtual)
   const linked = linkedMounts(treeOpts, path.virtual)
+  const nested = linked === null ? childMounts(treeOpts.mounts, path.virtual) : []
   const limit = treeOpts.budget?.listingLimit(path.virtual) ?? null
   let entries: string[]
   try {
@@ -733,7 +735,8 @@ async function openDir(
         du: contentSize(s),
         missing: false,
       },
-      crossing: crossing || (linked.includes(childPath) && treeOpts.crossReaddir !== null),
+      crossing:
+        crossing || (linked?.includes(childPath) === true && treeOpts.crossReaddir !== null),
     })
   }
   if (flags.fileLimit !== null && kept.length > flags.fileLimit)

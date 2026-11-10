@@ -628,21 +628,23 @@ async def _gitignore(
     return _gitignore_lines(text, directory.virtual)
 
 
-def _linked_mounts(opts: _TreeOpts, directory: str) -> list[str]:
+def _linked_mounts(opts: _TreeOpts, directory: str) -> list[str] | None:
     """The mount roots on a directory reached through a followed link,
-    named as the walk draws them. They only mark a boundary: such an entry
-    is still stat'ed, which a session's hides answer.
+    named as the walk draws them, None for one that was not. A mount holds
+    where the link leads, not at the name it is drawn under. They only mark
+    a boundary: such an entry is still stat'ed, which a session's hides
+    answer.
 
     Args:
         opts (_TreeOpts): the operand's walk.
         directory (str): absolute virtual path being listed.
     """
     if not opts.flags.follow or opts.resolve is None:
-        return []
+        return None
     real = opts.resolve(directory).rstrip("/")
     drawn = directory.rstrip("/")
     if real == drawn:
-        return []
+        return None
     return [
         drawn + mount[len(real) :]
         for mount in _child_mounts(opts.mounts, real or "/")
@@ -681,8 +683,12 @@ async def _open_dir(
     # readdir raises and a merge below it never runs: `tree` reported the
     # one path whose children it could name for certain as unopenable.
     flags = opts.flags
-    child_mounts = _child_mounts(opts.mounts, path.virtual)
     linked_mounts = _linked_mounts(opts, path.virtual)
+    child_mounts = (
+        _child_mounts(opts.mounts, path.virtual)
+        if linked_mounts is None
+        else []
+    )
     limit = opts.budget.listing_limit(path.virtual)
     try:
         entries = await (
@@ -754,7 +760,10 @@ async def _open_dir(
             (
                 _TreeNode(entry_spec, s, is_dir, leads, du=content_size(s)),
                 crossing
-                or (entry in linked_mounts and opts.cross_readdir is not None),
+                or (
+                    entry in (linked_mounts or ())
+                    and opts.cross_readdir is not None
+                ),
             )
         )
     if flags.file_limit is not None and len(kept) > flags.file_limit:

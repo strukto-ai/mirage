@@ -595,3 +595,13 @@ it('tree -l keeps a hidden mount below a link hidden', async () => {
   await ws.close()
   expect(io.stdoutText).toBe('/d/root\n`-- a -> ../real\n    `-- f\n')
 })
+
+it('tree -l draws no mount added under a link name', async () => {
+  const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.shell('mkdir -p /d/root /d/real; printf x > /d/real/f; ln -s ../real /d/root/a')
+  ws.addMount('/d/root/a/m', new RAMVFS(), MountMode.WRITE)
+  const io = await ws.shell('tree -l --noreport /d/root')
+  await ws.close()
+  expect(io.stdoutText).toBe('/d/root\n`-- a -> ../real\n    `-- f\n')
+  expect(io.exitCode).toBe(0)
+})
