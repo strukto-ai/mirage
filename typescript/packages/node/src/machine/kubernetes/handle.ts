@@ -23,29 +23,33 @@ import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { openProgramPipe, reportedState } from '../program.ts'
 import { ProgramMachine } from '../transport.ts'
 import { KUBERNETES_CONFIG_FIELDS, type KubernetesConfig } from './config.ts'
-import { EXIT_PREFIX, KUBECTL_HINT, RUNNING_PHASE } from './constants.ts'
+import { EXIT_PREFIX, EXIT_STATUS, KUBECTL_HINT, RUNNING_PHASE } from './constants.ts'
 
 /**
- * Whether a line, as far as it has arrived, can still turn out to be
- * kubectl's report of the exit status.
+ * Where kubectl's report of the exit status can begin in the stderr so
+ * far, or its length when it cannot be there. The report follows the
+ * program's last byte directly, on a line of its own or not.
  *
- * @param line the last line of stderr so far.
+ * @param stderr the stderr not yet passed on.
  */
-export function mayBeExitLine(line: Uint8Array): boolean {
-  const bytes = Buffer.from(line)
-  if (bytes.length <= EXIT_PREFIX.length) {
-    return EXIT_PREFIX.subarray(0, bytes.length).equals(bytes)
+export function exitReportStart(stderr: Buffer): number {
+  const at = stderr.lastIndexOf(EXIT_PREFIX)
+  if (at >= 0 && EXIT_STATUS.test(stderr.subarray(at + EXIT_PREFIX.length).toString('latin1'))) {
+    return at
   }
-  if (!bytes.subarray(0, EXIT_PREFIX.length).equals(EXIT_PREFIX)) return false
-  return /^[0-9]+\n?$/.test(bytes.subarray(EXIT_PREFIX.length).toString('latin1'))
+  const size = stderr.length
+  for (let start = Math.max(0, size - EXIT_PREFIX.length + 1); start < size; start++) {
+    if (EXIT_PREFIX.subarray(0, size - start).equals(stderr.subarray(start))) return start
+  }
+  return size
 }
 
 /**
  * kubectl's stderr with its own report of the exit status taken out, so
  * a failing program says only what it said itself.
  *
- * The report is always the last line, so only a last line that can
- * still become one is held; everything else passes as it arrives.
+ * The report comes last, so only an ending that can still become one is
+ * held; everything else passes as it arrives.
  */
 export class ExitLineFilter {
   private readonly errors: OutputFn | null
@@ -75,8 +79,7 @@ export class ExitLineFilter {
    */
   async write(data: Uint8Array): Promise<void> {
     const held = Buffer.concat([this.held, data])
-    const start = held.length < 2 ? 0 : held.lastIndexOf('\n', held.length - 2) + 1
-    const end = mayBeExitLine(held.subarray(start)) ? start : held.length
+    const end = exitReportStart(held)
     this.held = held.subarray(end)
     await this.emit(held.subarray(0, end))
   }

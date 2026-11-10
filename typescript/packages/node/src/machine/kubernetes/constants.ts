@@ -25,3 +25,9 @@ export const RUNNING_PHASE = 'Running'
  * when the program in the pod exits nonzero.
  */
 export const EXIT_PREFIX = Buffer.from('command terminated with exit code ')
+
+/**
+ * What can follow EXIT_PREFIX while the report arrives: kubectl reads the
+ * status as one byte, so at most three digits, then the newline.
+ */
+export const EXIT_STATUS = /^(?:[0-9]{0,3}|[0-9]{1,3}\n)$/

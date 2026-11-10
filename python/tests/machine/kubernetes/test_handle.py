@@ -21,12 +21,13 @@ from mirage.machine import program
 from mirage.machine.constants import wrap_line
 from mirage.machine.errors import ConnectionLostError
 from mirage.machine.kubernetes import KubernetesMachine
-from mirage.machine.kubernetes.handle import ExitLineFilter, may_be_exit_line
+from mirage.machine.kubernetes.handle import ExitLineFilter, exit_report_start
 from mirage.machine.registry import build_machine
 from mirage.machine.types import MachinePipe
 from mirage.runtime.types import OutputFn, RunResult
 
-REPORT = b"command terminated with exit code 3\n"
+PREFIX = b"command terminated with exit code "
+REPORT = PREFIX + b"3\n"
 
 
 class FakeKubernetesMachine(KubernetesMachine):
@@ -149,6 +150,15 @@ async def test_a_failing_program_says_only_what_it_said():
 
 
 @pytest.mark.asyncio
+async def test_a_failure_with_no_final_newline_keeps_what_it_wrote():
+    machine = FakeKubernetesMachine(
+        stderr=b"boom" + REPORT, exit_code=3, config={"pod": "p"}
+    )
+    result = await machine.exec_line("false", None, {}, "/")
+    assert (result.stderr, result.exit_code) == (b"boom", 3)
+
+
+@pytest.mark.asyncio
 async def test_a_silent_failing_program_has_no_stderr():
     machine = FakeKubernetesMachine(
         stderr=REPORT, exit_code=3, config={"pod": "p"}
@@ -195,21 +205,35 @@ async def test_a_streamed_failure_reaches_the_receiver_without_the_report():
 
 
 @pytest.mark.parametrize(
-    "line, held",
+    "stderr, start",
     [
-        (b"", True),
-        (b"command", True),
-        (b"command terminated with exit code ", True),
-        (b"command terminated with exit code 12", True),
-        (b"command terminated with exit code 12\n", True),
-        (b"command terminated with exit code \n", False),
-        (b"command terminated with exit code 1x", False),
-        (b"commands", False),
-        (b"boom\n", False),
+        (b"", 0),
+        (b"boom\n", 5),
+        (b"c", 0),
+        (b"abc", 2),
+        (b"boomcommand", 4),
+        (b"boom" + REPORT, 4),
+        (REPORT + REPORT, len(REPORT)),
+        (PREFIX, 0),
+        (PREFIX + b"255", 0),
+        (PREFIX + b"255\n", 0),
+        (PREFIX + b"1234", len(PREFIX) + 4),
+        (PREFIX + b"\n", len(PREFIX) + 1),
+        (PREFIX + b"1x", len(PREFIX) + 2),
     ],
 )
-def test_only_what_can_become_the_report_is_held(line, held):
-    assert may_be_exit_line(line) is held
+def test_only_what_can_become_the_report_is_held(stderr, start):
+    assert exit_report_start(stderr) == start
+
+
+@pytest.mark.asyncio
+async def test_a_report_of_endless_digits_is_not_held():
+    chunks, collect = collector()
+    said = ExitLineFilter(collect)
+    await said.write(PREFIX)
+    await said.write(b"1" * 100_000)
+    assert b"".join(chunks) == PREFIX + b"1" * 100_000
+    assert await said.finish(0) is True
 
 
 @pytest.mark.asyncio

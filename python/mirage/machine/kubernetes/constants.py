@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
+
 KUBECTL_HINT = "the kubernetes machine needs `kubectl` on PATH"
 
 # `kubectl get pod` reports status.phase: Pending, Running, Succeeded,
@@ -21,3 +23,7 @@ RUNNING_PHASE = "Running"
 # What kubectl prints on its own stderr, then the status and a newline,
 # when the program in the pod exits nonzero.
 EXIT_PREFIX = b"command terminated with exit code "
+
+# What can follow EXIT_PREFIX while the report arrives: kubectl reads the
+# status as one byte, so at most three digits, then the newline.
+EXIT_STATUS = re.compile(rb"[0-9]{0,3}|[0-9]{1,3}\n")
