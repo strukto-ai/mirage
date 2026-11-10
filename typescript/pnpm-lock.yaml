@@ -75,12 +75,6 @@ importers:
 
   .:
     devDependencies:
-      '@aws-sdk/client-s3':
-        specifier: ^3.1116.0
-        version: 3.1147.0
-      '@aws-sdk/s3-request-presigner':
-        specifier: ^3.1116.0
-        version: 3.1147.0
       '@changesets/cli':
         specifier: ^2.30.0
         version: 2.31.0(@types/node@22.19.17)

@@ -25,9 +25,7 @@ from .conftest import (
 
 class TestJqExampleJson:
     def _load(self, backend):
-        write_to_backend(
-            backend, "/tmp/example.json", EXAMPLE_JSON.read_bytes()
-        )
+        write_to_backend(backend, "/tmp/example.json", EXAMPLE_JSON)
 
     def test_top_level_keys(self, backend):
         self._load(backend)
@@ -133,9 +131,7 @@ class TestJqExampleJsonl:
     # it as one array of them, which is what `jq -s` does.
 
     def _load(self, backend):
-        write_to_backend(
-            backend, "/tmp/example.jsonl", EXAMPLE_JSONL.read_bytes()
-        )
+        write_to_backend(backend, "/tmp/example.jsonl", EXAMPLE_JSONL)
 
     def test_each_line_runs_on_its_own(self, backend):
         self._load(backend)
@@ -147,7 +143,7 @@ class TestJqExampleJsonl:
     def test_total_lines(self, backend):
         self._load(backend)
         result = jq_slurp(backend, "/tmp/example.jsonl", "length")
-        assert result == 5766
+        assert result == 6
 
     def test_all_have_type(self, backend):
         self._load(backend)

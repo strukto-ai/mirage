@@ -15,7 +15,6 @@
 import type { BaseVFS } from '../../vfs/base.ts'
 import { DevVFS } from '../../vfs/dev/dev.ts'
 import { Command } from '../../commands/config.ts'
-import type { CLI } from '../../commands/cli/types.ts'
 import { DEV_COMMANDS } from '../../commands/builtin/dev/index.ts'
 
 // A VFS class, whatever its constructor's visibility (one may build
@@ -84,18 +83,6 @@ export function backendCommands(vfs: BaseVFS): Command[] {
     cls = Object.getPrototypeOf(cls)
   }
   return []
-}
-
-/**
- * The shell commands a mount of `vfs` serves beside the generic set: a
- * builtin's backend commands first (`backendCommands`), then the commands
- * the VFS was handed, so they win; a command tree it was handed stays a
- * `CLI`, which the mount registers under its root's name. A name none of
- * these has falls back to the generic command every mount shares. Mirrors
- * Python's `commands_for`.
- */
-export function commandsFor(vfs: BaseVFS): (Command | CLI)[] {
-  return [...backendCommands(vfs), ...vfs.commands()]
 }
 
 registerBackendCommands(DevVFS, () => DEV_COMMANDS)

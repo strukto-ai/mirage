@@ -25,7 +25,7 @@ import {
   Workspace,
 } from "@struktoai/mirage-node";
 
-const DATA_DIR = fileURLToPath(new URL("../../../../data/", import.meta.url));
+const DATA_DIR = fileURLToPath(new URL("../../../data/", import.meta.url));
 
 async function main(): Promise<void> {
   const vfs = new RAMVFS();

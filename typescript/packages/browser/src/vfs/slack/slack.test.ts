@@ -15,7 +15,7 @@
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
-import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
+import { backendCommands } from '@struktoai/mirage-core/workspace/mount/backends'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildVfs } from '../registry.ts'
 import { SlackConfig } from './config.ts'
@@ -58,7 +58,7 @@ describe('SlackVFS (browser)', () => {
 
   it('serves no commands of its own', () => {
     const r = new SlackVFS({ proxyUrl: '/api/slack' })
-    expect(commandsFor(r)).toEqual([])
+    expect(backendCommands(r)).toEqual([])
   })
 
   it('getState() redacts getHeaders but keeps proxyUrl visible', async () => {

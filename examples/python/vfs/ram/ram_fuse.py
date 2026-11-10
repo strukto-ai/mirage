@@ -19,7 +19,7 @@ from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.vfs.ram import RAMVFS
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DATA_DIR = REPO_ROOT / "data"
+DATA_DIR = REPO_ROOT / "examples" / "data"
 
 vfs = RAMVFS()
 store = vfs._store

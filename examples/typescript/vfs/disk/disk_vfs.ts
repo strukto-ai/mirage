@@ -22,7 +22,7 @@ const require = createRequire(import.meta.url)
 const fs = require('fs') as typeof import('fs')
 
 const REPO_ROOT = new URL('../../../..', import.meta.url).pathname
-const DATA_DIR = join(REPO_ROOT, 'data')
+const DATA_DIR = join(REPO_ROOT, 'examples', 'data')
 
 const tmp = mkdtempSync(join(tmpdir(), 'mirage-disk-vfs-'))
 const filesDir = join(tmp, 'files')

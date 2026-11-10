@@ -31,7 +31,7 @@ from mirage.vfs.slack import SlackConfig, SlackVFS
 load_dotenv(".env.development")
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DATA_DIR = REPO_ROOT / "data"
+DATA_DIR = REPO_ROOT / "examples" / "data"
 
 tmp = tempfile.mkdtemp()
 shutil.copytree(DATA_DIR, Path(tmp) / "files", dirs_exist_ok=True)

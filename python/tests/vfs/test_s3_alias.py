@@ -31,7 +31,7 @@ from mirage.vfs.seaweedfs.config import SeaweedFSConfig
 from mirage.vfs.supabase.config import SupabaseConfig
 from mirage.vfs.tencent.config import TencentConfig
 from mirage.vfs.wasabi.config import WasabiConfig
-from mirage.workspace.mount.backends import commands_for
+from mirage.workspace.mount.backends import backend_commands
 from tests.fixtures.vfs_io import served
 
 # Mirrors typescript/packages/node/src/vfs/s3_aliases.test.ts. Every
@@ -286,7 +286,7 @@ def test_an_alias_carries_its_own_name(name):
     assert vfs.name == name
     assert isinstance(vfs.config, S3Config)
     assert {"read", "readdir", "stat", "write"} <= served(vfs)
-    assert commands_for(vfs) == []
+    assert backend_commands(vfs) == []
     assert vfs.storage_location() == f"s3:{vfs.config.endpoint_url}:b"
     state = vfs.get_state()
     assert state["type"] == name

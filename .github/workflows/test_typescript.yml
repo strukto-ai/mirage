@@ -13,6 +13,7 @@ permissions:
       - typescript/**
       # mirage-rs is built into every Python and TypeScript test run.
       - rust/**
+      - examples/data/**
       - examples/typescript/**
       - examples/browser/**
       - integ/**
@@ -59,6 +60,7 @@ jobs:
             hit:
               - 'typescript/**'
               - 'rust/**'
+              - 'examples/data/**'
               - 'examples/typescript/**'
               - 'examples/browser/**'
               - 'integ/**'

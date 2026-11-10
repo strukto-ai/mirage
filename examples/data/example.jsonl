@@ -1,0 +1,12 @@
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-05T09:00:00.000Z"}
+{"type":"queue-operation","operation":"dequeue","timestamp":"2026-01-05T09:00:00.120Z"}
+{"type":"user","timestamp":"2026-01-05T09:00:01.000Z","text":"Which mirage mounts are read-only?"}
+{"type":"assistant","timestamp":"2026-01-05T09:00:03.400Z","text":"I'll list the mounts first.","tool":"bash","command":"mount"}
+{"type":"user","timestamp":"2026-01-05T09:00:04.100Z","tool_result":"/data on disk (ro)\n/tmp on ram (rw)\n"}
+{"type":"assistant","timestamp":"2026-01-05T09:00:05.900Z","text":"/data is read-only and /tmp is writable."}
+{"type":"user","timestamp":"2026-01-05T09:01:12.000Z","text":"Copy the report from /data into /tmp."}
+{"type":"assistant","timestamp":"2026-01-05T09:01:14.300Z","text":"Copying it now.","tool":"bash","command":"cp /data/report.csv /tmp/"}
+{"type":"user","timestamp":"2026-01-05T09:01:14.900Z","tool_result":""}
+{"type":"assistant","timestamp":"2026-01-05T09:01:16.200Z","text":"Done, the report is at /tmp/report.csv."}
+{"type":"system","timestamp":"2026-01-05T09:01:16.300Z","subtype":"turn_duration","duration_ms":76300}
+{"type":"queue-operation","operation":"remove","timestamp":"2026-01-05T09:01:16.400Z"}

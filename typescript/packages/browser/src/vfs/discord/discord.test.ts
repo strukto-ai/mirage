@@ -14,7 +14,7 @@
 
 import { VFSName } from '@struktoai/mirage-core/types'
 import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
-import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
+import { backendCommands } from '@struktoai/mirage-core/workspace/mount/backends'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildVfs } from '../registry.ts'
 import { DiscordConfig } from './config.ts'
@@ -55,7 +55,7 @@ describe('DiscordVFS (browser)', () => {
 
   it('serves only the generic commands', () => {
     const r = new DiscordVFS({ proxyUrl: '/api/discord' })
-    expect(commandsFor(r)).toEqual([])
+    expect(backendCommands(r)).toEqual([])
   })
 
   it('getState() redacts getHeaders but keeps proxyUrl visible', async () => {

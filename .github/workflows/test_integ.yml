@@ -9,7 +9,6 @@ permissions:
     branches: [main]
     paths:
       - integ/**
-      - data/**
       - python/**
       - typescript/**
       - rust/**
@@ -25,7 +24,6 @@ permissions:
       # the fake hubs serve the READMEs there as fixture content.
       - '!integ/README.md'
       - '!integ/runtime/**/README.md'
-      - '!data/**/README.md'
       - '!python/**/README.md'
       - '!typescript/**/README.md'
       - '!rust/**/README.md'
@@ -120,7 +118,6 @@ jobs:
             # policy/documents and fixtures/normalized_records corpora do too.
             core:
               - 'integ/**'
-              - 'data/**'
               - 'python/**'
               - 'rust/**'
               - '.github/actions/setup-rust/action.yml'
@@ -133,7 +130,6 @@ jobs:
               # the fake hubs serve the READMEs there as fixture content.
               - '!integ/README.md'
               - '!integ/runtime/**/README.md'
-              - '!data/**/README.md'
               - '!python/**/README.md'
               - '!rust/**/README.md'
             ts:

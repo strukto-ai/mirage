@@ -349,22 +349,6 @@ def conversion_scalar(session: SessionState, name: str) -> str | None:
     return answer
 
 
-async def evaluate_integer(
-    session: SessionState, text: str, added: str | None = None
-) -> str:
-    """Evaluate ``text`` as an ``-i`` write coerces it, land what it
-    assigns, and give back the value: a ``declare -ni r=M`` value, which
-    bash evaluates before refusing the reference (``M='X=5'`` sets X).
-
-    Args:
-        session (SessionState): shell session state.
-        text (str): the value, the held one for a ``r+=M``.
-        added (str | None): a ``r+=M``'s added text, evaluated after
-            ``text`` in the same evaluation and added to it.
-    """
-    return str(run_write(session, lambda shell: shell.integer(text, added)))
-
-
 def appended(
     held: ShellValue | None, added: str, integer: bool
 ) -> tuple[str, str | None]:
@@ -741,23 +725,6 @@ def set_positional_params(
     else:
         check_env(session, positional_bytes(session), args_bytes(values))
         session.positional_args = values
-
-
-def shadow_local(
-    session: SessionState, name: str, inherit: bool = False
-) -> None:
-    """Record the caller's record before a ``local`` shadows it, once per
-    function; a local ``RANDOM`` is an ordinary variable for the
-    function's extent, and so is a local ``LINENO`` or ``BASHPID``, its
-    ``unset`` the function's own; with ``-I`` it keeps the meaning the
-    caller's has.
-
-    Args:
-        session (SessionState): the session the function runs in.
-        name (str): the variable being declared local.
-        inherit (bool): the declaration carried ``-I``.
-    """
-    session.vars.shell.shadow(name, inherit)
 
 
 def seed_var(session: SessionState, name: str, value: ShellValue) -> None:

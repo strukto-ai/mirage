@@ -15,7 +15,6 @@
 import hashlib
 from contextlib import ExitStack
 from datetime import datetime, timezone
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -30,8 +29,6 @@ from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
 from tests.e2e.s3_mock import S3_SESSION
 from tests.fixtures.mount_commands import command_files
-
-DATA_DIR = Path(__file__).resolve().parents[3] / "data"
 
 s3_cat = generic("cat").fn
 LAST_MODIFIED = datetime(2026, 3, 26, tzinfo=timezone.utc)
@@ -170,21 +167,13 @@ def _slice_range(data: bytes, range_spec: str) -> bytes:
     return data[start : end + 1]
 
 
-def _load_example_jsonl(limit: int = 20) -> bytes:
-    chunks: list[bytes] = []
-    with (DATA_DIR / "example.jsonl").open("rb") as handle:
-        for _ in range(limit):
-            line = handle.readline()
-            if not line:
-                break
-            chunks.append(line)
-    return b"".join(chunks)
-
-
 def _s3_objects() -> dict[str, bytes]:
     return {
-        "data/example.json": (DATA_DIR / "example.json").read_bytes(),
-        "data/example.jsonl": _load_example_jsonl(),
+        "data/example.json": b'{"company": "Strukto"}\n',
+        "data/example.jsonl": (
+            b'{"type": "user", "text": "open the mirage docs"}\n'
+            b'{"type": "assistant", "text": "done"}\n'
+        ),
         "reports/summary.txt": b"alpha report\nbeta report\n",
         "archive/2026/q1/deep.txt": b"deep archive\n",
     }

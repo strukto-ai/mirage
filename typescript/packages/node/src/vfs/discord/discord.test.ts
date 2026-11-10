@@ -17,7 +17,7 @@ import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { DiscordConfig } from '@struktoai/mirage-core/vfs/discord/config'
 import { parseConfigWithSchema, redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
-import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
+import { backendCommands } from '@struktoai/mirage-core/workspace/mount/backends'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildVfs } from '../registry.ts'
 import { DiscordVFS } from '@struktoai/mirage-core/vfs/direct/discord'
@@ -56,7 +56,7 @@ describe('DiscordVFS (node)', () => {
 
   it('serves only the generic commands', () => {
     const r = new DiscordVFS({ token: 'bot-test' })
-    expect(commandsFor(r)).toEqual([])
+    expect(backendCommands(r)).toEqual([])
   })
 
   it('getState() redacts token', async () => {

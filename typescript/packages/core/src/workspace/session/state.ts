@@ -276,22 +276,6 @@ export function conversionScalar(session: SessionState, name: string): string | 
 }
 
 /**
- * Evaluate `text` as an `-i` write coerces it, land what it assigns, and give
- * back the value: a `declare -ni r=M` value, which bash evaluates before
- * refusing the reference (`M='X=5'` sets X). `added` is a `r+=M`'s added
- * text, evaluated after `text` in the same evaluation and added to it.
- * Mirrors Python's evaluate_integer.
- */
-// eslint-disable-next-line @typescript-eslint/require-await
-export async function evaluateInteger(
-  session: SessionState,
-  text: string,
-  added: string | null = null,
-): Promise<string> {
-  return String(runWrite(session, (shell) => shell.integer(text, added)))
-}
-
-/**
  * What a `+=` hands `setVar`: the held text then the added one, or on an
  * integer the held text with the added one as `added`. An array extends
  * element 0 and a map key `"0"`. Mirrors Python's appended.
@@ -546,17 +530,6 @@ export function setPositionalParams(
     checkEnv(session, positionalBytes(session), argsBytes(values))
     session.positionalArgs = values
   }
-}
-
-/**
- * Record the caller's record before a `local` shadows it, once per function;
- * a local `RANDOM` is an ordinary variable for the function's extent, and so
- * is a local `LINENO` or `BASHPID`, its `unset` the function's own; with `-I`
- * (`inherit`) it keeps the meaning the caller's has. Mirrors Python's
- * shadow_local.
- */
-export function shadowLocal(session: SessionState, name: string, inherit = false): void {
-  session.vars.shell.shadow(name, inherit)
 }
 
 /**

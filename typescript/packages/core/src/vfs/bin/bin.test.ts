@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import { Command } from '../../commands/config.ts'
 import { MountMode } from '../../types.ts'
-import { commandsFor } from '../../workspace/mount/backends.ts'
+import { backendCommands } from '../../workspace/mount/backends.ts'
 import { MountEntry } from '../../workspace/mount/mount.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { declared } from '../call.ts'
@@ -33,7 +33,7 @@ describe('BinViewVFS', () => {
       (name) => (name === 'ls' ? 'ls' : null),
     )
     const names = new Set(
-      [...GENERIC_COMMANDS, ...commandsFor(vfs)].flatMap((cmd) =>
+      [...GENERIC_COMMANDS, ...backendCommands(vfs), ...vfs.commands()].flatMap((cmd) =>
         cmd instanceof Command ? [cmd.name] : [],
       ),
     )

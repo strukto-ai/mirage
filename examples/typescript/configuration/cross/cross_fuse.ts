@@ -35,7 +35,7 @@ const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../../.env.development') })
 
 const REPO_ROOT = resolve(__HERE, '../../../..')
-const DATA_DIR = join(REPO_ROOT, 'data')
+const DATA_DIR = join(REPO_ROOT, 'examples', 'data')
 
 function env(name: string): string {
   const value = process.env[name]
