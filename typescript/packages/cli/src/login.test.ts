@@ -107,7 +107,7 @@ class FakeClerk {
       }
       if (parts.pathname === '/.well-known/oauth-protected-resource') {
         if (this.opts.publishes === false) {
-          reply(404, { detail: 'no login' })
+          reply(404, { error: { code: 'not_found', message: 'no login' } })
           return
         }
         reply(200, { resource: this.url, authorization_servers: [this.url], client_id: CLIENT_ID })

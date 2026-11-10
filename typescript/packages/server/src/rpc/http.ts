@@ -24,6 +24,7 @@ import type { RequestTable } from '../requests.ts'
 import type { McpEndpoint } from '../mcp/http.ts'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import type { RouteApp, RouteReply, RouteRequest } from '../routes.ts'
+import { errorResponse as httpError, HttpError } from '../errors.ts'
 import { RPC_INTERNAL_ERROR, RPC_INVALID_REQUEST, RPC_PARSE_ERROR } from './constants.ts'
 import {
   CANCEL_REQUEST,
@@ -128,7 +129,7 @@ class RpcEndpoint {
   ): Promise<RouteReply> {
     const workspaceId = req.params.workspaceId
     const server = await this.server(workspaceId, req.query.session_id ?? null, req.account)
-    if (typeof server === 'string') return reply.status(404).send({ detail: server })
+    if (typeof server === 'string') return httpError(reply, new HttpError('not_found', server))
     const parsed: unknown = req.body
     const batch = Array.isArray(parsed)
     const messages: unknown[] = batch ? parsed : [parsed]

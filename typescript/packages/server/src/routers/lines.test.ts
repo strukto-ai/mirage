@@ -75,17 +75,12 @@ it('lists a line and finds it by the id its result names', async () => {
       }
       expect(found.machines).toEqual([process.machine])
       expect((await get(app, '/v1/workspaces/w/lines?state=running')).body).toEqual([])
-      const expected = "'waiting', 'running', 'stopping' or 'exited'"
       expect((await get(app, '/v1/workspaces/nope/lines?state=lost')).body).toEqual({
-        detail: [
-          {
-            type: 'enum',
-            loc: ['query', 'state'],
-            msg: `Input should be ${expected}`,
-            input: 'lost',
-            ctx: { expected },
-          },
-        ],
+        error: {
+          code: 'invalid_value',
+          message: 'state must be one of waiting, running, stopping, exited',
+          param: 'state',
+        },
       })
       expect((await get(app, '/v1/workspaces/w/lines/nope')).status).toBe(404)
     } finally {

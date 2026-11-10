@@ -43,9 +43,15 @@ interface Item {
   used_by?: number
 }
 
-interface Answer {
-  detail: string
+interface Refusal {
+  code: string
+  message: string
+  param?: string
   missing?: string[]
+}
+
+interface Answer {
+  error: Refusal
   id?: string
   kind?: string
   builtin?: boolean
@@ -91,11 +97,17 @@ describe('entries router', () => {
     const { app } = setup()
     expect((await call(app, 'POST', '/v1/vfs', GITHUB)).status).toBe(201)
     const again = await call(app, 'POST', '/v1/vfs', GITHUB)
-    expect(again).toMatchObject({ status: 409, body: { detail: 'github already exists' } })
+    expect(again).toMatchObject({
+      status: 409,
+      body: { error: { code: 'conflict', message: 'github already exists' } },
+    })
     const gh = { name: 'github', type: 'gh', fields: { token: 't' } }
     expect((await call(app, 'POST', '/v1/clis', gh)).status).toBe(409)
     const other = await call(app, 'GET', '/v1/clis/github')
-    expect(other).toMatchObject({ status: 404, body: { detail: 'CLI not found' } })
+    expect(other).toMatchObject({
+      status: 404,
+      body: { error: { code: 'not_found', message: 'CLI not found' } },
+    })
   })
 
   it('keeps a sealed field a PUT leaves out, and removes one given as null', async () => {
@@ -110,7 +122,10 @@ describe('entries router', () => {
     const required = await call(app, 'PUT', '/v1/vfs/github', {
       fields: { owner: 'o', repo: 'r', token: null },
     })
-    expect(required).toMatchObject({ status: 400, body: { detail: 'token is required' } })
+    expect(required).toMatchObject({
+      status: 400,
+      body: { error: { message: 'token is required' } },
+    })
     await call(app, 'POST', '/v1/clis', {
       name: 'mcp1',
       type: 'mcp',
@@ -135,17 +150,17 @@ describe('entries router', () => {
     for (const [body, detail] of cases) {
       const r = await call(app, 'POST', '/v1/vfs', { name: 'x', ...(body as object) })
       expect(r.status).toBe(400)
-      expect(r.body.detail.startsWith(detail)).toBe(true)
+      expect(r.body.error.message.startsWith(detail)).toBe(true)
     }
     const mcp = await call(app, 'POST', '/v1/clis', {
       name: 'm',
       type: 'mcp',
       fields: { url: 'http://a.b' },
     })
-    expect(mcp.body.detail).toBe("url must be the MCP server's https URL")
+    expect(mcp.body.error.message).toBe("url must be the MCP server's https URL")
     const id = await call(app, 'POST', '/v1/vfs', { ...GITHUB, name: 'sec_x' })
     expect(id.status).toBe(400)
-    expect(id.body.detail).toContain('not look like an id')
+    expect(id.body.error.message).toContain('not look like an id')
   })
 
   it('refuses a pointer until its store is saved', async () => {
@@ -155,7 +170,13 @@ describe('entries router', () => {
     const first = await call(app, 'POST', '/v1/vfs', body)
     expect(first).toMatchObject({
       status: 400,
-      body: { detail: 'add aws under Secret stores first', missing: ['aws'] },
+      body: {
+        error: {
+          code: 'invalid_request',
+          message: 'add aws under Secret stores first',
+          missing: ['aws'],
+        },
+      },
     })
     const stores = await call(app, 'GET', '/v1/stores')
     expect(stores.status).toBe(404)
@@ -175,7 +196,10 @@ describe('entries router', () => {
     await store.putTemplate({ name: 'agent', config })
     expect((await call(app, 'GET', '/v1/vfs')).body.items[0]?.used_by).toBe(1)
     const refused = await call(app, 'DELETE', '/v1/vfs/github')
-    expect(refused).toMatchObject({ status: 409, body: { detail: 'github is used by agent' } })
+    expect(refused).toMatchObject({
+      status: 409,
+      body: { error: { code: 'conflict', message: 'github is used by agent' } },
+    })
     await store.deleteTemplate('agent')
     expect((await call(app, 'DELETE', '/v1/vfs/github')).status).toBe(204)
     expect((await call(app, 'GET', '/v1/vfs/github')).status).toBe(404)

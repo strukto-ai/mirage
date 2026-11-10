@@ -15,6 +15,8 @@ import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
 import { POLICY_NAME } from '@struktoai/mirage-core/resources/constants'
 import { ResourceError } from '@struktoai/mirage-core/resources/errors'
 import type { Policy } from '@struktoai/mirage-core/resources/types'
+import { z } from '@struktoai/mirage-core/vfs/secrets'
+import { HttpError, validationError } from '../errors.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
 import type { RouteApp, RouteReply } from '../routes.ts'
 import { storeRefusal } from './templates.ts'
@@ -39,79 +41,49 @@ interface PolicyList {
   items: PolicyName[]
 }
 
-interface CreatePolicyRequest {
-  name: string
-  source: string
-}
+const CreatePolicyRequest = z.strictObject({ name: z.string(), source: z.string() })
 
-interface UpdatePolicyRequest {
-  source: string
-}
-
-interface Refusal {
-  status: number
-  detail: string
-}
+const UpdatePolicyRequest = z.strictObject({ source: z.string() })
 
 /**
  * Refuse policies on a server of many accounts: its one store would let each
- * account read and change the others'. Null when the server has one account.
+ * account read and change the others'. Mirrors Python's `require_one_account`.
  */
-function requireOneAccount(registry: WorkspaceRegistry): Refusal | null {
-  return registry.accountsRequired
-    ? { status: 501, detail: 'policies are kept only on a server of one account' }
-    : null
+function requireOneAccount(registry: WorkspaceRegistry): void {
+  if (registry.accountsRequired) {
+    throw new HttpError('not_supported', 'policies are kept only on a server of one account')
+  }
 }
 
-/**
- * The body's fields when it holds exactly `fields` as strings, else the 400
- * the Python server's model answers with (unknown fields included).
- */
-function bodyOf(body: unknown, fields: readonly string[]): Record<string, string> | Refusal {
-  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
-    return { status: 400, detail: 'body must be an object' }
-  }
-  const given = body as Record<string, unknown>
-  const unknown = Object.keys(given).filter((k) => !fields.includes(k))
-  if (unknown.length > 0) return { status: 400, detail: `unknown fields: ${unknown.join(', ')}` }
-  const out: Record<string, string> = {}
-  for (const field of fields) {
-    const value = given[field]
-    if (typeof value !== 'string') return { status: 400, detail: `${field} must be a string` }
-    out[field] = value
-  }
-  return out
+/** The body as `schema` reads it, else its first bad field. */
+function bodyOf<T>(schema: z.ZodType<T>, body: unknown): T {
+  const parsed = schema.safeParse(body)
+  if (!parsed.success) throw validationError(parsed.error, body)
+  return parsed.data
 }
 
-/** A refusal for a source over 64 KiB, else null. */
-function checkSource(source: string): Refusal | null {
-  return new TextEncoder().encode(source).length > MAX_SOURCE
-    ? { status: 400, detail: `source must be at most ${String(MAX_SOURCE / 1024)} KB` }
-    : null
+/** `source`, refused past 64 KiB of UTF-8. Mirrors Python's `check_source`. */
+function checkSource(source: string): string {
+  if (new TextEncoder().encode(source).length > MAX_SOURCE) {
+    throw new HttpError('invalid_value', `source must be at most ${String(MAX_SOURCE / 1024)} KB`, {
+      param: 'source',
+    })
+  }
+  return source
 }
 
 function present(policy: Policy): PolicyResponse {
   return { name: policy.name, source: policy.source }
 }
 
-function isRefusal(value: Record<string, string> | Refusal): value is Refusal {
-  return typeof (value as Refusal).status === 'number'
-}
-
 /** Run a store call; a refusal answers by its code, anything else propagates. */
-async function stored<T>(
-  registry: WorkspaceRegistry,
-  reply: RouteReply,
-  run: () => Promise<T>,
-): Promise<T | RouteReply> {
-  const refused = requireOneAccount(registry)
-  if (refused !== null) return reply.status(refused.status).send({ detail: refused.detail })
+async function stored<T>(registry: WorkspaceRegistry, run: () => Promise<T>): Promise<T> {
+  requireOneAccount(registry)
   try {
     return await run()
   } catch (e) {
     if (!(e instanceof ResourceError)) throw e
-    const { status, detail } = storeRefusal(e)
-    return reply.status(status).send({ detail })
+    throw storeRefusal(e)
   }
 }
 
@@ -123,45 +95,42 @@ export function registerPoliciesRoutes(
   },
 ): void {
   const { resources, registry } = deps
-  app.get('/v1/policies', (_req, reply) =>
-    stored(registry, reply, async (): Promise<PolicyList> => ({
+  app.get('/v1/policies', () =>
+    stored(registry, async (): Promise<PolicyList> => ({
       items: (await resources.listPolicies()).map((p) => ({ name: p.name })),
     })),
   )
 
   // A name already saved is a 409.
   app.post('/v1/policies', (req, reply) =>
-    stored(registry, reply, async () => {
-      const body = bodyOf(req.body, ['name', 'source'])
-      if (isRefusal(body)) return reply.status(body.status).send({ detail: body.detail })
-      const { name, source } = body as unknown as CreatePolicyRequest
+    stored(registry, async (): Promise<RouteReply> => {
+      const { name, source } = bodyOf(CreatePolicyRequest, req.body)
       if (!POLICY_NAME.test(name)) {
-        return reply.status(400).send({ detail: 'policy name must end in .py, such as guard.py' })
+        throw new HttpError('invalid_value', 'name must end in .py, such as guard.py', {
+          param: 'name',
+        })
       }
-      const tooBig = checkSource(source)
-      if (tooBig !== null) return reply.status(tooBig.status).send({ detail: tooBig.detail })
-      return reply.status(201).send(present(await resources.createPolicy({ name, source })))
+      const checked = checkSource(source)
+      return reply
+        .status(201)
+        .send(present(await resources.createPolicy({ name, source: checked })))
     }),
   )
 
-  app.get<{ Params: RefParams }>('/v1/policies/:ref', (req, reply) =>
-    stored(registry, reply, async () => present(await resources.getPolicy(req.params.ref))),
+  app.get<{ Params: RefParams }>('/v1/policies/:ref', (req) =>
+    stored(registry, async () => present(await resources.getPolicy(req.params.ref))),
   )
 
   // A missing policy is a 404, not a create.
-  app.put<{ Params: RefParams }>('/v1/policies/:ref', (req, reply) =>
-    stored(registry, reply, async () => {
-      const body = bodyOf(req.body, ['source'])
-      if (isRefusal(body)) return reply.status(body.status).send({ detail: body.detail })
-      const { source } = body as unknown as UpdatePolicyRequest
-      const tooBig = checkSource(source)
-      if (tooBig !== null) return reply.status(tooBig.status).send({ detail: tooBig.detail })
+  app.put<{ Params: RefParams }>('/v1/policies/:ref', (req) =>
+    stored(registry, async () => {
+      const source = checkSource(bodyOf(UpdatePolicyRequest, req.body).source)
       return present(await resources.updatePolicy({ name: req.params.ref, source }))
     }),
   )
 
   app.delete<{ Params: RefParams }>('/v1/policies/:ref', (req, reply) =>
-    stored(registry, reply, async () => {
+    stored(registry, async () => {
       await resources.deletePolicy(req.params.ref)
       return reply.status(204).send()
     }),

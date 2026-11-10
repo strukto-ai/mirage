@@ -17,6 +17,7 @@ import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
 import { watchNetwork } from '@struktoai/mirage-core/io/web/network'
 import { inRequest } from '@struktoai/mirage-core/io/web/request'
 import { registerApi } from '@struktoai/mirage-server/api'
+import { errorResponse, HttpError } from '@struktoai/mirage-server/errors'
 import { AuthMode, resolveAuthConfig, type AuthConfig } from '@struktoai/mirage-server/auth/config'
 import { authenticator, PUBLIC_PATHS } from '@struktoai/mirage-server/auth/middleware'
 import {
@@ -91,10 +92,10 @@ export interface EdgeApp {
 
 function unauthorized(reason: string): Response {
   console.warn(`rejecting request: ${reason}`)
-  return Response.json(
-    { detail: 'Unauthorized' },
-    { status: 401, headers: { 'WWW-Authenticate': 'Bearer' } },
-  )
+  const refused = new HttpError('unauthorized', 'unauthorized', {
+    headers: { 'WWW-Authenticate': 'Bearer' },
+  })
+  return Response.json(refused.body(), { status: refused.status, headers: refused.headers })
 }
 
 const decoder = new TextDecoder()
@@ -110,10 +111,13 @@ function codexSocket(
   reply: RouteReply,
 ): RouteReply {
   if (req.headers.upgrade?.toLowerCase() !== 'websocket') {
-    return reply.status(426).send({ detail: 'codex-exec needs a WebSocket upgrade' })
+    return errorResponse(
+      reply,
+      new HttpError('invalid_request', 'codex-exec needs a WebSocket upgrade'),
+    )
   }
   const entry = registry.visible(req.params.id, req.account)
-  if (entry === null) return reply.status(404).send({ detail: 'workspace not found' })
+  if (entry === null) return errorResponse(reply, new HttpError('not_found', 'workspace not found'))
   const pair = new WebSocketPair()
   const [client, server] = [pair[0], pair[1]]
   server.accept()
@@ -184,7 +188,7 @@ export function createApp(options: EdgeAppOptions = {}): EdgeApp {
     })
     // SSH runs ssh2, which only the Node server hosts.
     routes.get('/v1/workspaces/:id/ssh', (_req, reply) =>
-      reply.status(501).send({ detail: 'ssh needs the Node server' }),
+      errorResponse(reply, new HttpError('not_supported', 'ssh needs the Node server')),
     )
     routes.get('/v1/workspaces/:id/codex-exec', (req, reply) =>
       codexSocket(registry, req as RouteRequest<{ Params: { id: string } }>, reply),

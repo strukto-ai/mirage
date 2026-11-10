@@ -22,6 +22,7 @@ import {
 import { COUNTED_HEADER } from '../rate_limit.ts'
 import { HOP_BY_HOP } from './constants.ts'
 import type { Answer } from './types.ts'
+import type { HttpError } from '../errors.ts'
 
 /** The decoded segments of a request's path, null if one is not percent-encoded. */
 export function pathParts(url: string | undefined): string[] | null {
@@ -85,6 +86,17 @@ export function passable(headers: IncomingHttpHeaders): OutgoingHttpHeaders {
 export function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const text = JSON.stringify(body)
   res.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'content-length': Buffer.byteLength(text),
+  })
+  res.end(text)
+}
+
+/** Answer `error` straight onto `res`. Mirrors Python's `send_error`. */
+export function sendError(res: ServerResponse, error: HttpError): void {
+  const text = JSON.stringify(error.body())
+  res.writeHead(error.status, {
+    ...error.headers,
     'content-type': 'application/json; charset=utf-8',
     'content-length': Buffer.byteLength(text),
   })

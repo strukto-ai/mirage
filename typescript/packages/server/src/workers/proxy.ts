@@ -28,7 +28,17 @@ import { isCrossOrigin, isHostAllowed } from '../host_validation.ts'
 import { MAX_REQUEST_PART } from '../multipart.ts'
 import { COUNTED_HEADER } from '../rate_limit.ts'
 import { AUTH_PROBE, UNAVAILABLE } from './constants.ts'
-import { answered, discard, headersFor, passable, pathParts, sendAnswer, sendJson } from './http.ts'
+import { HttpError } from '../errors.ts'
+import {
+  answered,
+  discard,
+  headersFor,
+  passable,
+  pathParts,
+  sendAnswer,
+  sendError,
+  sendJson,
+} from './http.ts'
 import { idOf, peek } from './peek.ts'
 import type { WorkerPool } from './pool.ts'
 import type { Answer, Peeked } from './types.ts'
@@ -72,7 +82,7 @@ export class WorkerProxy {
     this.server = createServer((req, res) => {
       this.handle(req, res).catch((error: unknown) => {
         console.error('mirage: a worker request failed:', error)
-        if (!res.headersSent) sendJson(res, 502, UNAVAILABLE)
+        if (!res.headersSent) sendError(res, UNAVAILABLE)
         else res.destroy()
       })
     })
@@ -113,14 +123,14 @@ export class WorkerProxy {
     const { pool } = this.options
     const first = pool.first()
     if (first === undefined) {
-      sendJson(res, 502, UNAVAILABLE)
+      sendError(res, UNAVAILABLE)
       return
     }
     if (this.refusedHere(req, res)) return
     const url = new URL(req.url ?? '/', 'http://daemon')
     const parts = pathParts(req.url)
     if (parts === null) {
-      sendJson(res, 400, { detail: 'path is not percent-encoded' })
+      sendError(res, new HttpError('invalid_request', 'path is not percent-encoded'))
       discard(req)
       return
     }
@@ -220,7 +230,7 @@ export class WorkerProxy {
   ): Promise<void> {
     const { pool } = this.options
     if (this.draining) {
-      sendJson(res, 503, { detail: 'server is shutting down' })
+      sendError(res, new HttpError('shutting_down', 'server is shutting down'))
       return
     }
     let reserved = false
@@ -234,13 +244,20 @@ export class WorkerProxy {
       const peeked: Peeked =
         started === undefined ? read : { ...read, id: started, lost: false, twice: false }
       if (peeked.lost) {
-        sendJson(res, 413, {
-          detail: `the workspace id must come in the body's first ${String(MAX_REQUEST_PART)} bytes`,
-        })
+        sendError(
+          res,
+          new HttpError(
+            'too_large',
+            `the workspace id must come in the body's first ${String(MAX_REQUEST_PART)} bytes`,
+          ),
+        )
         return
       }
       if (peeked.twice) {
-        sendJson(res, 400, { detail: "multipart body has more than one 'request' part" })
+        sendError(
+          res,
+          new HttpError('invalid_request', "multipart body has more than one 'request' part"),
+        )
         return
       }
       const home = peeked.id === undefined ? undefined : pool.home(peeked.id)
@@ -248,28 +265,37 @@ export class WorkerProxy {
       // A retry of a live id goes to its worker even when full, but holds a
       // slot too: the worker may stop that id first and build it again.
       if (!live && !this.hasRoom(1)) {
-        sendJson(res, 503, {
-          detail: `server is at max_workspaces (${String(this.options.maxWorkspaces)})`,
-        })
+        sendError(
+          res,
+          new HttpError(
+            'server_full',
+            `server is at max_workspaces (${String(this.options.maxWorkspaces)})`,
+          ),
+        )
         return
       }
       const building = peeked.id === undefined ? undefined : pool.building(peeked.id)
       if (source !== null && building !== undefined && building !== source) {
-        sendJson(res, 409, { detail: `workspace id already exists: ${String(peeked.id)}` })
+        sendError(res, new HttpError('already_exists', 'workspace id already exists'))
         return
       }
       // A clone builds on its source's worker, so an id another worker
       // holds, even stopped, stays there: a create reaches it.
       if (source !== null && home?.dead === false && home !== source) {
-        const detail = live
-          ? `workspace id already exists: ${String(peeked.id)}`
-          : `workspace id was used on another worker; create it there instead: ${String(peeked.id)}`
-        sendJson(res, 409, { detail })
+        sendError(
+          res,
+          live
+            ? new HttpError('already_exists', 'workspace id already exists')
+            : new HttpError(
+                'conflict',
+                'workspace id was used on another worker; create it there instead',
+              ),
+        )
         return
       }
       const worker = source ?? (home?.dead === false ? home : undefined) ?? pool.random()
       if (worker === undefined) {
-        sendJson(res, 502, UNAVAILABLE)
+        sendError(res, UNAVAILABLE)
         return
       }
       // Nothing is awaited between the check above and here, so creates
@@ -337,17 +363,17 @@ export class WorkerProxy {
   }
 
   /**
-   * Answer 400 for a Host or a browser Origin the workers refuse, as they
+   * Answer 403 for a Host or a browser Origin the workers refuse, as they
    * would, since the daemon answers some requests itself: true when it did.
    */
   private refusedHere(req: IncomingMessage, res: ServerResponse): boolean {
     const { host, origin, 'sec-fetch-site': fetchSite } = req.headers
     if (!isHostAllowed(host, this.options.allowedHosts)) {
-      sendJson(res, 400, { detail: 'Invalid host header' })
+      sendError(res, new HttpError('host_not_allowed', 'host header is not allowed'))
       return true
     }
     if (isCrossOrigin(host, origin, fetchSite)) {
-      sendJson(res, 400, { detail: 'Cross-origin request refused' })
+      sendError(res, new HttpError('origin_not_allowed', 'cross-origin request refused'))
       return true
     }
     return false

@@ -14,6 +14,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { type WebSocket, createWebSocketStream } from 'ws'
+import { errorResponse, HttpError } from '../errors.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
 import { serveCodexSocket } from '../ssh/codex.ts'
 import type { SSHEndpoint } from '../ssh/types.ts'
@@ -55,14 +56,18 @@ export function registerSshRoutes(
       websocket: true,
       preValidation: async (req, reply) => {
         if (deps.registry.visible(req.params.id, req.account) === null) {
-          return reply.status(404).send({ detail: 'workspace not found' })
+          return errorResponse(reply, new HttpError('not_found', 'workspace not found'))
         }
         try {
           await import('ssh2')
         } catch {
-          return reply.status(501).send({
-            detail: 'SSH over HTTPS needs ssh2; install it next to the server (npm install ssh2)',
-          })
+          return errorResponse(
+            reply,
+            new HttpError(
+              'not_supported',
+              'SSH over HTTPS needs ssh2; install it next to the server (npm install ssh2)',
+            ),
+          )
         }
       },
     },
@@ -94,7 +99,7 @@ export function registerSshRoutes(
       websocket: true,
       preValidation: async (req, reply) => {
         if (deps.registry.visible(req.params.id, req.account) === null) {
-          return reply.status(404).send({ detail: 'workspace not found' })
+          return errorResponse(reply, new HttpError('not_found', 'workspace not found'))
         }
       },
     },

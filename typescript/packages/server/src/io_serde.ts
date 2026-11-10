@@ -14,9 +14,6 @@
 
 import { Buffer } from 'node:buffer'
 import { fromJsonSchema } from '@modelcontextprotocol/server'
-import { classify } from '@struktoai/mirage-core/errors/classify'
-import { posixPhrase } from '@struktoai/mirage-core/errors/posix'
-import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import type {
   Ask,
   CommandExplanation,
@@ -32,6 +29,7 @@ import { CALLS } from '@struktoai/mirage-core/workspace/dispatcher/constants'
 import type { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { RESERVED_KWARGS } from './constants.ts'
+import { HttpError, paramOf } from './errors.ts'
 import { BYTES, schemaOf, type Args, type VfsCall } from './vfs_calls.ts'
 
 export interface ResultDict {
@@ -56,21 +54,6 @@ export function refusalToDict(refusal: Refusal | null): ResultDict['refusal'] {
         policy: refusal.policy,
         ask_id: refusal.askId,
       }
-}
-
-/**
- * A failed call's public detail, errno and policy refusal record. Unknown
- * exceptions may carry credentials, backend responses or host paths; only
- * named conditions have public text. Mirrors Python's `failure_to_dict`.
- */
-export function failureToDict(err: unknown): Record<string, JsonValue> & { detail: string } {
-  const condition = classify(err)
-  const body: Record<string, JsonValue> & { detail: string } = {
-    detail: condition === null ? 'internal server error' : posixPhrase(condition),
-  }
-  if (condition !== null) body.errno = condition
-  if (err instanceof PolicyDenied) body.refusal = refusalToDict(err.refusal)
-  return body
 }
 
 export function ioResultToDict(result: ExecuteResult): ResultDict & JsonValue {
@@ -144,8 +127,25 @@ function nodeToDict(node: ShellNode | CommandExplanation): Record<string, JsonVa
   return { type: node.type, text: node.text, children: node.children.map(nodeToDict) }
 }
 
-/** A VFS call's arguments do not fit its schema. Mirrors Python's `CallArgsError`. */
-export class CallArgsError extends Error {}
+/**
+ * A VFS call's arguments do not fit its schema: `message` names no value
+ * sent, and `param` is the argument at fault, when one is. Mirrors Python's
+ * `CallArgsError`.
+ */
+export class CallArgsError extends Error {
+  constructor(
+    message: string,
+    readonly param?: string,
+  ) {
+    super(message)
+  }
+
+  /** The refusal a route answers. */
+  error(): HttpError {
+    if (this.param === undefined) return new HttpError('invalid_request', this.message)
+    return new HttpError('invalid_value', this.message, { param: this.param })
+  }
+}
 
 /**
  * A VFS call's arguments, held to its schema, as its method takes them:
@@ -154,9 +154,19 @@ export class CallArgsError extends Error {}
  */
 export async function checked(call: VfsCall, params: unknown): Promise<Record<string, unknown>> {
   const result = await fromJsonSchema(schemaOf(call))['~standard'].validate(params)
-  if (result.issues !== undefined) {
-    const why = result.issues.map((issue) => issue.message).join('; ')
-    throw new CallArgsError(`invalid arguments for vfs/${call.name}: ${why}`)
+  const issue = result.issues?.[0]
+  if (issue !== undefined) {
+    const at = /^data((?:\/\S+)*) /.exec(issue.message)?.[1] ?? ''
+    const param = paramOf(
+      at
+        .split('/')
+        .filter((key) => key !== '')
+        .map((key) => (/^\d+$/.test(key) ? Number(key) : key)),
+    )
+    throw new CallArgsError(
+      `arguments do not fit vfs/${call.name}'s schema`,
+      param === '' ? undefined : param,
+    )
   }
   const args: Record<string, unknown> = {}
   for (const [name, value] of Object.entries(params as Record<string, unknown>)) {
@@ -166,7 +176,7 @@ export async function checked(call: VfsCall, params: unknown): Promise<Record<st
     }
     const text = String(value)
     if (!/^[A-Za-z0-9+/]*={0,2}$/.test(text) || text.length % 4 !== 0) {
-      throw new CallArgsError(`${name} must be base64`)
+      throw new CallArgsError(`${name} must be base64`, name)
     }
     args[name] = new Uint8Array(Buffer.from(text, 'base64'))
   }

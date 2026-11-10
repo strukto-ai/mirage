@@ -74,7 +74,11 @@ describe('mirage mcp over stdio', () => {
       res.writeHead(refused ? 500 : req.method === 'POST' ? 201 : 200, {
         'content-type': 'application/json',
       })
-      res.end(JSON.stringify(refused ? { detail: 'sessions on fire' } : { id: 'minted' }))
+      res.end(
+        JSON.stringify(
+          refused ? { error: { code: 'internal', message: 'sessions on fire' } } : { id: 'minted' },
+        ),
+      )
     })
     await new Promise<void>((resolve) => stub.listen(0, '127.0.0.1', resolve))
     try {
@@ -109,7 +113,11 @@ describe('mirage mcp over stdio', () => {
         res.writeHead(refused ? 500 : req.method === 'POST' ? 201 : 200, {
           'content-type': 'application/json',
         })
-        res.end(JSON.stringify(refused ? { detail: 'no sessions' } : { id: 'minted' }))
+        res.end(
+          JSON.stringify(
+            refused ? { error: { code: 'not_found', message: 'no sessions' } } : { id: 'minted' },
+          ),
+        )
       })
     })
     await new Promise<void>((resolve) => stub.listen(0, '127.0.0.1', resolve))

@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isFsError } from '@struktoai/mirage-core/errors/fs'
+import { classify } from '@struktoai/mirage-core/errors/classify'
 import { PolicyError } from '@struktoai/mirage-core/policy/errors'
+import { fsError, HttpError, loaderError, WorkspaceMissing } from '../errors.ts'
 import type { RouteApp } from '../routes.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
 
@@ -55,7 +56,7 @@ export function registerDocumentsRoutes(
             : {}),
           handler: async (req, reply) => {
             const entry = deps.registry.visible(req.params.wsId, req.account)
-            if (entry === null) return reply.status(404).send({ detail: 'workspace not found' })
+            if (entry === null) throw new WorkspaceMissing(req.params.wsId)
             const ws = entry.runner.ws
             // Loaded before the error mapping: a store that cannot be read
             // is the server's failure, never a 403 or 404 to the client.
@@ -75,21 +76,16 @@ export function registerDocumentsRoutes(
               // The session is looked up inside the call, as Python does, so
               // one closed since the request arrived answers 404 too.
               if (error instanceof Error && error.message.startsWith('unknown session'))
-                return reply.status(404).send({ detail: 'session not found' })
-              const code = error instanceof Error && 'code' in error ? String(error.code) : ''
-              const status = (
-                { ENOENT: 404, ENOTDIR: 422, EEXIST: 409, EACCES: 403 } as Record<string, number>
-              )[code]
-              if (status !== undefined) return reply.status(status).send({ detail: String(error) })
-              if (isFsError(error)) throw error
+                throw new HttpError('not_found', 'session not found', { cause: error })
               if (
                 error instanceof PolicyError ||
                 (error instanceof Error &&
                   (error.message.startsWith('profile is only') ||
                     error.message.startsWith('document path must')))
               ) {
-                return reply.status(422).send({ detail: error.message })
+                throw loaderError(error)
               }
+              if (classify(error) !== null) throw fsError(error)
               throw error
             }
           },

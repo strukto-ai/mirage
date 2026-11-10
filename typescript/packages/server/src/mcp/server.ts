@@ -48,7 +48,8 @@ import type {
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { McpToolOperations, OutputProgress } from './progress.ts'
-import { answered, checked, explanationToDict, failureToDict } from '../io_serde.ts'
+import { fsError } from '../errors.ts'
+import { answered, checked, explanationToDict } from '../io_serde.ts'
 import { VFS_CALLS, schemaOf, type VfsCall } from '../vfs_calls.ts'
 
 // Diagnostics go to stderr, never stdout, which a stdio transport speaks on;
@@ -242,7 +243,7 @@ export function createMirageMcpServer(
       logger.debug('mcp tool %s failed', name, err)
       // A call that failed is a tool result the agent reads, not a
       // protocol error.
-      if (vfs !== undefined) return json(failureToDict(err), true)
+      if (vfs !== undefined) return json(fsError(err).record(), true)
       const text = err instanceof Error ? err.message : String(err)
       return { content: [{ type: 'text', text }], isError: true }
     }

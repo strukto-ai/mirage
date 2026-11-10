@@ -174,7 +174,7 @@ describe('MirageRpcServer', () => {
       expect((await call(server(), 'vfs/read', { path: '/x' })).error).toEqual({
         code: -32603,
         message: 'internal server error',
-        data: { detail: 'internal server error' },
+        data: { code: 'internal', message: 'internal server error' },
       })
       expect(diagnostics.mock.calls.map(([chunk]) => String(chunk)).join('')).toContain(err.stack)
       expect(protocolOutput).not.toHaveBeenCalled()

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { HttpError } from '../errors.ts'
+
 // How long a worker has to answer its health check once started.
 export const READY_SECONDS = 60
 // How long a stopped worker has to exit before it is killed, past the
@@ -22,7 +24,9 @@ export const EXIT_SECONDS = 10
 // on, and refuses it as any request otherwise.
 export const AUTH_PROBE = '/v1/-'
 // What a request gets when no worker can answer it.
-export const UNAVAILABLE = { detail: 'worker unavailable' }
+export const UNAVAILABLE = new HttpError('unavailable', 'worker unavailable', {
+  headers: { 'retry-after': '1' },
+})
 // Headers that belong to one connection, which are not passed on.
 export const HOP_BY_HOP: ReadonlySet<string> = new Set([
   'connection',

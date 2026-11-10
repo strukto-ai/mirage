@@ -205,7 +205,8 @@ export function fastifyRoutes(app: FastifyInstance): RouteApp {
               const parse =
                 error.code === 'FST_ERR_CTP_INVALID_JSON_BODY' ||
                 error.code === 'FST_ERR_CTP_EMPTY_JSON_BODY'
-              void reply.send(parse ? invalidJson : error)
+              if (!parse) throw error
+              void reply.code(400).send(invalidJson)
             },
           }),
     })

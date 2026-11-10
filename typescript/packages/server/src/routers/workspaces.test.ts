@@ -302,7 +302,10 @@ describe('workspaces router', () => {
       const r = await upload(capped, await download(free, 'many'))
       expect(r.statusCode).toBe(400)
       expect(r.json()).toEqual({
-        detail: 'load failed: the snapshot holds 3 sessions, past max_sessions (2)',
+        error: {
+          code: 'invalid_request',
+          message: 'the snapshot holds 3 sessions, past max_sessions (2)',
+        },
       })
       expect(reasons).toEqual(['max_sessions'])
       expect(capped.registry.size()).toBe(0)
@@ -338,7 +341,10 @@ describe('workspaces router', () => {
       const r = await capped.inject({ method: 'POST', url: '/v1/workspaces', payload: body })
       expect(r.statusCode).toBe(400)
       expect(r.json()).toEqual({
-        detail: 'the saved workspace holds 3 sessions, past max_sessions (2)',
+        error: {
+          code: 'invalid_request',
+          message: 'the saved workspace holds 3 sessions, past max_sessions (2)',
+        },
       })
       expect(reasons).toEqual(['max_sessions'])
       expect(capped.registry.size()).toBe(0)
@@ -355,7 +361,9 @@ describe('workspaces router', () => {
     app.registry.draining = true
     const r = await app.inject({ method: 'POST', url: '/v1/workspaces', payload: { config: RAM } })
     expect(r.statusCode).toBe(503)
-    expect(r.json()).toEqual({ detail: 'server is shutting down' })
+    expect(r.json()).toEqual({
+      error: { code: 'shutting_down', message: 'server is shutting down' },
+    })
     await app.close()
   })
 
@@ -372,7 +380,9 @@ describe('workspaces router', () => {
       expect((await create('b')).statusCode).toBe(201)
       const full = await create()
       expect(full.statusCode).toBe(503)
-      expect(full.json()).toEqual({ detail: 'server is at max_workspaces (2)' })
+      expect(full.json()).toEqual({
+        error: { code: 'server_full', message: 'server is at max_workspaces (2)' },
+      })
       const clone = await app.inject({
         method: 'POST',
         url: '/v1/workspaces/a/clone',
@@ -413,7 +423,7 @@ describe('workspaces router', () => {
       const refused = await post('/v1/workspaces', { config: DISK(root) })
       expect([refused.statusCode, refused.json()]).toEqual([
         403,
-        { detail: 'no disk mounts for null' },
+        { error: { code: 'policy_refused', message: 'no disk mounts for null' } },
       ])
       const said = await post('/v1/workspaces?explain=true', { config: DISK(root) })
       expect(said.statusCode).toBe(200)
@@ -468,7 +478,7 @@ describe('workspaces router', () => {
       const refused = await post('/v1/workspaces', { config: { ...RAM, runtimes: ['monty'] } })
       expect([refused.statusCode, refused.json()]).toEqual([
         403,
-        { detail: "runtimes are the server's" },
+        { error: { code: 'policy_refused', message: "runtimes are the server's" } },
       ])
       const made = await post('/v1/workspaces', { config: RAM })
       expect(made.statusCode).toBe(201)
@@ -752,7 +762,10 @@ describe('workspaces router', () => {
         })
         expect(res.statusCode).toBe(400)
         expect(res.json()).toEqual({
-          detail: 'runtime initModule is only allowed in operator-owned configuration',
+          error: {
+            code: 'invalid_request',
+            message: 'runtime initModule is only allowed in operator-owned configuration',
+          },
         })
         const list = await app.inject({ method: 'GET', url: '/v1/workspaces', headers })
         expect(list.json()).toEqual([])
@@ -822,45 +835,27 @@ describe('workspaces router', () => {
           url: '/v1/workspaces',
           payload: { id: 'bad', config },
         })
-        expect(res.statusCode).toBe(422)
-        expect(res.json()).toEqual({
-          detail: [
-            ...(!mounts
-              ? [
-                  {
-                    type: 'missing',
-                    loc: ['body', 'config', 'mounts'],
-                    msg: 'Field required',
-                    input: config,
-                  },
-                ]
-              : []),
-            ...(invalidTime !== undefined
-              ? [
-                  {
-                    type: typeof invalidTime === 'number' ? 'string_type' : 'value_error',
-                    loc: ['body', 'config', 'system_time'],
-                    msg:
-                      typeof invalidTime === 'number'
-                        ? 'Input should be a valid string'
-                        : 'Value error, system_time is not an ISO 8601 instant with an offset from 1970 through 2261, as 2026-03-02T09:00:00Z',
-                    input: invalidTime,
-                    ...(typeof invalidTime === 'string' ? { ctx: { error: {} } } : {}),
-                  },
-                ]
-              : []),
-            ...(extra
-              ? [
-                  {
-                    type: 'extra_forbidden',
-                    loc: ['body', 'config', 'unknown_setting'],
-                    msg: 'Extra inputs are not permitted',
-                    input: true,
-                  },
-                ]
-              : []),
-          ],
-        })
+        const error = !mounts
+          ? { code: 'missing_field', message: 'config.mounts is required', param: 'config.mounts' }
+          : typeof invalidTime === 'number'
+            ? {
+                code: 'invalid_value',
+                message: 'config.system_time must be a string',
+                param: 'config.system_time',
+              }
+            : invalidTime !== undefined
+              ? {
+                  code: 'invalid_value',
+                  message:
+                    'system_time is not an ISO 8601 instant with an offset from 1970 through 2261, as 2026-03-02T09:00:00Z',
+                  param: 'config.system_time',
+                }
+              : {
+                  code: 'unknown_field',
+                  message: 'config.unknown_setting is not a known field',
+                  param: 'config.unknown_setting',
+                }
+        expect([res.statusCode, res.json()]).toEqual([400, { error }])
         expect(app.registry.has('bad')).toBe(false)
       } finally {
         await app.close()
@@ -868,21 +863,21 @@ describe('workspaces router', () => {
     },
   )
 
-  it('POST /v1/workspaces returns 502 when VFS build fails', async () => {
+  it('POST /v1/workspaces 400s with the loader text when the VFS is unknown', async () => {
     const app = buildApp()
     const res = await app.inject({
       method: 'POST',
       url: '/v1/workspaces',
       payload: { config: { mounts: { '/': { vfs: 'not-a-real-VFS' } } } },
     })
-    expect(res.statusCode).toBe(502)
+    expect(res.statusCode).toBe(400)
+    expect(res.json<{ error: { code: string } }>().error.code).toBe('invalid_request')
     await app.close()
   })
 
   it('POST /v1/workspaces 400s for a bad secrets block', async () => {
-    // Resolution moved into configToWorkspaceArgs, whose catch answers
-    // 502. An unresolvable source is the caller's config, and python's
-    // create route refuses the same body with 400.
+    // An unresolvable source is the caller's config, and python's create
+    // route refuses the same body with 400.
     const app = buildApp()
     const res = await app.inject({
       method: 'POST',
@@ -967,7 +962,10 @@ describe('workspaces router', () => {
         url: '/v1/workspaces/load',
         payload: { id, key: 'missing.tar' },
       })
-      expect(load.json<{ detail: string }>().detail).toContain('invalid workspace id')
+      expect([load.statusCode, load.json()]).toEqual([
+        400,
+        { error: { code: 'invalid_value', message: 'id must not be . or ..', param: 'id' } },
+      ])
     }
     await app.close()
   })
@@ -985,7 +983,9 @@ describe('workspaces router', () => {
       vi.spyOn(ws.stateStore, 'drop').mockRejectedValue(new Error('store on fire'))
       const res = await app.inject({ method: 'DELETE', url: '/v1/workspaces/doomed' })
       expect(res.statusCode).toBe(500)
-      expect(res.json<{ detail: string }>().detail).toContain('store on fire')
+      expect(res.json()).toEqual({
+        error: { code: 'internal', message: 'internal server error' },
+      })
       expect(app.registry.has('doomed')).toBe(false)
     } finally {
       await app.close()
@@ -1051,7 +1051,9 @@ describe('workspaces router', () => {
         },
       })
       expect(res.statusCode).toBe(400)
-      expect(res.json<{ detail: string }>().detail).toBe('disk: folder_versions: must be a boolean')
+      expect(res.json<{ error: { message: string } }>().error.message).toBe(
+        'disk: folder_versions: must be a boolean',
+      )
     } finally {
       await app.close()
       rmSync(root, { recursive: true, force: true })
@@ -1080,7 +1082,9 @@ describe('workspaces router', () => {
         payload: { override: { mounts: { '/a': block, '/b': block } } },
       })
       expect(res.statusCode).toBe(400)
-      expect(res.json<{ detail: string }>().detail).toContain('is already mounted at')
+      expect(res.json<{ error: { message: string } }>().error.message).toContain(
+        'is already mounted at',
+      )
     } finally {
       await app.close()
       rmSync(root, { recursive: true, force: true })
@@ -1103,7 +1107,9 @@ describe('workspaces router', () => {
         },
       })
       expect(res.statusCode).toBe(400)
-      expect(res.json<{ detail: string }>().detail).toContain('capacity must be a size like 100MB')
+      expect(res.json<{ error: { message: string } }>().error.message).toContain(
+        'capacity must be a size like 100MB',
+      )
     } finally {
       await app.close()
     }
@@ -1122,7 +1128,7 @@ describe('workspaces router', () => {
       payload: { override: { mounts: { '/': { vfs: 'ram', config: { bogus: 1 } } } } },
     })
     expect(res.statusCode).toBe(400)
-    expect(res.json<{ detail: string }>().detail).toContain('bogus')
+    expect(res.json<{ error: { message: string } }>().error.message).toContain('bogus')
     await app.close()
   })
 
@@ -1165,7 +1171,9 @@ describe('workspaces router', () => {
         },
       })
       expect(res.statusCode).toBe(400)
-      expect(res.json<{ detail: string }>().detail).toBe('disk: folder_versions: must be a boolean')
+      expect(res.json<{ error: { message: string } }>().error.message).toBe(
+        'disk: folder_versions: must be a boolean',
+      )
     } finally {
       await app.close()
       rmSync(root, { recursive: true, force: true })
@@ -1251,8 +1259,10 @@ describe('workspaces router', () => {
         url: '/v1/workspaces/load',
         payload: { key: 'nope.tar' },
       })
-      expect(missing.statusCode).toBe(400)
-      expect(missing.json<{ detail: string }>().detail).toBe('snapshot not found: nope.tar')
+      expect([missing.statusCode, missing.json()]).toEqual([
+        400,
+        { error: { code: 'invalid_value', message: 'key names no snapshot', param: 'key' } },
+      ])
     } finally {
       vi.restoreAllMocks()
       await app.close().catch(() => undefined)
@@ -1272,7 +1282,9 @@ describe('workspaces router', () => {
         await app.inject({ method: 'POST', url: '/v1/workspaces/load', payload: { key: 'a.tar' } }),
       ]) {
         expect(res.statusCode).toBe(400)
-        expect(res.json<{ detail: string }>().detail).toBe('this server has no snapshot store')
+        expect(res.json<{ error: { message: string } }>().error.message).toBe(
+          'this server has no snapshot store',
+        )
       }
     } finally {
       await app.close().catch(() => undefined)
@@ -1286,7 +1298,7 @@ describe('workspaces router', () => {
       expect(none.statusCode).toBe(400)
       const both = await upload(app, new Uint8Array(), { key: 'a.tar' })
       expect(both.statusCode).toBe(400)
-      expect(both.json<{ detail: string }>().detail).toContain('not both')
+      expect(both.json<{ error: { message: string } }>().error.message).toContain('not both')
       const junk = await upload(app, new TextEncoder().encode('not a tar'))
       expect(junk.statusCode).toBe(400)
     } finally {
@@ -1300,7 +1312,9 @@ describe('workspaces router', () => {
     try {
       const res = await upload(app, new Uint8Array(9))
       expect(res.statusCode).toBe(413)
-      expect(res.json<{ detail: string }>().detail).toBe('snapshot part too large')
+      expect(res.json<{ error: { message: string } }>().error.message).toBe(
+        'snapshot part too large',
+      )
     } finally {
       limits.snapshot = undefined
       await app.close().catch(() => undefined)
@@ -1322,7 +1336,7 @@ describe('workspaces router', () => {
       const oversized = await writeSnapshotTar({ ...manifest, padding: 'x'.repeat(128_000) }, {})
       const res = await upload(app, oversized, { id: 'limited' })
       expect(res.statusCode).toBe(400)
-      expect(res.json<{ detail: string }>().detail).toContain(
+      expect(res.json<{ error: { message: string } }>().error.message).toContain(
         'snapshot exceeds expanded size limit',
       )
       expect(app.registry.has('limited')).toBe(false)
@@ -1341,17 +1355,10 @@ describe('workspaces router', () => {
         url: '/v1/workspaces',
         payload: { config: '/etc/passwd' },
       })
-      expect(res.statusCode).toBe(422)
-      expect(res.json()).toEqual({
-        detail: [
-          {
-            type: 'model_attributes_type',
-            loc: ['body', 'config'],
-            msg: 'Input should be a valid dictionary or object to extract fields from',
-            input: '/etc/passwd',
-          },
-        ],
-      })
+      expect([res.statusCode, res.json()]).toEqual([
+        400,
+        { error: { code: 'invalid_value', message: 'config must be an object', param: 'config' } },
+      ])
     } finally {
       await app.close().catch(() => undefined)
     }
@@ -1763,7 +1770,7 @@ describe('workspace cancel, kill, stop and start', () => {
     try {
       const r = await post(app, '/v1/workspaces/nope/start')
       expect(r.statusCode).toBe(404)
-      expect(r.json()).toEqual({ detail: 'workspace not found' })
+      expect(r.json()).toEqual({ error: { code: 'not_found', message: 'workspace not found' } })
       expect((await post(app, '/v1/workspaces/nope/stop')).statusCode).toBe(404)
     } finally {
       await app.close()
@@ -1818,17 +1825,17 @@ describe('workspace cancel, kill, stop and start', () => {
           commands: { allow: ['ls'], deny: [{ commands: ['cat *'], reason: 'sealed' }] },
         },
       })
-      expect(refused.statusCode).toBe(422)
+      expect(refused.statusCode).toBe(400)
       const unknown = await app.inject({ method: 'PUT', url: `${route}x`, payload: { bogus: 1 } })
-      expect(unknown.statusCode).toBe(422)
+      expect(unknown.statusCode).toBe(400)
       mkdirSync(join(root, 'guard.py'))
       const unreadable = await app.inject({
         method: 'PUT',
         url: `${route}y`,
         payload: { policy: { pre_command: [{ script: join(root, 'guard.py') }] } },
       })
-      expect(unreadable.statusCode).toBe(422)
-      expect(unreadable.json<{ detail: string }>().detail).toContain('directory')
+      expect(unreadable.statusCode).toBe(400)
+      expect(unreadable.json<{ error: { message: string } }>().error.message).toContain('directory')
       const missing = await app.inject({
         method: 'PUT',
         url: '/v1/workspaces/nope/profiles/reader',
@@ -1954,7 +1961,9 @@ describe('MCP CLIs in a create', () => {
         },
       })
       expect(res.statusCode).toBe(400)
-      expect(res.json<{ detail: string }>().detail).toContain("cannot list the server's tools")
+      expect(res.json<{ error: { message: string } }>().error.message).toContain(
+        "cannot list the server's tools",
+      )
       expect(fake.requests).toEqual([])
     } finally {
       await app.close()
@@ -1973,7 +1982,9 @@ describe('MCP CLIs in a create', () => {
         payload: { config: { ...RAM, clis: { fx: mcpEntry(empty.url, TOKEN) } } },
       })
       expect(res.statusCode).toBe(400)
-      expect(res.json<{ detail: string }>().detail).toContain('the server lists no tools')
+      expect(res.json<{ error: { message: string } }>().error.message).toContain(
+        'the server lists no tools',
+      )
     } finally {
       await app.close()
       await empty.close()

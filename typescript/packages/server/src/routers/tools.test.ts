@@ -103,11 +103,16 @@ describe('the tool routes', () => {
       payload: { path: '/a' },
     })
     expect(bad.statusCode).toBe(400)
-    expect(bad.json<{ detail: string }>().detail).toMatch(/^Invalid arguments for tool read/)
+    expect(bad.json()).toEqual({
+      error: {
+        code: 'invalid_request',
+        message: "arguments do not fit tool read's input schema",
+      },
+    })
     expect(ws.statusCode).toBe(404)
-    expect(ws.json()).toEqual({ detail: 'workspace not found' })
+    expect(ws.json()).toEqual({ error: { code: 'not_found', message: 'workspace not found' } })
     expect(session.statusCode).toBe(404)
-    expect(session.json()).toEqual({ detail: 'session not found' })
+    expect(session.json()).toEqual({ error: { code: 'not_found', message: 'session not found' } })
   })
   it('cancel the shell when the caller disconnects', async () => {
     const app = buildApp({ allowedHosts: ['*'] })

@@ -14,11 +14,9 @@
 
 import { loadWorkspaceConfig, type WorkspaceConfigRaw } from '@struktoai/mirage-core/config'
 import { validateDocument } from '@struktoai/mirage-core/rs/document'
-import { isPlainObject } from '@struktoai/mirage-core/utils/records'
 import { parseSystemTime } from '@struktoai/mirage-core/utils/clock'
 import type { JsonValue, MountBackend } from '@struktoai/mirage-core/types'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
-import type { OverrideShape } from './clone.ts'
 
 export interface MountSummary {
   prefix: string
@@ -61,15 +59,24 @@ export interface WorkspaceDetail {
 }
 
 /** A workspace to create: from `config`, or from the saved `template` of that name, never both. */
-export interface CreateWorkspaceRequest {
-  config?: Record<string, unknown> | null
-  template?: string
-  id?: string
-}
+export const CreateWorkspaceRequest = z.strictObject({
+  config: z.record(z.string(), z.unknown()).nullish(),
+  template: z.string().nullish(),
+  id: z.string().nullish(),
+})
 
-/** A request config rejected by its schema, before operator-only runtime checks. */
-export class ConfigValidationError extends Error {
-  static readonly time = (value: string | null | undefined, ctx: z.RefinementCtx): void => {
+export type CreateWorkspaceRequest = z.infer<typeof CreateWorkspaceRequest>
+
+/**
+ * A workspace config checked as a create checks one, taken as written: the
+ * caller's CLI expanded its `${VAR}` in the caller's env, and the server's
+ * env is not a tenant's to read. A field the schema refuses throws a
+ * `ZodError` placed from the config's root, the declared fields first and
+ * then the first unknown key; any other refusal throws an Error naming what
+ * is wrong. Mirrors Python's `check_config`.
+ */
+export function checkConfig(config: unknown): WorkspaceConfigRaw {
+  const time = (value: string | null | undefined, ctx: z.RefinementCtx): void => {
     if (value === undefined || value === null) return
     try {
       parseSystemTime(value)
@@ -78,108 +85,25 @@ export class ConfigValidationError extends Error {
       ctx.addIssue({ code: 'custom', message: error.message })
     }
   }
-
-  static readonly shape = z.looseObject({
+  const shape = z.looseObject({
     mounts: z.record(z.string(), z.unknown()),
-    system_time: z.string().nullable().optional().superRefine(ConfigValidationError.time),
+    system_time: z.string().nullable().optional().superRefine(time),
     profile: z.string().nullable().optional(),
     default_session_id: z.string().nullable().optional(),
     workspace_id: z.string().nullable().optional(),
   })
-  readonly detail: {
-    type: string
-    loc: string[]
-    msg: string
-    input: unknown
-    ctx?: Record<string, unknown>
-  }[] = []
-
-  constructor(config: unknown, cause: Error) {
-    super(cause.message, { cause })
-    if (!isPlainObject(config)) {
-      this.detail.push({
-        type: 'model_attributes_type',
-        loc: ['body', 'config'],
-        msg: 'Input should be a valid dictionary or object to extract fields from',
-        input: config,
-      })
-      return
-    }
-    const checked = ConfigValidationError.shape.safeParse(config)
-    if (!checked.success) {
-      for (const issue of checked.error.issues) {
-        const field = issue.path[0]
-        if (typeof field !== 'string') throw checked.error
-        const input = config[field]
-        if (issue.code === 'custom') {
-          this.detail.push({
-            type: 'value_error',
-            loc: ['body', 'config', field],
-            msg: `Value error, ${issue.message}`,
-            input,
-            ctx: { error: {} },
-          })
-          continue
-        }
-        if (issue.code !== 'invalid_type') throw checked.error
-        this.detail.push({
-          type:
-            input === undefined
-              ? 'missing'
-              : issue.expected === 'string'
-                ? 'string_type'
-                : 'dict_type',
-          loc: ['body', 'config', field],
-          msg:
-            input === undefined
-              ? 'Field required'
-              : issue.expected === 'string'
-                ? 'Input should be a valid string'
-                : 'Input should be a valid dictionary',
-          input: input === undefined ? config : input,
-        })
-      }
-    }
-    // The shared engine checks allowed keys without running field validators.
-    for (const [key, value] of Object.entries(config)) {
-      try {
-        validateDocument('config', { [key]: value }, 'config')
-      } catch (error) {
-        if (!(error instanceof Error)) throw error
-        this.detail.push({
-          type: 'extra_forbidden',
-          loc: ['body', 'config', key],
-          msg: 'Extra inputs are not permitted',
-          input: value,
-        })
-      }
-    }
-    if (this.detail.length === 0) {
-      this.detail.push({
-        type: 'value_error',
-        loc: ['body', 'config'],
-        msg: cause.message,
-        input: config,
-      })
+  const fields = shape.parse(config)
+  for (const [key, value] of Object.entries(fields)) {
+    try {
+      validateDocument('config', { [key]: value }, 'config')
+    } catch (error) {
+      if (!(error instanceof Error)) throw error
+      throw new z.ZodError([
+        { code: 'unrecognized_keys', keys: [key], path: [], message: error.message },
+      ])
     }
   }
-}
-
-/**
- * A workspace config checked as a create checks one, taken as written: the
- * caller's CLI expanded its `${VAR}` in the caller's env, and the server's
- * env is not a tenant's to read. Throws an Error naming what is wrong.
- */
-export function checkConfig(config: unknown): WorkspaceConfigRaw {
-  let cfg: WorkspaceConfigRaw
-  try {
-    if (!isPlainObject(config)) throw new Error('config must be a mapping')
-    ConfigValidationError.shape.parse(config)
-    cfg = loadWorkspaceConfig(config, null)
-  } catch (error) {
-    if (!(error instanceof Error)) throw error
-    throw new ConfigValidationError(config, error)
-  }
+  const cfg = loadWorkspaceConfig(fields, null)
   for (const entry of cfg.runtimes ?? []) {
     if (typeof entry === 'string') continue
     const runtimeConfig = entry.config
@@ -194,11 +118,14 @@ export function checkConfig(config: unknown): WorkspaceConfigRaw {
   return cfg
 }
 
-export interface CreateTemplateRequest {
-  name: string
-  description?: string | null
-  config: Record<string, unknown>
-}
+/** A template to save: its name, an optional description and a whole workspace config. */
+export const CreateTemplateRequest = z.strictObject({
+  name: z.string(),
+  description: z.string().nullish(),
+  config: z.record(z.string(), z.unknown()),
+})
+
+export type CreateTemplateRequest = z.infer<typeof CreateTemplateRequest>
 
 export interface TemplateResponse {
   name: string
@@ -206,15 +133,21 @@ export interface TemplateResponse {
   config: Record<string, JsonValue>
 }
 
-export interface CloneWorkspaceRequest {
-  id?: string
-  override?: OverrideShape
-}
+/** A clone of a workspace: its new id, and an override of the source's config. */
+export const CloneWorkspaceRequest = z.strictObject({
+  id: z.string().nullish(),
+  override: z.record(z.string(), z.unknown()).nullish(),
+})
+
+export type CloneWorkspaceRequest = z.infer<typeof CloneWorkspaceRequest>
 
 export const SnapshotWorkspaceRequest = z.object({ key: z.string() }).strict()
 
-export interface LoadWorkspaceRequest {
-  key?: string
-  id?: string
-  override?: OverrideShape
-}
+/** A snapshot to load: a key in the snapshot store or an upload, its id and an override. */
+export const LoadWorkspaceRequest = z.strictObject({
+  key: z.string().nullish(),
+  id: z.string().nullish(),
+  override: z.record(z.string(), z.unknown()).nullish(),
+})
+
+export type LoadWorkspaceRequest = z.infer<typeof LoadWorkspaceRequest>

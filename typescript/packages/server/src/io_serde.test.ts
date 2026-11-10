@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { MountMode } from '@struktoai/mirage-core/types'
-import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import type { Route } from '@struktoai/mirage-core/policy/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
@@ -21,14 +20,7 @@ import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { Workspace } from '@struktoai/mirage-node'
 import { describe, expect, it } from 'vitest'
-import {
-  CallArgsError,
-  answered,
-  checked,
-  explanationToDict,
-  failureToDict,
-  ioResultToDict,
-} from './io_serde.ts'
+import { CallArgsError, answered, checked, explanationToDict, ioResultToDict } from './io_serde.ts'
 import { VFS_CALL_BY_NAME, type VfsCall } from './vfs_calls.ts'
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s)
@@ -38,45 +30,6 @@ class OnMonty implements Policy {
     return Promise.resolve({ kind: 'route', runtime: 'monty', reason: 'plain arithmetic' })
   }
 }
-
-describe('failureToDict', () => {
-  it.each([
-    new Error('backend token=secret'),
-    new TypeError('backend token=secret'),
-    Object.assign(new Error('backend token=secret'), { code: 'ECONNREFUSED' }),
-    'backend token=secret',
-  ])('hides unknown backend failures (%s)', (err) => {
-    expect(failureToDict(err)).toEqual({ detail: 'internal server error' })
-  })
-
-  it.each([
-    ['ENOENT', 'No such file or directory'],
-    ['EACCES', 'Permission denied'],
-    ['EIO', 'Input/output error'],
-  ])('exposes only public errno text for %s', (code, detail) => {
-    const err = Object.assign(new Error('backend token=secret at /private/config'), { code })
-    expect(failureToDict(err)).toEqual({ detail, errno: code })
-  })
-
-  it('keeps the policy refusal record', () => {
-    const err = new PolicyDenied('backend token=secret', '/private/config', {
-      kind: 'pending',
-      reason: 'sign-off',
-      policy: '',
-      askId: 'abc123',
-    })
-    expect(failureToDict(err)).toEqual({
-      detail: 'Permission denied',
-      errno: 'EACCES',
-      refusal: {
-        kind: 'pending',
-        reason: 'sign-off',
-        policy: '',
-        ask_id: 'abc123',
-      },
-    })
-  })
-})
 
 describe('ioResultToDict', () => {
   it('carries a null refusal on an ordinary run', () => {
@@ -156,11 +109,12 @@ describe('checked and answered', () => {
   })
 
   it('refuses arguments outside the schema', async () => {
-    await expect(checked(byName('write'), { path: '/a', data: '%%' })).rejects.toThrow(
-      new CallArgsError('data must be base64'),
-    )
+    await expect(checked(byName('write'), { path: '/a', data: '%%' })).rejects.toMatchObject({
+      message: 'data must be base64',
+      param: 'data',
+    })
     await expect(checked(byName('write'), { path: '/a' })).rejects.toThrow(
-      /invalid arguments for vfs\/write/,
+      new CallArgsError("arguments do not fit vfs/write's schema"),
     )
   })
 })

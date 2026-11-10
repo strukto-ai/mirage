@@ -33,6 +33,7 @@ export default defineConfig({
     'src/auth/middleware.ts',
     'src/api.ts',
     'src/routes.ts',
+    'src/errors.ts',
     'src/registry.ts',
     'src/ssh/config.ts',
     'src/ssh/constants.ts',

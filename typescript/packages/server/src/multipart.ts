@@ -13,21 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Buffer } from 'node:buffer'
+import { HttpError } from './errors.ts'
 
 export const MAX_REQUEST_PART = 1024 * 1024
 export const MAX_SNAPSHOT_PART = 1024 * 1024 * 1024
 const MAX_HEADER_COUNT = 8
 const MAX_HEADER_SIZE = 4096 + 128
-
-/** A body refused with the status it is answered with. */
-export class MultipartError extends Error {
-  constructor(
-    readonly statusCode: number,
-    message: string,
-  ) {
-    super(message)
-  }
-}
 
 export type PartEvent =
   | { kind: 'begin'; name: string }
@@ -158,10 +149,10 @@ class Parts {
   private checkHeaders(block: string): void {
     const lines = block.split('\r\n')
     if (lines.some((line) => line.length > MAX_HEADER_SIZE)) {
-      throw new MultipartError(400, 'bad multipart body: Maximum header size exceeded')
+      throw new HttpError('invalid_request', 'multipart body is malformed')
     }
     if (lines.filter((line) => line !== '').length > MAX_HEADER_COUNT) {
-      throw new MultipartError(400, 'bad multipart body: Maximum header count exceeded')
+      throw new HttpError('invalid_request', 'multipart body is malformed')
     }
   }
 
@@ -182,7 +173,7 @@ class Parts {
  * chunk by chunk, so a reader can act on a part while it is still
  * uploading.
  *
- * @throws MultipartError 400 for a body without a boundary, a malformed
+ * @throws HttpError 400 for a body without a boundary, a malformed
  *   one, or one that stops before its closing boundary.
  */
 export async function* partEvents(
@@ -191,7 +182,7 @@ export async function* partEvents(
 ): AsyncGenerator<PartEvent> {
   const boundary = headerParam(contentType, 'boundary')
   if (boundary === undefined || boundary === '') {
-    throw new MultipartError(400, 'multipart body without a boundary')
+    throw new HttpError('invalid_request', 'multipart body without a boundary')
   }
   const parts = new Parts(boundary)
   for await (const chunk of source) {
@@ -201,5 +192,5 @@ export async function* partEvents(
         : Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength),
     )
   }
-  if (!parts.finished) throw new MultipartError(400, 'multipart body ended early')
+  if (!parts.finished) throw new HttpError('invalid_request', 'multipart body ended early')
 }

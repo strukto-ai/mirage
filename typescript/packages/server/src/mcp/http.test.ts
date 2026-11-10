@@ -136,9 +136,13 @@ describe('the MCP endpoint over HTTP', () => {
     const workspace = await post('/v1/workspaces/nope/mcp')
     const session = await post(`/v1/workspaces/${id}/mcp?session_id=nope`)
     expect(workspace.status).toBe(404)
-    expect(await workspace.json()).toEqual({ detail: 'workspace not found' })
+    expect(await workspace.json()).toEqual({
+      error: { code: 'not_found', message: 'workspace not found' },
+    })
     expect(session.status).toBe(404)
-    expect(await session.json()).toEqual({ detail: 'session not found' })
+    expect(await session.json()).toEqual({
+      error: { code: 'not_found', message: 'session not found' },
+    })
   })
 
   it('serves the VFS calls and explain with calls=all', async () => {
@@ -163,7 +167,9 @@ describe('the MCP endpoint over HTTP', () => {
     expect(JSON.parse(text(read))).toBe('aGk=')
     expect(JSON.parse(text(said))).toMatchObject({ outcome: 'allow' })
     expect(refused.status).toBe(400)
-    expect(await refused.json()).toEqual({ detail: 'calls must be tools or all' })
+    expect(await refused.json()).toEqual({
+      error: { code: 'invalid_value', message: 'calls must be one of tools, all', param: 'calls' },
+    })
   })
 
   it('rejects an unknown tool as a protocol error', async () => {

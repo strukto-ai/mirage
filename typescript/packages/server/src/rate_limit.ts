@@ -20,6 +20,7 @@ import { DEFAULT_RATE_LIMITS, DaemonConfigError, readDaemonTable } from './daemo
 import { ENV_RATE_LIMITS, ENV_WORKER_TOKEN } from './env.ts'
 import { refused } from './metrics.ts'
 import { mirageHome } from './paths.ts'
+import { errorResponse, HttpError } from './errors.ts'
 
 const PER: Readonly<Record<string, number>> = { second: 1, minute: 60, hour: 3600, day: 86400 }
 const KEYS: ReadonlySet<string> = new Set(['ip', 'account', 'workspace'])
@@ -185,7 +186,7 @@ export function registerRateLimits(
         const name = typeof limit.key === 'function' ? 'function' : limit.key
         console.warn(`rate-limiting a request past ${name}=${limit.rate}`)
         refused('rate_limit')
-        await reply.code(429).send({ detail: 'Too Many Requests' })
+        await errorResponse(reply, new HttpError('rate_limited', 'too many requests'))
       }
     })
   }

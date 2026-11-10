@@ -16,7 +16,7 @@ import { resolveWorkspaceConfig } from '@struktoai/mirage-server/workspace_confi
 import type { Command } from 'commander'
 import { DaemonClient, makeClient } from './client.ts'
 import { LoginError } from './credentials.ts'
-import { fail, handleResponse } from './output.ts'
+import { errorMessage, fail, handleResponse } from './output.ts'
 import { resolveConfig } from './workspace.ts'
 
 export const MCP_ENV_NAMES = ['MIRAGE_MCP_CONFIG', 'MIRAGE_CONFIG']
@@ -32,8 +32,7 @@ async function hasSession(
 ): Promise<boolean> {
   const r = await client.request('GET', `${workspacePath}/sessions`)
   if (r.status >= 400) {
-    const { detail } = (await r.json()) as { detail?: unknown }
-    throw new Error(`error ${String(r.status)}: ${String(detail)}`)
+    throw new Error(`error ${String(r.status)}: ${errorMessage(await r.text())}`)
   }
   const rows: unknown = await r.json()
   return (

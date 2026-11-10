@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { errorOf, errorResponse, HttpError } from '@struktoai/mirage-server/errors'
 import type {
   BodySchema,
   RouteApp,
@@ -231,27 +232,18 @@ function failure(error: unknown, config: RouteConfig): WebReply {
   ) {
     return reply.status(error.statusCode).send(config.invalidJson)
   }
-  const declared = (error as { statusCode?: unknown }).statusCode
-  const statusCode = typeof declared === 'number' && declared >= 400 ? declared : 500
-  if (statusCode >= 500) console.error('route failed', error)
-  const message = error instanceof Error ? error.message : String(error)
-  const code = (error as { code?: unknown }).code
-  return reply.status(statusCode).send({
-    statusCode,
-    ...(typeof code === 'string' ? { code } : {}),
-    error: STATUS_TEXT[statusCode] ?? 'Error',
-    message,
-  })
+  return errorResponse(reply, error instanceof RouteError ? routeError(error) : errorOf(error))
 }
 
-const STATUS_TEXT: Readonly<Record<number, string>> = {
-  400: 'Bad Request',
-  401: 'Unauthorized',
-  403: 'Forbidden',
-  404: 'Not Found',
-  413: 'Payload Too Large',
-  415: 'Unsupported Media Type',
-  500: 'Internal Server Error',
+/**
+ * A body this router refused before the route ran, as the error the Node
+ * server answers: a body it cannot read as JSON or past the limit as
+ * Fastify's are, a media type or schema miss as a bad request.
+ */
+function routeError(error: RouteError): HttpError {
+  if (error.statusCode === 415) return new HttpError('invalid_request', 'body must be JSON')
+  if (error.code === 'FST_ERR_VALIDATION') return new HttpError('invalid_request', error.message)
+  return errorOf(error)
 }
 
 /**
@@ -284,25 +276,12 @@ export class WebRoutes implements RouteApp {
       found = this.match(request.method === 'HEAD' ? 'GET' : request.method, url.pathname)
     } catch (error) {
       if (!(error instanceof URIError)) throw error
-      return Response.json(
-        {
-          statusCode: 400,
-          code: 'FST_ERR_BAD_URL',
-          error: 'Bad Request',
-          message: `'${url.pathname}' is not a valid url component`,
-        },
-        { status: 400 },
-      )
+      const refused = new HttpError('invalid_request', 'path is not percent-encoded')
+      return Response.json(refused.body(), { status: refused.status })
     }
     if (found === null) {
-      return Response.json(
-        {
-          message: `Route ${request.method}:${url.pathname} not found`,
-          error: 'Not Found',
-          statusCode: 404,
-        },
-        { status: 404 },
-      )
+      const missing = new HttpError('not_found', 'not found')
+      return Response.json(missing.body(), { status: missing.status })
     }
     const [route, params] = found
     let reply = new WebReply()
