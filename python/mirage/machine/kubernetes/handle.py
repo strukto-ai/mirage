@@ -187,9 +187,10 @@ class KubernetesMachine(ProgramMachine):
                 output=output,
                 errors=said.write,
             )
-        except BaseException:
-            # A stopped kubectl reports nothing, so what is held is the
-            # program's.
+        except Exception:
+            # A failed kubectl reports nothing, so what is held is the
+            # program's. A cancel skips this: a receiver that stopped
+            # reading would hold up the stop.
             await said.finish(0)
             raise
         if not await said.finish(done.exit_code):

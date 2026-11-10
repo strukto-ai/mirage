@@ -142,18 +142,30 @@ async def test_exec_line_carries_cwd_and_env_on_the_command():
 
 
 class CutOffMachine(KubernetesMachine):
+    cut_off: type[BaseException] = OSError
+
     async def _exec_program(self, args, stdin=None, output=None, errors=None):
         await errors(b"command")
-        raise asyncio.CancelledError
+        raise self.cut_off
 
 
 @pytest.mark.asyncio
-async def test_a_cut_off_run_keeps_what_was_held():
+async def test_a_failed_kubectl_keeps_what_was_held():
     chunks, collect = collector()
     machine = CutOffMachine("box", config={"pod": "p"})
-    with pytest.raises(asyncio.CancelledError):
+    with pytest.raises(OSError):
         await machine._exec_argv(("x",), None, {}, "/", None, collect)
     assert chunks == [b"command"]
+
+
+@pytest.mark.asyncio
+async def test_a_cancel_does_not_wait_on_the_receiver():
+    chunks, collect = collector()
+    machine = CutOffMachine("box", config={"pod": "p"})
+    machine.cut_off = asyncio.CancelledError
+    with pytest.raises(asyncio.CancelledError):
+        await machine._exec_argv(("x",), None, {}, "/", None, collect)
+    assert chunks == []
 
 
 @pytest.mark.asyncio
