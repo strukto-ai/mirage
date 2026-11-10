@@ -59,7 +59,6 @@ function makePathSpec(virtual: string, prefix: string, operand?: PathSpec): Path
 /** tar's flags as argp read them. Mirrors Python's TarFlags. */
 export interface TarFlags {
   create: boolean
-  extract: boolean
   list: boolean
   codec: string | null
   verbose: boolean
@@ -173,7 +172,6 @@ export function parseFlags(bag: Record<string, FlagValue>): TarFlags | IOResult 
   }
   return {
     create: fl.asBool('create'),
-    extract: fl.asBool('extract'),
     list: fl.asBool('list'),
     codec: CODECS.find((codec) => fl.asBool(codec)) ?? null,
     verbose: fl.asBool('verbose'),

@@ -254,19 +254,6 @@ export class FlagView {
     return typeof value === 'string' ? value : fallback
   }
 
-  /**
-   * The option as text, `fallback` when it is absent or empty. For a program
-   * that cannot tell an empty value from none, as a Go flag's zero value
-   * cannot (gh's `if opts.Name != ""`): there the empty one reads as unset,
-   * and nowhere else. Mirrors Python's `as_nonempty`.
-   */
-  asNonEmpty(name: string): string | undefined
-  asNonEmpty(name: string, fallback: string): string
-  asNonEmpty(name: string, fallback?: string): string | undefined {
-    const value = this.asStr(name)
-    return value === undefined || value === '' ? fallback : value
-  }
-
   asList(name: string): string[] {
     const value = this.flags[this.key(name)]
     if (Array.isArray(value)) {

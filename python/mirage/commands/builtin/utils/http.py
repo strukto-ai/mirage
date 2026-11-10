@@ -25,6 +25,8 @@ from dataclasses import dataclass, replace
 from typing import Any
 from urllib.parse import urlsplit
 
+import httpx
+
 from mirage.commands.builtin.errors import HttpConnectError, HttpTimeoutError
 from mirage.commands.builtin.utils.constants import HTTP_TIMEOUT_SECONDS
 from mirage.commands.builtin.utils.cookie import (
@@ -35,19 +37,8 @@ from mirage.commands.builtin.utils.cookie import (
 from mirage.io.stream import prime_stream
 from mirage.io.types import ByteSource
 
-# httpx is the [http] extra, so it stays optional: top-level import guarded the
-# same way the databricks accessor guards its SDK.
-httpx: Any
-try:
-    import httpx as _httpx
-except ImportError:
-    httpx = None
-else:
-    httpx = _httpx
-
 DEFAULT_USER_AGENT = "Mozilla/5.0 (compatible; mirage/1.0)"
 DEFAULT_PORTS = {"http": 80, "https": 443}
-MISSING_HTTPX = "httpx is required for curl/wget: pip install 'mirage[http]'"
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,8 +133,6 @@ async def http_request(
     # server's certificate is not checked. `stream` hands the final body
     # over as it arrives instead of holding all of it first, so a download
     # costs one chunk of memory however large it is.
-    if httpx is None:
-        raise ImportError(MISSING_HTTPX)
     host, port = _endpoint(url)
     started = time.monotonic()
     event_hooks: dict[str, list[Any]] = {}
@@ -198,8 +187,8 @@ async def http_request(
         while True:
             try:
                 resp = await client.send(request, stream=True)
-                follows = follow_redirects and resp.next_request is not None
-                if not stream and not follows:
+                redirect = resp.next_request if follow_redirects else None
+                if not stream and redirect is None:
                     await resp.aread()
             # A timeout is a transport error too, so it is told apart first:
             # curl answers it with its own code (28), not the connect one.
@@ -207,16 +196,16 @@ async def http_request(
                 raise _timeout(url, started) from exc
             except httpx.TransportError as exc:
                 raise HttpConnectError(host, port) from exc
-            if not follows:
+            if redirect is None:
                 break
             await resp.aclose()
             history.append(_hop(resp, b""))
             if len(history) > client.max_redirects:
                 raise httpx.TooManyRedirects(
                     "Exceeded maximum allowed redirects.",
-                    request=resp.next_request,
+                    request=redirect,
                 )
-            request = resp.next_request
+            request = redirect
         if not stream:
             return replace(_hop(resp, resp.content), history=tuple(history))
         body = await prime_stream(_streamed(client, resp, url, started))

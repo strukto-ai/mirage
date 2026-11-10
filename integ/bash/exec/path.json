@@ -249,7 +249,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'wait %%1 2>/dev/null; echo st=$?\\n' > /data/jw.sh; (sleep 0.2) & /data/jw.sh; wait; rm /data/jw.sh",
+      "command": "printf 'wait %%1 2>/dev/null; echo st=$?\\n' > /data/jw.sh; (sleep 0.2) & /data/jw.sh; wait; jobs > /dev/null; rm /data/jw.sh",
       "expect": {
         "exit": 0,
         "stdout": "st=127\n",
