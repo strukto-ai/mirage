@@ -41,10 +41,12 @@ import {
   PolicyDenied,
   postCommandGate,
   refusalOf,
+  renderCommandDeny,
   renderDeny,
   resolveProducer,
   type Route,
 } from '../../policy/index.ts'
+import { agreed } from '../../policy/policies.ts'
 import type { EntryGate } from '../../policy/types.ts'
 import { RouteError } from '../../runtime/routing/index.ts'
 import { routed } from '../../runtime/table.ts'
@@ -1021,8 +1023,13 @@ async function runArgv(
         place(admitted?.route ?? null)
         // A wrapper a runtime takes starts its program where Mirage cannot,
         // so the program is judged here, and where a policy places it the
-        // wrapper goes with it.
-        if (wrapperRunsOutside(name, argv.args, session, registry, context.frame.routing)) {
+        // wrapper goes with it. One process runs them all, so every route
+        // answering for them has to agree.
+        const gate = admitted
+        if (
+          gate !== null &&
+          wrapperRunsOutside(name, argv.args, session, registry, context.frame.routing)
+        ) {
           const verdict = await wrappedVerdict(
             [name, ...argv.args].map((w) => ({ raw: w, text: w })),
             session,
@@ -1032,10 +1039,17 @@ async function runArgv(
             signal,
             claimant,
           )
-          if (verdict !== null && 'stderr' in verdict) {
-            return refused([name, ...argv.args].join(' '), verdict)
+          if (!Array.isArray(verdict)) return refused([name, ...argv.args].join(' '), verdict)
+          const answer = agreed(gate.route === null ? verdict : [gate.route, ...verdict])
+          if (answer?.kind === 'deny') {
+            const [stderr, exitCode] = await renderCommandDeny(name, answer, gate.ctx)
+            return refused([name, ...argv.args].join(' '), {
+              stderr,
+              exitCode,
+              refusal: refusalOf(answer),
+            })
           }
-          place(verdict)
+          place(answer)
         }
         return await run(nested)
       } finally {
@@ -1262,8 +1276,8 @@ function unreadable(name: string, session: SessionState): Refused | null {
  * `env` and `timeout` have theirs admitted, at the place the pass judged it,
  * and a line the gate cannot read (`nohup /usr/bin/env`) is refused under an
  * allow list. The machine runs the program itself, so a function of its name
- * does not stand in for it. Returns the first refusal; else the route of the
- * innermost program a policy placed; else null.
+ * does not stand in for it. Returns the first refusal, else every route a
+ * policy answered for them.
  */
 async function wrappedVerdict(
   words: readonly Word[],
@@ -1273,11 +1287,11 @@ async function wrappedVerdict(
   stdin: ByteSource | null,
   signal: AbortSignal | undefined,
   claimant: Claimant | null,
-): Promise<Refused | Route | null> {
+): Promise<Refused | Route[]> {
   const [first, ...rest] = words
-  if (first === undefined) return null
+  if (first === undefined) return []
   const head = wordValue(first)
-  let placed: Route | null = null
+  const routes: Route[] = []
   for (const inner of innerLines(head, rest)) {
     if (inner.argv.length === 0) {
       // shortcut: a line run under the box (`time sh -c`) is not judged.
@@ -1314,7 +1328,7 @@ async function wrappedVerdict(
       true,
     )
     if (!(verdict instanceof Admitted)) return verdict
-    placed = verdict.route ?? placed
+    if (verdict.route !== null) routes.push(verdict.route)
     const deeper = await wrappedVerdict(
       inner.argv,
       session,
@@ -1324,10 +1338,10 @@ async function wrappedVerdict(
       signal,
       place,
     )
-    if (deeper !== null && 'stderr' in deeper) return deeper
-    placed = deeper ?? placed
+    if (!Array.isArray(deeper)) return deeper
+    routes.push(...deeper)
   }
-  return placed
+  return routes
 }
 
 async function routeArgv(

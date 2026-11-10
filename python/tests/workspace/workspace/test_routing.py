@@ -238,6 +238,24 @@ async def test_explain_places_a_wrapper_with_its_program():
         await ws.close()
 
 
+@pytest.mark.asyncio
+async def test_explain_ignores_a_shell_line_under_a_wrapper():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"a": _Box("a"), "b": _Box("b")},
+        runtimes=[MachineRuntime(["nohup", "hostname"], machine="a")],
+        policies=[_ProgramOnB()],
+    )
+    try:
+        said = await ws.explain("nohup sh -c hostname")
+        first = next(node for node in _commands(said.node) if node.command)
+        assert (first.command, first.machine) == ("nohup", "box:a")
+        assert (await ws.shell("nohup sh -c hostname")).stdout == b"a\n"
+    finally:
+        await ws.close()
+
+
 def _commands(node):
     for child in getattr(node, "children", ()):
         if getattr(child, "type", "") == "command":

@@ -59,9 +59,11 @@ from mirage.policy import (
     PolicyDenied,
     post_command_gate,
     refusal_of,
+    render_command_deny,
     render_deny,
     resolve_producer,
 )
+from mirage.policy.policies import agreed
 from mirage.policy.types import Claimant, HandOff, Route
 from mirage.runtime.routing import RouteError
 from mirage.runtime.table import routed
@@ -971,8 +973,9 @@ async def _run_argv(
             place(admitted.route if admitted is not None else None)
             # A wrapper a runtime takes starts its program where Mirage
             # cannot, so the program is judged here, and where a policy
-            # places it the wrapper goes with it.
-            if wrapper_runs_outside(
+            # places it the wrapper goes with it. One process runs them
+            # all, so every route answering for them has to agree.
+            if admitted is not None and wrapper_runs_outside(
                 name, argv.args, session, registry, context.frame.routing
             ):
                 verdict = await _wrapped_verdict(
@@ -986,7 +989,17 @@ async def _run_argv(
                 )
                 if isinstance(verdict, Refused):
                     return _refused(" ".join([name, *argv.args]), verdict)
-                place(verdict)
+                own = [] if admitted.route is None else [admitted.route]
+                answer = agreed([*own, *verdict])
+                if isinstance(answer, Deny):
+                    err, code = await render_command_deny(
+                        name, answer, admitted.ctx
+                    )
+                    return _refused(
+                        " ".join([name, *argv.args]),
+                        Refused(err, code, refusal_of(answer)),
+                    )
+                place(answer)
             with command_records(own=True) as mine:
                 result = await _route_argv(
                     recurse,
@@ -1422,7 +1435,7 @@ async def _wrapped_verdict(
     stdin: ByteSource | None,
     cancel: asyncio.Event | None,
     claimant: Claimant | None,
-) -> Refused | Route | None:
+) -> Refused | list[Route]:
     """The gate's answer on the programs a wrapper runs where Mirage
     cannot see them run (``nohup python3`` on a machine). What the words
     run is followed as the line's pass follows it (``inner_lines``):
@@ -1443,10 +1456,9 @@ async def _wrapped_verdict(
         claimant (Claimant | None): the command and its line.
 
     Returns:
-        The first refusal; else the route of the innermost program a
-        policy placed; else None.
+        The first refusal, else every route a policy answered for them.
     """
-    placed: Route | None = None
+    routes: list[Route] = []
     for inner in inner_lines(words[0].value, words[1:]):
         if not inner.argv:
             # shortcut: a line run under the box (`time sh -c`) is not judged.
@@ -1484,7 +1496,8 @@ async def _wrapped_verdict(
         )
         if isinstance(verdict, Refused):
             return verdict
-        placed = verdict.route or placed
+        if verdict.route is not None:
+            routes.append(verdict.route)
         deeper = await _wrapped_verdict(
             inner.argv,
             session,
@@ -1496,8 +1509,8 @@ async def _wrapped_verdict(
         )
         if isinstance(deeper, Refused):
             return deeper
-        placed = deeper or placed
-    return placed
+        routes.extend(deeper)
+    return routes
 
 
 async def _route_argv(

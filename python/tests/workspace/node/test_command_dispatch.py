@@ -398,6 +398,75 @@ async def test_an_outside_wrapper_runs_where_its_program_is_routed(machine):
         await ws.close()
 
 
+class Routes(Policy):
+    def __init__(self, routes: dict[str, Route]) -> None:
+        self.routes = routes
+
+    def pre_command(self, ctx):
+        return self.routes.get(ctx.command)
+
+
+TWO_TOOLS = r"nohup find / -maxdepth 0 -exec tool_a {} \; -exec tool_b {} \;"
+
+
+def _routed(routes: dict[str, Route]) -> Workspace:
+    return Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"a": Named("a"), "b": Named("b")},
+        runtimes=[
+            MachineRuntime(["find", "hostname"], machine="a"),
+            "workspace",
+        ],
+        policies=[Routes(routes)],
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("routes", "line"),
+    [
+        (
+            {"tool_a": Route(machine="a"), "tool_b": Route(machine="b")},
+            TWO_TOOLS,
+        ),
+        (
+            {"nice": Route(machine="b"), "hostname": Route("machine")},
+            "nohup nice hostname",
+        ),
+        (
+            {"nohup": Route(machine="a"), "hostname": Route(machine="b")},
+            "nohup hostname",
+        ),
+    ],
+)
+async def test_routes_one_process_cannot_honor_refuse_the_wrapper(
+    routes, line
+):
+    # One process runs the wrapper and its programs, so routes answering for
+    # them have to agree, as two policies placing one line do.
+    ws = _routed(routes)
+    try:
+        r = await ws.shell(line)
+        assert (r.exit_code, r.stdout) == (126, b"")
+        assert r.refusal is not None
+        assert r.refusal.reason.startswith(
+            "policies place the line on different runtimes"
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_routes_that_agree_place_the_wrapper():
+    ws = _routed({"tool_a": Route(machine="b"), "tool_b": Route(machine="b")})
+    try:
+        r = await ws.shell(TWO_TOOLS)
+        assert (r.exit_code, r.stdout) == (0, b"b\n")
+    finally:
+        await ws.close()
+
+
 class OtherBox(Box):
     name = "other"
     captures = ("hostname",)

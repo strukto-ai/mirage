@@ -396,6 +396,80 @@ describe('a wrapper whose program is routed', () => {
   })
 })
 
+class Routes implements Policy {
+  constructor(private readonly routes: Record<string, Route>) {}
+
+  preCommand(ctx: CommandContext): Route | null {
+    return this.routes[ctx.command] ?? null
+  }
+}
+
+const TWO_TOOLS = String.raw`nohup find / -maxdepth 0 -exec tool_a {} \; -exec tool_b {} \;`
+
+function routedWs(routes: Record<string, Route>): Workspace {
+  return new Workspace(
+    { '/': new RAMVFS() },
+    {
+      mode: MountMode.EXEC,
+      machines: { a: new Named('a'), b: new Named('b') },
+      runtimes: [new MachineRuntime({ captures: ['find', 'hostname'], machine: 'a' }), 'workspace'],
+      policies: [new Routes(routes)],
+    },
+  )
+}
+
+// One process runs the wrapper and its programs, so routes answering for them
+// have to agree, as two policies placing one line do.
+describe('routes under one wrapper', () => {
+  it.each<[Record<string, Route>, string]>([
+    [
+      {
+        tool_a: { kind: 'route', machine: 'a' },
+        tool_b: { kind: 'route', machine: 'b' },
+      },
+      TWO_TOOLS,
+    ],
+    [
+      {
+        nice: { kind: 'route', machine: 'b' },
+        hostname: { kind: 'route', runtime: 'machine' },
+      },
+      'nohup nice hostname',
+    ],
+    [
+      {
+        nohup: { kind: 'route', machine: 'a' },
+        hostname: { kind: 'route', machine: 'b' },
+      },
+      'nohup hostname',
+    ],
+  ])('refuse the line when they disagree: %j', async (routes, line) => {
+    const ws = routedWs(routes)
+    try {
+      const io = await ws.shell(line)
+      expect([io.exitCode, text(io.stdout)]).toEqual([126, ''])
+      expect(io.refusal?.reason.startsWith('policies place the line on different runtimes')).toBe(
+        true,
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('place the wrapper when they agree', async () => {
+    const ws = routedWs({
+      tool_a: { kind: 'route', machine: 'b' },
+      tool_b: { kind: 'route', machine: 'b' },
+    })
+    try {
+      const io = await ws.shell(TWO_TOOLS)
+      expect([io.exitCode, text(io.stdout)]).toEqual([0, 'b\n'])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
 class OtherBox extends Box {
   override readonly name: string = 'other'
   constructor() {

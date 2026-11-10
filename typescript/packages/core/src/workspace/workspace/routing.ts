@@ -19,6 +19,7 @@ import type {
   Claimant,
   CommandContext,
   Deny,
+  Occurrence,
   Pending,
   Route,
   RouteContext,
@@ -35,6 +36,8 @@ import { Consumer } from '../lookup/types.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Judged, Walked } from '../node/explain.ts'
+import { innerLines, type Word, wordValue } from '../node/inner_lines.ts'
+import { argvFrame, wholeOccurrence } from '../node/occurrence.ts'
 import type { SessionState } from '../session/session.ts'
 import type { ExecuteOptions } from './types.ts'
 import type { Runtimes } from './runtimes.ts'
@@ -98,12 +101,26 @@ function apart(decision: RouteDecision<Runtime>): RouteDecision<Runtime> {
   return { ...decision, bindings }
 }
 
-/** Whether a judged command stands inside another on its line. */
-function runsUnder(one: Judged, outer: Judged): boolean {
-  for (let at = one.occurrence.parent; at !== null; at = at.parent) {
-    if (sameOccurrence(at, outer.occurrence)) return true
+/**
+ * The judged commands a wrapper's run answers for, as the run walks them: a
+ * shell line under the wrapper is the machine's to run, so what it names
+ * places nothing.
+ */
+function wrappedPrograms(
+  words: readonly Word[],
+  occurrence: Occurrence,
+  judged: readonly Judged[],
+): Judged[] {
+  const [first, ...rest] = words
+  if (first === undefined) return []
+  const found: Judged[] = []
+  for (const inner of innerLines(wordValue(first), rest)) {
+    if (inner.argv.length === 0) continue
+    const place = wholeOccurrence(argvFrame(inner.argv.map(wordValue), occurrence))
+    const held = judged.find((other) => sameOccurrence(other.occurrence, place))
+    if (held !== undefined) found.push(held, ...wrappedPrograms(inner.argv, place, judged))
   }
-  return false
+  return found
 }
 
 export class Router {
@@ -234,7 +251,8 @@ export class Router {
    * path first); both empty when the workspace runs it itself. A
    * `preCommand` route of the command places it over the line's decision,
    * as its run does, and so does the route of a program a wrapper takes
-   * along to a runtime (`programs`, the commands it runs, outermost first).
+   * along to a runtime (`programs`, the commands its run answers for,
+   * outermost first).
    * Mirrors Python's `Router.placement_for`.
    */
   placementFor(
@@ -254,16 +272,18 @@ export class Router {
       one.session !== undefined &&
       wrapperRunsOutside(one.judgment.command, one.ctx.argv, one.session, this.registry, placed)
     ) {
-      for (const program of programs) {
-        const inner = commandRoute(program.judgment.answers)
-        if (inner !== null) {
-          placed = routed(
-            this.runtimes.entries,
-            placed.bindings,
-            inner.runtime,
-            inner.machine ?? placed.machine,
-          )
-        }
+      const answer = agreed(
+        [one, ...programs]
+          .map((held) => commandRoute(held.judgment.answers))
+          .filter((held): held is Route => held !== null),
+      )
+      if (answer?.kind === 'route') {
+        placed = routed(
+          this.runtimes.entries,
+          placed.bindings,
+          answer.runtime,
+          answer.machine ?? placed.machine,
+        )
       }
     }
     return this.serving(one, placed)
@@ -297,11 +317,18 @@ export class Router {
           )
         }
       }
-      if (!PROGRAM_WRAPPERS.has(one.judgment.command)) return this.placementFor(one, line)
+      const command = one.judgment.command
+      if (!PROGRAM_WRAPPERS.has(command) || one.ctx === undefined) {
+        return this.placementFor(one, line)
+      }
       return this.placementFor(
         one,
         line,
-        judged.filter((held) => runsUnder(held, one)),
+        wrappedPrograms(
+          [command, ...one.ctx.argv].map((w) => ({ raw: w, text: w })),
+          one.occurrence,
+          judged,
+        ),
       )
     }
   }

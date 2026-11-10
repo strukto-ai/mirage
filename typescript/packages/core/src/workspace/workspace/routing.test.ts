@@ -245,6 +245,26 @@ describe('routing on machines', () => {
     }
   })
 
+  it('explains a shell line under a wrapper as moving nothing', async () => {
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { a: new Box('a'), b: new Box('b') },
+        runtimes: [new MachineRuntime({ captures: ['nohup', 'hostname'], machine: 'a' })],
+        policies: [new ProgramOnB()],
+      },
+    )
+    try {
+      const said = await ws.explain('nohup sh -c hostname')
+      const [first] = [...commands(said.node)]
+      expect([first?.command, first?.machine]).toEqual(['nohup', 'box:a'])
+      expect(DEC.decode((await ws.shell('nohup sh -c hostname')).stdout)).toBe('a\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('explains the machine a routed eval runs its line on', async () => {
     const ws = workspace(new EvalOnB())
     try {
