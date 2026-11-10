@@ -223,6 +223,21 @@ describe('asks router', () => {
     await app.close()
   })
 
+  it('reads all as a FastAPI boolean and refuses other values with 422', async () => {
+    const app = buildApp()
+    await createWs(app, 'asks-flag')
+    for (const flag of ['1', 'yes', 'off']) {
+      const ok = await app.inject({
+        method: 'GET',
+        url: `/v1/workspaces/asks-flag/asks?all=${flag}`,
+      })
+      expect(ok.statusCode).toBe(200)
+    }
+    const bad = await app.inject({ method: 'GET', url: '/v1/workspaces/asks-flag/asks?all=abc' })
+    expect(bad.statusCode).toBe(422)
+    await app.close()
+  })
+
   it('refuses bad answers and tells already-answered from unknown', async () => {
     const app = buildApp()
     await createWs(app, 'asks-err')

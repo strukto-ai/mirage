@@ -63,7 +63,7 @@ import { withPolicies } from '../resources/policies.ts'
 import { withEntries } from '../resources/strukto.ts'
 import { makeBrief, makeDetail, makeStoppedBrief, makeStoppedDetail } from '../summary.ts'
 import { NO_WORKSPACE_ID, requireOneAccount, storeRefusal } from './templates.ts'
-import { queryFlag } from './vfs.ts'
+import { failure, queryFlag } from './vfs.ts'
 
 export interface WorkspaceRoutesDeps {
   registry: WorkspaceRegistry
@@ -610,7 +610,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       try {
         explain = queryFlag(req.query.explain, 'explain')
       } catch (e) {
-        return reply.status(400).send({ detail: (e as Error).message })
+        return failure(reply, e)
       }
       if (explain) {
         return explanationToDict(await deps.registry.explanation(config, req.account))
@@ -758,7 +758,12 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       if (deps.registry.removing(req.params.id)) {
         return reply.status(404).send({ detail: 'workspace not found' })
       }
-      const verbose = req.query.verbose === 'true'
+      let verbose: boolean
+      try {
+        verbose = queryFlag(req.query.verbose, 'verbose')
+      } catch (e) {
+        return failure(reply, e)
+      }
       return await makeDetail(entry, verbose)
     },
   )
