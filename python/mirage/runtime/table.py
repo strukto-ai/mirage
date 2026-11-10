@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import weakref
 from collections.abc import Mapping
 from typing import Any, TypeGuard
 
@@ -104,6 +105,12 @@ RUNTIME_HINTS: dict[str, str] = {
 }
 
 
+# The name each runtime built with no options came from, so a copy can build it again.
+_BUILT_FROM: weakref.WeakKeyDictionary[Runtime[Any], str] = (
+    weakref.WeakKeyDictionary()
+)
+
+
 def build_runtime(name: str, **options: Any) -> Runtime[Any]:
     """Construct a runtime by name, failing loud on unknown names.
 
@@ -116,7 +123,23 @@ def build_runtime(name: str, **options: Any) -> Runtime[Any]:
         ValueError: unknown name, with a cross-language hint for
             TypeScript-only names.
     """
-    return runtime_class(name)(**options)
+    runtime = runtime_class(name)(**options)
+    if not options:
+        _BUILT_FROM[runtime] = name
+    return runtime
+
+
+def built_from(runtime: Runtime[Any]) -> str | None:
+    """The registry name a runtime was built from with no options.
+
+    Args:
+        runtime (Runtime): a runtime entry.
+
+    Returns:
+        str | None: the name, or None for one built with options or by
+        the host.
+    """
+    return _BUILT_FROM.get(runtime)
 
 
 def runtime_class(name: str) -> type[Runtime[Any]]:
