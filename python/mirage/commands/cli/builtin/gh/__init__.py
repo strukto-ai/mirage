@@ -56,6 +56,32 @@ BODY_FILE = Argument(
 TITLE = Argument("-t", "--title", help="Set the new title.")
 REOPEN_COMMENT = Argument("-c", "--comment", help="Add a reopening comment")
 NUMBER = Argument("NUMBER", metavar="[<number> | <url> | <branch>]")
+COMMENT_OPTIONS = (
+    Argument("-b", "--body", metavar="text", help="The comment body text"),
+    BODY_FILE,
+    _flag(
+        long="--create-if-none",
+        description=(
+            "Create a new comment if no comments are found. Can be used "
+            "only with --edit-last"
+        ),
+    ),
+    _flag(
+        long="--delete-last",
+        description="Delete the last comment of the current user",
+    ),
+    _flag(
+        long="--edit-last",
+        description="Edit the last comment of the current user",
+    ),
+    _flag(
+        long="--yes",
+        description=(
+            "Skip the delete confirmation prompt when --delete-last is "
+            "provided"
+        ),
+    ),
+)
 
 
 def _repo_edit_option(field: RepoEditField) -> Argument:
@@ -271,35 +297,7 @@ def _issue() -> CommandSpec:
                 arguments=(
                     Argument("NUMBER", metavar="{<number> | <url>}"),
                     REPO,
-                    Argument(
-                        "-b",
-                        "--body",
-                        metavar="text",
-                        help="The comment body text",
-                    ),
-                    BODY_FILE,
-                    _flag(
-                        long="--create-if-none",
-                        description=(
-                            "Create a new comment if no comments are "
-                            "found. Can be used only with --edit-last"
-                        ),
-                    ),
-                    _flag(
-                        long="--delete-last",
-                        description="Delete the last comment of the current user",
-                    ),
-                    _flag(
-                        long="--edit-last",
-                        description="Edit the last comment of the current user",
-                    ),
-                    _flag(
-                        long="--yes",
-                        description=(
-                            "Skip the delete confirmation prompt when "
-                            "--delete-last is provided"
-                        ),
-                    ),
+                    *COMMENT_OPTIONS,
                 ),
             ),
             CommandSpec(
@@ -711,35 +709,7 @@ def _pr() -> CommandSpec:
                 arguments=(
                     NUMBER,
                     REPO,
-                    Argument(
-                        "-b",
-                        "--body",
-                        metavar="text",
-                        help="The comment body text",
-                    ),
-                    BODY_FILE,
-                    _flag(
-                        long="--create-if-none",
-                        description=(
-                            "Create a new comment if no comments are "
-                            "found. Can be used only with --edit-last"
-                        ),
-                    ),
-                    _flag(
-                        long="--delete-last",
-                        description="Delete the last comment of the current user",
-                    ),
-                    _flag(
-                        long="--edit-last",
-                        description="Edit the last comment of the current user",
-                    ),
-                    _flag(
-                        long="--yes",
-                        description=(
-                            "Skip the delete confirmation prompt when "
-                            "--delete-last is provided"
-                        ),
-                    ),
+                    *COMMENT_OPTIONS,
                 ),
             ),
             CommandSpec(

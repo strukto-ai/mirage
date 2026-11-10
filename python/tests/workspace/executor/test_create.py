@@ -97,15 +97,20 @@ async def _a_block_then_a_byte():
 
 @pytest.mark.asyncio
 async def test_a_failed_write_leaves_the_offset_after_what_landed():
-    landed: list[tuple[int, int]] = []
+    landed = 3
 
     async def dispatch(op: str, scope: PathSpec, **kwargs):
+        nonlocal landed
         if kwargs.get("admit_only"):
             return None, None
+        if op == "stat":
+            return FileStat(name="f", size=landed, type=FileType.FILE), None
         if op == "pwrite":
-            if landed:
-                raise OSError(28, "No space left on device")
-            landed.append((kwargs["offset"], len(kwargs["data"])))
+            assert kwargs["offset"] == 3
+            async for part in kwargs["data"]:
+                if landed == 3 + MEMORY_LIMIT:
+                    raise OSError(28, "No space left on device")
+                landed += len(part)
         return None, None
 
     file = FileDescription(_to_scope("/data/f"), opened=True, offset=3)
@@ -113,13 +118,12 @@ async def test_a_failed_write_leaves_the_offset_after_what_landed():
         await write_description(
             dispatch, SessionState("s"), file, _a_block_then_a_byte()
         )
-    assert landed == [(3, MEMORY_LIMIT)]
-    assert file.offset == 3 + MEMORY_LIMIT
+    assert file.offset == landed == 3 + MEMORY_LIMIT
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "size,ops", [(0, ["stat", "write"]), (5, ["stat", "pwrite", "pwrite"])]
+    "size,ops", [(0, ["stat", "write"]), (5, ["stat", "pwrite"])]
 )
 async def test_a_first_write_into_an_empty_file_lands_as_one_stream(size, ops):
     calls: list[str] = []
@@ -130,7 +134,7 @@ async def test_a_first_write_into_an_empty_file_lands_as_one_stream(size, ops):
         calls.append(op)
         if op == "stat":
             return FileStat(name="f", size=size, type=FileType.FILE), None
-        if op == "write":
+        if op in ("write", "pwrite"):
             await materialize(kwargs["data"])
         return None, None
 
@@ -155,6 +159,7 @@ async def test_a_second_first_write_meanwhile_takes_the_windows():
             return FileStat(name="f", size=0, type=FileType.FILE), None
         if op == "write":
             await release.wait()
+        if op in ("write", "pwrite"):
             await materialize(kwargs["data"])
         return None, None
 

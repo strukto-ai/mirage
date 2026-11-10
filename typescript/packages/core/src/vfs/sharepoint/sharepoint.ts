@@ -54,6 +54,7 @@ export class SharePointVFS extends BaseVFS {
   override readonly indexTtl: number = 86_400
   override vfsMd: string = VFS_MD
   override readonly wholeWordSearch: boolean = true
+  override readonly searchNeedsWalkLimit: boolean = true
   override readonly accessor: SharePointAccessor
   private readonly config: SharePointConfig
 
@@ -129,15 +130,6 @@ export class SharePointVFS extends BaseVFS {
 
   override truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
     return truncate(this.accessor, path, length, noCreate)
-  }
-
-  /**
-   * Whether this VFS answers `name`; with no walk limit it reads every
-   * file rather than ask the service's search.
-   */
-  override supports(name: string): boolean {
-    if (name === 'files_containing' && this.walkLimit < 0) return false
-    return super.supports(name)
   }
 
   override filesContaining(

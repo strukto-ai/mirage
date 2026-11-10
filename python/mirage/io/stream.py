@@ -33,41 +33,30 @@ logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
 
 
-class SharedStdin:
-    """One lazy byte cursor shared by commands inheriting an input descriptor.
+class SharedStdin(SharedInput):
+    """One lazy cursor shared by the commands inheriting an input
+    descriptor (xargs's and find's children).
 
-    Reads are serialized, including source pulls, so concurrent consumers
-    neither replay bytes nor advance the source simultaneously. A consumer
-    stopping early leaves the cursor open for the next one. Byte-sized pulls
-    preserve the unread suffix when a command such as ``head -c 1`` exits.
+    Pulls are serialized, so concurrent consumers neither replay bytes
+    nor pull the source at once. Each pull hands over a whole chunk, and
+    a command that stops early gives back what it left, as off a file
+    (``seekable``), so its successor reads on from there; one that fails
+    leaves the input to the next.
 
     Args:
         source (ByteSource): the inherited input, still unread.
     """
 
     def __init__(self, source: ByteSource) -> None:
-        self._chunks: AsyncIterator[bytes] | None = ensure_stream(source)
-        self._buffer = b""
-        self._pos = 0
+        super().__init__(source, seekable=True)
         self._lock = asyncio.Lock()
-
-    def __aiter__(self) -> "SharedStdin":
-        return self
 
     async def __anext__(self) -> bytes:
         async with self._lock:
-            while self._pos >= len(self._buffer):
-                if self._chunks is None:
-                    raise StopAsyncIteration
-                try:
-                    self._buffer = await anext(self._chunks)
-                except StopAsyncIteration:
-                    self._chunks = None
-                    raise
-                self._pos = 0
-            chunk = self._buffer[self._pos : self._pos + 1]
-            self._pos += 1
-            return chunk
+            return await super().__anext__()
+
+    async def discard(self) -> None:
+        """Leave the input to the next command, however this one ended."""
 
 
 async def drain(stream: ByteSource | None) -> None:

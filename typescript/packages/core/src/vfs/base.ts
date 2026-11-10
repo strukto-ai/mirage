@@ -248,6 +248,9 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * any other pattern reads every file.
    */
   readonly wholeWordSearch: boolean = false
+  /** `filesContaining` asks the service only under a walk limit; with none
+   * (-1) a search reads every file. */
+  readonly searchNeedsWalkLimit: boolean = false
   /**
    * The most files one command walks under a directory of this mount: grep
    * -r, rg and git grep stop reading there, find, ls -R, tree, du and
@@ -300,9 +303,12 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * Whether this VFS defines the function `name`. A function the base
    * declares is supported once a subclass or the instance itself replaces
    * it; one only a subclass declares (a custom `@vfsCall`) is supported
-   * because it exists.
+   * because it exists, and `files_containing` is not under
+   * `searchNeedsWalkLimit` with no walk limit.
    */
   supports(name: string): boolean {
+    const unlimited = this.searchNeedsWalkLimit && this.walkLimit < 0
+    if (name === 'files_containing' && unlimited) return false
     const method = methodName(name)
     const own: unknown = (this as unknown as Record<string, unknown>)[method]
     return (

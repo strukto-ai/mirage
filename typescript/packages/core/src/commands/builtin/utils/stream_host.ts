@@ -623,7 +623,7 @@ export class StreamHost {
       await dispatch('copy', src, [dst])
     } catch (error) {
       if (classify(error) !== 'ENOTSUP') throw error
-      const [data] = await dispatch('read', src)
+      const [data] = await dispatch('read', src, [], { stream: true })
       await dispatch('write', dst, [data])
     }
     const mode = (original as FileStat | null | undefined)?.mode

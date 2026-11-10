@@ -5,6 +5,8 @@ use std::sync::{Arc, OnceLock};
 use super::builtin::{Cfunc, Fault};
 use super::meter::Charge;
 use super::value::{Text, Value};
+use crate::calendar::{MONTHS, WEEKDAYS};
+use crate::number::is_space;
 
 type Answer = Result<Value, Fault>;
 
@@ -12,29 +14,6 @@ const DAY: i64 = 86400;
 const YEAR_MIN: i64 = i32::MIN as i64 + 1900;
 const YEAR_MAX: i64 = i32::MAX as i64 + 1900;
 const CONVERT: &str = "error converting number of seconds since epoch to datetime";
-const WEEKDAYS: [&str; 7] = [
-    "Sunday",
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-];
-const MONTHS: [&str; 12] = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-];
 const UTC_NAMES: [(&str, &str); 12] = [
     ("UTC", "UTC"),
     ("Etc/UTC", "UTC"),
@@ -963,10 +942,6 @@ fn conversion(conv: u8, flags: Flags, tm: &Tm, out: &mut Vec<u8>) -> Option<()> 
     }
     text(out, &words, flags);
     Some(())
-}
-
-fn is_space(byte: u8) -> bool {
-    matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r')
 }
 
 /// The days before each month in a common year then in a leap year.

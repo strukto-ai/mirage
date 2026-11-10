@@ -16,7 +16,7 @@ import { PathSpec } from '../../../../../types.ts'
 import { IOResult } from '../../../../../io/types.ts'
 import { Files } from '../../../../../workspace/files.ts'
 import { unzipGeneric } from '../../unzip.ts'
-import { crossOpts, flatScopes, streamOp } from '../utils.ts'
+import { crossOpts, fileStreamOp, flatScopes } from '../utils.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 
@@ -40,7 +40,7 @@ export function runUnzip(
     flatScopes(scopes),
     textArgs,
     { ...crossOpts(flagKwargs), cwd: PathSpec.fromStrPath(cwd), vfs },
-    streamOp(dispatch),
+    fileStreamOp(dispatch),
   )
   return result ?? [null, new IOResult()]
 }

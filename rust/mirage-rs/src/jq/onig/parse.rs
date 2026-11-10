@@ -2034,23 +2034,7 @@ impl Parser {
         if negate {
             self.at += 1;
         }
-        const NAMES: [(&str, Ctype); 14] = [
-            ("alnum", Ctype::Alnum),
-            ("alpha", Ctype::Alpha),
-            ("blank", Ctype::Blank),
-            ("cntrl", Ctype::Cntrl),
-            ("digit", Ctype::Digit),
-            ("graph", Ctype::Graph),
-            ("lower", Ctype::Lower),
-            ("print", Ctype::Print),
-            ("punct", Ctype::Punct),
-            ("space", Ctype::Space),
-            ("upper", Ctype::Upper),
-            ("xdigit", Ctype::Xdigit),
-            ("ascii", Ctype::Ascii),
-            ("word", Ctype::Word),
-        ];
-        for (name, ctype) in NAMES {
+        for (name, ctype) in class::CTYPES {
             let len = name.chars().count();
             let matches = self.chars[self.at..]
                 .iter()

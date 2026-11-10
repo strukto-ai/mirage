@@ -243,7 +243,6 @@ def transfer_primitives(dispatch: DispatchFn) -> dict[str, Any]:
     p = functools.partial
     return dict(
         stat=p(dispatched_call, dispatch, "stat"),
-        read_bytes=p(dispatched_call, dispatch, "read"),
         read_stream=file_stream_op(dispatch),
         write=p(_relay_write, dispatch),
         copy=p(_relay_copy, dispatch),

@@ -21,6 +21,7 @@ from mirage.core.dev.mixin import PipeFiles
 from mirage.core.dev.pipe import DevicePipe
 from mirage.errors.fs import eacces, einval, enoent, fs_error
 from mirage.errors.types import FsCondition
+from mirage.utils.ranges import splice_window
 from mirage.vfs.dev.types import DevFileState, PipeRow
 from mirage.vfs.ram.store import RAMStore
 
@@ -176,6 +177,12 @@ class DevFiles(PipeFiles):
             self.state.tombstones.add(name)
             return
         raise KeyError(key)
+
+    def size(self, key: str) -> int:
+        return len(self.get(key, b""))
+
+    def splice(self, key: str, offset: int, data: bytes) -> None:
+        self[key] = splice_window(self.get(key, b""), offset, data)
 
     @overload
     def pop(self, key: str, /) -> bytes: ...

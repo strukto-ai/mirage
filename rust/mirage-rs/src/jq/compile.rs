@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::sync::OnceLock;
 
 use super::builtin::{self, Cfunc, Fault};
-use super::check;
+use super::check::{self, Scope, with};
 use super::link::{self, Body, Dep, Linked, Unit};
 use super::syntax::{self, Ast, BinOp, Def, Parsed, Pattern, PatternKey, Update};
 use super::value::{Object, Value};
@@ -41,31 +41,7 @@ enum Bind {
     },
 }
 
-struct Scope {
-    bind: Bind,
-    next: Env,
-}
-
-type Env = Option<Rc<Scope>>;
-
-impl Drop for Scope {
-    fn drop(&mut self) {
-        let mut next = self.next.take();
-        while let Some(scope) = next {
-            match Rc::try_unwrap(scope) {
-                Ok(mut scope) => next = scope.next.take(),
-                Err(_) => break,
-            }
-        }
-    }
-}
-
-fn with(env: &Env, bind: Bind) -> Env {
-    Some(Rc::new(Scope {
-        bind,
-        next: env.clone(),
-    }))
-}
+type Env = check::Env<Bind>;
 
 fn find_var(env: &Env, wanted: &str) -> Option<(usize, usize)> {
     let mut at = env.as_deref();

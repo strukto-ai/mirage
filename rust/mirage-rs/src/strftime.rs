@@ -2,36 +2,12 @@ use std::collections::VecDeque;
 
 use serde::Deserialize;
 
-use crate::{Stream, StreamError, parse_config};
+use crate::calendar::{MONTHS, WEEKDAYS};
+use crate::{Stream, StreamError, constants::OUTPUT, parse_config};
 
-/// The most a call writes.
-const OUTPUT: usize = 64 * 1024;
 /// The widest field: date reads a wider width as this one.
 const MAX_WIDTH: usize = i32::MAX as usize;
 
-const DAYS: [&str; 7] = [
-    "Sunday",
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-];
-const MONTHS: [&str; 12] = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-];
 const MONTH_STARTS: [i64; 12] = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
 
 #[derive(Deserialize)]
@@ -558,8 +534,8 @@ impl Strftime {
         } else {
             let mut text = Rendered::default();
             text.extend_from_slice(match code {
-                b'a' => &DAYS[self.weekday as usize].as_bytes()[..3],
-                b'A' => DAYS[self.weekday as usize].as_bytes(),
+                b'a' => &WEEKDAYS[self.weekday as usize].as_bytes()[..3],
+                b'A' => WEEKDAYS[self.weekday as usize].as_bytes(),
                 b'b' | b'h' => &MONTHS[c.month - 1].as_bytes()[..3],
                 b'B' => MONTHS[c.month - 1].as_bytes(),
                 b'n' => b"\n",

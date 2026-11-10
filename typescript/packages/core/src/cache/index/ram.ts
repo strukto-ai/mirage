@@ -24,7 +24,6 @@ import {
   type Evicted,
   type ListResult,
   type LookupResult,
-  type SetDirOptions,
 } from './config.ts'
 import { IndexCacheStore } from './store.ts'
 
@@ -195,23 +194,6 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     return Promise.resolve({ entries: children, version, window: this.windowed.has(vfsPath) })
   }
 
-  setDir(
-    vfsPath: string,
-    entries: readonly [string, FileStat][],
-    expiredAt?: Date | null,
-    options: SetDirOptions = {},
-  ): Promise<Evicted[]> {
-    return this.storeDir(
-      vfsPath,
-      entries,
-      expiredAt,
-      false,
-      options.window !== true,
-      options.excluded ?? [],
-      options.version ?? null,
-    ).then((result) => result ?? [])
-  }
-
   override setPartialDir(
     vfsPath: string,
     entries: readonly [string, FileStat][],
@@ -220,7 +202,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     return this.storeDir(vfsPath, entries, expiredAt, true, false).then(() => undefined)
   }
 
-  private storeDir(
+  protected override storeDir(
     vfsPath: string,
     entries: readonly [string, FileStat][],
     expiredAt: Date | null | undefined,
@@ -386,25 +368,6 @@ export class RAMIndexCacheStore extends IndexCacheStore {
       })
     }
     return changed
-  }
-
-  override refillDir(
-    path: string,
-    entries: readonly [string, FileStat][],
-    token: string,
-    expiredAt?: Date | null,
-    options: SetDirOptions & { partial?: boolean } = {},
-  ): Promise<Evicted[] | null> {
-    return this.storeDir(
-      path,
-      entries,
-      expiredAt,
-      options.partial === true,
-      options.partial !== true && options.window !== true,
-      options.excluded ?? [],
-      options.version ?? null,
-      token,
-    )
   }
 
   invalidateEntry(vfsPath: string): Promise<void> {

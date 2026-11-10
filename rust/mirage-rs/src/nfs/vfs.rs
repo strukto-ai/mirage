@@ -45,13 +45,6 @@ impl ReadDirSimpleResult {
     }
 }
 
-/// What capabilities are supported
-#[allow(dead_code)]
-pub enum VFSCapabilities {
-    ReadOnly,
-    ReadWrite,
-}
-
 impl HostFs {
     /// Simple version of readdir.
     /// Only need to return filename and id. Pages from `start_after`, as
@@ -127,9 +120,5 @@ impl HostFs {
             fid = self.lookup(fid, &component.into()).await?;
         }
         Ok(fid)
-    }
-
-    pub fn serverid(&self) -> cookieverf3 {
-        self.generation().to_le_bytes()
     }
 }

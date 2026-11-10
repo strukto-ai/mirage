@@ -5,9 +5,9 @@ use std::collections::VecDeque;
 use memchr::memchr;
 use serde::Deserialize;
 
+use crate::constants::{MAX_HELD, WORK};
 use crate::{Stream, StreamError, parse_config, quoted};
 
-const WORK: usize = 16384;
 /// The block a long hold sets aside at a time.
 #[cfg(not(test))]
 const PARK: usize = 64 * 1024;
@@ -18,13 +18,6 @@ const PARK: usize = 4096;
 const RETIRE: usize = 64;
 #[cfg(test)]
 const RETIRE: usize = 2;
-
-/// The most of a record cut holds while a decision waits on the rest of
-/// it: past it the run fails as the real one does once memory runs out.
-#[cfg(not(test))]
-const MAX_HELD: usize = 1 << 30;
-#[cfg(test)]
-const MAX_HELD: usize = 1 << 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Mode {

@@ -7,7 +7,7 @@ use sha1::Sha1;
 use sha2::{Digest, Sha224, Sha256, Sha384, Sha512};
 
 use crate::number;
-use crate::{Stream, StreamError, parse_config, quoted};
+use crate::{Stream, StreamError, constants::OUTPUT, parse_config, quoted};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -213,7 +213,7 @@ impl CheckLines {
     fn pump(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
         let start = out.len();
         self.busy = true;
-        while out.len() - start < 64 * 1024 {
+        while out.len() - start < OUTPUT {
             let crate::records::Take::Record(line) = self.records.next_span(b'\n') else {
                 self.busy = false;
                 break;

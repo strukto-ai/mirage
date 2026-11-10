@@ -65,6 +65,7 @@ export class DropboxVFS extends BaseVFS {
     truncate: ['entry'],
   } as const
   override readonly wholeWordSearch: boolean = true
+  override readonly searchNeedsWalkLimit: boolean = true
   readonly config: DropboxConfig
   override readonly accessor: DropboxAccessor
 
@@ -167,15 +168,6 @@ export class DropboxVFS extends BaseVFS {
 
   override dirCopy(src: PathSpec, dst: PathSpec): Promise<void> {
     return dropboxDirCopy(this.accessor, src, dst)
-  }
-
-  /**
-   * Whether this VFS answers `name`; with no walk limit it reads every
-   * file rather than ask the service's search.
-   */
-  override supports(name: string): boolean {
-    if (name === 'files_containing' && this.walkLimit < 0) return false
-    return super.supports(name)
   }
 
   override filesContaining(

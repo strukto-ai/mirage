@@ -69,16 +69,18 @@ class NullIndexCacheStore(IndexCacheStore):
     ) -> ListResult:
         return ListResult(status=LookupStatus.NOT_FOUND)
 
-    async def set_dir(
+    async def _set_dir(
         self,
         vfs_path: str,
         entries: Sequence[tuple[str, FileStat]],
-        expired_at: datetime | None = None,
+        expired_at: datetime | None,
         *,
-        window: bool = False,
+        partial: bool,
+        evict: bool,
         excluded: tuple[str, ...] = (),
         version: str | None = None,
-    ) -> list[Evicted]:
+        refill: str | None = None,
+    ) -> list[Evicted] | None:
         return []
 
     async def entries(self) -> dict[str, FileStat]:
@@ -95,34 +97,6 @@ class NullIndexCacheStore(IndexCacheStore):
             paths (Sequence[str]): immediate child keys, scoped by the mount.
         """
         return False
-
-    async def refill_dir(
-        self,
-        vfs_path: str,
-        entries: Sequence[tuple[str, FileStat]],
-        token: str,
-        expired_at: datetime | None = None,
-        *,
-        partial: bool = False,
-        window: bool = False,
-        excluded: tuple[str, ...] = (),
-        version: str | None = None,
-    ) -> list[Evicted] | None:
-        """Commit a fetched listing unless a point observation retired it.
-
-        None means rejected; rejected listings report no deletions.
-
-        Args:
-            vfs_path (str): directory key.
-            entries (Sequence[tuple[str, FileStat]]): fetched children.
-            token (str): token captured before the backend fetch.
-            expired_at (datetime | None): optional deadline.
-            partial (bool): incomplete page.
-            window (bool): capped view which proves nothing absent.
-            excluded (tuple[str, ...]): nested mounts to preserve.
-            version (str | None): backend listing version.
-        """
-        return []
 
     async def invalidate_entry(self, vfs_path: str) -> None:
         pass

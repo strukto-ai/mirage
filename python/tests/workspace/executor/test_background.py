@@ -175,13 +175,13 @@ async def test_job_nested_in_a_backgrounded_subshell_writes_through_its_job():
     stdout, so that job's console and the terminal both show the two in
     the order they were written (bash's ``b`` then ``a``)."""
     ws = _workspace()
-    await ws.shell("( (sleep 0.15; echo a) & echo b & wait ) &")
+    first = await ws.shell("( (sleep 0.15; echo a) & echo b & wait ) &")
     await ws.job_table.wait(1, ws.default_session_id)
     job = ws.job_table.get(1, ws.default_session_id)
     assert job is not None
     later = await (await ws.shell("true")).stdout_str()
     assert await job.console.snapshot(Channel.STDOUT) == b"b\na\n"
-    assert later == "b\na\n"
+    assert await first.stdout_str() + later == "b\na\n"
 
 
 def _slow_first_writes(ws: Workspace, monkeypatch: pytest.MonkeyPatch) -> None:

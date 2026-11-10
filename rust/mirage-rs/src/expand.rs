@@ -1,10 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::width::TAB_WIDTH;
-use crate::{Stream, StreamError, parse_config};
-
-/// The output one call writes before it holds the rest for `drain`.
-const OUTPUT: usize = 64 * 1024;
+use crate::{Stream, StreamError, constants::OUTPUT, parse_config};
 
 /// One resolved `-t` list: the explicit stops in typed order, `/N`'s
 /// multiple past them and `+N`'s step from the last of them. All empty is

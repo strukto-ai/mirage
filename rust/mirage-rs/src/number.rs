@@ -6,6 +6,17 @@
 /// What C's `isspace` takes in the C locale, which `strtol` skips first.
 pub(crate) const BLANKS: &[u8] = b" \t\n\x0b\x0c\r";
 
+/// Whether `byte` is one of [`BLANKS`].
+pub(crate) fn is_space(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r')
+}
+
+/// The bytes GNU sort skips as blanks in the C locale: space, tab and the
+/// newline a `-z` record can hold.
+pub(crate) fn is_blank(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\n')
+}
+
 /// `strerror(ERANGE)`, the clause a value below its least takes.
 pub(crate) const ERANGE: &str = "Numerical result out of range";
 

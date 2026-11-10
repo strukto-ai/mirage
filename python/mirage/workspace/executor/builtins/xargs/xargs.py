@@ -1286,19 +1286,14 @@ async def handle_xargs(
         stop = None
         failed = False
         torn: list[IOResult] = []
-        # Each run's stderr, joined onto ``merged`` only before the output
-        # that follows it, so a trace still precedes its command's output
-        # and a run of stderr with no output between costs one join.
-        said = notes
+        # Each run's stderr, said on ``merged`` only before the output that
+        # follows it, so a trace still precedes its command's output and a
+        # run of stderr with no output between is one piece.
         pending: list[bytes] = []
 
         def publish() -> None:
-            nonlocal said
-            joined = b"".join(pending)
+            merged.add_stderr(b"".join(pending))
             pending.clear()
-            if joined:
-                said += joined
-                merged.stderr = said
 
         async def record(io: IOResult) -> None:
             nonlocal failed, stop

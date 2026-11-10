@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use serde::Deserialize;
 
 use crate::records::{Records, Take};
-use crate::{Stream, StreamError, parse_config};
+use crate::{Stream, StreamError, constants::WORK, parse_config};
 use options::Keys;
 
 #[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -71,8 +71,6 @@ struct Uniq {
     output: VecDeque<Output>,
     busy: bool,
 }
-
-const WORK: usize = 16384;
 
 #[derive(Clone, Copy)]
 enum Phase {

@@ -76,6 +76,7 @@ class GitHubVFS(BaseVFS):
     # VFS.
     index_ttl: float = 86_400
     whole_word_search: bool = True
+    search_needs_walk_limit: bool = True
     walk_limit: int = WALK_LIMIT
 
     def __init__(
@@ -185,17 +186,6 @@ class GitHubVFS(BaseVFS):
 
     async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
         return await _tree(self.accessor, path)
-
-    def supports(self, name: str) -> bool:
-        """Whether this VFS answers ``name``; with no walk limit it reads
-        every file rather than ask the service's search.
-
-        Args:
-            name (str): the function name.
-        """
-        if name == "files_containing" and self.walk_limit < 0:
-            return False
-        return super().supports(name)
 
     async def files_containing(
         self,

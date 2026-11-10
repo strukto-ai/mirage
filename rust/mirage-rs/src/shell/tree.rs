@@ -774,6 +774,6 @@ pub(crate) fn lay_out(source: Vec<u8>, mut root: Syn, error: Option<Refusal>) ->
     }
 }
 
-fn to_u32(value: usize) -> u32 {
+pub(super) fn to_u32(value: usize) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
 }

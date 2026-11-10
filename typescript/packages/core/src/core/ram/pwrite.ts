@@ -17,7 +17,6 @@ import type { RAMAccessor } from '../../accessor/ram.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
-import { spliceWindow } from '../../utils/ranges.ts'
 
 import { activeDevice, activePipe } from '../dev/device.ts'
 import { checkCapacity, checkDestParents, checkWriteTarget } from './dest.ts'
@@ -48,12 +47,12 @@ export async function pwrite(
   checkDestParents(accessor, path, p)
   checkWriteTarget(accessor, path, p)
   if (activeDevice(accessor, p) === null) {
-    const existing = accessor.store.files.get(p) ?? new Uint8Array()
+    const size = accessor.store.files.get(p)?.byteLength ?? 0
     if (data.byteLength > 0) {
-      const end = Math.max(existing.byteLength, offset + data.byteLength)
+      const end = Math.max(size, offset + data.byteLength)
       checkCapacity(accessor, path, p, end)
     }
-    accessor.store.files.set(p, spliceWindow(existing, offset, data))
+    accessor.store.files.splice(p, offset, data)
   }
   accessor.store.modified.set(p, nowIso())
   record('pwrite', path.virtual, VFSName.RAM, data.byteLength, timer)

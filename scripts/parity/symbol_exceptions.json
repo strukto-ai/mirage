@@ -1,5 +1,5 @@
 {
- "baseline": 1629,
+ "baseline": 1628,
  "modules": {
   "machine/kubernetes/config": {
    "typescript_only": {
@@ -1394,11 +1394,6 @@
   "runtime/python/monty/constants": {
    "typescript_only": {
     "SHARED_THREAD_SECONDS": "Python runs monty on worker processes it kills at a deadline; a TypeScript host that runs it on its own thread (an edge isolate) fires no timer while a run holds that thread, so the run is handed the deadline it runs under, or a cap if sooner, as monty's own limit."
-   }
-  },
-  "core/ram/constants": {
-   "python_only": {
-    "PUBLISH_BYTES": "A Python RAM file is immutable bytes, so each landing of a streamed write copies the whole file, and past this size the wait grows with it; TypeScript grows one buffer and lands only the new bytes, so its wait stays STREAM_PUBLISH_SECONDS."
    }
   },
   "execution/process/config": {

@@ -104,17 +104,7 @@ impl CharSet {
     }
 
     pub(crate) fn contains(&self, cp: u32) -> bool {
-        self.ranges
-            .binary_search_by(|&(start, end)| {
-                if cp < start {
-                    std::cmp::Ordering::Greater
-                } else if cp > end {
-                    std::cmp::Ordering::Less
-                } else {
-                    std::cmp::Ordering::Equal
-                }
-            })
-            .is_ok()
+        crate::width::in_ranges(cp, &self.ranges)
     }
 
     pub(crate) fn is_empty(&self) -> bool {

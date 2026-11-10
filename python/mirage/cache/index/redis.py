@@ -1278,28 +1278,6 @@ class RedisIndexCacheStore(IndexCacheStore):
             expires_at,
         )
 
-    async def set_dir(
-        self,
-        vfs_path: str,
-        entries: Sequence[tuple[str, FileStat]],
-        expired_at: datetime | None = None,
-        *,
-        window: bool = False,
-        excluded: tuple[str, ...] = (),
-        version: str | None = None,
-    ) -> list[Evicted]:
-        result = await self._set_dir(
-            vfs_path,
-            entries,
-            expired_at,
-            partial=False,
-            evict=not window,
-            excluded=excluded,
-            version=version,
-        )
-        assert result is not None
-        return result
-
     async def set_partial_dir(
         self,
         vfs_path: str,
@@ -1461,29 +1439,6 @@ class RedisIndexCacheStore(IndexCacheStore):
         if changed or self._listings.contradicts(paths):
             self._listings.wrote()
         return changed
-
-    async def refill_dir(
-        self,
-        vfs_path: str,
-        entries: Sequence[tuple[str, FileStat]],
-        token: str,
-        expired_at: datetime | None = None,
-        *,
-        partial: bool = False,
-        window: bool = False,
-        excluded: tuple[str, ...] = (),
-        version: str | None = None,
-    ) -> list[Evicted] | None:
-        return await self._set_dir(
-            vfs_path,
-            entries,
-            expired_at,
-            partial=partial,
-            evict=not partial and not window,
-            excluded=excluded,
-            version=version,
-            refill=token,
-        )
 
     @_counts_listing_write
     async def invalidate_entry(self, vfs_path: str) -> None:

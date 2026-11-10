@@ -3,9 +3,8 @@ use std::collections::{HashSet, VecDeque};
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::{Stream, StreamError, parse_config};
+use crate::{Stream, StreamError, constants::WORK, parse_config};
 
-const WORK: usize = 16 * 1024;
 const MEMORY: u64 = 1024 * 1024;
 const DRAWS: usize = 16 * 1024;
 /// The most records an indexed shuffle orders in memory; past it the

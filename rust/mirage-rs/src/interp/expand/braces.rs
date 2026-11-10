@@ -1,6 +1,8 @@
 //! One `${...}`: its name, subscript and operator read off the node, the
 //! parameter it reads, and an indirection aimed at what a name holds.
 
+use std::borrow::Cow;
+
 use super::operators::bad_transformation;
 use super::{
     Braces, Chunk, Expander, Host, Operands, Part, bad_subscript, discard, ifs_joiner, join,
@@ -231,6 +233,9 @@ impl<H: Host> Expander<'_, H> {
         } else {
             self.operands(&p).await?
         };
+        if let Some(count) = self.splat_count(&p) {
+            return Ok(vec![Chunk::value(count.to_string(), quoted)]);
+        }
         if let Some((array, keys)) = self.splat_source(&p) {
             return self.expand_splat(&p, array, keys, quoted, &operands).await;
         }
@@ -249,12 +254,14 @@ impl<H: Host> Expander<'_, H> {
                 }
                 write_key = Some(key);
             } else {
-                let array = match self.shell.indexed(&var) {
-                    Some(array) => array.into_owned(),
-                    None => Indexed::dense(self.shell.vars.scalar(&var).map(<[u8]>::to_vec)),
-                };
                 let key = self.subscript_key(&p).await?;
                 let mut index = self.expansion_index(&key).await?;
+                let array = match self.shell.indexed(&var) {
+                    Some(array) => array,
+                    None => Cow::Owned(Indexed::dense(
+                        self.shell.vars.scalar(&var).map(<[u8]>::to_vec),
+                    )),
+                };
                 if index < 0 {
                     index = array.back(index);
                     let assigns = matches!(p.op, Some("=" | ":="));

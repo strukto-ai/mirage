@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { rechunk } from '@struktoai/mirage-core/io/stream'
 import { recordStream } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
@@ -42,28 +43,14 @@ export async function* readStream(
   }
   const b = await bucket(accessor)
   const readable = b.openDownloadStream(fileId)
-  let pending: Uint8Array = new Uint8Array(0)
   try {
-    for await (const chunk of readable as AsyncIterable<Uint8Array>) {
-      const merged = new Uint8Array(pending.byteLength + chunk.byteLength)
-      merged.set(pending, 0)
-      merged.set(chunk, pending.byteLength)
-      pending = merged
-      while (pending.byteLength >= DEFAULT_CHUNK_SIZE) {
-        const piece = pending.slice(0, DEFAULT_CHUNK_SIZE)
-        if (rec !== null) rec.bytes += piece.byteLength
-        yield piece
-        pending = pending.slice(DEFAULT_CHUNK_SIZE)
-      }
+    for await (const piece of rechunk(readable as AsyncIterable<Uint8Array>, DEFAULT_CHUNK_SIZE)) {
+      if (rec !== null) rec.bytes += piece.byteLength
+      yield piece
     }
   } catch (err) {
     if (isNotFound(err)) throw enoent(path)
     throw err
   }
-  if (pending.byteLength > 0) {
-    if (rec !== null) rec.bytes += pending.byteLength
-    yield pending
-  }
-
   if (rec !== null) rec.complete = true
 }

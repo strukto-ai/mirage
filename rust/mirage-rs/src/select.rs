@@ -2,9 +2,7 @@ use std::collections::VecDeque;
 
 use serde::Deserialize;
 
-use crate::{Stream, StreamError, parse_config};
-
-const WORK: usize = 16 * 1024;
+use crate::{Stream, StreamError, constants::WORK, parse_config};
 
 #[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

@@ -19,7 +19,7 @@ import {
   isoToEpoch,
   parseDateExpr,
   parseDateExprAsync,
-  parsePosixTime,
+  parsePosixTimeAsync,
   toIsoZ,
   utcDateFolder,
 } from './dates.ts'
@@ -504,7 +504,7 @@ describe('toIsoZ', () => {
 // A clock setting as coreutils 9.7 date reads it (`date
 // MMDDhhmm[[CC]YY][.ss]` as a user without the privilege to set the clock).
 // Mirrors test_dates.py.
-describe('parsePosixTime', () => {
+describe('parsePosixTimeAsync', () => {
   const NOW = new Date(Date.UTC(2026, 8, 22, 12))
 
   it.each([
@@ -515,8 +515,8 @@ describe('parsePosixTime', () => {
     ['01010000.30', Date.UTC(2026, 0, 1, 0, 0, 30)],
     ['0229000024', Date.UTC(2024, 1, 29)],
     ['1231235924.60', Date.UTC(2025, 0, 1)],
-  ])('reads %s', (text, epochMs) => {
-    expect(parsePosixTime(text, UTC_ZONE, NOW)?.getTime()).toBe(epochMs)
+  ])('reads %s', async (text, epochMs) => {
+    expect((await parsePosixTimeAsync(text, UTC_ZONE, NOW))?.getTime()).toBe(epochMs)
   })
 
   it.each([
@@ -531,8 +531,8 @@ describe('parsePosixTime', () => {
     '01012500',
     '0229000025',
     '0101000\uff10',
-  ])('refuses %s', (text) => {
-    expect(parsePosixTime(text, UTC_ZONE, NOW)).toBeNull()
+  ])('refuses %s', async (text) => {
+    expect(await parsePosixTimeAsync(text, UTC_ZONE, NOW)).toBeNull()
   })
 
   // mirage holds what Python's datetime holds, years 1-9999 in UTC and on the
@@ -544,30 +544,34 @@ describe('parsePosixTime', () => {
     ['123118599999.60', 'America/New_York'],
     ['010100000001', 'Asia/Tokyo'],
     ['123123599999.60', 'Asia/Tokyo'],
-  ])('refuses %s in %s, a moment datetime cannot hold', (text, zone) => {
-    expect(parsePosixTime(text, resolveTz(zone))).toBeNull()
+  ])('refuses %s in %s, a moment datetime cannot hold', async (text, zone) => {
+    expect(await parsePosixTimeAsync(text, resolveTz(zone))).toBeNull()
   })
 
-  it('reads the last second datetime holds', () => {
-    expect(parsePosixTime('123123599999.59', UTC_ZONE)?.getTime()).toBe(253402300799000)
-    expect(parsePosixTime('123118599999.59', resolveTz('America/New_York'))?.getTime()).toBe(
+  it('reads the last second datetime holds', async () => {
+    expect((await parsePosixTimeAsync('123123599999.59', UTC_ZONE))?.getTime()).toBe(
       253402300799000,
     )
+    expect(
+      (await parsePosixTimeAsync('123118599999.59', resolveTz('America/New_York')))?.getTime(),
+    ).toBe(253402300799000)
   })
 
-  it('refuses a wall clock the zone skips', () => {
+  it('refuses a wall clock the zone skips', async () => {
     const berlin = resolveTz('Europe/Berlin')
-    expect(parsePosixTime('033002302025', berlin)).toBeNull()
-    expect(parsePosixTime('033003302025', berlin)?.getTime()).toBe(Date.UTC(2025, 2, 30, 1, 30))
+    expect(await parsePosixTimeAsync('033002302025', berlin)).toBeNull()
+    expect((await parsePosixTimeAsync('033003302025', berlin))?.getTime()).toBe(
+      Date.UTC(2025, 2, 30, 1, 30),
+    )
   })
 
   it.each([
     ['040503002026', 1775354400],
     // The repeated hour reads as its later, standard reading.
     ['040505302026', 1775367000],
-  ])('reads %s in a daylight time shorter than a day', (text, epoch) => {
+  ])('reads %s in a daylight time shorter than a day', async (text, epoch) => {
     const zone = resolveTz('STD0SUM-1,M4.1.0/0,M4.1.0/6')
-    expect(parsePosixTime(text, zone)?.getTime()).toBe(epoch * 1000)
+    expect((await parsePosixTimeAsync(text, zone))?.getTime()).toBe(epoch * 1000)
   })
 })
 

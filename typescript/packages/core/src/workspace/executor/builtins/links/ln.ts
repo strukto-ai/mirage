@@ -43,7 +43,8 @@ import {
 } from '../../../../errors/fs.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
 import type { FsCondition } from '../../../../errors/types.ts'
-import { type ByteSource, materialize } from '../../../../io/types.ts'
+import { discardStreams, ensureStream, primeStream } from '../../../../io/stream.ts'
+import type { ByteSource } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { type FileStat, FileType, PathSpec, wordText } from '../../../../types.ts'
@@ -448,7 +449,8 @@ export async function planLinks(
   return [operands.slice(0, -1).map((op) => into(op, resolved, wordText(last))), null]
 }
 
-// The bytes a hard link copies, or the refusal in ln's words.
+// The bytes a hard link copies, a stream already open, or the refusal in
+// ln's words.
 async function sourceBytes(
   links: NamespaceReader,
   dispatch: DispatchFn,
@@ -456,7 +458,7 @@ async function sourceBytes(
   typed: string,
   linkTyped: string,
   flags: LnFlags,
-): Promise<[Uint8Array | null, string | null]> {
+): Promise<[ByteSource | null, string | null]> {
   let resolved = srcAbs
   if (links.isLink(srcAbs)) {
     try {
@@ -495,8 +497,8 @@ async function sourceBytes(
   // refuses a source it cannot reach at all, so the remaining operands
   // still link.
   try {
-    const [data] = await dispatch('read', PathSpec.fromStrPath(resolved))
-    return [data instanceof Uint8Array ? data : await materialize(data as ByteSource), null]
+    const [data] = await dispatch('read', PathSpec.fromStrPath(resolved), [], { stream: true })
+    return [await primeStream(ensureStream(data as ByteSource)), null]
   } catch (err) {
     const why = fsStrerror(err)
     if (why === null) throw err
@@ -520,11 +522,14 @@ export async function makeLink(
   errors: string[],
   out: string[],
 ): Promise<void> {
+  const opened: ByteSource[] = []
   try {
-    await attemptLink(links, dispatch, cwd, plan, flags, errors, out)
+    await attemptLink(links, dispatch, cwd, plan, flags, errors, out, opened)
   } catch (err) {
     if (!isRefusal(err)) throw err
     errors.push(refused(flags, plan.linkTyped, wordText(plan.source), classify(err) ?? 'EACCES'))
+  } finally {
+    await discardStreams(...opened)
   }
 }
 
@@ -632,7 +637,7 @@ async function createLink(
   dispatch: DispatchFn,
   linkSpec: PathSpec,
   linkTarget: string | null,
-  data: Uint8Array | null,
+  data: ByteSource | null,
   flags: LnFlags,
   typed: string,
   targetTyped: string,
@@ -673,7 +678,8 @@ async function createLink(
   return null
 }
 
-// makeLink up to a refused stat of the name.
+// makeLink up to a refused stat of the name. The copy's source, once open,
+// goes on `opened` for the caller to close however this returns.
 async function attemptLink(
   links: NamespaceReader,
   dispatch: DispatchFn,
@@ -682,12 +688,13 @@ async function attemptLink(
   flags: LnFlags,
   errors: string[],
   out: string[],
+  opened: ByteSource[],
 ): Promise<void> {
   const kind = flags.symbolic ? 'symbolic link' : 'hard link'
   const typed = plan.linkTyped
   const targetTyped = wordText(plan.source)
   let linkTarget: string | null = null
-  let data: Uint8Array | null = null
+  let data: ByteSource | null = null
   const refusal = await walkRefusal(links, dispatch, cwd, plan, flags)
   if (refusal !== null) {
     errors.push(refusal)
@@ -723,6 +730,7 @@ async function attemptLink(
         return
       }
       data = bytes
+      if (data !== null) opened.push(data)
     }
   }
   if (links.isMount(plan.linkAbs)) {

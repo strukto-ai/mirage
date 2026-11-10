@@ -48,6 +48,11 @@ export interface GenericCommand<A extends Accessor = Accessor> {
    */
   streams?: boolean
   /**
+   * The command cuts a shared standard input itself and hands back what it
+   * leaves (`head`, `sed`, `grep -m`), so that input reaches it whole.
+   */
+  givesBack?: boolean
+  /**
    * What a line of it does: one answer no option changes, or the function
    * that reads it off the line. Absent is `new LineFacts()`.
    */

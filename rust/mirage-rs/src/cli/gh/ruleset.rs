@@ -1,9 +1,9 @@
 // Follows gh 2.85.0's pkg/cmd/ruleset (MIT; see licenses/third_party/gh.txt).
 
-use super::accessor::{Flags, Out, repo_for, tsv};
+use super::accessor::{Flags, Out, limit_or_refuse, repo_for, tsv};
 use crate::core::github::client::{Account, Failure, Result, github_request, quote, usage, value};
 use crate::core::github::json::{Json, Obj};
-use crate::core::github::repo::{RepoRef, graphql_data, view_repo};
+use crate::core::github::repo::{graphql_data, view_repo};
 
 const REPO_HEADER: &str = "\nquery RepoRulesetList($limit: Int!, $endCursor: String, $includeParents: Boolean, $owner: String!, $repo: String!) {\n\tlevel: repository(owner: $owner, name: $repo) {\n";
 const ORG_HEADER: &str = "\nquery OrgRulesetList($limit: Int!, $endCursor: String, $includeParents: Boolean, $login: String!) {\n\tlevel: organization(login: $login) {\n";
@@ -72,19 +72,12 @@ fn rules_text(rules: &[Json]) -> String {
     out
 }
 
-fn name_of(repo: &RepoRef) -> String {
-    format!("{}/{}", repo.owner, repo.repo)
-}
-
 pub(crate) async fn list_cmd(account: &Account, flags: &Flags) -> Result<Out> {
     let org = flags.as_nonempty("org");
     if flags.as_nonempty("repo").is_some() && org.is_some() {
         return usage("only one of --repo and --org may be specified");
     }
-    let limit = flags.as_int("limit").unwrap_or(30);
-    if limit < 1 {
-        return usage(format!("invalid limit: {limit}"));
-    }
+    let limit = limit_or_refuse(flags, 30)?;
     let mut base = Obj::new();
     base.set(
         "includeParents",
@@ -178,7 +171,7 @@ pub(crate) async fn check_cmd(account: &Account, flags: &Flags, texts: &[String]
             None => return value("could not determine current branch: no `branch` on the install"),
         }
     };
-    let endpoint = format!("repos/{}/rules/branches/{}", name_of(&repo), quote(&branch));
+    let endpoint = format!("repos/{}/rules/branches/{}", repo.full(), quote(&branch));
     let found = github_request(account, "GET", &format!("/{endpoint}"), None)
         .await
         .map_err(|failure| Failure::Value(format!("GET {endpoint} failed: {}", failure.text())))?;
@@ -186,7 +179,7 @@ pub(crate) async fn check_cmd(account: &Account, flags: &Flags, texts: &[String]
     let mut out = format!(
         "{} rules apply to branch {branch} in repo {}\n",
         rules.len(),
-        name_of(&repo)
+        repo.full()
     );
     if !rules.is_empty() {
         out.push('\n');
@@ -210,10 +203,7 @@ pub(crate) async fn view_cmd(account: &Account, flags: &Flags, texts: &[String])
     }
     let path = match org {
         Some(org) => format!("/orgs/{org}/rulesets/{id}"),
-        None => format!(
-            "/repos/{}/rulesets/{id}",
-            name_of(&repo_for(account, flags)?)
-        ),
+        None => format!("/repos/{}/rulesets/{id}", repo_for(account, flags)?.full()),
     };
     let found = github_request(account, "GET", &path, None).await?;
     Ok(Out::text(ruleset_text(&found)))

@@ -4,14 +4,13 @@ use serde_json::{Value as Json, json};
 
 use crate::number;
 use crate::scan::{Typed, Values, unknown};
-use crate::{Stream, StreamError, latin1_list, parse_config};
+use crate::{Stream, StreamError, constants::OUTPUT, latin1_list, parse_config};
 
 const INTMAX: u64 = i64::MAX as u64;
 /// The size letters diffutils 3.10's cmp takes after a count: no `b`, no
 /// lower-case `m`, and none past `Y`.
 const SIZE_LETTERS: &[u8] = b"kKMGTPEZY";
 const HINT: &[u8] = b"\ncmp: Try 'cmp --help' for more information.";
-const WINDOW: usize = 64 * 1024;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -104,7 +103,10 @@ fn count(raw: &[u8], option: &str, shown: &[u8]) -> Result<u64, StreamError> {
 struct Cmp {
     config: Config,
     skip: [u64; 2],
+    /// Each input's bytes read and not yet compared: `held` from `at` on,
+    /// so a window compared costs its own bytes, not the chunk's.
     held: [Vec<u8>; 2],
+    at: [usize; 2],
     ended: [bool; 2],
     taken: [u64; 2],
     compared: u64,
@@ -137,6 +139,7 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         config,
         skip,
         held: [Vec::new(), Vec::new()],
+        at: [0; 2],
         ended: [false; 2],
         taken: [0; 2],
         compared: 0,
@@ -177,8 +180,20 @@ impl Cmp {
         self.ended[index] || self.config.limit == Some(self.taken[index])
     }
 
+    fn rest(&self, index: usize) -> &[u8] {
+        &self.held[index][self.at[index]..]
+    }
+
     fn drained(&self, index: usize) -> bool {
-        self.held[index].is_empty() && self.exhausted(index)
+        self.rest(index).is_empty() && self.exhausted(index)
+    }
+
+    fn consume(&mut self, index: usize, count: usize) {
+        self.at[index] += count;
+        if self.at[index] == self.held[index].len() {
+            self.held[index].clear();
+            self.at[index] = 0;
+        }
     }
 
     fn decide(&mut self, status: i32) {
@@ -187,6 +202,7 @@ impl Cmp {
         for held in &mut self.held {
             held.clear();
         }
+        self.at = [0; 2];
     }
 
     fn take(&mut self, index: usize, mut input: &[u8]) {
@@ -282,10 +298,11 @@ impl Cmp {
             if gone0 || gone1 {
                 let other = usize::from(gone0);
                 if self.config.verbose {
-                    self.held[other].clear();
+                    let count = self.rest(other).len();
+                    self.consume(other, count);
                     return;
                 }
-                if self.held[other].is_empty() {
+                if self.rest(other).is_empty() {
                     return;
                 }
                 if !self.config.silent {
@@ -294,11 +311,12 @@ impl Cmp {
                 self.decide(1);
                 return;
             }
-            if self.held[0].is_empty() || self.held[1].is_empty() {
+            if self.rest(0).is_empty() || self.rest(1).is_empty() {
                 return;
             }
-            let count = self.held[0].len().min(self.held[1].len()).min(WINDOW / 16);
-            let (a, b) = (&self.held[0][..count], &self.held[1][..count]);
+            let count = self.rest(0).len().min(self.rest(1).len()).min(OUTPUT / 16);
+            let (held, at) = (&self.held, self.at);
+            let (a, b) = (&held[0][at[0]..][..count], &held[1][at[1]..][..count]);
             if self.config.verbose {
                 for (at, (x, y)) in a.iter().zip(b).enumerate() {
                     if x != y {
@@ -320,9 +338,9 @@ impl Cmp {
             self.lines += newlines(a);
             self.last = a.last().copied();
             self.compared += count as u64;
-            self.held[0].drain(..count);
-            self.held[1].drain(..count);
-            self.known_width |= self.rows.len() >= WINDOW / 16;
+            self.consume(0, count);
+            self.consume(1, count);
+            self.known_width |= self.rows.len() >= OUTPUT / 16;
             if self.known_width && !self.rows.is_empty() {
                 return;
             }
@@ -332,7 +350,7 @@ impl Cmp {
     fn render(&mut self, out: &mut Vec<u8>) {
         let width = self.width;
         let start = out.len();
-        while self.row < self.rows.len() && out.len() - start < WINDOW {
+        while self.row < self.rows.len() && out.len() - start < OUTPUT {
             let (offset, first, second) = self.rows[self.row];
             crate::integer::decimal(offset, false, width, out);
             out.push(b' ');
@@ -354,10 +372,18 @@ impl Cmp {
         }
         if self.row == self.rows.len() {
             self.rows.clear();
-            self.rows.shrink_to(WINDOW / 16);
+            self.rows.shrink_to(OUTPUT / 16);
             self.row = 0;
         }
     }
+}
+
+/// Refuses an input past the two a comparison reads, or one that ended.
+pub(crate) fn indexed(ended: &[bool; 2], index: usize) -> Result<(), StreamError> {
+    if index > 1 || ended[index] {
+        return Err(StreamError::new("invalid or ended input"));
+    }
+    Ok(())
 }
 
 impl Stream for Cmp {
@@ -376,7 +402,7 @@ impl Stream for Cmp {
         if self.decided {
             return None;
         }
-        (0..2).find(|index| self.held[*index].is_empty() && !self.exhausted(*index))
+        (0..2).find(|index| self.rest(*index).is_empty() && !self.exhausted(*index))
     }
 
     fn feed_input(
@@ -385,9 +411,7 @@ impl Stream for Cmp {
         input: &[u8],
         _: &mut Vec<u8>,
     ) -> Result<(), StreamError> {
-        if index > 1 || self.ended[index] {
-            return Err(StreamError::new("invalid or ended input"));
-        }
+        indexed(&self.ended, index)?;
         if !self.decided {
             self.take(index, input);
             self.process();
@@ -396,9 +420,7 @@ impl Stream for Cmp {
     }
 
     fn end_input(&mut self, index: usize, _: &mut Vec<u8>) -> Result<(), StreamError> {
-        if index > 1 || self.ended[index] {
-            return Err(StreamError::new("invalid or ended input"));
-        }
+        indexed(&self.ended, index)?;
         self.ended[index] = true;
         self.process();
         Ok(())

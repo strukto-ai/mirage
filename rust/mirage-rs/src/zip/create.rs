@@ -9,8 +9,8 @@ use flate2::{Compress, Compression, Crc, FlushCompress, Status};
 use serde::Deserialize;
 
 use super::{
-    ARCHIVE, CENTRAL, END, END64, GATHER, LOCAL, LOCATOR64, Spool, WINDOW, ZIP32, central,
-    end_record, say, u16_at, u32_at, unzip, wildcard,
+    ARCHIVE, CENTRAL, END, END64, LOCAL, LOCATOR64, Spool, WINDOW, ZIP32, central, end_record, say,
+    u16_at, u32_at, unzip, wildcard,
 };
 use crate::request::{Opening, Reply, Request, WriteMode, bytes, failed, failure_text};
 use crate::task::Host;
@@ -629,7 +629,7 @@ async fn add(
             Some(target) => target,
             None if found.kind != Kind::File || ended => break,
             None => {
-                let (open, least) = (open.take(), GATHER);
+                let (open, least) = (open.take(), WINDOW as u64);
                 let (reply, data) = host.ask(Request::Read { fd, open, least }).await;
                 if failed(&reply) {
                     return Err(failure_text(&reply));

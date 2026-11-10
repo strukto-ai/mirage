@@ -121,6 +121,7 @@ class GCalVFS(BaseVFS):
     index_ttl: float = 300
     vfs_md: str = VFS_MD
     whole_word_search: bool = True
+    search_needs_walk_limit: bool = True
     searchable = ("*/*/*.gcal.json",)
 
     def __init__(self, config: GCalConfig) -> None:
@@ -151,17 +152,6 @@ class GCalVFS(BaseVFS):
         self, path: PathSpec, entry: FileStat | None = None
     ) -> FileStat:
         return await _stat(self.accessor, path, entry)
-
-    def supports(self, name: str) -> bool:
-        """Whether this VFS answers ``name``; with no walk limit it reads
-        every file rather than ask the service's search.
-
-        Args:
-            name (str): the function name.
-        """
-        if name == "files_containing" and self.walk_limit < 0:
-            return False
-        return super().supports(name)
 
     async def files_containing(
         self,

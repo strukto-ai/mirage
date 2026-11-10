@@ -31,7 +31,7 @@ from dulwich.refs import (
 )
 from dulwich.repo import BaseRepo
 
-from mirage.commands.cli.builtin.git.constants import TEMPLATE_KINDS
+from mirage.commands.cli.builtin.git.constants import TEMPLATE_KINDS, WILDCARDS
 from mirage.commands.cli.builtin.git.dates import date_clock, parse_date_mode
 from mirage.commands.cli.builtin.git.diff_output import (
     DiffFlags,
@@ -468,9 +468,6 @@ def parse_flags(
 # The ``--diff-merges`` values that diff a merge against its parents, one
 # by one or the first alone.
 PARENT_DIFFS = frozenset(("on", "1", "m", "separate", "first-parent"))
-
-# What makes an operand a pattern git reads as a path unseen.
-WILDCARDS = "*?[\\"
 
 
 async def walk_operands(

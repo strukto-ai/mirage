@@ -142,6 +142,7 @@ export class GDocsVFS extends BaseVFS {
   override readonly readRevalidatable: boolean = true
   override vfsMd: string = VFS_MD
   override readonly wholeWordSearch: boolean = true
+  override readonly searchNeedsWalkLimit: boolean = true
   readonly config: GDocsConfig
   override readonly accessor: GDocsAccessor
 
@@ -158,15 +159,6 @@ export class GDocsVFS extends BaseVFS {
   } as const
 
   override readonly renderers: Readonly<Record<string, string>> = { '.gdoc.json': 'readDoc' }
-
-  /**
-   * Whether this VFS answers `name`; with no walk limit it reads every
-   * file rather than ask the service's search.
-   */
-  override supports(name: string): boolean {
-    if (name === 'files_containing' && this.walkLimit < 0) return false
-    return super.supports(name)
-  }
 
   override filesContaining(
     path: PathSpec,

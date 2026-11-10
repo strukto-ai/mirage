@@ -61,6 +61,7 @@ from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import fs_strerror, walk_refusal
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition, WalkLimitError
+from mirage.io.async_line_iterator import SharedInput
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.regex import LineRegex
 from mirage.rs.scan import scanned
@@ -349,12 +350,20 @@ async def grep_generic(
 
     io = IOResult(exit_code=1, stderr=warning or None)
     if not paths:
-        source = resolve_source(stdin)
-        return search(
-            source,
+        shared = (
+            stdin
+            if isinstance(stdin, SharedInput)
+            and stdin.seekable
+            and f.max_count
+            else None
+        )
+        return stream_input(
+            resolve_source(stdin),
+            stream,
             f.label,
             f.with_filename and not f.no_filename,
             io,
+            shared=shared,
         ), io
 
     mounts = mounts_of(ctx)
@@ -390,8 +399,7 @@ async def grep_generic(
         # Said before the output that follows it, so it lands among the
         # output it came with, each stretch joined once.
         if pending:
-            held = io.stderr if isinstance(io.stderr, bytes) else b""
-            io.stderr = held + b"".join(pending)
+            io.add_stderr(b"".join(pending))
             pending.clear()
 
     def warn(message: str) -> None:

@@ -131,7 +131,7 @@ fn number(field: &[u8]) -> Option<Option<i128>> {
         }
         return Some(Some(value));
     }
-    let blank = |b: u8| matches!(b, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r');
+    let blank = crate::number::is_space;
     let start = field.iter().position(|&b| !blank(b)).unwrap_or(field.len());
     let digits = field[start..]
         .iter()

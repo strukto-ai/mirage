@@ -33,11 +33,8 @@ import {
 } from '../../../../core/hf_hub/cache.ts'
 import { HfHubError, hubBytes, resolveUrl } from '../../../../core/hf_hub/client.ts'
 import { Absence, classifyAbsence, headCommit, revisionUrl } from '../../../../core/hf_hub/repo.ts'
-import {
-  ABSENT_STATUSES,
-  GLOB_CHARS,
-  MAX_DOWNLOAD_WORKERS,
-} from '../../../../core/hf_hub/constants.ts'
+import { ABSENT_STATUSES, MAX_DOWNLOAD_WORKERS } from '../../../../core/hf_hub/constants.ts'
+import { GLOB_CHARS } from '../../../../utils/glob_walk.ts'
 import { fetchTree, filterRepoPaths, repoFiles } from '../../../../core/hf_hub/tree.ts'
 import type { TreeEntry } from '../../../../core/hf_hub/tree_entry.ts'
 import { repoTypeOf, requireOperands, textOut } from './accessor.ts'

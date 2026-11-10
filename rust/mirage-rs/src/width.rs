@@ -40,7 +40,8 @@ impl Stream for Width {
     }
 }
 
-fn in_ranges(cp: u32, ranges: &[(u32, u32)]) -> bool {
+/// Whether `cp` falls in one of the sorted, disjoint inclusive `ranges`.
+pub(crate) fn in_ranges(cp: u32, ranges: &[(u32, u32)]) -> bool {
     ranges
         .binary_search_by(|&(lo, hi)| {
             if hi < cp {

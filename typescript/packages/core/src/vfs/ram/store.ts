@@ -27,11 +27,17 @@ export interface RAMAttrs {
  * at each op, means no change to the table can miss the count; the
  * workspace's `max_memory` sums `held`. It refuses nothing: an op checks
  * growth with `checkCapacity` before it stores, in the same synchronous step.
- * Mirrors Python's `RAMFiles`.
+ *
+ * A file `splice` grew is a view of a buffer the table keeps, so a run of
+ * appends or pwrites past its end lands in place; a reader's view ends where
+ * the file did, so the bytes it holds never change. Mirrors Python's
+ * `RAMFiles`.
  */
 export class RAMFiles extends Map<string, Uint8Array> {
   /** The bytes the table holds, which the workspace's `max_memory` sums. */
   held = 0
+  /** The buffer each key `splice` grew, whose prefix the key's view is. */
+  private readonly grown = new Map<string, Uint8Array>()
 
   constructor(readonly usage: StorageUsage | null = null) {
     super()
@@ -45,23 +51,51 @@ export class RAMFiles extends Map<string, Uint8Array> {
 
   override set(key: string, value: Uint8Array): this {
     this.count(value.byteLength - (this.get(key)?.byteLength ?? 0))
+    this.grown.delete(key)
     return super.set(key, value)
   }
 
   override delete(key: string): boolean {
     this.count(-(this.get(key)?.byteLength ?? 0))
+    this.grown.delete(key)
     return super.delete(key)
   }
 
   override clear(): void {
     super.clear()
+    this.grown.clear()
     this.held = 0
     if (this.usage !== null) this.usage.used = 0
+  }
+
+  /**
+   * Write `data` at `offset` of `key`, as pwrite(2) leaves a file: a gap past
+   * its end reads as zeros, a missing key is created, and writing nothing
+   * changes nothing. Bytes past the end land in the key's buffer, grown by
+   * half again when full; an overwrite copies the file first, since a reader
+   * may still view the bytes it replaces.
+   */
+  splice(key: string, offset: number, data: Uint8Array): void {
+    const current = this.get(key) ?? new Uint8Array()
+    if (data.byteLength === 0) {
+      if (!this.has(key)) this.set(key, current)
+      return
+    }
+    const length = Math.max(current.byteLength, offset + data.byteLength)
+    let buffer = this.grown.get(key)
+    if (buffer === undefined || offset < current.byteLength || length > buffer.byteLength) {
+      buffer = new Uint8Array(Math.floor(length * 1.5))
+      buffer.set(current)
+    }
+    buffer.fill(0, current.byteLength, offset)
+    buffer.set(data, offset)
+    this.set(key, buffer.subarray(0, length))
+    this.grown.set(key, buffer)
   }
 }
 
 export class RAMStore {
-  readonly files: Map<string, Uint8Array>
+  readonly files: Map<string, Uint8Array> & Pick<RAMFiles, 'splice'>
   readonly dirs = new Set<string>(['/'])
   readonly modified = new Map<string, string>()
   readonly attrs = new Map<string, RAMAttrs>()

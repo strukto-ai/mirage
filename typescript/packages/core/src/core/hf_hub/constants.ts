@@ -85,10 +85,6 @@ export const MAX_DOWNLOAD_WORKERS = 8
 // (constants.REPO_ID_SEPARATOR): "models--julien-c--EsperBERTo-small".
 export const REPO_ID_SEPARATOR = '--'
 
-// What makes a word a pattern rather than a filename. Used to tell an
-// upstream-style variadic --include line from a real filename operand.
-export const GLOB_CHARS: readonly string[] = ['*', '?', '[']
-
 // The file a deletion pattern never removes: the Hub reads its LFS rules from
 // it, so upstream keeps it whatever `--delete` or `repo-files delete` matched.
 export const GITATTRIBUTES = '.gitattributes'

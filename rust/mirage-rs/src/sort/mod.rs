@@ -7,7 +7,7 @@ use std::cmp::Ordering;
 
 use serde::Deserialize;
 
-use crate::{Stream, StreamError, parse_config};
+use crate::{Stream, StreamError, constants::OUTPUT, parse_config};
 use key::Compare;
 
 #[derive(Deserialize)]
@@ -87,10 +87,6 @@ fn separator(zero_terminated: bool) -> u8 {
 }
 
 const RECORD_OVERHEAD: usize = 64;
-
-/// How much of a sorted run one `drain` writes, so a run is held once, as
-/// its records, and never again as its output.
-const PIECE: usize = 64 * 1024;
 
 /// About how much work one `drain` or merge call does: a few milliseconds
 /// even for keyed comparisons, so a host's loop is never held for a whole
@@ -356,7 +352,7 @@ impl Sorter {
         let data = &self.data;
         let compare = &self.compare;
         let mut work = 0;
-        let full = out.len() + PIECE;
+        let full = out.len() + OUTPUT;
         while next < self.spans.len() && out.len() < full && work < STEP {
             let (lo, hi) = self.spans[next];
             next += 1;

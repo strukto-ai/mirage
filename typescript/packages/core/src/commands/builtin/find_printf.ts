@@ -16,7 +16,7 @@ import type { util } from 'zod'
 import type { PrintfKind } from '../../core/generic/types.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
 import { type OpenStream, openStreamSync } from '../../rs/stream.ts'
-import { byteView, decodeText } from '../../shell/bytes.ts'
+import { byteView } from '../../shell/bytes.ts'
 import { concat } from '../../utils/bytes.ts'
 import type { PrintfPart } from './types.ts'
 import { groupName, ownerName, type Identity } from './utils/identity.ts'
@@ -88,23 +88,4 @@ export async function renderPrintf(
     out.push(engine.drain())
   }
   return concat(out)
-}
-
-/** Render one compiled format synchronously. */
-export function expandPrintf(
-  parts: readonly PrintfPart[],
-  row: string,
-  base: string,
-  st: PrintfStatFacts | null,
-  identity: Identity | null = null,
-): string {
-  const engine = compilePrintf(parts)
-  try {
-    engine.begin(facts(row, base, st, identity))
-    const out = [engine.finish()]
-    while (engine.busy()) out.push(engine.drain())
-    return decodeText(concat(out))
-  } finally {
-    engine.close()
-  }
 }

@@ -128,10 +128,7 @@ impl NumberScan {
     pub fn step(&mut self, raw: &Input) -> Option<NumberValue> {
         match self.phase {
             Phase::Space => {
-                if raw
-                    .get(self.at)
-                    .is_some_and(|b| b" \t\n\x0b\x0c\r".contains(&b))
-                {
+                if raw.get(self.at).is_some_and(crate::number::is_space) {
                     self.at += 1;
                 } else {
                     self.phase = Phase::Start;

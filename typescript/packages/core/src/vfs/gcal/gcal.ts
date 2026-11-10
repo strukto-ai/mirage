@@ -114,6 +114,7 @@ export class GCalVFS extends BaseVFS {
   override readonly indexTtl: number = 300
   override vfsMd: string
   override readonly wholeWordSearch: boolean = true
+  override readonly searchNeedsWalkLimit: boolean = true
   // Calendar's search answers for events; calendar.json is always read.
   override readonly searchable: readonly string[] = ['*/*/*.gcal.json']
   readonly config: GCalConfig
@@ -147,15 +148,6 @@ export class GCalVFS extends BaseVFS {
 
   override deltaHook(): DeltaHook {
     return buildDeltaHook(this.accessor)
-  }
-
-  /**
-   * Whether this VFS answers `name`; with no walk limit it reads every
-   * file rather than ask the service's search.
-   */
-  override supports(name: string): boolean {
-    if (name === 'files_containing' && this.walkLimit < 0) return false
-    return super.supports(name)
   }
 
   override filesContaining(

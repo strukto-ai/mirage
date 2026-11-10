@@ -327,7 +327,7 @@ pub(crate) async fn set_cmd(account: &Account, flags: &Flags, texts: &[String]) 
     };
     let base = match &target {
         Entity::Environment(repo, env) => {
-            let found = repo_ids(account, None, &[format!("{}/{}", repo.owner, repo.repo)]).await?;
+            let found = repo_ids(account, None, &[repo.full()]).await?;
             format!(
                 "/repositories/{}/environments/{}/variables",
                 found[0],

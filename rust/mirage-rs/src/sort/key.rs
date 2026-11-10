@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::number::{general_order, human_order, leading_number};
 use super::version::version_cmp;
+use crate::number::is_blank;
 
 /// One key's ordering options.
 #[derive(Deserialize, Serialize, Clone, Copy, Default)]
@@ -57,12 +58,6 @@ pub(crate) struct Compare {
     /// The bytes `-R` salts each key's hash with, which the host draws.
     #[serde(default)]
     pub salt: Vec<u8>,
-}
-
-/// The bytes GNU sort skips as blanks in the C locale: space, tab and the
-/// newline a `-z` record can hold.
-pub(crate) fn is_blank(byte: u8) -> bool {
-    matches!(byte, b' ' | b'\t' | b'\n')
 }
 
 const MONTHS: [&[u8; 3]; 12] = [

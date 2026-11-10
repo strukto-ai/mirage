@@ -52,5 +52,10 @@ async def grep(
 
 
 BUILDER = GenericCommand(
-    "grep", grep, aggregate=prefix_aggregate, read=True, facts=facts
+    "grep",
+    grep,
+    aggregate=prefix_aggregate,
+    read=True,
+    gives_back=True,
+    facts=facts,
 )

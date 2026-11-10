@@ -1,5 +1,30 @@
 pub(crate) const DAY: i128 = 86400;
 
+pub(crate) const WEEKDAYS: [&str; 7] = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+];
+
+pub(crate) const MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+
 pub(crate) fn days(mut year: i128, month: i128, day: i128) -> i128 {
     year += (month - 1).div_euclid(12);
     let month = (month - 1).rem_euclid(12) + 1;

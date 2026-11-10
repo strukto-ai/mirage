@@ -225,7 +225,7 @@ def check_capacity(
         key (str): its normalized key.
         size (int): the key's length after the change.
     """
-    growth = size - len(store.files.get(key, b""))
+    growth = size - store.files.size(key)
     check_room(spec, growth)
     if store.usage is not None:
         store.usage.admit(spec, growth)

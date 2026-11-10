@@ -1099,15 +1099,16 @@ async function runArgv(
       // records that command made.
       node.exitCode = io.exitCode
       for (const item of mine) node.records.push(item)
-      const late = io.stderr
+      const late = io.stderr ?? new Uint8Array()
+      const said = io.stderrPieces ?? []
       if (
         node.stderr === saved &&
         early instanceof Uint8Array &&
         late instanceof Uint8Array &&
-        late.byteLength > early.byteLength &&
+        (late.byteLength > early.byteLength || said.length > 0) &&
         early.every((byte, i) => late[i] === byte)
       )
-        node.stderr = concat([node.stderr, late.subarray(early.byteLength)])
+        node.stderr = concat([node.stderr, late.subarray(early.byteLength), ...said])
       if (!judging) return
       const ctx = gated.ctx
       const stderr = await materialize(io.stderr)

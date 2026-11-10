@@ -243,7 +243,7 @@ class IndexView(IndexCacheStore):
         excluded: tuple[str, ...] = (),
         version: str | None = None,
     ) -> list[Evicted]:
-        gone = await self._set_dir(
+        gone = await self._store_owned(
             vfs_path,
             entries,
             expired_at,
@@ -261,11 +261,11 @@ class IndexView(IndexCacheStore):
         entries: Sequence[tuple[str, FileStat]],
         expired_at: datetime | None = None,
     ) -> None:
-        await self._set_dir(
+        await self._store_owned(
             vfs_path, entries, expired_at, partial=True, window=False
         )
 
-    async def _set_dir(
+    async def _store_owned(
         self,
         vfs_path: str,
         entries: Sequence[tuple[str, FileStat]],

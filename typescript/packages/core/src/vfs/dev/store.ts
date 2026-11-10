@@ -17,6 +17,7 @@ import type { DevicePipe } from '../../core/dev/pipe.ts'
 import type { DevFileState } from './types.ts'
 import { liveSessions } from '../../context/session_context.ts'
 import { enoent, eacces, einval, fsError } from '../../errors/fs.ts'
+import { spliceWindow } from '../../utils/ranges.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { StorageUsage } from '../capacity.ts'
 import type { RAMAttrs } from '../ram/store.ts'
@@ -141,6 +142,10 @@ export class DevFiles extends PipeFiles {
     this.state.files.set(key, value)
     this.state.tombstones.delete(name)
     return this
+  }
+
+  splice(key: string, offset: number, data: Uint8Array): void {
+    this.set(key, spliceWindow(this.get(key) ?? new Uint8Array(), offset, data))
   }
 
   override delete(key: string): boolean {

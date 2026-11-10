@@ -78,7 +78,8 @@ export async function write(
     const current = append ? files.get(p) : undefined
     if (current !== undefined && whole.byteLength === 0) return
     checkCapacity(accessor, path, p, (current?.byteLength ?? 0) + whole.byteLength)
-    files.set(p, current === undefined ? whole : concat([current, whole]))
+    if (current === undefined) files.set(p, whole)
+    else files.splice(p, current.byteLength, whole)
     modified.set(p, nowIso())
     record(op, path.virtual, VFSName.RAM, whole.byteLength, timer)
     return
@@ -94,38 +95,18 @@ export async function write(
   const usage = accessor.store.usage
   let held = 0
   let queued = 0
-  // What this write last published: a view of a buffer it grows, so a
-  // publish copies only the bytes that arrived since. A file another writer
-  // changed in between is copied instead, so no view a reader holds changes.
-  const grown: { buffer: Uint8Array; view: Uint8Array | null } = {
-    buffer: new Uint8Array(),
-    view: null,
-  }
   const publish = (): void => {
     if (later !== null) clearTimeout(later)
     later = null
     last = performance.now()
     if (pending.length === 0) return
     try {
-      const current = files.get(p) ?? new Uint8Array()
-      const start = append ? current.byteLength : position
-      const end = pending.reduce((at, piece) => at + piece.byteLength, start)
-      const length = Math.max(current.byteLength, end)
-      checkRoom(path, length - current.byteLength)
-      const grows = current === grown.view && start === current.byteLength
-      if (!grows || length > grown.buffer.byteLength) {
-        const size = grows ? Math.max(length, grown.buffer.byteLength * 2) : length
-        grown.buffer = new Uint8Array(size)
-        grown.buffer.set(current)
-      }
-      let at = start
-      for (const piece of pending) {
-        grown.buffer.set(piece, at)
-        at += piece.byteLength
-      }
-      grown.view = grown.buffer.subarray(0, length)
-      files.set(p, grown.view)
-      if (!append) position = end
+      const arrived = concat(pending)
+      const current = files.get(p)?.byteLength ?? 0
+      const start = append ? current : position
+      checkRoom(path, Math.max(current, start + arrived.byteLength) - current)
+      files.splice(p, start, arrived)
+      if (!append) position = start + arrived.byteLength
       modified.set(p, nowIso())
     } finally {
       pending = []
@@ -160,14 +141,7 @@ export async function write(
       else later ??= setTimeout(publishLater, wait)
     }
   } finally {
-    try {
-      publish()
-    } finally {
-      // A refused last publish still lets the spare buffer go.
-      const { buffer, view } = grown
-      if (view !== null && files.get(p) === view && view.byteLength < buffer.byteLength)
-        files.set(p, view.slice())
-    }
+    publish()
   }
   if (failed.error !== undefined) throw failed.error
   record(op, path.virtual, VFSName.RAM, size, timer)

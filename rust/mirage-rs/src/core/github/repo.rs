@@ -10,6 +10,12 @@ pub(crate) struct RepoRef {
     pub(crate) repo: String,
 }
 
+impl RepoRef {
+    pub(crate) fn full(&self) -> String {
+        format!("{}/{}", self.owner, self.repo)
+    }
+}
+
 const URL_PREFIXES: [&str; 7] = [
     "git@",
     "ssh:",

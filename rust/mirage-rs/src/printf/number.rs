@@ -28,10 +28,6 @@ impl Rendered {
     }
 }
 
-fn space(byte: u8) -> bool {
-    matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 11 | 12)
-}
-
 fn digit(byte: u8, base: u32) -> Option<u32> {
     let n = match byte {
         b'0'..=b'9' => u32::from(byte - b'0'),
@@ -88,7 +84,7 @@ fn exponent(raw: &[u8], marker: usize) -> (usize, i64) {
 
 pub(crate) fn scan_float(raw: &[u8]) -> Option<FloatToken> {
     let mut at = 0;
-    while raw.get(at).copied().is_some_and(space) {
+    while raw.get(at).copied().is_some_and(crate::number::is_space) {
         at += 1;
     }
     let negative = raw.get(at) == Some(&b'-');

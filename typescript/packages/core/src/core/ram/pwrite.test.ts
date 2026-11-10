@@ -35,6 +35,17 @@ describe('pwrite', () => {
     expect(accessor.store.modified.get('/f.txt')?.endsWith('Z')).toBe(true)
   })
 
+  it('leaves a reader its bytes while pwrites change the file', async () => {
+    const accessor = new RAMAccessor(new RAMStore())
+    accessor.store.files.set('/f.txt', ENC.encode('hello'))
+    await pwrite(accessor, PATH, ENC.encode('!'), 5)
+    const seen = accessor.store.files.get('/f.txt')
+    await pwrite(accessor, PATH, ENC.encode('J'), 0)
+    await pwrite(accessor, PATH, ENC.encode('?'), 6)
+    expect(seen).toEqual(ENC.encode('hello!'))
+    expect(accessor.store.files.get('/f.txt')).toEqual(ENC.encode('Jello!?'))
+  })
+
   it('fills zeros past the end and creates the file', async () => {
     const accessor = new RAMAccessor(new RAMStore())
     await pwrite(accessor, PATH, ENC.encode('z'), 3)

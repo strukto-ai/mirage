@@ -18,7 +18,6 @@ from mirage.commands.builtin.generic.crossmount.utils import (
     transfer_primitives,
 )
 from mirage.commands.builtin.generic.unzip import unzip_generic
-from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.config import Context
 from mirage.commands.spec.types import FlagValue
 from mirage.runtime.types import DispatchFn
@@ -51,6 +50,6 @@ async def run_unzip(
         flat_scopes(scopes),
         list(text_args),
         Context(flags=flag_kwargs, cwd=PathSpec.from_str_path(cwd)),
-        normalized_read(transfer_primitives(dispatch)["read_bytes"]),
+        transfer_primitives(dispatch)["read_stream"],
         dispatch,
     )

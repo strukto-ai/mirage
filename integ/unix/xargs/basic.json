@@ -1226,6 +1226,46 @@
       ]
     },
     {
+      "id": "xargs_option_warning_precedes_verbose_traces",
+      "seq": 1304215,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nb\\n' | xargs -L1 -n1 -t echo 2>&1; printf 'a\\n' | xargs -L1 -n1 -t true 2>&1",
+      "expect": {
+        "exit": 0,
+        "stdout": "xargs: warning: options --max-lines and --max-args/-n are mutually exclusive, ignoring previous --max-lines value\necho a\na\necho b\nb\nxargs: warning: options --max-lines and --max-args/-n are mutually exclusive, ignoring previous --max-lines value\ntrue a\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "L1",
+        "n1"
+      ]
+    },
+    {
       "id": "xargs_verbose_quotes_words",
       "seq": 1300067,
       "targets": [

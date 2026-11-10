@@ -92,10 +92,7 @@ export async function* printfOutput(
       await budget.run()
     }
   } finally {
-    said()
-    if (errors.length > 0) {
-      io.stderr = concat(io.stderr instanceof Uint8Array ? [io.stderr, ...errors] : errors)
-    }
+    io.addStderr(concat(errors))
     if (stream.live && io.exitCode === 0) io.exitCode = stream.status()
     await closeStream(stream)
   }

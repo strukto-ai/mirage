@@ -20,7 +20,7 @@ import type { EmailAccessor } from '../../../../accessor/email.ts'
 import { storeFlags, type FlagOp } from '../../../../core/email/client.ts'
 import { rendered } from './printer.ts'
 
-const IMAP_FLAGS: Record<string, string> = {
+export const IMAP_FLAGS: Record<string, string> = {
   seen: '\\Seen',
   answered: '\\Answered',
   flagged: '\\Flagged',

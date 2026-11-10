@@ -137,12 +137,12 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import decode_text
 from mirage.types import PathSpec
 from mirage.utils.clock import system_now
+from mirage.utils.glob_walk import GLOB_CHARS
 
 REMOTE = "remotes/"
 AUTO_SETUP_MERGE = "branch.autosetupmerge"
 TRACK_WORDS = (Track.ALWAYS, Track.SIMPLE, Track.INHERIT)
 LOCAL_REMOTE = "."
-GLOB_CHARS = ("*", "?", "[")
 UPSTREAM_KEYS = frozenset({b"remote", b"merge"})
 # The order git 2.56.0's --delete-merged deletes in, as pinned on up to 60
 # branches: names fall in FNV-1 buckets by their hash, 64 at first and four

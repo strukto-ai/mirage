@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::utf8::{Decoder, INVALID, ascii_run};
 use crate::width::{advance_column, is_space};
-use crate::{Stream, StreamError, parse_config};
+use crate::{Stream, StreamError, constants::OUTPUT, parse_config};
 
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -126,7 +126,7 @@ struct Report {
 impl Report {
     fn render(&mut self, out: &mut Vec<u8>) {
         let start = out.len();
-        while out.len() - start < 64 * 1024 {
+        while out.len() - start < OUTPUT {
             if self.at == self.pending.len() {
                 self.pending.clear();
                 self.at = 0;
@@ -151,7 +151,7 @@ impl Report {
                 }
                 self.pending.push(b'\n');
             }
-            let len = (64 * 1024 - (out.len() - start)).min(self.pending.len() - self.at);
+            let len = (OUTPUT - (out.len() - start)).min(self.pending.len() - self.at);
             out.extend_from_slice(&self.pending[self.at..self.at + len]);
             self.at += len;
         }

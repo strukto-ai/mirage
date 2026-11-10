@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
+use crate::constants::MAX_HELD;
 use crate::regex::Step;
 use crate::regex::parse::Dialect;
 use crate::regex::posix::{Options, Posix};
 
 use super::buffer::Buffer;
-use super::value::{MAX_LEN, Text};
+use super::value::Text;
 
 /// Read one string escape whose backslash ends at `pos`, appending what it
 /// spells; returns where the escape ends. An escape awk does not know
@@ -128,10 +129,6 @@ impl Regexes {
     }
 }
 
-fn blank(c: u8) -> bool {
-    matches!(c, b' ' | b'\t' | b'\n')
-}
-
 /// A field scan keeps its next search and field boundary between VM turns.
 #[derive(Default)]
 pub(super) struct SplitScan {
@@ -176,7 +173,7 @@ impl SplitScan {
                     }
                     let at = self.at;
                     self.at += 1;
-                    if blank(record[at]) {
+                    if crate::number::is_blank(record[at]) {
                         if self.active {
                             self.active = false;
                             return Ok(Step::Done(Some((self.start, at))));
@@ -700,7 +697,7 @@ fn copy_piece(
     end: usize,
     work: &mut u64,
 ) -> Result<bool, ()> {
-    if out.len().saturating_add(end - *at) > MAX_LEN {
+    if out.len().saturating_add(end - *at) > MAX_HELD {
         return Err(());
     }
     if !out.reserve(end - *at, work) {
@@ -741,7 +738,7 @@ impl Substitution {
                 _ => false,
             };
             if byte {
-                if self.out.len() == MAX_LEN {
+                if self.out.len() == MAX_HELD {
                     return Err(());
                 }
                 if !self.out.reserve(1, work) || *work == 0 {
@@ -833,7 +830,7 @@ impl Substitution {
                             *at += 1;
                         }
                     }
-                    if self.out.len() > MAX_LEN {
+                    if self.out.len() > MAX_HELD {
                         return Err(());
                     }
                 }
@@ -851,7 +848,7 @@ impl Substitution {
                     *work -= 1;
                     if from == to {
                         if let Some(&byte) = self.subject.get(*from) {
-                            if self.out.len() == MAX_LEN {
+                            if self.out.len() == MAX_HELD {
                                 return Err(());
                             }
                             self.out.values.push(byte);

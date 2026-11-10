@@ -62,6 +62,7 @@ export class TrelloVFS extends BaseVFS {
   override readonly cachesReads: boolean = true
   override vfsMd: string = VFS_MD
   override readonly wholeWordSearch: boolean = true
+  override readonly searchNeedsWalkLimit: boolean = true
   readonly config: TrelloConfig
   override readonly accessor: TrelloAccessor
   // Trello's search answers for cards; comments and the board's other files
@@ -92,15 +93,6 @@ export class TrelloVFS extends BaseVFS {
     if (config.workspaceId !== undefined) accessorOpts.workspaceId = config.workspaceId
     if (config.boardIds !== undefined) accessorOpts.boardIds = config.boardIds
     this.accessor = new TrelloAccessor(new HttpTrelloTransport(transportOpts), accessorOpts)
-  }
-
-  /**
-   * Whether this VFS answers `name`; with no walk limit it reads every
-   * file rather than ask the service's search.
-   */
-  override supports(name: string): boolean {
-    if (name === 'files_containing' && this.walkLimit < 0) return false
-    return super.supports(name)
   }
 
   override filesContaining(

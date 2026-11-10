@@ -98,10 +98,7 @@ async def printf_output(
                 yield output
             await budget.run()
     finally:
-        said()
-        if errors:
-            held = io.stderr if isinstance(io.stderr, bytes) else b""
-            io.stderr = held + b"".join(errors)
+        io.add_stderr(b"".join(errors))
         if not io.exit_code:
             io.exit_code = stream.status()
         await close_stream(stream)

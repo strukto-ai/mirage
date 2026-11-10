@@ -31,8 +31,6 @@ const ZIP32: u64 = 0xFFFF_FFFF;
 const WINDOW: usize = 64 * 1024;
 /// How much of the directory, or of the archive's tail, one request reads.
 const READ: u64 = 1024 * 1024;
-/// How much of a member zip reads a request at a time.
-const GATHER: u64 = 64 * 1024;
 /// The spool the archive is read into.
 const ARCHIVE: u32 = 1;
 

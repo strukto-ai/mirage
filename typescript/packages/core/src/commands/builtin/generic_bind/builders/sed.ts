@@ -26,6 +26,7 @@ export const BUILDER: GenericCommand = {
   facts: facts,
   write: true,
   read: true,
+  givesBack: true,
   fn: async (_accessor, paths, texts, ctx) => {
     const files = commandFiles(ctx, paths)
     // The default stream-to-stdout path is read-only and works on every

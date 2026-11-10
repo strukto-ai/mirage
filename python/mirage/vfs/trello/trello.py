@@ -57,6 +57,7 @@ class TrelloVFS(BaseVFS):
     caches_reads: bool = True
     vfs_md: str = VFS_MD
     whole_word_search: bool = True
+    search_needs_walk_limit: bool = True
     # Trello's search answers for cards; comments and the board's other
     # files are always read.
     searchable = ("workspaces/*/boards/*/lists/*/cards/*/card.json",)
@@ -67,17 +68,6 @@ class TrelloVFS(BaseVFS):
         self.accessor = TrelloAccessor(
             self.config, lambda: self.walk_limit >= 0
         )
-
-    def supports(self, name: str) -> bool:
-        """Whether this VFS answers ``name``; with no walk limit it reads
-        every file rather than ask the service's search.
-
-        Args:
-            name (str): the function name.
-        """
-        if name == "files_containing" and self.walk_limit < 0:
-            return False
-        return super().supports(name)
 
     async def files_containing(
         self,

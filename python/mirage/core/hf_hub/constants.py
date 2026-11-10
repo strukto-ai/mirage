@@ -88,10 +88,6 @@ MAX_DOWNLOAD_WORKERS = 8
 # (constants.REPO_ID_SEPARATOR): "models--julien-c--EsperBERTo-small".
 REPO_ID_SEPARATOR = "--"
 
-# What makes a word a pattern rather than a filename. Used to tell an
-# upstream-style variadic --include line from a real filename operand.
-GLOB_CHARS = ("*", "?", "[")
-
 # The file a deletion pattern never removes: the Hub reads its LFS rules
 # from it, so upstream keeps it whatever `--delete` or `repo-files delete`
 # matched.

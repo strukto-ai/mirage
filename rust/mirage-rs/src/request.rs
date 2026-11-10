@@ -232,7 +232,7 @@ fn pairs(items: &[(String, String)]) -> Json {
 }
 
 fn latin1(bytes: &[u8]) -> Json {
-    Json::String(bytes.iter().map(|&b| char::from(b)).collect())
+    Json::String(crate::byte_text(bytes))
 }
 
 fn opening(put: &mut impl FnMut(&str, Json), path: &[u8], opening: Opening) {
@@ -592,6 +592,13 @@ impl Io {
         let header = request.encode(data);
         self.in_flight = Some(request);
         Some(header)
+    }
+
+    /// The host's reply, decoded, and the request in flight it answers.
+    pub(crate) fn answer(&mut self, reply: &[u8]) -> Result<(Request, Reply), String> {
+        let reply = Reply::decode(reply)?;
+        let request = self.in_flight.take().ok_or("no request is waiting")?;
+        Ok((request, reply))
     }
 }
 

@@ -76,3 +76,6 @@ DWIM_RULES = (
 # HEAD, starts on when nothing says otherwise.
 DEFAULT_BRANCH = "master"
 LOGS_DIR = "logs"
+
+# What makes a word a pattern git reads as a path unseen.
+WILDCARDS = "*?[\\"

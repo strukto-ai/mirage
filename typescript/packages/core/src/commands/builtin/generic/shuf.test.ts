@@ -20,7 +20,6 @@ import { closeQuietly } from '../../../io/stream.ts'
 import { PathSpec } from '../../../types.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import type { Context } from '../../config.ts'
-import { UINTMAX } from '../constants.ts'
 import { parseFlags as parseLineFlags } from '../../../workspace/executor/command/flags.ts'
 import { SeededIdSource } from '../../../utils/ids.ts'
 import { sha256Hex } from '../../../utils/hash.ts'
@@ -29,6 +28,7 @@ import { emitCount, parseFlags, shufGeneric, type ShufFlags } from './shuf.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
+const UINTMAX = 2n ** 64n - 1n
 
 function refusal(parsed: ShufFlags | IOResult): string | null {
   if (!(parsed instanceof IOResult)) return null

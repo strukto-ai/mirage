@@ -1,8 +1,6 @@
 use serde::Deserialize;
 
-use crate::{Stream, StreamError};
-
-const WORK: usize = 16 * 1024;
+use crate::{Stream, StreamError, constants::WORK};
 
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]

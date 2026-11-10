@@ -1,8 +1,6 @@
 use serde::Deserialize;
 
-use crate::{Stream, StreamError, parse_config, strftime::Strftime};
-
-const WORK: usize = 16384;
+use crate::{Stream, StreamError, constants::WORK, parse_config, strftime::Strftime};
 
 #[derive(Deserialize)]
 #[serde(untagged)]

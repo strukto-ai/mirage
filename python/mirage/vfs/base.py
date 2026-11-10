@@ -180,6 +180,10 @@ class BaseVFS:
     # rg -w); any other pattern reads every file.
     whole_word_search: bool = False
 
+    # ``files_containing`` asks the service only under a walk limit; with
+    # none (-1) a search reads every file.
+    search_needs_walk_limit: bool = False
+
     # The most files one command walks under a directory of this mount:
     # grep -r, rg and git grep stop reading there, find, ls -R, tree, du
     # and getfattr -R stop listing, git status and the other verbs that
@@ -272,11 +276,16 @@ class BaseVFS:
 
         A function the base declares is supported once a subclass or the
         instance itself replaces it; one only a subclass declares (a
-        custom ``@vfs_call``) is supported because it exists.
+        custom ``@vfs_call``) is supported because it exists, and
+        ``files_containing`` is not under ``search_needs_walk_limit`` with
+        no walk limit.
 
         Args:
             name (str): the function name.
         """
+        unlimited = self.search_needs_walk_limit and self.walk_limit < 0
+        if name == "files_containing" and unlimited:
+            return False
         own = getattr(self, name, None)
         fn = getattr(own, "__func__", own)
         return callable(own) and fn is not getattr(BaseVFS, name, None)

@@ -6,9 +6,10 @@ use crate::regex::{STEPS, Step};
 use crate::request::{Opening, Reply, Request, WriteMode, bytes};
 
 use super::debug;
-use super::io::{Failure, Feed, Input, Io, LIMIT, Line, LineReader, MAX_LEN, Notes, read_error};
+use super::io::{Failure, Feed, Input, Io, Line, LineReader, Notes, read_error};
 use super::script::{Address, Command, Part, Program, Subst, Translit};
 use super::text::{Refusal, absolute, convert, list, resolve, unit};
+use crate::constants::{FLUSH, KEPT, MAX_HELD};
 
 const STDOUT: &[u8] = b"/dev/stdout";
 const STDERR: &[u8] = b"/dev/stderr";
@@ -380,7 +381,7 @@ fn expand(
                     upper,
                     utf8,
                     &mut converted,
-                    MAX_LEN.saturating_sub(out.len()),
+                    MAX_HELD.saturating_sub(out.len()),
                 ) {
                     return Err(exhausted());
                 }
@@ -392,7 +393,7 @@ fn expand(
         match pending {
             Some(upper) if !text.is_empty() => {
                 let len = unit(text, 0, utf8);
-                if !convert(&text[..len], upper, utf8, out, MAX_LEN) {
+                if !convert(&text[..len], upper, utf8, out, MAX_HELD) {
                     return Err(exhausted());
                 }
                 room(out.len(), text.len() - len)?;
@@ -417,7 +418,7 @@ fn exhausted() -> Refusal {
 
 /// Whether a space of `len` bytes may take `more`.
 fn room(len: usize, more: usize) -> Result<(), Refusal> {
-    if len.saturating_add(more) > MAX_LEN {
+    if len.saturating_add(more) > MAX_HELD {
         return Err(exhausted());
     }
     Ok(())
@@ -791,14 +792,14 @@ impl Machine {
         while self.io.idle()
             && steps < budget
             && self.regex_budget > 0
-            && self.out.len() < LIMIT
+            && self.out.len() < FLUSH
             && !self.done()
         {
             steps += 1;
             if let Err(refusal) = self.step() {
                 self.fail(refusal);
             }
-            if self.edit.len() >= LIMIT {
+            if self.edit.len() >= FLUSH {
                 self.send_edit();
             }
         }
@@ -1320,11 +1321,11 @@ impl Machine {
         if !self.opts.in_place {
             return &mut self.out;
         }
-        if !self.edit.is_empty() && self.edit.len() + len >= LIMIT {
+        if !self.edit.is_empty() && self.edit.len() + len >= FLUSH {
             self.send_edit();
         }
         if self.edit.capacity() == 0 {
-            self.edit.reserve_exact(LIMIT.max(len + 1));
+            self.edit.reserve_exact(FLUSH.max(len + 1));
         }
         &mut self.edit
     }
@@ -1362,14 +1363,14 @@ impl Machine {
                 room(self.notes.stderr.len() + self.err_out.len(), text.len() + 1)?;
                 put_line(&mut self.err_out, &mut self.err_missing, text, newline, end);
                 // A loop that never ends its cycle still hands stderr on.
-                if self.err_out.len() >= LIMIT {
+                if self.err_out.len() >= FLUSH {
                     self.boundary();
                 }
             }
             Target::File(file) => {
                 let out = &mut self.files[file];
                 put_line(&mut out.buf, &mut out.missing, text, newline, end);
-                if out.buf.len() >= LIMIT {
+                if out.buf.len() >= FLUSH {
                     self.route(file);
                 }
             }
@@ -1756,7 +1757,7 @@ impl Machine {
                     let (print, wfile) = (subst.print, subst.wfile);
                     let mut old = std::mem::replace(&mut self.ps, result.into()).into_storage();
                     old.clear();
-                    if old.capacity() <= 64 * 1024 {
+                    if old.capacity() <= KEPT {
                         self.rewrite.out = old;
                     }
                     self.replaced = true;
@@ -1880,7 +1881,7 @@ impl Machine {
             b'l' => {
                 let width = self.commands[pc].number.unwrap_or(self.opts.line_length);
                 let text =
-                    list(&self.ps, width, MAX_LEN, self.opts.delimiter).ok_or_else(exhausted)?;
+                    list(&self.ps, width, MAX_HELD, self.opts.delimiter).ok_or_else(exhausted)?;
                 self.print(&text);
             }
             b'q' => {
@@ -2025,10 +2026,7 @@ impl Machine {
 
     /// Take the host's answer to the request in flight.
     pub(super) fn answer(&mut self, reply: &[u8], data: &[u8]) -> Result<(), String> {
-        let reply = Reply::decode(reply)?;
-        let Some(request) = self.io.in_flight.take() else {
-            return Err("no request is waiting".into());
-        };
+        let (request, reply) = self.io.answer(reply)?;
         if let Some(fatal) = &reply.fatal {
             self.notes.stderr.extend_from_slice(b"sed: ");
             self.notes.stderr.extend_from_slice(&bytes(fatal));

@@ -41,6 +41,18 @@ async def test_pwrite_keeps_the_bytes_outside_the_window():
 
 
 @pytest.mark.asyncio
+async def test_a_read_keeps_its_bytes_while_pwrites_change_the_file():
+    accessor = RAMAccessor(RAMStore())
+    accessor.store.files["/f.txt"] = b"hello"
+    await pwrite(accessor, PATH, b"!", 5)
+    seen = accessor.store.files["/f.txt"]
+    await pwrite(accessor, PATH, b"J", 0)
+    await pwrite(accessor, PATH, b"?", 6)
+    assert seen == b"hello!"
+    assert accessor.store.files["/f.txt"] == b"Jello!?"
+
+
+@pytest.mark.asyncio
 async def test_pwrite_past_the_end_fills_zeros_and_creates():
     accessor = RAMAccessor(RAMStore())
     await pwrite(accessor, PATH, b"z", 3)

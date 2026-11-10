@@ -217,7 +217,7 @@ fn name_and_stamp(rest: &[u8]) -> (&[u8], &[u8]) {
         Some(tab) => rest.split_at(tab),
         None => (rest, &b""[..]),
     };
-    let blank = |b: &u8| b" \t\n\x0b\x0c\r".contains(b);
+    let blank = |b: &u8| crate::number::BLANKS.contains(b);
     let start = name.iter().position(|b| !blank(b)).unwrap_or(name.len());
     let end = name
         .iter()

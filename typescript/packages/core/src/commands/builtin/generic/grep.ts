@@ -46,6 +46,7 @@ import type { OpenStream } from '../../../rs/stream.ts'
 import type { LineRegex } from '../../../rs/regex.ts'
 import { fileAdmitted, dirAdmitted, parseFileGlobs } from '../grep_select.ts'
 import { resolveSource } from '../utils/stream.ts'
+import { SharedInput } from '../../../io/async_line_iterator.ts'
 import { UsageError } from '../../errors.ts'
 import { WalkLimitError } from '../../../errors/types.ts'
 import { SYNOPSES } from '../../spec/synopsis.ts'
@@ -306,9 +307,31 @@ export async function grepGeneric(
   const first = paths[0]
   if (first === undefined) {
     try {
-      const source = guardInput(resolveSource(ctx.stdin), ctx)
+      // -m over a file leaves standard input past its last selected line,
+      // so grep reads that descriptor itself and gives back the rest.
+      const shared =
+        ctx.stdin instanceof SharedInput && ctx.stdin.seekable && (f.maxCount ?? 0) > 0
+          ? ctx.stdin
+          : null
+      const source = shared ?? guardInput(resolveSource(ctx.stdin), ctx)
+      const label = f.label ?? GREP_STDIN_LABEL
+      const show = f.withFilename && !f.noFilename
       return [
-        owned(search(source, f.label ?? GREP_STDIN_LABEL, f.withFilename && !f.noFilename, io)),
+        owned(
+          streamInput(
+            source,
+            searcher,
+            label,
+            show,
+            io,
+            false,
+            null,
+            ctx.signal,
+            false,
+            null,
+            shared,
+          ),
+        ),
         io,
       ]
     } catch (error) {
@@ -347,10 +370,7 @@ export async function grepGeneric(
   // Said before the output that follows it, so it lands among the output it
   // came with, each stretch joined once.
   function said(): void {
-    if (pending.length === 0) return
-    const held = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
-    io.stderr = concat([held, ...pending])
-    pending.length = 0
+    if (pending.length > 0) io.addStderr(concat(pending.splice(0)))
   }
 
   function warn(message: string): void {

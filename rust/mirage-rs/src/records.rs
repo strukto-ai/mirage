@@ -1,3 +1,5 @@
+use crate::constants::MAX_HELD;
+
 /// What an input gives when asked for its next record.
 pub(crate) enum Take<T = Vec<u8>> {
     Record(T),
@@ -5,18 +7,12 @@ pub(crate) enum Take<T = Vec<u8>> {
     Wait,
 }
 
-/// The longest record held before its terminator comes: past it the
-/// command fails as the real one does once memory runs out.
-#[cfg(not(test))]
-pub(crate) const MAX_LEN: usize = 1 << 30;
-#[cfg(test)]
-pub(crate) const MAX_LEN: usize = 1 << 16;
 /// The most the buffer grows to by doubling: a record at the cap and the
 /// chunks past it fit, short of the 2 GiB a byte vector on wasm32 cannot
 /// hold.
-const GROW_LIMIT: usize = MAX_LEN + MAX_LEN / 2;
+const GROW_LIMIT: usize = MAX_HELD + MAX_HELD / 2;
 
-/// A record passed `MAX_LEN` with no terminator.
+/// A record passed `MAX_HELD` with no terminator.
 #[derive(Debug)]
 pub(crate) struct Overlong;
 
@@ -40,11 +36,11 @@ impl Records {
     }
 
     /// Take the next bytes, refused once the record they would extend has
-    /// been searched past `MAX_LEN` with no terminator. Room is made by
+    /// been searched past `MAX_HELD` with no terminator. Room is made by
     /// dropping what was read first, then by doubling up to `GROW_LIMIT`.
     pub(crate) fn push(&mut self, data: &[u8]) -> Result<(), Overlong> {
         self.compact();
-        if self.searched.saturating_sub(self.pos) > MAX_LEN {
+        if self.searched.saturating_sub(self.pos) > MAX_HELD {
             return Err(Overlong);
         }
         if self.buf.len() + data.len() > self.buf.capacity() {
@@ -141,7 +137,7 @@ impl Records {
 
 #[cfg(test)]
 mod tests {
-    use super::{GROW_LIMIT, MAX_LEN, Records, Take};
+    use super::{GROW_LIMIT, MAX_HELD, Records, Take};
     use crate::{StreamError, open};
 
     #[test]
@@ -156,8 +152,8 @@ mod tests {
             }
             assert!(records.buf.capacity() <= GROW_LIMIT);
         };
-        assert!(refused > MAX_LEN && refused <= MAX_LEN + 1000);
-        let long = vec![b'x'; MAX_LEN + 1];
+        assert!(refused > MAX_HELD && refused <= MAX_HELD + 1000);
+        let long = vec![b'x'; MAX_HELD + 1];
         let mut pieces = Records::default();
         for _ in 0..3 {
             pieces.push(&long).unwrap();
@@ -218,7 +214,7 @@ mod tests {
 
     #[test]
     fn whole_record_engines_refuse_a_line_past_the_cap_in_their_own_words() {
-        let line = |first: &[u8]| [first, &vec![b'x'; MAX_LEN + 2000]].concat();
+        let line = |first: &[u8]| [first, &vec![b'x'; MAX_HELD + 2000]].concat();
         let (letter, digit) = (line(b"a\n"), line(b"1\n"));
         let pair: &[u8] = b"a\nb\n";
         let comm = r#"{"suppress":[false,false,false],"check_order":null,"delimiter":"\t","total":false,"zero_terminated":false,"shared":false,"stdin_twice":false}"#;

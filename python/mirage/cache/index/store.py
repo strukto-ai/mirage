@@ -190,7 +190,17 @@ class IndexCacheStore:
             list[Evicted]: the children the previous listing named and
             this one does not.
         """
-        raise NotImplementedError
+        result = await self._set_dir(
+            vfs_path,
+            entries,
+            expired_at,
+            partial=False,
+            evict=not window,
+            excluded=excluded,
+            version=version,
+        )
+        assert result is not None
+        return result
 
     async def report_gone(self, gone: list[Evicted]) -> None:
         """Hand children a re-list found gone to the mount's cleanup.
@@ -266,6 +276,31 @@ class IndexCacheStore:
             excluded (tuple[str, ...]): nested mounts to preserve.
             version (str | None): backend listing version.
         """
+        return await self._set_dir(
+            vfs_path,
+            entries,
+            expired_at,
+            partial=partial,
+            evict=not partial and not window,
+            excluded=excluded,
+            version=version,
+            refill=token,
+        )
+
+    async def _set_dir(
+        self,
+        vfs_path: str,
+        entries: Sequence[tuple[str, FileStat]],
+        expired_at: datetime | None,
+        *,
+        partial: bool,
+        evict: bool,
+        excluded: tuple[str, ...] = (),
+        version: str | None = None,
+        refill: str | None = None,
+    ) -> list[Evicted] | None:
+        """The one listing write ``set_dir`` and ``refill_dir`` go through;
+        a stale ``refill`` token answers None."""
         raise NotImplementedError
 
     async def invalidate_entry(self, vfs_path: str) -> None:

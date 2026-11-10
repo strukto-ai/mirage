@@ -3162,6 +3162,17 @@
               "stderr": "bash: xmalloc: cannot allocate 1048577 bytes (past max_env of 2097152 bytes, a mirage workspace setting)\n"
             }
           }
+        },
+        {
+          "op": "exec",
+          "command": "(seq 400000 > /a/mf; mapfile -t q < /a/mf; echo never); echo rc=$?",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "rc=2\n",
+              "stderr": "bash: xmalloc: cannot allocate 2465197 bytes (past max_env of 2097152 bytes, a mirage workspace setting)\n"
+            }
+          }
         }
       ]
     },

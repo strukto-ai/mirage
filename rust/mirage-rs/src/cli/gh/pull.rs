@@ -447,7 +447,7 @@ pub(crate) async fn list_cmd(account: &Account, flags: &Flags) -> Result<Out> {
                 search: keywords,
                 ..ListQuery::default()
             },
-            &format!("{}/{}", repo.owner, repo.repo),
+            &repo.full(),
             features.advanced,
         );
         search_pull_request_fields(account, &query, limit, &select_text, features.search_type())
@@ -832,7 +832,7 @@ pub(crate) async fn edit_cmd(account: &Account, flags: &Flags, texts: &[String])
 
 pub(crate) async fn reopen_cmd(account: &Account, flags: &Flags, texts: &[String]) -> Result<Out> {
     let (repo, number, node) = find(account, flags, texts, "id,number,state,title").await?;
-    let name = format!("{}#{number} ({})", full(&repo), node.get("title").text());
+    let name = format!("{}#{number} ({})", repo.full(), node.get("title").text());
     match node.get("state").as_str() {
         Some("MERGED") => {
             return Ok(Out::failed(format!(
@@ -1074,10 +1074,6 @@ pub(crate) async fn checks_cmd(account: &Account, flags: &Flags, texts: &[String
     Ok(out)
 }
 
-fn full(repo: &RepoRef) -> String {
-    format!("{}/{}", repo.owner, repo.repo)
-}
-
 /// A selector's pull request, its fields as gh's Finder reads them.
 async fn find(
     account: &Account,
@@ -1135,7 +1131,7 @@ pub(crate) async fn close_cmd(account: &Account, flags: &Flags, texts: &[String]
         "state,number,title,isCrossRepository,headRefName,id",
     )
     .await?;
-    let name = format!("{}#{number} ({})", full(&repo), node.get("title").text());
+    let name = format!("{}#{number} ({})", repo.full(), node.get("title").text());
     if node.get("state").as_str() == Some("MERGED") {
         return Ok(Out::failed(format!(
             "X Pull request {name} can't be closed because it was already merged\n"
@@ -1235,7 +1231,7 @@ pub(crate) async fn review_cmd(account: &Account, flags: &Flags, texts: &[String
 
 pub(crate) async fn ready_cmd(account: &Account, flags: &Flags, texts: &[String]) -> Result<Out> {
     let (repo, number, node) = find(account, flags, texts, "id,number,state,isDraft").await?;
-    let name = format!("{}#{number}", full(&repo));
+    let name = format!("{}#{number}", repo.full());
     if node.get("state").as_str() != Some("OPEN") {
         return Ok(Out::failed(format!(
             "X Pull request {name} is closed. Only draft pull requests can be marked as \"ready for review\"\n"
@@ -1375,7 +1371,7 @@ pub(crate) async fn revert_cmd(account: &Account, flags: &Flags, texts: &[String
     if node.get("state").as_str() != Some("MERGED") {
         return Ok(Out::failed(format!(
             "X Pull request {}#{number} ({}) can't be reverted because it has not been merged\n",
-            full(&repo),
+            repo.full(),
             node.get("title").text()
         )));
     }
@@ -1443,7 +1439,7 @@ pub(crate) async fn merge_cmd(account: &Account, flags: &Flags, texts: &[String]
     )
     .await?;
     let (repo, number, node) = find(account, flags, texts, MERGE_FIELDS).await?;
-    let name = format!("{}#{number}", full(&repo));
+    let name = format!("{}#{number}", repo.full());
     if node.get("isInMergeQueue").truthy() {
         return Ok(Out::warned(format!(
             "! Pull request {name} is already queued to merge\n"
@@ -1654,7 +1650,7 @@ pub(crate) async fn status_cmd(account: &Account, flags: &Flags) -> Result<Out> 
     let query = format!(
         "fragment pr on PullRequest{{{select_text}}}fragment prWithReviews on PullRequest{{...pr}}{PR_STATUS_QUERY}"
     );
-    let name = full(&repo);
+    let name = repo.full();
     let mut variables = Obj::new();
     variables.set("owner", repo.owner.as_str());
     variables.set("repo", repo.repo.as_str());

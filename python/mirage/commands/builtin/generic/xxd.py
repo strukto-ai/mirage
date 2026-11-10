@@ -307,8 +307,9 @@ async def xxd(
 
     A dump replaces OUTFILE; ``-r`` writes into it at the dump's offsets
     and keeps the bytes around them, as xxd does, through ``pwrite`` where
-    the backend has one, so the stored bytes are what it writes into and
-    no gap is held here. Deliberate divergence:
+    the backend has one, one streamed pwrite per run of contiguous
+    offsets, so the stored bytes are what it writes into and no gap is
+    held here. Deliberate divergence:
     xxd opens OUTFILE before it reads, so an INFILE that is OUTFILE reads
     empty and a directory INFILE leaves an empty OUTFILE behind; this
     reads first and writes once.
@@ -453,13 +454,20 @@ async def _write_output(
         data = b""
     if reverse and pwrite_bytes is not None:
         try:
-            wrote = False
             async with aclosing(_reverse_segments(segments)) as writes:
-                async for start, chunk in writes:
-                    await pwrite_bytes(target, chunk, start)
-                    wrote = True
-            if not wrote:
-                await pwrite_bytes(target, b"", 0)
+                step = await anext(writes, None)
+                if step is None:
+                    await pwrite_bytes(target, b"", 0)
+
+                async def run(end: int) -> AsyncIterator[bytes]:
+                    nonlocal step
+                    while step is not None and step[0] == end:
+                        end += len(step[1])
+                        yield step[1]
+                        step = await anext(writes, None)
+
+                while step is not None:
+                    await pwrite_bytes(target, run(step[0]), step[0])
         except FS_ERRORS as exc:
             return None, IOResult(
                 stderr=fs_error_line("xxd", target, exc).encode(),

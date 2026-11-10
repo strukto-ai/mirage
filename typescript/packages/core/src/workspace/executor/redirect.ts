@@ -26,8 +26,8 @@ import { posixPhrase } from '../../errors/posix.ts'
 import { share, SharedInput } from '../../io/async_line_iterator.ts'
 import { chunks as byteChunks } from '../../io/cooperative.ts'
 import { PipeClosed } from '../../io/errors.ts'
-import { MEMORY_LIMIT, spooledPair } from '../../io/spool.ts'
-import { asyncChain, discardStreams, rechunk } from '../../io/stream.ts'
+import { spooledPair } from '../../io/spool.ts'
+import { asyncChain, discardStreams } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { DeviceInput, IOResult, materialize, PipeStream } from '../../io/types.ts'
 import { ByteWriter } from '../../io/writer.ts'
@@ -201,10 +201,9 @@ export class PipeRecorder extends Recorder {
             return
           }
           // What comes once an op reached the file lands at the
-          // description's offset, as a descriptor's write does, a block at
-          // a time; into a file still empty as one stream, as a
-          // description's first write does, which a store that rewrites the
-          // file on each pwrite would otherwise copy block after block.
+          // description's offset as one streamed pwrite, as a descriptor's
+          // write does; into a file still empty as one stream, as a
+          // description's first write does.
           if (
             offset === 0 &&
             (await soleStream(this.dispatch, file, async (sole) => {
@@ -214,11 +213,7 @@ export class PipeRecorder extends Recorder {
           ) {
             return
           }
-          let at = offset
-          for await (const part of rechunk(source, MEMORY_LIMIT)) {
-            await this.dispatch('pwrite', file.where, [part, at])
-            at += part.length
-          }
+          await this.dispatch('pwrite', file.where, [source, offset])
         })
       }, true),
     ]

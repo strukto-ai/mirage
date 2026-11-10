@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use super::accessor::{Flags, Out, one_line, read_cli_file, time_field, tsv};
+use super::accessor::{Flags, Out, limit_or_refuse, one_line, read_cli_file, time_field, tsv};
 use super::args::wrong_count;
 use crate::core::github::client::{Account, Failure, Result, github_request, usage, value};
 use crate::core::github::json::{Json, Obj, quoted};
@@ -68,10 +68,7 @@ struct Listed {
 }
 
 pub(crate) async fn list_cmd(account: &Account, flags: &Flags) -> Result<Out> {
-    let limit = flags.as_int("limit").unwrap_or(10);
-    if limit < 1 {
-        return usage(format!("invalid limit: {limit}"));
-    }
+    let limit = limit_or_refuse(flags, 10)?;
     let filter = flags.as_nonempty("filter");
     let include = flags.gh_bool("include_content");
     if filter.is_none() && include {

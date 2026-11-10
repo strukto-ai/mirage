@@ -1,9 +1,10 @@
 use std::collections::LinkedList;
 
+use crate::constants::MAX_HELD;
 use crate::printf::number::Rendered;
 use crate::regex::Step;
 
-use super::value::{FloatSpec, MAX_LEN, NumberScan, Text, Value, fixed_number, render_int, to_int};
+use super::value::{FloatSpec, NumberScan, Text, Value, fixed_number, render_int, to_int};
 use super::vm::no_memory;
 
 enum Piece {
@@ -22,7 +23,7 @@ impl Default for Output {
         Self {
             pieces: LinkedList::new(),
             len: 0,
-            limit: MAX_LEN,
+            limit: MAX_HELD,
         }
     }
 }
@@ -275,7 +276,7 @@ impl NumberText {
                             .saturating_mul(10)
                             .saturating_add((byte - b'0') as usize);
                         self.at += 1;
-                        if self.spec.width > MAX_LEN {
+                        if self.spec.width > MAX_HELD {
                             self.fallback()?;
                         }
                     } else if self.format.get(self.at) == Some(&b'.') {
@@ -296,7 +297,7 @@ impl NumberText {
                             .saturating_add((byte - b'0') as usize);
                         self.spec.precision = Some(precision);
                         self.at += 1;
-                        if precision > MAX_LEN {
+                        if precision > MAX_HELD {
                             self.fallback()?;
                         }
                     } else {
@@ -428,7 +429,7 @@ impl Formatter {
         let Some(arg) = self.take() else {
             return Ok(());
         };
-        if spec.width > MAX_LEN || (conv != b's' && spec.precision.is_some_and(|p| p > MAX_LEN)) {
+        if spec.width > MAX_HELD || (conv != b's' && spec.precision.is_some_and(|p| p > MAX_HELD)) {
             return Err(no_memory());
         }
         if matches!(conv, b'c' | b's') {
@@ -494,7 +495,7 @@ impl Formatter {
                             return Ok(Step::Paused);
                         }
                     }
-                    if conv == b's' && spec.width <= MAX_LEN {
+                    if conv == b's' && spec.width <= MAX_HELD {
                         let at = usize::from(spec.width_star) + usize::from(spec.precision_star);
                         if let Some(arg @ Value::Num(_)) = self.args.as_mut_slice().get_mut(at) {
                             let value = arg.num();

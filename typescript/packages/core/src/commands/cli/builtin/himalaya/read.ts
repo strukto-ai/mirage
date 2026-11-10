@@ -29,28 +29,14 @@ import {
   type MimeValue,
 } from '../../../../core/email/mime.ts'
 import { compactJsonBytes } from '../../../../core/render/json.ts'
-import { partMime, partName, partPayload } from './attachment.ts'
+import { MONTHS } from '../../../builtin/utils/constants.ts'
+import { PARSE_FAILURE, partMime, partName, partPayload } from './attachment.ts'
+import { SEEN_FLAG } from './deliver.ts'
 import { notice } from './printer.ts'
 import { formatSize } from './table.ts'
 import { fetchSource } from './util.ts'
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const MONTH_NAMES = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-]
-const PARSE_FAILURE = 'Failed to parse RFC 5322 message'
-const SEEN_FLAG = '\\Seen'
 const ENC = new TextEncoder()
 
 interface DateFields {
@@ -92,7 +78,7 @@ function rfc822(value: DateFields): string {
   const negative = value.tz_before_gmt && (value.tz_hour > 0 || value.tz_minute > 0)
   return (
     `${DAYS[dayOfWeek(value.year, value.month, value.day)] ?? ''}, ${String(value.day)} ` +
-    `${MONTH_NAMES[value.month - 1] ?? ''} ${pad(value.year, 4)} ${pad(value.hour)}:${pad(value.minute)}:` +
+    `${MONTHS[value.month - 1] ?? ''} ${pad(value.year, 4)} ${pad(value.hour)}:${pad(value.minute)}:` +
     `${pad(value.second)} ${negative ? '-' : '+'}${pad(value.tz_hour)}${pad(value.tz_minute)}`
   )
 }

@@ -148,6 +148,7 @@ class GDocsVFS(BaseVFS):
     read_revalidatable: bool = True
     vfs_md: str = VFS_MD
     whole_word_search: bool = True
+    search_needs_walk_limit: bool = True
 
     # Every file here is a rendering; there are no stored bytes to read.
     renderers: Mapping[str, str] = MappingProxyType({".gdoc.json": "read_doc"})
@@ -175,17 +176,6 @@ class GDocsVFS(BaseVFS):
         """
         data = await _read(self.accessor, path)
         return slice_window(data, offset, size)
-
-    def supports(self, name: str) -> bool:
-        """Whether this VFS answers ``name``; with no walk limit it reads
-        every file rather than ask the service's search.
-
-        Args:
-            name (str): the function name.
-        """
-        if name == "files_containing" and self.walk_limit < 0:
-            return False
-        return super().supports(name)
 
     async def files_containing(
         self,

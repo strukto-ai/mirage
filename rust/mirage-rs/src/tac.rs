@@ -1,15 +1,13 @@
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::regex::STEPS;
 use crate::regex::parse::Dialect;
 use crate::regex::posix::{Options, Posix};
 use crate::{Stream, StreamError, parse_config};
 
 /// The fewest input bytes one request reads.
 const BLOCK: u64 = 1 << 16;
-/// The most places a regular expression is tried at, and steps a
-/// backtracked attempt takes, per call.
-const STEPS: u64 = 1 << 16;
 /// The most of one record a regular expression is searched in: GNU holds
 /// the record it searches and runs out of memory past what it can get.
 /// Mirage caps a regex record at 8 MiB, leaving room for the old/new

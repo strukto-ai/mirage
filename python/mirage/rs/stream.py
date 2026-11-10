@@ -260,6 +260,17 @@ async def run_stream(
             yield chunk
 
 
+async def _drained(
+    stream: OpenStream, budget: YieldBudget, first: bytes = b""
+) -> AsyncGenerator[bytes, None]:
+    if first:
+        yield first
+    while stream.busy():
+        await budget.run()
+        if output := stream.drain():
+            yield output
+
+
 async def merge_output(
     stream: OpenStream, read: Callable[[int], Awaitable[bytes | None]]
 ) -> AsyncGenerator[bytes, None]:
@@ -272,11 +283,10 @@ async def merge_output(
             chunk, None at its end.
     """
     budget = YieldBudget()
+    output = b""
     while True:
-        while stream.busy():
-            await budget.run()
-            if output := stream.drain():
-                yield output
+        async for out in _drained(stream, budget, output):
+            yield out
         index = stream.wants()
         if index is None:
             break
@@ -287,14 +297,8 @@ async def merge_output(
             if chunk is None
             else stream.feed_input(index, bytes(chunk))
         )
-        if output:
-            yield output
-    if output := stream.finish():
-        yield output
-    while stream.busy():
-        await budget.run()
-        if output := stream.drain():
-            yield output
+    async for out in _drained(stream, budget, stream.finish()):
+        yield out
 
 
 async def chain_output(
@@ -330,20 +334,12 @@ async def stream_output_chunks(
     try:
         async with aclosing(chunks(source)) as bounded:
             async for chunk in bounded:
-                if output := stream.feed(chunk):
-                    yield output
-                while stream.busy():
-                    await budget.run()
-                    if output := stream.drain():
-                        yield output
+                async for out in _drained(stream, budget, stream.feed(chunk)):
+                    yield out
                 if stream.done():
                     break
-        if output := stream.finish():
-            yield output
-        while stream.busy():
-            await budget.run()
-            if output := stream.drain():
-                yield output
+        async for out in _drained(stream, budget, stream.finish()):
+            yield out
     finally:
         if owns_stream:
             await close_stream(stream)
@@ -356,7 +352,5 @@ async def close_stream(stream: OpenStream) -> None:
         stream (OpenStream): The owned command engine.
     """
     if stream.cancel():
-        budget = YieldBudget()
-        while stream.busy():
-            await budget.run()
-            stream.drain()
+        async for _ in _drained(stream, YieldBudget()):
+            pass

@@ -25,6 +25,7 @@ from mirage.commands.cli.builtin.git.changes import (
     staged_entries,
     work_entries,
 )
+from mirage.commands.cli.builtin.git.constants import WILDCARDS
 from mirage.commands.cli.builtin.git.diff_output import (
     DiffFlags,
     compare,
@@ -100,9 +101,6 @@ from mirage.workspace.files import Files
 
 
 Tree = dict[bytes, tuple[int, bytes]]
-
-# What makes a word a pattern git reads as a path unseen.
-WILDCARDS = "*?[\\"
 
 
 def _sides(

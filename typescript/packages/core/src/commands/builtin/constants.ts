@@ -25,13 +25,6 @@ export const MIME_SYMLINK = 'inode/symlink; charset=binary'
 // How much of a file `file` sniffs: only its first bytes are read.
 export const FILE_HEADER_BYTES = 512
 
-// od, split and cmp all skip leading whitespace in a count and allow one '+'
-// before the digits, so `-b +10` and `-b " 10"` are valid while `+ 10`,
-// `++10`, `-10` and a trailing space are not.
-// A bigint: as a double, 2 ** 64 - 1 rounds up to 2 ** 64, which would let
-// exactly-2**64 values through the too-large checks that python rejects.
-export const UINTMAX = 2n ** 64n - 1n
-
 // The bytes C `isspace` accepts, which every gnulib scanner skips before
 // the sign. Spelled out rather than written `\s`: JavaScript's `\s` also
 // matches every Unicode space and python's matches 0x1c-0x1f, and GNU

@@ -80,3 +80,5 @@ export const DWIM_RULES = [
 // starts on when nothing says otherwise.
 export const DEFAULT_BRANCH = 'master'
 export const LOGS_DIR = 'logs'
+// What makes a word a pattern git reads as a path unseen.
+export const WILDCARDS = ['*', '?', '[', '\\']

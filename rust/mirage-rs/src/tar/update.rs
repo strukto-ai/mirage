@@ -7,13 +7,10 @@ use std::collections::HashMap;
 
 use super::create::{self, Output};
 use super::header::{self, Block, Pax};
-use super::read::{Input, Raw, Selection, trimmed};
+use super::read::{Input, MAX_META, Raw, Selection, trimmed};
 use super::{Codec, Config, FAILED, FATAL, Mode, TRAILER, lines, open_failure};
-use crate::request::{Opening, Request, WriteMode, failed};
+use crate::request::{Request, WriteMode, failed};
 use crate::task::Host;
-
-/// The most data of one meta header a run holds.
-const MAX_META: u64 = 1 << 30;
 
 pub(super) async fn run(host: &Host, config: &Config) -> i32 {
     if config.abandon {
@@ -22,22 +19,9 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
     }
     let delete = config.mode == Mode::Delete;
     let to_stdout = config.archive == b"-";
-    let opening = if to_stdout {
-        (b"-".to_vec(), Opening::Name)
-    } else {
-        (config.archive.clone(), Opening::Operand(1))
-    };
-    let mut raw = Raw::new(host, opening);
-    raw.gather(6).await;
+    let mut raw = Raw::archive(host, config).await;
     let mut absent = false;
-    if let Some(mut reply) = raw.error.take() {
-        if config.probe
-            && reply.names(&["ENOENT"])
-            && host.stat(&config.archive).await.as_deref() == Some("dir")
-        {
-            reply.error = Some("Is a directory".into());
-            reply.errno = Some("EISDIR".into());
-        }
+    if let Some(reply) = raw.error.take() {
         if reply.names(&["EISDIR"]) {
             let name = &config.archive;
             let line = [b"tar: ", &name[..], b": Cannot read: Bad file descriptor"].concat();

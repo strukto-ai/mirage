@@ -21,7 +21,7 @@ use serde_json::{Value as Json, json};
 use crate::number;
 use crate::quote::escaped;
 use crate::scan::{Typed, Values, unknown};
-use crate::width::char_width;
+use crate::width::{TAB_WIDTH, char_width};
 use crate::word::{self, Choice};
 use crate::{Stream, StreamError, byte_text, parse_config, quoted};
 
@@ -68,8 +68,6 @@ const QUOTING: &[Choice] = &[
 ];
 /// The width a listing in columns fills when nothing names one.
 const LINE_WIDTH: u64 = 80;
-/// The tab stops a listing in columns pads with when `-T` names none.
-const TAB_SIZE: u64 = 8;
 /// The fewest columns a column of `-C` or `-x` takes, its gap included.
 const NARROWEST: u64 = 3;
 /// Past this a width is wider than any listing, and stays exact in JSON.
@@ -93,7 +91,7 @@ pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
     let mut quoting: Option<&str> = None;
     let mut hide_control = false;
     let mut width: Option<Option<u64>> = None;
-    let mut tabsize = TAB_SIZE;
+    let mut tabsize = TAB_WIDTH;
     let mut warnings: Vec<String> = Vec::new();
     for (name, raw) in options {
         match name.as_str() {

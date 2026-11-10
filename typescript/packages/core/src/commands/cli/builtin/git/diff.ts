@@ -27,7 +27,7 @@ import {
   prefixConfig,
   type DiffFlags,
 } from './diff_output.ts'
-import { HEAD } from './constants.ts'
+import { HEAD, WILDCARDS } from './constants.ts'
 
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import { PathSpec } from '../../../../types.ts'
@@ -62,8 +62,6 @@ import type { IndexEntry, IndexState } from './types.ts'
 const ENC = new TextEncoder()
 
 type Tree = Map<string, TreeEntry>
-// What makes a word a pattern git reads as a path unseen.
-const WILDCARDS = ['*', '?', '[', '\\']
 
 /**
  * The two sides a diff compares, and any warning.

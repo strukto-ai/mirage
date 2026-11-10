@@ -263,7 +263,7 @@ async function writeOutput(
   source: AsyncIterable<Uint8Array>,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   writeBytes: ((p: PathSpec, data: ByteSource) => Promise<void>) | null,
-  pwriteBytes: ((p: PathSpec, data: Uint8Array, offset: number) => Promise<void>) | null,
+  pwriteBytes: ((p: PathSpec, data: ByteSource, offset: number) => Promise<void>) | null,
   render: () => Promise<AsyncIterable<Uint8Array> | null>,
   revert: Readonly<Record<string, util.JSONType>>,
 ): Promise<[ByteSource | null, IOResult]> {
@@ -308,17 +308,23 @@ async function writeOutput(
     data = new Uint8Array(0)
   }
   if (dump === null && pwriteBytes !== null) {
+    const writes = reverseSegments(segments)
     try {
-      let wrote = false
-      for await (const [start, chunk] of reverseSegments(segments)) {
-        await pwriteBytes(target, chunk, start)
-        wrote = true
+      let step = await writes.next()
+      if (step.done === true) await pwriteBytes(target, new Uint8Array(), 0)
+      async function* run(end: number): AsyncGenerator<Uint8Array> {
+        while (step.done !== true && step.value[0] === end) {
+          end += step.value[1].byteLength
+          yield step.value[1]
+          step = await writes.next()
+        }
       }
-      if (!wrote) await pwriteBytes(target, new Uint8Array(), 0)
+      while (step.done !== true) await pwriteBytes(target, run(step.value[0]), step.value[0])
     } catch (err) {
       if (!isFsError(err)) throw err
       return failed(target, err, OPEN_OUTPUT_EXIT)
     } finally {
+      await writes.return(undefined)
       await closeQuietly(segments)
     }
     return [null, done]
@@ -397,12 +403,12 @@ export function parseFlags(bag: Record<string, FlagValue>): XxdFlags | IOResult 
 /**
  * xxd over INFILE (or stdin) to OUTFILE (or stdout). A dump replaces
  * OUTFILE; -r writes into it at the dump's offsets and keeps the bytes around
- * them, as xxd does, through pwrite where the backend has one, so the stored
- * bytes are what it writes into and no gap is held here. Deliberate
- * divergence: xxd opens OUTFILE before it
- * reads, so an INFILE that is OUTFILE reads empty and a directory INFILE
- * leaves an empty OUTFILE behind; this reads first and writes once. Mirrors
- * Python's xxd.
+ * them, as xxd does, through pwrite where the backend has one, one streamed
+ * pwrite per run of contiguous offsets, so the stored bytes are what it writes
+ * into and no gap is held here. Deliberate divergence: xxd opens OUTFILE
+ * before it reads, so an INFILE that is OUTFILE reads empty and a directory
+ * INFILE leaves an empty OUTFILE behind; this reads first and writes once.
+ * Mirrors Python's xxd.
  */
 export async function xxdGeneric(
   parsed: XxdFlags,
@@ -410,7 +416,7 @@ export async function xxdGeneric(
   ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   writeBytes: ((p: PathSpec, data: ByteSource) => Promise<void>) | null = null,
-  pwriteBytes: ((p: PathSpec, data: Uint8Array, offset: number) => Promise<void>) | null = null,
+  pwriteBytes: ((p: PathSpec, data: ByteSource, offset: number) => Promise<void>) | null = null,
 ): Promise<[ByteSource | null, IOResult]> {
   const read = stdinStream(stream, ctx.stdin, true)
   if (paths.length > 2) throw extraOperandError(CommandName.XXD, paths[2]?.rawPath ?? '')

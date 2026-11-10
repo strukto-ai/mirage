@@ -533,16 +533,23 @@ impl Parser<'_> {
     }
 
     fn arith_postfix(&mut self, grammar: Grammar) -> R<Syn> {
-        let mut operand = self.arith_primary(grammar)?;
+        let operand = self.arith_primary(grammar)?;
+        Ok(self.postfix(operand, true))
+    }
+
+    /// `operand` and each `++` or `--` after it, past blanks if `blanks`.
+    pub(super) fn postfix(&mut self, mut operand: Syn, blanks: bool) -> Syn {
         loop {
-            self.arith_blank();
+            if blanks {
+                self.arith_blank();
+            }
             let at = self.i;
             let text = if self.starts(b"++") {
                 "++"
             } else if self.starts(b"--") {
                 "--"
             } else {
-                return Ok(operand);
+                return operand;
             };
             self.i += 2;
             let op = Syn::token(text, at, self.i).with_field("operator");

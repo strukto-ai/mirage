@@ -193,7 +193,7 @@ async def test_a_shared_input_outlives_a_close_and_not_a_discard():
 
 
 @pytest.mark.asyncio
-async def test_shared_stdin_preserves_unread_bytes_and_serializes_readers():
+async def test_shared_stdin_keeps_what_a_reader_gave_back_and_serializes_readers():
     pulls = []
 
     async def source():
@@ -205,9 +205,10 @@ async def test_shared_stdin_preserves_unread_bytes_and_serializes_readers():
     shared = SharedStdin(source())
     assert not pulls
     first = aiter(shared)
-    assert await anext(first) == b"a"
+    assert await anext(first) == b"abc"
+    shared.lines.unread(b"bc")
     second = aiter(shared)
-    results = await asyncio.gather(*(anext(second) for _ in range(5)))
+    results = await asyncio.gather(anext(second), anext(second))
     assert b"".join(results) == b"bcdef"
     with pytest.raises(StopAsyncIteration):
         await anext(first)

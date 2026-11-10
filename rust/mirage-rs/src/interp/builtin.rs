@@ -241,33 +241,67 @@ fn characters(text: &[u8]) -> Vec<&[u8]> {
     out
 }
 
-/// The characters `read` splits, each with whether a backslash quoted it.
-/// Without `raw` a backslash quotes the next character, a backslash-newline
-/// is a line continuation and a backslash at the end goes.
-fn read_chars(text: &[u8], raw: bool) -> Vec<(&[u8], bool)> {
-    let chars = characters(text);
-    let mut out = Vec::with_capacity(chars.len());
-    let mut at = 0;
-    while at < chars.len() {
-        if chars[at] == b"\\" && !raw {
-            if let Some(next) = chars.get(at + 1).filter(|next| **next != b"\n") {
-                out.push((*next, true));
-            }
-            at += 2;
-            continue;
-        }
-        out.push((chars[at], false));
-        at += 1;
+/// A line as `read` splits it: its bytes once backslashes are processed,
+/// where each character starts, and whether a backslash quoted it, a few
+/// bytes a byte rather than a slice a character. Without `raw` a backslash
+/// quotes the next character, a backslash-newline is a line continuation
+/// and a backslash at the end goes.
+struct ReadLine {
+    text: Vec<u8>,
+    starts: Vec<usize>,
+    quoted: Vec<bool>,
+}
+
+/// The length of the character at `at` as `characters` cuts it: a UTF-8
+/// one, or a byte that starts none.
+fn char_len(text: &[u8], at: usize) -> usize {
+    let len = match text[at] {
+        0xC2..=0xDF => 2,
+        0xE0..=0xEF => 3,
+        0xF0..=0xF4 => 4,
+        _ => return 1,
+    };
+    match text.get(at..at + len) {
+        Some(ch) if std::str::from_utf8(ch).is_ok() => len,
+        _ => 1,
     }
-    out
+}
+
+impl ReadLine {
+    fn new(line: &[u8], raw: bool) -> Self {
+        let mut read = ReadLine {
+            text: Vec::with_capacity(line.len()),
+            starts: Vec::new(),
+            quoted: Vec::new(),
+        };
+        let mut at = 0;
+        while at < line.len() {
+            let quoted = !raw && line[at] == b'\\';
+            if quoted {
+                at += 1;
+                if at == line.len() || line[at] == b'\n' {
+                    at += 1;
+                    continue;
+                }
+            }
+            let len = char_len(line, at);
+            read.starts.push(read.text.len());
+            read.quoted.push(quoted);
+            read.text.extend_from_slice(&line[at..at + len]);
+            at += len;
+        }
+        read.starts.push(read.text.len());
+        read
+    }
+
+    fn char(&self, k: usize) -> &[u8] {
+        &self.text[self.starts[k]..self.starts[k + 1]]
+    }
 }
 
 /// A line as `read` takes it, backslashes processed unless `raw`.
 pub fn read_text(text: &[u8], raw: bool) -> Vec<u8> {
-    read_chars(text, raw)
-        .into_iter()
-        .flat_map(|(ch, _)| ch.iter().copied())
-        .collect()
+    ReadLine::new(text, raw).text
 }
 
 /// Split one `read` line into at most `slots` fields on `ifs`, as bash
@@ -279,17 +313,12 @@ pub fn read_text(text: &[u8], raw: bool) -> Vec<u8> {
 /// of two). No slots (`read -a`) means every field, a delimiter at the end
 /// opening none.
 pub fn read_fields(text: &[u8], ifs: &[u8], slots: usize, raw: bool) -> Vec<Vec<u8>> {
-    let chars = read_chars(text, raw);
+    let read = ReadLine::new(text, raw);
     let ifs = characters(ifs);
-    let n = chars.len();
-    let splits = |k: usize| !chars[k].1 && ifs.contains(&chars[k].0);
-    let white = |k: usize| splits(k) && matches!(chars[k].0, b" " | b"\t" | b"\n");
-    let joined = |from: usize, to: usize| -> Vec<u8> {
-        chars[from..to]
-            .iter()
-            .flat_map(|(ch, _)| ch.iter().copied())
-            .collect()
-    };
+    let n = read.quoted.len();
+    let splits = |k: usize| !read.quoted[k] && ifs.contains(&read.char(k));
+    let white = |k: usize| splits(k) && matches!(read.char(k), b" " | b"\t" | b"\n");
+    let joined = |from: usize, to: usize| read.text[read.starts[from]..read.starts[to]].to_vec();
     let skip_white = |mut k: usize| {
         while k < n && white(k) {
             k += 1;

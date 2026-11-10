@@ -78,6 +78,7 @@ class GoogleDriveVFS(BaseVFS):
     index_ttl: float = 86_400
     vfs_md: str = VFS_MD
     whole_word_search: bool = True
+    search_needs_walk_limit: bool = True
     supports_snapshot: bool = True
     read_revalidatable: bool = True
 
@@ -213,17 +214,6 @@ class GoogleDriveVFS(BaseVFS):
         parent: FileStat | None = None,
     ) -> None:
         await _truncate(self.accessor, path, length, no_create, entry, parent)
-
-    def supports(self, name: str) -> bool:
-        """Whether this VFS answers ``name``; with no walk limit it reads
-        every file rather than ask the service's search.
-
-        Args:
-            name (str): the function name.
-        """
-        if name == "files_containing" and self.walk_limit < 0:
-            return False
-        return super().supports(name)
 
     async def files_containing(
         self,

@@ -47,6 +47,9 @@ class GenericCommand:
         streams (bool): it only reads its operands while its output
             drains (comm, fold), so a cross-mount run hands that output
             on live.
+        gives_back (bool): it cuts a shared standard input itself and
+            hands back what it leaves (head, sed, grep -m), so that input
+            reaches it whole.
         facts (LineFacts | FactsFn): what a line of it does: one answer
             no option changes, or the function that reads it off the
             line.
@@ -59,4 +62,5 @@ class GenericCommand:
     read: bool = False
     pass_through: bool = False
     streams: bool = False
+    gives_back: bool = False
     facts: LineFacts | FactsFn = LineFacts()

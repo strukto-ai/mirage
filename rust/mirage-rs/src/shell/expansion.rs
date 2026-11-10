@@ -163,6 +163,26 @@ impl Parser<'_> {
         self.fail(self.i)
     }
 
+    /// The quote or expansion at the cursor as its own node; None past an
+    /// escaped pair, a byte of plain text or a lone `$`.
+    pub(super) fn quoted_piece(&mut self) -> R<Option<Syn>> {
+        let piece = match self.peek() {
+            b'\\' => {
+                self.i += 2;
+                return Ok(None);
+            }
+            b'"' => self.string()?,
+            b'\'' => self.raw_string()?,
+            b'`' => self.backtick()?,
+            b'$' => self.dollar()?,
+            _ => {
+                self.i += 1;
+                return Ok(None);
+            }
+        };
+        Ok((!piece.is("$")).then_some(piece))
+    }
+
     /// A substring's offset and length up to the `}`: their text as words,
     /// the quotes and expansions in it as their own nodes.
     fn substring_operands(&mut self, children: &mut Vec<Syn>) -> R<()> {
@@ -175,22 +195,11 @@ impl Parser<'_> {
             let at = self.i;
             let piece = match self.peek() {
                 b'}' => break,
-                b'\\' => {
-                    self.i += 2;
-                    continue;
-                }
-                b'"' => self.string()?,
-                b'\'' => self.raw_string()?,
-                b'`' => self.backtick()?,
-                b'$' => self.dollar()?,
-                _ => {
-                    self.i += 1;
-                    continue;
-                }
+                _ => match self.quoted_piece()? {
+                    Some(piece) => piece,
+                    None => continue,
+                },
             };
-            if piece.is("$") {
-                continue;
-            }
             push_run(&mut pieces, "word", run, at);
             pieces.push(piece);
             run = self.i;

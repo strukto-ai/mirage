@@ -19,8 +19,7 @@ import { DEFAULT_UMASK, getCurrentEvaluation } from '../../context/session_conte
 import type { DispatchFn } from '../../runtime/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { isFsError } from '../../errors/fs.ts'
-import { drain, rechunk, sliceStream } from '../../io/stream.ts'
-import { MEMORY_LIMIT } from '../../io/spool.ts'
+import { drain, sliceStream } from '../../io/stream.ts'
 import type { SessionState } from '../session/session.ts'
 import { hasAborted, makeAbortError } from '../../utils/abort.ts'
 
@@ -102,7 +101,9 @@ async function reachedPipe(dispatch: DispatchFn, path: string | null): Promise<P
  * cancelled, so the turn checks the writer's execution frame, as
  * Python's cancelled task leaves the queue. What a killed command wrote
  * before it stopped (`kept`) still lands, as Python's task writes on once
- * it has taken its cancel.
+ * it has taken its cancel. A store that rewrites the file per pwrite rewrites
+ * it once per write; writing nothing sends none, and a write that fails
+ * leaves the offset no further than the file's end.
  */
 export async function writeDescription(
   dispatch: DispatchFn,
@@ -144,20 +145,34 @@ export async function writeDescription(
       file.opened = true
     }
     const start = file.offset + (file.source?.lines.position ?? 0)
-    let offset = start
-    try {
-      for await (const part of rechunk(data, MEMORY_LIMIT)) {
-        await dispatch('pwrite', file.where, [part, offset])
-        offset += part.byteLength
+    const parts = chunks(data)
+    let step = await parts.next()
+    let moved = 0
+    async function* counted(): AsyncGenerator<Uint8Array> {
+      while (step.done !== true) {
+        moved += step.value.byteLength
+        yield step.value
+        step = await parts.next()
       }
+    }
+    try {
+      if (data instanceof Uint8Array) {
+        if (data.byteLength > 0) await dispatch('pwrite', file.where, [data, start])
+        moved = data.byteLength
+      } else if (step.done !== true) await dispatch('pwrite', file.where, [counted(), start])
+    } catch (err) {
+      const size = await sizeOf(dispatch, file.where)
+      if (size !== null) moved = Math.min(moved, Math.max(size - start, 0))
+      throw err
     } finally {
-      if (offset !== start) {
-        file.offset = offset
+      await parts.return?.()
+      if (moved > 0) {
+        file.offset = start + moved
         if (file.source !== null) {
           const content = (
             await dispatch('read', file.where, [], { stream: true })
           )[0] as ByteSource
-          file.source.lines = await file.source.lines.reopen(sliceStream(content, offset))
+          file.source.lines = await file.source.lines.reopen(sliceStream(content, file.offset))
         }
       }
     }

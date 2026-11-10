@@ -1,10 +1,7 @@
 use serde::Deserialize;
 
 use crate::records::{Records, Take};
-use crate::{Stream, StreamError, parse_config};
-
-/// The most a call writes, past a row's held delimiters.
-const OUTPUT: usize = 64 * 1024;
+use crate::{Stream, StreamError, constants::OUTPUT, parse_config};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -269,7 +266,7 @@ mod tests {
         assert_eq!(out, b"x\t1\nab");
         stream.feed_input(0, b"c\n", &mut out).unwrap();
         assert_eq!(out, b"x\t1\nabc\t2\n");
-        let long = vec![b'y'; crate::records::MAX_LEN * 2];
+        let long = vec![b'y'; crate::constants::MAX_HELD * 2];
         assert_eq!(
             paste(r#"{"serial":true,"inputs":[0]}"#, &[&long]),
             [long.as_slice(), b"\n"].concat()

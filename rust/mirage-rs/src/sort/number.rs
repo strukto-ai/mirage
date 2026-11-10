@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use super::key::is_blank;
+use crate::number::is_blank;
 
 /// A C-locale `-n` number at the front of a field, exact however long:
 /// optional blanks, an optional `-`, digits, an optional fraction. Zero is

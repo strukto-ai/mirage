@@ -7,16 +7,15 @@ use super::compile::{
     RSTART, SUBSEP, Var,
 };
 use super::format::{Formatter, NumberText, Output, Print};
-use super::io::{
-    Io, LIMIT, Next, Ordered, OutFile, OutPipe, Reader, Retired, STDERR_NAME, STDOUT_NAMES,
-};
+use super::io::{Io, Next, Ordered, OutFile, OutPipe, Reader, Retired, STDERR_NAME, STDOUT_NAMES};
 use super::parser::{Cmp, GetlineKind, RedirKind};
 use super::text::{
     IndexSearch, Regexes, SplitScan, StringWork, Substitution, View, split_assignment, substr,
 };
 use super::value::{
-    MAX_LEN, NumberScan, Text, Value, compare_numbers, default_number, string, strnum, to_int,
+    NumberScan, Text, Value, compare_numbers, default_number, string, strnum, to_int,
 };
+use crate::constants::{FLUSH, MAX_HELD};
 use crate::regex::Step as SearchStep;
 use crate::request::{Opening, Request, WriteMode};
 
@@ -244,7 +243,7 @@ impl Record {
                 if join.planned > 0 {
                     join.length = join.length.saturating_add(ofs.len());
                 }
-                if join.length > MAX_LEN {
+                if join.length > MAX_HELD {
                     return Err(no_memory());
                 }
                 join.planned += 1;
@@ -633,8 +632,8 @@ impl Machine {
         while !self.done
             && self.io.idle()
             && work > 0
-            && self.io.out.len() < LIMIT
-            && self.io.err.len() < LIMIT
+            && self.io.out.len() < FLUSH
+            && self.io.err.len() < FLUSH
         {
             let result = if self.pending.is_some() {
                 self.resume(&mut work)
@@ -1486,7 +1485,7 @@ impl Machine {
                 let right = self.pop_text();
                 let left = self.pop_text();
                 let len = left.len().saturating_add(right.len());
-                if len > MAX_LEN {
+                if len > MAX_HELD {
                     return Err(no_memory());
                 }
                 self.pending = Some(Pending::String(StringWork::Join {
@@ -2225,7 +2224,7 @@ impl Machine {
                 .get_mut(name)
                 .expect("opened before rendering");
             pipe.buf.extend_from_slice(body);
-            if pipe.buf.len() >= LIMIT {
+            if pipe.buf.len() >= FLUSH {
                 let (fd, data) = (pipe.fd, std::mem::take(&mut pipe.buf));
                 self.io.push(Request::Spool { fd, data });
             }
@@ -2235,7 +2234,10 @@ impl Machine {
             self.io.err.extend_from_slice(body);
         } else if let Some(file) = self.io.files_out.get_mut(name) {
             file.buf.extend_from_slice(body);
-            if file.buf.len() >= LIMIT {
+            if !std::mem::replace(&mut file.written, true) {
+                self.io.written.push(name.clone());
+            }
+            if file.buf.len() >= FLUSH {
                 self.io.send_file(name);
             }
         }

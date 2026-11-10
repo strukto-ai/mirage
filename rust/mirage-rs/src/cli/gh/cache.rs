@@ -1,6 +1,6 @@
 // Follows gh 2.85.0's pkg/cmd/cache (MIT; see licenses/third_party/gh.txt).
 
-use super::accessor::{Flags, Out, camel, repo_for, time_field, tsv, typed_out};
+use super::accessor::{Flags, Out, camel, limit_or_refuse, repo_for, time_field, tsv, typed_out};
 use crate::core::github::client::{
     Account, Failure, Pairs, Result, github_request, github_request_response, usage,
 };
@@ -60,10 +60,7 @@ fn file_size(size: i128) -> String {
 }
 
 pub(crate) async fn list_cmd(account: &Account, flags: &Flags) -> Result<Out> {
-    let limit = flags.as_int("limit").unwrap_or(30);
-    if limit < 1 {
-        return usage(format!("invalid limit: {limit}"));
-    }
+    let limit = limit_or_refuse(flags, 30)?;
     super::accessor::json_fields(flags, &CACHE_FIELDS)?;
     let repo = repo_for(account, flags)?;
     let mut params = vec![
@@ -129,7 +126,7 @@ pub(crate) async fn delete_cmd(account: &Account, flags: &Flags, texts: &[String
         return usage("--ref cannot be used with cache ID");
     }
     let repo = repo_for(account, flags)?;
-    let name = format!("{}/{}", repo.owner, repo.repo);
+    let name = repo.full();
     let mut targets = texts.to_vec();
     if all {
         let rows = caches(account, &repo, &[], i64::MAX).await?;

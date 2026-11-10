@@ -356,6 +356,24 @@ class IOResult:
     async def stderr_str(self, errors: str = "replace") -> str:
         return (await self.materialize_stderr()).decode(errors=errors)
 
+    def add_stderr(self, piece: bytes) -> None:
+        """Say ``piece`` on stderr after what the command said so far:
+        handed to a reader keeping errors among the output
+        (``stderr_pieces``), which sends it before the next chunk, else
+        joined onto ``stderr``. A command saying many as it streams adds
+        each here rather than rebuilding its whole stderr.
+
+        Args:
+            piece (bytes): what the command says.
+        """
+        if not piece:
+            return
+        if self.stderr_pieces is not None:
+            self.stderr_pieces.append(piece)
+        else:
+            held = self.stderr if isinstance(self.stderr, bytes) else b""
+            self.stderr = held + piece
+
     async def merge(self, other: "IOResult") -> "IOResult":
         # Fully consume stderr from both sides so it's never lost.
         left_stderr = await materialize(self.stderr)

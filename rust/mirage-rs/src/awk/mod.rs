@@ -18,15 +18,12 @@ mod tests;
 
 use serde::Deserialize;
 
-use crate::{Stream, StreamError, parse_config};
+use crate::{Stream, StreamError, constants::DRAIN_STEPS, parse_config};
 
 use self::compile::compile;
 use self::parser::parse;
 use self::text::unescape;
 use self::vm::{Machine, Setup};
-
-/// The steps one `drain` runs before the host may yield.
-const STEPS: usize = 20_000;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -118,7 +115,7 @@ impl Stream for Awk {
     fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
         match self {
             Awk::Running(machine) => {
-                machine.run(STEPS);
+                machine.run(DRAIN_STEPS);
                 if !machine.reporting() {
                     out.append(&mut machine.io.out);
                 }
@@ -126,7 +123,7 @@ impl Stream for Awk {
             Awk::Retiring { machine, .. } => {
                 if machine
                     .as_mut()
-                    .is_some_and(|machine| machine.retire(STEPS))
+                    .is_some_and(|machine| machine.retire(DRAIN_STEPS))
                 {
                     *machine = None;
                 }

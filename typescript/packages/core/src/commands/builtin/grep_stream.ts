@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { encodeText } from '../../shell/bytes.ts'
+import type { SharedInput } from '../../io/async_line_iterator.ts'
 import { closeQuietly } from '../../io/stream.ts'
 import { materialize, type IOResult } from '../../io/types.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
@@ -138,6 +139,29 @@ async function* drained(
  * step per `drain`, so an abort lands between steps. Mirrors Python's
  * stream_input.
  */
+/**
+ * What grep was fed past where -m leaves standard input, once it has reached
+ * -m: GNU leaves standard input read from a file just past -m's last selected
+ * line, so the next command reads on from there. Mirrors Python's
+ * `_past_position`.
+ */
+function pastPosition(
+  stream: OpenStream,
+  kept: Uint8Array[] | null,
+  block: Uint8Array,
+  fed: number,
+): Uint8Array[] | null {
+  if (kept !== null) {
+    kept.push(block.slice())
+    return kept
+  }
+  const { positioned } = JSON.parse(new TextDecoder().decode(stream.metadata())) as {
+    positioned: number | null
+  }
+  if (positioned === null) return null
+  return [block.slice(Math.min(positioned - fed, block.byteLength))]
+}
+
 export async function* streamInput(
   source: AsyncIterable<Uint8Array>,
   stream: OpenStream,
@@ -149,6 +173,7 @@ export async function* streamInput(
   signal?: AbortSignal,
   consumeAll = false,
   listLabel: string | null = null,
+  shared: SharedInput | null = null,
 ): AsyncIterable<Uint8Array> {
   const budget = new YieldBudget(signal)
   stream.begin({
@@ -159,21 +184,29 @@ export async function* streamInput(
     after_output: afterOutput,
   })
   io.exitCode = 1
+  let kept: Uint8Array[] | null = null
+  let fed = 0
   try {
     // -m0 reads nothing.
     if (!stream.done() || consumeAll) {
       for await (const chunk of source) {
         await budget.run()
         for (let offset = 0; offset < chunk.byteLength; offset += PROBE_BLOCK_BYTES) {
-          if (stream.done()) break
+          if (stream.done()) {
+            kept?.push(chunk.slice(offset))
+            break
+          }
           await budget.run()
-          const output = stream.feed(chunk.subarray(offset, offset + PROBE_BLOCK_BYTES))
-          yield* drained(stream, output, io, budget)
+          const block = chunk.subarray(offset, offset + PROBE_BLOCK_BYTES)
+          yield* drained(stream, stream.feed(block), io, budget)
+          if (shared !== null) kept = pastPosition(stream, kept, block, fed)
+          fed += block.byteLength
         }
         if (stream.done() && !consumeAll) break
       }
     }
   } finally {
+    if (shared !== null && kept !== null) shared.lines.unread(concat(kept))
     await closeQuietly(source)
   }
   yield* drained(stream, stream.finish(), io, budget)

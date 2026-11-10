@@ -30,7 +30,8 @@ from mirage.context.session_context import (
     reset_caller,
 )
 from mirage.errors.fs import eisdir
-from mirage.io.stream import close_quietly, ensure_stream, materialize
+from mirage.io.spool import spooled
+from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.rs.diff_types import DiffComputer
 from mirage.rs.find import FindExpr
@@ -94,7 +95,7 @@ async def run_dispatch(
     The builder runs as a run across mounts: no mount's command scope is
     bound around it (``crosses_mounts``), so every call it makes through
     its files reaches whichever mount serves the path. The output is read
-    before this returns, inside the running command: a ``fresh`` mount
+    into a spool before this returns, inside the running command: a ``fresh`` mount
     trusts only the listings that command made, so a lazy stream read
     after it ends would be served the previous command's. A builder that
     ``streams`` only reads, and each read opens as this command
@@ -152,4 +153,4 @@ async def run_dispatch(
     stdout, io = result
     if builder.streams:
         return stdout, io
-    return await materialize(stdout), io
+    return await spooled(stdout), io

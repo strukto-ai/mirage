@@ -135,12 +135,12 @@ describe('job output reaches the session terminal as it is written', () => {
   // they were written (bash's `b` then `a`).
   it('writes a job nested in a backgrounded subshell through its job', async () => {
     const ws = buildWs()
-    await ws.shell('( (sleep 0.15; echo a) & echo b & wait ) &')
+    const first = await ws.shell('( (sleep 0.15; echo a) & echo b & wait ) &')
     await ws.jobTable.wait(1, ws.sessionManager.defaultId)
     const job = ws.jobTable.get(1, ws.sessionManager.defaultId)
     if (job === null) throw new Error('job 1 missing')
     expect(DEC.decode(await job.console.snapshot(Channel.STDOUT))).toBe('b\na\n')
-    expect((await ws.shell('true')).stdoutText).toBe('b\na\n')
+    expect(first.stdoutText + (await ws.shell('true')).stdoutText).toBe('b\na\n')
   })
 })
 

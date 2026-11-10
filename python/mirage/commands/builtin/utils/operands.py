@@ -346,13 +346,15 @@ def operand_lines(
 
 
 async def say(io: IOResult, line: bytes) -> None:
-    """Put an operand's stderr line on ``io`` after what it holds.
+    """Say an operand's stderr line on ``io`` after what it holds.
 
     Args:
         io (IOResult): the result.
         line (bytes): the line.
     """
-    io.stderr = await materialize(io.stderr) + line
+    if io.stderr is not None and not isinstance(io.stderr, bytes):
+        await io.materialize_stderr()
+    io.add_stderr(line)
 
 
 def operands_io(err: bytes) -> IOResult:
@@ -424,8 +426,7 @@ async def report_fs_error(
         path (PathSpec): the operand that failed.
         exc (BaseException): the failure.
     """
-    existing = await materialize(io.stderr)
-    io.stderr = existing + encode_text(fs_error_line(cmd_name, path, exc))
+    await say(io, encode_text(fs_error_line(cmd_name, path, exc)))
     io.exit_code = 1
 
 

@@ -18,9 +18,12 @@ use super::builtin::invalid_module_path;
 use super::main::EXHAUSTED;
 use super::parse::{Scanned, Scanner};
 use super::syntax::{self, Def, Import, Parsed};
-use super::unicode::WORK;
 use super::value::Value;
-use crate::{Stream, StreamError, parse_config};
+use crate::{
+    Stream, StreamError,
+    constants::{MAX_LINKS, WORK},
+    parse_config,
+};
 
 /// The search list of a jq run no `-L` gave one to.
 pub(crate) const DEFAULT_SEARCH: [&str; 3] = ["~/.jq", "$ORIGIN/../lib/jq", "$ORIGIN/../lib"];
@@ -143,9 +146,6 @@ fn documents(bytes: &[u8]) -> Result<Vec<Value>, String> {
 
 /// Each symlink in the namespace and what it points at.
 pub(crate) type Links = HashMap<String, String>;
-
-/// How many links one path may pass through, as the kernel allows.
-const MAX_LINKS: usize = 40;
 
 /// `path` made absolute against `cwd`, with no `.`, `..` or link left in
 /// it, as jq_realpath leaves one that exists: a `..` after a link goes up

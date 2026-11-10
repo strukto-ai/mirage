@@ -110,10 +110,7 @@ fn exported(node: &Json, fields: &[String]) -> Json {
 
 pub(crate) async fn list_cmd(account: &Account, flags: &Flags) -> Result<Out> {
     let fields = json_fields(flags, &LABEL_FIELDS)?;
-    let limit = flags.as_int("limit").unwrap_or(30);
-    if limit < 1 {
-        return usage(format!("invalid limit: {limit}"));
-    }
+    let limit = super::accessor::limit_or_refuse(flags, 30)?;
     let search = flags.as_str("search").unwrap_or("");
     let spelled = |name: &str| account.argv_has(&format!("--{name}"));
     if !search.is_empty() && (spelled("order") || spelled("sort")) {

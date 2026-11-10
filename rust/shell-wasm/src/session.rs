@@ -45,7 +45,7 @@ fn operands_in(operands: Vec<Item>) -> Result<Vec<Operand>, String> {
                 Ok(Operand::Literal {
                     name: parts.string()?,
                     append: parts.flag()?,
-                    items: texts(parts.list()?)?,
+                    items: words(parts.list()?)?,
                 })
             }
             word => Ok(Operand::Word(one(word, Args::bytes)?)),
@@ -251,20 +251,6 @@ fn record_in(item: Item) -> Result<Var, String> {
         attrs: vars::attrs_of(&cluster),
         managed,
     })
-}
-
-fn texts(items: Vec<Item>) -> Result<Vec<Vec<u8>>, String> {
-    items
-        .into_iter()
-        .map(|item| one(item, Args::bytes))
-        .collect()
-}
-
-fn names_in(items: Vec<Item>) -> Result<Vec<String>, String> {
-    items
-        .into_iter()
-        .map(|item| one(item, Args::string))
-        .collect()
 }
 
 fn flags_in(item: Item) -> Result<HashMap<String, bool>, String> {
@@ -565,7 +551,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             let assigned = match args.maybe()? {
                 None => None,
                 Some(keys) if assoc => Some(Assigned::Keys(
-                    texts(one(keys, Args::list)?)?.into_iter().collect(),
+                    words(one(keys, Args::list)?)?.into_iter().collect(),
                 )),
                 Some(indexes) => Some(Assigned::Indexes(
                     one(indexes, Args::list)?
@@ -641,7 +627,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         }
         "push" => {
             let name = args.string()?;
-            let words = texts(args.list()?)?;
+            let words = words(args.list()?)?;
             return engine.write(handle, Write::Push { name, words }, true);
         }
         "unset_element" => {
@@ -719,8 +705,8 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         "contains" => Item::Bool(shell.store()?.record(&args.string()?).is_some()),
         "held" => Item::int(shell.0.held()),
         "hide" => {
-            let names = names_in(args.list()?)?;
-            let patterns = names_in(args.list()?)?;
+            let names = strings(args.list()?)?;
+            let patterns = strings(args.list()?)?;
             shell.store_mut()?.hide_vars(&names, &patterns);
             Item::Nil
         }
@@ -772,7 +758,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         ),
         "listing" => {
             let letters = args.string()?;
-            let skip = names_in(args.list()?)?;
+            let skip = strings(args.list()?)?;
             Item::list(
                 listing::listing(shell.store()?, &letters, &skip)
                     .into_iter()
@@ -780,7 +766,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             )
         }
         "assignments" => {
-            let skip = names_in(args.list()?)?;
+            let skip = strings(args.list()?)?;
             Item::list(
                 listing::assignments(shell.store()?, &skip)
                     .into_iter()
@@ -818,7 +804,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         }
         "in_call_env" => Item::Bool(shell.store()?.in_call_env(&args.string()?)),
         "reach_global" => {
-            let names = names_in(args.list()?)?;
+            let names = strings(args.list()?)?;
             shell.store_mut()?.reach_global(&names);
             Item::Nil
         }
@@ -830,14 +816,14 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         "frame" => {
             let positional = args
                 .maybe()?
-                .map(|item| texts(one(item, Args::list)?))
+                .map(|item| words(one(item, Args::list)?))
                 .transpose()?;
             let calls = args
                 .maybe()?
                 .map(|item| {
                     one(item, Args::list)?
                         .into_iter()
-                        .map(|call| texts(one(call, Args::list)?))
+                        .map(|call| words(one(call, Args::list)?))
                         .collect::<Result<Vec<_>, String>>()
                 })
                 .transpose()?;
@@ -859,7 +845,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 .collect::<Result<Vec<_>, String>>()?;
             let function_names = args
                 .maybe()?
-                .map(|item| texts(one(item, Args::list)?))
+                .map(|item| words(one(item, Args::list)?))
                 .transpose()?;
             let call_lines = args
                 .list()?

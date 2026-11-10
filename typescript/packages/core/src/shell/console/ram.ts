@@ -37,6 +37,7 @@ interface Waiter {
  */
 export class RAMConsoleStore implements ConsoleStore {
   private chunks: ConsoleChunk[]
+  private head = 0
   private baseSeq: number
   private nextSeq: number
   private bytes: number
@@ -87,9 +88,9 @@ export class RAMConsoleStore implements ConsoleStore {
 
   readFrom(seq: number, limit?: number): Promise<ReadResult> {
     const truncated = seq < this.baseSeq
-    const start = truncated ? 0 : Math.min(seq - this.baseSeq, this.chunks.length)
-    const window =
-      limit === undefined ? this.chunks.slice(start) : this.chunks.slice(start, start + limit)
+    const start = truncated ? 0 : Math.min(seq - this.baseSeq, this.chunks.length - this.head)
+    const at = this.head + start
+    const window = limit === undefined ? this.chunks.slice(at) : this.chunks.slice(at, at + limit)
     return Promise.resolve([window, this.baseSeq + start + window.length, truncated])
   }
 
@@ -140,17 +141,23 @@ export class RAMConsoleStore implements ConsoleStore {
     return Promise.resolve()
   }
 
+  // Drop the oldest chunks past the budget by moving the head, letting go of
+  // the dropped ones once they are half the list.
   private trim(): void {
     if (this.maxBytes === null) return
     while (this.bytes > this.maxBytes) {
-      const head = this.chunks[0]
+      const first = this.chunks[this.head]
       // The terminal chunk is what releases waitFinished() and ends
       // follow(); dropping it would leave both blocked forever, so it
       // outranks the byte budget.
-      if (head === undefined || head.channel === Channel.CONTROL) break
-      this.chunks.shift()
-      this.bytes -= head.data.byteLength
+      if (first === undefined || first.channel === Channel.CONTROL) break
+      this.head += 1
+      this.bytes -= first.data.byteLength
       this.baseSeq += 1
+    }
+    if (this.head * 2 >= this.chunks.length) {
+      this.chunks.splice(0, this.head)
+      this.head = 0
     }
   }
 

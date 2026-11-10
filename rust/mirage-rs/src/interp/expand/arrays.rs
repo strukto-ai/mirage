@@ -56,6 +56,23 @@ impl<H: Host> Expander<'_, H> {
         Some((array, keys))
     }
 
+    /// `${#a[@]}` and `${#a[*]}` of a named array: its count, read where
+    /// it lives rather than from a copy of its elements.
+    pub(super) fn splat_count(&self, p: &Braces) -> Option<usize> {
+        let subscript = p.subscript.as_deref().filter(|_| p.length)?;
+        if subscript != b"@" && subscript != b"*" {
+            return None;
+        }
+        let var = String::from_utf8_lossy(p.name.as_deref()?).into_owned();
+        Some(
+            match (self.shell.vars.assoc(&var), self.shell.indexed(&var)) {
+                (Some(map), _) => map.len(),
+                (None, Some(array)) => array.count(),
+                (None, None) => usize::from(self.shell.vars.scalar(&var).is_some()),
+            },
+        )
+    }
+
     /// A splat: one field per element, whatever the operator. A quoted `*`
     /// joins on IFS's first character. `${#a[@]}` is the count and
     /// `${!a[@]}` the keys; a slice, the per-element value operators and

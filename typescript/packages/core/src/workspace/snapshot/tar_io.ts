@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { util } from 'zod'
-import { drain } from '../../io/stream.ts'
+import { drain, yieldBytes } from '../../io/stream.ts'
 import { closeStream, openStream, serveRequests, type Served } from '../../rs/stream.ts'
 import { byteView, textView } from '../../shell/bytes.ts'
 import { VFSName } from '../../types.ts'
@@ -55,7 +55,7 @@ export async function readSnapshotTar(
   compress: CompressMode = null,
   maxBytes?: number,
 ): Promise<unknown> {
-  return unpack(once(data), null, compress, maxBytes)
+  return unpack(yieldBytes(data), null, compress, maxBytes)
 }
 
 /**
@@ -165,7 +165,7 @@ async function pack(
         const fd = request.fd as number
         if (typeof request.operand === 'number') {
           const blob = entries[request.operand - 2]?.[1] ?? new Uint8Array()
-          inputs.set(fd, typeof blob === 'string' ? regularChunks(blob) : once(blob))
+          inputs.set(fd, typeof blob === 'string' ? regularChunks(blob) : yieldBytes(blob))
         }
         const next = await inputs.get(fd)?.next()
         if (next === undefined || next.done === true) {
@@ -316,11 +316,6 @@ function counts(names: readonly string[]): Map<string, number> {
   const out = new Map<string, number>()
   for (const name of names) out.set(name, (out.get(name) ?? 0) + 1)
   return out
-}
-
-async function* once(data: Uint8Array): AsyncGenerator<Uint8Array> {
-  await Promise.resolve()
-  yield data
 }
 
 /** The manifest, the archive's first member, parsed. */

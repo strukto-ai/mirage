@@ -569,27 +569,31 @@ export async function* interleaved(
   const pieces: Uint8Array[] = []
   let told = 0
   io.stderrPieces = pieces
-  try {
-    for await (const chunk of stdout) {
-      for (const piece of pieces.slice(told)) {
-        told += 1
-        yield [Channel.STDERR, piece]
-      }
-      const err = io.stderr
-      if (
-        err instanceof Uint8Array &&
-        err.byteLength > Math.max(sent.byteLength, start) &&
-        startsWith(err, sent)
-      ) {
-        yield [Channel.STDERR, err.subarray(sent.byteLength)]
-        sent = err
-      }
-      yield [Channel.STDOUT, chunk]
+  // What `io` gained, then what it was handed, since the last chunk: a piece
+  // sends what it held first, as that came before it.
+  function* said(): Generator<[Channel, Uint8Array]> {
+    const err = io.stderr
+    const least = told < pieces.length ? 0 : start
+    if (
+      err instanceof Uint8Array &&
+      err.byteLength > Math.max(sent.byteLength, least) &&
+      startsWith(err, sent)
+    ) {
+      const grown = err.subarray(sent.byteLength)
+      sent = err
+      yield [Channel.STDERR, grown]
     }
     for (const piece of pieces.slice(told)) {
       told += 1
       yield [Channel.STDERR, piece]
     }
+  }
+  try {
+    for await (const chunk of stdout) {
+      yield* said()
+      yield [Channel.STDOUT, chunk]
+    }
+    yield* said()
   } finally {
     io.stderrPieces = null
     const err = io.stderr

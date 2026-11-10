@@ -31,7 +31,7 @@ pub(super) enum Ctype {
     Ascii,
 }
 
-const CTYPES: [(&str, Ctype); 14] = [
+pub(super) const CTYPES: [(&str, Ctype); 14] = [
     ("alnum", Ctype::Alnum),
     ("alpha", Ctype::Alpha),
     ("blank", Ctype::Blank),

@@ -7,6 +7,7 @@
 //! a heredoc's body follows the command that reads it.
 
 use super::Tree;
+use super::tree::to_u32;
 
 /// Where the printing stands and what each node it reached starts on.
 struct Layout<'a> {
@@ -415,10 +416,6 @@ fn newlines(source: &[u8], from: usize, to: usize) -> u32 {
             .get(from..to.max(from))
             .map_or(0, |gap| memchr::memchr_iter(b'\n', gap).count()),
     )
-}
-
-fn to_u32(value: usize) -> u32 {
-    u32::try_from(value).unwrap_or(u32::MAX)
 }
 
 #[cfg(test)]

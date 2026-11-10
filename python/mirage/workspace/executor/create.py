@@ -18,8 +18,7 @@ from contextlib import aclosing, asynccontextmanager
 from mirage.context import DEFAULT_UMASK
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.cooperative import chunks
-from mirage.io.spool import MEMORY_LIMIT
-from mirage.io.stream import drain, rechunk, slice_stream
+from mirage.io.stream import drain, slice_stream
 from mirage.io.types import ByteSource, OpReport
 from mirage.runtime.types import DispatchFn
 from mirage.shell.descriptors import FileDescription
@@ -128,7 +127,7 @@ async def write_description(
 ) -> None:
     """Write through a shared open file description, preserving its offset.
 
-    A write-only description lands at its offset with ``pwrite``, so it
+    A write-only description lands at its offset with one ``pwrite``, so it
     needs no read of the file, as a write to a write-only descriptor
     needs none (``exec 3>f; echo a >&3``). Its first write into a file
     still empty lands as one stream instead (``_first_write``). A
@@ -139,7 +138,10 @@ async def write_description(
     an open file: a background job writing alongside the shell neither
     reopens the file nor lands on an offset another write has not
     advanced yet. A writer killed while it waits for its turn writes
-    nothing: its cancelled task leaves the queue.
+    nothing: its cancelled task leaves the queue. A store that rewrites
+    the file per pwrite rewrites it once per write; writing nothing sends
+    none, and a write that fails leaves the offset no further than the
+    file's end.
 
     Args:
         dispatch (DispatchFn): operation dispatcher.
@@ -177,25 +179,46 @@ async def write_description(
                 dispatch, session, file.where, b"", append=file.append
             )
             file.opened = True
-        start = offset = file.offset + (
+        start = file.offset + (
             file.source.lines.position if file.source is not None else 0
         )
+        parts = chunks(data)
+        step = await anext(parts, None)
+        moved = 0
+
+        async def counted() -> AsyncIterator[bytes]:
+            nonlocal step, moved
+            while step is not None:
+                moved += len(step)
+                yield step
+                step = await anext(parts, None)
+
         try:
-            async with aclosing(rechunk(data, MEMORY_LIMIT)) as source:
-                async for part in source:
+            if isinstance(data, bytes):
+                if data:
                     await dispatch(
-                        "pwrite", file.where, data=part, offset=offset
+                        "pwrite", file.where, data=data, offset=start
                     )
-                    offset += len(part)
+                moved = len(data)
+            elif step is not None:
+                await dispatch(
+                    "pwrite", file.where, data=counted(), offset=start
+                )
+        except BaseException:
+            size = await _size_of(dispatch, file.where)
+            if size is not None:
+                moved = min(moved, max(size - start, 0))
+            raise
         finally:
-            if offset != start:
-                file.offset = offset
+            await parts.aclose()
+            if moved:
+                file.offset = start + moved
                 if file.source is not None:
                     content, _ = await dispatch(
                         "read", file.where, stream=True
                     )
                     file.source.lines = await file.source.lines.reopen(
-                        slice_stream(content, offset)
+                        slice_stream(content, file.offset)
                     )
 
 

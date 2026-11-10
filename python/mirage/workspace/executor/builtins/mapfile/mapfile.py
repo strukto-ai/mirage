@@ -39,6 +39,7 @@ from mirage.workspace.executor.builtins.shared import (
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
+from mirage.workspace.session.budget import env_limit
 from mirage.workspace.session.state import (
     session_view,
     visible_arrays,
@@ -168,6 +169,7 @@ async def handle_mapfile(
     # it, so neither -O appends nor empty records grow it past the
     # workspace's max_memory a few lines at a time.
     held = sum(_SLOT + len(encode_text(v)) for v in arr.elements.values())
+    max_env = env_limit()
     outputs: list[bytes] = []
     errors: list[bytes] = []
     while buffer is not None and (limit == 0 or stored < limit):
@@ -212,7 +214,11 @@ async def handle_mapfile(
         array_set(arr, index, text)
         stored += 1
         index += 1
-        if not found:
+        # Once the values alone pass max_env the write refuses whatever
+        # follows, so the rest is not read.
+        values = held - _SLOT * len(arr.elements)
+        over = max_env is not None and values > max_env
+        if not found or over:
             break
     try:
         await view.set(name, arr)

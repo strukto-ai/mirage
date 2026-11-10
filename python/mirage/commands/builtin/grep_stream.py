@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 from collections.abc import AsyncGenerator, AsyncIterator
 
 from mirage.commands.builtin.grep_binary import (
@@ -21,6 +22,7 @@ from mirage.commands.builtin.grep_binary import (
 )
 from mirage.commands.builtin.types import RegexSyntax
 from mirage.commands.errors import UsageError
+from mirage.io.async_line_iterator import SharedInput
 from mirage.io.stream import close_quietly
 from mirage.io.types import IOResult, materialize
 from mirage.io.yield_budget import YieldBudget
@@ -116,6 +118,7 @@ async def stream_input(
     size: int | None = None,
     consume_all: bool = False,
     list_label: str | None = None,
+    shared: SharedInput | None = None,
 ) -> AsyncGenerator[bytes, None]:
     """Run one input through the grep stream, yielding grep's output for it.
 
@@ -135,6 +138,9 @@ async def stream_input(
         size (int | None): the input's size for -T, None for a pipe.
         consume_all (bool): Drain input after selection stops to validate a trailer.
         list_label (str | None): A separate name for -l/-L output.
+        shared (SharedInput | None): standard input read from a file, which
+            -m leaves just past its last selected line, as GNU does, so the
+            next command reads on from there.
     """
     budget = YieldBudget()
     stream.begin(
@@ -149,6 +155,8 @@ async def stream_input(
         }
     )
     io.exit_code = 1
+    kept: list[bytes] | None = None
+    fed = 0
     try:
         # -m0 reads nothing.
         if not stream.done() or consume_all:
@@ -156,6 +164,8 @@ async def stream_input(
                 await budget.run()
                 for offset in range(0, len(chunk), PROBE_BLOCK_BYTES):
                     if stream.done():
+                        if kept is not None:
+                            kept.append(chunk[offset:])
                         break
                     await budget.run()
                     block = chunk[offset : offset + PROBE_BLOCK_BYTES]
@@ -163,12 +173,38 @@ async def stream_input(
                         stream, stream.feed(block), io, budget
                     ):
                         yield output
+                    if shared is not None:
+                        kept = _past_position(stream, kept, block, fed)
+                    fed += len(block)
                 if stream.done() and not consume_all:
                     break
     finally:
+        if shared is not None and kept:
+            shared.lines.unread(b"".join(kept))
         await close_quietly(source)
     async for output in drained(stream, stream.finish(), io, budget):
         yield output
+
+
+def _past_position(
+    stream: OpenStream, kept: list[bytes] | None, block: bytes, fed: int
+) -> list[bytes] | None:
+    """What grep was fed past where -m leaves standard input, once it has
+    reached -m.
+
+    Args:
+        stream (OpenStream): the grep stream.
+        kept (list[bytes] | None): what is kept so far, None before -m.
+        block (bytes): the block just fed.
+        fed (int): the bytes fed before it.
+    """
+    if kept is not None:
+        kept.append(block)
+        return kept
+    at = json.loads(stream.metadata())["positioned"]
+    if at is None:
+        return None
+    return [block[min(at - fed, len(block)) :]]
 
 
 async def drained(

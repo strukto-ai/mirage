@@ -1,13 +1,12 @@
 use flate2::{Compress, Compression, Crc, Decompress, FlushCompress, FlushDecompress, Status};
 use serde::{Deserialize, Serialize};
 
-use crate::{Stream, StreamError, parse_config};
+use crate::{Stream, StreamError, constants::OUTPUT, parse_config};
 
 mod bz2;
 mod xz;
 
 const INPUT: usize = 16 * 1024;
-const OUTPUT: usize = 64 * 1024;
 const EOF: &str = "\ngzip: {}: unexpected end of file";
 const CORRUPT: &str = "\ngzip: {}: invalid compressed data--format violated";
 

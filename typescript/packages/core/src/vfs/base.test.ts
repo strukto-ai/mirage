@@ -565,7 +565,7 @@ describe('supports', () => {
         if (!file.endsWith('.ts') || file.endsWith('.test.ts')) continue
         const source = readFileSync(`${root}${dir.name}/${file}`, 'utf8')
         if (!source.includes('filesContaining(')) continue
-        expect([file, source.includes('override supports(name: string)')]).toEqual([
+        expect([file, source.includes('searchNeedsWalkLimit: boolean = true')]).toEqual([
           file,
           guard.test(source),
         ])

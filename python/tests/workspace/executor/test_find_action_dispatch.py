@@ -1035,12 +1035,7 @@ async def test_exec_child_reads_a_slow_stdin_incrementally():
             await asyncio.sleep(3600)
 
     shared = SharedStdin(endless())
-    got = []
-    async for chunk in shared:
-        got.append(chunk)
-        if len(got) == 2:
-            break
-    assert got == [b"a", b"b"]
+    assert await anext(aiter(shared)) == b"ab"
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,7 @@ use std::hash::{Hash, Hasher};
 use std::ops::{Deref, Range};
 use std::sync::{Arc, OnceLock};
 
+use crate::number::is_blank;
 use crate::printf::number::{Rendered, render_float, render_integer};
 
 #[derive(Clone, Debug, Default)]
@@ -116,10 +117,6 @@ pub(super) fn strnum(raw: impl Into<Text>) -> Value {
     }
 }
 
-fn blank(c: u8) -> bool {
-    matches!(c, b' ' | b'\t' | b'\n')
-}
-
 /// The length of the awk number at the start of `raw`, or 0:
 /// `[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?`.
 #[cfg(test)]
@@ -154,10 +151,10 @@ fn number_len(raw: &[u8]) -> usize {
 
 #[cfg(test)]
 fn trimmed(raw: &[u8]) -> &[u8] {
-    let start = raw.iter().position(|&c| !blank(c)).unwrap_or(raw.len());
+    let start = raw.iter().position(|&c| !is_blank(c)).unwrap_or(raw.len());
     let end = raw
         .iter()
-        .rposition(|&c| !blank(c))
+        .rposition(|&c| !is_blank(c))
         .map_or(start, |at| at + 1);
     &raw[start..end]
 }
@@ -173,7 +170,7 @@ fn looks_numeric(raw: &[u8]) -> bool {
 /// starts with none.
 #[cfg(test)]
 fn parse_number(raw: &[u8]) -> f64 {
-    let start = raw.iter().position(|&c| !blank(c)).unwrap_or(raw.len());
+    let start = raw.iter().position(|&c| !is_blank(c)).unwrap_or(raw.len());
     let body = &raw[start..];
     let len = number_len(body);
     std::str::from_utf8(&body[..len])
@@ -248,7 +245,7 @@ impl NumberScan {
             *work -= 1;
             match self.phase {
                 NumberPhase::Space => {
-                    if raw.get(self.at).is_some_and(|&byte| blank(byte)) {
+                    if raw.get(self.at).is_some_and(|&byte| is_blank(byte)) {
                         self.at += 1;
                     } else {
                         self.phase = NumberPhase::Start;
@@ -315,7 +312,7 @@ impl NumberScan {
                     }
                 }
                 NumberPhase::Tail => match raw.get(self.at) {
-                    Some(&byte) if blank(byte) => self.at += 1,
+                    Some(&byte) if is_blank(byte) => self.at += 1,
                     Some(_) => return Some(self.result(false)),
                     None => return Some(self.result(true)),
                 },
@@ -324,9 +321,6 @@ impl NumberScan {
         None
     }
 }
-
-/// The most bytes one string, or one printf field, may take.
-pub(super) const MAX_LEN: usize = 1 << 30;
 
 /// A number truncated toward zero, as awk reads an integer: NaN is 0, an
 /// infinity the 64-bit edge, and a magnitude past `i128` saturates.
@@ -481,6 +475,7 @@ impl FloatSpec<'_> {
 
 #[cfg(test)]
 fn float_spec(format: &[u8]) -> Option<FloatSpec<'_>> {
+    use crate::constants::MAX_HELD;
     let rest = format.strip_prefix(b"%")?;
     let flags = rest.iter().take_while(|c| b"-+ #0".contains(c)).count();
     let width = rest[flags..]
@@ -498,7 +493,7 @@ fn float_spec(format: &[u8]) -> Option<FloatSpec<'_>> {
         at += 1 + digits;
     }
     let width = decimal(&rest[flags..flags + width]);
-    if width > MAX_LEN || precision.is_some_and(|p| p > MAX_LEN) {
+    if width > MAX_HELD || precision.is_some_and(|p| p > MAX_HELD) {
         return None;
     }
     match rest.get(at..) {

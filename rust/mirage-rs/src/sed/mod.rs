@@ -16,14 +16,11 @@ use serde::Deserialize;
 
 use crate::number;
 use crate::request::Opening;
-use crate::{Stream, StreamError, parse_config};
+use crate::{Stream, StreamError, constants::DRAIN_STEPS, parse_config};
 
 use self::exec::{Machine, Options};
 use self::io::Input;
 use self::script::{Piece, Syntax, compile};
-
-/// The steps one `drain` runs before the host may yield.
-const STEPS: usize = 20_000;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -172,7 +169,7 @@ impl Stream for Sed {
     }
 
     fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        self.machine.run(STEPS);
+        self.machine.run(DRAIN_STEPS);
         self.machine.hand_on(out);
         Ok(())
     }

@@ -5,10 +5,9 @@ use std::collections::VecDeque;
 use serde::Deserialize;
 
 use super::meter::Charge;
-use crate::{Stream, StreamError};
+use crate::{Stream, StreamError, constants::WORK};
 
 pub(super) const BLOCK: usize = 4096;
-pub(super) const WORK: usize = 16 * 1024;
 
 #[derive(Default)]
 pub(super) struct Bytes {

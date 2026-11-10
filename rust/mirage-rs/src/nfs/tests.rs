@@ -394,19 +394,28 @@ fn a_closed_connection_drops_its_waiting_call() {
 fn writes_are_refused_as_a_read_only_filesystem() {
     let tree = Tree::sample();
     let mut server = server();
-    let input = record(
-        16,
-        nfs::PROGRAM,
-        9,
-        &args(&[
-            &|o| fh(1).serialize(o).unwrap(),
-            &|o| b"new".to_vec().serialize(o).unwrap(),
-            &|o| super::nfs::sattr3::default().serialize(o).unwrap(),
-        ]),
-    );
-    let (out, _) = tree.run(&mut server, 1, &input);
-    let mut found = replies(&out);
-    assert!(matches!(status(&mut found[0].1), nfsstat3::NFS3ERR_ROFS));
+    let body = args(&[
+        &|o| fh(1).serialize(o).unwrap(),
+        &|o| b"new".to_vec().serialize(o).unwrap(),
+        &|o| o.extend([0_u8; 24]),
+    ]);
+    for proc_ in [2, 7, 8, 9, 10, 12, 13, 14] {
+        let (out, ran) = tree.run(&mut server, 1, &record(proc_, nfs::PROGRAM, proc_, &body));
+        assert_eq!(ran, 0);
+        let mut found = replies(&out);
+        let (xid, cursor) = &mut found[0];
+        assert_eq!(*xid, proc_);
+        let rest = &cursor.get_ref()[cursor.position() as usize..];
+        let wcc = if proc_ == 14 { 2 } else { 1 };
+        let expected = [vec![30_u32], vec![0; 2 * wcc]].concat();
+        assert_eq!(
+            rest,
+            expected
+                .iter()
+                .flat_map(|w| w.to_be_bytes())
+                .collect::<Vec<_>>()
+        );
+    }
 }
 
 #[test]

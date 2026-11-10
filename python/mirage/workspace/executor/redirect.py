@@ -38,13 +38,8 @@ from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput, share
 from mirage.io.cooperative import chunks as byte_chunks
 from mirage.io.errors import PipeClosed
-from mirage.io.spool import MEMORY_LIMIT, spooled_pair
-from mirage.io.stream import (
-    async_chain,
-    discard_streams,
-    materialize,
-    rechunk,
-)
+from mirage.io.spool import spooled_pair
+from mirage.io.stream import async_chain, discard_streams, materialize
 from mirage.io.types import ByteSource, DeviceInput, PipeStream
 from mirage.io.writer import ByteWriter
 from mirage.runtime.types import DispatchFn
@@ -261,10 +256,9 @@ class PipeRecorder(Recorder):
         self, file: FileDescription, offset: int, source: ByteSource
     ) -> None:
         # What comes once an op reached the file lands at the description's
-        # offset, as a descriptor's write does, a block at a time; into a
-        # file still empty as one stream, as a description's first write
-        # does, which a store that rewrites the file on each pwrite would
-        # otherwise copy block after block.
+        # offset as one streamed pwrite, as a descriptor's write does; into
+        # a file still empty as one stream, as a description's first write
+        # does.
         token = bind_caller(current_caller().changed({"streamed": ()}))
         try:
             if not offset:
@@ -272,12 +266,9 @@ class PipeRecorder(Recorder):
                     if sole:
                         await self.dispatch("write", file.where, data=source)
                         return
-            async with aclosing(rechunk(source, MEMORY_LIMIT)) as parts:
-                async for part in parts:
-                    await self.dispatch(
-                        "pwrite", file.where, data=part, offset=offset
-                    )
-                    offset += len(part)
+            await self.dispatch(
+                "pwrite", file.where, data=source, offset=offset
+            )
         finally:
             reset_caller(token)
 
