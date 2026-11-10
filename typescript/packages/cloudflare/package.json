@@ -59,7 +59,8 @@
     "@opentelemetry/api-logs": "^0.222.0",
     "@struktoai/mirage-core": "workspace:*",
     "@struktoai/mirage-server": "workspace:*",
-    "@xmldom/xmldom": "^0.9.12"
+    "@xmldom/xmldom": "^0.9.12",
+    "ssh2": "^1.16.0"
   },
   "devDependencies": {
     "@pydantic/monty": "1.4.0",

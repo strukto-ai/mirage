@@ -35,8 +35,13 @@ import { releaseNetwork, watchNetwork } from './io/network.ts'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import './commands/builtin/utils/http.ts'
 import './io/spool.ts'
-import './mount/sftp.ts'
 import './secrets/constants.ts'
+import { registerPipeServer } from '@struktoai/mirage-core/machine/mounts'
+import { PipeServer } from '@struktoai/mirage-core/mount/sftp'
+import { OWNER } from './mount/constants.ts'
+
+// A machine's files show as the mounting user's, as a kernel mount here shows them.
+registerPipeServer((files, session, run) => new PipeServer(files, session, run, OWNER))
 
 export type NodeWorkspaceOptions = WorkspaceOptions
 

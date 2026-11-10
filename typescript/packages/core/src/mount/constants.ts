@@ -22,3 +22,24 @@ export const LISTING_CONCURRENCY = 16
  * FSTAT_ROW_SECONDS.
  */
 export const FSTAT_ROW_SECONDS = 1
+
+// SFTP v3 open flags and status codes, fixed by the protocol draft.
+export const OPEN = {
+  READ: 0x01,
+  WRITE: 0x02,
+  APPEND: 0x04,
+  CREAT: 0x08,
+  TRUNC: 0x10,
+  EXCL: 0x20,
+} as const
+export const STATUS = {
+  OK: 0,
+  EOF: 1,
+  NO_SUCH_FILE: 2,
+  PERMISSION_DENIED: 3,
+  FAILURE: 4,
+  OP_UNSUPPORTED: 8,
+} as const
+
+// The size ssh2's SFTP class cuts each answer to on a sandbox's pipe.
+export const PIPE_PACKET_SIZE = 64 * 1024

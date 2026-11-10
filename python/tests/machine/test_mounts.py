@@ -45,6 +45,7 @@ from mirage.machine.constants import (
 from mirage.machine.handle import MachineHandle
 from mirage.machine.mixin import PipeTransportMixin
 from mirage.machine.mounts import (
+    kill_line,
     mount_table,
     running_line,
     top_prefixes,
@@ -97,11 +98,15 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
         self.fail_unmount = False
         self.fail_table = False
         self.fail_check = False
+        self.fail_kill = False
+        self.hang_kill = False
         self.commands: list[str] = []
         self.pipes: list[str] = []
         self.requests: dict[str, asyncio.StreamReader] = {}
         self.stopped: list[str] = []
         self.guards: list[tuple[str, ...]] = []
+        # Holds every mount table read until it is set.
+        self.gate: asyncio.Event | None = None
 
     async def connect(self) -> None:
         return None
@@ -123,8 +128,19 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
         if line == "cat /proc/mounts" and self.fail_table:
             return RunResult(stdout=b"", stderr=b"gone\n", exit_code=1)
         if line == "cat /proc/mounts":
+            await asyncio.sleep(0)
+            if self.gate is not None:
+                await self.gate.wait()
             return RunResult(
                 stdout=self.rows().encode(), stderr=None, exit_code=0
+            )
+        if line.startswith("for p in /proc/[0-9]*") and self.hang_kill:
+            await asyncio.Event().wait()
+        if line.startswith("for p in /proc/[0-9]*") and self.fail_kill:
+            raise RuntimeError("the machine went away")
+        if line.startswith("for p in /proc/[0-9]*"):
+            self.running.discard(
+                next(w[2:] for w in shlex.split(line) if w.startswith("S="))
             )
         if line.startswith("cat /proc/[0-9]*/cmdline") and self.fail_check:
             return RunResult(stdout=b"", stderr=b"", exit_code=2)
@@ -293,6 +309,47 @@ def test_the_running_line_finds_a_program_carrying_the_source():
         program.kill()
         program.wait()
         program.stdout.close()
+
+
+# It kills each program carrying the source as an argument, as sshfs does,
+# and no program carrying a shorter or another source, nor itself.
+@pytest.mark.skipif(not os.path.exists("/proc/self"), reason="needs /proc")
+def test_the_kill_line_kills_only_a_program_carrying_the_source():
+    programs = [
+        subprocess.Popen(
+            [
+                "/bin/sh",
+                "-c",
+                "echo ready; while :; do sleep 1; done",
+                "sh",
+                source,
+            ],
+            stdout=subprocess.PIPE,
+        )
+        for source in (
+            "mirage-x:/my notes",
+            "mirage-x:/my",
+            "mirage-y:/my notes",
+        )
+    ]
+    try:
+        for program in programs:
+            assert program.stdout is not None
+            assert program.stdout.readline() == b"ready\n"
+        done = subprocess.run(
+            ["/bin/sh", "-c", kill_line("mirage-x:/my notes")],
+            check=False,
+            timeout=10,
+        )
+        assert done.returncode == 0
+        programs[0].wait(timeout=10)
+        assert [p.poll() for p in programs] == [-9, None, None]
+    finally:
+        for program in programs:
+            program.kill()
+            program.wait()
+            assert program.stdout is not None
+            program.stdout.close()
 
 
 # With no process to read, the line cannot tell rather than answer that
@@ -915,6 +972,126 @@ async def test_a_server_that_ended_is_started_again():
         await asyncio.sleep(0)
     assert (await agent.shell("python3 job.py")).exit_code == 0
     assert served(sandbox) == ["/data", "/my notes", "/data"]
+    await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fails", [True, False])
+async def test_a_mount_whose_server_ended_before_it_showed_is_never_taken(
+    monkeypatch, fails
+):
+    class Server(Drain):
+        async def serve(self, reader, writer):
+            if fails:
+                raise RuntimeError("no server here")
+
+    monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
+    sandbox = FakeMachine("ssh")
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    result = await agent.shell("python3 job.py")
+    assert result.exit_code == 1
+    assert "fake: sshfs did not mount /data" in await result.stderr_str()
+    assert "python3 job.py" not in sandbox.commands
+    assert "/data" not in sandbox.table
+    assert "/data" in sandbox.stopped
+    await ws.close()
+
+
+async def _until(ready):
+    for _ in range(1000):
+        if ready():
+            return
+        await asyncio.sleep(0.001)
+    assert ready()
+
+
+# A program blocked on a mount nobody answers is freed while its line runs:
+# the sshfs is killed, then the mount is unmounted.
+@pytest.mark.asyncio
+async def test_a_mount_is_taken_down_as_soon_as_its_server_ends():
+    sandbox = FakeMachine("ssh")
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    line = asyncio.create_task(agent.shell("python3 slow.py"))
+    await _until(lambda: "python3 slow.py" in sandbox.commands)
+    source = sandbox.table["/data"][0]
+    sandbox.requests["/data"].feed_eof()
+    await _until(lambda: "/data" not in sandbox.table)
+    killed = sandbox.commands.index(kill_line(source))
+    assert (
+        sandbox.commands.index(
+            "fusermount3 -uz '/data' || fusermount -uz '/data'"
+        )
+        > killed
+    )
+    assert source not in sandbox.running
+    assert "/my notes" in sandbox.table
+    line.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await line
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    assert sandbox.stopped == ["/data"]
+    assert served(sandbox) == ["/data", "/my notes", "/data"]
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_mount_whose_sshfs_cannot_be_killed_is_still_unmounted(caplog):
+    sandbox = FakeMachine("ssh")
+    sandbox.fail_kill = True
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    sandbox.requests["/data"].feed_eof()
+    await _until(lambda: "/data" not in sandbox.table)
+    assert "fake: killing the sshfs for /data failed" in caplog.text
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_the_next_line_runs_past_a_takedown_the_machine_never_answers(
+    monkeypatch,
+):
+    monkeypatch.setattr(mounts, "UNMOUNT_WAIT_SECONDS", 0.05)
+    sandbox = FakeMachine("ssh")
+    sandbox.hang_kill = True
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    sandbox.requests["/data"].feed_eof()
+    await _until(
+        lambda: any(c.startswith("for p in /proc/") for c in sandbox.commands)
+    )
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    assert served(sandbox) == ["/data", "/my notes", "/data"]
+    await ws.close()
+
+
+# An sshfs exits while a line holds the mounts: that line serves the prefix
+# again before the ended server's takedown runs, which then leaves the new
+# sshfs, carrying the same source, alone.
+@pytest.mark.asyncio
+async def test_its_own_sshfs_that_replaced_an_ended_server_is_left_alone():
+    sandbox = FakeMachine("ssh")
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    source = sandbox.table["/data"][0]
+    gate = sandbox.gate = asyncio.Event()
+    ws.add_mount("/extra", RAMVFS(), MountMode.WRITE)
+    reads = sandbox.commands.count("cat /proc/mounts")
+    line = asyncio.create_task(agent.shell("python3 job.py"))
+    await _until(lambda: sandbox.commands.count("cat /proc/mounts") > reads)
+    sandbox.sshfs_exits("/data")
+    await asyncio.sleep(0)
+    sandbox.gate = None
+    gate.set()
+    assert (await line).exit_code == 0
+    await asyncio.sleep(0.02)
+    assert served(sandbox) == ["/data", "/my notes", "/data", "/extra"]
+    assert sandbox.table["/data"] == (source, "fuse.sshfs")
+    assert source in sandbox.running
     await ws.close()
 
 

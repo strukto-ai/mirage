@@ -12,20 +12,63 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { eexist, enoent, enotdir } from '@struktoai/mirage-core/errors/fs'
-import { MountCore } from '@struktoai/mirage-core/mount/core'
-import type { MountAttrs } from '@struktoai/mirage-core/mount/types'
-import { registerPipeServer } from '@struktoai/mirage-core/machine/mounts'
-import type { PipeWriter } from '@struktoai/mirage-core/runtime/types'
-import { S_IFDIR, S_IFLNK, S_IFMT } from '@struktoai/mirage-core/utils/stat_view'
-import type { Files } from '@struktoai/mirage-core/workspace/files'
-import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
-import { createRequire } from 'node:module'
-import { constants as osConstants } from 'node:os'
-import { posix } from 'node:path'
-import type { Attributes, FileEntry, SFTPWrapper } from 'ssh2'
-import { OPEN, OWNER, PIPE_PACKET_SIZE, SSH2_SFTP_MODULE, STATUS } from './constants.ts'
-import { classifyErrno, SFTPStatusError } from './errors.ts'
+import { classify } from '../errors/classify.ts'
+import { eexist, enoent, enotdir } from '../errors/fs.ts'
+import type { FsCondition } from '../errors/types.ts'
+import { registerPipeServer } from '../machine/mounts.ts'
+import { PolicyDenied } from '../policy/errors.ts'
+import type { PipeWriter } from '../runtime/types.ts'
+import { loadOptionalPeer } from '../utils/optional_peer.ts'
+import { posixNormpath } from '../utils/path.ts'
+import { S_IFDIR, S_IFLNK, S_IFMT } from '../utils/stat_view.ts'
+import type { Files } from '../workspace/files.ts'
+import type { SessionState } from '../workspace/session/session.ts'
+import { OPEN, PIPE_PACKET_SIZE, STATUS } from './constants.ts'
+import { MountCore } from './core.ts'
+import { messageCondition, SFTPStatusError } from './errors.ts'
+import type { MountAttrs } from './types.ts'
+
+/** An entry's SFTP attributes, as ssh2 reads and writes them. */
+export interface Attributes {
+  mode: number
+  uid: number
+  gid: number
+  size: number
+  atime: number
+  mtime: number
+}
+
+interface FileEntry {
+  filename: string
+  longname: string
+  attrs: Attributes
+}
+
+// The Buffer ssh2 takes, which core cannot name: only `buffer` makes one.
+type Ssh2Buffer = never
+
+/** What the server drives of an ssh2 SFTP channel; ssh2's own types need Node's. */
+export interface SftpChannel {
+  on(event: string, listener: (...args: never[]) => void): unknown
+  status(id: number, code: number, message?: string): unknown
+  name(id: number, names: FileEntry[]): unknown
+  attrs(id: number, attrs: Attributes): unknown
+  handle(id: number, handle: Ssh2Buffer): unknown
+  data(id: number, data: Ssh2Buffer): unknown
+  end(): unknown
+}
+
+// ssh2 answers only with a Buffer, which every host that loads ssh2 has.
+function buffer(bytes: Uint8Array): Ssh2Buffer {
+  const { Buffer } = globalThis as unknown as {
+    Buffer: { from(data: ArrayBufferLike, offset: number, length: number): Ssh2Buffer }
+  }
+  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+}
+
+function handleKey(handle: Uint8Array): string {
+  return String.fromCharCode(...handle)
+}
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const NO_ATTRS = {} as Attributes
@@ -85,8 +128,7 @@ export function longname(name: string, a: Attributes): string {
 
 /** A client path as a workspace path: absolute, normalized, never above `/`. */
 export function workspacePath(path: string): string {
-  const normal = posix.normalize('/' + path.replace(/^\/+/, ''))
-  return normal.length > 1 && normal.endsWith('/') ? normal.slice(0, -1) : normal
+  return posixNormpath('/' + path)
 }
 
 async function exists(core: MountCore, path: string): Promise<boolean> {
@@ -94,7 +136,7 @@ async function exists(core: MountCore, path: string): Promise<boolean> {
     await core.getattr(path)
     return true
   } catch (err) {
-    if (classifyErrno(err) === osConstants.errno.ENOENT) return false
+    if ((classify(err) ?? messageCondition(err)) === 'ENOENT') return false
     throw err
   }
 }
@@ -104,15 +146,26 @@ function modeOf(attrs: Partial<Attributes>): number | null {
   return typeof attrs.mode === 'number' ? attrs.mode : null
 }
 
-const DENIED = new Set([osConstants.errno.EACCES, osConstants.errno.EROFS, osConstants.errno.EPERM])
+const DENIED: ReadonlySet<FsCondition> = new Set(['EACCES', 'EROFS', 'EPERM'])
 
-/** The SFTP status and message for a failure, through the shared errno table. */
+/**
+ * The SFTP status and message for a failure, by the condition core names,
+ * its message the last resort. SFTP hands back only the status, so a
+ * policy's reason for a refusal goes to the operator log, and so does an
+ * error with neither a condition nor a code.
+ */
 function statusOf(err: unknown): [number, string] {
   if (err instanceof SFTPStatusError) return [err.status, err.message]
-  const code = classifyErrno(err)
+  if (err instanceof PolicyDenied && err.decision !== null) {
+    console.info(`policy ${err.decision.policy} refused ${err.virtualPath}: ${err.decision.reason}`)
+  }
+  const condition = classify(err) ?? messageCondition(err)
   const message = err instanceof Error ? err.message : String(err)
-  if (code === osConstants.errno.ENOENT) return [STATUS.NO_SUCH_FILE, message]
-  if (DENIED.has(code)) return [STATUS.PERMISSION_DENIED, message]
+  if (condition === 'ENOENT') return [STATUS.NO_SUCH_FILE, message]
+  if (condition !== null && DENIED.has(condition)) return [STATUS.PERMISSION_DENIED, message]
+  if (condition === null && (err as { code?: unknown } | null)?.code === undefined) {
+    console.warn(`unclassified mount error: ${String(err)}`)
+  }
   return [STATUS.FAILURE, message]
 }
 
@@ -145,7 +198,7 @@ export class MirageSFTPServer {
    *   writes failed to land, before the client gets the status.
    */
   constructor(
-    private readonly sftp: SFTPWrapper,
+    private readonly sftp: SftpChannel,
     private readonly makeCore: () => Promise<MountCore>,
     private readonly onExit?: () => Promise<void>,
     private readonly passiveSshfs = false,
@@ -156,22 +209,22 @@ export class MirageSFTPServer {
   /** Answer the client's requests; settles once it has left and its handles are released. */
   attach(): Promise<void> {
     const s = this.sftp
-    s.on('REALPATH', (id, path) => {
+    s.on('REALPATH', (id: number, path: string) => {
       this.serve(id, () => this.realpath(id, path))
     })
-    s.on('STAT', (id, path) => {
+    s.on('STAT', (id: number, path: string) => {
       this.serve(id, () => this.stat(id, path, true))
     })
-    s.on('LSTAT', (id, path) => {
+    s.on('LSTAT', (id: number, path: string) => {
       this.serve(id, () => this.stat(id, path, false))
     })
-    s.on('FSTAT', (id, handle) => {
+    s.on('FSTAT', (id: number, handle: Uint8Array) => {
       this.serve(id, () => this.fstat(id, handle))
     })
-    s.on('SETSTAT', (id, path, attrs) => {
+    s.on('SETSTAT', (id: number, path: string, attrs: Partial<Attributes>) => {
       this.serve(id, () => this.setAttrs(id, workspacePath(path), attrs))
     })
-    s.on('FSETSTAT', (id, handle, attrs) => {
+    s.on('FSETSTAT', (id: number, handle: Uint8Array, attrs: Partial<Attributes>) => {
       this.serve(id, () => {
         const f = this.file(handle)
         // Its name now belongs to another file, or to none.
@@ -179,51 +232,51 @@ export class MirageSFTPServer {
         return this.setAttrs(id, f.path, attrs)
       })
     })
-    s.on('OPENDIR', (id, path) => {
+    s.on('OPENDIR', (id: number, path: string) => {
       this.serve(id, () => this.opendir(id, path))
     })
-    s.on('READDIR', (id, handle) => {
+    s.on('READDIR', (id: number, handle: Uint8Array) => {
       this.serve(id, () => this.readdir(id, handle))
     })
-    s.on('OPEN', (id, filename, flags, attrs) => {
+    s.on('OPEN', (id: number, filename: string, flags: number, attrs: Partial<Attributes>) => {
       this.serve(id, () => this.open(id, filename, flags, attrs))
     })
-    s.on('READ', (id, handle, offset, len) => {
+    s.on('READ', (id: number, handle: Uint8Array, offset: number, len: number) => {
       this.serve(id, () => this.read(id, handle, offset, len))
     })
-    s.on('WRITE', (id, handle, offset, data) => {
+    s.on('WRITE', (id: number, handle: Uint8Array, offset: number, data: Uint8Array) => {
       this.serve(id, () => this.write(id, handle, offset, data))
     })
-    s.on('CLOSE', (id, handle) => {
+    s.on('CLOSE', (id: number, handle: Uint8Array) => {
       this.serve(id, () => this.close(id, handle))
     })
-    s.on('REMOVE', (id, path) => {
+    s.on('REMOVE', (id: number, path: string) => {
       this.serve(id, () => this.simple(id, (core) => core.unlink(workspacePath(path))))
     })
-    s.on('MKDIR', (id, path, attrs) => {
+    s.on('MKDIR', (id: number, path: string, attrs: Partial<Attributes>) => {
       this.serve(id, () =>
         this.simple(id, (core) => core.mkdir(workspacePath(path), modeOf(attrs))),
       )
     })
-    s.on('RMDIR', (id, path) => {
+    s.on('RMDIR', (id: number, path: string) => {
       this.serve(id, () => this.simple(id, (core) => core.rmdir(workspacePath(path))))
     })
-    s.on('RENAME', (id, oldPath, newPath) => {
+    s.on('RENAME', (id: number, oldPath: string, newPath: string) => {
       this.serve(id, () => this.rename(id, workspacePath(oldPath), workspacePath(newPath)))
     })
-    s.on('READLINK', (id, path) => {
+    s.on('READLINK', (id: number, path: string) => {
       this.serve(id, () => this.readlink(id, path))
     })
     // SSH channels let ssh2 normalize OpenSSH's swap. Passive sshfs pipes
     // have no peer identification, so normalize their wire order here.
     // @types/ssh2 names the emitted parameters the other way round.
-    s.on('SYMLINK', (id, linkPath, targetPath) => {
+    s.on('SYMLINK', (id: number, linkPath: string, targetPath: string) => {
       if (this.passiveSshfs) [linkPath, targetPath] = [targetPath, linkPath]
       this.serve(id, () =>
         this.simple(id, (core) => core.symlink(targetPath, workspacePath(linkPath))),
       )
     })
-    s.on('EXTENDED', (id) => {
+    s.on('EXTENDED', (id: number) => {
       this.sftp.status(id, STATUS.OP_UNSUPPORTED, 'extension not supported')
     })
     return new Promise((resolve, reject) => {
@@ -250,21 +303,21 @@ export class MirageSFTPServer {
     return this.core
   }
 
-  private addHandle(handle: OpenHandle): Buffer {
-    const id = Buffer.alloc(4)
-    id.writeUInt32BE(this.nextHandle)
+  private addHandle(handle: OpenHandle): Ssh2Buffer {
+    const id = new Uint8Array(4)
+    new DataView(id.buffer).setUint32(0, this.nextHandle)
     this.nextHandle = (this.nextHandle + 1) >>> 0
-    this.handles.set(id.toString('hex'), handle)
-    return id
+    this.handles.set(handleKey(id), handle)
+    return buffer(id)
   }
 
-  private handle(buf: Buffer): OpenHandle {
-    const handle = this.handles.get(buf.toString('hex'))
+  private handle(buf: Uint8Array): OpenHandle {
+    const handle = this.handles.get(handleKey(buf))
     if (handle === undefined) throw new SFTPStatusError(STATUS.FAILURE, 'invalid handle')
     return handle
   }
 
-  private file(buf: Buffer): OpenFile {
+  private file(buf: Uint8Array): OpenFile {
     const handle = this.handle(buf)
     if (handle.kind !== 'file') throw new SFTPStatusError(STATUS.FAILURE, 'not a file handle')
     const ctx = this.core?.handles.get(handle.fd)
@@ -290,7 +343,7 @@ export class MirageSFTPServer {
     this.sftp.attrs(id, toAttrs(await core.getattr(p, follow)))
   }
 
-  private async fstat(id: number, buf: Buffer): Promise<void> {
+  private async fstat(id: number, buf: Uint8Array): Promise<void> {
     const core = await this.mount()
     const f = this.file(buf)
     this.sftp.attrs(id, toAttrs(await core.fgetattr(f.path, f.fd)))
@@ -322,7 +375,7 @@ export class MirageSFTPServer {
     this.sftp.handle(id, this.addHandle({ kind: 'dir', path: p, done: false }))
   }
 
-  private async readdir(id: number, buf: Buffer): Promise<void> {
+  private async readdir(id: number, buf: Uint8Array): Promise<void> {
     const core = await this.mount()
     const dir = this.handle(buf)
     if (dir.kind !== 'dir') throw new SFTPStatusError(STATUS.FAILURE, 'not a directory handle')
@@ -363,7 +416,7 @@ export class MirageSFTPServer {
     this.sftp.handle(id, this.addHandle({ kind: 'file', path, fd }))
   }
 
-  private async read(id: number, buf: Buffer, offset: number, len: number): Promise<void> {
+  private async read(id: number, buf: Uint8Array, offset: number, len: number): Promise<void> {
     const core = await this.mount()
     const f = this.file(buf)
     const data = await core.read(f.path, f.fd, offset, len)
@@ -371,10 +424,15 @@ export class MirageSFTPServer {
       this.sftp.status(id, STATUS.EOF)
       return
     }
-    this.sftp.data(id, Buffer.from(data.buffer, data.byteOffset, data.byteLength))
+    this.sftp.data(id, buffer(data))
   }
 
-  private async write(id: number, buf: Buffer, offset: number, data: Buffer): Promise<void> {
+  private async write(
+    id: number,
+    buf: Uint8Array,
+    offset: number,
+    data: Uint8Array,
+  ): Promise<void> {
     const core = await this.mount()
     const f = this.file(buf)
     // A copy: the handle holds the bytes until close, and ssh2 reuses the
@@ -383,10 +441,10 @@ export class MirageSFTPServer {
     this.sftp.status(id, STATUS.OK)
   }
 
-  private async close(id: number, buf: Buffer): Promise<void> {
+  private async close(id: number, buf: Uint8Array): Promise<void> {
     const core = await this.mount()
     const handle = this.handle(buf)
-    this.handles.delete(buf.toString('hex'))
+    this.handles.delete(handleKey(buf))
     if (handle.kind === 'file') await this.release(core, handle)
     this.sftp.status(id, STATUS.OK)
   }
@@ -446,19 +504,7 @@ type Ssh2Sftp = new (
   client: { _protocol: object },
   chanInfo: object,
   cfg: { server: boolean },
-) => SFTPWrapper & { push(data: Buffer | null): void }
-
-function loadSftp(): Ssh2Sftp {
-  try {
-    const mod = createRequire(import.meta.url)(SSH2_SFTP_MODULE) as { SFTP: Ssh2Sftp }
-    return mod.SFTP
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    throw new Error(
-      `ssh2 is required to serve the workspace into a sandbox; install it as a peer dep: ${msg}`,
-    )
-  }
-}
+) => SftpChannel & { push(data: Uint8Array | null): void }
 
 /**
  * SFTP on a byte pipe as `session`, for a sandbox's sshfs.
@@ -475,17 +521,26 @@ export class PipeServer {
   // Handles whose failure a sync handed back, never handed back again.
   private readonly told = new Set<number>()
 
+  /**
+   * @param owner who owns what the mount shows when a row names its owner
+   *   by name; the core's default when not given.
+   */
   constructor(
     files: Files,
     session: SessionState,
     private readonly run: (op: () => Promise<void>) => Promise<void> = (op) => op(),
+    owner?: { uid: number; gid: number },
   ) {
-    this.core = new MountCore(files, { session, owner: OWNER })
+    this.core = new MountCore(files, { session, ...(owner === undefined ? {} : { owner }) })
   }
 
   /** Answer the client's requests until it closes the pipe. */
   async serve(reader: ReadableStream<Uint8Array>, writer: PipeWriter): Promise<void> {
-    const SFTP = loadSftp()
+    // A literal specifier, so a bundler carries ssh2 along; loaded only here, as an optional peer.
+    const { SFTP } = (await loadOptionalPeer(() => import('ssh2/lib/protocol/SFTP.js'), {
+      feature: 'serving the workspace into a machine',
+      packageName: 'ssh2',
+    })) as { SFTP: Ssh2Sftp }
     const side = () => ({ id: 0, window: Infinity, packetSize: PIPE_PACKET_SIZE, state: 'open' })
     const protocol = {
       _remoteIdentRaw: undefined,
@@ -516,7 +571,7 @@ export class PipeServer {
       for (;;) {
         const { done, value } = await chunks.read()
         if (done) break
-        sftp.push(Buffer.from(value.buffer, value.byteOffset, value.byteLength))
+        sftp.push(value)
       }
     } finally {
       sftp.push(null)

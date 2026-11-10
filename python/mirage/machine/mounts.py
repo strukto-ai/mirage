@@ -180,6 +180,25 @@ def running_line(source: str) -> str:
     )
 
 
+def kill_line(source: str) -> str:
+    """The machine command that kills every program with ``source`` as
+    one of its arguments, as an sshfs serving it has, reading ``/proc`` as
+    ``running_line`` does, so it never kills itself. SIGKILL: what the
+    server never answered can no longer land, and only the daemon's death
+    frees a program blocked on the mount.
+
+    Args:
+        source (str): the mount's source.
+    """
+    return (
+        "for p in /proc/[0-9]*; do tr '\\0\\n' '\\n\\001' "
+        '<"$p/cmdline" 2>/dev/null | '
+        f"S={single_quote(source.replace(chr(10), chr(1)))} awk "
+        "'BEGIN { s = ENVIRON[\"S\"] } $0 == s { f = 1 } END { exit !f }' "
+        '&& kill -KILL "${p#/proc/}" 2>/dev/null; done; :'
+    )
+
+
 class MachineMounts:
     """The workspace prefixes one machine sees, by its ``mount_type``.
 
@@ -258,6 +277,8 @@ class MachineMounts:
         # What each served prefix was laid over, shown again once its server ends.
         self._under: dict[str, tuple[str, str] | None] = {}
         self._lock = asyncio.Lock()
+        # Each takedown of a prefix whose server ended, until it has run.
+        self._takedowns: set[asyncio.Task[None]] = set()
         self._name = f"{SSHFS_SOURCE_PREFIX}{uuid.uuid4().hex}"
 
     @property
@@ -689,11 +710,13 @@ class MachineMounts:
             server.serve(pipe.reader, pipe.writer), context=Context()
         )
         self._served[prefix] = (pipe, task, server)
+        task.add_done_callback(lambda done: self._ended(prefix, done))
         try:
             deadline = asyncio.get_running_loop().time() + MOUNT_WAIT_SECONDS
             while True:
                 try:
-                    if (await self._table()).get(prefix) == (
+                    row = (await self._table()).get(prefix)
+                    if not task.done() and row == (
                         self._source(prefix),
                         "fuse.sshfs",
                     ):
@@ -750,6 +773,62 @@ class MachineMounts:
             if current is None or not current.cancelling():
                 await self._drop_log(log)
 
+    def _ended(self, prefix: str, task: asyncio.Task[None]) -> None:
+        """Take down the mount of a prefix whose server ended, unless a
+        line took it down already: the mount, rather than a program blocked
+        on it, is what goes. The next line drops the prefix as it does any
+        that ended. The lock keeps this off the sshfs a later line serves
+        again, which carries the same source, and a deadline keeps a
+        machine that went away from holding the lock.
+
+        Args:
+            prefix (str): the served mountpoint.
+            task (asyncio.Task[None]): the server that ended.
+        """
+        takedown = asyncio.create_task(self._take_down(prefix, task))
+        self._takedowns.add(takedown)
+        takedown.add_done_callback(self._takedowns.discard)
+
+    async def _take_down(self, prefix: str, task: asyncio.Task[None]) -> None:
+        async with self._lock:
+            if self._served.get(prefix, (None, None, None))[1] is not task:
+                return
+            try:
+                await asyncio.wait_for(
+                    self._kill_and_unmount(prefix), UNMOUNT_WAIT_SECONDS
+                )
+            except TimeoutError:
+                logger.warning(
+                    "%s: taking down %s after its server ended timed out",
+                    self._provider,
+                    prefix,
+                )
+
+    async def _kill_and_unmount(self, prefix: str) -> None:
+        await self._attempt(
+            kill_line(self._source(prefix)), f"killing the sshfs for {prefix}"
+        )
+        await self._unmount_own(prefix, await self._present())
+
+    async def _attempt(self, line: str, what: str) -> None:
+        """Run one cleanup line, warning when it fails.
+
+        Args:
+            line (str): the machine command.
+            what (str): what it does, for the warning.
+        """
+        try:
+            done = await self._run(line)
+        except Exception:
+            logger.warning(
+                "%s: %s failed", self._provider, what, exc_info=True
+            )
+            return
+        if done.exit_code != 0:
+            logger.warning(
+                "%s: %s failed: %s", self._provider, what, said(done.stderr)
+            )
+
     async def _drop_log(self, log: str) -> None:
         """Remove the helper's setup log; keeping it only costs a file.
 
@@ -787,23 +866,7 @@ class MachineMounts:
         """
         pipe, task, _ = self._served.pop(prefix)
         self._under.pop(prefix, None)
-        if present.get(prefix, ("", ""))[0] == self._source(prefix):
-            try:
-                done = await self._run(unmount_line(prefix))
-                if done.exit_code != 0:
-                    logger.warning(
-                        "%s: unmounting %s in the machine failed: %s",
-                        self._provider,
-                        prefix,
-                        said(done.stderr),
-                    )
-            except Exception:
-                logger.warning(
-                    "%s: unmounting %s in the machine failed",
-                    self._provider,
-                    prefix,
-                    exc_info=True,
-                )
+        await self._unmount_own(prefix, present)
         try:
             await pipe.stop()
             await asyncio.wait_for(task, UNMOUNT_WAIT_SECONDS)
@@ -816,21 +879,36 @@ class MachineMounts:
             )
             task.cancel()
 
+    async def _unmount_own(
+        self, prefix: str, present: dict[str, tuple[str, str]]
+    ) -> None:
+        """Unmount ``prefix`` if the mount on top is still this instance's.
+
+        Args:
+            prefix (str): the served mountpoint.
+            present (dict[str, tuple[str, str]]): the machine's mount table.
+        """
+        if present.get(prefix, ("", ""))[0] == self._source(prefix):
+            await self._attempt(
+                unmount_line(prefix), f"unmounting {prefix} in the machine"
+            )
+
+    async def _present(self) -> dict[str, tuple[str, str]]:
+        """The mount table to unmount by, or every served prefix as this
+        instance's when it cannot be read."""
+        try:
+            return await self._table()
+        except Exception:
+            logger.warning(
+                "%s: reading the mount table to unmount failed; "
+                "unmounting every served prefix",
+                self._provider,
+                exc_info=True,
+            )
+            return {p: (self._source(p), "fuse.sshfs") for p in self._served}
+
     async def _unmount(self) -> None:
-        present: dict[str, tuple[str, str]] = {}
-        if self._served:
-            try:
-                present = await self._table()
-            except Exception:
-                logger.warning(
-                    "%s: reading the mount table to unmount failed; "
-                    "unmounting every served prefix",
-                    self._provider,
-                    exc_info=True,
-                )
-                present = {
-                    p: (self._source(p), "fuse.sshfs") for p in self._served
-                }
+        present = await self._present() if self._served else {}
         for prefix in list(self._served):
             await self._drop(prefix, present)
         self._seen = None

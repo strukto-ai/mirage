@@ -86,7 +86,7 @@ export const SSHFS_SOURCE_PREFIX = 'mirage-'
 export const SSHFS_HINT =
   'serving the workspace into a machine needs sshfs there; install it in the image (apt-get update && apt-get install sshfs)'
 export const PIPE_SERVER_HINT =
-  'serving the workspace into a machine needs @struktoai/mirage-node and its ssh2 peer'
+  'this host serves no files into a machine: import @struktoai/mirage-core/mount/sftp, as node and cloudflare do, and install its ssh2 peer'
 
 /**
  * Every argv a machine runs goes under this POSIX sh prelude, with the
