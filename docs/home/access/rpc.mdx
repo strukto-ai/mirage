@@ -60,7 +60,7 @@ the header itself.
 | Method | Params | Result |
 | --- | --- | --- |
 | `initialize` | | `{server_info, protocol_version, workspace_id, session_id, methods}` |
-| `shell` | `command`, `cwd?`, `env?`, `stdin?`, `open_stdin?`, `explain?` | `{exit_code, stdout, stderr, refusal}` |
+| `shell` | `command`, `cwd?`, `env?`, `stdin?`, `open_stdin?`, `explain?` | `{exit_code, stdout, stderr, decision}` |
 | `stdin/write` | `id`, `data` | `null` |
 | `stdin/close` | `id` | `null` |
 | `vfs/<call>` | the call's arguments, `explain?` | what the call returns |
