@@ -143,16 +143,19 @@ function kib(size: number, width: number): string {
   return text
 }
 
+function usageOf(info: Process): ProcessUsage {
+  return info.usage ?? NO_USAGE
+}
+
 function ordered(rows: readonly Process[], field: string): Process[] {
-  const usage = (info: Process): ProcessUsage => info.usage ?? NO_USAGE
   const keys: Record<string, (info: Process) => number | string> = {
     PID: shownPid,
     USER: (info) => info.sessionId,
-    VIRT: (info) => usage(info).vsz,
-    RES: (info) => usage(info).rss,
-    '%CPU': (info) => usage(info).cpuPercent,
-    '%MEM': (info) => usage(info).memoryPercent,
-    'TIME+': (info) => usage(info).cpuSeconds,
+    VIRT: (info) => usageOf(info).vsz,
+    RES: (info) => usageOf(info).rss,
+    '%CPU': (info) => usageOf(info).cpuPercent,
+    '%MEM': (info) => usageOf(info).memoryPercent,
+    'TIME+': (info) => usageOf(info).cpuSeconds,
     COMMAND: (info) => info.command,
   }
   const key = keys[field] ?? shownPid

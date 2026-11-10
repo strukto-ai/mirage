@@ -199,6 +199,15 @@ def _kib(size: int, width: int) -> str:
     return text
 
 
+def _usage_of(info: Process) -> ProcessUsage:
+    """A process's usage, zero where its machine gave none.
+
+    Args:
+        info (Process): the process.
+    """
+    return info.usage or NO_USAGE
+
+
 def _ordered(rows: list[Process], field: str) -> list[Process]:
     """The rows in ``field``'s order, largest first where it is a size.
 
@@ -206,18 +215,14 @@ def _ordered(rows: list[Process], field: str) -> list[Process]:
         rows (list[Process]): the processes.
         field (str): the field.
     """
-
-    def usage(info: Process) -> ProcessUsage:
-        return info.usage or NO_USAGE
-
     keys = {
         "PID": lambda info: info.shown_pid,
         "USER": lambda info: info.session_id,
-        "VIRT": lambda info: usage(info).vsz,
-        "RES": lambda info: usage(info).rss,
-        "%CPU": lambda info: usage(info).cpu_percent,
-        "%MEM": lambda info: usage(info).memory_percent,
-        "TIME+": lambda info: usage(info).cpu_seconds,
+        "VIRT": lambda info: _usage_of(info).vsz,
+        "RES": lambda info: _usage_of(info).rss,
+        "%CPU": lambda info: _usage_of(info).cpu_percent,
+        "%MEM": lambda info: _usage_of(info).memory_percent,
+        "TIME+": lambda info: _usage_of(info).cpu_seconds,
         "COMMAND": lambda info: info.command,
     }
     ordered = sorted(rows, key=lambda info: info.shown_pid)
