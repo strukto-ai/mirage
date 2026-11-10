@@ -14,8 +14,16 @@
 
 import pytest
 
-from mirage.execution.types import CpuShares, TaskCounts
-from mirage.workspace.executor.builtins.resources.top import handle_top
+from mirage.execution.process.types import Process, ProcessUsage
+from mirage.execution.types import (
+    CpuShares,
+    LineId,
+    MachineId,
+    ProcessId,
+    TaskCounts,
+)
+from mirage.types import PathSpec
+from mirage.workspace.executor.builtins.resources.top import _since, handle_top
 from tests.fixtures.machine_resources import resources, table_of
 
 SAMPLED = {
@@ -118,3 +126,27 @@ async def test_refusals_are_in_procps_words(words: list[str], said: str):
     _, err, code = await top_of(*words)
     assert err == said
     assert code == 1
+
+
+def _busy(pid: int, cpu_seconds: float) -> Process:
+    return Process(
+        id=ProcessId("w", pid),
+        session_id="s",
+        line=LineId("line_1"),
+        parent=None,
+        group=pid,
+        command="sleep 30",
+        cwd=PathSpec.from_str_path("/"),
+        machine=MachineId("host", "box"),
+        started_at=1.0,
+        usage=ProcessUsage(cpu_seconds, 1.0, 0.0, 0, 0),
+    )
+
+
+def test_a_later_frame_shows_the_cpu_since_the_one_before():
+    samples: dict[int, tuple[float, float]] = {}
+    first = _since([_busy(7, 10.0)], samples, 100.0)
+    assert [row.usage.cpu_percent for row in first if row.usage] == [1.0]
+    later = _since([_busy(7, 11.5), _busy(8, 3.0)], samples, 102.0)
+    assert [row.usage.cpu_percent for row in later if row.usage] == [75.0, 1.0]
+    assert samples == {7: (11.5, 102.0), 8: (3.0, 102.0)}

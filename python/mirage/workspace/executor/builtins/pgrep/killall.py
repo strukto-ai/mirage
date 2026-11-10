@@ -14,8 +14,6 @@
 
 import asyncio
 
-from mirage.commands.builtin.grep_pattern import compile_pattern
-from mirage.commands.errors import UsageError
 from mirage.commands.spec.shell import SHELL_SPECS
 from mirage.commands.spec.standard import version_line
 from mirage.execution.job import JobTable
@@ -23,6 +21,8 @@ from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.types import Process
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.rs.errors import RegexError
+from mirage.rs.regex import posix_regex
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import SIGRTMAX, SIGTERM
 from mirage.shell.signals import signal_number
@@ -102,15 +102,13 @@ def _picks_of(
     """
     if regexp:
         try:
-            matcher = compile_pattern(
-                name, ignore_case=ignore_case, line_regexp=True
-            )
-        except UsageError:
+            matcher = posix_regex(name, extended=True, ignore_case=ignore_case)
+        except RegexError:
             return None
         return [
             info
             for info in rows
-            if matcher.matches_blocking(process_name(info))
+            if matcher.search_blocking(process_name(info)) is not None
         ]
 
     def folded(text: str) -> str:

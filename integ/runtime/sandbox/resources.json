@@ -459,6 +459,39 @@
           }
         }
       ]
+    },
+    {
+      "id": "wrappers_and_lookups_find_lscpu",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "microsandbox",
+        "apple_container",
+        "kubernetes"
+      ],
+      "entry": {
+        "captures": [
+          "@python",
+          "perl"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "command -v lscpu; type -t lscpu; timeout 5 lscpu | head -n 1 | grep -c mirage",
+          "expect": {
+            "exit": 0,
+            "stdout": "/usr/bin/lscpu\nfile\n1\n"
+          }
+        }
+      ]
     }
   ]
 }

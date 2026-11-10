@@ -608,7 +608,8 @@ def program(
     is a program only where a language runtime is bound to it: without
     one it answers 127, as it does on a system that never installed it.
     A function shadowing a program leaves the file in place, as it does
-    on PATH.
+    on PATH. ``lscpu`` is one wherever its view of the machines answers
+    it: a runtime runs programs and none takes the name itself.
 
     Args:
         name (str): the command word.
@@ -637,6 +638,8 @@ def program(
         ):
             return None
         return consumer
+    if name == MACHINE_VIEW and runs_programs(registry.runtime_bindings):
+        return Consumer.SESSION
     return Consumer.UNKNOWN if name in RUNNERS else None
 
 

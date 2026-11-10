@@ -12,15 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { compilePattern } from '../../../../commands/builtin/grep_pattern.ts'
-import { UsageError } from '../../../../commands/errors.ts'
 import { SHELL_SPECS } from '../../../../commands/spec/shell.ts'
 import { versionLine } from '../../../../commands/spec/standard.ts'
 import { currentCaller, type RedirectResult } from '../../../../context/session_context.ts'
 import type { JobTable } from '../../../../execution/job/index.ts'
 import { type Process, shownMachine, shownPid } from '../../../../execution/process/types.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { LineRegex } from '../../../../rs/regex.ts'
+import { RegexError } from '../../../../rs/errors.ts'
+import { type PosixRegex, posixRegex } from '../../../../rs/regex.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { SIGTERM } from '../../../../shell/constants.ts'
 import { signalNumber } from '../../../../shell/signals.ts'
@@ -50,7 +49,7 @@ type Flags = Record<string, string | boolean>
 
 /** What a search selects. Mirrors Python's `Search`. */
 interface Search {
-  readonly matcher: LineRegex | null
+  readonly matcher: PosixRegex | null
   readonly full: boolean
   readonly inverse: boolean
   readonly newest: boolean
@@ -92,13 +91,13 @@ function matcherOf(
   pattern: string | null,
   ignoreCase: boolean,
   exact: boolean,
-): [LineRegex | null, string] {
+): [PosixRegex | null, string] {
   if (pattern === null) return [null, '']
   try {
-    return [compilePattern(pattern, ignoreCase, false, false, undefined, false, exact), '']
+    return [posixRegex(exact ? `^(${pattern})$` : pattern, true, 'posix', ignoreCase), '']
   } catch (err) {
-    if (!(err instanceof UsageError)) throw err
-    return [null, `${name}: regex error: ${err.message.replace(/^grep: /, '')}\n`]
+    if (!(err instanceof RegexError)) throw err
+    return [null, `${name}: regex error: ${err.message}\n`]
   }
 }
 
@@ -181,7 +180,9 @@ async function searchFor(
     states === null &&
     parents.size === 0 &&
     groups.size === 0 &&
-    sessions.size === 0
+    sessions.size === 0 &&
+    typeof flags.u !== 'string' &&
+    typeof flags.U !== 'string'
   )
     return refused(flags, `${name}: no matching criteria specified\n${tryAgain(name)}`)
   const [matcher, bad] = matcherOf(name, pattern, flags.i === true, flags.x === true)
