@@ -312,6 +312,7 @@
             "pages": [
               "home/setup/machine/overview",
               "home/setup/machine/docker",
+              "home/setup/machine/kubernetes",
               "home/setup/machine/apple_container",
               "home/setup/machine/smolvm",
               "home/setup/machine/microsandbox",

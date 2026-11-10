@@ -8,7 +8,8 @@
         "e2b",
         "smolvm",
         "microsandbox",
-        "apple_container"
+        "apple_container",
+        "kubernetes"
       ],
       "steps": [
         {
@@ -25,7 +26,8 @@
       "id": "stdin_absent_eof",
       "runtimes": [
         "ssh",
-        "e2b"
+        "e2b",
+        "kubernetes"
       ],
       "steps": [
         {
@@ -41,7 +43,8 @@
       "id": "stdin_empty_eof",
       "runtimes": [
         "ssh",
-        "e2b"
+        "e2b",
+        "kubernetes"
       ],
       "steps": [
         {

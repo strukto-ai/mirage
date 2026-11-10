@@ -31,6 +31,7 @@ A line or a command can also name its machine: `execute(machine=)`, a
 | [Docker](/home/setup/machine/docker) | A Docker container |
 | [E2B](/home/setup/machine/e2b) | An E2B cloud sandbox |
 | [Daytona](/home/setup/machine/daytona) | A Daytona cloud sandbox |
+| [Kubernetes](/home/setup/machine/kubernetes) | A pod, including an AWS Nitro Sandbox on EKS |
 | [smolvm](/home/setup/machine/smolvm) | A microVM with its own kernel |
 | [Microsandbox](/home/setup/machine/microsandbox) | A microVM with its own kernel |
 | [Apple Container](/home/setup/machine/apple_container) | A container on macOS, a VM of its own |
@@ -108,7 +109,7 @@ mounts:
 | --- | --- |
 | Command | The captured program and its words, as typed |
 | Piped input | stdin |
-| Environment | The session's, over the config `env`, plus `MIRAGE_PROCESS`, the id of its Mirage process. Docker, Apple Container, smolvm and Microsandbox pass it on the exec command line, where other users of the host can see it in `ps`. |
+| Environment | The session's, over the config `env`, plus `MIRAGE_PROCESS`, the id of its Mirage process. Docker, Apple Container, Kubernetes, smolvm and Microsandbox pass it on the exec command line, where other users of the host can see it in `ps`. |
 | Working directory | The shell's, unchanged; one the machine lacks exits 126 |
 | Disk, network, language modules | The machine's own |
 

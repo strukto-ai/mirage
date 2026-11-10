@@ -128,7 +128,7 @@ Here `python3 job.py | grep error` runs `python3` in the container and
 | Monty, WASI, QuickJS | directly | no host files or network |
 | Pyodide | directly | Browser programs retain JavaScript and network access; `init_module` enables host access. See [containment](/typescript/runtime/python#containment). |
 | `local`, Sandlock | a [FUSE folder](/home/setup/fuse) you mount | the host's disk and network; under Sandlock, only the paths you grant |
-| `machine` | SFTP and `sshfs` with `mount_type: ssh` (`docker`, `e2b`, `ssh`, `smolvm`, `apple_container`, `microsandbox`), or a Mirage inside the machine | that machine's disk and network |
+| `machine` | SFTP and `sshfs` with `mount_type: ssh` (`docker`, `e2b`, `ssh`, `kubernetes`, `smolvm`, `apple_container`, `microsandbox`), or a Mirage inside the machine | that machine's disk and network |
 
 Mount modes, profiles and policies apply to every file call that reaches the
 workspace. A host runtime or a machine also has its own files and network,

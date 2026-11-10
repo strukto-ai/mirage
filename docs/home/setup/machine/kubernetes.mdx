@@ -1,0 +1,121 @@
+---
+title: Kubernetes
+icon: dharmachakra
+description: Run captured programs in a Kubernetes pod, including a Nitro Sandbox on EKS.
+---
+
+The `kubernetes` machine provider reaches a running pod, by name, through
+`kubectl exec`, and the `machine` runtime runs captured programs in it. You
+create the pod; Mirage only runs programs in it. Python SDK and Node.
+
+## Installation
+
+Install `kubectl` and sign it in to the cluster. Mirage uses the credentials and
+context `kubectl` already has. Create a pod that stays running:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mirage-box
+spec:
+  containers:
+    - name: main
+      image: my-mirage-image
+      command: ["sleep", "infinity"]
+```
+
+## Nitro Sandboxes on EKS
+
+To run the pod in an [AWS Nitro Sandbox](https://docs.aws.amazon.com/eks/latest/userguide/sandboxing.html),
+a lightweight VM with its own kernel, set the runtime class on it. This needs
+Kubernetes 1.36 or later.
+
+```yaml
+spec:
+  runtimeClassName: isolated-sandbox
+```
+
+Mirage needs `exec` and stdin, so use `isolated-sandbox`. A
+`confidential-sandbox` pod denies them, and programs cannot run in it.
+
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/runtime/overview#captures):
+every program Mirage does not have itself. Name `@python` to run
+Python in the pod too.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import RAMVFS, MountMode, Workspace
+    from mirage.runtime.machine import MachineRuntime
+
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"box": {"provider": "kubernetes", "pod": "mirage-box"}},
+        runtimes=[MachineRuntime(["@python", "@external"], machine="box")],
+    )
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, MachineRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { box: { provider: 'kubernetes', pod: 'mirage-box' } },
+        runtimes: [new MachineRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+      },
+    )
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    mode: exec
+    machines:
+      box:
+        provider: kubernetes
+        pod: mirage-box
+    runtimes:
+      - name: machine
+        captures: ["@python", "@external"]
+        machine: box
+    mounts:
+      /data:
+        vfs: ram
+    ```
+  </Tab>
+</Tabs>
+
+## Configuration
+
+| Field | Meaning |
+| --- | --- |
+| `pod` | Name of a running pod. Required. |
+| `namespace` | The pod's namespace. Defaults to the context's. |
+| `container` | The container in the pod. Defaults to the pod's default. |
+| `context` | The kubeconfig context. Defaults to the current one. |
+
+## Connecting the workspace
+
+Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). With `ssh`, the pod needs `sshfs` and
+access to `/dev/fuse`. With `fuse`, put `sandbox.yaml` in the pod and start Mirage:
+
+```bash
+kubectl exec mirage-box -- mirage workspace create /tmp/sandbox.yaml
+```
+
+## Notes
+
+- The pod's phase must be `Running`.
+- The working directory and environment travel on the `kubectl` command line,
+  where other users of the host can see them in `ps`.
+- A run whose connection to the pod drops ends with status 129.
+- Lines sent to one pod share its files and processes. Give each tenant its
+  own pod.

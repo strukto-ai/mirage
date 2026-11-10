@@ -1412,6 +1412,7 @@ const RUNTIME_LANGUAGE: Record<string, string | null> = {
   smolvm: null,
   microsandbox: null,
   apple_container: null,
+  kubernetes: null,
 }
 const PROGRAM_HEAD: Record<string, string> = { python: 'python3 -c', js: 'node -e' }
 // Every language a program or an `expect` may be keyed by. `node` is the
@@ -1439,6 +1440,7 @@ const RUNTIME_REQUIRES: Record<string, string[]> = {
   smolvm: ['env:MIRAGE_INTEG_SMOLVM_MACHINE'],
   microsandbox: ['env:MIRAGE_INTEG_MICROSANDBOX_SANDBOX'],
   apple_container: ['env:MIRAGE_INTEG_APPLE_CONTAINER'],
+  kubernetes: ['env:MIRAGE_INTEG_KUBERNETES_POD'],
 }
 // The world entry a runtime is built from, before a case's own `entry`
 // narrows its captures or adds config. Mirrors run.py RUNTIME_ENTRY.
@@ -1464,10 +1466,18 @@ const RUNTIME_ENTRY: Record<string, { captures?: string[]; config?: Record<strin
     captures: ['@line'],
     config: { container: '${MIRAGE_INTEG_APPLE_CONTAINER}' },
   },
+  kubernetes: { captures: ['@line'], config: { pod: '${MIRAGE_INTEG_KUBERNETES_POD}' } },
 }
 // Runtimes that need a host the hosted runners do not give every job: an
 // unmet requirement skips their variants even under INTEG_RUNTIME_STRICT.
-const OPTIONAL_RUNTIMES = new Set(['sandlock', 'e2b', 'smolvm', 'microsandbox', 'apple_container'])
+const OPTIONAL_RUNTIMES = new Set([
+  'sandlock',
+  'e2b',
+  'smolvm',
+  'microsandbox',
+  'apple_container',
+  'kubernetes',
+])
 // A machine provider's variant runs the machine runtime on a machine of that
 // provider, its config the machine's `machines:` entry. Mirrors run.py
 // `MACHINE_PROVIDERS`.
@@ -1478,6 +1488,7 @@ const MACHINE_PROVIDERS = new Set([
   'smolvm',
   'microsandbox',
   'apple_container',
+  'kubernetes',
 ])
 
 /** The world entry for one runtime of a case's matrix. Mirrors run.py `_entry`. */

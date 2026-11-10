@@ -102,7 +102,7 @@ because the runners run one case at a time. No CLI reaches a process's own
   repeat reads from the workspace file cache, as `s3` does already; its
   `expect_on` takes the backend's entry, then its own.
 - A runtime the hosted runners cannot give every job (e2b, smolvm,
-  microsandbox, apple_container, sandlock) is skipped when its requirement is unmet, even
+  microsandbox, apple_container, kubernetes, sandlock) is skipped when its requirement is unmet, even
   under `INTEG_RUNTIME_STRICT=1`.
 
 ## Running
@@ -123,7 +123,8 @@ bash integ/runtime/cli.sh python/.venv/bin/mirage "node typescript/packages/cli/
 ```
 
 `INTEG_RUNTIMES=e2b` keeps only the named runtimes' variants; CI's
-`integ-e2b` and `integ-microsandbox` jobs run `sandbox` that way.
+`integ-e2b`, `integ-microsandbox` and `integ-kubernetes` jobs run `sandbox`
+that way.
 
 | Needs                                        | For                                                 |
 | -------------------------------------------- | --------------------------------------------------- |
@@ -139,9 +140,10 @@ bash integ/runtime/cli.sh python/.venv/bin/mirage "node typescript/packages/cli/
 | `MIRAGE_INTEG_SMOLVM_MACHINE`                | smolvm                                              |
 | `MIRAGE_INTEG_MICROSANDBOX_SANDBOX`          | microsandbox                                        |
 | `MIRAGE_INTEG_APPLE_CONTAINER`               | apple_container                                     |
+| `MIRAGE_INTEG_KUBERNETES_POD`                | kubernetes                                          |
 | `MIRAGE_INTEG_SANDLOCK`                      | sandlock                                            |
 
 With `INTEG_RUNTIME_STRICT=1` an unmet requirement fails instead of
-skipping. `MIRAGE_INTEG_BOX_MOUNTS` says the docker, e2b or microsandbox
-guest has sshfs, FUSE, and a mount of its own at `/boxdata` holding `own.txt`
+skipping. `MIRAGE_INTEG_BOX_MOUNTS` says the docker, e2b, microsandbox or
+kubernetes guest has sshfs, FUSE, and a mount of its own at `/boxdata` holding `own.txt`
 (`box`).

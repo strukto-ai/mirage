@@ -112,6 +112,7 @@ RUNTIME_LANGUAGE: dict[str, str | None] = {
     "smolvm": None,
     "microsandbox": None,
     "apple_container": None,
+    "kubernetes": None,
 }
 PROGRAM_HEAD: dict[str, str] = {"python": "python3 -c", "js": "node -e"}
 # Every language a program or an `expect` may be keyed by. `node` is the
@@ -140,6 +141,7 @@ RUNTIME_REQUIRES: dict[str, list[str]] = {
     "smolvm": ["env:MIRAGE_INTEG_SMOLVM_MACHINE"],
     "microsandbox": ["env:MIRAGE_INTEG_MICROSANDBOX_SANDBOX"],
     "apple_container": ["env:MIRAGE_INTEG_APPLE_CONTAINER"],
+    "kubernetes": ["env:MIRAGE_INTEG_KUBERNETES_POD"],
 }
 # The world entry a runtime is built from, before a case's own `entry`
 # narrows its captures or adds config. A machine provider's variant runs
@@ -177,9 +179,21 @@ RUNTIME_ENTRY: dict[str, dict[str, Any]] = {
         "captures": ["@line"],
         "config": {"container": "${MIRAGE_INTEG_APPLE_CONTAINER}"},
     },
+    "kubernetes": {
+        "captures": ["@line"],
+        "config": {"pod": "${MIRAGE_INTEG_KUBERNETES_POD}"},
+    },
 }
 MACHINE_PROVIDERS = frozenset(
-    {"docker", "ssh", "e2b", "smolvm", "microsandbox", "apple_container"}
+    {
+        "docker",
+        "ssh",
+        "e2b",
+        "smolvm",
+        "microsandbox",
+        "apple_container",
+        "kubernetes",
+    }
 )
 # Runtimes that need a host the hosted runners do not give every job
 # (a live sandbox, a hypervisor, Landlock): an unmet requirement skips
@@ -190,6 +204,7 @@ OPTIONAL_RUNTIMES = {
     "smolvm",
     "microsandbox",
     "apple_container",
+    "kubernetes",
 }
 
 _moto_server: Any = None
