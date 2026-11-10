@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { compilePattern } from '../../../../commands/builtin/grep_pattern.ts'
-import { UsageError } from '../../../../commands/errors.ts'
 import { SHELL_SPECS } from '../../../../commands/spec/shell.ts'
 import { versionLine } from '../../../../commands/spec/standard.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
@@ -21,6 +19,8 @@ import type { JobTable } from '../../../../execution/job/index.ts'
 import type { ProcessHandle } from '../../../../execution/process/handle.ts'
 import { type Process, shownPid } from '../../../../execution/process/types.ts'
 import { IOResult } from '../../../../io/types.ts'
+import { RegexError } from '../../../../rs/errors.ts'
+import { posixRegex } from '../../../../rs/regex.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { SIGRTMAX, SIGTERM } from '../../../../shell/constants.ts'
 import { signalNumber } from '../../../../shell/signals.ts'
@@ -63,9 +63,9 @@ async function picksOf(
   if (regexp) {
     let matcher
     try {
-      matcher = compilePattern(name, ignoreCase, false, false, undefined, false, true)
+      matcher = posixRegex(name, true, 'posix', ignoreCase)
     } catch (err) {
-      if (!(err instanceof UsageError)) throw err
+      if (!(err instanceof RegexError)) throw err
       return null
     }
     const picks: Process[] = []

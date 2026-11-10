@@ -508,7 +508,9 @@ export function lookupAll(
  * An interpreter (python3, node) is a program only where a language
  * runtime is bound to it: without one it answers 127, as it does on a
  * system that never installed it. A function shadowing a program leaves
- * the file in place, as it does on PATH.
+ * the file in place, as it does on PATH. `lscpu` is one wherever its view of
+ * the machines answers it: a runtime runs programs and none takes the name
+ * itself.
  */
 export function program(
   name: string,
@@ -528,6 +530,7 @@ export function program(
     if (consumer === Consumer.EXTERNAL && registry.runtimeBindings[name] === undefined) return null
     return consumer
   }
+  if (name === MACHINE_VIEW && runsPrograms(registry.runtimeBindings)) return Consumer.SESSION
   return RUNNERS.has(name) ? Consumer.UNKNOWN : null
 }
 

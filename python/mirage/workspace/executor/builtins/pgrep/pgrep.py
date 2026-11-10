@@ -14,8 +14,6 @@
 
 from dataclasses import dataclass
 
-from mirage.commands.builtin.grep_pattern import compile_pattern
-from mirage.commands.errors import UsageError
 from mirage.commands.spec.shell import SHELL_SPECS
 from mirage.commands.spec.standard import version_line
 from mirage.context import current_caller
@@ -23,7 +21,8 @@ from mirage.execution.job import JobTable
 from mirage.execution.process.types import Process
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.rs.regex import LineRegex
+from mirage.rs.errors import RegexError
+from mirage.rs.regex import PosixRegex, posix_regex
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import SIGTERM
 from mirage.shell.signals import signal_number
@@ -86,7 +85,7 @@ class Search:
     """What a search selects.
 
     Args:
-        matcher (LineRegex | None): the pattern; None for every name.
+        matcher (PosixRegex | None): the pattern; None for every name.
         full (bool): ``-f``, match the whole command line.
         inverse (bool): ``-v``.
         newest (bool): ``-n``.
@@ -98,7 +97,7 @@ class Search:
         states (str): ``-r``'s state letters.
     """
 
-    matcher: LineRegex | None
+    matcher: PosixRegex | None
     full: bool
     inverse: bool
     newest: bool
@@ -146,9 +145,9 @@ def _numbers(name: str, text: str) -> tuple[frozenset[int], str]:
 
 def _matcher_of(
     name: str, pattern: str | None, ignore_case: bool, exact: bool
-) -> tuple[LineRegex | None, str]:
-    """A search's pattern, compiled as an extended regular expression,
-    or why it does not compile.
+) -> tuple[PosixRegex | None, str]:
+    """A search's pattern, compiled as one extended regular expression
+    over the whole name or line, or why it does not compile.
 
     Args:
         name (str): the command.
@@ -160,14 +159,15 @@ def _matcher_of(
         return None, ""
     try:
         return (
-            compile_pattern(
-                pattern, ignore_case=ignore_case, line_regexp=exact
+            posix_regex(
+                f"^({pattern})$" if exact else pattern,
+                extended=True,
+                ignore_case=ignore_case,
             ),
             "",
         )
-    except UsageError as exc:
-        reason = str(exc).removeprefix("grep: ")
-        return None, f"{name}: regex error: {reason}\n"
+    except RegexError as exc:
+        return None, f"{name}: regex error: {exc.message}\n"
 
 
 def _selected(
@@ -197,7 +197,7 @@ def _selected(
         return (
             (
                 search.matcher is None
-                or search.matcher.matches_blocking(haystack)
+                or search.matcher.search_blocking(haystack) is not None
             )
             and (not search.parents or parent in search.parents)
             and (not search.groups or group in search.groups)
@@ -268,6 +268,8 @@ async def _search_for(
         or older is not None
         or isinstance(states, str)
         or any(numbered.values())
+        or isinstance(flags.get("u"), str)
+        or isinstance(flags.get("U"), str)
     )
     if not criteria:
         said = f"{name}: no matching criteria specified\n{_try_again(name)}"

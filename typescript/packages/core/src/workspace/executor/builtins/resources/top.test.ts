@@ -14,13 +14,15 @@
 
 import { describe, expect, it } from 'vitest'
 import type { JobTable } from '../../../../execution/job/index.ts'
-import type { MachineResources } from '../../../../execution/types.ts'
+import type { Process } from '../../../../execution/process/types.ts'
+import { LineId, MachineId, type MachineResources, ProcessId } from '../../../../execution/types.ts'
+import { PathSpec } from '../../../../types.ts'
 import {
   decoded,
   resources,
   tableOf,
 } from '../../../../../tests/workspace/fixtures/machine_resources.ts'
-import { handleTop } from './top.ts'
+import { handleTop, since } from './top.ts'
 
 const SAMPLED: Partial<MachineResources> = {
   tasks: { total: 60, running: 1, sleeping: 59, stopped: 0, zombie: 0 },
@@ -42,6 +44,29 @@ const SAMPLED: Partial<MachineResources> = {
   cached: Math.trunc(119.7 * 1024 ** 2),
   swapTotal: 0,
   swapFree: 0,
+}
+
+function busy(pid: number, cpuSeconds: number): Process {
+  return {
+    id: new ProcessId('w', pid),
+    sessionId: 's',
+    line: new LineId('line_1'),
+    parent: null,
+    group: pid,
+    command: 'sleep 30',
+    cwd: PathSpec.fromStrPath('/'),
+    machine: new MachineId('host', 'box'),
+    startedAt: 1,
+    runtime: null,
+    machinePid: null,
+    state: 'running',
+    endedAt: null,
+    exit: null,
+    signal: null,
+    error: null,
+    ancestors: [],
+    usage: { cpuSeconds, cpuPercent: 1, memoryPercent: 0, rss: 0, vsz: 0 },
+  }
 }
 
 async function topOf(
@@ -100,5 +125,17 @@ describe('top', () => {
     [['-bn1', 'extra'], "top: unknown option 'extra'\n"],
   ])('refuses %j in procps words', async (words: string[], said: string) => {
     expect((await topOf(words)).slice(1)).toEqual([said, 1])
+  })
+
+  it('shows the cpu since the frame before in a later frame', () => {
+    const samples = new Map<number, [number, number]>()
+    const first = since([busy(7, 10)], samples, 100)
+    expect(first.map((row) => row.usage?.cpuPercent)).toEqual([1])
+    const later = since([busy(7, 11.5), busy(8, 3)], samples, 102)
+    expect(later.map((row) => row.usage?.cpuPercent)).toEqual([75, 1])
+    expect([...samples]).toEqual([
+      [7, [11.5, 102]],
+      [8, [3, 102]],
+    ])
   })
 })

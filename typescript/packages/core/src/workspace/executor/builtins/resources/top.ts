@@ -205,11 +205,37 @@ function table(
   return lines
 }
 
+/**
+ * The rows with each one's `%CPU` over the time since the frame before, as top
+ * shows a frame after its first; a process that frame did not see keeps its
+ * average over its life. `samples` then holds this frame's: each pid's CPU
+ * seconds and when they were read, on a monotonic clock. Mirrors Python's
+ * `_since`.
+ */
+export function since(
+  rows: readonly Process[],
+  samples: Map<number, [number, number]>,
+  now: number,
+): Process[] {
+  const before = new Map(samples)
+  samples.clear()
+  return rows.map((info) => {
+    const usage = info.usage
+    if (usage === undefined || usage === null) return info
+    samples.set(info.id.pid, [usage.cpuSeconds, now])
+    const seen = before.get(info.id.pid)
+    if (seen === undefined || now <= seen[1]) return info
+    const spent = Math.max(0, usage.cpuSeconds - seen[0])
+    return { ...info, usage: { ...usage, cpuPercent: (spent / (now - seen[1])) * 100 } }
+  })
+}
+
 async function frameOf(
   jobTable: JobTable,
   session: SessionState | null,
   scope: MachineScope,
   options: TopOptions,
+  samples: Map<number, [number, number]>,
 ): Promise<[string, string]> {
   const processes = jobTable.processes
   const [machines, errors] = await readMachines(processes, scope, 'top', true)
@@ -229,10 +255,11 @@ async function frameOf(
     for (const line of block(row, options.scale))
       lines.push(scope.several ? withMachine(line, row.machine) : line)
   lines.push('')
-  lines.push(...table(rows, options, scope.several, session?.profile ?? null))
-  const shown =
+  const shown = since(rows, samples, performance.now() / 1000)
+  lines.push(...table(shown, options, scope.several, session?.profile ?? null))
+  const cut =
     options.narrowed && !scope.several ? lines.map((line) => line.slice(0, options.width)) : lines
-  return [shown.map((line) => `${line}\n`).join(''), errors]
+  return [cut.map((line) => `${line}\n`).join(''), errors]
 }
 
 async function* framesOf(
@@ -243,6 +270,7 @@ async function* framesOf(
   options: TopOptions,
   io: IOResult,
   node: ExecutionNode,
+  samples: Map<number, [number, number]>,
   signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
   try {
@@ -250,7 +278,7 @@ async function* framesOf(
     let done = 1
     while (options.iterations === null || done < options.iterations) {
       await sleep(options.delay * 1000, signal)
-      const [text, errors] = await frameOf(jobTable, session, scope, options)
+      const [text, errors] = await frameOf(jobTable, session, scope, options, samples)
       if (errors !== '') await tellOnce(io, node, errors)
       yield encodeText(`\n${text}`)
       done += 1
@@ -345,7 +373,8 @@ export async function handleTop(
   const named = typeof name === 'string' ? name : null
   const scope = machineScope(jobTable.processes, named)
   if (scope === null) return jobResult(cmdStr, `top: ${named ?? ''}: no such machine\n`, 1)
-  const [text, errors] = await frameOf(jobTable, session, scope, options)
+  const samples = new Map<number, [number, number]>()
+  const [text, errors] = await frameOf(jobTable, session, scope, options, samples)
   const code = errors === '' ? 0 : 1
   const err = errors === '' ? null : encodeText(errors)
   const io = new IOResult({ exitCode: code, stderr: err })
@@ -356,6 +385,6 @@ export async function handleTop(
   })
   if (options.iterations === 1) return [encodeText(text), io, node]
   io.output = new OutputState()
-  const out = framesOf(text, jobTable, session, scope, options, io, node, signal)
+  const out = framesOf(text, jobTable, session, scope, options, io, node, samples, signal)
   return [out, io, node]
 }

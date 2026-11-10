@@ -13,8 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from mirage.commands.builtin.utils.identity import UNKNOWN_NAME
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
@@ -287,11 +288,47 @@ def _table(
     return lines
 
 
+def _since(
+    rows: list[Process],
+    samples: dict[int, tuple[float, float]],
+    now: float,
+) -> list[Process]:
+    """The rows with each one's ``%CPU`` over the time since the frame
+    before, as top shows a frame after its first; a process that frame
+    did not see keeps its average over its life. ``samples`` then holds
+    this frame's.
+
+    Args:
+        rows (list[Process]): the processes this frame shows.
+        samples (dict[int, tuple[float, float]]): each pid's CPU seconds
+            and when the frame before read them.
+        now (float): when this frame read them, on a monotonic clock.
+    """
+    before = dict(samples)
+    samples.clear()
+    shown: list[Process] = []
+    for info in rows:
+        usage = info.usage
+        if usage is None:
+            shown.append(info)
+            continue
+        samples[info.pid] = (usage.cpu_seconds, now)
+        seen = before.get(info.pid)
+        if seen is None or now <= seen[1]:
+            shown.append(info)
+            continue
+        spent = max(0.0, usage.cpu_seconds - seen[0])
+        percent = spent / (now - seen[1]) * 100
+        shown.append(replace(info, usage=replace(usage, cpu_percent=percent)))
+    return shown
+
+
 async def _frame_of(
     job_table: JobTable,
     session: SessionState | None,
     scope: MachineScope,
     options: TopOptions,
+    samples: dict[int, tuple[float, float]],
 ) -> tuple[str, str]:
     """One frame of output, and what the machines that did not answer
     said.
@@ -301,6 +338,8 @@ async def _frame_of(
         session (SessionState | None): the shell session.
         scope (MachineScope): the machines.
         options (TopOptions): how to print.
+        samples (dict[int, tuple[float, float]]): the frame before's CPU
+            readings, which this frame's replace (``_since``).
     """
     processes = job_table.processes
     machines, errors = await read_machines(processes, scope, "top", cpu=True)
@@ -323,7 +362,8 @@ async def _frame_of(
             )
     lines.append("")
     profile = session.profile if session is not None else None
-    lines += _table(rows, options, scope.several, profile)
+    shown = _since(rows, samples, time.monotonic())
+    lines += _table(shown, options, scope.several, profile)
     if options.narrowed and not scope.several:
         lines = [line[: options.width] for line in lines]
     return "".join(f"{line}\n" for line in lines), errors
@@ -337,6 +377,7 @@ async def _frames_of(
     options: TopOptions,
     io: IOResult,
     node: ExecutionNode,
+    samples: dict[int, tuple[float, float]],
 ) -> AsyncIterator[bytes]:
     """The first frame, then one every ``delay`` until ``iterations``.
     A machine that stops answering says so on stderr, and the command
@@ -350,13 +391,17 @@ async def _frames_of(
         options (TopOptions): how to print.
         io (IOResult): the result, settled as the output ends.
         node (ExecutionNode): the command's node, settled with it.
+        samples (dict[int, tuple[float, float]]): the first frame's CPU
+            readings.
     """
     try:
         yield encode_text(first)
         done = 1
         while options.iterations is None or done < options.iterations:
             await asyncio.sleep(options.delay)
-            text, errors = await _frame_of(job_table, session, scope, options)
+            text, errors = await _frame_of(
+                job_table, session, scope, options, samples
+            )
             if errors:
                 await tell_once(io, node, errors)
             yield encode_text(f"\n{text}")
@@ -471,7 +516,8 @@ async def handle_top(
     scope = machine_scope(job_table.processes, named)
     if scope is None:
         return job_result(cmd_str, f"top: {named}: no such machine\n", 1)
-    text, errors = await _frame_of(job_table, session, scope, options)
+    samples: dict[int, tuple[float, float]] = {}
+    text, errors = await _frame_of(job_table, session, scope, options, samples)
     code = 1 if errors else 0
     err = encode_text(errors) or None
     io = IOResult(exit_code=code, stderr=err)
@@ -479,5 +525,7 @@ async def handle_top(
     if options.iterations == 1:
         return encode_text(text), io, node
     io.output = OutputState()
-    out = _frames_of(text, job_table, session, scope, options, io, node)
+    out = _frames_of(
+        text, job_table, session, scope, options, io, node, samples
+    )
     return out, io, node
