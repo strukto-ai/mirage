@@ -1616,7 +1616,8 @@ def wire_failure(status: int, body: Any) -> dict[str, Any]:
         status (int): the response status.
         body (Any): its JSON body.
     """
-    errno = body.get("errno") if isinstance(body, dict) else None
+    error = body.get("error") if isinstance(body, dict) else None
+    errno = error.get("errno") if isinstance(error, dict) else None
     return {"errno": errno or f"HTTP {status}"}
 
 
