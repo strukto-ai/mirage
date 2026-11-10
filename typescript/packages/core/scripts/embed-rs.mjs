@@ -18,10 +18,11 @@ const output = new URL('../src/generated/', import.meta.url)
 const built = new URL('../dist/generated/', import.meta.url)
 
 // Build one crate's module and write the files its `#mirage-*-wasm` import
-// names. The streams module stays at opt-level 2 to fit the browser's limit;
-// the shell module, a fraction of it, takes the profile's 3; gh's, which waits
-// on GitHub, is built for size. `small` names the crates built for size inside
-// a module, the codecs and parsers no hot loop waits on.
+// names. The streams module's dependencies and its LTO run at opt-level 2 to
+// fit the browser's limit, mirage-rs at the profile's 3 (awk is a tenth slower
+// at 2), as does the shell module; gh's, which waits on GitHub, is built for
+// size. `small` names the crates built for size inside a module, the codecs and
+// parsers no hot loop waits on.
 function embed(crate, name, build, small = []) {
   let messages
   try {
@@ -101,7 +102,7 @@ function embed(crate, name, build, small = []) {
 embed(
   'mirage-rs-wasm',
   'mirage_rs',
-  ['--release', '--', '-C', 'opt-level=2'],
+  ['--release', '--config', 'profile.release.package."*".opt-level=2', '--', '-C', 'opt-level=2'],
   [
     'lzma-rust2',
     'libbz2-rs-sys',
