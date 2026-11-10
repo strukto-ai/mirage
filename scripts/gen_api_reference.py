@@ -279,7 +279,11 @@ def response_content(doc: dict[str, Any], op: dict[str, Any]) -> str:
             "HTTP/1.1 200 OK\nContent-Type: application/json",
             "```",
         ]
-    elif streamed is not None and "example" not in streamed:
+    elif (
+        streamed is not None
+        and "example" not in streamed
+        and "example" in generic
+    ):
         example = [
             "```json 200",
             json.dumps(generic["example"], indent=2),
@@ -588,6 +592,17 @@ def selftest() -> None:
     )
     assert streamed_response.count("```json 200") == 1
     assert '```json 200\n{\n  "id": "demo"\n}\n```' in streamed_response
+    for content in (
+        {"application/x-ndjson": {"schema": {"type": "string"}}},
+        {
+            "application/json": {"schema": {"type": "object"}},
+            "application/x-ndjson": {"schema": {"type": "string"}},
+        },
+    ):
+        unexampled = response_content(
+            doc, {"responses": {"200": {"content": content}}}
+        )
+        assert "```json 200" not in unexampled
     print("API reference self-test passed")
 
 
