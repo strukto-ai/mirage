@@ -469,7 +469,7 @@ function explained(expl: ShellExplanation | VfsExplanation): Record<string, unkn
     outcome: expl.outcome,
     reason: expl.reason,
     answers: answered(expl.answers),
-    refusal: expl.refusal?.kind ?? null,
+    decision: expl.decision?.kind ?? null,
   }
   if ('call' in expl) return { call: expl.call, ...verdict, error: expl.error }
   return {
@@ -685,7 +685,7 @@ async function action(
             exit_code: outcome.result.exitCode,
             stdout: outcome.result.stdoutText,
             stderr: outcome.result.stderrText,
-            refusal: outcome.result.refusal?.reason ?? null,
+            decision: outcome.result.decision?.reason ?? null,
           }
         }
       } finally {
@@ -753,7 +753,7 @@ async function action(
         exit_code: result.exitCode,
         stdout: result.stdoutText,
         stderr: result.stderrText,
-        refusal: result.refusal?.reason ?? null,
+        decision: result.decision?.reason ?? null,
         ...(sink === undefined
           ? {}
           : { streamed: DEC.decode(await sink.snapshot(Channel.STDOUT)) }),
@@ -867,7 +867,8 @@ async function run(host: Host, testCase: Case): Promise<number> {
         actual = { error: err instanceof Error ? err.message : String(err) }
         const condition = classify(err)
         if (condition !== null) actual.errno = condition
-        if (err instanceof PolicyDenied && err.refusal !== null) actual.reason = err.refusal.reason
+        if (err instanceof PolicyDenied && err.decision !== null)
+          actual.reason = err.decision.reason
       }
       const expected = step.expect ?? { value: null }
       if (!matches(actual, expected)) {

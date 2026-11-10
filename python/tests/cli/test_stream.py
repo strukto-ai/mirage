@@ -302,7 +302,7 @@ async def test_json_collects_channels_and_preserves_metadata(
                     status="done",
                     result={
                         "exit_code": 7,
-                        "refusal": {"reason": "test"},
+                        "decision": {"reason": "test"},
                     },
                     error=None,
                 )
@@ -342,7 +342,7 @@ async def test_json_collects_channels_and_preserves_metadata(
             stderr.seek(0)
             assert json.load(stdout) == {
                 "exit_code": 7,
-                "refusal": {"reason": "test"},
+                "decision": {"reason": "test"},
                 "stdout": "€�\0",
                 "stderr": "diagnostic",
             }
@@ -362,7 +362,7 @@ async def _refused_shell(request):
                 status="done",
                 result={
                     "exit_code": 126,
-                    "refusal": {
+                    "decision": {
                         "kind": "deny",
                         "reason": "no deletes",
                         "policy": "Guard",
@@ -376,7 +376,7 @@ async def _refused_shell(request):
     )
 
 
-async def test_raw_output_ends_with_the_refusal_line(monkeypatch, tmp_path):
+async def test_raw_output_ends_with_the_decision_line(monkeypatch, tmp_path):
     app = web.Application()
     app.router.add_post("/shell", _refused_shell)
     runner = web.AppRunner(app)

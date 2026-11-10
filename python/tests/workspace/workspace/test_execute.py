@@ -376,8 +376,8 @@ async def test_command_name_keeps_the_record_the_inner_line_earned():
     io = await ws.shell('V=secret; command echo "$V"')
     assert io.exit_code == 126
     assert io.stderr == b"echo: Permission denied\n"
-    assert io.refusal is not None
-    assert io.refusal.reason == "secrets stay put"
+    assert io.decision is not None
+    assert io.decision.reason == "secrets stay put"
 
 
 @pytest.mark.asyncio
@@ -385,8 +385,8 @@ async def test_eval_keeps_the_record_the_inner_line_earned():
     ws = _policed_ws()
     io = await ws.shell('V=secret; eval "echo $V"')
     assert io.exit_code == 126
-    assert io.refusal is not None
-    assert io.refusal.reason == "secrets stay put"
+    assert io.decision is not None
+    assert io.decision.reason == "secrets stay put"
 
 
 # A substitution keeps only the inner stdout, so its record has to
@@ -396,8 +396,8 @@ async def test_a_substitution_keeps_the_record_the_inner_line_earned():
     ws = _policed_ws()
     io = await ws.shell('V=secret; X=$(echo "$V")')
     assert io.exit_code == 126
-    assert io.refusal is not None
-    assert io.refusal.reason == "secrets stay put"
+    assert io.decision is not None
+    assert io.decision.reason == "secrets stay put"
 
 
 @pytest.mark.asyncio
@@ -406,8 +406,8 @@ async def test_an_unrefused_outer_command_still_reports_the_inner_record():
     io = await ws.shell('V=secret; echo "[$(echo "$V")]"')
     assert io.exit_code == 0
     assert io.stdout == b"[]\n"
-    assert io.refusal is not None
-    assert io.refusal.reason == "secrets stay put"
+    assert io.decision is not None
+    assert io.decision.reason == "secrets stay put"
 
 
 # `!` negates the status, so a refused command reads as success (bash
@@ -419,8 +419,8 @@ async def test_a_negated_command_keeps_its_refusal():
     io = await ws.shell('V=secret; ! echo "$V"')
     assert io.exit_code == 0
     assert io.stderr == b"echo: Permission denied\n"
-    assert io.refusal is not None
-    assert io.refusal.reason == "secrets stay put"
+    assert io.decision is not None
+    assert io.decision.reason == "secrets stay put"
 
 
 @pytest.mark.asyncio
@@ -428,8 +428,8 @@ async def test_a_negated_pipeline_keeps_its_refusal():
     ws = _policed_ws()
     io = await ws.shell('V=secret; ! true | echo "$V"')
     assert io.exit_code == 0
-    assert io.refusal is not None
-    assert io.refusal.reason == "secrets stay put"
+    assert io.decision is not None
+    assert io.decision.reason == "secrets stay put"
 
 
 @pytest.mark.asyncio

@@ -27,7 +27,7 @@ with `Retry-After` ([rate limits](/home/access/http#rate-limits)).
 | `message` | Always | Human-readable text. Its wording can change, so do not parse it. It never repeats a value you sent in the body, a header or the query. |
 | `param` | Request-shape errors | The request field at fault. A body field is a dotted path from the body's root, such as `config.mounts` or `mounts[0].mode`. A query or path parameter is its bare name. |
 | `errno` | Failed file calls | The POSIX condition, such as `ENOENT` or `STALE_WRITE`. See [file call conditions](/home/access/errors#file-calls). |
-| `refusal` | Policy refusals | The [refusal record](/home/policy/policies): `kind`, `reason`, `policy` and `ask_id`. |
+| `decision` | Policy refusals | The [decision record](/home/policy/policies): `kind`, `reason`, `policy` and `ask_id`. |
 | `missing` | Saved-config routes | Names that must exist first, such as the secret stores a config refers to. |
 
 Detect an error by its HTTP status, never by the presence of an `error` key: a
@@ -163,7 +163,7 @@ A VFS call a policy refuses returns HTTP `403`:
     "code": "policy_refused",
     "message": "Permission denied",
     "errno": "EACCES",
-    "refusal": {
+    "decision": {
       "kind": "deny",
       "reason": "writes under /data are not allowed",
       "policy": "PermissionsPolicy",
@@ -173,7 +173,7 @@ A VFS call a policy refuses returns HTTP `403`:
 }
 ```
 
-A shell line a policy refuses still returns `200`; check its `refusal`.
+A shell line a policy refuses still returns `200`; check its `decision`.
 
 ### Failed shell job
 
@@ -191,6 +191,6 @@ a stream. Check for side effects before retrying.
 ## Shell exit codes
 
 A completed shell request can return HTTP `200` with a nonzero `exit_code`.
-Inspect `exit_code`, `stdout`, `stderr` and `refusal` before treating the command
+Inspect `exit_code`, `stdout`, `stderr` and `decision` before treating the command
 as successful. The response's HTTP status describes the request, while
 `exit_code` describes the shell command.

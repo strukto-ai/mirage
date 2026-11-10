@@ -239,7 +239,7 @@ async function dry(
       reason: '',
       source: '',
       answers: [],
-      refusal: null,
+      decision: null,
       error: '',
     }
   }

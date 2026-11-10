@@ -29,7 +29,7 @@ from mirage.server.errors import (
     loader_error,
     validation_error,
 )
-from mirage.types import JsonValue, Refusal
+from mirage.types import JsonValue, PolicyDecision
 
 
 class Body(BaseModel):
@@ -167,16 +167,18 @@ def test_known_failures_expose_only_public_errno_text(
     }
 
 
-def test_failure_keeps_the_policy_refusal_record():
+def test_failure_keeps_the_policy_decision_record():
     exc = PolicyDenied(
         "backend token=secret",
-        refusal=Refusal(kind="pending", reason="sign-off", ask_id="abc123"),
+        decision=PolicyDecision(
+            kind="pending", reason="sign-off", ask_id="abc123"
+        ),
     )
     assert fs_error(exc).record() == {
         "code": "policy_refused",
         "message": "Permission denied",
         "errno": "EACCES",
-        "refusal": {
+        "decision": {
             "kind": "pending",
             "reason": "sign-off",
             "policy": "",

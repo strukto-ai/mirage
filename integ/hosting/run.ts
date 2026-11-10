@@ -24,7 +24,7 @@ interface Result {
   stdout: string
   stderr: string
   exitCode: number
-  refusal: { kind: string; reason: string; askId: string | null } | null
+  decision: { kind: string; reason: string; askId: string | null } | null
 }
 interface TrackingCase {
   id: string
@@ -35,7 +35,7 @@ interface TrackingCase {
     stdout: string
     stderr: string
     exit_code: number
-    refusal: { kind: string; reason: string } | null
+    decision: { kind: string; reason: string } | null
   }
 }
 interface Session {
@@ -236,12 +236,12 @@ async function run(
             exit_code: result.exitCode,
             stdout: result.stdout,
             stderr: result.stderr,
-            refusal:
-              result.refusal === null
+            decision:
+              result.decision === null
                 ? null
                 : {
-                    kind: result.refusal.kind,
-                    reason: result.refusal.reason,
+                    kind: result.decision.kind,
+                    reason: result.decision.reason,
                   },
           },
           scenario.expect,
@@ -256,17 +256,17 @@ async function run(
           assert.equal(kept.stdout, 'kept\n', 'refused execution must leave the backend unchanged')
         }
         let attempts = 1
-        if (result.refusal?.kind === 'pending') {
+        if (result.decision?.kind === 'pending') {
           const asks = await request<{ id: string; sessionId: string }[]>('GET', `${path}/asks`)
           assert.equal(asks.length, 1)
-          assert.equal(asks[0]!.id, result.refusal.askId)
+          assert.equal(asks[0]!.id, result.decision.askId)
           assert.equal(asks[0]!.sessionId, 'agent')
-          await request('POST', `${path}/asks/${result.refusal.askId}`, { answer: 'allow' })
+          await request('POST', `${path}/asks/${result.decision.askId}`, { answer: 'allow' })
           const allowed = await request<Result>('POST', `${path}/shell?session_id=agent`, {
             command: scenario.command,
           })
           assert.equal(allowed.exitCode, 0)
-          assert.equal(allowed.refusal, null)
+          assert.equal(allowed.decision, null)
           assert.deepEqual(await request('GET', `${path}/asks`), [])
           const removed = await request<Result>('POST', `${path}/shell`, {
             command: 'test ! -e /work/keep',

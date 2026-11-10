@@ -17,7 +17,7 @@ import logging
 from deepagents.backends.protocol import ExecuteResponse, FileInfo, GrepMatch
 
 from mirage.io.types import IOResult
-from mirage.workspace.tools.io_text import decode, with_refusal
+from mirage.workspace.tools.io_text import decode, with_decision
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ def io_to_execute_response(io: IOResult) -> ExecuteResponse:
     if stderr:
         output = f"{stdout}\n{stderr}" if stdout else stderr
     return ExecuteResponse(
-        output=with_refusal(output, io.refusal), exit_code=io.exit_code
+        output=with_decision(output, io.decision), exit_code=io.exit_code
     )
 
 

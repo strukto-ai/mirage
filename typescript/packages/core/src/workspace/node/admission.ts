@@ -32,7 +32,7 @@ import {
   Outcome,
   PermissionsPolicy,
   policyDenied,
-  refusalOf,
+  decisionOf,
   renderCommandDeny,
   Scope,
 } from '../../policy/index.ts'
@@ -44,7 +44,7 @@ import { CommandWord, type EntryGate } from '../../policy/types.ts'
 import { getRedirects, literalWord } from '../../shell/helpers.ts'
 import type { Redirect, TSNodeLike } from '../../shell/types.ts'
 import { NodeType, RedirectKind } from '../../shell/types.ts'
-import { Follow, PathSpec, type LineFacts, type Refusal } from '../../types.ts'
+import { Follow, PathSpec, type LineFacts, type PolicyDecision } from '../../types.ts'
 import { makeAbortError } from '../../utils/abort.ts'
 import { getExtension } from '../../utils/filetype.ts'
 import { pathVisible } from '../../utils/hidden.ts'
@@ -90,14 +90,14 @@ import { wordValue, type Word } from './inner_lines.ts'
 /**
  * What the command plane prints when a line does not get to run: 126 for
  * a whole-command refusal or an unanswered ask, the operand code (1, tar
- * 2) for a refusal about a path or carrying an error. `refusal` is the
+ * 2) for a refusal about a path or carrying an error. `decision` is the
  * record the result carries beside stderr, null for the filesystem's own
  * error. Mirrors the Python `Refused`.
  */
 export interface Refused {
   readonly stderr: Uint8Array
   readonly exitCode: number
-  readonly refusal: Refusal | null
+  readonly decision: PolicyDecision | null
 }
 
 function norm(virtual: string): string {
@@ -688,7 +688,7 @@ export async function admit(
     })
   }
   const [stderr, exitCode] = await renderCommandDeny(name, action, ctx)
-  return { stderr, exitCode, refusal: refusalOf(action) }
+  return { stderr, exitCode, decision: decisionOf(action) }
 }
 
 /**
@@ -724,7 +724,7 @@ export async function admitTest(
     true,
   )
   if (!(verdict instanceof Admitted)) {
-    throw new CondRefused(verdict.stderr, verdict.exitCode, verdict.refusal)
+    throw new CondRefused(verdict.stderr, verdict.exitCode, verdict.decision)
   }
   return verdict
 }

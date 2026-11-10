@@ -27,9 +27,9 @@ export {
   postVfsGate,
   preNetworkGate,
   preVfsGate,
-  describeRefusal,
+  describeDecision,
   policyDenied,
-  refusalOf,
+  decisionOf,
   renderCommandDeny,
   renderDeny,
 } from './policies.ts'

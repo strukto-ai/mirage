@@ -87,7 +87,7 @@ export async function runStream(
     }
     if (final !== null) merged = await merged.merge(final)
     result.records = merged.records
-    result.refusal = result.refusal ?? merged.refusal
+    result.decision = result.decision ?? merged.decision
     const stderr = concat([await materialize(merged.stderr), await materialize(result.stderr)])
     result.stderr = stderr.byteLength > 0 ? stderr : null
     result.exitCode = result.exitCode || merged.exitCode || failCode
@@ -103,7 +103,7 @@ export async function runStream(
       const [source, io] = await runSingle(Cmd.CAT, [scope], [], {})
       fetches.push({ scope, out: source, io })
       result.producer = io.producer
-      result.refusal = io.refusal ?? result.refusal
+      result.decision = io.decision ?? result.decision
       if (io.exitCode !== 0) await drain(source)
       else if (source !== null) sources.push(source)
     }
@@ -123,7 +123,7 @@ export async function runStream(
       })
     if (final !== null) {
       result.producer = final.producer
-      result.refusal = final.refusal ?? result.refusal
+      result.decision = final.decision ?? result.decision
     }
   } catch (error) {
     await closeFetches()

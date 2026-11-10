@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PolicyDenied, describeRefusal } from '../../policy/index.ts'
-import type { Refusal } from '../../types.ts'
+import { PolicyDenied, describeDecision } from '../../policy/index.ts'
+import type { PolicyDecision } from '../../types.ts'
 import type { ExecuteResult } from '../workspace/types.ts'
 import { errorVirtualPath, fsStrerror } from '../../errors/fs.ts'
 
@@ -26,19 +26,19 @@ export function decode(value: Uint8Array | null | undefined): string {
  * The one line a text surface appends for a refusal, newline included, or
  * the empty string when there is no record. The refusal's stderr is the
  * bare `Permission denied` or the path's own error, which never says why.
- * Mirrors Python's `refusal_line`.
+ * Mirrors Python's `decision_line`.
  */
-export function refusalLine(refusal: Refusal | null): string {
-  if (refusal === null) return ''
-  return `${describeRefusal(refusal)}\n`
+export function decisionLine(decision: PolicyDecision | null): string {
+  if (decision === null) return ''
+  return `${describeDecision(decision)}\n`
 }
 
 /**
  * Append the refusal's reason as one more line after the shell's own
  * output, for a surface that hands the agent text.
  */
-export function withRefusal(text: string, refusal: Refusal | null): string {
-  const line = refusalLine(refusal)
+export function withDecision(text: string, decision: PolicyDecision | null): string {
+  const line = decisionLine(decision)
   if (line === '' || text === '') return text || line
   return text.endsWith('\n') ? `${text}${line}` : `${text}\n${line}`
 }
@@ -63,7 +63,7 @@ export function errorText(error: unknown): string {
         : message === '' || message === strerror
           ? strerror
           : `${message}: ${strerror}`
-  return withRefusal(`Error: ${words}`, error instanceof PolicyDenied ? error.refusal : null)
+  return withDecision(`Error: ${words}`, error instanceof PolicyDenied ? error.decision : null)
 }
 
 export function ioToStr(io: ExecuteResult): string {
@@ -71,7 +71,7 @@ export function ioToStr(io: ExecuteResult): string {
   const stderr = io.stderrText
   let text = stdout
   if (stderr) text = stdout ? `${stdout}\n${stderr}` : stderr
-  return withRefusal(text, io.refusal)
+  return withDecision(text, io.decision)
 }
 
 /**

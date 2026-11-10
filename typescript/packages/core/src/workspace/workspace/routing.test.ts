@@ -179,7 +179,7 @@ describe('routing on machines', () => {
       expect(DEC.decode((await ws.shell('hostname; hostname')).stdout)).toBe('a\n')
       const said = await ws.shell('hostname; hostname -s')
       expect([said.exitCode, DEC.decode(said.stdout)]).toEqual([126, ''])
-      expect(said.refusal?.reason.startsWith('ShortOnB routes hostname elsewhere')).toBe(true)
+      expect(said.decision?.reason.startsWith('ShortOnB routes hostname elsewhere')).toBe(true)
     } finally {
       await ws.close()
     }
@@ -193,7 +193,7 @@ describe('routing on machines', () => {
       const said = await ws.explain('hostname; hostname -s')
       const run = await ws.shell('hostname; hostname -s')
       expect([said.outcome, said.exitCode]).toEqual([Outcome.DENY, 126])
-      expect(said.refusal).toEqual(run.refusal)
+      expect(said.decision).toEqual(run.decision)
       expect(said.stderr).toBe(DEC.decode(run.stderr))
     } finally {
       await ws.close()
@@ -231,8 +231,8 @@ describe('routing on machines', () => {
     try {
       const said = await ws.shell('hostname -s')
       expect(said.exitCode).toBe(126)
-      expect(said.refusal?.reason).toContain('ShortOnB on machine b')
-      expect(said.refusal?.reason).toContain('OnA on machine a')
+      expect(said.decision?.reason).toContain('ShortOnB on machine b')
+      expect(said.decision?.reason).toContain('OnA on machine a')
     } finally {
       await ws.close()
     }
@@ -293,7 +293,7 @@ describe('routing on machines', () => {
       const wrapper = nodes.find((c) => c.command === 'nohup')
       const run = await ws.shell('nohup hostname')
       expect([wrapper?.outcome, wrapper?.exitCode]).toEqual([Outcome.DENY, 126])
-      expect(wrapper?.refusal).toEqual(run.refusal)
+      expect(wrapper?.decision).toEqual(run.decision)
       expect(wrapper?.stderr).toBe(DEC.decode(run.stderr))
       const echo = nodes.find((c) => c.command === 'echo')
       expect([echo?.outcome, echo?.exitCode]).toEqual([Outcome.ALLOW, 0])
@@ -317,8 +317,8 @@ describe('routing on machines', () => {
         const wrapper = nodes.find((c) => c.command === 'nohup')
         const run = await ws.shell('nohup hostname')
         expect(stopped?.outcome).toBe(outcome)
-        expect(stopped?.refusal?.reason).toBe(answer.reason)
-        expect(run.refusal?.reason).toBe(answer.reason)
+        expect(stopped?.decision?.reason).toBe(answer.reason)
+        expect(run.decision?.reason).toBe(answer.reason)
         expect(wrapper?.outcome).toBe(name === 'nohup' ? outcome : Outcome.ALLOW)
       } finally {
         await ws.close()
@@ -333,12 +333,12 @@ describe('routing on machines', () => {
     )
     try {
       const first = await ws.shell('nohup hostname')
-      await ws.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW, Scope.SESSION)
+      await ws.decisions.answer(first.decision?.askId ?? '', Outcome.ALLOW, Scope.SESSION)
       const said = await ws.explain('nohup hostname')
       const wrapper = [...commands(said.node)].find((c) => c.command === 'nohup')
       const run = await ws.shell('nohup hostname')
       expect([wrapper?.outcome, wrapper?.exitCode]).toEqual([Outcome.DENY, 126])
-      expect(wrapper?.refusal).toEqual(run.refusal)
+      expect(wrapper?.decision).toEqual(run.decision)
     } finally {
       await ws.close()
     }

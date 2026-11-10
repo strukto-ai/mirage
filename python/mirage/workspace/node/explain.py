@@ -40,7 +40,7 @@ from mirage.policy import (
     Route,
     ShellExplanation,
     ShellNode,
-    refusal_of,
+    decision_of,
     render_command_deny,
     render_deny,
 )
@@ -61,7 +61,7 @@ from mirage.shell.helpers import (
 from mirage.shell.parse import opaque_reads, parse, referenced_names
 from mirage.shell.types import NodeType
 from mirage.shell.variable import VarAttr
-from mirage.types import PathSpec, Refusal
+from mirage.types import PathSpec, PolicyDecision
 from mirage.utils.hidden import is_glob
 from mirage.utils.path import resolve_path
 from mirage.workspace.executor.builtins.alias.alias import expanding_aliases
@@ -182,7 +182,7 @@ class Judgment:
             the session's hides dropped what it cannot see.
         exit_code (int): what the line would exit with, 0 to run.
         stderr (str): what the agent would read, empty to run.
-        refusal (Refusal | None): the record the refused result would
+        decision (PolicyDecision | None): the record the refused result would
             carry, None when the line would run.
         answers (tuple[Deny | Ask | Route, ...]): every policy's answer
             to the command, in the order the chain asks them.
@@ -201,7 +201,7 @@ class Judgment:
     paths: tuple[str, ...] = ()
     exit_code: int = 0
     stderr: str = ""
-    refusal: Refusal | None = None
+    decision: PolicyDecision | None = None
     answers: tuple[Deny | Ask | Route, ...] = ()
     words: tuple[CommandWord, ...] = ()
 
@@ -221,7 +221,7 @@ def _denied(command: str, reason: str) -> Judgment:
         reason=reason,
         exit_code=code,
         stderr=decode_text(err),
-        refusal=refusal_of(deny),
+        decision=decision_of(deny),
     )
 
 
@@ -303,7 +303,7 @@ async def _explained(
         reason=action.reason if base.reason == "" else base.reason,
         exit_code=code,
         stderr=decode_text(err),
-        refusal=refusal_of(action),
+        decision=decision_of(action),
     )
 
 
@@ -384,7 +384,7 @@ def _unread_paths(
     return frozenset(unread - read)
 
 
-def _line_refusal(
+def _line_decision(
     name: str,
     args: list[str],
     words: Sequence[Word],
@@ -482,7 +482,7 @@ async def _judge_words(
     spelled as it spells it. For a runtime that takes the line whole
     this is the gate itself (:func:`admit_line`), so what ``explain``
     says about such a line is what its admission does: a deny first,
-    then what the runtime would do past the gate (:func:`_line_refusal`),
+    then what the runtime would do past the gate (:func:`_line_decision`),
     then an ask.
 
     Args:
@@ -584,7 +584,7 @@ async def _judge_words(
     )
     inners = inner_lines(name, words[1:])
     refused = (
-        _line_refusal(
+        _line_decision(
             name,
             args,
             read_words,
@@ -724,7 +724,7 @@ def _refuses(expl: Judgment) -> bool:
     Args:
         expl (Judgment): one command's explanation.
     """
-    return expl.exit_code != 0 and not is_pending(expl.refusal)
+    return expl.exit_code != 0 and not is_pending(expl.decision)
 
 
 def _asks_for(one: Judged) -> bool:
@@ -1381,7 +1381,7 @@ async def _admitted(
     judgment = one.judgment
     if one.ctx is None:
         return Refused(
-            encode_text(judgment.stderr), judgment.exit_code, judgment.refusal
+            encode_text(judgment.stderr), judgment.exit_code, judgment.decision
         )
     action = await resolved(
         one.ctx,
@@ -1393,7 +1393,7 @@ async def _admitted(
     if action is None:
         return None
     err, code = await render_command_deny(judgment.command, action, one.ctx)
-    return Refused(err, code, refusal_of(action))
+    return Refused(err, code, decision_of(action))
 
 
 async def admit_line(
@@ -1418,7 +1418,7 @@ async def admit_line(
     command runs (``eval``, ``sh -c``, ``xargs``, ``env`` ... see
     ``inner_lines``) are judged in turn; and what the runtime would do
     past the gate is refused under a rule that would have read it
-    (:func:`_line_refusal`). A command a ``pre_command`` route places
+    (:func:`_line_decision`). A command a ``pre_command`` route places
     off the runtime or machine the line runs whole on is refused too,
     since one run cannot put it elsewhere.
 
@@ -1482,7 +1482,7 @@ async def off_line_refusal(
         policy=route.policy,
     )
     err, code = await render_command_deny(command, action, one.ctx)
-    return Refused(err, code, refusal_of(action))
+    return Refused(err, code, decision_of(action))
 
 
 def refused_where_it_stands(one: Judged, deny: Deny) -> Judged:
@@ -1502,7 +1502,7 @@ def refused_where_it_stands(one: Judged, deny: Deny) -> Judged:
             reason=deny.reason,
             exit_code=code,
             stderr=decode_text(err),
-            refusal=refusal_of(deny),
+            decision=decision_of(deny),
         ),
     )
 
@@ -1999,7 +1999,7 @@ def explained_line(
             outcome=outcome,
             reason=reason,
             source=source,
-            refusal=judgment.refusal,
+            decision=judgment.decision,
             exit_code=judgment.exit_code,
             stderr=judgment.stderr,
         )
@@ -2050,7 +2050,7 @@ def _verdict_of(judgment: Judgment) -> tuple[Outcome, str, str]:
         source = (
             "commands.allow" if judgment.source == "commands.allow" else ""
         )
-    refused = judgment.refusal
+    refused = judgment.decision
     if refused is not None:
         outcome = Outcome.ASK if is_pending(refused) else Outcome.DENY
         return outcome, refused.reason, source
@@ -2184,7 +2184,7 @@ def _command_of(
         reason=reason,
         source=source,
         answers=judgment.answers,
-        refusal=judgment.refusal,
+        decision=judgment.decision,
         runtime=runtime,
         machine=machine,
         text=text,

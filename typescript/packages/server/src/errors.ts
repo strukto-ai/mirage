@@ -143,7 +143,7 @@ export const FRAMEWORK: Readonly<Record<string, readonly [ErrorCode, string]>> =
 export interface HttpErrorOptions {
   param?: string | undefined
   errno?: string | undefined
-  refusal?: Record<string, JsonValue> | null | undefined
+  decision?: Record<string, JsonValue> | null | undefined
   missing?: readonly string[] | undefined
   headers?: Readonly<Record<string, string>> | undefined
   cause?: unknown
@@ -158,7 +158,7 @@ export interface HttpErrorOptions {
 export class HttpError extends Error {
   readonly param: string | undefined
   readonly errno: string | undefined
-  readonly refusal: Record<string, JsonValue> | null | undefined
+  readonly decision: Record<string, JsonValue> | null | undefined
   readonly missing: readonly string[] | undefined
   readonly headers: Readonly<Record<string, string>>
 
@@ -170,7 +170,7 @@ export class HttpError extends Error {
     super(message, options.cause === undefined ? undefined : { cause: options.cause })
     this.param = options.param
     this.errno = options.errno
-    this.refusal = options.refusal
+    this.decision = options.decision
     this.missing = options.missing
     this.headers = options.headers ?? {}
   }
@@ -184,7 +184,7 @@ export class HttpError extends Error {
     const error: Record<string, JsonValue> = { code: this.code, message: this.message }
     if (this.param !== undefined) error.param = this.param
     if (this.errno !== undefined) error.errno = this.errno
-    if (this.refusal !== undefined && this.refusal !== null) error.refusal = this.refusal
+    if (this.decision !== undefined && this.decision !== null) error.decision = this.decision
     if (this.missing !== undefined) error.missing = [...this.missing]
     return error
   }
@@ -240,17 +240,17 @@ export function fsError(err: unknown): HttpError {
   const condition = classify(err)
   if (condition === null) return new HttpError('internal', INTERNAL_MESSAGE)
   if (err instanceof PolicyDenied) {
-    const refusal = err.refusal
+    const decision = err.decision
     return new HttpError('policy_refused', posixPhrase(condition), {
       errno: condition,
-      refusal:
-        refusal === null
+      decision:
+        decision === null
           ? null
           : {
-              kind: refusal.kind,
-              reason: refusal.reason,
-              policy: refusal.policy,
-              ask_id: refusal.askId,
+              kind: decision.kind,
+              reason: decision.reason,
+              policy: decision.policy,
+              ask_id: decision.askId,
             },
     })
   }

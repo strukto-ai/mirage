@@ -316,7 +316,7 @@ it('keeps no copy from before an empty streamed append waited', async () => {
 it.each([
   [MountMode.READ, undefined, { code: 'EROFS' }],
   [MountMode.WRITE, 'missing', { message: 'unknown session: missing' }],
-])('closes a refused upload without pulling it (%s, %s)', async (mode, sessionId, refusal) => {
+])('closes a refused upload without pulling it (%s, %s)', async (mode, sessionId, decision) => {
   const ws = new Workspace({ '/dst': new RAMVFS() }, { mode })
   let closed = false
   const source: AsyncIterableIterator<Uint8Array> = {
@@ -332,7 +332,7 @@ it.each([
     },
   }
   try {
-    await expect(ws.vfs.write('/dst/f', source, sessionId)).rejects.toMatchObject(refusal)
+    await expect(ws.vfs.write('/dst/f', source, sessionId)).rejects.toMatchObject(decision)
     expect(closed).toBe(true)
   } finally {
     await ws.close()
@@ -3523,9 +3523,9 @@ describe('hides answer before any policy', () => {
         .read('/data/secret', {}, 'veiled')
         .catch((e: unknown) => e)
       expect((hidden as { code?: string }).code).toBe('ENOENT')
-      expect((hidden as { refusal?: unknown }).refusal ?? null).toBeNull()
+      expect((hidden as { decision?: unknown }).decision ?? null).toBeNull()
       const denied: unknown = await ws.vfs.read('/data/secret').catch((e: unknown) => e)
-      expect((denied as { refusal?: { reason: string } }).refusal?.reason).toBe('sealed')
+      expect((denied as { decision?: { reason: string } }).decision?.reason).toBe('sealed')
     } finally {
       await ws.close()
     }

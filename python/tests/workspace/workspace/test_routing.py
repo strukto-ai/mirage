@@ -125,8 +125,8 @@ async def test_a_line_run_whole_refuses_a_command_routed_off_it():
         assert (await ws.shell("hostname; hostname")).stdout == b"a\n"
         said = await ws.shell("hostname; hostname -s")
         assert (said.exit_code, said.stdout) == (126, b"")
-        assert said.refusal is not None
-        assert said.refusal.reason.startswith(
+        assert said.decision is not None
+        assert said.decision.reason.startswith(
             "_ShortOnB routes hostname elsewhere"
         )
     finally:
@@ -147,7 +147,7 @@ async def test_explain_shows_a_line_run_whole_refused_for_a_route():
         said = await ws.explain("hostname; hostname -s")
         run = await ws.shell("hostname; hostname -s")
         assert (said.outcome, said.exit_code) == (Outcome.DENY, 126)
-        assert said.refusal == run.refusal
+        assert said.decision == run.decision
         assert said.stderr == await run.stderr_str()
     finally:
         await ws.close()
@@ -183,9 +183,9 @@ async def test_two_command_routes_that_disagree_refuse_it():
     try:
         said = await ws.shell("hostname -s")
         assert said.exit_code == 126
-        assert said.refusal is not None
-        assert "_ShortOnB on machine b" in said.refusal.reason
-        assert "_OnA on machine a" in said.refusal.reason
+        assert said.decision is not None
+        assert "_ShortOnB on machine b" in said.decision.reason
+        assert "_OnA on machine a" in said.decision.reason
     finally:
         await ws.close()
 
@@ -271,7 +271,7 @@ async def test_explain_refuses_a_wrapper_whose_routes_disagree():
         wrapper = next(n for n in _commands(said.node) if n.command == "nohup")
         run = await ws.shell("nohup hostname")
         assert (wrapper.outcome, wrapper.exit_code) == (Outcome.DENY, 126)
-        assert wrapper.refusal == run.refusal
+        assert wrapper.decision == run.decision
         assert wrapper.stderr == await run.stderr_str()
         echo = next(n for n in _commands(said.node) if n.command == "echo")
         assert (echo.outcome, echo.exit_code) == (Outcome.ALLOW, 0)
@@ -307,8 +307,8 @@ async def test_explain_keeps_what_stops_a_wrapper_before_its_routes(
         run = await ws.shell("nohup hostname")
         assert nodes[command].outcome is outcome
         assert (
-            nodes[command].refusal.reason
-            == run.refusal.reason
+            nodes[command].decision.reason
+            == run.decision.reason
             == answer.reason
         )
         assert nodes["nohup"].outcome is (
@@ -324,13 +324,13 @@ async def test_explain_refuses_disagreeing_routes_once_an_approval_is_given():
     try:
         first = await ws.shell("nohup hostname")
         await ws.decisions.answer(
-            first.refusal.ask_id, Outcome.ALLOW, Scope.SESSION
+            first.decision.ask_id, Outcome.ALLOW, Scope.SESSION
         )
         said = await ws.explain("nohup hostname")
         wrapper = next(n for n in _commands(said.node) if n.command == "nohup")
         run = await ws.shell("nohup hostname")
         assert (wrapper.outcome, wrapper.exit_code) == (Outcome.DENY, 126)
-        assert wrapper.refusal == run.refusal
+        assert wrapper.decision == run.decision
     finally:
         await ws.close()
 

@@ -66,7 +66,7 @@ async def test_a_rule_on_the_script_reads_it_however_it_is_typed(line, shown):
         assert (
             await io.stderr_str() == f"python3: {shown}: Permission denied\n"
         )
-        assert io.refusal is not None and io.refusal.reason == "protected"
+        assert io.decision is not None and io.decision.reason == "protected"
     finally:
         await ws.close()
 

@@ -614,8 +614,8 @@ async def test_a_hidden_mount_the_sandbox_serves_refuses_the_line(mount_type):
     result = await agent.shell("python3 job.py")
     assert result.exit_code == 126
     assert await result.stderr_str() == "fake: Permission denied\n"
-    assert result.refusal is not None
-    assert result.refusal.reason == (
+    assert result.decision is not None
+    assert result.decision.reason == (
         "a mount this session restricts is not served through the dispatcher"
     )
     await ws.close()

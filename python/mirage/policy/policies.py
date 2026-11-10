@@ -72,7 +72,7 @@ from mirage.policy.types import (
     policy_caller,
 )
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
-from mirage.types import FileType, Limit, MountMode, PathSpec, Refusal
+from mirage.types import FileType, Limit, MountMode, PathSpec, PolicyDecision
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.types import VfsCall
 from mirage.view.types import FileView, SessionView
@@ -103,7 +103,7 @@ def render_deny(subject: str, deny: Deny | Pending) -> tuple[bytes, int]:
     126, so stderr never tells an agent whether a retry might pass; a
     Deny about a path is the command's own GNU line for that path and
     EACCES; each leaves the reason (and an ask's id) on the result's
-    ``refusal`` record. A Deny carrying an error keeps
+    ``decision`` record. A Deny carrying an error keeps
     ``<subject>: <reason>``, because there the reason is the diagnostic
     a built-in worded in POSIX's terms. A path or an error exits at the
     command's operand-refusal code (1, tar 2).
@@ -279,7 +279,7 @@ async def _file_type(
     return found.type
 
 
-def refusal_of(action: Deny | Pending) -> Refusal | None:
+def decision_of(action: Deny | Pending) -> PolicyDecision | None:
     """The record a refused result carries beside its bash-voiced stderr.
 
     None for a Deny carrying an error: that is the filesystem's own
@@ -292,26 +292,28 @@ def refusal_of(action: Deny | Pending) -> Refusal | None:
     if isinstance(action, Deny) and action.error is not None:
         return None
     if isinstance(action, Pending):
-        return Refusal(kind="pending", reason=action.reason, ask_id=action.id)
-    return Refusal(
+        return PolicyDecision(
+            kind="pending", reason=action.reason, ask_id=action.id
+        )
+    return PolicyDecision(
         kind="failed" if action.failed else "deny",
         reason=action.reason,
         policy=action.policy,
     )
 
 
-def describe_refusal(refusal: Refusal) -> str:
+def describe_decision(decision: PolicyDecision) -> str:
     """One line saying why, for a surface that hands the agent text
     rather than a record; the agent adapters append it after stderr.
 
     Args:
-        refusal (Refusal): the record off a refused result.
+        decision (PolicyDecision): the record off a refused result.
     """
-    if refusal.kind == "pending":
-        return f"requires approval: {refusal.reason} (ask {refusal.ask_id})"
-    if refusal.kind == "failed":
-        return f"policy {refusal.policy} failed"
-    return f"policy denied: {refusal.reason}"
+    if decision.kind == "pending":
+        return f"requires approval: {decision.reason} (ask {decision.ask_id})"
+    if decision.kind == "failed":
+        return f"policy {decision.policy} failed"
+    return f"policy denied: {decision.reason}"
 
 
 def policy_denied(
@@ -337,12 +339,12 @@ def policy_denied(
         caller (Caller | None): who was refused, whose line notes the
             record; None for the caller bound here.
     """
-    refusal = refusal_of(action)
+    decision = decision_of(action)
     sink = (caller if caller is not None else current_caller()).refusals
-    if refusal is not None and sink is not None:
-        sink(refusal)
+    if decision is not None and sink is not None:
+        sink(decision)
     return PolicyDenied(
-        posix_errno(FsCondition.EACCES), strerror, filename, refusal=refusal
+        posix_errno(FsCondition.EACCES), strerror, filename, decision=decision
     )
 
 
@@ -517,7 +519,7 @@ async def _explained_op(
     error = action.error if isinstance(action, Deny) else None
     return replace(
         decided,
-        refusal=None if error is not None else refusal_of(action),
+        decision=None if error is not None else decision_of(action),
         error=errno.errorcode.get(
             error.errno if error is not None and error.errno else errno.EACCES,
             "EACCES",
@@ -706,7 +708,7 @@ async def post_command_gate(
 
     Returns what refuses it after the fact (a Deny, or the ledger's
     answer to an Ask), which the caller turns into exit 126 and a
-    refusal record. Nothing the command did is undone.
+    decision record. Nothing the command did is undone.
 
     Args:
         policies (Policies): the workspace's policies.

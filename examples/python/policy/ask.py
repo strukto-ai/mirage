@@ -54,7 +54,7 @@ async def reviewer(record: Decision) -> Decision:
 async def run(ws: Workspace, line: str) -> None:
     await ws.vfs.write("/data/a.txt", b"a\n")
     res = await ws.shell(line, session_id="agent")
-    how = "ran" if res.refusal is None else f"refused ({res.refusal.kind})"
+    how = "ran" if res.decision is None else f"refused ({res.decision.kind})"
     print(f"{line}: {how}, exit {res.exit_code}")
 
 

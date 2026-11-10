@@ -331,7 +331,7 @@ it('refuses a machine runtime before running with hidden files', async () => {
     expect(result.exitCode).toBe(126)
     expect(dec.decode(result.stdout)).toBe('')
     expect(dec.decode(result.stderr)).toBe(`${runtime.name}: Permission denied\n`)
-    expect(result.refusal?.reason).toBe("runtime cannot enforce this session's file restrictions")
+    expect(result.decision?.reason).toBe("runtime cannot enforce this session's file restrictions")
   } finally {
     await ws.close()
   }
@@ -360,7 +360,7 @@ it.each<[string, NetworkSetting, boolean, boolean]>([
       expect(result.exitCode).toBe(126)
       expect(dec.decode(result.stdout)).toBe('')
       expect(dec.decode(result.stderr)).toBe(`${runtime.name}: Permission denied\n`)
-      expect(result.refusal?.reason).toBe("runtime cannot enforce this workspace's network")
+      expect(result.decision?.reason).toBe("runtime cannot enforce this workspace's network")
     } finally {
       await ws.close()
     }

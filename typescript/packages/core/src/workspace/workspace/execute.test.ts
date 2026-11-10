@@ -298,14 +298,14 @@ describe('a nested line carries its refusal out', () => {
     const io = await ws.shell('V=secret; command echo "$V"')
     expect(io.exitCode).toBe(126)
     expect(stderrStr(io)).toBe('echo: Permission denied\n')
-    expect(io.refusal?.reason).toBe('secrets stay put')
+    expect(io.decision?.reason).toBe('secrets stay put')
   })
 
   it('eval keeps it too', async () => {
     const ws = policedWs()
     const io = await ws.shell('V=secret; eval "echo $V"')
     expect(io.exitCode).toBe(126)
-    expect(io.refusal?.reason).toBe('secrets stay put')
+    expect(io.decision?.reason).toBe('secrets stay put')
   })
 
   // A substitution keeps only the inner stdout, so its record has to
@@ -314,7 +314,7 @@ describe('a nested line carries its refusal out', () => {
     const ws = policedWs()
     const io = await ws.shell('V=secret; X=$(echo "$V")')
     expect(io.exitCode).toBe(126)
-    expect(io.refusal?.reason).toBe('secrets stay put')
+    expect(io.decision?.reason).toBe('secrets stay put')
   })
 
   it('an unrefused outer command still reports the inner record', async () => {
@@ -322,7 +322,7 @@ describe('a nested line carries its refusal out', () => {
     const io = await ws.shell('V=secret; echo "[$(echo "$V")]"')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('[]\n')
-    expect(io.refusal?.reason).toBe('secrets stay put')
+    expect(io.decision?.reason).toBe('secrets stay put')
   })
 })
 
@@ -335,14 +335,14 @@ describe('a negated command keeps its refusal', () => {
     const io = await ws.shell('V=secret; ! echo "$V"')
     expect(io.exitCode).toBe(0)
     expect(stderrStr(io)).toBe('echo: Permission denied\n')
-    expect(io.refusal?.reason).toBe('secrets stay put')
+    expect(io.decision?.reason).toBe('secrets stay put')
   })
 
   it('for a pipeline', async () => {
     const ws = policedWs()
     const io = await ws.shell('V=secret; ! true | echo "$V"')
     expect(io.exitCode).toBe(0)
-    expect(io.refusal?.reason).toBe('secrets stay put')
+    expect(io.decision?.reason).toBe('secrets stay put')
   })
 })
 

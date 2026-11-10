@@ -163,7 +163,7 @@ await ctx.plugin(MirageService, { workspace: ws }).await()
 
 Building the handler before the plugins load is fine: it reads `ctx.approval` at ask time, not at construction, so an approval plugin composed later is still found.
 
-A **deny** refuses the line at 126 in bash's voice, and the reason rides on the result as its `refusal` record, which is also what dsh reads to tell a policy refusal from a command that failed on its own. Command rules match token prefixes: `rm` covers every `rm` line, while `rm -rf` does not match `rm -r -f` or `rm --recursive --force`. Those forms still match the broader `rm` ask rule.
+A **deny** refuses the line at 126 in bash's voice, and the reason rides on the result as its `decision` record, which is also what dsh reads to tell a policy refusal from a command that failed on its own. Command rules match token prefixes: `rm` covers every `rm` line, while `rm -rf` does not match `rm -r -f` or `rm --recursive --force`. Those forms still match the broader `rm` ask rule.
 
 ```
 $ rm -rf /data/build
@@ -171,7 +171,7 @@ rm: Permission denied
 ```
 
 ```ts
-result.refusal
+result.decision
 // { kind: 'deny', reason: 'rm -rf is blocked', policy: 'PermissionsPolicy', askId: null }
 ```
 
@@ -216,7 +216,7 @@ rm: Permission denied
 ```
 
 ```ts
-result.refusal
+result.decision
 // { kind: 'pending', reason: 'deletes are reviewed', policy: '', askId: '0efc4a8f6280' }
 ```
 

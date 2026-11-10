@@ -54,7 +54,7 @@ from mirage.rs.approvals import (
     record_wire,
 )
 from mirage.rs.document import units
-from mirage.types import PathSpec, Refusal
+from mirage.types import PathSpec, PolicyDecision
 
 # A host that answers an Ask inside the line.
 #
@@ -215,14 +215,14 @@ def encloses(scope: Occurrence, occurrence: Occurrence) -> bool:
     )
 
 
-def is_pending(refusal: Refusal | None) -> bool:
-    """Whether a refusal record is a question the host has not answered
+def is_pending(decision: PolicyDecision | None) -> bool:
+    """Whether a decision record is a question the host has not answered
     yet, which holds the line for its retry rather than ending it.
 
     Args:
-        refusal (Refusal | None): the record a result carries.
+        decision (PolicyDecision | None): the record a result carries.
     """
-    return refusal is not None and refusal.kind == "pending"
+    return decision is not None and decision.kind == "pending"
 
 
 def op_question(
@@ -461,7 +461,7 @@ class Decisions(DecisionOwner):
         try:
             return await run(handed)
         except PolicyDenied as exc:
-            if is_pending(exc.refusal):
+            if is_pending(exc.decision):
                 self.release(session_id, handed)
             raise
         finally:

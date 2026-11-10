@@ -36,8 +36,8 @@ from mirage.policy import (
     Route,
     Scope,
     ask_rule,
+    decision_of,
     policy_denied,
-    refusal_of,
     render_command_deny,
 )
 from mirage.policy.builtin.permissions import PermissionsPolicy
@@ -56,7 +56,7 @@ from mirage.shell.helpers import (
 )
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import Redirect, RedirectKind
-from mirage.types import Follow, LineFacts, PathSpec, Refusal
+from mirage.types import Follow, LineFacts, PathSpec, PolicyDecision
 from mirage.utils.abort import MirageAbortError
 from mirage.utils.filetype import get_extension
 from mirage.utils.hidden import path_visible
@@ -125,13 +125,13 @@ class Refused:
         exit_code (int): 126 for a whole-command refusal or an
             unanswered ask, the operand code (1, tar 2) for a refusal
             about a path or carrying an error.
-        refusal (Refusal | None): the record the result carries
+        decision (PolicyDecision | None): the record the result carries
             beside stderr; None for the filesystem's own error.
     """
 
     stderr: bytes
     exit_code: int
-    refusal: Refusal | None = None
+    decision: PolicyDecision | None = None
 
 
 def _norm(virtual: str) -> str:
@@ -799,7 +799,7 @@ async def admit(
             route=command_route(answers),
         )
     err, code = await render_command_deny(name, action, ctx)
-    return Refused(err, code, refusal_of(action))
+    return Refused(err, code, decision_of(action))
 
 
 async def admit_test(
@@ -843,7 +843,7 @@ async def admit_test(
         intrinsic=True,
     )
     if isinstance(verdict, Refused):
-        raise CondRefused(verdict.stderr, verdict.exit_code, verdict.refusal)
+        raise CondRefused(verdict.stderr, verdict.exit_code, verdict.decision)
     return verdict
 
 

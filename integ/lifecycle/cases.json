@@ -1161,7 +1161,7 @@
               "exit_code": 126,
               "stdout": "",
               "stderr": "echo: Permission denied\n",
-              "refusal": "first gate"
+              "decision": "first gate"
             }
           }
         },
@@ -1189,7 +1189,7 @@
               "exit_code": 126,
               "stdout": "",
               "stderr": "echo: Permission denied\n",
-              "refusal": "first gate"
+              "decision": "first gate"
             }
           }
         },
@@ -1215,7 +1215,7 @@
               "exit_code": 126,
               "stdout": "",
               "stderr": "echo: Permission denied\n",
-              "refusal": "second gate"
+              "decision": "second gate"
             }
           }
         },
@@ -1279,7 +1279,7 @@
               "exit_code": 126,
               "stdout": "",
               "stderr": "echo: Permission denied\n",
-              "refusal": "replacement gate"
+              "decision": "replacement gate"
             }
           }
         },
@@ -1358,7 +1358,7 @@
               "exit_code": 126,
               "stdout": "",
               "stderr": "echo: Permission denied\n",
-              "refusal": "python gate"
+              "decision": "python gate"
             }
           }
         },
@@ -1393,7 +1393,7 @@
               "exit_code": 126,
               "stdout": "",
               "stderr": "echo: Permission denied\n",
-              "refusal": "second gate"
+              "decision": "second gate"
             }
           }
         },
@@ -1442,7 +1442,7 @@
           "expect": {
             "value": {
               "exit_code": 126,
-              "refusal_contains": "missing-lifecycle-engine"
+              "decision_contains": "missing-lifecycle-engine"
             }
           }
         },
@@ -1470,7 +1470,7 @@
               "exit_code": 126,
               "stdout": "",
               "stderr": "echo: Permission denied\n",
-              "refusal": "python gate"
+              "decision": "python gate"
             }
           }
         },
@@ -1554,7 +1554,7 @@
               "exit_code": 126,
               "stdout": "",
               "stderr": "echo: Permission denied\n",
-              "refusal": "second gate"
+              "decision": "second gate"
             }
           }
         },
@@ -4827,7 +4827,7 @@
               "exit_code": 7,
               "stdout": "",
               "stderr": "",
-              "refusal": null
+              "decision": null
             }
           }
         }
@@ -6855,7 +6855,7 @@
               "exit_code": 0,
               "stdout": "g.txt\n",
               "stderr": "",
-              "refusal": null
+              "decision": null
             }
           }
         }

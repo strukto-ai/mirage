@@ -34,7 +34,7 @@ from mirage.policy.types import (
 from mirage.server.constants import RESERVED_KWARGS
 from mirage.server.errors import ErrorCode, HttpError, param_of
 from mirage.server.vfs_calls import BYTES, Args, VfsCall, schema_of
-from mirage.types import FileStat, JsonValue, PathSpec, Refusal
+from mirage.types import FileStat, JsonValue, PathSpec, PolicyDecision
 from mirage.workspace.dispatcher.constants import CALLS
 from mirage.workspace.workspace.workspace import Session
 
@@ -58,14 +58,16 @@ class CallArgsError(ValueError):
         return HttpError(ErrorCode.INVALID_VALUE, str(self), param=self.param)
 
 
-def refusal_to_dict(refusal: Refusal | None) -> dict[str, JsonValue] | None:
-    """A refusal record as the server's entry points carry it.
+def decision_to_dict(
+    decision: PolicyDecision | None,
+) -> dict[str, JsonValue] | None:
+    """A decision record as the server's entry points carry it.
 
     Args:
-        refusal (Refusal | None): the record, or None when nothing was
+        decision (PolicyDecision | None): the record, or None when nothing was
             refused.
     """
-    return asdict(refusal) if refusal is not None else None
+    return asdict(decision) if decision is not None else None
 
 
 async def io_result_to_dict(result: IOResult) -> dict[str, Any]:
@@ -83,7 +85,7 @@ async def io_result_to_dict(result: IOResult) -> dict[str, Any]:
         "exit_code": result.exit_code,
         "stdout": stdout.decode(errors="replace"),
         "stderr": stderr.decode(errors="replace"),
-        "refusal": refusal_to_dict(result.refusal),
+        "decision": decision_to_dict(result.decision),
     }
 
 
@@ -101,7 +103,7 @@ def explanation_to_dict(expl: Explanation) -> dict[str, JsonValue]:
         "outcome": expl.outcome.value,
         "reason": expl.reason,
         "source": expl.source,
-        "refusal": refusal_to_dict(expl.refusal),
+        "decision": decision_to_dict(expl.decision),
         "answers": [answer_to_dict(a) for a in expl.answers],
     }
     if isinstance(expl, ShellExplanation):

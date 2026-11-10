@@ -32,7 +32,7 @@ import {
   runExplaining,
   runWithCaller,
   runAsProcess,
-  runWithRefusalSink,
+  runWithDecisionSink,
   runWithSession,
   sessionAccess,
   sessionCaller,
@@ -1621,7 +1621,7 @@ export class Workspace {
     if (!asyncContextIsolatesTasks) return this.explained(line, sessionId)
     // Judged inside a line, as the line runs: an ask a deciding policy's
     // read meets refuses like a deny and records nothing.
-    return runWithRefusalSink(
+    return runWithDecisionSink(
       () => undefined,
       () => runExplaining(DryRun.DECIDING, () => this.explained(line, sessionId)),
     )
@@ -1695,7 +1695,7 @@ export class Workspace {
           outcome: placed.kind === 'pending' ? Outcome.ASK : Outcome.DENY,
           reason: placed.reason,
           source: '',
-          refusal: refused.refusal,
+          decision: refused.decision,
           exitCode: refused.exitCode,
           stderr: refused.stderrText,
         }
@@ -1714,14 +1714,14 @@ export class Workspace {
         // refuses the line, as the run's admission does.
         for (const one of judged) {
           const off = await offLineRefusal(one, (each) => this.router.offLine(each, placed))
-          if (off?.refusal == null) continue
+          if (off?.decision == null) continue
           return {
             ...said,
             answers,
             outcome: Outcome.DENY,
-            reason: off.refusal.reason,
+            reason: off.decision.reason,
             source: '',
-            refusal: off.refusal,
+            decision: off.decision,
             exitCode: off.exitCode,
             stderr: decodeText(off.stderr),
           }

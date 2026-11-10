@@ -860,8 +860,8 @@ profiles:
     assert (
         refused.stderr == b"rm: cannot remove '/repo/f': Permission denied\n"
     )
-    assert refused.refusal is not None
-    assert refused.refusal.reason == "no deletes in the repo"
+    assert refused.decision is not None
+    assert refused.decision.reason == "no deletes in the repo"
     assert where == "/repo\n"
     assert readonly.exit_code != 0
 

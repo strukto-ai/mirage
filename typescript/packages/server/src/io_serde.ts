@@ -24,7 +24,12 @@ import type {
   ShellNode,
   VfsExplanation,
 } from '@struktoai/mirage-core/policy/types'
-import { FileStat, PathSpec, type JsonValue, type Refusal } from '@struktoai/mirage-core/types'
+import {
+  FileStat,
+  PathSpec,
+  type JsonValue,
+  type PolicyDecision,
+} from '@struktoai/mirage-core/types'
 import { CALLS } from '@struktoai/mirage-core/workspace/dispatcher/constants'
 import type { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -36,23 +41,23 @@ export interface ResultDict {
   exit_code: number
   stdout: string
   stderr: string
-  refusal: {
-    kind: Refusal['kind']
+  decision: {
+    kind: PolicyDecision['kind']
     reason: string
     policy: string
     ask_id: string | null
   } | null
 }
 
-/** A refusal record as the server's entry points carry it. Mirrors Python's `refusal_to_dict`. */
-export function refusalToDict(refusal: Refusal | null): ResultDict['refusal'] {
-  return refusal === null
+/** A decision record as the server's entry points carry it. Mirrors Python's `decision_to_dict`. */
+export function decisionToDict(decision: PolicyDecision | null): ResultDict['decision'] {
+  return decision === null
     ? null
     : {
-        kind: refusal.kind,
-        reason: refusal.reason,
-        policy: refusal.policy,
-        ask_id: refusal.askId,
+        kind: decision.kind,
+        reason: decision.reason,
+        policy: decision.policy,
+        ask_id: decision.askId,
       }
 }
 
@@ -61,7 +66,7 @@ export function ioResultToDict(result: ExecuteResult): ResultDict & JsonValue {
     exit_code: result.exitCode,
     stdout: result.stdoutText,
     stderr: result.stderrText,
-    refusal: refusalToDict(result.refusal),
+    decision: decisionToDict(result.decision),
   }
 }
 
@@ -91,7 +96,7 @@ export function explanationToDict(
     outcome: expl.outcome,
     reason: expl.reason,
     source: expl.source,
-    refusal: refusalToDict(expl.refusal),
+    decision: decisionToDict(expl.decision),
     answers: expl.answers.map(answerToDict),
   }
   if ('line' in expl) {

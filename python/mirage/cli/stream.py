@@ -14,8 +14,8 @@ from mirage.cli.client import DaemonClient
 from mirage.cli.output import error_message, exit_code_from_response
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.shell.constants import INTERRUPTED_STATUS
-from mirage.types import Refusal
-from mirage.workspace.tools.io_text import refusal_line
+from mirage.types import PolicyDecision
+from mirage.workspace.tools.io_text import decision_line
 
 logger = logging.getLogger(__name__)
 
@@ -141,14 +141,14 @@ async def consume_stream(
     raise ValueError("daemon stream ended without a completion record")
 
 
-def refusal_of(result: dict[str, Any] | None) -> Refusal | None:
-    """The refusal record off a completion's result.
+def decision_of(result: dict[str, Any] | None) -> PolicyDecision | None:
+    """The decision record off a completion's result.
 
     Args:
         result (dict[str, Any] | None): the completion's result.
     """
-    refusal = (result or {}).get("refusal")
-    return Refusal(**refusal) if isinstance(refusal, dict) else None
+    decision = (result or {}).get("decision")
+    return PolicyDecision(**decision) if isinstance(decision, dict) else None
 
 
 async def stream_shell(
@@ -231,7 +231,9 @@ async def stream_shell(
         raise RuntimeError(f"shell failed: {terminal['error']}")
     if terminal["status"] == "canceled":
         return INTERRUPTED_STATUS
-    line = "" if json_output else refusal_line(refusal_of(terminal["result"]))
+    line = (
+        "" if json_output else decision_line(decision_of(terminal["result"]))
+    )
     if line:
         await _write(stderr_fd, line.encode())
     if json_output:

@@ -411,7 +411,7 @@ async function runPipeline(
   const flipped = new IOResult({
     exitCode: io.exitCode !== 0 ? 0 : 1,
     stderr: io.stderr,
-    refusal: io.refusal,
+    decision: io.decision,
   })
   execNode.exitCode = flipped.exitCode
   session.errexitImmune = true
@@ -437,7 +437,7 @@ async function negated(
   const flipped = new IOResult({
     exitCode: io.exitCode !== 0 ? 0 : 1,
     stderr: io.stderr,
-    refusal: io.refusal,
+    decision: io.decision,
   })
   execNode.exitCode = flipped.exitCode
   session.errexitImmune = true

@@ -20,7 +20,7 @@ import {
   currentCaller,
   explaining,
   lineRunning,
-  noteRefusal,
+  noteDecision,
   runExplaining,
   runLanding,
   type Caller,
@@ -30,7 +30,7 @@ import { posixPhrase } from '../errors/posix.ts'
 import { fsErrorLine } from '../errors/render.ts'
 import { commandRecords } from '../observe/context.ts'
 import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
-import { FileType, Limit, type PathSpec, type Refusal } from '../types.ts'
+import { FileType, Limit, type PathSpec, type PolicyDecision } from '../types.ts'
 import { abortable, hasAborted, makeAbortError } from '../utils/abort.ts'
 import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
 import { rstripSlash } from '../utils/slash.ts'
@@ -85,7 +85,7 @@ type MethodContext =
  * ask, is bash's own `<subject>: Permission denied` at 126, so stderr
  * never tells an agent whether a retry might pass; a Deny about a path
  * is the command's own GNU line for that path and EACCES; each leaves
- * the reason (and an ask's id) on the result's `refusal` record. A Deny
+ * the reason (and an ask's id) on the result's `decision` record. A Deny
  * carrying an error keeps `<subject>: <reason>`, because there the
  * reason is the diagnostic a built-in worded in POSIX's terms. A path or
  * an error exits at the command's operand-refusal code (1, tar 2).
@@ -247,7 +247,7 @@ async function fileType(
  * busy mount root, a name that exists), whose stderr line already says
  * everything, so no policy refusal is recorded.
  */
-export function refusalOf(action: Deny | Pending): Refusal | null {
+export function decisionOf(action: Deny | Pending): PolicyDecision | null {
   if (action.kind === 'pending') {
     return { kind: 'pending', reason: action.reason, policy: '', askId: action.id }
   }
@@ -264,12 +264,12 @@ export function refusalOf(action: Deny | Pending): Refusal | null {
  * One line saying why, for a surface that hands the agent text rather
  * than a record; the agent adapters append it after stderr.
  */
-export function describeRefusal(refusal: Refusal): string {
-  if (refusal.kind === 'pending') {
-    return `requires approval: ${refusal.reason} (ask ${refusal.askId ?? ''})`
+export function describeDecision(decision: PolicyDecision): string {
+  if (decision.kind === 'pending') {
+    return `requires approval: ${decision.reason} (ask ${decision.askId ?? ''})`
   }
-  if (refusal.kind === 'failed') return `policy ${refusal.policy} failed`
-  return `policy denied: ${refusal.reason}`
+  if (decision.kind === 'failed') return `policy ${decision.policy} failed`
+  return `policy denied: ${decision.reason}`
 }
 
 /**
@@ -317,12 +317,12 @@ export function policyDenied(
   message = posixPhrase('EACCES'),
   caller?: Caller,
 ): PolicyDenied {
-  const refusal = refusalOf(action)
-  if (refusal !== null) {
-    if (caller === undefined) noteRefusal(refusal)
-    else caller.refusals?.(refusal)
+  const decision = decisionOf(action)
+  if (decision !== null) {
+    if (caller === undefined) noteDecision(decision)
+    else caller.refusals?.(decision)
   }
-  return new PolicyDenied(message, filename, refusal)
+  return new PolicyDenied(message, filename, decision)
 }
 
 /**
@@ -348,7 +348,7 @@ async function explainedOp(
     reason: '',
     source: '',
     answers,
-    refusal: null,
+    decision: null,
     error: '',
   }
   if (winner === null) return base
@@ -374,7 +374,7 @@ async function explainedOp(
   const code: unknown = (error as { code?: unknown } | undefined)?.code
   return {
     ...decided,
-    refusal: error !== undefined ? null : refusalOf(action),
+    decision: error !== undefined ? null : decisionOf(action),
     error: typeof code === 'string' && code !== '' ? code : 'EACCES',
   }
 }
@@ -548,7 +548,7 @@ export async function postExecuteGate(
 /**
  * Fire postCommand once a command or CLI ran and its output drained.
  * Returns what refuses it after the fact (a Deny, or the ledger's answer
- * to an Ask), which the caller turns into exit 126 and a refusal record.
+ * to an Ask), which the caller turns into exit 126 and a decision record.
  * Nothing the command did is undone. A run killed while the host decides
  * throws the abort. Mirrors the Python `post_command_gate`.
  */

@@ -1,8 +1,8 @@
 import { Buffer } from 'node:buffer'
 import type { Writable } from 'node:stream'
 import { INTERRUPTED_STATUS, SIGPIPE_STATUS } from '@struktoai/mirage-core/shell/constants'
-import type { Refusal } from '@struktoai/mirage-core/types'
-import { refusalLine } from '@struktoai/mirage-core/workspace/tools/io_text'
+import type { PolicyDecision } from '@struktoai/mirage-core/types'
+import { decisionLine } from '@struktoai/mirage-core/workspace/tools/io_text'
 import type { DaemonClient } from './client.ts'
 import { exitCodeFromResponse, handleResponse } from './output.ts'
 
@@ -76,11 +76,11 @@ export async function consumeStream(
   throw new Error('daemon stream ended without a completion record')
 }
 
-/** The refusal record off a completion's result, in core's shape. */
-function refusalOf(result: Record<string, unknown> | null): Refusal | null {
-  const raw = result?.refusal as
+/** The decision record off a completion's result, in core's shape. */
+function decisionOf(result: Record<string, unknown> | null): PolicyDecision | null {
+  const raw = result?.decision as
     | {
-        kind: Refusal['kind']
+        kind: PolicyDecision['kind']
         reason: string
         policy: string
         ask_id: string | null
@@ -158,7 +158,7 @@ export async function streamShell(
     )
     if (terminal.status === 'failed') throw new Error(`shell failed: ${String(terminal.error)}`)
     if (terminal.status === 'canceled') return INTERRUPTED_STATUS
-    const line = jsonOutput ? '' : refusalLine(refusalOf(terminal.result))
+    const line = jsonOutput ? '' : decisionLine(decisionOf(terminal.result))
     if (line !== '') await write(process.stderr, Buffer.from(line), stop.signal)
     if (jsonOutput) {
       const result = {

@@ -24,7 +24,7 @@ import {
   runWithCaller,
 } from '../context/session_context.ts'
 import { sha256Hex } from '../utils/hash.ts'
-import type { Refusal } from '../types.ts'
+import type { PolicyDecision } from '../types.ts'
 import { PolicyDenied } from './errors.ts'
 import { DecisionOwner, Outcome } from './types.ts'
 import type {
@@ -189,8 +189,8 @@ export function sameOccurrence(a: Occurrence | null, b: Occurrence | null): bool
   return x === null && y === null
 }
 
-export function isPending(refusal: Refusal | null | undefined): boolean {
-  return refusal?.kind === 'pending'
+export function isPending(decision: PolicyDecision | null | undefined): boolean {
+  return decision?.kind === 'pending'
 }
 
 export function opQuestion(
@@ -352,7 +352,7 @@ export class Decisions extends DecisionOwner {
     try {
       return await runWithOpCall(this, handed, sessionId, () => run(handed))
     } catch (err) {
-      const held = err instanceof PolicyDenied && isPending(err.refusal)
+      const held = err instanceof PolicyDenied && isPending(err.decision)
       if (held && asyncContextIsolatesTasks) this.release(sessionId, handed)
       throw err
     } finally {

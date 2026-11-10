@@ -18,7 +18,7 @@ import { runWithAdmission } from '../../context/session_context.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
-import { postExecuteGate, refusalOf, renderDeny } from '../../policy/index.ts'
+import { postExecuteGate, decisionOf, renderDeny } from '../../policy/index.ts'
 import type { RouteContext } from '../../policy/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { encodeText } from '../../shell/bytes.ts'
@@ -94,7 +94,7 @@ export async function runCommandTree(
         new IOResult({
           exitCode: verdict.exitCode,
           stderr: verdict.stderr,
-          refusal: verdict.refusal,
+          decision: verdict.decision,
         }),
         new ExecutionNode({
           command: 'cat',
@@ -180,7 +180,7 @@ export async function runCommandTree(
     mergedErr.set(denyBytes, existingErr.byteLength)
     io.stderr = mergedErr
     io.exitCode = exitCode
-    io.refusal = refusalOf(refused)
+    io.decision = decisionOf(refused)
     execNode.exitCode = io.exitCode
     if (screen !== null) {
       screen.putBack(new Uint8Array(), mergedErr)

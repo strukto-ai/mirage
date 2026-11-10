@@ -14,11 +14,11 @@
 
 import type { LostPaths, OpRecord } from '../../../src/observe/record.ts'
 import { RAMVFS } from '../../../src/vfs/ram/ram.ts'
-import { type CacheFacts, MountMode, type Refusal } from '../../../src/types.ts'
+import { type CacheFacts, MountMode, type PolicyDecision } from '../../../src/types.ts'
 import type { RuntimeEntry } from '../../../src/runtime/base.ts'
 import type { SessionProfile } from '../../../src/policy/profile.ts'
 import { Workspace } from '../../../src/workspace/workspace/workspace.ts'
-import { describeRefusal } from '../../../src/policy/index.ts'
+import { describeDecision } from '../../../src/policy/index.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -121,13 +121,13 @@ export function stderrStr(io: { stderr: Uint8Array }): string {
 }
 
 /**
- * stderr as bash prints it, then the refusal record as one more line: what
+ * stderr as bash prints it, then the decision record as one more line: what
  * a text surface hands an agent.
  */
-export function voicedStderr(io: { stderr: Uint8Array; refusal: Refusal | null }): string {
+export function voicedStderr(io: { stderr: Uint8Array; decision: PolicyDecision | null }): string {
   const text = DEC.decode(io.stderr)
-  if (io.refusal === null) return text
-  return `${text}${describeRefusal(io.refusal)}\n`
+  if (io.decision === null) return text
+  return `${text}${describeDecision(io.decision)}\n`
 }
 
 export function countOccurrences(buf: Uint8Array, needle: string): number {

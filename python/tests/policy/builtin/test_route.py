@@ -84,7 +84,7 @@ async def test_a_program_returns_its_route_or_none():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("source", "refusal"),
+    ("source", "decision"),
     [
         ("x = 1", r"route_policy defines no pre_execute\(ctx\)"),
         ("def pre_execute(ctx):\n    1 / 0", "route_policy exited 1"),
@@ -95,12 +95,12 @@ async def test_a_program_returns_its_route_or_none():
     ],
 )
 async def test_a_program_that_fails_is_the_deployments_mistake(
-    source, refusal
+    source, decision
 ):
     policy = _route_policy(
         {"script": ScriptSource(source), "runtime": "monty"}
     )
-    with pytest.raises(RouteError, match=refusal):
+    with pytest.raises(RouteError, match=decision):
         await policy.pre_execute(_line("echo hi"))
 
 

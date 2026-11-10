@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { Refusal } from '../../types.ts'
+import type { PolicyDecision } from '../../types.ts'
 import { ExecuteResult } from '../workspace/workspace.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import { eisdir } from '../../errors/fs.ts'
@@ -51,13 +51,13 @@ describe('ioToStr', () => {
 })
 
 describe('ioToStr with a refusal', () => {
-  const denied: Refusal = {
+  const denied: PolicyDecision = {
     kind: 'deny',
     reason: 'no deletes',
     policy: 'RulePolicy',
     askId: null,
   }
-  const pending: Refusal = {
+  const pending: PolicyDecision = {
     kind: 'pending',
     reason: 'sign-off',
     policy: '',
@@ -84,7 +84,7 @@ describe('ioToStr with a refusal', () => {
     // bare `Permission denied` was redirected away and the earlier
     // output carries the reason by coincidence; a record is never
     // already said, so the line is still appended.
-    const quoted: Refusal = {
+    const quoted: PolicyDecision = {
       kind: 'deny',
       reason: 'secrets stay put',
       policy: 'DenySecret',
@@ -117,13 +117,13 @@ describe('replaceText', () => {
 
 describe('errorText', () => {
   it('adds the policy line to a plain EACCES', () => {
-    const refusal: Refusal = {
+    const decision: PolicyDecision = {
       kind: 'deny',
       reason: 'sealed',
       policy: '',
       askId: null,
     }
-    expect(errorText(new PolicyDenied('Permission denied', '/data/x', refusal))).toBe(
+    expect(errorText(new PolicyDenied('Permission denied', '/data/x', decision))).toBe(
       'Error: /data/x: Permission denied\npolicy denied: sealed\n',
     )
     expect(errorText(new Error('No such file or directory'))).toBe(

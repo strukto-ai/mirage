@@ -50,7 +50,7 @@ import { NodeKind, nodeKind, simpleCommand } from '../../shell/node_kind.ts'
 import { commandInvocations } from '../../shell/parse/names.ts'
 import { retainPrograms } from '../../shell/parse/program.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
-import { PathSpec, type Refusal } from '../../types.ts'
+import { PathSpec, type PolicyDecision } from '../../types.ts'
 import { abortable, atDeadline, runWithDeadline } from '../../utils/abort.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import type { EvaluationContext } from '../evaluation.ts'
@@ -568,9 +568,9 @@ export async function handleBackground(
     const lineSink = currentCaller().refusals
     // The line still hears of every refusal; a question left waiting also
     // holds the job.
-    const note = (refusal: Refusal): void => {
-      hold.held ||= isPending(refusal)
-      lineSink?.(refusal)
+    const note = (decision: PolicyDecision): void => {
+      hold.held ||= isPending(decision)
+      lineSink?.(decision)
     }
     const run = async (stop: AbortSignal | null = null): Promise<[IOResult, ExecutionNode]> => {
       let stdout: ByteSource | null
@@ -659,7 +659,7 @@ export async function handleBackground(
       } finally {
         disarm?.()
       }
-      hold.ended = hold.held || isPending(result[0].refusal)
+      hold.ended = hold.held || isPending(result[0].decision)
       return result
     }
     // The job's own layer of the caller: its fork, so dispatcher and host

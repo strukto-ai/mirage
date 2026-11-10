@@ -38,11 +38,11 @@ from mirage.policy import (
     Route,
     VfsContext,
     VfsResultContext,
-    describe_refusal,
+    decision_of,
+    describe_decision,
     post_execute_gate,
     post_vfs_gate,
     pre_vfs_gate,
-    refusal_of,
     render_deny,
 )
 from mirage.policy.composition import Composition
@@ -54,8 +54,8 @@ from mirage.types import (
     Limit,
     MountMode,
     PathSpec,
+    PolicyDecision,
     Producer,
-    Refusal,
 )
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.ram import RAMVFS
@@ -447,7 +447,9 @@ async def test_pre_vfs_gate_raises_eacces():
         )
     assert excinfo.value.errno == errno.EACCES
     assert excinfo.value.filename == "/data/x"
-    assert excinfo.value.refusal and "no reads" in excinfo.value.refusal.reason
+    assert (
+        excinfo.value.decision and "no reads" in excinfo.value.decision.reason
+    )
     # No opinion on writes: the gate passes silently.
     await pre_vfs_gate(
         policies, CALLS["write"], _path("/data/x"), True, "/data/"
@@ -571,8 +573,8 @@ async def test_an_op_ask_with_no_ledger_refuses_like_a_deny():
             policies, CALLS["write"], _path("/data/x"), True, "/data/"
         )
     assert info.value.errno == errno.EACCES
-    assert info.value.refusal is not None
-    assert info.value.refusal.kind == "deny"
+    assert info.value.decision is not None
+    assert info.value.decision.kind == "deny"
 
 
 class OnBeta(Policy):
@@ -609,13 +611,13 @@ def test_render_deny_words_an_open_question_as_a_deny():
     assert code == 126
 
 
-def test_refusal_of_records_kind_policy_and_ask():
-    assert refusal_of(Deny("user rule", policy="RulePolicy")) == Refusal(
-        kind="deny", reason="user rule", policy="RulePolicy"
-    )
+def test_decision_of_records_kind_policy_and_ask():
+    assert decision_of(
+        Deny("user rule", policy="RulePolicy")
+    ) == PolicyDecision(kind="deny", reason="user rule", policy="RulePolicy")
     # The filesystem's own error is no policy refusal: nothing recorded.
     assert (
-        refusal_of(
+        decision_of(
             Deny(
                 "cannot remove 'x'",
                 policy="MountRootPolicy",
@@ -624,30 +626,36 @@ def test_refusal_of_records_kind_policy_and_ask():
         )
         is None
     )
-    assert refusal_of(
+    assert decision_of(
         Deny("Raising failed", policy="Raising", failed=True)
-    ) == Refusal(kind="failed", reason="Raising failed", policy="Raising")
-    assert refusal_of(Pending("abc123", "sign-off")) == Refusal(
+    ) == PolicyDecision(
+        kind="failed", reason="Raising failed", policy="Raising"
+    )
+    assert decision_of(Pending("abc123", "sign-off")) == PolicyDecision(
         kind="pending", reason="sign-off", ask_id="abc123"
     )
 
 
-def test_describe_refusal_carries_the_reason_the_stderr_line_dropped():
+def test_describe_decision_carries_the_reason_the_stderr_line_dropped():
     assert (
-        describe_refusal(
-            Refusal(kind="deny", reason="user rule", policy="RulePolicy")
+        describe_decision(
+            PolicyDecision(
+                kind="deny", reason="user rule", policy="RulePolicy"
+            )
         )
         == "policy denied: user rule"
     )
     assert (
-        describe_refusal(
-            Refusal(kind="pending", reason="sign-off", ask_id="abc123")
+        describe_decision(
+            PolicyDecision(kind="pending", reason="sign-off", ask_id="abc123")
         )
         == "requires approval: sign-off (ask abc123)"
     )
     assert (
-        describe_refusal(
-            Refusal(kind="failed", reason="Raising failed", policy="Raising")
+        describe_decision(
+            PolicyDecision(
+                kind="failed", reason="Raising failed", policy="Raising"
+            )
         )
         == "policy Raising failed"
     )
@@ -697,9 +705,9 @@ async def test_remove_by_identity_refreshes_methods_and_keeps_admission_order():
     policies.add(first)
     policies.add(last)
     assert not policies.remove(DenyWeird())
-    refusal = await policies.pre_command(_ctx("weird"))
-    assert isinstance(refusal, Deny)
-    assert refusal.reason == "nope"
+    decision = await policies.pre_command(_ctx("weird"))
+    assert isinstance(decision, Deny)
+    assert decision.reason == "nope"
     assert policies.wants("pre_command")
     assert policies.remove(last)
     assert not policies.wants("pre_command")
@@ -804,10 +812,10 @@ def test_standalone_composition_keeps_first_agreed_route_and_ask_precedence():
     same = Route("node", reason="second placement")
     other = Route("python", reason="other placement")
     question = Ask("review")
-    refusal = Deny("refused")
+    decision = Deny("refused")
     assert agreed([first]) is first
     assert settled((first,)) is first
-    assert settled((question, refusal, first, other)) is refusal
+    assert settled((question, decision, first, other)) is decision
     assert agreed([first, same]) is first
     assert settled((first, same)) is first
     assert isinstance(agreed([first, other]), Deny)

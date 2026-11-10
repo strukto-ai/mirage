@@ -322,8 +322,8 @@ async def test_policy_deny_folds_into_the_line_result():
         io = await ws.shell("python3 -c 'x'")
         assert io.exit_code == 126
         assert io.stderr == b"python3: Permission denied\n"
-        assert io.refusal is not None
-        assert io.refusal.reason == "python3 is blocked"
+        assert io.decision is not None
+        assert io.decision.reason == "python3 is blocked"
         io = await ws.shell("echo ok")
         assert await materialize(io.stdout) == b"ok\n"
         assert io.exit_code == 0
@@ -380,8 +380,8 @@ async def test_a_coded_route_policy_places_beside_a_policys_deny():
         io = await ws.shell("python3 -c 'secret'")
         assert io.exit_code == 126
         assert io.stderr == b"python3: Permission denied\n"
-        assert io.refusal is not None
-        assert io.refusal.reason == "secrets stay put"
+        assert io.decision is not None
+        assert io.decision.reason == "secrets stay put"
     finally:
         await ws.close()
 
@@ -445,8 +445,8 @@ async def test_a_placement_deny_outranks_a_route():
             126,
             b"python3: Permission denied\n",
         )
-        assert io.refusal is not None
-        assert (io.refusal.reason, io.refusal.policy) == (
+        assert io.decision is not None
+        assert (io.decision.reason, io.decision.policy) == (
             "secrets stay put",
             "NoSecrets",
         )
@@ -471,8 +471,8 @@ async def test_two_placements_that_disagree_refuse_the_line():
     try:
         io = await ws.shell("python3 -c 'heavy'")
         assert io.exit_code == 126
-        assert io.refusal is not None
-        assert io.refusal.reason == (
+        assert io.decision is not None
+        assert io.decision.reason == (
             "policies place the line on different runtimes: "
             "RoutePolicy on alpha, HeavyOnBeta on beta"
         )
@@ -507,8 +507,8 @@ async def test_admission_comes_before_placement():
         )
         io = await ws.shell("rm /x", session_id="agent")
         assert (io.exit_code, io.stderr) == (126, b"rm: Permission denied\n")
-        assert io.refusal is not None
-        assert io.refusal.reason == "no deletes"
+        assert io.decision is not None
+        assert io.decision.reason == "no deletes"
         assert seen == []
         io = await ws.shell("echo ok", session_id="agent")
         assert io.exit_code == 0

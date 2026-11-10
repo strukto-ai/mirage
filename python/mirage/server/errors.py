@@ -160,7 +160,7 @@ class HttpError(Exception):
             body, a header or the query.
         param (str | None): the request field at fault.
         errno (str | None): the POSIX condition of a failed file call.
-        refusal (dict[str, JsonValue] | None): a policy's refusal record.
+        decision (dict[str, JsonValue] | None): a policy's decision record.
         missing (list[str] | None): names that must exist first.
         headers (Mapping[str, str] | None): headers to answer with.
     """
@@ -172,7 +172,7 @@ class HttpError(Exception):
         *,
         param: str | None = None,
         errno: str | None = None,
-        refusal: dict[str, JsonValue] | None = None,
+        decision: dict[str, JsonValue] | None = None,
         missing: list[str] | None = None,
         headers: Mapping[str, str] | None = None,
     ) -> None:
@@ -181,7 +181,7 @@ class HttpError(Exception):
         self.message = message
         self.param = param
         self.errno = errno
-        self.refusal = refusal
+        self.decision = decision
         self.missing = missing
         self.headers = dict(headers or {})
 
@@ -204,8 +204,8 @@ class HttpError(Exception):
             error["param"] = self.param
         if self.errno is not None:
             error["errno"] = self.errno
-        if self.refusal is not None:
-            error["refusal"] = self.refusal
+        if self.decision is not None:
+            error["decision"] = self.decision
         if self.missing is not None:
             error["missing"] = list(self.missing)
         return error
@@ -269,7 +269,7 @@ def fs_error(exc: Exception) -> HttpError:
             ErrorCode.POLICY_REFUSED,
             posix_phrase(condition),
             errno=condition.name,
-            refusal=(None if exc.refusal is None else asdict(exc.refusal)),
+            decision=(None if exc.decision is None else asdict(exc.decision)),
         )
     return HttpError(
         ERRNO_CODE[condition], posix_phrase(condition), errno=condition.name

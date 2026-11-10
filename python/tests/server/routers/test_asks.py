@@ -66,7 +66,7 @@ async def _raise_ask(client: AsyncClient, wid: str, sid: str) -> str:
     body = r.json()
     assert body["exit_code"] == 126
     assert body["stderr"] == "rm: Permission denied\n"
-    assert body["refusal"]["kind"] == "pending"
+    assert body["decision"]["kind"] == "pending"
     r = await client.get(f"/v1/workspaces/{wid}/asks?session_id={sid}")
     assert r.status_code == 200
     pending = r.json()
@@ -150,8 +150,8 @@ async def test_ask_deny_refuses_the_retry():
         body = r.json()
         assert body["exit_code"] == 126
         assert body["stderr"] == "rm: Permission denied\n"
-        assert body["refusal"]["kind"] == "deny"
-        assert ASK_REASON in body["refusal"]["reason"]
+        assert body["decision"]["kind"] == "deny"
+        assert ASK_REASON in body["decision"]["reason"]
 
 
 @pytest.mark.asyncio

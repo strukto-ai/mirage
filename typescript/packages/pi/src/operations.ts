@@ -24,7 +24,7 @@ import type {
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { Files } from '@struktoai/mirage-core/workspace/files'
 import { FileVersionTracker } from '@struktoai/mirage-core/workspace/tools/file_version'
-import { decode, refusalLine } from '@struktoai/mirage-core/workspace/tools/io_text'
+import { decode, decisionLine } from '@struktoai/mirage-core/workspace/tools/io_text'
 import { ensureParents } from '@struktoai/mirage-core/workspace/tools/tool_operations'
 import type { ExecuteResult, Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -153,7 +153,7 @@ export function mirageOperations(
         options.onData(Buffer.from(result.stderr))
       }
       // The record, described once, after what was just streamed.
-      const why = refusalLine(result.refusal)
+      const why = decisionLine(result.decision)
       if (why.length > 0) options.onData(Buffer.from(why))
       return { exitCode: result.exitCode }
     },

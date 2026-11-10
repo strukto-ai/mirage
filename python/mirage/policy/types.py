@@ -27,8 +27,8 @@ from mirage.types import (
     Limit,
     MountMode,
     PathSpec,
+    PolicyDecision,
     Producer,
-    Refusal,
 )
 from mirage.vfs.types import VfsCall
 from mirage.view.types import FileView, SessionView
@@ -52,7 +52,7 @@ class Outcome(StrEnum):
     ALLOW is silence as well as consent, since a line no rule speaks
     about runs. DENY covers both refusals, and ``Ruling.rule`` tells
     them apart: a rule refused it, or, with no rule, the allow list did.
-    Both exit 126 and print the same line; the ``refusal`` record
+    Both exit 126 and print the same line; the ``decision`` record
     carries the operator's reason when there is one.
     """
 
@@ -72,7 +72,7 @@ class Deny:
     2); a Deny carrying an ``error`` is that error, its reason the
     command's own diagnostic, ``<cmd>: <reason>``, at the same code.
     The dispatcher raises ``error``, else EACCES; the session view
-    EACCES. The reason otherwise rides the result's ``refusal`` record,
+    EACCES. The reason otherwise rides the result's ``decision`` record,
     so a document deny and a coded one print alike.
 
     Args:
@@ -159,7 +159,7 @@ class CommandRule:
 
     Args:
         reason (str): why the command is refused, carried on the
-            result's refusal record.
+            result's decision record.
         commands (tuple[str, ...]): command patterns the rule applies
             to; empty means every command. A path-scoped rule carries
             exactly one.
@@ -1117,7 +1117,7 @@ class Explanation:
             in the order the chain asks them, each naming its policy;
             the profile's rules answer as ``PermissionsPolicy``. A hide
             is never among them.
-        refusal (Refusal | None): the record a refused run carries,
+        decision (PolicyDecision | None): the record a refused run carries,
             None when it would run.
     """
 
@@ -1125,7 +1125,7 @@ class Explanation:
     reason: str = ""
     source: str = ""
     answers: "tuple[Deny | Ask | Route, ...]" = ()
-    refusal: Refusal | None = None
+    decision: PolicyDecision | None = None
 
 
 @dataclass(frozen=True, slots=True)

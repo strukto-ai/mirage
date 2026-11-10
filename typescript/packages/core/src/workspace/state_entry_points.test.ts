@@ -449,7 +449,7 @@ describe('file policies judge every file entry point', () => {
     const recorder = new OpRecorder()
     const ws = await makeSealedWs([recorder, new SealedPaths()])
     await expect(ws.vfs.read('/a/secret.txt')).rejects.toMatchObject({
-      refusal: { reason: 'secret is sealed' },
+      decision: { reason: 'secret is sealed' },
     })
     await expect(ws.vfs.write('/a/prod/new.txt', ENC.encode('hi\n'))).rejects.toThrow()
     recorder.asked.length = 0
@@ -1695,7 +1695,7 @@ describe('command permissions end to end', () => {
     ws.createSession('w', { profile: 'after' })
     const io = await ws.shell('echo hi; echo $?', { sessionId: 'w' })
     expect(stdoutStr(io)).toBe('hi\n126\n')
-    expect(io.refusal?.reason).toBe('no echo after 0')
+    expect(io.decision?.reason).toBe('no echo after 0')
     expect(await line(ws, 'echo hi')).toEqual([0, 'hi\n', ''])
   })
 

@@ -20,7 +20,7 @@ import {
   type RedirectRunner,
   currentCaller,
   isProgramInvocation,
-  noteRefusal,
+  noteDecision,
   redirectPathsFor,
   redirectRunnerFor,
   redirectSyntaxFor,
@@ -40,7 +40,7 @@ import {
   type HandOff,
   PolicyDenied,
   postCommandGate,
-  refusalOf,
+  decisionOf,
   renderDeny,
   resolveProducer,
   type Route,
@@ -966,8 +966,8 @@ async function runArgv(
     paths: readonly PathSpec[],
   ): Promise<RedirectResult> => {
     seedPrefix?.(name)
-    const refusal = await guard(paths, given)
-    if (refusal !== null) return refusal
+    const decision = await guard(paths, given)
+    if (decision !== null) return decision
     // The admitted command's gate is bound for its run and handed back
     // after, so its own I/O can ask about the entries the gate did not see
     // and a nested line binds its own (see `Admitted`). The workspace's
@@ -1045,7 +1045,7 @@ async function runArgv(
             return refused([name, ...argv.args].join(' '), {
               stderr,
               exitCode,
-              refusal: refusalOf(answer),
+              decision: decisionOf(answer),
             })
           }
           place(answer)
@@ -1093,7 +1093,7 @@ async function runArgv(
     // (unless the command saved that itself, as an external one does), so the
     // method is asked when the stream ends or its reader stops, and at once
     // for output already whole. A refusal leaves what was sent as sent: exit
-    // 126, the refusal line on stderr, the refusal record.
+    // 126, the refusal line on stderr, the decision record.
     const settle = async (): Promise<void> => {
       // A function hands back its last command's node, which keeps the
       // records that command made.
@@ -1129,8 +1129,8 @@ async function runArgv(
       io.exitCode = code
       node.exitCode = code
       node.stderr = concat([node.stderr, err])
-      io.refusal = refusalOf(action)
-      if (io.refusal !== null) noteRefusal(io.refusal)
+      io.decision = decisionOf(action)
+      if (io.decision !== null) noteDecision(io.decision)
     }
     if (stdout === null || stdout instanceof Uint8Array) {
       await settle()
@@ -1245,7 +1245,7 @@ function refused(command: string, verdict: Refused): RedirectResult {
     new IOResult({
       exitCode: verdict.exitCode,
       stderr: verdict.stderr,
-      refusal: verdict.refusal,
+      decision: verdict.decision,
     }),
     new ExecutionNode({
       command,
@@ -1265,7 +1265,7 @@ function unreadable(name: string, session: SessionState): Refused | null {
   if ((session.commands?.allow ?? null) === null) return null
   const deny: Deny = { kind: 'deny', reason: UNREADABLE_LINES }
   const [stderr, exitCode] = renderDeny(name, deny)
-  return { stderr, exitCode, refusal: refusalOf(deny) }
+  return { stderr, exitCode, decision: decisionOf(deny) }
 }
 
 /**

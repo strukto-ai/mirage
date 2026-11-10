@@ -17,7 +17,7 @@ import type { FileView, SessionAccess } from '../view/types.ts'
 import type { VfsCall } from '../vfs/types.ts'
 import type { ScriptSource } from '../runtime/types.ts'
 import type { SecretRef } from '../secrets/config.ts'
-import type { JsonValue, Limit, MountMode, PathSpec, Producer, Refusal } from '../types.ts'
+import type { JsonValue, Limit, MountMode, PathSpec, Producer, PolicyDecision } from '../types.ts'
 import type { WordKind } from '../commands/spec/types.ts'
 import type { SessionView } from '../view/types.ts'
 
@@ -904,7 +904,7 @@ export interface Explanation {
    */
   readonly answers: readonly (Deny | Ask | Route)[]
   /** The record a refused run carries, null when it would run. */
-  readonly refusal: Refusal | null
+  readonly decision: PolicyDecision | null
 }
 
 /**

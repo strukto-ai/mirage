@@ -1543,12 +1543,12 @@ def explain_answer(wire: dict[str, Any]) -> Answer:
     Args:
         wire (dict[str, Any]): the explanation's JSON.
     """
-    refusal = wire["refusal"]
+    decision = wire["decision"]
     said = {
         "outcome": wire["outcome"],
         "reason": wire["reason"],
         "source": wire["source"],
-        "refusal": refusal["kind"] if refusal else None,
+        "decision": decision["kind"] if decision else None,
     }
     if "call" in wire:
         return {**said, "call": wire["call"], "error": wire["error"]}

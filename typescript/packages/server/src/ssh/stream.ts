@@ -18,7 +18,7 @@ import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_exec
 import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
 import type { ServerChannel } from 'ssh2'
 import { concat } from '@struktoai/mirage-core/utils/bytes'
-import { refusalLine } from '@struktoai/mirage-core/workspace/tools/io_text'
+import { decisionLine } from '@struktoai/mirage-core/workspace/tools/io_text'
 
 // How far the client may type or pipe ahead of whoever reads it before
 // the channel is paused and SSH flow control pushes back.
@@ -419,7 +419,7 @@ export type Send = (data: Uint8Array, stderr: boolean) => Promise<void>
  * A line's output through `send` as the line produces it, then the
  * refusal's line on stderr when a policy refused part of it. The
  * terminal's output goes out as the line printed it; the policy's reason
- * is the one line `refusalLine` appends, read once the line has ended,
+ * is the one line `decisionLine` appends, read once the line has ended,
  * since an op a streaming command reads late is refused only then.
  * Resolves to the line's final status, its output already sent. Mirrors
  * Python's `deliver`.
@@ -430,7 +430,7 @@ export async function deliver(execution: ShellExecution, send: Send): Promise<Ex
     await send(data, stream === Channel.STDERR)
   }
   const result = await execution.wait()
-  const line = refusalLine(result.refusal)
+  const line = decisionLine(result.decision)
   if (line !== '') await send(new TextEncoder().encode(line), true)
   return result
 }

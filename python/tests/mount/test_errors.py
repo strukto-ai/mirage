@@ -23,7 +23,7 @@ from mirage.errors import FsCondition, posix_errno
 from mirage.errors.fs import edquot, exdev, no_mount
 from mirage.mount.errors import classify_error
 from mirage.policy import PolicyDenied
-from mirage.types import Refusal
+from mirage.types import PolicyDecision
 from mirage.utils.path import CycleError
 
 
@@ -115,7 +115,9 @@ def test_a_policys_reason_goes_to_the_log(caplog):
         errno.EACCES,
         "Permission denied",
         "/data/x",
-        refusal=Refusal(kind="deny", reason="sealed", policy="RulePolicy"),
+        decision=PolicyDecision(
+            kind="deny", reason="sealed", policy="RulePolicy"
+        ),
     )
     with caplog.at_level(logging.INFO, logger="mirage.mount.errors"):
         assert classify_error(refused) == errno.EACCES

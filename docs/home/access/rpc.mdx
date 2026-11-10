@@ -43,7 +43,7 @@ These examples use the `demo` workspace from the [CLI quickstart](/home/access/c
 Both answer:
 
 ```json
-{"jsonrpc": "2.0", "id": 1, "result": {"exit_code": 0, "stdout": "3\n", "stderr": "", "refusal": null}}
+{"jsonrpc": "2.0", "id": 1, "result": {"exit_code": 0, "stdout": "3\n", "stderr": "", "decision": null}}
 ```
 
 Answers come back as calls finish, so match them by `id`.
@@ -124,7 +124,7 @@ slowly holds it back. Send one at a time to keep the bytes in order.
 | `-32800` | Canceled. |
 
 A file error carries the [HTTP error object](/api/errors#error-body) in `data`:
-its `code`, `message` and `errno`, plus a `refusal` record when a policy
+its `code`, `message` and `errno`, plus a `decision` record when a policy
 refused it:
 
 ```json

@@ -424,7 +424,7 @@ async def finish_shell(
         + (await cleanup.materialize_stderr())
         or None,
         exit_code=cleanup.exit_code,
-        refusal=io.refusal,
+        decision=io.decision,
     )
 
 

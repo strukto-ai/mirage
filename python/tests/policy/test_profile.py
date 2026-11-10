@@ -64,7 +64,7 @@ from mirage.utils.abort import MirageAbortError
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.session.state import seed_var
-from mirage.workspace.tools.io_text import with_refusal
+from mirage.workspace.tools.io_text import with_decision
 from tests.fixtures.vfs_io import dispatched
 
 
@@ -1046,7 +1046,7 @@ async def _line(ws: Workspace, line: str, sid: str | None = None):
     return (
         r.exit_code,
         await r.stdout_str(),
-        with_refusal(await r.stderr_str(), r.refusal),
+        with_decision(await r.stderr_str(), r.decision),
     )
 
 
@@ -1694,8 +1694,8 @@ async def test_a_post_command_program_refuses_a_command_after_it_ran():
         ws.create_session("w", profile="after")
         io = await ws.shell("echo hi; echo $?", session_id="w")
         assert await io.stdout_str() == "hi\n126\n"
-        assert io.refusal is not None
-        assert io.refusal.reason == "no echo after 0"
+        assert io.decision is not None
+        assert io.decision.reason == "no echo after 0"
         assert await _line(ws, "echo hi") == (0, "hi\n", "")
     finally:
         await ws.close()

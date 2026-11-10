@@ -84,7 +84,7 @@ sout() { jq -r '.stdout // .result.stdout // empty'; }
 no_ls_time() { sed -E 's/ [A-Z][a-z]{2} +[0-9]+ [0-9]{2}:[0-9]{2} / /'; }
 serr() { jq -r '.stderr // .result.stderr // empty'; }
 # The reason a refused line carries beside bash's bare `Permission denied`.
-sreason() { jq -r '.refusal.reason // .result.refusal.reason // empty'; }
+sreason() { jq -r '.decision.reason // .result.decision.reason // empty'; }
 sexit() { jq -r '.exit_code // .result.exit_code // empty'; }
 verdict() { jq -r 'if (.exit_code // .result.exit_code // 1) == 0 then "allowed" else "denied" end'; }
 

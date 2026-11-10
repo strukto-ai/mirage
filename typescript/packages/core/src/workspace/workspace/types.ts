@@ -37,7 +37,7 @@ import type {
   Limit,
   MountMode,
   ReadSpec,
-  Refusal,
+  PolicyDecision,
   WritePolicy,
 } from '../../types.ts'
 import type { Clock } from '../../utils/clock.ts'
@@ -262,18 +262,18 @@ export class ExecuteResult {
    * it; null on every ordinary run. stderr stays in bash's voice, this
    * carries the reason.
    */
-  readonly refusal: Refusal | null
+  readonly decision: PolicyDecision | null
 
   constructor(
     stdout: Uint8Array,
     stderr: Uint8Array,
     exitCode: number,
-    refusal: Refusal | null = null,
+    decision: PolicyDecision | null = null,
   ) {
     this.stdout = stdout
     this.stderr = stderr
     this.exitCode = exitCode
-    this.refusal = refusal
+    this.decision = decision
   }
 
   get stdoutText(): string {

@@ -43,7 +43,7 @@ interface Item {
   used_by?: number
 }
 
-interface Refusal {
+interface PolicyDecision {
   code: string
   message: string
   param?: string
@@ -51,7 +51,7 @@ interface Refusal {
 }
 
 interface Answer {
-  error: Refusal
+  error: PolicyDecision
   id?: string
   kind?: string
   builtin?: boolean

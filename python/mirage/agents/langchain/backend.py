@@ -50,7 +50,7 @@ from mirage.bridge.sync import on_owner_loop
 from mirage.commands.builtin.utils.limit import TRUNCATION_NOTICE
 from mirage.io.types import IOResult
 from mirage.workspace.files import Files
-from mirage.workspace.tools.io_text import replace_text, with_refusal
+from mirage.workspace.tools.io_text import replace_text, with_decision
 from mirage.workspace.tools.tool_operations import ensure_parents
 from mirage.workspace.workspace import Session, Workspace
 
@@ -136,7 +136,9 @@ async def _command_error(
 ) -> str | None:
     if io.exit_code in success_exit_codes:
         return None
-    stderr = with_refusal((await io.stderr_str()).strip(), io.refusal).strip()
+    stderr = with_decision(
+        (await io.stderr_str()).strip(), io.decision
+    ).strip()
     if stderr:
         return stderr
     return f"Command failed with exit code {io.exit_code}"

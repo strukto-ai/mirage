@@ -23,7 +23,7 @@ import { LINE_NAME } from '../../policy/builtin/output_cap.ts'
 import {
   type Claimant,
   postExecuteGate,
-  refusalOf,
+  decisionOf,
   renderDeny,
   resolveLimit,
 } from '../../policy/index.ts'
@@ -162,7 +162,7 @@ export async function runWholeLine(
       stdout: data,
       stderr: stderr.length > 0 ? stderr : null,
       exitCode: io.exitCode,
-      refusal: null,
+      decision: null,
     }
   }
   const [refused, bound] = await postExecuteGate(
@@ -183,7 +183,7 @@ export async function runWholeLine(
       stdout: new Uint8Array(),
       stderr: concat([stderr, denyBytes]),
       exitCode,
-      refusal: refusalOf(refused),
+      decision: decisionOf(refused),
     }
   }
   const [capped, cappedErr, cappedCode] = await guardOutput(
@@ -196,6 +196,6 @@ export async function runWholeLine(
     stdout: capped !== null ? await materialize(capped) : new Uint8Array(),
     stderr: cappedErr !== null ? await materialize(cappedErr) : null,
     exitCode: cappedCode,
-    refusal: null,
+    decision: null,
   }
 }

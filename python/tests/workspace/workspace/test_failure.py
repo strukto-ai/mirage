@@ -15,7 +15,7 @@
 from mirage.commands.errors import UsageError
 from mirage.errors.types import CommandTimeoutError
 from mirage.policy import Deny
-from mirage.types import Refusal
+from mirage.types import PolicyDecision
 from mirage.workspace.workspace.failure import (
     failure_result,
     placement_refused,
@@ -33,7 +33,7 @@ def test_a_placement_deny_reports_126_named_by_the_command():
     io = placement_refused(deny, "rm -rf /data")
     assert io.exit_code == 126
     assert io.stderr == b"rm: Permission denied\n"
-    assert io.refusal == Refusal(
+    assert io.decision == PolicyDecision(
         kind="deny", reason="no writes", policy="RoutePolicy"
     )
 

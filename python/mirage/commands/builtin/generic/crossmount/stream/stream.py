@@ -125,7 +125,7 @@ async def run_stream(
         if final is not None:
             merged = await merged.merge(final)
         result.records = merged.records
-        result.refusal = result.refusal or merged.refusal
+        result.decision = result.decision or merged.decision
         result.stderr = (
             await materialize(merged.stderr) + await materialize(result.stderr)
         ) or None
@@ -140,7 +140,7 @@ async def run_stream(
             out, io = await run_single(Cmd.CAT, [scope], [], {})
             fetches.append((scope, out, io))
             result.producer = io.producer
-            result.refusal = io.refusal or result.refusal
+            result.decision = io.decision or result.decision
             if io.exit_code != 0:
                 await drain(out)
             elif out is not None:
@@ -169,7 +169,7 @@ async def run_stream(
                 resolve_hint=scopes[0],
             )
             result.producer = final.producer
-            result.refusal = final.refusal or result.refusal
+            result.decision = final.decision or result.decision
     except BaseException:
         await close_fetches()
         raise

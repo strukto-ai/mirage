@@ -47,8 +47,8 @@ import type { Workspace } from '@struktoai/mirage-node'
 import { StreamTail, TailBuffer } from './text.ts'
 import { SpillSink, ensureDirPath, type SpillTarget } from './spill.ts'
 
-import type { Refusal } from '@struktoai/mirage-core/types'
-import { refusalLine } from '@struktoai/mirage-core/workspace/tools/io_text'
+import type { PolicyDecision } from '@struktoai/mirage-core/types'
+import { decisionLine } from '@struktoai/mirage-core/workspace/tools/io_text'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 
 const DEFAULT_TIMEOUT_MS = 120_000
@@ -407,7 +407,7 @@ class MirageShellExecution implements ShellExecution {
     // printed in bash's own words.
     if (result !== null) {
       const before = this.stderrTail.readFrom(0).text
-      const line = refusalLine(result.refusal)
+      const line = decisionLine(result.decision)
       if (line !== '') {
         const lead = before === '' || before.endsWith('\n') ? '' : '\n'
         await this.console.emit(Channel.STDERR, new TextEncoder().encode(lead + line))
@@ -648,7 +648,7 @@ export class MirageShellExecutor extends ShellExecutor {
    * or by the read-only narrowing.
    *
    * The document's refusals ride the result itself: a `Deny`, an
-   * unanswered ask and a policy that raised all leave `refusal` on the
+   * unanswered ask and a policy that raised all leave `decision` on the
    * `ExecuteResult`, whatever the line did with its streams (`2>&1`, a
    * trailing command that owns the status). That record is read for
    * every call, because a role's `commands.deny` and `commands.ask`
@@ -666,10 +666,10 @@ export class MirageShellExecutor extends ShellExecutor {
    */
   private wasDenied(
     spec: ShellExecSpec,
-    result: { readonly refusal: Refusal | null },
+    result: { readonly decision: PolicyDecision | null },
     stderr: string,
   ): boolean {
-    if (result.refusal !== null) return true
+    if (result.decision !== null) return true
     if (this.modeFor(spec) !== 'read-only') return false
     return DENIAL_SIGNATURES.some((signature) => stderr.includes(signature))
   }

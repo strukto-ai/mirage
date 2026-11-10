@@ -52,7 +52,7 @@ import {
   expireCaller,
   getCurrentSessionFor,
   runWithCaller,
-  runWithRefusalSink,
+  runWithDecisionSink,
   runWithSession,
   getCurrentEvaluation,
   runWithEvaluation,
@@ -83,7 +83,7 @@ import type { RouteDecision } from '../../runtime/types.ts'
 import { wholeLineRuntime } from '../../runtime/table.ts'
 import { RouteError } from '../../runtime/routing/errors.ts'
 import type { Deny, HandOff, Pending } from '../../policy/index.ts'
-import type { Refusal } from '../../types.ts'
+import type { PolicyDecision } from '../../types.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { getText, inputSubstitutionRedirect } from '../../shell/helpers.ts'
 import { LineHistory } from '../history/line.ts'
@@ -167,10 +167,10 @@ export interface ExecuteEnv {
  * survives. The typed line reports it when its own tree earned none: the
  * rightmost rule IOResult.merge applies, with the inner line standing
  * left of the command that consumed its output. Mirrors Python's
- * `NestedRefusal`.
+ * `NestedDecision`.
  */
-interface NestedRefusal {
-  latest: Refusal | null
+interface NestedDecision {
+  latest: PolicyDecision | null
 }
 
 /**
@@ -215,7 +215,7 @@ async function answerLine(
     const io = new IOResult({
       exitCode: result.exitCode,
       stderr: result.stderr,
-      refusal: result.refusal,
+      decision: result.decision,
     })
     await runCancellable(
       history !== null
@@ -252,7 +252,7 @@ async function drainToSink(sink: JobConsole, result: ExecuteResult): Promise<Exe
   if (result.stdout.byteLength === 0 && result.stderr.byteLength === 0) return result
   if (result.stdout.byteLength > 0) await sink.emit(Channel.STDOUT, result.stdout)
   if (result.stderr.byteLength > 0) await sink.emit(Channel.STDERR, result.stderr)
-  return new ExecuteResult(new Uint8Array(), new Uint8Array(), result.exitCode, result.refusal)
+  return new ExecuteResult(new Uint8Array(), new Uint8Array(), result.exitCode, result.decision)
 }
 
 /**
@@ -487,7 +487,7 @@ async function runLine(
     throw error
   }
   const [stdout, stderr] = tty.take()
-  return new ExecuteResult(stdout, stderr, result.exitCode, result.refusal)
+  return new ExecuteResult(stdout, stderr, result.exitCode, result.decision)
 }
 
 /** End a line bash cannot read, as where it was read says. Mirrors Python's `_unreadable_line`. */
@@ -551,7 +551,7 @@ function recurse(
   context: EvaluationContext,
   effectiveSession: SessionState,
   routingDecision: RouteDecision<Runtime>,
-  nested: NestedRefusal,
+  nested: NestedDecision,
   parser: ParseScope,
   handed: HandOff,
   deps: () => ExecuteNodeDeps,
@@ -652,7 +652,7 @@ function recurse(
           )
           io.stdout = stdout
           recordStatus(session, io.exitCode, true)
-          if (io.refusal !== null) nested.latest = io.refusal
+          if (io.decision !== null) nested.latest = io.decision
           return io
         }
       } finally {
@@ -702,12 +702,12 @@ function recurse(
         const res = await env.execute(cmd, innerOpts)
         // The record rides back with the streams: a refusal the inner
         // line earned is the outer line's to report.
-        if (res.refusal !== null) nested.latest = res.refusal
+        if (res.decision !== null) nested.latest = res.decision
         io = new IOResult({
           exitCode: res.exitCode,
           stdout: res.stdout,
           stderr: res.stderr,
-          refusal: res.refusal,
+          decision: res.decision,
         })
       } catch (err) {
         // A substitution runs on a copy of the caller's frames, and it
@@ -974,7 +974,7 @@ async function runPreparedLine(
           const rootNode = root as unknown as TSNodeLike
           const reparse = (source: string): TSNodeLike =>
             parser.parse(source) as unknown as TSNodeLike
-          const nested: NestedRefusal = { latest: null }
+          const nested: NestedDecision = { latest: null }
 
           // The line's hand-off: the grants its passes and gates claim for its
           // commands, which the gates run on and the line's end spends. A
@@ -996,13 +996,13 @@ async function runPreparedLine(
               reparse,
               stop,
             ))
-          // Placement waits on admission, judged with the line's refusal sink
+          // Placement waits on admission, judged with the line's decision sink
           // bound, so an op a policy script makes while the line is judged is
           // inside the line, never a question of its own.
           const held = (): Promise<boolean> =>
-            runWithRefusalSink(
-              (refusal: Refusal) => {
-                nested.latest = refusal
+            runWithDecisionSink(
+              (decision: PolicyDecision) => {
+                nested.latest = decision
               },
               async () =>
                 lineHeld(
@@ -1300,7 +1300,7 @@ async function runOnLineRuntime(
   killed: AbortSignal | undefined,
   history: LineHistory | null,
   judged: () => Promise<[Walked, Judged[]][]>,
-  nested: NestedRefusal,
+  nested: NestedDecision,
   deadline: { seconds: number; start: number } | null,
   reparse: (line: string) => TSNodeLike,
   inLine: <T>(fn: () => Promise<T>) => Promise<T>,
@@ -1310,7 +1310,7 @@ async function runOnLineRuntime(
     lineCliEnvNames: ReadonlySet<string>,
     probeText: boolean,
   ) => Promise<ExecuteResult | null>,
-  hold: (refusal: Refusal | null) => void,
+  hold: (decision: PolicyDecision | null) => void,
 ): Promise<ExecuteResult> {
   const effectiveSession = context.session
   const isLine = options.record !== false
@@ -1330,13 +1330,13 @@ async function runOnLineRuntime(
     (one) => env.router.offLine(one, decision),
   )
   if (refused !== null) {
-    hold(refused.refusal)
+    hold(refused.decision)
     recordStatus(targetSession, refused.exitCode)
     if (isLine) {
       const io = new IOResult({
         exitCode: refused.exitCode,
         stderr: refused.stderr,
-        refusal: refused.refusal,
+        decision: refused.decision,
       })
       await runCancellable(
         history !== null
@@ -1351,7 +1351,7 @@ async function runOnLineRuntime(
         killed,
       )
     }
-    return new ExecuteResult(new Uint8Array(), refused.stderr, refused.exitCode, refused.refusal)
+    return new ExecuteResult(new Uint8Array(), refused.stderr, refused.exitCode, refused.decision)
   }
   if (env.sessions.hasManagedEnv) {
     // A whole-line program may read any name, so the walk is not
@@ -1440,15 +1440,15 @@ async function runOnLineRuntime(
     throw error
   }
   for (const item of lineRecords) env.records.push(item)
-  const refusal = result.refusal ?? nested.latest
-  hold(refusal)
+  const carried = result.decision ?? nested.latest
+  hold(carried)
   recordStatus(targetSession, result.exitCode)
   if (isLine) {
     await logLine(
       new IOResult({
         exitCode: result.exitCode,
         stdout: result.stdout,
-        refusal,
+        decision: carried,
         ...(result.stderr !== null ? { stderr: result.stderr } : {}),
       }),
     )
@@ -1457,7 +1457,7 @@ async function runOnLineRuntime(
     result.stdout,
     result.stderr ?? new Uint8Array(),
     result.exitCode,
-    refusal,
+    carried,
   )
 }
 
@@ -1472,7 +1472,7 @@ async function runParsedLine(
   context: EvaluationContext,
   stdin: ByteSource | null,
   reparse: (line: string) => TSNodeLike,
-  nested: NestedRefusal,
+  nested: NestedDecision,
   handed: HandOff,
   judged: () => Promise<[Walked, Judged[]][]>,
   // The top-level line's deadline: the controller its timer aborts, its
@@ -1491,8 +1491,8 @@ async function runParsedLine(
   // An op a policy refuses inside a command prints the command's own GNU
   // line, so the dispatcher notes the record here, for the line to carry on its
   // result.
-  const note = (refusal: Refusal): void => {
-    nested.latest = refusal
+  const note = (decision: PolicyDecision): void => {
+    nested.latest = decision
   }
   // The line's own layer of the caller: its sink, and the call its
   // session writes are. A session write on the line is a call of the
@@ -1569,8 +1569,8 @@ async function runParsedLine(
         reparse,
         inLine,
         fill,
-        (refusal) => {
-          held = isPending(refusal)
+        (decision) => {
+          held = isPending(decision)
         },
       )
     }
@@ -1597,13 +1597,13 @@ async function runParsedLine(
       // A question left waiting holds the line for its retry, which has
       // to find the grants standing, so they are released rather than
       // spent; any other refusal ends the line.
-      held = isPending(prejudged.refusal)
+      held = isPending(prejudged.decision)
       recordStatus(targetSession, prejudged.exitCode)
       return new ExecuteResult(
         new Uint8Array(),
         prejudged.stderr,
         prejudged.exitCode,
-        prejudged.refusal,
+        prejudged.decision,
       )
     }
     if (env.sessions.hasManagedEnv) {
@@ -1720,15 +1720,15 @@ async function runParsedLine(
         isLine ? runWithRecording(runBody, env.records, env.registry.clock) : [await runBody(), []],
       )
       // A record a nested line earned is the line's to report when its
-      // own tree earned none (see NestedRefusal). A question a gate left
+      // own tree earned none (see NestedDecision). A question a gate left
       // waiting holds the line exactly as one the pass left waiting
       // does: the retry has to find the grants the pass claimed for the
       // other commands standing, or it asks for them again, and the
       // answer to this one would be taken by the first spelling the pass
       // reads.
       const treeIo = execResult[0][1]
-      treeIo.refusal ??= nested.latest
-      held = isPending(treeIo.refusal)
+      treeIo.decision ??= nested.latest
+      held = isPending(treeIo.decision)
     } catch (err) {
       // Abort (cancellation) and content drift are control-flow signals
       // that must propagate, mirroring the Python workspace. Any other
@@ -1838,5 +1838,5 @@ async function runParsedLine(
       restoreStatus(targetSession, statusBefore, lineStatusWriter(targetSession))
     throw executionFailure.error
   }
-  return new ExecuteResult(stdoutBytes, stderrBytes, io.exitCode, io.refusal)
+  return new ExecuteResult(stdoutBytes, stderrBytes, io.exitCode, io.decision)
 }

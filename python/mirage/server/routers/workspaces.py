@@ -55,7 +55,7 @@ from mirage.server.errors import (
     loader_error,
     validation_error,
 )
-from mirage.server.io_serde import explanation_to_dict, refusal_to_dict
+from mirage.server.io_serde import decision_to_dict, explanation_to_dict
 from mirage.server.logs import (
     LogPage,
     completed_logs,
@@ -1067,8 +1067,8 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
         except PolicyDenied as e:
             raise HttpError(
                 ErrorCode.POLICY_REFUSED,
-                e.refusal.reason if e.refusal is not None else str(e),
-                refusal=refusal_to_dict(e.refusal),
+                e.decision.reason if e.decision is not None else str(e),
+                decision=decision_to_dict(e.decision),
             )
         except FileNotFoundError:
             raise HttpError(

@@ -936,7 +936,7 @@ class Producer:
     (output caps today; budgets and attribution later) read it as
     context. Facts only: no policy reads a decision off the
     envelope; the one a chain hands down is written beside it as
-    ``IOResult.refusal`` after the last method has spoken.
+    ``IOResult.decision`` after the last method has spoken.
 
     Args:
         command (str): the producing command's name.
@@ -954,7 +954,7 @@ class Producer:
     native: bool = False
 
 
-RefusalKind = Literal["deny", "pending", "failed"]
+PolicyDecisionKind = Literal["deny", "pending", "failed"]
 
 # What the kernel walk answers for a path it cannot resolve at all: the
 # empty name (POSIX never resolves a null pathname) or a symlink loop.
@@ -962,7 +962,7 @@ WalkErrno = Literal["ENOENT", "ELOOP"]
 
 
 @dataclass(frozen=True, slots=True)
-class Refusal:
+class PolicyDecision:
     """Why a line did not run, for the caller that reads the result.
 
     stderr keeps bash's voice (``<cmd>: Permission denied``), which
@@ -973,7 +973,7 @@ class Refusal:
     which must not reveal that the word names anything.
 
     Args:
-        kind (RefusalKind): ``deny`` for a policy's refusal, ``pending``
+        kind (PolicyDecisionKind): ``deny`` for a policy's refusal, ``pending``
             for an ask the host has not answered, ``failed`` for a
             policy that raised and so refused by default.
         reason (str): the policy's own words, or the ask's.
@@ -982,7 +982,7 @@ class Refusal:
         ask_id (str | None): the approval id to quote, for ``pending``.
     """
 
-    kind: RefusalKind
+    kind: PolicyDecisionKind
     reason: str
     policy: str = ""
     ask_id: str | None = None

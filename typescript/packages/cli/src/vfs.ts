@@ -75,7 +75,7 @@ export async function answer(r: Response): Promise<unknown> {
     const error = errorOf(await r.clone().text())
     if (error?.errno !== undefined) {
       process.stderr.write(`${error.message} (${error.errno})\n`)
-      if (error.refusal) process.stderr.write(`policy denied: ${error.refusal.reason}\n`)
+      if (error.decision) process.stderr.write(`policy denied: ${error.decision.reason}\n`)
       process.exit(1)
     }
   }

@@ -413,7 +413,7 @@ async function main(): Promise<void> {
       const result = await denied.shell('linear issue relation add PLAT-1 duplicate PLAT-2')
       assert.notEqual(result.exitCode, 0)
       assert.equal(calls.length, 0)
-      assert.equal(result.refusal?.reason, 'read only')
+      assert.equal(result.decision?.reason, 'read only')
     } finally {
       await denied.close()
     }

@@ -52,7 +52,7 @@ describe('python3: a rule on the script', () => {
         expect(io.exitCode).toBe(1)
         expect(stdoutStr(io)).toBe('')
         expect(stderrStr(io)).toBe(`python3: ${shown}: Permission denied\n`)
-        expect(io.refusal?.reason).toBe('protected')
+        expect(io.decision?.reason).toBe('protected')
       } finally {
         await ws.close()
       }

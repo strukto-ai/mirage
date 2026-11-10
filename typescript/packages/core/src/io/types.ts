@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec, Producer, Refusal } from '../types.ts'
+import type { PathSpec, Producer, PolicyDecision } from '../types.ts'
 import { concat } from '../utils/bytes.ts'
 import { chunks } from './cooperative.ts'
 import { checkMemory } from './memory.ts'
@@ -213,7 +213,7 @@ export class IOResult {
   // ownership of every byte in a combined result. The workspace boundary hands it to the
   // policy layer as context. Facts ride the envelope as policy
   // input; the decision a chain hands down rides beside them as
-  // `refusal`, written after the last method has spoken.
+  // `decision`, written after the last method has spoken.
   output: OutputState | null = null
   outputFinalized = false
   producer: Producer | null
@@ -221,7 +221,7 @@ export class IOResult {
   // refused it; null on every ordinary run. stderr stays in bash's
   // voice, this carries the reason. merge keeps the rightmost record,
   // as it does the producer.
-  refusal: Refusal | null
+  decision: PolicyDecision | null
   // How the command answers its stdout's reader going away when it does so
   // itself (`tee -p`); null leaves the writer to SIGPIPE. merge keeps the
   // right-hand one, whose stdout the result carries.
@@ -237,7 +237,7 @@ export class IOResult {
         | 'exitCode'
         | 'producer'
         | 'records'
-        | 'refusal'
+        | 'decision'
         | 'closedStdout'
         | 'rows'
       >
@@ -249,7 +249,7 @@ export class IOResult {
     this.stderr = init.stderr ?? null
     this._exitCode = init.exitCode ?? 0
     this.producer = init.producer ?? null
-    this.refusal = init.refusal ?? null
+    this.decision = init.decision ?? null
     this.closedStdout = init.closedStdout ?? null
     this.streamSource = null
   }
@@ -310,7 +310,7 @@ export class IOResult {
       records: other.records,
       stderr: mergedStderr,
       producer: other.producer,
-      refusal: other.refusal ?? this.refusal,
+      decision: other.decision ?? this.decision,
       closedStdout: other.closedStdout,
     })
     result.output = other.output

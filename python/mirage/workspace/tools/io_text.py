@@ -14,8 +14,8 @@
 
 from mirage.errors.fs import error_virtual_path, fs_strerror
 from mirage.io.types import IOResult
-from mirage.policy import PolicyDenied, describe_refusal
-from mirage.types import Refusal
+from mirage.policy import PolicyDenied, describe_decision
+from mirage.types import PolicyDecision
 
 
 def decode(value: bytes | None) -> str:
@@ -24,45 +24,45 @@ def decode(value: bytes | None) -> str:
     return value.decode("utf-8", errors="replace")
 
 
-def refusal_line(refusal: Refusal | None) -> str:
+def decision_line(decision: PolicyDecision | None) -> str:
     """The one line a text surface appends for a refusal, newline
     included, or the empty string when there is no record. The
     refusal's stderr is the bare ``Permission denied`` or the path's own
     error, which never says why.
 
     Args:
-        refusal (Refusal | None): the record off the result.
+        decision (PolicyDecision | None): the record off the result.
     """
-    if refusal is None:
+    if decision is None:
         return ""
-    return describe_refusal(refusal) + "\n"
+    return describe_decision(decision) + "\n"
 
 
-def with_refusal(text: str, refusal: Refusal | None) -> str:
+def with_decision(text: str, decision: PolicyDecision | None) -> str:
     """Append the refusal's reason as one more line after the shell's
     own output, for a surface that hands the agent text.
 
     Args:
         text (str): the joined stdout and stderr.
-        refusal (Refusal | None): the record off the result; None
+        decision (PolicyDecision | None): the record off the result; None
             returns the text unchanged.
     """
-    line = refusal_line(refusal)
+    line = decision_line(decision)
     if not line or not text:
         return text or line
     return text + line if text.endswith("\n") else f"{text}\n{line}"
 
 
-def with_refusal_bytes(data: bytes, refusal: Refusal | None) -> bytes:
-    """``with_refusal`` for a surface that hands the agent raw stderr
+def with_decision_bytes(data: bytes, decision: PolicyDecision | None) -> bytes:
+    """``with_decision`` for a surface that hands the agent raw stderr
     bytes; the bytes themselves are never decoded.
 
     Args:
         data (bytes): the shell's stderr.
-        refusal (Refusal | None): the record off the result; None
+        decision (PolicyDecision | None): the record off the result; None
             returns the bytes unchanged.
     """
-    line = refusal_line(refusal).encode("utf-8")
+    line = decision_line(decision).encode("utf-8")
     if not line or not data:
         return data or line
     return data + line if data.endswith(b"\n") else data + b"\n" + line
@@ -78,7 +78,7 @@ def error_text(exc: Exception) -> str:
     Args:
         exc (Exception): the failure.
     """
-    refusal = exc.refusal if isinstance(exc, PolicyDenied) else None
+    decision = exc.decision if isinstance(exc, PolicyDenied) else None
     strerror = fs_strerror(exc)
     if strerror is None:
         words = str(exc)
@@ -90,7 +90,7 @@ def error_text(exc: Exception) -> str:
         words = strerror
     else:
         words = f"{exc}: {strerror}"
-    return with_refusal(f"Error: {words}", refusal)
+    return with_decision(f"Error: {words}", decision)
 
 
 def io_to_str(io: IOResult) -> str:
@@ -99,7 +99,7 @@ def io_to_str(io: IOResult) -> str:
     text = stdout
     if stderr:
         text = f"{stdout}\n{stderr}" if stdout else stderr
-    return with_refusal(text, io.refusal)
+    return with_decision(text, io.decision)
 
 
 def replace_text(

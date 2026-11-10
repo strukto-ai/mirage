@@ -196,7 +196,7 @@ describe('templates router', () => {
       url: '/v1/workspaces/guarded/shell',
       payload: { command: 'touch /a && rm /a' },
     })
-    expect(ran.json<{ refusal?: { reason: string } }>().refusal?.reason).toBe(
+    expect(ran.json<{ decision?: { reason: string } }>().decision?.reason).toBe(
       'deletes are disabled',
     )
     await app.close()

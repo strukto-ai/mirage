@@ -103,7 +103,7 @@ class DaemonRpcServer(MirageRpcServer):
             pipe (BytePipe | None): the pipe behind an open ``stdin``.
 
         Returns:
-            JsonValue: ``{exit_code, stdout, stderr, refusal}``.
+            JsonValue: ``{exit_code, stdout, stderr, decision}``.
 
         Raises:
             RpcError: the job was cancelled or failed.

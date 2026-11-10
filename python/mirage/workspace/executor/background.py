@@ -88,7 +88,7 @@ from mirage.shell.signals import (
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.shell.voice import shell_voice
-from mirage.types import PathSpec, Refusal
+from mirage.types import PathSpec, PolicyDecision
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.builtins.jobspec import session_of
 from mirage.workspace.executor.statement import (
@@ -681,13 +681,13 @@ async def handle_background(
         outer = current_caller()
         line_sink = outer.refusals
 
-        def note(refusal: Refusal) -> None:
+        def note(decision: PolicyDecision) -> None:
             # The line still hears of every refusal; a question left
             # waiting also holds the job.
             nonlocal held
-            held = held or is_pending(refusal)
+            held = held or is_pending(decision)
             if line_sink is not None:
-                line_sink(refusal)
+                line_sink(decision)
 
         # The job's own layer of the caller. The task's context snapshot
         # still points at the OUTER session (create_task copies the
@@ -791,7 +791,7 @@ async def handle_background(
                     logger.debug(
                         "job %d: its timeout notice found no reader", job.pid
                     )
-            ended_held = held or is_pending(io.refusal)
+            ended_held = held or is_pending(io.decision)
             return io, exec_node
         finally:
             release_job()

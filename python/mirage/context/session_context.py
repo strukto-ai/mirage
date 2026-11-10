@@ -35,7 +35,7 @@ from mirage.types import (
     Limit,
     MountMode,
     PathSpec,
-    Refusal,
+    PolicyDecision,
     Visibility,
     WalkProbe,
     weaker_mode,
@@ -86,7 +86,7 @@ class SessionOwner(ABC):
 
 
 # Where a refusal an entry point raises is noted for the line running it.
-RefusalSink = Callable[[Refusal], None]
+DecisionSink = Callable[[PolicyDecision], None]
 
 # Runs a prepared command under ordered redirects, with a gate for
 # each target and the command identity for the single-output fast path.
@@ -130,7 +130,7 @@ class Caller:
             shell's own I/O around them does not.
         mount (tuple[str, MountMode] | None): the prefix and configured
             mode of the mount a command runs on.
-        refusals (RefusalSink | None): where the running line notes a
+        refusals (DecisionSink | None): where the running line notes a
             policy's refusal; None outside a line.
         explaining (list[VfsExplanation] | DryRun | None): a dry run's
             trace, DECIDING while its policies decide, None to run.
@@ -192,7 +192,7 @@ class Caller:
     gate: EntryGate | None = None
     rule_gate: EntryGate | None = None
     mount: tuple[str, MountMode] | None = None
-    refusals: RefusalSink | None = None
+    refusals: DecisionSink | None = None
     explaining: list[VfsExplanation] | DryRun | None = None
     walk_probe: WalkProbe | None = None
     redirects: (
@@ -780,7 +780,7 @@ def reset_mount_gate(token: CallerToken) -> None:
     reset_caller(token)
 
 
-def set_refusal_sink(sink: RefusalSink) -> CallerToken:
+def set_decision_sink(sink: DecisionSink) -> CallerToken:
     """Bind where the entry points note a policy's refusal, for one line's run.
 
     Set by the workspace around a typed line: a command renders an op
@@ -791,12 +791,12 @@ def set_refusal_sink(sink: RefusalSink) -> CallerToken:
     reaches it.
 
     Args:
-        sink (RefusalSink): takes each record as an entry point raises it.
+        sink (DecisionSink): takes each record as an entry point raises it.
     """
     return _bind(refusals=sink)
 
 
-def reset_refusal_sink(token: CallerToken) -> None:
+def reset_decision_sink(token: CallerToken) -> None:
     """Restore the previous refusal-sink binding."""
     reset_caller(token)
 
@@ -835,17 +835,17 @@ def explaining() -> list[VfsExplanation] | DryRun | None:
     return _caller.get().explaining
 
 
-def note_refusal(refusal: Refusal) -> None:
+def note_decision(decision: PolicyDecision) -> None:
     """Hand an entry point's refusal to the line running in this context; an
     entry point reached outside any line (a programmatic op) has no line to
     tell, and the record rides the raised error alone.
 
     Args:
-        refusal (Refusal): the policy's record.
+        decision (PolicyDecision): the policy's record.
     """
     sink = _caller.get().refusals
     if sink is not None:
-        sink(refusal)
+        sink(decision)
 
 
 def get_walk_probe() -> WalkProbe | None:

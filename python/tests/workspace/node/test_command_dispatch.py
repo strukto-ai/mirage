@@ -449,8 +449,8 @@ async def test_routes_one_process_cannot_honor_refuse_the_wrapper(
     try:
         r = await ws.shell(line)
         assert (r.exit_code, r.stdout) == (126, b"")
-        assert r.refusal is not None
-        assert r.refusal.reason.startswith(
+        assert r.decision is not None
+        assert r.decision.reason.startswith(
             "policies place the line on different runtimes"
         )
     finally:

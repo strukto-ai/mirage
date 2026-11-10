@@ -37,8 +37,8 @@ import {
   postExecuteGate,
   postVfsGate,
   preVfsGate,
-  describeRefusal,
-  refusalOf,
+  describeDecision,
+  decisionOf,
   renderDeny,
 } from './policies.ts'
 import { scriptContext } from './script.ts'
@@ -475,7 +475,7 @@ describe('Policies', () => {
       expect((err as PolicyDenied).code).toBe('EACCES')
       expect((err as PolicyDenied).virtualPath).toBe('/data/x')
       expect((err as PolicyDenied).message).toBe('Permission denied')
-      expect((err as PolicyDenied).refusal?.reason).toBe('no reads')
+      expect((err as PolicyDenied).decision?.reason).toBe('no reads')
     }
     // No opinion on writes: the gate passes silently.
     await preVfsGate(policies, callOf('write'), path('/data/x'), true, '/data/')
@@ -487,7 +487,7 @@ describe('Policies', () => {
     await postVfsGate(policies, callOf('read'), path('/data/x'), false, '/data/', new Uint8Array(4))
     await expect(
       postVfsGate(policies, callOf('read'), path('/data/x'), false, '/data/', new Uint8Array(64)),
-    ).rejects.toMatchObject({ refusal: { reason: 'result too large' } })
+    ).rejects.toMatchObject({ decision: { reason: 'result too large' } })
   })
 
   it('add takes code only: a policy that also carries a reason field is just a policy', async () => {
@@ -554,7 +554,7 @@ describe('workspace policies', () => {
       // A whole-command refusal is bash's "found but may not run".
       expect(refused.exitCode).toBe(126)
       expect(new TextDecoder().decode(refused.stderr)).toBe('python3: Permission denied\n')
-      expect(refused.refusal).toEqual({
+      expect(refused.decision).toEqual({
         kind: 'deny',
         reason: 'interpreters are off',
         policy: 'NoInterpreters',
@@ -571,7 +571,7 @@ describe('workspace policies', () => {
       const refused = await ws.shell("python3 -c 'print(1)'")
       expect(refused.exitCode).toBe(126)
       expect(new TextDecoder().decode(refused.stderr)).toBe('python3: Permission denied\n')
-      expect(refused.refusal).toEqual({
+      expect(refused.decision).toEqual({
         kind: 'deny',
         reason: 'interpreters are off',
         policy: 'NoInterpreters',
@@ -594,7 +594,7 @@ describe('workspace policies', () => {
       const refused = await ws.shell('source /data/setup.sh')
       expect(refused.exitCode).toBe(126)
       expect(new TextDecoder().decode(refused.stderr)).toBe('source: Permission denied\n')
-      expect(refused.refusal).toEqual({
+      expect(refused.decision).toEqual({
         kind: 'deny',
         reason: 'disabled',
         policy: 'PermissionsPolicy',
@@ -605,7 +605,7 @@ describe('workspace policies', () => {
       expect(new TextDecoder().decode(frozen.stderr)).toBe(
         "touch: cannot touch '/data/prod/x': Permission denied\n",
       )
-      expect(frozen.refusal?.reason).toBe('frozen')
+      expect(frozen.decision?.reason).toBe('frozen')
       const ok = await ws.shell('touch /data/dev-x && echo done')
       expect(new TextDecoder().decode(ok.stdout)).toContain('done')
     } finally {
@@ -623,7 +623,7 @@ describe('workspace policies', () => {
       await ws.shell('mkdir -p /data/prod')
       const refused = await ws.shell('shuf -e a -o /data/prod/out')
       expect(refused.exitCode).toBe(1)
-      expect(refused.refusal?.reason).toBe('prod is protected')
+      expect(refused.decision?.reason).toBe('prod is protected')
       const listing = await ws.shell('ls /data/prod')
       expect(new TextDecoder().decode(listing.stdout)).not.toContain('out')
     } finally {
@@ -642,7 +642,7 @@ describe('workspace policies', () => {
         ws.dispatch('write', '/data/prod/x.txt', [new TextEncoder().encode('nope')]),
       ).rejects.toThrow(PolicyDenied)
       await expect(ws.dispatch('read', '/data/prod/x.txt')).rejects.toMatchObject({
-        refusal: { reason: 'prod is protected' },
+        decision: { reason: 'prod is protected' },
       })
     } finally {
       await ws.close()
@@ -821,12 +821,12 @@ describe('Limit end to end', () => {
         expect(result.stderr.byteLength).toBe(0)
         if (test.failed) {
           expect(output.stderr).toBe(test.stderr)
-          expect(result.refusal).toMatchObject({
+          expect(result.decision).toMatchObject({
             kind: 'failed',
             reason: 'Boom failed',
             policy: 'Boom',
           })
-        } else expect(result.refusal).toBeNull()
+        } else expect(result.decision).toBeNull()
       } finally {
         await execution.close()
       }
@@ -873,7 +873,7 @@ describe('Limit end to end', () => {
       expect(r.exitCode).toBe(126)
       const err = new TextDecoder().decode(r.stderr)
       expect(err).toBe('echo: Permission denied\n')
-      expect(r.refusal).toEqual({
+      expect(r.decision).toEqual({
         kind: 'failed',
         reason: 'Boom failed',
         policy: 'Boom',
@@ -950,7 +950,7 @@ describe('Ask in the chain', () => {
       '/data/',
     ).catch((err: unknown) => err)
     expect(refused).toBeInstanceOf(PolicyDenied)
-    expect((refused as PolicyDenied).refusal?.kind).toBe('deny')
+    expect((refused as PolicyDenied).decision?.kind).toBe('deny')
   })
 
   it('preExecute routes agree and an ask holds the line', async () => {
@@ -987,8 +987,8 @@ describe('Ask in the chain', () => {
     expect(code).toBe(126)
   })
 
-  it('refusalOf records kind, policy and ask', () => {
-    expect(refusalOf({ kind: 'deny', reason: 'user rule', policy: 'RulePolicy' })).toEqual({
+  it('decisionOf records kind, policy and ask', () => {
+    expect(decisionOf({ kind: 'deny', reason: 'user rule', policy: 'RulePolicy' })).toEqual({
       kind: 'deny',
       reason: 'user rule',
       policy: 'RulePolicy',
@@ -996,7 +996,7 @@ describe('Ask in the chain', () => {
     })
     // The filesystem's own error is no policy refusal: nothing recorded.
     expect(
-      refusalOf({
+      decisionOf({
         kind: 'deny',
         reason: "cannot remove 'x'",
         policy: 'MountRootPolicy',
@@ -1004,14 +1004,14 @@ describe('Ask in the chain', () => {
       }),
     ).toBeNull()
     expect(
-      refusalOf({ kind: 'deny', reason: 'Raising failed', policy: 'Raising', failed: true }),
+      decisionOf({ kind: 'deny', reason: 'Raising failed', policy: 'Raising', failed: true }),
     ).toEqual({
       kind: 'failed',
       reason: 'Raising failed',
       policy: 'Raising',
       askId: null,
     })
-    expect(refusalOf({ kind: 'pending', id: 'abc123', reason: 'sign-off' })).toEqual({
+    expect(decisionOf({ kind: 'pending', id: 'abc123', reason: 'sign-off' })).toEqual({
       kind: 'pending',
       reason: 'sign-off',
       policy: '',
@@ -1019,9 +1019,9 @@ describe('Ask in the chain', () => {
     })
   })
 
-  it('describeRefusal carries the reason the stderr line dropped', () => {
+  it('describeDecision carries the reason the stderr line dropped', () => {
     expect(
-      describeRefusal({
+      describeDecision({
         kind: 'deny',
         reason: 'user rule',
         policy: 'RulePolicy',
@@ -1029,7 +1029,7 @@ describe('Ask in the chain', () => {
       }),
     ).toBe('policy denied: user rule')
     expect(
-      describeRefusal({
+      describeDecision({
         kind: 'pending',
         reason: 'sign-off',
         policy: '',
@@ -1037,7 +1037,7 @@ describe('Ask in the chain', () => {
       }),
     ).toBe('requires approval: sign-off (ask abc123)')
     expect(
-      describeRefusal({
+      describeDecision({
         kind: 'failed',
         reason: 'Raising failed',
         policy: 'Raising',
@@ -1094,8 +1094,8 @@ describe('every method answers Deny and Ask', () => {
       ws.policies.add(policy)
       const refused = await ws.vfs.read('/data/x').catch((err: unknown) => err)
       expect(refused).toBeInstanceOf(PolicyDenied)
-      const refusal = (refused as PolicyDenied).refusal
-      expect(refusal?.kind).toBe('pending')
+      const decision = (refused as PolicyDenied).decision
+      expect(decision?.kind).toBe('pending')
       const last = policy.seen.at(-1)
       expect(last).toBeDefined()
       const [pre, post] = last ?? []
@@ -1103,7 +1103,7 @@ describe('every method answers Deny and Ask', () => {
         expect(post?.[field]).toEqual(pre?.[field])
       }
       expect(new TextDecoder().decode(post?.result as Uint8Array)).toBe('x\n')
-      await ws.decisions.answer(refusal?.askId ?? '', Outcome.ALLOW)
+      await ws.decisions.answer(decision?.askId ?? '', Outcome.ALLOW)
       expect(new TextDecoder().decode(await ws.vfs.read('/data/x'))).toBe('x\n')
     } finally {
       await ws.close()
@@ -1130,7 +1130,7 @@ describe('every method answers Deny and Ask', () => {
       const reasons: string[] = []
       for (let i = 0; i < 2; i++) {
         const held = await ws.shell('rm -f /data/x')
-        expect(held.refusal?.kind).toBe('pending')
+        expect(held.decision?.kind).toBe('pending')
         const pending = ws.decisions.pending()
         expect(pending).toHaveLength(1)
         const [record] = pending
@@ -1300,13 +1300,13 @@ describe('postCommand', () => {
       })
       const line = 'cat /data/a /data/b | tail -c 4'
       const held = await ws.shell(line, { sessionId: 'agent' })
-      expect(held.refusal?.kind).toBe('pending')
+      expect(held.decision?.kind).toBe('pending')
       const [nod] = ws.decisions.pending()
       await ws.decisions.answer(nod?.id ?? '', Outcome.ALLOW)
       const out = await ws.shell(line, { sessionId: 'agent' })
       expect([out.exitCode, out.stdoutText]).toEqual([0, 'b\nb\n'])
       const again = await ws.shell(line, { sessionId: 'agent' })
-      expect(again.refusal?.kind).toBe('pending')
+      expect(again.decision?.kind).toBe('pending')
     } finally {
       await ws.close()
     }
@@ -1327,12 +1327,12 @@ describe('postCommand', () => {
       ws.policies.add(new AskBigReads())
       const held = await ws.vfs.read('/data/big', { stream: true }).catch((err: unknown) => err)
       expect(held).toBeInstanceOf(PolicyDenied)
-      await ws.decisions.answer((held as PolicyDenied).refusal?.askId ?? '', Outcome.ALLOW)
+      await ws.decisions.answer((held as PolicyDenied).decision?.askId ?? '', Outcome.ALLOW)
       const stream = (await ws.vfs.read('/data/big', { stream: true }))[Symbol.asyncIterator]()
       expect((await stream.next()).value).toHaveLength(1024)
       await stream.return?.()
       const again = await ws.vfs.read('/data/big', { stream: true }).catch((err: unknown) => err)
-      expect((again as PolicyDenied).refusal?.kind).toBe('pending')
+      expect((again as PolicyDenied).decision?.kind).toBe('pending')
     } finally {
       await ws.close()
     }
@@ -1779,10 +1779,10 @@ it('standalone composition keeps first agreed route and ask precedence', () => {
   const same: Route = { kind: 'route', runtime: 'node', reason: 'second placement' }
   const other: Route = { kind: 'route', runtime: 'python', reason: 'other placement' }
   const question: Ask = { kind: 'ask', reason: 'review' }
-  const refusal: Deny = { kind: 'deny', reason: 'refused' }
+  const decision: Deny = { kind: 'deny', reason: 'refused' }
   expect(agreed([first])).toBe(first)
   expect(settled([first])).toBe(first)
-  expect(settled([question, refusal, first, other])).toBe(refusal)
+  expect(settled([question, decision, first, other])).toBe(decision)
   expect(agreed([first, same])).toBe(first)
   expect(settled([first, same])).toBe(first)
   expect(agreed([first, other])).toMatchObject({ kind: 'deny' })
@@ -1966,7 +1966,7 @@ it('pure route agreement leaves diagnostic policy names unread', () => {
 
 it('pure settlement reads a winning denial kind once', () => {
   let reads = 0
-  const refusal: Deny = {
+  const decision: Deny = {
     reason: 'refused',
     get kind(): 'deny' {
       reads += 1
@@ -1974,7 +1974,7 @@ it('pure settlement reads a winning denial kind once', () => {
       return 'deny'
     },
   }
-  expect(settled([refusal])).toBe(refusal)
+  expect(settled([decision])).toBe(decision)
   expect(reads).toBe(1)
 })
 

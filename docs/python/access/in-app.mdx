@@ -277,9 +277,9 @@ Runs a shell line as the session. With `stream=False`, it collects the execution
   <ResponseField name="exit_code" type="int" />
   <ResponseField name="stdout_str()" type="async -> str">The output as text. `materialize_stdout()` returns the raw bytes.</ResponseField>
   <ResponseField name="stderr_str()" type="async -> str">The error output as text. `materialize_stderr()` returns the raw bytes.</ResponseField>
-  <ResponseField name="refusal" type="Refusal | None">
+  <ResponseField name="decision" type="PolicyDecision | None">
     Why the line did not run, or `None`.
-    <Expandable title="Refusal">
+    <Expandable title="PolicyDecision">
       <ResponseField name="kind" type="str">`deny` for a refusal, `pending` for an ask nobody answered, `failed` for a policy that raised.</ResponseField>
       <ResponseField name="reason" type="str">The rule's or the policy's words.</ResponseField>
       <ResponseField name="policy" type="str">The policy class that refused; empty for an ask.</ResponseField>
