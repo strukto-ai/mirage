@@ -16,7 +16,7 @@ import type { Policy } from '@struktoai/mirage-core/policy/base'
 import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
 import { watchNetwork } from '@struktoai/mirage-core/io/web/network'
 import { inRequest } from '@struktoai/mirage-core/io/web/request'
-import { registerApi } from '@struktoai/mirage-server/api'
+import { isStopped, registerApi } from '@struktoai/mirage-server/api'
 import { errorResponse, HttpError } from '@struktoai/mirage-server/errors'
 import { AuthMode, resolveAuthConfig, type AuthConfig } from '@struktoai/mirage-server/auth/config'
 import { authenticator, PUBLIC_PATHS } from '@struktoai/mirage-server/auth/middleware'
@@ -177,10 +177,11 @@ export function createApp(options: EdgeAppOptions = {}): EdgeApp {
       ceilings: resolveCeilings(options),
       policies: options.policies ?? [],
     })
-    const routes = new WebRoutes()
+    const host = edgeHost()
+    const routes = new WebRoutes((id, account) => isStopped({ registry, host }, id, account))
     const mcp = registerApi(routes, {
       registry,
-      host: edgeHost(),
+      host,
       auth,
       startedAt: Date.now() / 1000,
       exit: () => undefined,

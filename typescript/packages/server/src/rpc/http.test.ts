@@ -112,6 +112,12 @@ describe('the RPC endpoint', () => {
       body: 'not json',
     })
     expect(((await parse.json()) as { error: { code: number } }).error.code).toBe(-32700)
+    const empty = await fetch(`${base}/v1/workspaces/${id}/rpc`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '',
+    })
+    expect(((await empty.json()) as { error: { code: number } }).error.code).toBe(-32700)
   })
 
   it('runs shell as a daemon job in the named session', async () => {
