@@ -12,7 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { debuglog } from 'node:util'
 import WebSocket, { WebSocketServer } from 'ws'
+
+const logger = { debug: debuglog('mirage') }
 
 /** The server would not open the tunnel. */
 export class TunnelRefused extends Error {
@@ -31,7 +34,8 @@ export function refusalMessage(body: string): string {
   try {
     const message = (JSON.parse(text) as { error?: { message?: unknown } } | null)?.error?.message
     return typeof message === 'string' ? message : text
-  } catch {
+  } catch (err) {
+    logger.debug('upgrade error body is not JSON: %s', err)
     return text
   }
 }

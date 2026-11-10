@@ -83,7 +83,8 @@ async def relay_stdio(url: str, token: Callable[[], str]) -> None:
                     continue
                 try:
                     message = json.loads(line)
-                except ValueError:
+                except ValueError as exc:
+                    logger.debug("rpc line is not JSON: %s", exc)
                     await write(
                         json.dumps(
                             error_response(

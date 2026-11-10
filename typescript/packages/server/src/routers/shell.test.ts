@@ -48,6 +48,13 @@ async function createWs(app: ReturnType<typeof buildApp>, id: string): Promise<v
   })
 }
 
+/** A multipart shell body holding only its `request` part. */
+function requestForm(request: string): FormData {
+  const body = new FormData()
+  body.append('request', new Blob([request], { type: 'application/json' }))
+  return body
+}
+
 describe('execute router', () => {
   it.each(['ram', 'disk'] as const)(
     'preserves large multipart stdin on %s',
@@ -702,14 +709,9 @@ describe('a foreground shell request', () => {
     try {
       const base = await served(app, 'parts')
       const route = `${base}/v1/workspaces/parts/shell`
-      const form = (request: string): FormData => {
-        const body = new FormData()
-        body.append('request', new Blob([request], { type: 'application/json' }))
-        return body
-      }
       const bad = await fetch(route, {
         method: 'POST',
-        body: form(JSON.stringify({ command: 'echo hi', provision: true })),
+        body: requestForm(JSON.stringify({ command: 'echo hi', provision: true })),
       })
       expect([bad.status, await bad.json()]).toEqual([
         400,
@@ -721,7 +723,7 @@ describe('a foreground shell request', () => {
           },
         },
       ])
-      const unread = await fetch(route, { method: 'POST', body: form('{"command":') })
+      const unread = await fetch(route, { method: 'POST', body: requestForm('{"command":') })
       expect([unread.status, await unread.json()]).toEqual([
         400,
         { error: { code: 'invalid_json', message: 'body must be JSON' } },

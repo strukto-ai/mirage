@@ -26,8 +26,8 @@ def block(text: str, start: str) -> str:
     """The text from ``start`` to the first line that closes it.
 
     Args:
-        text: The module source.
-        start: The line that opens the block.
+        text (str): The module source.
+        start (str): The line that opens the block.
     """
     head = text.index(start)
     return text[head : text.index("\n}", head)]
