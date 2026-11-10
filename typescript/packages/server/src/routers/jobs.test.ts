@@ -69,8 +69,12 @@ it('lists a running job and finds it by id', async () => {
         result.line_id,
         pid,
       ])
+      expect(job?.id).toMatch(/^job_[0-9a-f]{32}$/)
       const found = await get(app, `/v1/workspaces/w/jobs/${job?.id ?? ''}`)
       expect([found.status, found.body]).toEqual([200, { ...job, processes: [pid] }])
+      const bare = (job?.id ?? '').replace('job_', '')
+      const missing = await get(app, `/v1/workspaces/w/jobs/${bare}`)
+      expect([missing.status, missing.body]).toEqual([404, { detail: 'job not found' }])
       expect((await get(app, `/v1/workspaces/w/jobs?line_id=${result.line_id}`)).body).toEqual([
         job,
       ])

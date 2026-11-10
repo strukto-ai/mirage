@@ -58,6 +58,9 @@ it('lists a process live and after it ends', async () => {
     const ran = await get(app, `/v1/workspaces/w/processes?line_id=${result.line_id}`)
     expect((ran.body as { pid: number }[]).map((p) => p.pid)).toContain(pid)
     const [job] = (await get(app, '/v1/workspaces/w/jobs')).body as { id: string }[]
+    const bare = (job?.id ?? '').replace('job_', '')
+    const ofBare = await get(app, `/v1/workspaces/w/processes?job_id=${bare}`)
+    expect([ofBare.status, ofBare.body]).toEqual([200, []])
     const ofJob = await get(app, `/v1/workspaces/w/processes?job_id=${job?.id ?? ''}`)
     const [live] = ofJob.body as { pid: number; machine: string; machine_pid: unknown }[]
     expect([live?.pid, live?.machine_pid]).toEqual([pid, null])

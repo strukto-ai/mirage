@@ -66,7 +66,9 @@ it('lists a line and finds it by the id its result names', async () => {
       const detail = await get(app, `/v1/workspaces/w/lines/${result.line_id}`)
       expect(detail.status).toBe(200)
       const found = detail.body as { jobs: string[]; processes: number[]; machines: string[] }
-      expect(found.jobs).toHaveLength(1)
+      const [job] = (await get(app, '/v1/workspaces/w/jobs')).body as { id: string }[]
+      expect(found.jobs).toEqual([job?.id])
+      expect(job?.id.startsWith('job_')).toBe(true)
       expect(found.processes).toContain(pid)
       const process = (await get(app, `/v1/workspaces/w/processes/${String(pid)}`)).body as {
         machine: string

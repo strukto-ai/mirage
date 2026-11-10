@@ -420,6 +420,27 @@ describe('JobTable.wait', () => {
   })
 })
 
+// A job started here and one restored from a snapshot are both named
+// `job_` and 32 hex digits, the id every caller sees.
+describe('JobTable job names', () => {
+  it('names a started and a restored job job_ and hex', async () => {
+    const jt = new JobTable()
+    const started = await jt.submit({
+      command: 'a',
+      run: quiet,
+      abort: new AbortController(),
+      cwd: '/',
+    })
+    const restored = new JobHandle({ id: 7, command: 'x', cwd: '/', createdAt: 0 })
+    restored.state = 'exited'
+    await jt.load(restored)
+    const names = [started.record.id.console, restored.record.id.console]
+    for (const name of names) expect(name).toMatch(/^job_[0-9a-f]{32}$/)
+    expect(names[0]).not.toBe(names[1])
+    await jt.killAll()
+  })
+})
+
 // A job whose program ended on a signal no kill sent lists by that signal,
 // as bash's jobs does; its output gains no kill marker.
 describe('JobTable signal-ended jobs', () => {
