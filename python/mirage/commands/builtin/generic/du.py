@@ -19,17 +19,18 @@ from mirage.commands.builtin.utils.formatting import (
     nanoseconds_of,
     scaled_size,
 )
-from mirage.commands.builtin.utils.links import mounts_of
+from mirage.commands.builtin.utils.links import follow_of, mounts_of
 from mirage.commands.builtin.utils.operands import at_offsets
 from mirage.commands.builtin.utils.output import format_records
-from mirage.commands.builtin.utils.paths import vfs_stat_path
+from mirage.commands.builtin.utils.paths import vfs_stat_path, virtual_key
 from mirage.commands.builtin.utils.strftime import gnu_strftime
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import usage_hint
+from mirage.context.session_context import current_caller
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import fs_strerror
+from mirage.errors.fs import eacces, fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.render import ZERO_LENGTH_NAME
 from mirage.errors.types import DotWalkError, FsCondition
@@ -331,6 +332,30 @@ def _listed_operands(
     return operands, refused
 
 
+async def _listed_stat(
+    stat: Callable[[PathSpec], Awaitable[FileStat]],
+    cwd: PathSpec,
+    path: PathSpec,
+) -> FileStat:
+    """A listed name's stat. The line's rules judged what it typed, not
+    what its list holds, so they are asked here, at the name and at where
+    it leads.
+
+    Args:
+        stat (Callable[[PathSpec], Awaitable[FileStat]]): the command's stat.
+        cwd (PathSpec): where a relative name is resolved.
+        path (PathSpec): the listed operand, its links followed.
+    """
+    gate = current_caller().gate
+    named = PathSpec.from_str_path(path.raw_path, cwd=cwd).virtual
+    if gate is not None and (
+        gate.refusal(named) is not None
+        or gate.refusal(path.virtual) is not None
+    ):
+        raise eacces(path)
+    return await stat(path)
+
+
 def cwd_spec(cwd: PathSpec | str) -> PathSpec:
     """Build the operand GNU ``du`` assumes when the line names none.
 
@@ -422,6 +447,11 @@ async def du_operands(
                     fs_strerror(exc) or posix_phrase(FsCondition.ENOENT),
                     len(present),
                 )
+            )
+            continue
+        except PermissionError as exc:
+            missing.append(
+                (path.raw_path, fs_strerror(exc) or str(exc), len(present))
             )
             continue
         except NotADirectoryError:
@@ -1199,6 +1229,14 @@ async def du_generic(
             )
             return b"", IOResult(exit_code=1, stderr=encode_text(line))
         paths, refused = _listed_operands(flags, ctx.cwd)
+        follow = follow_of(ctx)
+        if follow is not None:
+            paths = [
+                virtual_key(item)
+                for item in await follow(list(paths))
+                if isinstance(item, PathSpec)
+            ]
+        stat = partial(_listed_stat, stat, ctx.cwd)
     present: list[PathSpec] = []
     missing: list[tuple[str, str, int]] = []
     if paths or flags.listed is None:

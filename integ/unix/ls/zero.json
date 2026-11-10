@@ -29,6 +29,38 @@
         "stdout": "rc=2\nrc=2\n",
         "stderr": "ls: --dired and --zero are incompatible\nls: --dired and --zero are incompatible\n"
       }
+    },
+    {
+      "id": "ls_dired_marks_where_names_stand",
+      "seq": 16300102,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "mkdir -p /data/ez_l/d; printf ab > /data/ez_l/d/f; printf abc > /data/ez_l/d/g; chmod 644 /data/ez_l/d/f /data/ez_l/d/g; touch -d '2020-01-02 03:04:05' /data/ez_l/d/f /data/ez_l/d/g; cd /data/ez_l; ls --dired -go d/f d/g; echo rc=$?; ls -D -go d/f; cd /; rm -r /data/ez_l",
+      "expect": {
+        "exit": 0,
+        "stdout": "  -rw-r--r-- 1 2 Jan  2  2020 d/f\n  -rw-r--r-- 1 3 Jan  2  2020 d/g\n//DIRED// 30 33 64 67\n//DIRED-OPTIONS// --quoting-style=literal\nrc=0\n  -rw-r--r-- 1 2 Jan  2  2020 d/f\n//DIRED// 30 33\n//DIRED-OPTIONS// --quoting-style=literal\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ls_author_adds_a_column",
+      "seq": 16300103,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "mkdir -p /data/ez_l/d; printf ab > /data/ez_l/d/f; printf abc > /data/ez_l/d/g; cd /data/ez_l; ls -l d | awk '{print NF}'; ls -l --author d | awk '{print NF}'; ls -g --author d | awk '{print NF}'; ls -o --author d | awk '{print NF}'; ls --author d; cd /; rm -r /data/ez_l",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n9\n9\n2\n10\n10\n2\n9\n9\n2\n9\n9\nf\ng\n",
+        "stderr": ""
+      }
     }
   ]
 }

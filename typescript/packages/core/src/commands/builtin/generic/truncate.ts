@@ -70,6 +70,8 @@ export interface TruncateFlags {
   /** `-r`: the file whose size a relative `-s` counts from, in place of each
    * operand's own. */
   readonly reference?: PathSpec | null
+  /** The `-o` count as typed when it does not fit a file offset in bytes. */
+  readonly overflow?: string | null
 }
 
 // What -o counts in, the block size of the pinned image's files.
@@ -110,13 +112,14 @@ export function parseFlags(bag: Record<string, FlagValue>): TruncateFlags | IORe
   ) {
     throw new Error(`truncate: mirage-rs read -s as ${JSON.stringify(size)}`)
   }
+  const count = BigInt(size.size)
+  const scale = ioBlocks ? IO_BLOCK : 1n
+  const past = count * scale > (size.mode === 'reduce' ? 2n ** 63n : 2n ** 63n - 1n)
   return {
-    size: {
-      mode: size.mode as SizeMode,
-      number: BigInt(size.size) * (ioBlocks ? IO_BLOCK : 1n),
-    },
+    size: { mode: size.mode as SizeMode, number: count * scale },
     noCreate: fl.asBool('no_create'),
     reference,
+    overflow: past ? `${size.mode === 'reduce' ? '-' : ''}${count.toString()}` : null,
   }
 }
 
@@ -184,6 +187,7 @@ async function truncateOne(
 ): Promise<string | null> {
   let current = 0n
   let directory = false
+  let absent = false
   try {
     const st = await stat(path)
     current = BigInt(st.size ?? 0)
@@ -197,9 +201,15 @@ async function truncateOne(
     if (flags.noCreate) return null
     if (why !== null) throw enoent(path)
     current = 0n
+    absent = true
   }
   const slashed = path.rawPath.endsWith('/') && !endsAtDot(path.rawPath)
   if (directory || (slashed && !flags.noCreate)) throw eisdir(path)
+  if (flags.overflow !== undefined && flags.overflow !== null) {
+    if (absent) await truncate(path, 0, flags.noCreate)
+    const label = shellQuoteAlways(path.rawPath === '' ? path.virtual : path.rawPath)
+    return `truncate: overflow in ${flags.overflow} * ${IO_BLOCK.toString()} byte blocks for file ${label}\n`
+  }
   const size = resolveSize(flags.size, base ?? current)
   try {
     await truncate(path, Number(size), flags.noCreate)

@@ -15,6 +15,22 @@
         "stdout": "8192\n12288\n8192\n12288\nrc=2\nrc=1\nrc=1\nrc=1\n",
         "stderr": "truncate: you must specify either '--size' or '--reference'\nTry 'truncate --help' for more information.\ntruncate: '--io-blocks' was specified but '--size' was not\nTry 'truncate --help' for more information.\ntruncate: you must specify a relative '--size' with '--reference'\nTry 'truncate --help' for more information.\n"
       }
+    },
+    {
+      "id": "truncate_o_reports_an_overflow",
+      "seq": 16300301,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "mkdir -p /data/ez_u; printf x > /data/ez_u/a; truncate -o -s 2251799813685248 /data/ez_u/a /data/ez_u/new; echo rc=$?; stat -c %s /data/ez_u/a /data/ez_u/new; truncate -o -c -s 2251799813685248 /data/ez_u/none; echo rc=$?; ls /data/ez_u/none 2>/dev/null; truncate -o -s +2251799813685248 /data/ez_u/a; echo rc=$?; truncate -o -s -2251799813685249 /data/ez_u/a; echo rc=$?; truncate -o -s -2251799813685248 /data/ez_u/a; echo rc=$?; stat -c %s /data/ez_u/a; rm -r /data/ez_u",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n1\n0\nrc=0\nrc=1\nrc=1\nrc=0\n0\n",
+        "stderr": "truncate: overflow in 2251799813685248 * 4096 byte blocks for file '/data/ez_u/a'\ntruncate: overflow in 2251799813685248 * 4096 byte blocks for file '/data/ez_u/new'\ntruncate: overflow in 2251799813685248 * 4096 byte blocks for file '/data/ez_u/a'\ntruncate: overflow in -2251799813685249 * 4096 byte blocks for file '/data/ez_u/a'\n"
+      }
     }
   ]
 }

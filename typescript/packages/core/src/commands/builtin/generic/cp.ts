@@ -1439,14 +1439,26 @@ export async function makeBackup(
 // it before the create, so a create that fails still shows it; mv words a
 // copy across mounts `copied`. Mirrors Python's transfer_line.
 /** What --debug says of one file it copied, pinned on the reference image's
- * files: nothing for a copy that moved no bytes. */
+ * files: nothing for a copy that moved no bytes, `unsupported` for bytes read
+ * and written here, as across filesystems, and `yes` or, for an empty file,
+ * `unknown` for a copy the backend made. */
 async function debugLine(
   flags: CpFlags,
+  copier: CopyStrategy,
   stat: (path: PathSpec) => Promise<FileStat>,
   src: PathSpec,
 ): Promise<string[]> {
   if (!flags.debug || flags.attributesOnly || flags.link !== null) return []
-  const offload = (await stat(src)).size === 0 ? 'unknown' : 'yes'
+  let offload = 'unsupported'
+  if (!isPrimitiveCopy(copier)) {
+    offload = 'yes'
+    try {
+      if ((await stat(src)).size === 0) offload = 'unknown'
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      console.debug(`cp: no size for ${src.virtual}: ${String(err)}`)
+    }
+  }
   return [`copy offload: ${offload}, reflink: unsupported, sparse detection: no`]
 }
 
@@ -1721,6 +1733,8 @@ export async function copyEntries(
     removeFirst?: ((path: PathSpec) => Promise<void>) | null
     // Under --attributes-only, what moves a destination aside for its backup.
     aside?: NativeMove | null
+    // What follows each copied file's verbose line, --debug's report.
+    copiedLines?: readonly string[]
   } = {},
 ): Promise<boolean> {
   const srcBase = rstripSlash(src.virtual)
@@ -1851,7 +1865,10 @@ export async function copyEntries(
     opts.lines?.push(transferLine(entrySpec, entryDstSpec, backup, cmdName))
     if (!(await transferFile(strategy, entrySpec, entryDstSpec, cmdName, errors))) {
       copiedAll = false
-    } else await opts.keeper?.copied(entrySpec, entryDstSpec)
+      continue
+    }
+    opts.lines?.push(...(opts.copiedLines ?? []))
+    await opts.keeper?.copied(entrySpec, entryDstSpec)
   }
   return copiedAll
 }
@@ -2039,7 +2056,8 @@ export async function cpGeneric(
     updateGates(flags.update) ||
     backupDisplaces(flags.backup) ||
     keeper !== null ||
-    unlink !== null
+    unlink !== null ||
+    flags.debug
   const lines: string[] = []
   let warned = 0
   // Where each source's first copy went, by source and by link name.
@@ -2288,6 +2306,7 @@ export async function cpGeneric(
           keeper,
           removeFirst: unlink,
           aside,
+          copiedLines: await debugLine(flags, strategy, stat, src),
         })
         if (copies !== undefined) {
           await copyTreeLinks(
@@ -2412,7 +2431,7 @@ export async function cpGeneric(
           errors.push(copyFailed('cp', entry, entryDst, err))
           continue
         }
-        lines.push(...(await debugLine(flags, stat, entry)))
+        lines.push(...(await debugLine(flags, strategy, stat, entry)))
         await keeper?.copied(entry, entryDst)
       }
       if (copies !== undefined) {
@@ -2482,7 +2501,7 @@ export async function cpGeneric(
         continue
       }
     }
-    lines.push(...(await debugLine(flags, stat, src)))
+    lines.push(...(await debugLine(flags, copier, stat, src)))
     await keeper?.copied(src, target)
     created.add(keyOf(target))
   }

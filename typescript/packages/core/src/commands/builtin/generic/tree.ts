@@ -28,7 +28,7 @@ import {
   type StatFn,
 } from '../../../types.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
-import { enoent, isFsError, isMissError, isWalkError } from '../../../errors/fs.ts'
+import { eisdir, enoent, isFsError, isMissError, isWalkError } from '../../../errors/fs.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import type { LinkResolve, MountView } from '../../../view/types.ts'
 import { decodeText, encodeText, utf8Locale } from '../../../shell/bytes.ts'
@@ -38,12 +38,12 @@ import { fnmatch } from '../../../utils/fnmatch.ts'
 import { formatRecords } from '../utils/output.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { linksOf, mountsOf } from '../utils/links.ts'
-import { vfsReaddirPath, vfsStatPath } from '../utils/paths.ts'
+import { absentDestError, entryKind, vfsReaddirPath, vfsStatPath } from '../utils/paths.ts'
 import { WalkBudget } from '../utils/tree.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
 import { AnyTailMatcher } from '../../../rs/glob.ts'
 import { refused, scan } from '../../../rs/scan.ts'
-import { lsModeString, styledTime, timeOf } from '../utils/formatting.ts'
+import { lsModeString, styledTime } from '../utils/formatting.ts'
 import { sortByVersion } from './ls.ts'
 import { isoTimestamp } from '../../../utils/dates.ts'
 import { contentSize, posixMode } from '../../../utils/stat_view.ts'
@@ -62,6 +62,8 @@ const C_ESCAPES: ReadonlyMap<number, string> = new Map([
   [13, 'r'],
 ])
 const SI_UNITS = 'kMGTPE'
+const UNCLOSED = -1
+const UTF8_NAMES: ReadonlySet<string> = new Set(['utf-8', 'utf8'])
 // Where --si stops writing a tenth, pinned on tree 2.2.1.
 const SI_TENTHS_BELOW = 9.948
 // The lines a drawing holds before it writes them, whatever comes next.
@@ -132,6 +134,8 @@ export interface TreeFlags {
   readonly inodes: boolean
   readonly output: PathSpec | null
   readonly utf8: boolean
+  readonly charset: string | null
+  readonly boxLines: boolean
   readonly identity: Identity | null
 }
 
@@ -220,6 +224,8 @@ export function parseFlags(bag: Record<string, FlagValue>): TreeFlags | IOResult
     inodes: fl.asBool('inodes'),
     output: fl.asPath('o') ?? null,
     utf8: false,
+    charset: fl.asStr('charset') ?? null,
+    boxLines: false,
     identity: null,
   }
 }
@@ -258,6 +264,9 @@ interface TreeOpts {
   // here instead, the way real tree crosses one.
   readonly mounts: MountView | null
   readonly crossReaddir: ((p: PathSpec) => Promise<string[]>) | null
+  // What a followed link's directory is read through; under -x, unlike
+  // crossReaddir, it still lists a link that stays on the operand's mount.
+  readonly linkReaddir: ((p: PathSpec) => Promise<string[]>) | null
   readonly crossStat: ((p: PathSpec) => Promise<FileStat>) | null
   // What a drawn link leads to, from the namespace's symlink facts.
   readonly targetStat: ((path: string) => Promise<FileStat | null>) | null
@@ -320,7 +329,11 @@ async function mountRow(
 // can take whatever an earlier one would have, so the work stays the path's
 // length times the pattern's, however many `**` a .gitignore writes. Mirrors
 // Python's `_segments_match`.
-export function segmentsMatch(parts: readonly string[], pattern: readonly string[]): boolean {
+export function segmentsMatch(
+  parts: readonly string[],
+  pattern: readonly string[],
+  fits: (name: string, pattern: string) => boolean = fnmatch,
+): boolean {
   let at = 0
   let want = 0
   let resume = 0
@@ -331,7 +344,7 @@ export function segmentsMatch(parts: readonly string[], pattern: readonly string
       star = want
       resume = at
       want += 1
-    } else if (segment !== undefined && fnmatch(parts[at] ?? '', segment)) {
+    } else if (segment !== undefined && fits(parts[at] ?? '', segment)) {
       at += 1
       want += 1
     } else if (star >= 0) {
@@ -352,11 +365,86 @@ export function segmentsMatch(parts: readonly string[], pattern: readonly string
 // `_name_matcher`, one for each list of rules.
 const nameMatchers = new WeakMap<readonly Ignore[], AnyTailMatcher | null>()
 
-/** Whether a name fits -P or -I, `|` parting alternatives. */
+/** Where a pattern goes on once the bracket at `start` has judged one byte:
+ * null when it refuses, UNCLOSED when no `]` ends it. A `]` closes even as
+ * the first member, only `^` negates, a backslash takes the next byte as
+ * itself, and a `-` after a member makes a range whose end may be a `]`. */
+function bracket(rule: string, start: number, char: string): number | null {
+  let at = start + 1
+  const negated = rule.charAt(at) === '^'
+  if (negated) at += 1
+  let taken = false
+  while (at < rule.length && rule.charAt(at) !== ']') {
+    if (rule.charAt(at) === '\\') at += 1
+    const low = rule.charAt(at)
+    let high = low
+    at += 1
+    if (rule.charAt(at) === '-') {
+      at += 1
+      if (rule.charAt(at) === '\\') at += 1
+      high = rule.charAt(at)
+      at += 1
+    }
+    taken = taken || (char !== '' && low <= char && char <= high)
+  }
+  if (at >= rule.length) return UNCLOSED
+  return char !== '' && taken !== negated ? at + 1 : null
+}
+
+/** One character per byte of a name or pattern. */
+function bytewise(text: string): string {
+  return Array.from(encodeText(text), (byte) => String.fromCharCode(byte)).join('')
+}
+
+/** Whether a name fits one -P or -I alternative, byte by byte: `*`, `?`, a
+ * backslash and brackets, and a bracket no `]` ends fits whatever is left of
+ * the name. Only the latest `*` is ever retried, so the work stays the name's
+ * length times the pattern's. */
+function fits(name: string, pattern: string): boolean {
+  const text = bytewise(name)
+  const rule = bytewise(pattern)
+  let at = 0
+  let want = 0
+  let resume = 0
+  let star = -1
+  for (;;) {
+    const token = rule.charAt(want)
+    if (token === '*') {
+      want += 1
+      star = want
+      resume = at
+      continue
+    }
+    if (token === '' && at === text.length) return true
+    const char = text.charAt(at)
+    let ahead: number | null = null
+    if (token === '[') {
+      ahead = bracket(rule, want, char)
+      if (ahead === UNCLOSED) return true
+    } else if (token === '\\') {
+      if (char !== '' && rule.charAt(want + 1) === char) ahead = want + 2
+    } else if (token !== '' && char !== '' && (token === '?' || token === char)) {
+      ahead = want + 1
+    }
+    if (ahead !== null) {
+      want = ahead
+      at += 1
+    } else if (star < 0 || resume >= text.length) {
+      return false
+    } else {
+      resume += 1
+      at = resume
+      want = star
+    }
+  }
+}
+
+/** Whether a name fits -P or -I, every `|` parting alternatives, even in a
+ * bracket, and an empty one fitting anything. */
 function hit(flags: TreeFlags, pattern: string, name: string): boolean {
   const text = flags.ignoreCase ? name.toLowerCase() : name
   const typed = flags.ignoreCase ? pattern.toLowerCase() : pattern
-  return typed.split('|').some((part) => fnmatch(text, part))
+  return typed.split('|').some((part) => part === '' || fits(text, part))
 }
 
 /** Whether --matchdirs passes a directory's own files: its path under the
@@ -369,7 +457,9 @@ function letsFilesThrough(flags: TreeFlags, root: string, directory: string): bo
   const text = flags.ignoreCase ? relative.toLowerCase() : relative
   const typed = flags.ignoreCase ? flags.matchPattern.toLowerCase() : flags.matchPattern
   const parts = text.split('/')
-  return typed.split('|').some((part) => segmentsMatch(parts, part.replace(/\/+$/, '').split('/')))
+  return typed
+    .split('|')
+    .some((part) => part === '' || segmentsMatch(parts, part.replace(/\/+$/, '').split('/'), fits))
 }
 
 function nameMatcher(rules: readonly Ignore[]): AnyTailMatcher | null {
@@ -681,7 +771,14 @@ function readBelow(
   readdir: ReaddirFn<[p: PathSpec, nofollow?: boolean, limit?: number]>,
   stat: StatFn,
 ): [ReaddirFn<[p: PathSpec, nofollow?: boolean, limit?: number]>, StatFn] {
-  if (node.stat.type === FileType.SYMLINK) return [treeOpts.crossReaddir ?? readdir, stat]
+  if (node.stat.type === FileType.SYMLINK) {
+    const { mounts, resolve } = treeOpts
+    const stays =
+      mounts === null ||
+      resolve === null ||
+      mounts.rootOf(resolve(node.spec.virtual)) === mounts.rootOf(resolve(treeOpts.root ?? ''))
+    return [(stays ? treeOpts.linkReaddir : treeOpts.crossReaddir) ?? readdir, stat]
+  }
   if (!listing.crossed.has(node)) return [readdir, stat]
   return [treeOpts.crossReaddir ?? readdir, treeOpts.crossStat ?? stat]
 }
@@ -769,7 +866,7 @@ function siText(bytes: number): string {
 
 /** The time -D shows: the change time under -c, in the format --timefmt names. */
 function timeText(flags: TreeFlags, node: TreeNode): string {
-  const stamp = flags.changeTime ? timeOf(node.stat, 'ctime') : node.stat.modified
+  const stamp = flags.changeTime ? (node.stat.ctime ?? node.stat.modified) : node.stat.modified
   return styledTime(stamp, flags.timeFormat === null ? 'locale' : `+${flags.timeFormat}`)
 }
 
@@ -850,12 +947,12 @@ function shown(flags: TreeFlags, node: TreeNode, root = false): string {
   return name + (flags.classify ? classify(node.stat) : '')
 }
 
-/** What stands left of a name, in the locale's drawing set or under -A the
- * terminal's. */
+/** What stands left of a name, in the drawing set --charset or the locale
+ * picks or under -A the terminal's. */
 function drawnLead(flags: TreeFlags, prefix: string, last: boolean): string {
   if (flags.noIndent) return ''
   if (!flags.ansiLines) {
-    if (!flags.utf8) return prefix + (last ? LAST : BRANCH)
+    if (!flags.boxLines) return prefix + (last ? LAST : BRANCH)
     return prefix.replaceAll(VERTICAL, UTF8_VERTICAL) + (last ? UTF8_LAST : UTF8_BRANCH)
   }
   const above = prefix.replaceAll(VERTICAL, ANSI_VERTICAL)
@@ -1163,15 +1260,23 @@ export async function treeGeneric(
   if (unbounded !== undefined && parsed.maxDepth === null && !parsed.follow) {
     ;[readdir, stat] = unbounded
   }
+  const utf8 = utf8Locale(ctx.env)
   const flags: TreeFlags = {
     ...parsed,
-    utf8: utf8Locale(ctx.env),
+    utf8,
+    boxLines: parsed.charset === null ? utf8 : UTF8_NAMES.has(parsed.charset.toLowerCase()),
     identity: identityOf(ctx),
   }
   const output = parsed.output
   if (output !== null) {
     if (ctx.vfs === undefined) return [null, new IOResult({ exitCode: 1 })]
     try {
+      const vfs = ctx.vfs
+      const statOutput = (p: PathSpec): Promise<FileStat> => vfs.stat(p)
+      const found = await entryKind(statOutput, output)
+      if (found.isDir) throw eisdir(output)
+      if (!found.exists && (await absentDestError(statOutput, output)) !== null)
+        throw enoent(output)
       await ctx.vfs.write(output, new Uint8Array(0))
     } catch (error) {
       if (!isFsError(error)) throw error
@@ -1202,6 +1307,7 @@ export async function treeGeneric(
         : flags.oneFileSystem
           ? notCrossed
           : (p: PathSpec) => readdirPath(p.virtual),
+    linkReaddir: readdirPath === undefined ? null : (p: PathSpec) => readdirPath(p.virtual),
     crossStat:
       statPath === undefined
         ? null

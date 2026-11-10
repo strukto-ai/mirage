@@ -105,10 +105,10 @@
         "s3",
         "ssh"
       ],
-      "command": "mkdir -p /data/ez_tr/d/sub /data/ez_tr/e; printf x > /data/ez_tr/a; printf yy > /data/ez_tr/B; printf z > /data/ez_tr/d/c; printf q > /data/ez_tr/d/sub/q; printf f > /data/ez_tr/e/f; ln -s d /data/ez_tr/dl; ln -s nosuch /data/ez_tr/dang; ln -s a /data/ez_tr/fl; ln -s .. /data/ez_tr/d/up; ln -s /data/ez_tr/e /data/ez_tr/abs; tree -l /data/ez_tr; tree -l -L 1 /data/ez_tr; tree -l -d /data/ez_tr; tree -l --noreport /data/ez_tr/dl; rm -r /data/ez_tr",
+      "command": "mkdir -p /data/ez_tr/d/sub /data/ez_tr/e; printf x > /data/ez_tr/a; printf yy > /data/ez_tr/B; printf z > /data/ez_tr/d/c; printf q > /data/ez_tr/d/sub/q; printf f > /data/ez_tr/e/f; ln -s d /data/ez_tr/dl; ln -s nosuch /data/ez_tr/dang; ln -s a /data/ez_tr/fl; ln -s .. /data/ez_tr/d/up; ln -s /data/ez_tr/e /data/ez_tr/abs; tree -l /data/ez_tr; tree -l -L 1 /data/ez_tr; tree -l -d /data/ez_tr; tree -l --noreport /data/ez_tr/dl; tree -l -x --noreport /data/ez_tr; rm -r /data/ez_tr",
       "expect": {
         "exit": 0,
-        "stdout": "/data/ez_tr\n|-- B\n|-- a\n|-- abs -> /data/ez_tr/e\n|   `-- f\n|-- d\n|   |-- c\n|   |-- sub\n|   |   `-- q\n|   `-- up -> ..  [recursive, not followed]\n|-- dang -> nosuch\n|-- dl -> d  [recursive, not followed]\n|-- e\n|   `-- f\n`-- fl -> a\n\n7 directories, 8 files\n/data/ez_tr\n|-- B\n|-- a\n|-- abs -> /data/ez_tr/e\n|-- d\n|-- dang -> nosuch\n|-- dl -> d\n|-- e\n`-- fl -> a\n\n5 directories, 4 files\n/data/ez_tr\n|-- abs -> /data/ez_tr/e\n|-- d\n|   |-- sub\n|   `-- up -> ..  [recursive, not followed]\n|-- dl -> d  [recursive, not followed]\n`-- e\n\n7 directories\n/data/ez_tr/dl\n|-- c\n|-- sub\n|   `-- q\n`-- up -> ..\n    |-- B\n    |-- a\n    |-- abs -> /data/ez_tr/e\n    |   `-- f\n    |-- d\n    |   |-- c\n    |   |-- sub\n    |   |   `-- q\n    |   `-- up -> ..  [recursive, not followed]\n    |-- dang -> nosuch\n    |-- dl -> d  [recursive, not followed]\n    |-- e\n    |   `-- f\n    `-- fl -> a\n",
+        "stdout": "/data/ez_tr\n|-- B\n|-- a\n|-- abs -> /data/ez_tr/e\n|   `-- f\n|-- d\n|   |-- c\n|   |-- sub\n|   |   `-- q\n|   `-- up -> ..  [recursive, not followed]\n|-- dang -> nosuch\n|-- dl -> d  [recursive, not followed]\n|-- e\n|   `-- f\n`-- fl -> a\n\n7 directories, 8 files\n/data/ez_tr\n|-- B\n|-- a\n|-- abs -> /data/ez_tr/e\n|-- d\n|-- dang -> nosuch\n|-- dl -> d\n|-- e\n`-- fl -> a\n\n5 directories, 4 files\n/data/ez_tr\n|-- abs -> /data/ez_tr/e\n|-- d\n|   |-- sub\n|   `-- up -> ..  [recursive, not followed]\n|-- dl -> d  [recursive, not followed]\n`-- e\n\n7 directories\n/data/ez_tr/dl\n|-- c\n|-- sub\n|   `-- q\n`-- up -> ..\n    |-- B\n    |-- a\n    |-- abs -> /data/ez_tr/e\n    |   `-- f\n    |-- d\n    |   |-- c\n    |   |-- sub\n    |   |   `-- q\n    |   `-- up -> ..  [recursive, not followed]\n    |-- dang -> nosuch\n    |-- dl -> d  [recursive, not followed]\n    |-- e\n    |   `-- f\n    `-- fl -> a\n/data/ez_tr\n|-- B\n|-- a\n|-- abs -> /data/ez_tr/e\n|   `-- f\n|-- d\n|   |-- c\n|   |-- sub\n|   |   `-- q\n|   `-- up -> ..  [recursive, not followed]\n|-- dang -> nosuch\n|-- dl -> d  [recursive, not followed]\n|-- e\n|   `-- f\n`-- fl -> a\n",
         "stderr": ""
       }
     },
@@ -153,6 +153,49 @@
       "expect": {
         "exit": 0,
         "stdout": "[2024%]  /data/ez_tr/a  [error opening dir]\n[2024%]  /data/ez_tr/B  [error opening dir]\n[2024-01-02]  /data/ez_tr/a  [error opening dir]\n/data/ez_tr/e\n`-- f\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tree_patterns_keep_to_their_own_rules",
+      "seq": 16300010,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir -p /data/ez_tr/g; cd /data/ez_tr/g; touch a b c x xa xy '[' ']' 'x|y' '|' ./- '!'; cd /; tree -n --noreport -P '[|]' /data/ez_tr/g; tree -n --noreport -P 'x[|]y' /data/ez_tr/g; tree -n --noreport -P '[ab' /data/ez_tr/g; tree -n --noreport -P 'x[' /data/ez_tr/g; tree -n --noreport -P '|' /data/ez_tr/g; tree -n --noreport -P 'a|' /data/ez_tr/g; tree -n --noreport -P '[!a]' /data/ez_tr/g; tree -n --noreport -P '[^a]' /data/ez_tr/g; tree -n --noreport -P '[]' /data/ez_tr/g; tree -n --noreport -P '[a-c]' /data/ez_tr/g; tree -n --noreport -P '[a-]' /data/ez_tr/g; tree -n --noreport -P '\\[' /data/ez_tr/g; tree -n --noreport -P 'x\\' /data/ez_tr/g; tree -n --noreport -P '\\x' /data/ez_tr/g; tree -n --noreport -P '?' /data/ez_tr/g; tree -n --noreport -P 'x?' /data/ez_tr/g; tree -n --noreport -P '[\\]]' /data/ez_tr/g; tree -n --noreport -P '[-a]' /data/ez_tr/g; tree -n --noreport -I '[|]' /data/ez_tr/g; tree -n --noreport --ignore-case -P '[A]' /data/ez_tr/g; tree -n --noreport --matchdirs -P 'gg|' /data/ez_tr; rm -r /data/ez_tr",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/ez_tr/g\n|-- !\n|-- -\n|-- [\n|-- ]\n|-- a\n|-- b\n|-- c\n|-- x\n|-- xa\n|-- xy\n|-- x|y\n`-- |\n/data/ez_tr/g\n|-- x\n|-- xa\n|-- xy\n`-- x|y\n/data/ez_tr/g\n|-- !\n|-- -\n|-- [\n|-- ]\n|-- a\n|-- b\n|-- c\n|-- x\n|-- xa\n|-- xy\n|-- x|y\n`-- |\n/data/ez_tr/g\n|-- x\n|-- xa\n|-- xy\n`-- x|y\n/data/ez_tr/g\n|-- !\n|-- -\n|-- [\n|-- ]\n|-- a\n|-- b\n|-- c\n|-- x\n|-- xa\n|-- xy\n|-- x|y\n`-- |\n/data/ez_tr/g\n|-- !\n|-- -\n|-- [\n|-- ]\n|-- a\n|-- b\n|-- c\n|-- x\n|-- xa\n|-- xy\n|-- x|y\n`-- |\n/data/ez_tr/g\n|-- !\n`-- a\n/data/ez_tr/g\n|-- !\n|-- -\n|-- [\n|-- ]\n|-- b\n|-- c\n|-- x\n`-- |\n/data/ez_tr/g\n/data/ez_tr/g\n|-- a\n|-- b\n`-- c\n/data/ez_tr/g\n|-- !\n|-- -\n|-- [\n|-- ]\n|-- a\n|-- b\n|-- c\n|-- x\n|-- xa\n|-- xy\n|-- x|y\n`-- |\n/data/ez_tr/g\n`-- [\n/data/ez_tr/g\n/data/ez_tr/g\n`-- x\n/data/ez_tr/g\n|-- !\n|-- -\n|-- [\n|-- ]\n|-- a\n|-- b\n|-- c\n|-- x\n`-- |\n/data/ez_tr/g\n|-- xa\n`-- xy\n/data/ez_tr/g\n`-- ]\n/data/ez_tr/g\n|-- -\n`-- a\n/data/ez_tr/g\n/data/ez_tr/g\n`-- a\n/data/ez_tr\n`-- g\n    |-- !\n    |-- -\n    |-- [\n    |-- ]\n    |-- a\n    |-- b\n    |-- c\n    |-- x\n    |-- xa\n    |-- xy\n    |-- x|y\n    `-- |\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tree_charset_picks_the_lines_not_the_names",
+      "seq": 16300011,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "mkdir -p /data/ez_tr/d/sub /data/ez_tr/e; printf x > /data/ez_tr/a; printf yy > /data/ez_tr/B; printf z > /data/ez_tr/d/c; printf q > /data/ez_tr/d/sub/q; printf f > /data/ez_tr/e/f; LC_ALL=C.UTF-8 tree --charset=ascii --noreport -L 1 /data/ez_tr; LC_ALL=C tree --charset=UTF-8 --noreport -L 1 /data/ez_tr; LC_ALL=C tree --charset=utf8 --noreport -L 1 /data/ez_tr/e; tree --charset=nonsense --noreport -L 1 /data/ez_tr/e; LC_ALL=C tree -A --charset=utf-8 --noreport -L 1 /data/ez_tr/e; rm -r /data/ez_tr",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/ez_tr\n|-- B\n|-- a\n|-- d\n`-- e\n/data/ez_tr\n├── B\n├── a\n├── d\n└── e\n/data/ez_tr/e\n└── f\n/data/ez_tr/e\n`-- f\n/data/ez_tr/e\n\u001b(0mqq \u001b(Bf\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tree_change_time_is_shown_under_c",
+      "seq": 16300012,
+      "targets": [
+        "disk"
+      ],
+      "command": "mkdir -p /data/ez_tr/d/sub /data/ez_tr/e; printf x > /data/ez_tr/a; printf yy > /data/ez_tr/B; printf z > /data/ez_tr/d/c; printf q > /data/ez_tr/d/sub/q; printf f > /data/ez_tr/e/f; touch -d '2001-01-01 00:00:00' /data/ez_tr/a; tree -cD --timefmt %Y --noreport /data/ez_tr/a | grep -c 2001; tree -D --timefmt %Y --noreport /data/ez_tr/a | grep -c 2001; rm -r /data/ez_tr",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n1\n",
         "stderr": ""
       }
     }

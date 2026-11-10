@@ -83,11 +83,14 @@ class TruncateFlags:
         no_create (bool): ``-c``; an absent name stays absent, silently.
         reference (PathSpec | None): ``-r``; the file whose size a
             relative ``-s`` counts from, in place of each operand's own.
+        overflow (str | None): the ``-o`` count as typed when it does
+            not fit a file offset in bytes.
     """
 
     size: Size
     no_create: bool
     reference: PathSpec | None = None
+    overflow: str | None = None
 
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> TruncateFlags | IOResult:
@@ -125,13 +128,16 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TruncateFlags | IOResult:
         and isinstance(number := size.get("size"), str)
     ):
         raise ValueError(f"truncate: mirage-rs read -s as {size!r}")
+    count = int(number)
+    scale = IO_BLOCK if io_blocks else 1
+    past = count * scale > (2**63 if mode == "reduce" else 2**63 - 1)
     return TruncateFlags(
-        size=Size(
-            mode=cast(SizeMode, mode),
-            number=int(number) * (IO_BLOCK if io_blocks else 1),
-        ),
+        size=Size(mode=cast(SizeMode, mode), number=count * scale),
         no_create=fl.as_bool("no_create"),
         reference=reference,
+        overflow=(f"-{count}" if mode == "reduce" else str(count))
+        if past
+        else None,
     )
 
 
@@ -216,6 +222,7 @@ async def _truncate_one(
             counts from instead of the operand's.
     """
     directory = False
+    absent = False
     try:
         st = await stat(path)
         current = st.size or 0
@@ -233,9 +240,18 @@ async def _truncate_one(
         if why is not None:
             raise enoent(path) from exc
         current = 0
+        absent = True
     slashed = path.raw_path.endswith("/") and not ends_at_dot(path.raw_path)
     if directory or (slashed and not flags.no_create):
         raise eisdir(path)
+    if flags.overflow is not None:
+        if absent:
+            await truncate_fn(path, 0, flags.no_create)
+        label = shell_quote_always(path.raw_path or path.virtual)
+        return (
+            f"truncate: overflow in {flags.overflow} * {IO_BLOCK} "
+            f"byte blocks for file {label}\n"
+        )
     size = resolve_size(flags.size, current if base is None else base)
     try:
         await truncate_fn(path, size, flags.no_create)

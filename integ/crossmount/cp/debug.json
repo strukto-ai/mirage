@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "id": "xm_cp_debug_says_bytes_moved_here",
+      "seq": 16300402,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir -p /data/ez_c/t/s; printf x > /data/ez_c/t/s/f; : > /data/ez_c/e; mkdir -p /data2/ez_c; cp --debug /data/ez_c/t/s/f /data2/ez_c/f; echo rc=$?; cp --debug /data/ez_c/e /data2/ez_c/e; cp --debug -r /data/ez_c/t /data2/ez_c/t; echo rc=$?; rm -r /data/ez_c /data2/ez_c",
+      "expect": {
+        "exit": 0,
+        "stdout": "'/data/ez_c/t/s/f' -> '/data2/ez_c/f'\ncopy offload: unsupported, reflink: unsupported, sparse detection: no\nrc=0\n'/data/ez_c/e' -> '/data2/ez_c/e'\ncopy offload: unsupported, reflink: unsupported, sparse detection: no\n'/data/ez_c/t' -> '/data2/ez_c/t'\n'/data/ez_c/t/s' -> '/data2/ez_c/t/s'\n'/data/ez_c/t/s/f' -> '/data2/ez_c/t/s/f'\ncopy offload: unsupported, reflink: unsupported, sparse detection: no\nrc=0\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

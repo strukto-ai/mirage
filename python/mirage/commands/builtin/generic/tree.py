@@ -1,17 +1,15 @@
 import json
 import logging
 import posixpath
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import Literal
 
 from mirage.commands.builtin.generic.ls import sort_by_version
 from mirage.commands.builtin.utils.formatting import (
-    LsTimeKind,
     ls_mode_string,
     styled_time,
-    time_of,
 )
 from mirage.commands.builtin.utils.identity import (
     Identity,
@@ -21,14 +19,19 @@ from mirage.commands.builtin.utils.identity import (
 )
 from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.output import format_records
-from mirage.commands.builtin.utils.paths import vfs_readdir_path, vfs_stat_path
+from mirage.commands.builtin.utils.paths import (
+    absent_dest_error,
+    entry_kind,
+    vfs_readdir_path,
+    vfs_stat_path,
+)
 from mirage.commands.builtin.utils.tree import WalkBudget
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS, MISS_ERRORS, WALK_ERRORS
-from mirage.errors.fs import enoent
+from mirage.errors.fs import eisdir, enoent
 from mirage.io.async_line_iterator import char_width
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult, materialize
@@ -83,6 +86,8 @@ UNKNOWN_INODE = "?"
 # The escapes a name's control characters take in the C locale.
 _C_ESCAPES = {7: "a", 8: "b", 9: "t", 10: "n", 11: "v", 12: "f", 13: "r"}
 _SI_UNITS = "kMGTPE"
+_UNCLOSED = -1
+_UTF8_NAMES = frozenset({"utf-8", "utf8"})
 # Where --si stops writing a tenth, pinned on tree 2.2.1.
 _SI_TENTHS_BELOW = 9.948
 # The lines a drawing holds before it writes them, whatever comes next.
@@ -145,6 +150,8 @@ class TreeFlags:
     inodes: bool = False
     output: PathSpec | None = None
     utf8: bool = False
+    charset: str | None = None
+    box_lines: bool = False
     identity: Identity | None = None
 
 
@@ -278,6 +285,7 @@ class _TreeOpts:
     root: str = ""
     resolve: LinkResolve | None = None
     seen: set[str] = field(default_factory=set)
+    link_readdir: ReaddirFn | None = None
 
 
 @dataclass(slots=True)
@@ -348,7 +356,98 @@ class _Listing:
     rules: Sequence[_Ignore] = ()
 
 
-def _segments_match(parts: list[str], pattern: list[str]) -> bool:
+def _bracket(rule: str, start: int, char: str) -> int | None:
+    """Where a pattern goes on once the bracket at ``start`` has judged
+    one byte: None when it refuses, ``_UNCLOSED`` when no ``]`` ends it.
+
+    A ``]`` closes even as the first member, only ``^`` negates, ``\\``
+    takes the next byte as itself, and a ``-`` after a member makes a
+    range whose end may be a ``]``.
+
+    Args:
+        rule (str): the pattern, one character per byte.
+        start (int): where its ``[`` stands.
+        char (str): the name's next byte, empty past its end.
+    """
+    at = start + 1
+    negated = rule[at : at + 1] == "^"
+    if negated:
+        at += 1
+    taken = False
+    while at < len(rule) and rule[at] != "]":
+        if rule[at] == "\\":
+            at += 1
+        low = high = rule[at : at + 1]
+        at += 1
+        if rule[at : at + 1] == "-":
+            at += 1
+            if rule[at : at + 1] == "\\":
+                at += 1
+            high = rule[at : at + 1]
+            at += 1
+        taken = taken or (bool(char) and low <= char <= high)
+    if at >= len(rule):
+        return _UNCLOSED
+    return at + 1 if char and taken != negated else None
+
+
+def _bytewise(text: str) -> str:
+    """One character per byte of a name or pattern.
+
+    Args:
+        text (str): the name or pattern.
+    """
+    return encode_text(text).decode("latin-1")
+
+
+def _fits(name: str, pattern: str) -> bool:
+    """Whether a name fits one ``-P`` or ``-I`` alternative, byte by byte.
+
+    ``*``, ``?``, ``\\`` and brackets, and a bracket no ``]`` ends fits
+    whatever is left of the name. Only the latest ``*`` is ever retried,
+    so the work stays the name's length times the pattern's.
+
+    Args:
+        name (str): the entry's name.
+        pattern (str): the alternative.
+    """
+    text = _bytewise(name)
+    rule = _bytewise(pattern)
+    at = want = resume = 0
+    star = -1
+    while True:
+        token = rule[want : want + 1]
+        if token == "*":
+            want += 1
+            star, resume = want, at
+            continue
+        if not token and at == len(text):
+            return True
+        char = text[at : at + 1]
+        ahead: int | None = None
+        if token == "[":
+            ahead = _bracket(rule, want, char)
+            if ahead == _UNCLOSED:
+                return True
+        elif token == "\\":
+            if char and rule[want + 1 : want + 2] == char:
+                ahead = want + 2
+        elif token and char and token in ("?", char):
+            ahead = want + 1
+        if ahead is not None:
+            want, at = ahead, at + 1
+        elif star < 0 or resume >= len(text):
+            return False
+        else:
+            resume += 1
+            at, want = resume, star
+
+
+def _segments_match(
+    parts: list[str],
+    pattern: list[str],
+    fits: Callable[[str, str], bool] = fnmatch,
+) -> bool:
     """Whether a path fits a pattern, a ``**`` for any run of segments
     and, last in the pattern, at least one.
 
@@ -359,6 +458,8 @@ def _segments_match(parts: list[str], pattern: list[str]) -> bool:
     Args:
         parts (list[str]): the path's segments.
         pattern (list[str]): the pattern's segments.
+        fits (Callable[[str, str], bool]): whether a segment fits one
+            of the pattern's.
     """
     at = want = resume = 0
     star = -1
@@ -366,7 +467,7 @@ def _segments_match(parts: list[str], pattern: list[str]) -> bool:
         if want < len(pattern) and pattern[want] == "**":
             star, resume = want, at
             want += 1
-        elif want < len(pattern) and fnmatch(parts[at], pattern[want]):
+        elif want < len(pattern) and fits(parts[at], pattern[want]):
             at += 1
             want += 1
         elif star >= 0:
@@ -378,7 +479,8 @@ def _segments_match(parts: list[str], pattern: list[str]) -> bool:
 
 
 def _hit(flags: TreeFlags, pattern: str, name: str) -> bool:
-    """Whether a name fits ``-P`` or ``-I``, ``|`` parting alternatives.
+    """Whether a name fits ``-P`` or ``-I``, every ``|`` parting
+    alternatives, even in a bracket, and an empty one fitting anything.
 
     Args:
         flags (TreeFlags): the options.
@@ -387,7 +489,7 @@ def _hit(flags: TreeFlags, pattern: str, name: str) -> bool:
     """
     if flags.ignore_case:
         pattern, name = pattern.lower(), name.lower()
-    return any(fnmatch(name, part) for part in pattern.split("|"))
+    return any(not part or _fits(name, part) for part in pattern.split("|"))
 
 
 def _lets_files_through(flags: TreeFlags, root: str, directory: str) -> bool:
@@ -409,7 +511,7 @@ def _lets_files_through(flags: TreeFlags, root: str, directory: str) -> bool:
         pattern, relative = pattern.lower(), relative.lower()
     parts = relative.split("/")
     return any(
-        _segments_match(parts, part.rstrip("/").split("/"))
+        not part or _segments_match(parts, part.rstrip("/").split("/"), _fits)
         for part in pattern.split("|")
     )
 
@@ -695,7 +797,14 @@ def _read_below(
         stat (StatFn): the stat its parent is read through.
     """
     if node.stat.type == FileType.SYMLINK:
-        return opts.cross_readdir or readdir, stat
+        stays = (
+            opts.mounts is None
+            or opts.resolve is None
+            or opts.mounts.root_of(opts.resolve(node.spec.virtual))
+            == opts.mounts.root_of(opts.resolve(opts.root))
+        )
+        chosen = opts.link_readdir if stays else opts.cross_readdir
+        return chosen or readdir, stat
     if id(node) not in listing.crossed:
         return readdir, stat
     return opts.cross_readdir or readdir, opts.cross_stat or stat
@@ -806,7 +915,7 @@ def _time_text(flags: TreeFlags, node: _TreeNode) -> str:
         node (_TreeNode): the entry.
     """
     stamp = (
-        time_of(node.stat, LsTimeKind.CTIME)
+        node.stat.ctime or node.stat.modified
         if flags.change_time
         else node.stat.modified
     )
@@ -924,8 +1033,8 @@ def _shown(flags: TreeFlags, node: _TreeNode, root: bool = False) -> str:
 
 
 def _drawn_lead(flags: TreeFlags, prefix: str, last: bool) -> str:
-    """What stands left of a name, in the locale's drawing set or under
-    ``-A`` the terminal's.
+    """What stands left of a name, in the drawing set ``--charset`` or
+    the locale picks or under ``-A`` the terminal's.
 
     Args:
         flags (TreeFlags): the options.
@@ -935,7 +1044,7 @@ def _drawn_lead(flags: TreeFlags, prefix: str, last: bool) -> str:
     if flags.no_indent:
         return ""
     if not flags.ansi_lines:
-        if not flags.utf8:
+        if not flags.box_lines:
             return prefix + (_LAST if last else _BRANCH)
         above = prefix.replace(_VERTICAL, _UTF8_VERTICAL)
         return above + (_UTF8_LAST if last else _UTF8_BRANCH)
@@ -1140,6 +1249,7 @@ async def _rendered(
         if readdir_path is not None
         else None
     )
+    link_readdir = cross_readdir
     if cross_readdir is not None and flags.one_file_system:
         cross_readdir = _not_crossed
     cross_stat = (
@@ -1208,6 +1318,7 @@ async def _rendered(
             budget,
             root=path.virtual,
             resolve=links.resolve if links is not None else None,
+            link_readdir=link_readdir,
         )
         if flags.follow and opts.resolve is not None:
             opts.seen.add(opts.resolve(path.virtual))
@@ -1441,6 +1552,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TreeFlags | IOResult:
         json=fl.as_bool("J"),
         follow=fl.as_bool("args_l"),
         ansi_lines=fl.as_bool("A"),
+        charset=fl.as_str("charset"),
         quote=fl.as_bool("Q"),
         raw_names=fl.as_bool("N"),
         question=fl.as_bool("q"),
@@ -1492,17 +1604,34 @@ async def tree_generic(
         if ctx.vfs is None:
             return None, IOResult(exit_code=1)
         try:
+            exists, directory = await entry_kind(ctx.vfs.stat, output)
+            if directory:
+                raise eisdir(output)
+            if (
+                not exists
+                and await absent_dest_error(ctx.vfs.stat, output) is not None
+            ):
+                raise enoent(output)
             await ctx.vfs.write(output, b"")
         except FS_ERRORS as exc:
             logger.debug("tree: cannot write %s: %s", output.virtual, exc)
             line = f"tree: invalid filename '{output.raw_path}'\n"
             return None, IOResult(exit_code=1, stderr=encode_text(line))
+    utf8 = utf8_locale(ctx.env)
+    box_lines = (
+        utf8
+        if parsed.charset is None
+        else parsed.charset.lower() in _UTF8_NAMES
+    )
     body, io = await tree(
         paths,
         readdir=readdir,
         stat=stat,
         flags=replace(
-            parsed, utf8=utf8_locale(ctx.env), identity=identity_of(ctx)
+            parsed,
+            utf8=utf8,
+            box_lines=box_lines,
+            identity=identity_of(ctx),
         ),
         read=read,
         stat_path=vfs_stat_path(ctx.vfs),

@@ -37,7 +37,8 @@
     "integ/unix/du/files0.json": "These flags are read above the backend, so ram, disk and where a case says so s3 and ssh cover them; the cases make links, control-character names or an output file that the other backends would not keep.",
     "integ/unix/truncate/o.json": "These flags are read above the backend, so ram, disk and where a case says so s3 and ssh cover them; the cases make links, control-character names or an output file that the other backends would not keep.",
     "integ/unix/find/hosts.json": "These flags are read above the backend, so ram, disk and where a case says so s3 and ssh cover them; the cases make links, control-character names or an output file that the other backends would not keep.",
-    "integ/unix/cp/debug.json": "These flags are read above the backend, so ram, disk and where a case says so s3 and ssh cover them; the cases make links, control-character names or an output file that the other backends would not keep."
+    "integ/unix/cp/debug.json": "These flags are read above the backend, so ram, disk and where a case says so s3 and ssh cover them; the cases make links, control-character names or an output file that the other backends would not keep.",
+    "integ/crossmount/cp/debug.json": "This flag is read above the backend, so ram and disk cover what a copy across two mounts reports."
   },
   "entries": {
     "integ/unix/bc/files.json :: bc_a_file_is_named_by_its_bytes": {

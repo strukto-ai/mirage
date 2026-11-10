@@ -1639,21 +1639,31 @@ def transfer_line(
 
 async def _debug_line(
     flags: CpFlags,
+    copier: CopyStrategy,
     stat: Callable[[PathSpec], Awaitable[FileStat]],
     src: PathSpec,
 ) -> list[str]:
     """What ``--debug`` says of one file it copied, pinned on the reference
-    image's files: nothing for a copy that moved no bytes.
+    image's files: nothing for a copy that moved no bytes, ``unsupported``
+    for bytes read and written here, as across filesystems, and ``yes`` or,
+    for an empty file, ``unknown`` for a copy the backend made.
 
     Args:
         flags (CpFlags): the options.
+        copier (CopyStrategy): how the file was copied.
         stat (Callable[[PathSpec], Awaitable[FileStat]]): stats the source.
         src (PathSpec): the file copied.
     """
     if not flags.debug or flags.attributes_only or flags.link is not None:
         return []
-    empty = (await stat(src)).size == 0
-    offload = "unknown" if empty else "yes"
+    offload = "unsupported"
+    if not isinstance(copier, PrimitiveCopy):
+        offload = "yes"
+        try:
+            if (await stat(src)).size == 0:
+                offload = "unknown"
+        except FS_ERRORS as exc:
+            _logger.debug("no size for %s: %s", src.virtual, exc)
     return [
         f"copy offload: {offload}, reflink: unsupported, sparse detection: no"
     ]
@@ -2393,6 +2403,7 @@ async def copy_entries(
     keeper: Keeper | None = None,
     remove_first: Callable[[PathSpec], Awaitable[None]] | None = None,
     aside: NativeMove | None = None,
+    copied_lines: Sequence[str] = (),
 ) -> bool:
     """Copy a walked source tree entry by entry with GNU per-entry errors.
 
@@ -2433,6 +2444,8 @@ async def copy_entries(
         remove_first (Callable[[PathSpec], Awaitable[None]] | None):
             under ``--remove-destination``, what removes a file standing
             at an entry's destination first.
+        copied_lines (Sequence[str]): what follows each copied file's
+            verbose line, ``--debug``'s report.
 
     Returns:
         bool: Whether every entry landed.
@@ -2561,7 +2574,10 @@ async def copy_entries(
             strategy, entry, entry_dst, cmd_name, errors
         ):
             copied_all = False
-        elif keeper is not None:
+            continue
+        if lines is not None:
+            lines.extend(copied_lines)
+        if keeper is not None:
             await keeper.copied(entry, entry_dst)
     return copied_all
 
@@ -2702,6 +2718,7 @@ async def cp_generic(
         or backup_displaces(flags.backup)
         or keeper is not None
         or unlink is not None
+        or flags.debug
     )
     lines: list[str] = []
     warned = 0
@@ -3005,6 +3022,7 @@ async def cp_generic(
                     keeper=keeper,
                     aside=aside,
                     remove_first=unlink,
+                    copied_lines=await _debug_line(flags, strategy, stat, src),
                 )
                 if copies is not None:
                     await copy_tree_links(
@@ -3140,7 +3158,7 @@ async def cp_generic(
                 except FS_ERRORS as exc:
                     errors.append(copy_failed("cp", entry, entry_dst, exc))
                     continue
-                lines += await _debug_line(flags, stat, entry)
+                lines += await _debug_line(flags, strategy, stat, entry)
                 if keeper is not None:
                     await keeper.copied(entry, entry_dst)
             if copies is not None:
@@ -3213,7 +3231,7 @@ async def cp_generic(
             except FS_ERRORS as exc:
                 errors.append(copy_failed("cp", src, target, exc))
                 continue
-        lines += await _debug_line(flags, stat, src)
+        lines += await _debug_line(flags, copier, stat, src)
         if keeper is not None:
             await keeper.copied(src, target)
         created.add(key_of(target))

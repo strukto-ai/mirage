@@ -19,7 +19,7 @@ import type { Context } from '../../config.ts'
 import { IOResult, type ByteSource, type PathRecord } from '../../../io/types.ts'
 import { pathsScoped } from '../../../view/namespace_view.ts'
 import { ZERO_LENGTH_NAME } from '../../../errors/render.ts'
-import { fsStrerror, isDotWalkError, isMissingPath } from '../../../errors/fs.ts'
+import { eacces, fsStrerror, isDotWalkError, isMissingPath } from '../../../errors/fs.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { respellOne, respellRaw } from '../../../utils/path.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
@@ -45,8 +45,9 @@ import type { MountView, StatPath } from '../../../view/types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
 import { posixPhrase } from '../../../errors/posix.ts'
-import { mountsOf } from '../utils/links.ts'
-import { vfsStatPath } from '../utils/paths.ts'
+import { currentCaller } from '../../../context/session_context.ts'
+import { followOf, mountsOf } from '../utils/links.ts'
+import { vfsStatPath, virtualKey } from '../utils/paths.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
 import { anyTailMatcher } from '../../../rs/glob.ts'
 import { refused, scan } from '../../../rs/scan.ts'
@@ -419,6 +420,24 @@ async function duOperandExists(
 }
 
 /**
+ * A listed name's stat. The line's rules judged what it typed, not what its
+ * list holds, so they are asked here, at the name and at where it leads.
+ * Mirrors Python's _listed_stat.
+ */
+async function listedStat(
+  stat: (p: PathSpec) => Promise<unknown>,
+  cwd: PathSpec,
+  path: PathSpec,
+): Promise<unknown> {
+  const gate = currentCaller().gate
+  const named = PathSpec.fromStrPath(path.rawPath, undefined, cwd.virtual).virtual
+  if (gate !== null && (gate.refusal(named) !== null || gate.refusal(path.virtual) !== null)) {
+    throw eacces(path)
+  }
+  return stat(path)
+}
+
+/**
  * Split the operands into the ones du can read and the ones it cannot.
  *
  * GNU names every operand it fails to stat, keeps going with the rest, and
@@ -468,6 +487,10 @@ async function duOperands(
     try {
       await stat(path)
     } catch (err) {
+      if ((err as { code?: string }).code === 'EACCES') {
+        missing.push([path.rawPath, fsStrerror(err) ?? posixPhrase('EACCES'), present.length])
+        continue
+      }
       // An operand typed with a trailing slash that did not name a
       // directory. Unreadable like a missing one, but GNU reports the
       // errno it got, so the two cannot share a wording.
@@ -950,6 +973,14 @@ export async function duGeneric(
       return [new Uint8Array(0), new IOResult({ exitCode: 1, stderr: encodeText(line) })]
     }
     ;[paths, refused] = listedOperands(flags, ctx.cwd)
+    const follow = followOf(ctx)
+    if (follow !== undefined) {
+      paths = (await follow([...paths]))
+        .filter((item): item is PathSpec => item instanceof PathSpec)
+        .map(virtualKey)
+    }
+    const operandStat = stat
+    stat = (p) => listedStat(operandStat, ctx.cwd, p)
   }
   const { present, missing } =
     paths.length > 0 || flags.listed === undefined
