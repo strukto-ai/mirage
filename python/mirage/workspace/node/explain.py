@@ -1485,6 +1485,28 @@ async def off_line_refusal(
     return Refused(err, code, refusal_of(action))
 
 
+def refused_where_it_stands(one: Judged, deny: Deny) -> Judged:
+    """A command a ``Deny`` refuses at its own node, rendered as its run
+    renders it, while the rest of its line still runs.
+
+    Args:
+        one (Judged): the command's judgment and its place on the line.
+        deny (Deny): why its run refuses it.
+    """
+    err, code = render_deny(one.judgment.command, deny)
+    return dataclasses.replace(
+        one,
+        judgment=dataclasses.replace(
+            one.judgment,
+            outcome=Outcome.DENY,
+            reason=deny.reason,
+            exit_code=code,
+            stderr=decode_text(err),
+            refusal=refusal_of(deny),
+        ),
+    )
+
+
 async def _verdict_refuses(
     judged: Judged,
     registry: MountRegistry,

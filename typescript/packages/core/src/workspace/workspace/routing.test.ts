@@ -74,6 +74,13 @@ class ProgramOnB implements Policy {
   }
 }
 
+class WrapperApart implements Policy {
+  preCommand(ctx: CommandContext): Route | null {
+    if (ctx.command === 'nohup') return { kind: 'route', machine: 'a' }
+    return ctx.command === 'hostname' ? { kind: 'route', machine: 'b' } : null
+  }
+}
+
 class OnB implements Policy {
   preExecute(): Route {
     return { kind: 'route', machine: 'b', reason: 'the other box' }
@@ -260,6 +267,23 @@ describe('routing on machines', () => {
       const [first] = [...commands(said.node)]
       expect([first?.command, first?.machine]).toEqual(['nohup', 'box:a'])
       expect(DEC.decode((await ws.shell('nohup sh -c hostname')).stdout)).toBe('a\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('explains a wrapper whose routes disagree as refused', async () => {
+    const ws = workspace(new WrapperApart())
+    try {
+      const said = await ws.explain('nohup hostname; echo after')
+      const nodes = [...commands(said.node)]
+      const wrapper = nodes.find((c) => c.command === 'nohup')
+      const run = await ws.shell('nohup hostname')
+      expect([wrapper?.outcome, wrapper?.exitCode]).toEqual([Outcome.DENY, 126])
+      expect(wrapper?.refusal).toEqual(run.refusal)
+      expect(wrapper?.stderr).toBe(DEC.decode(run.stderr))
+      const echo = nodes.find((c) => c.command === 'echo')
+      expect([echo?.outcome, echo?.exitCode]).toEqual([Outcome.ALLOW, 0])
     } finally {
       await ws.close()
     }

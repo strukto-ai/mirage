@@ -54,7 +54,11 @@ from mirage.workspace.lookup.lookup import (
 )
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
-from mirage.workspace.node.explain import Judged, Walked
+from mirage.workspace.node.explain import (
+    Judged,
+    Walked,
+    refused_where_it_stands,
+)
 from mirage.workspace.node.inner_lines import Word, inner_lines
 from mirage.workspace.node.occurrence import argv_frame, whole_occurrence
 from mirage.workspace.session import SessionState
@@ -126,6 +130,26 @@ def _wrapped_programs(
             found.append(held)
             found.extend(_wrapped_programs(inner.argv, place, by_place))
     return found
+
+
+def _programs_of(
+    one: Judged, by_place: Mapping[Occurrence, Judged]
+) -> list[Judged]:
+    """The judged commands a wrapper's run answers for; none for any
+    other command.
+
+    Args:
+        one (Judged): the command.
+        by_place (Mapping[Occurrence, Judged]): the line's judged commands.
+    """
+    command = one.judgment.command
+    if command not in PROGRAM_WRAPPERS or one.ctx is None:
+        return []
+    return _wrapped_programs(
+        [Word(w, w) for w in (command, *one.ctx.argv)],
+        one.occurrence,
+        by_place,
+    )
 
 
 class Router:
@@ -359,18 +383,55 @@ class Router:
         whole = whole_line_runtime(decision.bindings)
         if isinstance(whole, Runtime):
             return whole.name, _machine_of(whole, decision)
-        route = command_route(one.judgment.answers)
-        if route is not None:
+        decision = self._own_placed(one, decision)
+        answer = self._wrapper_answer(one, decision, programs)
+        if isinstance(answer, Route):
             decision = routed(
                 self._runtimes.entries,
                 decision.bindings,
-                route.runtime,
-                route.machine or decision.machine,
+                answer.runtime,
+                answer.machine or decision.machine,
             )
+        return self._serving(one, decision)
+
+    def _own_placed(
+        self, one: Judged, decision: RouteDecision[RuntimeIdentity]
+    ) -> RouteDecision[RuntimeIdentity]:
+        """A decision with a command's own ``pre_command`` route over it.
+
+        Args:
+            one (Judged): the command.
+            decision (RouteDecision): the placement it runs under.
+        """
+        route = command_route(one.judgment.answers)
+        if route is None:
+            return decision
+        return routed(
+            self._runtimes.entries,
+            decision.bindings,
+            route.runtime,
+            route.machine or decision.machine,
+        )
+
+    def _wrapper_answer(
+        self,
+        one: Judged,
+        decision: RouteDecision[RuntimeIdentity],
+        programs: Sequence[Judged],
+    ) -> Deny | Route | None:
+        """What the routes answering for a wrapper a runtime takes and
+        for the programs its run judges come to, as its run settles them;
+        None for any other command.
+
+        Args:
+            one (Judged): the command.
+            decision (RouteDecision): its placement, its own route in it.
+            programs (Sequence[Judged]): the commands its run answers for.
+        """
         if (
-            one.ctx is not None
-            and one.session is not None
-            and wrapper_runs_outside(
+            one.ctx is None
+            or one.session is None
+            or not wrapper_runs_outside(
                 one.judgment.command,
                 one.ctx.argv,
                 one.session,
@@ -378,19 +439,72 @@ class Router:
                 decision,
             )
         ):
-            own = command_route(one.judgment.answers)
-            routes = [command_route(p.judgment.answers) for p in programs]
-            answer = agreed(
-                [r for r in (own, *routes) if isinstance(r, Route)]
-            )
-            if isinstance(answer, Route):
-                decision = routed(
-                    self._runtimes.entries,
-                    decision.bindings,
-                    answer.runtime,
-                    answer.machine or decision.machine,
+            return None
+        routes = [
+            command_route(held.judgment.answers) for held in (one, *programs)
+        ]
+        return agreed([route for route in routes if route is not None])
+
+    def _outer_placed(
+        self,
+        one: Judged,
+        by_place: Mapping[Occurrence, Judged],
+        decision: RouteDecision[RuntimeIdentity],
+    ) -> RouteDecision[RuntimeIdentity]:
+        """The placement a command runs under: its line's, with the route
+        of each command running it (``eval``) over that, as its run keeps
+        it.
+
+        Args:
+            one (Judged): the command.
+            by_place (Mapping[Occurrence, Judged]): the line's judged
+                commands.
+            decision (RouteDecision): the line's placement.
+        """
+        outer: list[Judged] = []
+        at = one.occurrence.parent
+        while at is not None:
+            held = by_place.get(at)
+            if held is not None:
+                outer.append(held)
+            at = at.parent
+        for held in reversed(outer):
+            decision = self._own_placed(held, decision)
+        return decision
+
+    def refuse_disagreeing(
+        self,
+        judged: Sequence[Judged],
+        decision: RouteDecision[RuntimeIdentity],
+    ) -> list[Judged]:
+        """A line's judged commands, each wrapper whose routes one run
+        cannot honor refused at its own node, as its run refuses it.
+
+        Args:
+            judged (Sequence[Judged]): the line's judged commands.
+            decision (RouteDecision): the line's placement.
+        """
+        by_place = {one.occurrence: one for one in judged}
+        kept: list[Judged] = []
+        for one in judged:
+            programs = _programs_of(one, by_place)
+            answer = (
+                self._wrapper_answer(
+                    one,
+                    self._own_placed(
+                        one, self._outer_placed(one, by_place, decision)
+                    ),
+                    programs,
                 )
-        return self._serving(one, decision)
+                if programs
+                else None
+            )
+            kept.append(
+                refused_where_it_stands(one, answer)
+                if isinstance(answer, Deny)
+                else one
+            )
+        return kept
 
     def placements(
         self,
@@ -409,34 +523,10 @@ class Router:
         by_place = {one.occurrence: one for one in judged}
 
         def placed(one: Judged) -> tuple[str, str]:
-            outer: list[Judged] = []
-            at = one.occurrence.parent
-            while at is not None:
-                held = by_place.get(at)
-                if held is not None:
-                    outer.append(held)
-                at = at.parent
-            line = decision
-            for held in reversed(outer):
-                route = command_route(held.judgment.answers)
-                if route is not None:
-                    line = routed(
-                        self._runtimes.entries,
-                        line.bindings,
-                        route.runtime,
-                        route.machine or line.machine,
-                    )
-            command = one.judgment.command
-            if command not in PROGRAM_WRAPPERS or one.ctx is None:
-                return self.placement_for(one, line)
             return self.placement_for(
                 one,
-                line,
-                _wrapped_programs(
-                    [Word(w, w) for w in (command, *one.ctx.argv)],
-                    one.occurrence,
-                    by_place,
-                ),
+                self._outer_placed(one, by_place, decision),
+                _programs_of(one, by_place),
             )
 
         return placed

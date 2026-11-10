@@ -35,7 +35,7 @@ import { mirageProgramAt, routedConsumer, wrapperRunsOutside } from '../lookup/l
 import { Consumer } from '../lookup/types.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import type { Judged, Walked } from '../node/explain.ts'
+import { type Judged, refusedWhereItStands, type Walked } from '../node/explain.ts'
 import { innerLines, type Word, wordValue } from '../node/inner_lines.ts'
 import { argvFrame, wholeOccurrence } from '../node/occurrence.ts'
 import type { SessionState } from '../session/session.ts'
@@ -121,6 +121,17 @@ function wrappedPrograms(
     if (held !== undefined) found.push(held, ...wrappedPrograms(inner.argv, place, judged))
   }
   return found
+}
+
+/** The judged commands a wrapper's run answers for; none for any other command. */
+function programsOf(one: Judged, judged: readonly Judged[]): Judged[] {
+  const command = one.judgment.command
+  if (!PROGRAM_WRAPPERS.has(command) || one.ctx === undefined) return []
+  return wrappedPrograms(
+    [command, ...one.ctx.argv].map((w) => ({ raw: w, text: w })),
+    one.occurrence,
+    judged,
+  )
 }
 
 export class Router {
@@ -262,31 +273,90 @@ export class Router {
   ): [string, string] {
     const whole = wholeLineRuntime(line.bindings)
     if (whole !== null) return [whole.name, machineOf(whole, line)]
+    const placed = this.ownPlaced(one, line)
+    const answer = this.wrapperAnswer(one, placed, programs)
+    if (answer?.kind !== 'route') return this.serving(one, placed)
+    return this.serving(
+      one,
+      routed(
+        this.runtimes.entries,
+        placed.bindings,
+        answer.runtime,
+        answer.machine ?? placed.machine,
+      ),
+    )
+  }
+
+  /** A decision with a command's own `preCommand` route over it. */
+  private ownPlaced(one: Judged, line: RouteDecision<Runtime>): RouteDecision<Runtime> {
     const route = commandRoute(one.judgment.answers)
-    let placed =
-      route === null
-        ? line
-        : routed(this.runtimes.entries, line.bindings, route.runtime, route.machine ?? line.machine)
+    if (route === null) return line
+    return routed(
+      this.runtimes.entries,
+      line.bindings,
+      route.runtime,
+      route.machine ?? line.machine,
+    )
+  }
+
+  /**
+   * What the routes answering for a wrapper a runtime takes and for the
+   * programs its run judges come to, as its run settles them; null for any
+   * other command. Mirrors Python's `Router._wrapper_answer`.
+   */
+  private wrapperAnswer(
+    one: Judged,
+    placed: RouteDecision<Runtime>,
+    programs: readonly Judged[],
+  ): Deny | Route | null {
     if (
-      one.ctx !== undefined &&
-      one.session !== undefined &&
-      wrapperRunsOutside(one.judgment.command, one.ctx.argv, one.session, this.registry, placed)
+      one.ctx === undefined ||
+      one.session === undefined ||
+      !wrapperRunsOutside(one.judgment.command, one.ctx.argv, one.session, this.registry, placed)
     ) {
-      const answer = agreed(
-        [one, ...programs]
-          .map((held) => commandRoute(held.judgment.answers))
-          .filter((held): held is Route => held !== null),
-      )
-      if (answer?.kind === 'route') {
-        placed = routed(
-          this.runtimes.entries,
-          placed.bindings,
-          answer.runtime,
-          answer.machine ?? placed.machine,
-        )
-      }
+      return null
     }
-    return this.serving(one, placed)
+    return agreed(
+      [one, ...programs]
+        .map((held) => commandRoute(held.judgment.answers))
+        .filter((route): route is Route => route !== null),
+    )
+  }
+
+  /**
+   * The placement a command runs under: its line's, with the route of each
+   * command running it (`eval`) over that, as its run keeps it.
+   */
+  private outerPlaced(
+    one: Judged,
+    judged: readonly Judged[],
+    decision: RouteDecision<Runtime>,
+  ): RouteDecision<Runtime> {
+    const outer: Judged[] = []
+    for (let at = one.occurrence.parent; at !== null; at = at.parent) {
+      const place = at
+      const held = judged.find((other) => sameOccurrence(other.occurrence, place))
+      if (held !== undefined) outer.push(held)
+    }
+    return outer.reverse().reduce((line, held) => this.ownPlaced(held, line), decision)
+  }
+
+  /**
+   * A line's judged commands, each wrapper whose routes one run cannot honor
+   * refused at its own node, as its run refuses it. Mirrors Python's
+   * `Router.refuse_disagreeing`.
+   */
+  refuseDisagreeing(judged: readonly Judged[], decision: RouteDecision<Runtime>): Judged[] {
+    return judged.map((one) => {
+      const programs = programsOf(one, judged)
+      if (programs.length === 0) return one
+      const answer = this.wrapperAnswer(
+        one,
+        this.ownPlaced(one, this.outerPlaced(one, judged, decision)),
+        programs,
+      )
+      return answer?.kind === 'deny' ? refusedWhereItStands(one, answer) : one
+    })
   }
 
   /**
@@ -298,39 +368,8 @@ export class Router {
     judged: readonly Judged[],
     decision: RouteDecision<Runtime>,
   ): (one: Judged) => [string, string] {
-    return (one) => {
-      const outer: Judged[] = []
-      for (let at = one.occurrence.parent; at !== null; at = at.parent) {
-        const place = at
-        const held = judged.find((other) => sameOccurrence(other.occurrence, place))
-        if (held !== undefined) outer.push(held)
-      }
-      let line = decision
-      for (const held of outer.reverse()) {
-        const route = commandRoute(held.judgment.answers)
-        if (route !== null) {
-          line = routed(
-            this.runtimes.entries,
-            line.bindings,
-            route.runtime,
-            route.machine ?? line.machine,
-          )
-        }
-      }
-      const command = one.judgment.command
-      if (!PROGRAM_WRAPPERS.has(command) || one.ctx === undefined) {
-        return this.placementFor(one, line)
-      }
-      return this.placementFor(
-        one,
-        line,
-        wrappedPrograms(
-          [command, ...one.ctx.argv].map((w) => ({ raw: w, text: w })),
-          one.occurrence,
-          judged,
-        ),
-      )
-    }
+    return (one) =>
+      this.placementFor(one, this.outerPlaced(one, judged, decision), programsOf(one, judged))
   }
 
   /**

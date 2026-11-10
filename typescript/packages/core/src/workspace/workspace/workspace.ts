@@ -1700,11 +1700,12 @@ export class Workspace {
           stderr: refused.stderrText,
         }
       }
+      const shown = wholeLine ? judged : this.router.refuseDisagreeing(judged, placed)
       const said = explainedLine(
         line,
-        judged,
+        shown,
         wholeLine ? judged : verdicts,
-        this.router.placements(judged, placed),
+        this.router.placements(shown, placed),
         reparse,
         wholeLine,
       )

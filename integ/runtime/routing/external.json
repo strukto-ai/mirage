@@ -808,6 +808,59 @@
           }
         }
       ]
+    },
+    {
+      "id": "external_wrapper_routes_that_disagree_refuse",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": [
+          "processbox",
+          {
+            "name": "echobox",
+            "captures": [
+              "@external"
+            ]
+          }
+        ],
+        "policies": [
+          {
+            "name": "place_command",
+            "contains": "native-tool",
+            "runtime": "echobox"
+          },
+          {
+            "name": "place_command",
+            "contains": "nohup",
+            "runtime": "processbox"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "native-tool a",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:native-tool a\n"
+          }
+        },
+        {
+          "command": "nohup native-tool a",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "nohup: Permission denied\n"
+          }
+        },
+        {
+          "command": "nohup other-tool a",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"nohup\",\"other-tool\",\"a\"]\n"
+          }
+        }
+      ]
     }
   ]
 }

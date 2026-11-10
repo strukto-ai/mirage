@@ -41,7 +41,6 @@ import {
   PolicyDenied,
   postCommandGate,
   refusalOf,
-  renderCommandDeny,
   renderDeny,
   resolveProducer,
   type Route,
@@ -1042,7 +1041,7 @@ async function runArgv(
           if (!Array.isArray(verdict)) return refused([name, ...argv.args].join(' '), verdict)
           const answer = agreed(gate.route === null ? verdict : [gate.route, ...verdict])
           if (answer?.kind === 'deny') {
-            const [stderr, exitCode] = await renderCommandDeny(name, answer, gate.ctx)
+            const [stderr, exitCode] = renderDeny(name, answer)
             return refused([name, ...argv.args].join(' '), {
               stderr,
               exitCode,
