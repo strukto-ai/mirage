@@ -90,8 +90,9 @@ class FakeMachine extends MachineHandle implements PipeTransport {
     own: readonly string[] = [],
     private readonly sshfs = true,
     private readonly sshfsMounts = true,
+    name = 'box',
   ) {
-    super('box', { mountType })
+    super(name, { mountType })
     for (const prefix of own) this.table.set(prefix, ['tmpfs', 'tmpfs'])
   }
 
@@ -282,8 +283,8 @@ function escaped(text: string, more = ''): string {
 }
 
 // Another workspace's runtime on the same sandbox.
-function sharing(sandbox: FakeMachine, mountType: MountType): FakeMachine {
-  const other = new FakeMachine(mountType)
+function sharing(sandbox: FakeMachine, mountType: MountType, name = 'box'): FakeMachine {
+  const other = new FakeMachine(mountType, [], true, true, name)
   other.table = sandbox.table
   other.running = sandbox.running
   return other
@@ -440,12 +441,13 @@ describe('killLine', () => {
 
 describe('sourceName', () => {
   it('names a workspace by its id, escaping what no two ids may share', () => {
-    expect(sourceName('w1-2')).toBe('mirage-w1-2')
-    expect([sourceName('a.b'), sourceName('a_b'), sourceName('a:é')]).toEqual([
-      'mirage-a_2eb',
-      'mirage-a_5fb',
-      'mirage-a_3a_c3_a9',
+    expect(sourceName('w1-2', 'box')).toBe('mirage-w1-2.box')
+    expect([sourceName('a.b', 'm'), sourceName('a_b', 'm'), sourceName('a', 'b.m')]).toEqual([
+      'mirage-a_2eb.m',
+      'mirage-a_5fb.m',
+      'mirage-a.b_2em',
     ])
+    expect(sourceName('a:é', 'box')).toBe('mirage-a_3a_c3_a9.box')
   })
 })
 
@@ -474,7 +476,7 @@ describe('MachineMounts', () => {
     const agent = await ws.session('agent', { profile: 'agent' })
     const result = await agent.shell('python3 job.py')
     expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'ran\n'])
-    const name = sourceName(ws.workspaceId)
+    const name = sourceName(ws.workspaceId, 'box')
     expect(sandbox.pipes.map((p) => p.split(' 2>')[0])).toEqual([
       `exec sshfs -f -o ${SSHFS_OPTIONS} '${name}-1:/data' '/data'`,
       `exec sshfs -f -o ${SSHFS_OPTIONS} '${name}-2:/my notes' '/my notes'`,
@@ -706,7 +708,7 @@ describe('MachineMounts', () => {
     })
     expect((await one.shell('python3 job.py')).exitCode).toBe(0)
     const stale = first.table.get('/data')?.[0] ?? ''
-    expect(stale).toBe('mirage-w_201-1:/data')
+    expect(stale).toBe('mirage-w_201.box-1:/data')
     // The host restarted: the first instance never closes, and its sshfs runs on.
     const second = sharing(first, 'ssh')
     const ws = workspace(second, [], undefined, undefined, 'w 1')
@@ -724,7 +726,7 @@ describe('MachineMounts', () => {
 
   it('fails loud when the mount a restarted instance left cannot be unmounted', async () => {
     const sandbox = new FakeMachine('ssh')
-    sandbox.table.set('/data', ['mirage-w1-1:/data', 'fuse.sshfs'])
+    sandbox.table.set('/data', ['mirage-w1.box-1:/data', 'fuse.sshfs'])
     sandbox.refuseUnmount = true
     const ws = workspace(sandbox, [], undefined, undefined, 'w1')
     const result = await (await ws.session('agent', { profile: 'agent' })).shell('python3 job.py')
@@ -733,6 +735,27 @@ describe('MachineMounts', () => {
       'python3: fake: cannot unmount /data, which this workspace served before a restart: fusermount: busy\n',
     ])
     expect(sandbox.pipes).toEqual([])
+  })
+
+  it("refuses, rather than takes, another machine entry's live sshfs on its sandbox", async () => {
+    const first = new FakeMachine('ssh')
+    const second = sharing(first, 'ssh', 'box2')
+    const ws = new Workspace(
+      { '/': new RAMVFS(), '/data': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        workspaceId: 'w1',
+        ...on(first),
+        machines: { box: first, box2: second },
+      },
+    )
+    expect((await ws.shell('python3 job.py')).exitCode).toBe(0)
+    const mounted = new Map(first.table)
+    const result = await ws.shell('python3 job.py', { machine: 'box2' })
+    expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([1, FOREIGN])
+    expect(second.commands.filter((c) => c.startsWith('for p in /proc/'))).toEqual([])
+    expect(first.table).toEqual(mounted)
+    await ws.close()
   })
 
   it('refuses the live sshfs of a workspace whose id only starts like its own', async () => {

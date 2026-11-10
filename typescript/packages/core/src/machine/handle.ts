@@ -497,6 +497,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       throw new Error(`${this.provider}: mountType needs a pipe transport`)
     this.mounts = new MachineMounts(
       this.provider,
+      this.name,
       mountType,
       this.setup.bind(this),
       this.openPipe.bind(this),

@@ -89,8 +89,10 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
 
     provider = "fake"
 
-    def __init__(self, mount_type, own=(), sshfs=True, sshfs_mounts=True):
-        super().__init__("box", config={"mount_type": mount_type})
+    def __init__(
+        self, mount_type, own=(), sshfs=True, sshfs_mounts=True, name="box"
+    ):
+        super().__init__(name, config={"mount_type": mount_type})
         self.captures = ["python3"]
         self.table = {prefix: ("tmpfs", "tmpfs") for prefix in own}
         self.running: set[str] = set()
@@ -235,9 +237,9 @@ def escaped(text, more=""):
     return "".join(f"\\{ord(c):03o}" if c in " " + more else c for c in text)
 
 
-def sharing(sandbox, mount_type):
+def sharing(sandbox, mount_type, name="box"):
     """Another workspace's runtime on the same sandbox."""
-    other = FakeMachine(mount_type)
+    other = FakeMachine(mount_type, name=name)
     other.table = sandbox.table
     other.running = sandbox.running
     return other
@@ -378,12 +380,13 @@ def test_the_running_line_cannot_tell_without_a_process_list(tmp_path):
 
 
 def test_a_source_name_escapes_what_no_two_workspace_ids_may_share():
-    assert source_name("w1-2") == "mirage-w1-2"
-    assert [source_name("a.b"), source_name("a_b"), source_name("a:é")] == [
-        "mirage-a_2eb",
-        "mirage-a_5fb",
-        "mirage-a_3a_c3_a9",
-    ]
+    assert source_name("w1-2", "box") == "mirage-w1-2.box"
+    assert [
+        source_name("a.b", "m"),
+        source_name("a_b", "m"),
+        source_name("a", "b.m"),
+    ] == ["mirage-a_2eb.m", "mirage-a_5fb.m", "mirage-a.b_2em"]
+    assert source_name("a:é", "box") == "mirage-a_3a_c3_a9.box"
 
 
 def test_top_prefixes_leave_out_the_root_devices_and_nested_mounts():
@@ -403,7 +406,7 @@ async def test_ssh_serves_every_prefix_the_session_sees():
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("python3 job.py")
     assert (result.exit_code, await result.stdout_str()) == (0, "ran\n")
-    name = source_name(ws.workspace_id)
+    name = source_name(ws.workspace_id, "box")
     assert [p.split(" 2>")[0] for p in sandbox.pipes] == [
         f"exec sshfs -f -o {SSHFS_OPTIONS} '{name}-1:/data' '/data'",
         f"exec sshfs -f -o {SSHFS_OPTIONS} '{name}-2:/my notes' '/my notes'",
@@ -651,7 +654,7 @@ async def test_a_restarted_workspace_takes_back_the_sshfs_it_left():
     )
     assert (await one.shell("python3 job.py")).exit_code == 0
     stale = first.table["/data"][0]
-    assert stale == "mirage-w_201-1:/data"
+    assert stale == "mirage-w_201.box-1:/data"
     # The host restarted: the first instance never closes, and its sshfs runs on.
     second = sharing(first, "ssh")
     ws = workspace(second, workspace_id="w 1")
@@ -669,7 +672,7 @@ async def test_a_restarted_workspace_takes_back_the_sshfs_it_left():
 @pytest.mark.asyncio
 async def test_a_mount_a_restarted_instance_left_that_will_not_unmount_fails():
     sandbox = FakeMachine("ssh")
-    sandbox.table["/data"] = ("mirage-w1-1:/data", "fuse.sshfs")
+    sandbox.table["/data"] = ("mirage-w1.box-1:/data", "fuse.sshfs")
     sandbox.refuse_unmount = True
     ws = workspace(sandbox, workspace_id="w1")
     result = await (await ws.session("agent", profile="agent")).shell(
@@ -681,6 +684,25 @@ async def test_a_mount_a_restarted_instance_left_that_will_not_unmount_fails():
         "before a restart: fusermount: busy\n",
     )
     assert sandbox.pipes == []
+
+
+@pytest.mark.asyncio
+async def test_another_machine_entrys_live_sshfs_on_the_sandbox_is_refused():
+    first = FakeMachine("ssh")
+    second = sharing(first, "ssh", "box2")
+    ws = Workspace(
+        {"/": RAMVFS(), "/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        workspace_id="w1",
+        **{**on(first), "machines": {"box": first, "box2": second}},
+    )
+    assert (await ws.shell("python3 job.py")).exit_code == 0
+    mounted = dict(first.table)
+    result = await ws.shell("python3 job.py", machine="box2")
+    assert (result.exit_code, await result.stderr_str()) == (1, FOREIGN)
+    assert not [c for c in second.commands if c.startswith("for p in /proc/")]
+    assert first.table == mounted
+    await ws.close()
 
 
 @pytest.mark.asyncio
@@ -1019,7 +1041,7 @@ async def test_a_landing_stopped_as_a_sync_returns_logs_its_failure(caplog):
             asyncio.get_running_loop().call_soon(landing[0].cancel)
             return [("/data/a.bin", QuotaExceededError(errno.EDQUOT, ""))]
 
-    held = mounts.MachineMounts("fake", "ssh", None, None)
+    held = mounts.MachineMounts("fake", "box", "ssh", None, None)
     held._served["/data"] = (None, None, Server(None, None, None), "")
     landing.append(asyncio.create_task(held.land()))
     with caplog.at_level("WARNING"):
