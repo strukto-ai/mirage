@@ -25,6 +25,7 @@ import { visibleEntries } from './pathspec.ts'
 
 import { readBlobBytes, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
+import { shownEntries } from './seen.ts'
 import { similarityScore } from './similarity.ts'
 import { commitEntries, type TreeEntry } from './tree.ts'
 import type { ConflictedEntry, IndexEntry, IndexState, StatusEntry, WorkTree } from './types.ts'
@@ -409,7 +410,9 @@ export function stagedEntries(state: IndexState): Map<string, TreeEntry> {
  * is compared with, while the index side leaves it out (git shows a combined
  * diff there, which is not offered). `roots` (`patternRoots`) narrows the
  * walk to what the pathspecs reach; an entry outside them reads as gone, for
- * the caller to drop. Mirrors Python's work_entries.
+ * the caller to drop. The sides are noted as `shownEntries` notes a tree's, so
+ * a blob an allowed file holds reads there whatever else stores those bytes.
+ * Mirrors Python's work_entries.
  */
 export async function workEntries(
   repo: Repo,
@@ -441,7 +444,7 @@ export async function workEntries(
     repo.held.set(oid, data)
     entries.set(path, { oid, mode: entryMode(info).toString(8).padStart(6, '0') })
   }
-  return entries
+  return shownEntries(repo, entries)
 }
 
 /**

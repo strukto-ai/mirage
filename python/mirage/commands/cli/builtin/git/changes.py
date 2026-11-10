@@ -35,6 +35,7 @@ from mirage.commands.cli.builtin.git.io import entry_bytes
 from mirage.commands.cli.builtin.git.objects import VfsObjectStore
 from mirage.commands.cli.builtin.git.pathspec import decoded, visible_entries
 from mirage.commands.cli.builtin.git.rows import entry_path
+from mirage.commands.cli.builtin.git.seen import shown_entries
 from mirage.commands.cli.builtin.git.tree import tree_entries
 from mirage.commands.cli.builtin.git.types import (
     IndexState,
@@ -480,6 +481,9 @@ async def work_entries(
     index side leaves it out (git shows a combined diff there, which is
     not offered).
 
+    The sides are noted as ``shown_entries`` notes a tree's, so a blob
+    an allowed file holds reads there whatever else stores those bytes.
+
     Args:
         vfs (Files): the session's files.
         repo (BaseRepo): the opened repository, whose store holds the
@@ -520,7 +524,7 @@ async def work_entries(
         blob = Blob.from_string(data)
         store.hold(blob)
         entries[path] = (entry_mode(info), blob.id)
-    return entries
+    return shown_entries(repo, entries)
 
 
 def merge(
