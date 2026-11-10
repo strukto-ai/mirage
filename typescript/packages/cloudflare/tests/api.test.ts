@@ -112,6 +112,16 @@ afterAll(async () => {
   await worker.stop()
 })
 
+/** A shell body sent as text/plain, answered as its status and JSON. */
+async function shellAsText(body: string): Promise<unknown> {
+  const response = await worker.fetch('http://edge.test/v1/workspaces/api/shell', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'text/plain' },
+    body,
+  })
+  return [response.status, await response.json()]
+}
+
 describe('the server API in workerd', () => {
   it('answers health without a token and refuses the rest without one', async () => {
     expect((await call('GET', '/v1/health', undefined, null)).status).toBe(200)
@@ -269,19 +279,11 @@ describe('the server API in workerd', () => {
   })
 
   it('reads a body as JSON whatever its Content-Type says', async () => {
-    const send = async (body: string): Promise<unknown> => {
-      const response = await worker.fetch('http://edge.test/v1/workspaces/api/shell', {
-        method: 'POST',
-        headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'text/plain' },
-        body,
-      })
-      return [response.status, await response.json()]
-    }
-    expect(await send('{"command": 1}')).toEqual([
+    expect(await shellAsText('{"command": 1}')).toEqual([
       400,
       { error: { code: 'invalid_value', message: 'command must be a string', param: 'command' } },
     ])
-    expect(await send('not json')).toEqual([
+    expect(await shellAsText('not json')).toEqual([
       400,
       { error: { code: 'invalid_json', message: 'body must be JSON' } },
     ])
@@ -355,6 +357,16 @@ describe('the server API in workerd', () => {
     expect((await call('POST', '/v1/workspaces/keep/stop')).status).toBe(200)
     const kept = await call('GET', '/v1/workspaces/keep')
     expect([kept.status, (kept.json as { status: string }).status]).toEqual([200, 'stopped'])
+    const held = await call('POST', '/v1/workspaces/keep/shell', { command: 'true' })
+    expect([held.status, held.json]).toEqual([
+      409,
+      {
+        error: {
+          code: 'workspace_stopped',
+          message: "workspace 'keep' is stopped; start it first",
+        },
+      },
+    ])
     expect((await call('POST', '/v1/workspaces/keep/start')).status).toBe(200)
     const again = await call('POST', '/v1/workspaces/keep/shell?session_id=agent', {
       command: 'echo $N',

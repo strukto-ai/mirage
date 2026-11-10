@@ -18,6 +18,7 @@ import {
   errorResponse,
   HttpError,
   paramOf,
+  WorkspaceMissing,
 } from '@struktoai/mirage-server/errors'
 import type {
   BodySchema,
@@ -84,8 +85,8 @@ function typeOf(value: unknown): string {
 
 /**
  * Check `body` against `schema` as Fastify's validator does for the shapes
- * the routes declare: the required fields, each field's type, and the
- * fields past `properties` dropped when `additionalProperties` is false.
+ * the routes declare: the required fields, each field's type, and then a
+ * field past `properties`, refused when `additionalProperties` is false.
  */
 function validate(body: unknown, schema: BodySchema): unknown {
   if (typeOf(body) !== 'object')
@@ -98,10 +99,12 @@ function validate(body: unknown, schema: BodySchema): unknown {
     }
   }
   const record: Record<string, unknown> = {}
+  let unknown: string | undefined
   for (const [field, value] of Object.entries(given)) {
     const declared = Object.hasOwn(schema.properties, field) ? schema.properties[field] : undefined
     if (declared === undefined) {
       if (schema.additionalProperties !== false) record[field] = value
+      else unknown ??= field
       continue
     }
     const types: readonly string[] =
@@ -117,6 +120,10 @@ function validate(body: unknown, schema: BodySchema): unknown {
       )
     }
     record[field] = value
+  }
+  if (unknown !== undefined) {
+    const param = paramOf([unknown])
+    throw new HttpError('unknown_field', `${param} is not a known field`, { param })
   }
   return record
 }
@@ -239,6 +246,15 @@ function failure(error: unknown, config: RouteConfig): WebReply {
 export class WebRoutes implements RouteApp {
   private readonly routes: Route[] = []
 
+  /**
+   * @param stopped Whether an account's workspace that is not live is
+   *   stopped, so a route that needs it answers 409 rather than 404, as
+   *   the Node server's error handler does.
+   */
+  constructor(
+    private readonly stopped?: (id: string, account: string | null) => Promise<boolean>,
+  ) {}
+
   readonly get = this.method('GET')
   readonly post = this.method('POST')
   readonly put = this.method('PUT')
@@ -298,7 +314,11 @@ export class WebRoutes implements RouteApp {
       const answer = await route.handler(req, reply)
       if (!reply.sent && answer !== undefined && answer !== reply) reply.send(answer)
     } catch (error) {
-      reply = failure(error, route.config)
+      const stopped =
+        error instanceof WorkspaceMissing &&
+        this.stopped !== undefined &&
+        (await this.stopped(error.workspaceId, account))
+      reply = failure(stopped ? error.stopped() : error, route.config)
     }
     return reply.response()
   }

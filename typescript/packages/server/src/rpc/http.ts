@@ -131,6 +131,9 @@ class RpcEndpoint {
     const server = await this.server(workspaceId, req.query.session_id ?? null, req.account)
     if (typeof server === 'string') return httpError(reply, new HttpError('not_found', server))
     const parsed: unknown = req.body
+    if (parsed === undefined) {
+      return reply.code(400).send(errorResponse(null, RPC_PARSE_ERROR, 'parse error'))
+    }
     const batch = Array.isArray(parsed)
     const messages: unknown[] = batch ? parsed : [parsed]
     const held: [string, () => void][] = []

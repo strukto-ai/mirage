@@ -95,7 +95,7 @@ describe('WebRoutes', () => {
     ])
   })
 
-  it('drops a field named after an Object.prototype member', async () => {
+  it('refuses a field named after an Object.prototype member as unknown', async () => {
     const response = await routes().fetch(
       new Request('http://edge.test/doc', {
         method: 'PUT',
@@ -104,6 +104,15 @@ describe('WebRoutes', () => {
       }),
       null,
     )
-    expect([response.status, await response.json()]).toEqual([200, { path: '/vfs.md' }])
+    expect([response.status, await response.json()]).toEqual([
+      400,
+      {
+        error: {
+          code: 'unknown_field',
+          message: 'constructor is not a known field',
+          param: 'constructor',
+        },
+      },
+    ])
   })
 })

@@ -33,8 +33,10 @@ import { registerTemplatesRoutes } from './routers/templates.ts'
 import { registerEntryRoutes, ROUTES as ENTRY_ROUTES } from './routers/entries.ts'
 import { registerToolsRoutes } from './routers/tools.ts'
 import { registerVfsRoutes } from './routers/vfs.ts'
-import { registerWorkspacesRoutes } from './routers/workspaces.ts'
+import { isStopped, registerWorkspacesRoutes } from './routers/workspaces.ts'
 import type { RouteApp, ServerHost } from './routes.ts'
+
+export { isStopped }
 
 export interface ApiDeps {
   registry: WorkspaceRegistry
