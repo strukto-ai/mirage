@@ -632,6 +632,42 @@ async def test_skill_md_stops_at_the_page_of_a_command_that_answers_help():
 
 
 @pytest.mark.asyncio
+async def test_skill_md_keeps_the_page_of_a_subcommand_with_no_help():
+    ws = Workspace({"/": (RAMVFS(), MountMode.WRITE)})
+    ws.register_cli(
+        "tool",
+        CLI(
+            CommandSpec(
+                name="tool",
+                subcommands=(
+                    CommandSpec(
+                        name="group",
+                        subcommands=(
+                            CommandSpec(
+                                name="raw",
+                                description="Takes anything.",
+                                add_help=False,
+                            ),
+                            CommandSpec(
+                                name="plain", description="Takes nothing."
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            handlers={
+                "group raw": CLIHandler(AsyncMock()),
+                "group plain": CLIHandler(AsyncMock()),
+            },
+        ),
+    )
+    skill = await ws.skill_md()
+    assert "## `tool group raw`" in skill
+    assert "## `tool group`\n" not in skill
+    assert "## `tool group plain`" not in skill
+
+
+@pytest.mark.asyncio
 async def test_skill_md_stops_below_the_top_where_the_profile_allows_a_group():
     ws = Workspace(
         {"/": (RAMVFS(), MountMode.WRITE)},
