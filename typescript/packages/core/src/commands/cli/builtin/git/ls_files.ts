@@ -35,6 +35,7 @@ import {
   narrowedUntracked,
   pathspecPatterns,
   pathspecSelects,
+  patternRoots,
   repoRelative,
   visibleEntries,
 } from './pathspec.ts'
@@ -218,7 +219,7 @@ export async function lsFiles(
             tracked,
             UNTRACKED_ALL,
             false,
-            null,
+            patternRoots(scope),
             stack,
             perDirectory,
           )

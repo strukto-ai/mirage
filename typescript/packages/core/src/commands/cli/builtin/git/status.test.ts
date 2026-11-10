@@ -28,7 +28,8 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
-import { MountMode, PathSpec } from '../../../../types.ts'
+import { ALL_COMMANDS } from '../../../../policy/builtin/output_cap.ts'
+import { Limit, MountMode, PathSpec } from '../../../../types.ts'
 import type { SessionProfile } from '../../../../policy/profile.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GIT } from './index.ts'
@@ -363,4 +364,30 @@ describe('git status --show-stash against the real binary', () => {
     )
     expect(mine).toBe(theirs)
   })
+})
+
+describe('a narrow path', () => {
+  it.each(['status --short -- a.txt', 'ls-files -o --directory -- a.txt'])(
+    'git %s walks no other untracked directory',
+    async (line) => {
+      const ws = new Workspace(
+        {
+          '/repo': [new RAMVFS(), MountMode.WRITE, { [ALL_COMMANDS]: new Limit({ walkLimit: 4 }) }],
+        },
+        { mode: MountMode.WRITE },
+      )
+      ws.registerCli('git', GIT)
+      try {
+        await ws.shell(
+          'cd /repo && git init -q && echo one > a.txt && echo two > b.txt && ' +
+            'git add a.txt b.txt && mkdir vendor && ' +
+            'for n in 1 2 3 4 5 6 7 8; do echo x > vendor/$n.txt; done',
+        )
+        const result = await ws.shell(`git -C /repo ${line}`)
+        expect(result.exitCode).toBe(0)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
 })

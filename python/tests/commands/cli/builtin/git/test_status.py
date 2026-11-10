@@ -29,7 +29,8 @@ from mirage.commands.cli.builtin.git.worktree import (
     UNTRACKED_NORMAL,
 )
 from mirage.commands.spec.flag_view import FlagView
-from mirage.types import MountMode
+from mirage.policy.builtin.output_cap import ALL_COMMANDS
+from mirage.types import Limit, MountMode
 from mirage.vfs.disk import DiskVFS
 from mirage.workspace import Workspace
 from tests.commands.cli.builtin.git.conftest import commit_file
@@ -352,3 +353,22 @@ async def test_show_stash_reports_what_git_reports(git_ws, repo_path):
         check=True,
     )
     assert await run(git_ws, "status --show-stash") == native.stdout
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    ["status --short -- a.txt", "ls-files -o --directory -- a.txt"],
+)
+async def test_a_narrow_path_walks_no_other_untracked_directory(
+    repo_path, line
+):
+    (repo_path / "vendor").mkdir()
+    for number in range(8):
+        (repo_path / "vendor" / f"{number}.txt").write_text("x\n")
+    vfs = DiskVFS(root=str(repo_path))
+    limits = {ALL_COMMANDS: Limit(walk_limit=4)}
+    with Workspace({"/repo/": (vfs, MountMode.READ, limits)}) as ws:
+        ws.register_cli("git", GIT)
+        result = await ws.shell("git -C /repo " + line)
+    assert result.exit_code == 0

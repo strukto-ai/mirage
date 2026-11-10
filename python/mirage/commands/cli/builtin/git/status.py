@@ -33,6 +33,7 @@ from mirage.commands.cli.builtin.git.pathspec import (
     narrowed_untracked,
     pathspec_patterns,
     pathspec_selects,
+    pattern_roots,
     repo_relative,
 )
 from mirage.commands.cli.builtin.git.ref_list import detached_line
@@ -289,7 +290,12 @@ async def _selected_rows(
         for name in names
     ):
         every, _, _ = await collect(
-            vfs, repo, location, UNTRACKED_ALL, show_ignored
+            vfs,
+            repo,
+            location,
+            UNTRACKED_ALL,
+            show_ignored,
+            pattern_roots(patterns),
         )
         files = [row.name for row in every if row.index_status == UNTRACKED]
     return kept + [

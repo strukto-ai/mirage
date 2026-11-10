@@ -372,6 +372,7 @@ async def _plumbing_flags(
 
 
 def _unmerged_sides(
+    repo: BaseRepo,
     location: RepoLocation,
     state: IndexState,
     patterns: Sequence[str],
@@ -392,6 +393,7 @@ def _unmerged_sides(
     stage 2 has no such row.
 
     Args:
+        repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
         state (IndexState): the parsed index.
         patterns (Sequence[str]): the pathspecs, empty for everything.
@@ -412,10 +414,11 @@ def _unmerged_sides(
         if not visible_path(location, name):
             after.pop(path, None)
             continue
-        ours = _stage_of(conflict.this)
+        ours = _stage_of(repo, path, conflict.this)
         work = after.get(path)
         if not patterns or pathspec_selects(name, patterns):
-            sides[path] = (ours, _stage_of(conflict.other), work)
+            theirs = _stage_of(repo, path, conflict.other)
+            sides[path] = (ours, theirs, work)
         if ours is None:
             after.pop(path, None)
         else:
@@ -423,8 +426,21 @@ def _unmerged_sides(
     return sides
 
 
-def _stage_of(entry: IndexEntry | None) -> tuple[int, bytes] | None:
-    return None if entry is None else (entry.mode, entry.sha)
+def _stage_of(
+    repo: BaseRepo, path: bytes, entry: IndexEntry | None
+) -> tuple[int, bytes] | None:
+    """One conflict stage as a side, its blob guarded by the path's rules.
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        path (bytes): the conflicted path.
+        entry (IndexEntry | None): the stage, None when it is absent.
+    """
+    if entry is None:
+        return None
+    stage = (entry.mode, entry.sha)
+    shown_entries(repo, {path: stage})
+    return stage
 
 
 async def diff_files(
@@ -454,7 +470,7 @@ async def diff_files(
         vfs, repo, location, state, pattern_roots(patterns)
     )
     before = shown_entries(repo, staged_entries(state))
-    unmerged = _unmerged_sides(location, state, patterns, before, after)
+    unmerged = _unmerged_sides(repo, location, state, patterns, before, after)
     return _compared(
         repo,
         location,

@@ -43,6 +43,7 @@ from tests.commands.cli.builtin.git.conftest import (
     REPO,
     branch_with_paths,
     commit_file,
+    conflict_index,
     repo_context,
 )
 
@@ -405,6 +406,17 @@ async def test_staged_content_answers_to_the_rules(history: Path):
         1,
         "",
         "git diff: /repo/new.txt: Permission denied\n",
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_conflict_stage_answers_to_the_rules(history: Path):
+    conflict_index(history, "secret.txt")
+    (history / "secret.txt").unlink()
+    assert await shell(history, "git diff-files -p", "sealed") == (
+        1,
+        "",
+        "git diff-files: /repo/secret.txt: Permission denied\n",
     )
 
 
