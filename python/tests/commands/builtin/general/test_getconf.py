@@ -46,15 +46,20 @@ def test_a_name_with_its_own_row_finds_it_before_a_posix_one():
     assert variable("SSIZE_MAX") == ("SSIZE_MAX", "32767")
 
 
+async def memory_values() -> tuple[str | None, str | None, str | None]:
+    return (
+        live_value("_PHYS_PAGES", None),
+        live_value("_AVPHYS_PAGES", None),
+        live_value("PAGESIZE", "4096"),
+    )
+
+
 @pytest.mark.asyncio
 async def test_the_memory_variables_are_the_workspaces_max_memory():
-    async def read() -> tuple[str | None, str | None, str | None]:
-        return (
-            live_value("_PHYS_PAGES", None),
-            live_value("_AVPHYS_PAGES", None),
-            live_value("PAGESIZE", "4096"),
-        )
-
     budget = MemoryBudget(1 << 20, lambda: 8192)
-    assert await run_with_memory(budget, read()) == ("256", "254", "4096")
-    assert await read() == (None, None, "4096")
+    assert await run_with_memory(budget, memory_values()) == (
+        "256",
+        "254",
+        "4096",
+    )
+    assert await memory_values() == (None, None, "4096")

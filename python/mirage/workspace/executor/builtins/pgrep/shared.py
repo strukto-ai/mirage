@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
+
 from mirage.context import current_caller
 from mirage.execution.job import JobTable
 from mirage.execution.process.types import Process, ProcessState
@@ -25,15 +27,21 @@ from mirage.workspace.session import SessionState
 # The longest process name a process's ``comm`` holds.
 NAME_WIDTH = 15
 
+# A word that assigns a variable, not a program's name.
+ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=")
+
 
 def program_of(info: Process) -> str:
-    """The basename of the program a process runs.
+    """The basename of the program a process runs; empty for a shell
+    whose line starts with an assignment, which runs none of its own.
 
     Args:
         info (Process): the process.
     """
     words = info.command.split()
-    return words[0].rsplit("/", 1)[-1] if words else ""
+    if not words or ASSIGNMENT.match(words[0]):
+        return ""
+    return words[0].rsplit("/", 1)[-1]
 
 
 def process_name(info: Process) -> str:

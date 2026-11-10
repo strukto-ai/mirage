@@ -22,9 +22,17 @@ import { inScope, type MachineScope } from '../machine_view.ts'
 // The longest process name a process's `comm` holds.
 export const NAME_WIDTH = 15
 
-/** The basename of the program a process runs. */
+// A word that assigns a variable, not a program's name.
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*\+?=/
+
+/**
+ * The basename of the program a process runs; empty for a shell whose line
+ * starts with an assignment, which runs none of its own. Mirrors Python's
+ * `program_of`.
+ */
 export function programOf(info: Process): string {
   const head = info.command.split(/\s+/).find((word) => word !== '') ?? ''
+  if (ASSIGNMENT.test(head)) return ''
   return head.slice(head.lastIndexOf('/') + 1)
 }
 
