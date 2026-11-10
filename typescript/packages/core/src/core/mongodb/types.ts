@@ -40,10 +40,6 @@ export type BsonTypeTag = (typeof BsonTypeTag)[keyof typeof BsonTypeTag]
 export const IndexType = {
   BTREE: 'btree',
   TEXT: 'text',
-  HASHED: 'hashed',
-  GEO_2D: '2d',
-  GEO_2DSPHERE: '2dsphere',
-  WILDCARD: 'wildcard',
 } as const
 export type IndexType = (typeof IndexType)[keyof typeof IndexType]
 

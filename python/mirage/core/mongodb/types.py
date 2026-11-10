@@ -41,10 +41,6 @@ class BsonTypeTag(StrEnum):
 class IndexType(StrEnum):
     BTREE = "btree"
     TEXT = "text"
-    HASHED = "hashed"
-    GEO_2D = "2d"
-    GEO_2DSPHERE = "2dsphere"
-    WILDCARD = "wildcard"
 
 
 PRIMARY_KEY = "_id"

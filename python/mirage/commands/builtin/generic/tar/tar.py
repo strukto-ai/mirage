@@ -54,7 +54,6 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True, slots=True)
 class TarFlags:
     create: bool = False
-    extract: bool = False
     list_only: bool = False
     codec: str | None = None
     verbose: bool = False
@@ -187,7 +186,6 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TarFlags | IOResult:
             lists_after.append(changes)
     return TarFlags(
         create=fl.as_bool("create"),
-        extract=fl.as_bool("extract"),
         list_only=fl.as_bool("list"),
         codec=next((codec for codec in _CODECS if fl.as_bool(codec)), None),
         verbose=fl.as_bool("verbose"),
