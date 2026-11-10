@@ -423,6 +423,21 @@ describe('execute router', () => {
         },
       },
     ])
+    const fallback = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/ert/shell',
+      payload: { command: 'echo hi', runtime: 'workspace' },
+    })
+    expect([fallback.statusCode, fallback.json()]).toEqual([
+      400,
+      {
+        error: {
+          code: 'invalid_value',
+          message: "'workspace' is the default executor, not a runtime you can select",
+          param: 'runtime',
+        },
+      },
+    ])
     const machine = await app.inject({
       method: 'POST',
       url: '/v1/workspaces/ert/shell',
