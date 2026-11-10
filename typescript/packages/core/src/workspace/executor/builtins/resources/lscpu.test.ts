@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import type { JobTable } from '../../../../execution/job/index.ts'
 import {
   decoded,
   resources,
@@ -35,10 +36,11 @@ const INTEL =
   'Model name:                              Intel Xeon\n' +
   'Socket(s):                               1\n'
 
-describe('lscpu', () => {
-  const two = () =>
-    tableOf([resources('docker:a', { cpuInfo: ARM }), resources('e2b:b', { cpuInfo: INTEL })])
+function two(): JobTable {
+  return tableOf([resources('docker:a', { cpuInfo: ARM }), resources('e2b:b', { cpuInfo: INTEL })])
+}
 
+describe('lscpu', () => {
   it('has a column a machine with dashes for the workspace', async () => {
     const [out, io] = await handleLscpu(two(), ['lscpu'])
     expect(decoded(out).split('\n').slice(0, -1)).toEqual([
