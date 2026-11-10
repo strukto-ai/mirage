@@ -426,6 +426,39 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_function_takes_a_views_name",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "microsandbox",
+        "apple_container",
+        "kubernetes"
+      ],
+      "entry": {
+        "captures": [
+          "@python",
+          "perl"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "nproc(){ echo mine; }; hostname(){ echo too; }; lscpu(){ echo also; }; nproc; hostname; lscpu",
+          "expect": {
+            "exit": 0,
+            "stdout": "mine\ntoo\nalso\n"
+          }
+        }
+      ]
     }
   ]
 }

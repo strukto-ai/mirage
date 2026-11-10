@@ -314,6 +314,76 @@
         "stdout": "1\n143\n",
         "stderr": "--signal: no process found\nKILL: no process found\n"
       }
+    },
+    {
+      "id": "pgrep_finds_a_job_an_assignment_leads",
+      "seq": 502440,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "X=1 sleep 5 & p=$!; sleep 0.2; pgrep -c sleep; ps -o comm= -p $p; kill $p; wait $p 2>/dev/null; true",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\nsleep\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "killall_refuses_a_signal_past_the_last",
+      "seq": 502441,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sleep 5 & p=$!; sleep 0.2; killall -99 sleep 2>&1 | sed 's/([0-9]*)/(N)/'; kill -0 $p && echo alive; kill $p; wait $p 2>/dev/null; true",
+      "expect": {
+        "exit": 0,
+        "stdout": "sleep(N): Invalid argument\nsleep: no process found\nalive\n",
+        "stderr": ""
+      }
     }
   ]
 }

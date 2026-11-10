@@ -22,7 +22,7 @@ import type { ProcessHandle } from '../../../../execution/process/handle.ts'
 import { type Process, shownPid } from '../../../../execution/process/types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
-import { SIGTERM } from '../../../../shell/constants.ts'
+import { SIGRTMAX, SIGTERM } from '../../../../shell/constants.ts'
 import { signalNumber } from '../../../../shell/signals.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
@@ -112,7 +112,7 @@ export async function handleKillall(
     return jobResult(cmdStr, usagePage('killall'), 1)
   let signal = leading[0] ?? SIGTERM
   if (typeof flags.s === 'string') {
-    const number = signalNumber(flags.s)
+    const number = /^[0-9]+$/.test(flags.s) ? Number(flags.s) : signalNumber(flags.s)
     if (number === null) unknown = flags.s.replace(/^SIG/, '')
     else signal = number
   }
@@ -136,6 +136,10 @@ export async function handleKillall(
     let killed = 0
     for (const info of picks) {
       const pid = String(shownPid(info))
+      if (signal > SIGRTMAX) {
+        if (!quiet) errors.push(`${processName(info)}(${pid}): Invalid argument\n`)
+        continue
+      }
       let handle: ReturnType<typeof processes.target>
       let found: boolean | null
       try {

@@ -55,6 +55,7 @@ from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.background import (
     handle_background,
     one_program,
+    program_text,
     pump,
     report_reaped,
     run_program,
@@ -255,7 +256,7 @@ async def handle_pipe(
             process = start_shell(
                 processes,
                 session,
-                decode_text(cmd.text or b""),
+                program_text(cmd, session) or decode_text(cmd.text or b""),
                 partial(run_segment, i, cmd),
                 session.process_id,
                 one_command=one_program(cmd, session),

@@ -341,6 +341,8 @@ export class JobTable {
     limit?: number | null
     // The job is one simple command (`JobHandle.simple`).
     simple?: boolean
+    // How its process shows that program; absent for the command line.
+    program?: string | null
     // Runs as the job's process ends, whether or not its runner began.
     ended?: () => Promise<void>
   }): Promise<JobHandle> {
@@ -359,7 +361,7 @@ export class JobTable {
     const process = this.processes.start({
       sessionId,
       parent: init.parent ?? null,
-      command: init.command,
+      command: init.program ?? init.command,
       cwd: PathSpec.fromStrPath(init.cwd),
       run: async () => {
         try {

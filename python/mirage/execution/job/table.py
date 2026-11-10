@@ -323,6 +323,7 @@ class JobTable:
         parent: int | None = None,
         limit: int | None = None,
         simple: bool = False,
+        program: str | None = None,
     ) -> JobHandle:
         """Register a job in its session's list and start it.
 
@@ -346,6 +347,8 @@ class JobTable:
                 (``processes.max``); None for no cap.
             simple (bool): the job is one simple command
                 (``JobHandle.simple``), which its process runs as.
+            program (str | None): how its process shows that program;
+                None for the command line.
 
         Raises:
             BlockingIOError: the session is at its process cap.
@@ -375,7 +378,7 @@ class JobTable:
 
         process = self.processes.start(
             session_id=session_id,
-            command=command,
+            command=program or command,
             cwd=PathSpec.from_str_path(cwd),
             run=execute,
             parent=parent,
