@@ -343,10 +343,6 @@ class HttpTransport:
                 None,
                 follow_redirects=True,
             )
-        except ImportError as exc:
-            raise GitError(
-                "https remotes need httpx: pip install 'mirage[http]'"
-            ) from exc
         except HttpConnectError as exc:
             raise GitError(f"unable to access '{self._url}/': {exc}") from exc
         if resp.status in (401, 403):
