@@ -100,8 +100,8 @@ async def json_body(request: Request) -> dict[str, JsonValue]:
             raise HttpError(ErrorCode.TOO_LARGE, "request body too large")
     try:
         parsed = json.loads(body)
-    except ValueError:
-        parsed = None
+    except ValueError as exc:
+        raise HttpError(ErrorCode.INVALID_JSON, "body must be JSON") from exc
     if not isinstance(parsed, dict):
         raise HttpError(
             ErrorCode.INVALID_REQUEST, "body must be a JSON object"

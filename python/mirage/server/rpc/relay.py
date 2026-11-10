@@ -14,6 +14,7 @@
 
 import asyncio
 import json
+import logging
 import sys
 from collections.abc import AsyncGenerator, Callable
 
@@ -23,6 +24,8 @@ import httpx
 from mirage.concurrency.limiter import run_blocking
 from mirage.server.rpc.constants import RPC_PARSE_ERROR
 from mirage.server.rpc.server import CANCEL_REQUEST, error_response
+
+logger = logging.getLogger(__name__)
 
 
 async def relay_stdio(url: str, token: Callable[[], str]) -> None:
@@ -68,7 +71,8 @@ async def relay_stdio(url: str, token: Callable[[], str]) -> None:
             if response.status_code >= 400:
                 try:
                     detail = response.json()["error"]["message"]
-                except (ValueError, KeyError, TypeError):
+                except (ValueError, KeyError, TypeError) as exc:
+                    logger.debug("rpc error body is not an error: %s", exc)
                     detail = response.text
                 raise RuntimeError(f"error {response.status_code}: {detail}")
             await write(response.text)

@@ -29,7 +29,7 @@ from mirage.server.errors import (
     loader_error,
     validation_error,
 )
-from mirage.types import Refusal
+from mirage.types import JsonValue, Refusal
 
 
 class Body(BaseModel):
@@ -41,7 +41,7 @@ class Body(BaseModel):
     tags: list[str] = []
 
 
-def _first(body: object, under: tuple[str, ...] = ()) -> dict[str, object]:
+def _first(body: JsonValue, under: tuple[str, ...] = ()) -> JsonValue:
     with pytest.raises(ValidationError) as caught:
         Body.model_validate(body)
     return validation_error(caught.value.errors(), under).body()["error"]
@@ -87,6 +87,14 @@ def test_a_nested_param_is_a_dotted_path():
         "code": "invalid_value",
         "message": "config.tags[1] must be a string",
         "param": "config.tags[1]",
+    }
+
+
+def test_a_key_named_like_a_type_keeps_its_name():
+    assert _first({"name": "a", "str": 1}) == {
+        "code": "unknown_field",
+        "message": "str is not a known field",
+        "param": "str",
     }
 
 

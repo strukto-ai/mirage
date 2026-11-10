@@ -292,9 +292,8 @@ def one_of(expected: str) -> str:
     return "one of " + ", ".join(re.findall(r"'([^']*)'", expected))
 
 
-def param_of(loc: Sequence[str | int]) -> tuple[str, bool]:
-    """A dotted path such as ``mounts[0].mode`` for a ``loc`` below its
-    place, and whether a union member's tag was cut from it.
+def param_of(loc: Sequence[str | int]) -> str:
+    """A dotted path such as ``mounts[0].mode`` for a field's place.
 
     Args:
         loc (Sequence[str | int]): the field's place in the request.
@@ -303,11 +302,45 @@ def param_of(loc: Sequence[str | int]) -> tuple[str, bool]:
     for key in loc:
         if isinstance(key, int):
             path += f"[{key}]"
-        elif UNION_TAG.match(key):
-            return path, True
         else:
             path += f".{key}" if path else key
-    return path, False
+    return path
+
+
+def untagged(
+    loc: Sequence[str | int], kind: str
+) -> tuple[Sequence[str | int], bool]:
+    """A pydantic ``loc`` without the union member's tag that follows a
+    field, and whether one was cut. A tag never leads, and the key a
+    missing or unknown field names is never one.
+
+    Args:
+        loc (Sequence[str | int]): the issue's place.
+        kind (str): the issue's type.
+    """
+    named = kind in ("missing", "extra_forbidden")
+    for i, key in enumerate(loc):
+        last = i == len(loc) - 1
+        if (
+            i > 0
+            and isinstance(key, str)
+            and UNION_TAG.match(key)
+            and not (last and named)
+        ):
+            return loc[:i], True
+    return loc, False
+
+
+def rank(issue: Mapping[str, Any]) -> tuple[int, int]:
+    """Where an issue falls in the order errors are reported: path and
+    query before body, unknown keys last.
+
+    Args:
+        issue (Mapping[str, Any]): one of pydantic's errors.
+    """
+    loc = tuple(issue["loc"])
+    place = PLACES.index(loc[0]) if loc and loc[0] in PLACES else 2
+    return place, int(issue["type"] == "extra_forbidden")
 
 
 def validation_error(
@@ -326,18 +359,14 @@ def validation_error(
             sits at, for a value checked on its own.
     """
 
-    def rank(issue: Mapping[str, Any]) -> tuple[int, int]:
-        loc = tuple(issue["loc"])
-        place = PLACES.index(loc[0]) if loc and loc[0] in PLACES else 2
-        return place, int(issue["type"] == "extra_forbidden")
-
     issue = sorted(issues, key=rank)[0]
     loc = tuple(issue["loc"])
     kind = issue["type"]
     if kind == "json_invalid":
         return HttpError(ErrorCode.INVALID_JSON, "body must be JSON")
     below = loc[1:] if loc and loc[0] in PLACES else loc
-    param, union = param_of((*under, *below))
+    field, union = untagged(below, kind)
+    param = param_of((*under, *field))
     if not param:
         return HttpError(
             ErrorCode.INVALID_REQUEST, "body must be a JSON object"
