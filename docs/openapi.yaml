@@ -133,6 +133,8 @@ paths:
                     backend: workspace
                     mountpoint: null
                 internals: null
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -140,12 +142,6 @@ paths:
         '409':
           $ref: '#/components/responses/409'
           description: The identifier already exists with a different workspace configuration.
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '503':
@@ -206,16 +202,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceDetail'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       tags:
@@ -235,18 +227,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteWorkspaceResponse'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
         '409':
           $ref: '#/components/responses/409'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '500':
@@ -329,12 +317,6 @@ paths:
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '403':
@@ -360,16 +342,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteWorkspaceResponse'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       description: |-
@@ -403,12 +381,6 @@ paths:
           $ref: '#/components/responses/404'
         '409':
           $ref: '#/components/responses/409'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '503':
@@ -434,16 +406,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CancelLinesResponse'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       description: Cancel all running and queued commands across every session. The workspace and sessions
@@ -465,16 +433,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/KillJobsResponse'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       description: Stop background jobs and runtime processes across every session. The workspace and
@@ -514,16 +478,12 @@ paths:
                 additionalProperties:
                   type: string
                 title: Response Set Profile V1 Workspaces  Workspace Id  Profiles  Name  Put
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       description: Create or replace a named permissions profile in the running workspace. Existing sessions
@@ -554,16 +514,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceDetail'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       tags:
@@ -586,18 +542,14 @@ paths:
               schema:
                 type: string
                 format: binary
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
         '409':
           $ref: '#/components/responses/409'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       tags:
@@ -626,16 +578,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SnapshotWorkspaceResponse'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       tags:
@@ -655,6 +603,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceDetail'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '409':
@@ -735,14 +685,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TemplateResponse'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -770,16 +716,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TemplateResponse'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -801,16 +743,12 @@ paths:
       responses:
         '204':
           description: No content
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -837,16 +775,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TemplateResponse'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -873,16 +807,12 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/VfsDocument'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       tags:
@@ -914,16 +844,12 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/VfsDocument'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       tags:
@@ -954,16 +880,12 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/VfsDocument'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       tags:
@@ -1001,16 +923,12 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/VfsDocument'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       tags:
@@ -1035,16 +953,12 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/SkillDocument'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       tags:
@@ -1076,16 +990,12 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/SkillDocument'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       tags:
@@ -1116,16 +1026,12 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/SkillDocument'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       tags:
@@ -1163,16 +1069,12 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/SkillDocument'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       tags:
@@ -1201,16 +1103,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SessionResponse'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       tags:
@@ -1234,16 +1132,12 @@ paths:
                 items:
                   $ref: '#/components/schemas/SessionResponse'
                 title: Response List Sessions V1 Workspaces  Workspace Id  Sessions Get
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       tags:
@@ -1270,16 +1164,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteSessionResponse'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       tags:
@@ -1314,16 +1204,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SessionResponse'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       description: Replace the session's profile; its cwd, env and history stay.
@@ -1351,16 +1237,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CancelLinesResponse'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       description: 'Cancel the session''s running and queued lines, from every entry point.
@@ -1391,16 +1273,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/KillJobsResponse'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       description: Kill the session's background jobs and runners; it stays open.
@@ -1438,16 +1316,12 @@ paths:
                 items:
                   $ref: '#/components/schemas/AskResponse'
                 title: Response List Asks V1 Workspaces  Workspace Id  Asks Get
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       description: List pending approval requests. Set `all=true` to include requests that have
@@ -1483,16 +1357,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AskResponse'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       description: Approve or deny a pending request and return the recorded decision. Returns
@@ -1539,16 +1409,12 @@ paths:
                   exit: null
                   signal: null
                   error: null
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       description: |-
@@ -1594,16 +1460,12 @@ paths:
                   - 42
                 machines:
                   - host:my-laptop
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       description: |-
@@ -1637,6 +1499,8 @@ paths:
       responses:
         '204':
           description: The bytes are buffered for the line.
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
@@ -1646,12 +1510,6 @@ paths:
         '499':
           description: The caller disconnected before the bytes were buffered. The bytes not
             yet buffered are dropped. The response has no body.
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       description: Send input to a running command with open stdin. The request completes when the bytes are buffered. If the command reads slowly, the request waits.
@@ -1674,18 +1532,14 @@ paths:
       responses:
         '204':
           description: The line reads what was sent, then end of file.
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
         '409':
           $ref: '#/components/responses/409'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       description: Close stdin for a running command. The command can read any buffered input before reaching end of file.
@@ -1741,16 +1595,12 @@ paths:
                   ended_at: null
                   exit: null
                   signal: null
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       description: |-
@@ -1796,16 +1646,12 @@ paths:
                 signal: null
                 processes:
                   - 42
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       description: |-
@@ -1882,17 +1728,14 @@ paths:
                   exit: null
                   signal: null
                   error: null
+        '400':
+          $ref: '#/components/responses/400'
+          description: A query parameter is not valid (`invalid_value`, with `param`), such as
+            an unknown `state` or a `machine` not in `provider:name` format.
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: A query parameter fails validation, such as an unknown `state` or a
-            `machine` not in `provider:name` format.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       description: |-
@@ -1942,16 +1785,12 @@ paths:
                 exit: null
                 signal: null
                 error: null
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       description: |-
@@ -1978,16 +1817,12 @@ paths:
                 items:
                   $ref: '#/components/schemas/MachineResponse'
                 title: Response List Machines V1 Workspaces  Workspace Id  Machines Get
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       description: |-
@@ -2023,12 +1858,6 @@ paths:
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       description: Get machine status and the tracked processes found on it. The machine is checked when
@@ -2089,43 +1918,49 @@ paths:
                   empty because the output was already sent. With `open_stdin`, a `line_id`
                   record comes first.
         '400':
-          description: The request cannot be read or its options conflict. The body is not valid
-            JSON, or its multipart parts are malformed, missing or out of order. Or the options
-            conflict, as `stream` with `explain`, `open_stdin` without `stream=true` or with a
-            stdin part, or `explain` with a multipart body, `cwd`, `runtime`, `machine` or
-            `open_stdin` set to `true`.
+          description: 'The request is malformed or its options conflict. The body is not JSON
+            (`invalid_json`), a field is missing, unknown or of the wrong type (`missing_field`,
+            `unknown_field`, `invalid_value`, with `param`; a field of the multipart `request`
+            part is named as in a JSON body), or `runtime` or `machine` names one the workspace
+            does not have (`invalid_value`, `param` `runtime` or `machine`), refused before
+            anything runs. Or the multipart parts are malformed, missing or out of order, or the
+            options conflict, as `stream` with `explain`, `open_stdin` without `stream=true` or
+            with a stdin part, or `explain` with a multipart body, `cwd`, `runtime`, `machine`
+            or `open_stdin` set to `true` (`invalid_request`).'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-              example:
-                detail: open_stdin takes stream=true and no stdin part
+              examples:
+                invalid_request:
+                  summary: Options that conflict
+                  value:
+                    error:
+                      code: invalid_request
+                      message: open_stdin takes stream=true and no stdin part
+                unknown_runtime:
+                  summary: A runtime the workspace does not have
+                  value:
+                    error:
+                      code: invalid_value
+                      message: runtime must be one of python
+                      param: runtime
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
         '409':
-          description: Another server owns command execution for this workspace. The error detail identifies
-            that server.
+          description: Another server owns command execution for this workspace
+            (`workspace_busy`; the message names that server), or the workspace is stopped
+            (`workspace_stopped`).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-        '422':
-          description: A body field or query parameter fails validation, such as an unknown or
-            missing field, a field of the wrong type, or `explain=maybe`. Each entry of `detail`
-            names the field in `loc`, starting with `body` or `query`; a field of the multipart
-            `request` part starts with `body`, `request`.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
               example:
-                detail:
-                  - type: missing
-                    loc: [body, command]
-                    msg: Field required
-                    input: {}
+                error:
+                  code: workspace_busy
+                  message: workspace 'demo' runs on daemon 'd-2'; only that daemon runs its lines
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -2134,12 +1969,20 @@ paths:
           $ref: '#/components/responses/499'
         '500':
           $ref: '#/components/responses/500'
+          description: The command's job failed internally (`internal`). The message is always
+            `internal server error`. The job's own error stays readable as `error` at
+            `GET /v1/workspaces/{workspace_id}/lines/{line_id}`, and in a stream's final record.
         '503':
-          description: The server is shutting down and accepts no new commands.
+          description: The server is shutting down and accepts no new commands
+            (`shutting_down`).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: shutting_down
+                  message: server is shutting down
       tags:
         - Shell
       x-hosts:
@@ -2278,18 +2121,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ToolResponse'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       tags:
@@ -2326,18 +2165,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ToolResponse'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       tags:
@@ -2382,18 +2217,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ToolResponse'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       tags:
@@ -2437,18 +2268,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ToolResponse'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       tags:
@@ -2498,18 +2325,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ToolResponse'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       tags:
@@ -2546,18 +2369,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ToolResponse'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       tags:
@@ -2622,18 +2441,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ToolResponse'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
       tags:
@@ -2691,26 +2506,20 @@ paths:
               schema:
                 type: string
                 format: binary
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -2767,26 +2576,20 @@ paths:
                 anyOf:
                   - type: 'null'
                   - $ref: '#/components/schemas/VfsExplanation'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -2837,26 +2640,20 @@ paths:
                 anyOf:
                   - type: 'null'
                   - $ref: '#/components/schemas/VfsExplanation'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -2907,26 +2704,20 @@ paths:
                 anyOf:
                   - type: 'null'
                   - $ref: '#/components/schemas/VfsExplanation'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -2982,26 +2773,20 @@ paths:
                   - type: object
                     description: A FileStat.
                   - $ref: '#/components/schemas/VfsExplanation'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3051,26 +2836,20 @@ paths:
                       type: string
                     description: Full paths.
                   - $ref: '#/components/schemas/VfsExplanation'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3115,26 +2894,20 @@ paths:
                 anyOf:
                   - type: boolean
                   - $ref: '#/components/schemas/VfsExplanation'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3179,26 +2952,20 @@ paths:
                 anyOf:
                   - type: boolean
                   - $ref: '#/components/schemas/VfsExplanation'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3243,26 +3010,20 @@ paths:
                 anyOf:
                   - type: boolean
                   - $ref: '#/components/schemas/VfsExplanation'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3310,26 +3071,20 @@ paths:
                       type: string
                     description: File names only.
                   - $ref: '#/components/schemas/VfsExplanation'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3374,26 +3129,20 @@ paths:
                 anyOf:
                   - type: 'null'
                   - $ref: '#/components/schemas/VfsExplanation'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3438,26 +3187,20 @@ paths:
                 anyOf:
                   - type: 'null'
                   - $ref: '#/components/schemas/VfsExplanation'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3502,26 +3245,20 @@ paths:
                 anyOf:
                   - type: 'null'
                   - $ref: '#/components/schemas/VfsExplanation'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3566,26 +3303,20 @@ paths:
                 anyOf:
                   - type: 'null'
                   - $ref: '#/components/schemas/VfsExplanation'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3630,26 +3361,20 @@ paths:
                 anyOf:
                   - type: 'null'
                   - $ref: '#/components/schemas/VfsExplanation'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3698,26 +3423,20 @@ paths:
                 anyOf:
                   - type: 'null'
                   - $ref: '#/components/schemas/VfsExplanation'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3767,26 +3486,20 @@ paths:
                   - type: string
                     description: The link's target.
                   - $ref: '#/components/schemas/VfsExplanation'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3832,26 +3545,20 @@ paths:
                   - type: object
                     description: The fields the backend could not keep, which Mirage stores instead.
                   - $ref: '#/components/schemas/VfsExplanation'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3912,26 +3619,20 @@ paths:
                   - type: string
                     description: The bytes, base64.
                   - $ref: '#/components/schemas/VfsExplanation'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3984,26 +3685,20 @@ paths:
                     items:
                       type: string
                   - $ref: '#/components/schemas/VfsExplanation'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -4050,26 +3745,20 @@ paths:
                 anyOf:
                   - type: 'null'
                   - $ref: '#/components/schemas/VfsExplanation'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -4130,26 +3819,20 @@ paths:
                 anyOf:
                   - type: 'null'
                   - $ref: '#/components/schemas/VfsExplanation'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -4200,26 +3883,20 @@ paths:
                 anyOf:
                   - type: 'null'
                   - $ref: '#/components/schemas/VfsExplanation'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -4271,20 +3948,12 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
         '413':
           $ref: '#/components/responses/413'
         '500':
           $ref: '#/components/responses/500'
-        '507':
-          $ref: '#/components/responses/507'
       description: Call a VFS function by name using the selected session and its permissions. Request
         arguments and the JSON response depend on the function. The response example shows headers only.
       tags:
@@ -4448,14 +4117,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntryList'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -4477,6 +4142,9 @@ paths:
                 $ref: '#/components/schemas/SavedEntry'
         '400':
           $ref: '#/components/responses/400'
+          description: The request is malformed or a field is not valid for the type (`param`
+            names it), or the fields refer to a secret store that is not saved yet
+            (`invalid_request`; `missing` lists the stores to add first).
         '401':
           $ref: '#/components/responses/401'
         '409':
@@ -4595,16 +4263,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntryDetail'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -4633,16 +4297,13 @@ paths:
                 $ref: '#/components/schemas/SavedEntry'
         '400':
           $ref: '#/components/responses/400'
+          description: The request is malformed or a field is not valid for the type (`param`
+            names it), or the fields refer to a secret store that is not saved yet
+            (`invalid_request`; `missing` lists the stores to add first).
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -4675,16 +4336,12 @@ paths:
       responses:
         '204':
           description: No content
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -4721,14 +4378,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntryList'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -4749,6 +4402,9 @@ paths:
                 $ref: '#/components/schemas/SavedEntry'
         '400':
           $ref: '#/components/responses/400'
+          description: The request is malformed or a field is not valid for the type (`param`
+            names it), or the fields refer to a secret store that is not saved yet
+            (`invalid_request`; `missing` lists the stores to add first).
         '401':
           $ref: '#/components/responses/401'
         '409':
@@ -4838,16 +4494,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntryDetail'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -4876,16 +4528,13 @@ paths:
                 $ref: '#/components/schemas/SavedEntry'
         '400':
           $ref: '#/components/responses/400'
+          description: The request is malformed or a field is not valid for the type (`param`
+            names it), or the fields refer to a secret store that is not saved yet
+            (`invalid_request`; `missing` lists the stores to add first).
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -4917,16 +4566,12 @@ paths:
       responses:
         '204':
           description: No content
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -4963,14 +4608,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntryList'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -4991,6 +4632,9 @@ paths:
                 $ref: '#/components/schemas/SavedEntry'
         '400':
           $ref: '#/components/responses/400'
+          description: The request is malformed or a field is not valid for the type (`param`
+            names it), or the fields refer to a secret store that is not saved yet
+            (`invalid_request`; `missing` lists the stores to add first).
         '401':
           $ref: '#/components/responses/401'
         '409':
@@ -5062,16 +4706,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntryDetail'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -5100,16 +4740,13 @@ paths:
                 $ref: '#/components/schemas/SavedEntry'
         '400':
           $ref: '#/components/responses/400'
+          description: The request is malformed or a field is not valid for the type (`param`
+            names it), or the fields refer to a secret store that is not saved yet
+            (`invalid_request`; `missing` lists the stores to add first).
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -5141,16 +4778,12 @@ paths:
       responses:
         '204':
           description: No content
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -5187,14 +4820,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntryList'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -5215,6 +4844,9 @@ paths:
                 $ref: '#/components/schemas/SavedEntry'
         '400':
           $ref: '#/components/responses/400'
+          description: The request is malformed or a field is not valid for the type (`param`
+            names it), or the fields refer to a secret store that is not saved yet
+            (`invalid_request`; `missing` lists the stores to add first).
         '401':
           $ref: '#/components/responses/401'
         '409':
@@ -5286,16 +4918,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntryDetail'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -5324,16 +4952,13 @@ paths:
                 $ref: '#/components/schemas/SavedEntry'
         '400':
           $ref: '#/components/responses/400'
+          description: The request is malformed or a field is not valid for the type (`param`
+            names it), or the fields refer to a secret store that is not saved yet
+            (`invalid_request`; `missing` lists the stores to add first).
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -5365,16 +4990,12 @@ paths:
       responses:
         '204':
           description: No content
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -5433,12 +5054,6 @@ paths:
           $ref: '#/components/responses/401'
         '409':
           $ref: '#/components/responses/409'
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -5462,16 +5077,12 @@ paths:
         '200': &id004
           description: OK
           content: *id003
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -5509,12 +5120,6 @@ paths:
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -5536,16 +5141,12 @@ paths:
       responses:
         '204':
           description: No content
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-          description: Validation Error
         '429':
           $ref: '#/components/responses/429'
         '501':
@@ -6442,21 +6043,6 @@ components:
       description: An environment variable with a literal `value` or a secret source identified by `from`,
         never both. Use `ref` and `key` to select a secret. `readonly` prevents commands from changing
         the variable. Managed secrets are always exported; literal values use the `export` setting.
-    HTTPValidationError:
-      example:
-        detail:
-          - type: string_type
-            loc: [body, id]
-            msg: Input should be a valid string
-            input: 4
-      properties:
-        detail:
-          items:
-            $ref: '#/components/schemas/ValidationError'
-          type: array
-          title: Detail
-      type: object
-      title: HTTPValidationError
     HealthResponse:
       properties:
         status:
@@ -7389,32 +6975,6 @@ components:
       required:
         - profile
       title: UpdateSessionRequest
-    ValidationError:
-      properties:
-        loc:
-          items:
-            anyOf:
-              - type: string
-              - type: integer
-          type: array
-          title: Location
-        msg:
-          type: string
-          title: Message
-        type:
-          type: string
-          title: Error Type
-        input:
-          title: Input
-        ctx:
-          type: object
-          title: Context
-      type: object
-      required:
-        - loc
-        - msg
-        - type
-      title: ValidationError
     VarsBlock:
       properties:
         hide:
@@ -7707,17 +7267,58 @@ components:
         and currently rejected.
     Error:
       type: object
+      description: 'The body of every HTTP error. Detect an error by its HTTP status, not by
+        the presence of `error`: a success body can carry an `error` field of its own.'
       properties:
-        detail:
-          description: What went wrong, as text or a structured record.
-        errno:
-          type: string
-          description: The errno of a failed file call, such as ENOENT.
-        refusal:
+        error:
           type: object
-          description: The policy refusal, when a policy refused the call.
+          properties:
+            code:
+              type: string
+              description: 'What went wrong, stable across releases; branch on it. One of
+                `invalid_request`, `invalid_json`, `missing_field`, `unknown_field`,
+                `invalid_value` (400); `unauthorized` (401); `forbidden`, `policy_refused`,
+                `host_not_allowed`, `origin_not_allowed`, `storage_full` (403); `not_found`
+                (404); `method_not_allowed` (405); `conflict`, `already_exists`, `workspace_busy`,
+                `workspace_stopped`, `stale_write` (409); `too_large` (413); `rate_limited`,
+                `session_limit` (429); `canceled` (499); `internal` (500); `not_supported`
+                (501); `unavailable`, `server_full`, `shutting_down` (503). New codes can be
+                added; a client that meets a code it does not know falls back to the HTTP
+                status.'
+            message:
+              type: string
+              description: Human-readable text. Its wording can change; never parse it. It
+                never repeats a value sent in the body, a header or the query.
+            param:
+              type: string
+              description: The request field at fault, for an error about the request's shape.
+                A body field is a dotted path from the body's root, such as `config.mounts` or
+                `mounts[0].mode`; a query or path parameter is its bare name.
+            errno:
+              type: string
+              description: The POSIX condition of a failed file call, such as `ENOENT` or
+                `STALE_WRITE`.
+            refusal:
+              $ref: '#/components/schemas/Refusal'
+              description: The policy refusal record, when a policy refused the call.
+            missing:
+              type: array
+              items:
+                type: string
+              description: Names that must exist first, such as secret stores a saved config
+                refers to. Only the saved-config routes send it.
+          required:
+            - code
+            - message
+          additionalProperties: false
       required:
-        - detail
+        - error
+      additionalProperties: false
+      example:
+        error:
+          code: missing_field
+          message: config.mounts is required
+          param: config.mounts
     Refusal:
       type: object
       description: Why a policy refused a command or part of it. A refusal can come after the
@@ -7795,13 +7396,15 @@ components:
             - type: string
             - type: 'null'
           description: Name of an entry under `runtimes` in the workspace config. If omitted or
-            `null`, the runtime is selected automatically.
+            `null`, the runtime is selected automatically. A name the workspace does not have
+            is refused with `400` before anything runs.
         machine:
           anyOf:
             - type: string
             - type: 'null'
           description: Name of an entry under `machines` in the workspace config. If omitted or
-            `null`, the machine is selected automatically.
+            `null`, the machine is selected automatically. A name the workspace does not have
+            is refused with `400` before anything runs.
         record:
           anyOf:
             - type: boolean
@@ -8132,136 +7735,206 @@ components:
       description: The server's token (MIRAGE_AUTH_TOKEN) or a JWT. A daemon in the default
         local mode with no token accepts requests without one.
   responses:
-    '413':
-      description: The request body, multipart part, or stdin exceeds its size limit.
-      content:
-        application/json:
-          schema:
-            anyOf:
-              - $ref: '#/components/schemas/Error'
-              - title: TypeScript JSON body limit
-                type: object
-                properties:
-                  statusCode:
-                    type: integer
-                    const: 413
-                  code:
-                    type: string
-                  error:
-                    type: string
-                  message:
-                    type: string
-                required:
-                  - statusCode
-                  - code
-                  - error
-                  - message
-          examples:
-            request_part:
-              summary: Python or multipart request limit
-              value:
-                detail: request body too large
-            typescript_json:
-              summary: TypeScript JSON body limit
-              value:
-                statusCode: 413
-                code: FST_ERR_CTP_BODY_TOO_LARGE
-                error: Payload Too Large
-                message: Request body is too large
-    '499':
-      description: The running shell job was canceled.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
-          example:
-            detail: job canceled
-    '500':
-      description: The job or server operation failed internally. Inspect detail and server logs
-        before retrying.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
-    '507':
-      description: The filesystem operation exceeds its storage capacity or quota.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
     '400':
-      description: 'Bad request: malformed, a host not allowed, or a browser page from another
-        origin'
+      description: 'The request is malformed: the body is not JSON (`invalid_json`) or not a JSON
+        object, a field is missing (`missing_field`), unknown (`unknown_field`) or has a wrong value
+        (`invalid_value`), or the request is otherwise invalid (`invalid_request`). `param` names the
+        field at fault.'
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
-        text/plain:
-          schema:
-            type: string
-            description: The daemon refuses a host not allowed, or a browser page from another
-              origin, in plain text.
+          examples:
+            missing_field:
+              summary: A required field is missing
+              value:
+                error:
+                  code: missing_field
+                  message: command is required
+                  param: command
+            unknown_field:
+              summary: A field the endpoint does not know
+              value:
+                error:
+                  code: unknown_field
+                  message: comand is not a known field
+                  param: comand
+            invalid_value:
+              summary: A field of the wrong type
+              value:
+                error:
+                  code: invalid_value
+                  message: id must be a string
+                  param: id
+            invalid_json:
+              summary: The body is not JSON
+              value:
+                error:
+                  code: invalid_json
+                  message: body must be JSON
     '401':
-      description: The token is missing or wrong
-      content:
-        application/json:
-          example:
-            detail: Unauthorized
-          schema:
-            $ref: '#/components/schemas/Error'
-        text/plain:
-          example: Unauthorized
+      description: The token is missing or wrong (`unauthorized`).
+      headers:
+        WWW-Authenticate:
+          description: Always `Bearer`.
           schema:
             type: string
-            description: The Python daemon answers Unauthorized as plain text.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: unauthorized
+              message: unauthorized
     '403':
-      description: A policy or mount mode refused the call
+      description: The call is refused. A policy refused it (`policy_refused`, with `refusal`), a
+        mount mode or permission refused it (`forbidden`), the backend is out of space or quota
+        (`storage_full`), or the request came for a host or from a browser origin that is not
+        allowed (`host_not_allowed`, `origin_not_allowed`).
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+          examples:
+            policy_refused:
+              summary: A policy refused the call
+              value:
+                error:
+                  code: policy_refused
+                  message: Permission denied
+                  errno: EACCES
+                  refusal:
+                    kind: deny
+                    reason: writes under /data are not allowed
+                    policy: PermissionsPolicy
+                    ask_id: null
+            storage_full:
+              summary: The backend is out of space or quota
+              value:
+                error:
+                  code: storage_full
+                  message: Disk quota exceeded
+                  errno: EDQUOT
+            host_not_allowed:
+              summary: The Host header is not allowed
+              value:
+                error:
+                  code: host_not_allowed
+                  message: host header is not allowed
     '404':
-      description: The workspace, session, job or file does not exist
+      description: The workspace, session, job, file or route does not exist, or the caller may not
+        see it (`not_found`).
       content:
         application/json:
-          example:
-            detail: workspace not found
           schema:
             $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: not_found
+              message: workspace not found
+    '405':
+      description: The path exists but does not take this method (`method_not_allowed`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: method_not_allowed
+              message: method not allowed
     '409':
-      description: The id or name is taken, the workspace is busy, or a file changed since
-        it was read
+      description: The request conflicts with the current state. The id or name is taken
+        (`already_exists`), the workspace is busy on another server or starting or stopping
+        (`workspace_busy`), the workspace is stopped (`workspace_stopped`), a file changed since it
+        was read (`stale_write`), or the state allows no such change (`conflict`).
       content:
         application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            already_exists:
+              summary: The id is taken
+              value:
+                error:
+                  code: already_exists
+                  message: workspace id already exists
+            workspace_stopped:
+              summary: The workspace is stopped
+              value:
+                error:
+                  code: workspace_stopped
+                  message: workspace 'demo' is stopped; start it first
+    '413':
+      description: The request body, a multipart part, or stdin exceeds its size limit (`too_large`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
           example:
-            detail: "workspace id already exists: 'demo'"
-          schema:
-            $ref: '#/components/schemas/Error'
+            error:
+              code: too_large
+              message: request body too large
     '429':
-      description: Past a rate limit, or a new session past max_sessions
+      description: Past a rate limit (`rate_limited`), or a new session past max_sessions
+        (`session_limit`).
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: rate_limited
+              message: too many requests
       headers:
         Retry-After:
-          description: Seconds to wait before retrying.
+          description: Seconds to wait before retrying. Sent with `rate_limited`.
           schema:
             type: integer
             minimum: 0
+    '499':
+      description: The running shell job was canceled (`canceled`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: canceled
+              message: job canceled
+    '500':
+      description: The server failed internally (`internal`). The message is always `internal server
+        error` and the cause goes to the server log. Check for side effects before retrying.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: internal
+              message: internal server error
     '501':
-      description: The server requires accounts; saved configs are kept only on a server of
-        one account
+      description: The server does not support this call (`not_supported`). Saved configs are kept
+        only on a server of one account.
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: not_supported
+              message: templates are kept only on a server of one account
     '503':
-      description: The server is at max_workspaces, or shutting down
+      description: The server cannot take the request now. It is at max_workspaces (`server_full`),
+        shutting down (`shutting_down`), or no worker can take the request (`unavailable`).
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: shutting_down
+              message: server is shutting down
     VfsDocument:
       description: Generated VFS.md document.
       content:

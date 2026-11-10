@@ -247,7 +247,10 @@ batched, so take the full output from the final result.
 Add `?calls=all` to the URL, or `--all-calls` to `mirage mcp`, for 23 more
 tools: `vfs_read`, `vfs_is_dir` and the rest, one per
 [VFS call](/api/reference). They take the same arguments and
-return the same JSON as HTTP. With them enabled, `shell` and every `vfs_<call>` also
+return the same JSON as HTTP. A failed call sets `isError` and answers the
+[HTTP error object](/api/errors#error-body) as its text, such as
+`{"code": "not_found", "message": "No such file or directory", "errno": "ENOENT"}`.
+With them enabled, `shell` and every `vfs_<call>` also
 take `explain: true`, which reports what the call would do without running it; see
 [Explain](/home/policy/explain).
 

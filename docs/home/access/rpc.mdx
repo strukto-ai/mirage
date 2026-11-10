@@ -123,9 +123,10 @@ slowly holds it back. Send one at a time to keep the bytes in order.
 | `-32603` | Anything else, such as a refused path. |
 | `-32800` | Canceled. |
 
-A file error carries its errno in `data`, plus a `refusal` record when a policy
+A file error carries the [HTTP error object](/api/errors#error-body) in `data`:
+its `code`, `message` and `errno`, plus a `refusal` record when a policy
 refused it:
 
 ```json
-{"jsonrpc": "2.0", "id": 2, "error": {"code": -32004, "message": "No such file or directory", "data": {"detail": "No such file or directory", "errno": "ENOENT"}}}
+{"jsonrpc": "2.0", "id": 2, "error": {"code": -32004, "message": "No such file or directory", "data": {"code": "not_found", "message": "No such file or directory", "errno": "ENOENT"}}}
 ```
