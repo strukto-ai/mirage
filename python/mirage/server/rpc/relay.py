@@ -66,7 +66,10 @@ async def relay_stdio(url: str, token: Callable[[], str]) -> None:
             if response.status_code == 204:
                 return
             if response.status_code >= 400:
-                detail = response.json().get("detail", response.text)
+                try:
+                    detail = response.json()["error"]["message"]
+                except (ValueError, KeyError, TypeError):
+                    detail = response.text
                 raise RuntimeError(f"error {response.status_code}: {detail}")
             await write(response.text)
 

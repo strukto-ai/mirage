@@ -79,13 +79,14 @@ async def test_a_process_is_listed_live_and_after_it_ends():
         r = await client.get(
             f"/v1/workspaces/{wid}/processes", params={"machine": "nowhere"}
         )
-        assert r.status_code == 422
-        [issue] = r.json()["detail"]
-        assert (issue["type"], issue["loc"], issue["input"]) == (
-            "value_error",
-            ["query", "machine"],
-            "nowhere",
-        )
+        assert r.status_code == 400
+        assert r.json() == {
+            "error": {
+                "code": "invalid_value",
+                "message": "machine must be provider:name",
+                "param": "machine",
+            }
+        }
         await _shell(client, wid, "kill %1; wait")
         r = await client.get(f"/v1/workspaces/{wid}/processes/{pid}")
         assert r.status_code == 200, r.text

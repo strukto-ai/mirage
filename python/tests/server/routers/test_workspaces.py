@@ -142,55 +142,38 @@ async def test_create_validates_config(mounts, extra, invalid_time):
         **({"system_time": invalid_time} if invalid_time is not None else {}),
         **({"unknown_setting": True} if extra else {}),
     }
-    detail = []
     if not mounts:
-        detail.append(
-            {
-                "type": "missing",
-                "loc": ["body", "config", "mounts"],
-                "msg": "Field required",
-                "input": config,
-            }
-        )
-    if invalid_time is not None:
-        detail.append(
-            {
-                "type": "string_type"
-                if isinstance(invalid_time, int)
-                else "value_error",
-                "loc": ["body", "config", "system_time"],
-                "msg": "Input should be a valid string"
-                if isinstance(invalid_time, int)
-                else (
-                    "Value error, system_time is not an ISO 8601 instant "
-                    "with an offset from 1970 through 2261, "
-                    "as 2026-03-02T09:00:00Z"
-                ),
-                "input": invalid_time,
-                **(
-                    {"ctx": {"error": {}}}
-                    if isinstance(invalid_time, str)
-                    else {}
-                ),
-            }
-        )
-    if extra:
-        detail.append(
-            {
-                "type": "extra_forbidden",
-                "loc": ["body", "config", "unknown_setting"],
-                "msg": "Extra inputs are not permitted",
-                "input": True,
-            }
-        )
+        error = {
+            "code": "missing_field",
+            "message": "config.mounts is required",
+            "param": "config.mounts",
+        }
+    elif isinstance(invalid_time, int):
+        error = {
+            "code": "invalid_value",
+            "message": "config.system_time must be a string",
+            "param": "config.system_time",
+        }
+    elif invalid_time is not None:
+        error = {
+            "code": "invalid_value",
+            "message": "system_time is not an ISO 8601 instant with an "
+            "offset from 1970 through 2261, as 2026-03-02T09:00:00Z",
+            "param": "config.system_time",
+        }
+    else:
+        error = {
+            "code": "unknown_field",
+            "message": "config.unknown_setting is not a known field",
+            "param": "config.unknown_setting",
+        }
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         r = await client.post(
             "/v1/workspaces", json={"id": "bad", "config": config}
         )
-        assert r.status_code == 422, r.text
-        assert r.json() == {"detail": detail}
+        assert (r.status_code, r.json()) == (400, {"error": error})
         assert "bad" not in app.state.registry
 
 
@@ -290,7 +273,7 @@ async def test_a_dot_id_is_refused_before_it_can_name_the_state_root(
             r = await client.post(
                 "/v1/workspaces/load", json={"key": "missing.tar", "id": wid}
             )
-            assert "invalid workspace id" in r.json()["detail"], r.text
+            assert r.json()["error"]["param"] == "id", r.text
 
 
 @pytest.mark.asyncio
@@ -317,7 +300,10 @@ async def test_a_failed_delete_answers_500_and_releases_the_id(
         monkeypatch.setattr(ws.state_store, "drop", refuse)
         r = await client.delete("/v1/workspaces/doomed")
         assert r.status_code == 500
-        assert "store on fire" in r.json()["detail"]
+        assert r.json()["error"] == {
+            "code": "internal",
+            "message": "internal server error",
+        }
         assert "doomed" not in app.state.registry
 
 
@@ -361,7 +347,9 @@ async def test_a_server_at_max_workspaces_answers_503():
             made.append(wid)
         r = await client.post("/v1/workspaces", json=_minimal_config())
         assert r.status_code == 503
-        assert r.json()["detail"] == "server is at max_workspaces (2)"
+        assert (
+            r.json()["error"]["message"] == "server is at max_workspaces (2)"
+        )
         r = await client.post(f"/v1/workspaces/{made[0]}/clone", json={})
         assert r.status_code == 503
         r = await client.post(
@@ -414,7 +402,7 @@ async def test_the_server_policies_refuse_a_workspace_before_it_is_built(
             "/v1/workspaces", json=_disk_config(str(tmp_path))
         )
         assert r.status_code == 403
-        assert r.json()["detail"] == "no disk mounts for None"
+        assert r.json()["error"]["message"] == "no disk mounts for None"
         assert len(app.state.registry) == 0
         r = await client.post(
             "/v1/workspaces?explain=true", json=_disk_config(str(tmp_path))
@@ -490,7 +478,7 @@ async def test_a_policy_file_answers_like_the_server_policies(tmp_path):
         refused["config"]["runtimes"] = ["monty"]
         r = await client.post("/v1/workspaces", json=refused)
         assert r.status_code == 403
-        assert r.json()["detail"] == "runtimes are the server's"
+        assert r.json()["error"]["message"] == "runtimes are the server's"
         r = await client.post("/v1/workspaces", json=_minimal_config())
         assert r.status_code == 201, r.text
         wid = r.json()["id"]
@@ -944,7 +932,11 @@ async def test_snapshot_store_round_trip(snapshot_store):
         assert r.status_code == 201, r.text
         r = await client.post("/v1/workspaces/load", json={"key": "nope.tar"})
         assert r.status_code == 400, r.text
-        assert r.json()["detail"] == "snapshot not found: nope.tar"
+        assert r.json()["error"] == {
+            "code": "invalid_value",
+            "message": "key names no snapshot",
+            "param": "key",
+        }
     keys = boto3.client(
         "s3",
         endpoint_url=snapshot_store.endpoint_url,
@@ -1192,7 +1184,10 @@ async def test_a_key_needs_a_snapshot_store():
             await client.post("/v1/workspaces/load", json={"key": "a.tar"}),
         ):
             assert r.status_code == 400, r.text
-            assert r.json()["detail"] == "this server has no snapshot store"
+            assert (
+                r.json()["error"]["message"]
+                == "this server has no snapshot store"
+            )
 
 
 @pytest.mark.asyncio
@@ -1205,7 +1200,7 @@ async def test_load_needs_one_source():
         assert r.status_code == 400, r.text
         r = await _upload(client, b"", {"key": "a.tar"})
         assert r.status_code == 400, r.text
-        assert "not both" in r.json()["detail"]
+        assert "not both" in r.json()["error"]["message"]
         r = await _upload(client, b"not a tar")
         assert r.status_code == 400, r.text
 
@@ -1219,7 +1214,7 @@ async def test_load_refuses_a_snapshot_over_the_limit(monkeypatch):
     ) as client:
         r = await _upload(client, b"x" * 9)
     assert r.status_code == 413, r.text
-    assert r.json()["detail"] == "snapshot part too large"
+    assert r.json()["error"]["message"] == "snapshot part too large"
 
 
 @pytest.mark.asyncio
@@ -1251,7 +1246,10 @@ async def test_load_caps_expanded_snapshot_and_releases_id(
             )
         r = await _upload(client, buffer.getvalue(), {"id": "limited"})
         assert r.status_code == 400, r.text
-        assert "snapshot exceeds expanded size limit" in r.json()["detail"]
+        assert (
+            "snapshot exceeds expanded size limit"
+            in r.json()["error"]["message"]
+        )
         assert "limited" not in app.state.registry
         r = await _upload(client, original, {"id": "limited"})
         assert r.status_code == 201, r.text
@@ -1279,7 +1277,10 @@ async def test_load_refuses_repeated_blob_allocations_and_releases_id(
         buffer = io.BytesIO(bz2.compress(buffer.getvalue()))
         r = await _upload(client, buffer.getvalue(), {"id": "repeated"})
         assert r.status_code == 400, r.text
-        assert "snapshot exceeds expanded size limit" in r.json()["detail"]
+        assert (
+            "snapshot exceeds expanded size limit"
+            in r.json()["error"]["message"]
+        )
         assert "repeated" not in app.state.registry
         r = await _upload(client, original, {"id": "repeated"})
         assert r.status_code == 201, r.text
@@ -1489,7 +1490,7 @@ async def test_create_with_an_unresolvable_secrets_block_is_a_bad_request():
         body["config"]["secrets"] = {"prod": {"source": "nope"}}
         r = await client.post("/v1/workspaces", json=body)
         assert r.status_code == 400, r.text
-        assert "nope" in r.json()["detail"]
+        assert "nope" in r.json()["error"]["message"]
 
 
 @pytest.mark.asyncio
@@ -1538,7 +1539,7 @@ async def test_clone_with_two_overrides_on_one_disk_root_is_a_bad_request(
             json={"override": {"mounts": {"/a": block, "/b": block}}},
         )
         assert r.status_code == 400, r.text
-        assert "is already mounted at" in r.json()["detail"]
+        assert "is already mounted at" in r.json()["error"]["message"]
 
 
 @pytest.mark.asyncio
@@ -1559,7 +1560,10 @@ async def test_clone_with_a_bad_disk_override_is_a_bad_request(tmp_path):
             json={"override": {"mounts": {"/": block}}},
         )
         assert r.status_code == 400, r.text
-        assert r.json()["detail"] == "disk: folder_versions: must be a boolean"
+        assert (
+            r.json()["error"]["message"]
+            == "disk: folder_versions: must be a boolean"
+        )
 
 
 @pytest.mark.asyncio
@@ -1577,7 +1581,7 @@ async def test_clone_with_an_unknown_mount_key_is_a_bad_request():
             json={"override": {"mounts": {"/": block}}},
         )
         assert r.status_code == 400, r.text
-        assert "bogus" in r.json()["detail"]
+        assert "bogus" in r.json()["error"]["message"]
 
 
 @pytest.mark.asyncio
@@ -1616,7 +1620,10 @@ async def test_create_with_a_bad_disk_mount_is_a_bad_request(tmp_path):
         }
         r = await client.post("/v1/workspaces", json=body)
         assert r.status_code == 400, r.text
-        assert r.json()["detail"] == "disk: folder_versions: must be a boolean"
+        assert (
+            r.json()["error"]["message"]
+            == "disk: folder_versions: must be a boolean"
+        )
 
 
 @pytest.mark.asyncio
@@ -1659,8 +1666,7 @@ async def test_load_with_an_unbuildable_vfs_override_is_a_bad_request(
             },
         )
         assert r.status_code == 400, r.text
-        assert r.json()["detail"].startswith("override build failed: ")
-        assert "gone.py" in r.json()["detail"]
+        assert r.json()["error"]["code"] == "invalid_request"
 
 
 @pytest.mark.asyncio
@@ -1741,6 +1747,22 @@ async def test_a_stopped_workspace_starts_with_its_files_and_cwd(tmp_path):
         assert r.status_code == 200, r.text
         r = await client.get("/v1/workspaces/keep")
         assert r.json()["status"] == "stopped"
+        r = await client.post(
+            "/v1/workspaces/keep/shell", json={"command": "pwd"}
+        )
+        assert (r.status_code, r.json()) == (
+            409,
+            {
+                "error": {
+                    "code": "workspace_stopped",
+                    "message": "workspace 'keep' is stopped; start it first",
+                }
+            },
+        )
+        r = await client.post(
+            "/v1/workspaces/never/shell", json={"command": "pwd"}
+        )
+        assert (r.status_code, r.json()["error"]["code"]) == (404, "not_found")
         r = await client.post("/v1/workspaces/keep/start")
         assert r.status_code == 200, r.text
         assert (r.json()["id"], r.json()["status"]) == ("keep", "running")
@@ -1970,7 +1992,7 @@ async def test_start_of_an_unknown_id_is_not_found(tmp_path):
     ) as client:
         r = await client.post("/v1/workspaces/nope/start")
         assert r.status_code == 404
-        assert r.json() == {"detail": "workspace not found"}
+        assert r.json()["error"]["message"] == "workspace not found"
         r = await client.post("/v1/workspaces/nope/stop")
         assert r.status_code == 404
 
@@ -2011,14 +2033,17 @@ async def test_set_profile_defines_and_replaces_a_name(tmp_path):
             }
         }
         r = await client.put(route, json=refused)
-        assert r.status_code == 422
+        assert r.status_code == 400
         r = await client.put(f"{route}x", json={"bogus": 1})
-        assert r.status_code == 422
+        assert r.status_code == 400
         (tmp_path / "guard.py").mkdir()
         script = {"script": str(tmp_path / "guard.py")}
         unreadable = {"policy": {"pre_command": [script]}}
         r = await client.put(f"{route}y", json=unreadable)
-        assert r.status_code == 422 and "directory" in r.json()["detail"]
+        assert (
+            r.status_code == 400
+            and "directory" in r.json()["error"]["message"]
+        )
         r = await client.put("/v1/workspaces/nope/profiles/reader", json={})
         assert r.status_code == 404
         await client.delete(f"/v1/workspaces/{wid}")
@@ -2044,7 +2069,10 @@ async def test_clone_with_a_bad_capacity_override_is_a_bad_request():
             },
         )
         assert r.status_code == 400, r.text
-        assert "capacity must be a size like 100MB" in r.json()["detail"]
+        assert (
+            "capacity must be a size like 100MB"
+            in r.json()["error"]["message"]
+        )
 
 
 @pytest.mark.asyncio
@@ -2056,7 +2084,7 @@ async def test_a_server_shutting_down_refuses_new_workspaces():
     ) as client:
         r = await client.post("/v1/workspaces", json=_minimal_config())
     assert r.status_code == 503
-    assert r.json() == {"detail": "server is shutting down"}
+    assert r.json()["error"]["message"] == "server is shutting down"
 
 
 @pytest.mark.asyncio
@@ -2175,8 +2203,8 @@ async def test_a_load_past_max_sessions_is_refused(monkeypatch):
     ) as client:
         r = await _upload(client, tar)
     assert r.status_code == 400
-    assert r.json()["detail"] == (
-        "load failed: the snapshot holds 3 sessions, past max_sessions (2)"
+    assert r.json()["error"]["message"] == (
+        "the snapshot holds 3 sessions, past max_sessions (2)"
     )
     assert seen == ["max_sessions"]
     assert len(capped.state.registry) == 0
@@ -2212,7 +2240,7 @@ async def test_a_reopen_past_max_sessions_is_refused(monkeypatch, tmp_path):
     ) as client:
         r = await client.post("/v1/workspaces", json=body)
     assert r.status_code == 400
-    assert r.json()["detail"] == (
+    assert r.json()["error"]["message"] == (
         "the saved workspace holds 3 sessions, past max_sessions (2)"
     )
     assert seen == ["max_sessions"]
@@ -2351,7 +2379,7 @@ async def test_a_create_outside_its_network_never_reaches_the_server(
         body["config"]["clis"] = {"fx": _mcp_entry(fake.url)}
         r = await client.post("/v1/workspaces", json=body)
         assert r.status_code == 400
-        assert "cannot list the server's tools" in r.json()["detail"]
+        assert "cannot list the server's tools" in r.json()["error"]["message"]
         assert fake.requests == []
 
 

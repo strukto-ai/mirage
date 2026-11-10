@@ -18,6 +18,7 @@ from typing import Any
 import httpx
 from starlette.types import Scope, Send
 
+from mirage.server.errors import HttpError
 from mirage.server.rate_limit import COUNTED_HEADER
 from mirage.server.workers.constants import HOP_BY_HOP
 from mirage.server.workers.types import Answer
@@ -82,6 +83,16 @@ def passable(raw: list[tuple[bytes, bytes]]) -> list[tuple[bytes, bytes]]:
     return [
         (k, v) for k, v in raw if k.decode("latin-1").lower() not in HOP_BY_HOP
     ]
+
+
+async def send_error(send: Send, error: HttpError) -> None:
+    """Answer ``error`` straight onto ``send``.
+
+    Args:
+        send (Send): the ASGI send channel.
+        error (HttpError): the error.
+    """
+    await send_json(send, error.status, error.body())
 
 
 async def send_json(send: Send, status: int, body: Any) -> None:

@@ -14,12 +14,13 @@
 
 import secrets
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict
 
 from mirage.config import _load_profile_policy
 from mirage.policy.errors import PolicyError
 from mirage.policy.profile import SessionProfile
+from mirage.server.errors import ErrorCode, HttpError, loader_error
 from mirage.server.metrics import refused
 from mirage.server.routers.vfs import require_entry, session_of
 from mirage.server.schemas import CancelLinesResponse, KillJobsResponse
@@ -61,14 +62,15 @@ async def create_session(
     async def create() -> SessionState:
         held = ws.list_sessions()
         if any(s.session_id == sid for s in held):
-            raise HTTPException(
-                status_code=409, detail=f"session id already exists: {sid!r}"
+            raise HttpError(
+                ErrorCode.ALREADY_EXISTS, "session id already exists"
             )
         cap = request.app.state.registry.max_sessions
         if cap is not None and len(held) >= cap:
             refused("max_sessions")
-            raise HTTPException(
-                status_code=429, detail=f"workspace is at max_sessions ({cap})"
+            raise HttpError(
+                ErrorCode.SESSION_LIMIT,
+                f"workspace is at max_sessions ({cap})",
             )
         return ws.create_session(
             sid, mounts=req.mounts or None, profile=req.profile
@@ -79,9 +81,9 @@ async def create_session(
     except (ValueError, PolicyError) as exc:
         # An unknown profile name and a refused inline document are
         # both the caller's mistake, and PolicyError is not a
-        # ValueError, so naming it here is what keeps them 422 rather
+        # ValueError, so naming it here is what keeps them 400 rather
         # than 500.
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise loader_error(exc, ("profile",)) from exc
     await entry.runner.call(entry.runner.ws.flush_sessions())
     return SessionResponse(session_id=sess.session_id, cwd=sess.cwd)
 
@@ -159,7 +161,7 @@ async def update_session(
             entry.runner.ws.set_session_profile(session_id, profile)
         )
     except KeyError as exc:
-        raise HTTPException(404, "session not found") from exc
+        raise HttpError(ErrorCode.NOT_FOUND, "session not found") from exc
     except (OSError, ValueError, PolicyError) as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise loader_error(exc, ("profile",)) from exc
     return SessionResponse(session_id=sess.session_id, cwd=sess.cwd)

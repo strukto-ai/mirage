@@ -37,7 +37,7 @@ HOP_BY_HOP = frozenset(
 )
 # What a request gets when no worker can answer it.
 UNAVAILABLE = Answer(
-    502,
-    [("content-type", "application/json")],
-    b'{"detail":"worker unavailable"}',
+    503,
+    [("content-type", "application/json"), ("retry-after", "1")],
+    b'{"error":{"code":"unavailable","message":"worker unavailable"}}',
 )

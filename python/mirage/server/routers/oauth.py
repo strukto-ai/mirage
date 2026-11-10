@@ -12,10 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from mirage.server.auth.config import PROTECTED_RESOURCE_PATH
+from mirage.server.errors import ErrorCode, HttpError
 
 router = APIRouter()
 
@@ -37,9 +38,7 @@ async def protected_resource(request: Request) -> ProtectedResource:
     """
     jwt = request.app.state.auth_config.jwt
     if jwt is None or jwt.login_client_id is None or jwt.issuer is None:
-        raise HTTPException(
-            status_code=404, detail="this server publishes no login"
-        )
+        raise HttpError(ErrorCode.NOT_FOUND, "this server publishes no login")
     return ProtectedResource(
         resource=str(request.base_url).rstrip("/"),
         authorization_servers=[jwt.issuer],

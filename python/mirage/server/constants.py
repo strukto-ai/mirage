@@ -34,3 +34,6 @@ RESERVED_KWARGS = frozenset(
         "direct",
     }
 )
+
+# Bodies read as sent, never as JSON: an upload, by its Content-Type.
+RAW_BODIES = (b"multipart/", b"application/octet-stream")

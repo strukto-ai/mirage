@@ -15,8 +15,8 @@
 from collections.abc import AsyncIterator
 
 import pytest
-from fastapi import HTTPException
 
+from mirage.server.errors import HttpError
 from mirage.server.multipart import PartEvent, part_events
 
 BOUNDARY = "b0undary"
@@ -84,11 +84,11 @@ async def test_a_boundary_not_followed_by_dashes_or_a_line_break_is_data(
                 END,
             ),
             CONTENT_TYPE,
-            "bad multipart body: Maximum header size exceeded",
+            "multipart body is malformed",
         ),
     ],
 )
 async def test_a_bad_body_is_refused(chunks, content_type, detail):
-    with pytest.raises(HTTPException) as caught:
+    with pytest.raises(HttpError) as caught:
         [e async for e in part_events(_chunks(*chunks), content_type)]
-    assert (caught.value.status_code, caught.value.detail) == (400, detail)
+    assert (caught.value.status, caught.value.message) == (400, detail)

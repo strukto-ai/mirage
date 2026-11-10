@@ -11,7 +11,7 @@ from typing import Any
 import aiohttp
 
 from mirage.cli.client import DaemonClient
-from mirage.cli.output import exit_code_from_response
+from mirage.cli.output import error_message, exit_code_from_response
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.shell.constants import INTERRUPTED_STATUS
 from mirage.types import Refusal
@@ -220,18 +220,7 @@ async def stream_shell(
                 if response.status == 499:
                     return INTERRUPTED_STATUS
                 if response.status >= 400:
-                    text = await response.text()
-                    detail = text
-                    # The daemon answers {"detail": ...}; any other body,
-                    # such as a proxy's error page, is printed as it came.
-                    if response.content_type == "application/json":
-                        try:
-                            answer = json.loads(text)
-                        except json.JSONDecodeError as e:
-                            logger.debug("error body is not JSON: %s", e)
-                        else:
-                            if isinstance(answer, dict):
-                                detail = answer.get("detail", text)
+                    detail = error_message(await response.text())
                     raise RuntimeError(f"error {response.status}: {detail}")
                 terminal = await consume_stream(
                     response.content.iter_chunked(CHUNK_SIZE), stdout, stderr

@@ -23,7 +23,7 @@ from contextlib import asynccontextmanager
 from typing import Any, TypeVar
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from mirage import Workspace, WorkspaceRunner
@@ -47,7 +47,13 @@ from mirage.server.clone import (
     clone_workspace_with_override,
 )
 from mirage.server.constants import MAX_SNAPSHOT_BYTES
-from mirage.server.io_serde import explanation_to_dict
+from mirage.server.errors import (
+    INTERNAL_MESSAGE,
+    ErrorCode,
+    HttpError,
+    loader_error,
+)
+from mirage.server.io_serde import explanation_to_dict, refusal_to_dict
 from mirage.server.logs import (
     LogPage,
     completed_logs,
@@ -108,6 +114,22 @@ router = APIRouter(prefix="/v1/workspaces")
 ACCOUNTS_DIR = "accounts"
 
 T = TypeVar("T")
+
+
+def refused_build(exc: Exception, fixed: str) -> HttpError:
+    """A build the caller's config or snapshot made fail, as a 400: the
+    project's own loaders word theirs for the caller; an OS or
+    interpreter error, which names the server's own paths and modules,
+    answers ``fixed`` and goes to the log.
+
+    Args:
+        exc (Exception): what the build raised.
+        fixed (str): the message for an error the caller may not read.
+    """
+    if isinstance(exc, (ValueError, TypeError, SecretsError)):
+        return loader_error(exc)
+    logger.info("mirage: %s: %s", fixed, exc)
+    return HttpError(ErrorCode.INVALID_REQUEST, fixed)
 
 
 async def _has_state(request: Request, workspace_id: str) -> bool:
@@ -187,7 +209,7 @@ async def _kept(
     )
 
 
-async def _stopped(request: Request, workspace_id: str) -> bool:
+async def is_stopped(request: Request, workspace_id: str) -> bool:
     """Whether the caller's ``workspace_id``, not live, is stopped: its
     state or its config is kept.
 
@@ -223,20 +245,19 @@ async def _claimed(request: Request, workspace_id: str) -> AsyncIterator[None]:
     registry = request.app.state.registry
     if registry.draining:
         refused("shutting_down")
-        raise HTTPException(status_code=503, detail="server is shutting down")
+        raise HttpError(ErrorCode.SHUTTING_DOWN, "server is shutting down")
     if not registry.has_room():
         refused("max_workspaces")
-        raise HTTPException(
-            status_code=503,
-            detail=f"server is at max_workspaces ({registry.max_workspaces})",
+        raise HttpError(
+            ErrorCode.SERVER_FULL,
+            f"server is at max_workspaces ({registry.max_workspaces})",
         )
     account = request.state.account
     stored = account is not None and await _has_state(request, workspace_id)
     claim = await registry.claim(workspace_id, account, stored)
     if claim is Claim.TAKEN:
-        raise HTTPException(
-            status_code=409,
-            detail=f"workspace id already exists: {workspace_id!r}",
+        raise HttpError(
+            ErrorCode.ALREADY_EXISTS, "workspace id already exists"
         )
     try:
         yield
@@ -264,9 +285,8 @@ async def _building(
     build = f"build:{new_workspace_id()}"
     async with registry.creating(workspace_id, build) as admitted:
         if not admitted:
-            raise HTTPException(
-                status_code=409,
-                detail=f"workspace id already exists: {workspace_id!r}",
+            raise HttpError(
+                ErrorCode.ALREADY_EXISTS, "workspace id already exists"
             )
         async with _claimed(request, workspace_id):
             yield
@@ -361,8 +381,10 @@ def store_key(request: Request, key: str) -> str:
     """
     relative = key.lstrip("/")
     if not is_safe_blob_path(relative):
-        raise HTTPException(
-            status_code=400, detail=f"invalid snapshot key: {key!r}"
+        raise HttpError(
+            ErrorCode.INVALID_VALUE,
+            "key must be a relative path inside the snapshot store",
+            param="key",
         )
     account = request.state.account
     if account is None:
@@ -387,7 +409,7 @@ async def run_capture(
     except OSError as exc:
         if exc.errno != errno.EBUSY:
             raise
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HttpError(ErrorCode.CONFLICT, str(exc)) from exc
 
 
 def _refuse_id(workspace_id: str | None) -> None:
@@ -402,10 +424,12 @@ def _refuse_id(workspace_id: str | None) -> None:
     try:
         check_name("workspace id", workspace_id)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise loader_error(exc) from exc
     if workspace_id in DOT_IDS:
-        raise HTTPException(
-            status_code=400, detail=f"invalid workspace id: {workspace_id!r}"
+        raise HttpError(
+            ErrorCode.INVALID_VALUE,
+            "id must not be . or ..",
+            param="id",
         )
 
 
@@ -418,13 +442,13 @@ async def _admit(request: Request, config: dict[str, Any]) -> None:
         config (dict[str, Any]): the config as the caller wrote it.
 
     Raises:
-        HTTPException: 403 with the refusal's reason.
+        HttpError: 403 with the refusal's reason.
     """
     refused = await request.app.state.registry.refusal(
         config, request.state.account
     )
     if refused is not None:
-        raise HTTPException(status_code=403, detail=refused.reason)
+        raise HttpError(ErrorCode.POLICY_REFUSED, refused.reason)
 
 
 def config_digest(config: WorkspaceConfig) -> str:
@@ -452,19 +476,18 @@ async def _config_of(
         request (Request): the HTTP request, for its JSON and the store.
 
     Raises:
-        HTTPException: 400 for both or neither, 404 for an unknown
+        HttpError: 400 for both or neither, 404 for an unknown
             template, 501 for a template on a server of many accounts.
     """
     if req.template is None:
         if req.config is None:
-            raise HTTPException(
-                status_code=400, detail="give a template or a config"
+            raise HttpError(
+                ErrorCode.INVALID_REQUEST, "give a template or a config"
             )
         return req.config, (await request.json())["config"]
     if req.config is not None:
-        raise HTTPException(
-            status_code=400,
-            detail="give a template or a config, not both",
+        raise HttpError(
+            ErrorCode.INVALID_REQUEST, "give a template or a config, not both"
         )
     require_one_account(request)
     try:
@@ -474,9 +497,9 @@ async def _config_of(
     try:
         config = check_config(template.config)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        raise loader_error(e, ("config",)) from e
     if config.workspace_id is not None:
-        raise HTTPException(status_code=400, detail=NO_WORKSPACE_ID)
+        raise HttpError(ErrorCode.INVALID_REQUEST, NO_WORKSPACE_ID)
     return config, template.config
 
 
@@ -494,7 +517,7 @@ async def _with_saved(
         written (dict[str, Any]): the config as written.
 
     Raises:
-        HTTPException: 501 for pointers on a server of many accounts, 400
+        HttpError: 501 for pointers on a server of many accounts, 400
             for a name that is not saved or a saved value its field cannot
             take.
     """
@@ -543,9 +566,8 @@ async def _open_workspace(
     digest = config_digest(config)
     async with registry.creating(wid, digest) as admitted:
         if not admitted:
-            raise HTTPException(
-                status_code=409,
-                detail=f"workspace id already exists: {wid!r}",
+            raise HttpError(
+                ErrorCode.ALREADY_EXISTS, "workspace id already exists"
             )
         if wid in registry or registry.removing(wid):
             held = registry.visible(wid, request.state.account)
@@ -554,9 +576,8 @@ async def _open_workspace(
                 or registry.removing(wid)
                 or held.config_digest != digest
             ):
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"workspace id already exists: {wid!r}",
+                raise HttpError(
+                    ErrorCode.ALREADY_EXISTS, "workspace id already exists"
                 )
             response.status_code = 200
             return await make_detail(held)
@@ -588,7 +609,7 @@ async def _open_workspace(
                 # unknown runtime option, a missing runtime extra, a
                 # `secrets:` block naming a source the host cannot resolve)
                 # are the caller's to fix, not a 500.
-                raise HTTPException(status_code=400, detail=str(e))
+                raise refused_build(e, "config could not be built")
             try:
                 for prefix, (
                     backend,
@@ -607,7 +628,7 @@ async def _open_workspace(
                 entry.config_digest = digest
             except ValueError as e:
                 await runner.stop()
-                raise HTTPException(status_code=409, detail=str(e))
+                raise HttpError(ErrorCode.CONFLICT, str(e))
             except BaseException:
                 # A cancelled create stops the runner too: nothing else
                 # holds it before it is registered.
@@ -695,12 +716,12 @@ async def get_workspace(
     if entry is None:
         kept = await _kept(request, workspace_id)
         if kept is None:
-            raise HTTPException(status_code=404, detail="workspace not found")
+            raise HttpError(ErrorCode.NOT_FOUND, "workspace not found")
         return make_stopped_detail(workspace_id, *kept)
     # A workspace being deleted keeps its id until the deletion is done,
     # but its runner has stopped answering: it is gone to a reader.
     if registry.removing(workspace_id):
-        raise HTTPException(status_code=404, detail="workspace not found")
+        raise HttpError(ErrorCode.NOT_FOUND, "workspace not found")
     return await make_detail(entry, verbose=verbose)
 
 
@@ -733,13 +754,13 @@ async def workspace_logs(
     """
     entry = require_entry(request, workspace_id)
     if request.app.state.registry.removing(workspace_id):
-        raise HTTPException(status_code=404, detail="workspace not found")
+        raise HttpError(ErrorCode.NOT_FOUND, "workspace not found")
     try:
         selected_session = session_filter(session)
         if format != "jsonl":
             log_page([], limit, after)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise loader_error(exc) from exc
     records = await entry.runner.call(
         entry.runner.ws.observer.events(selected_session)
     )
@@ -768,7 +789,7 @@ async def delete_workspace(
     if registry.visible(workspace_id, request.state.account) is None:
         kept = await _kept(request, workspace_id)
         if kept is None:
-            raise HTTPException(status_code=404, detail="workspace not found")
+            raise HttpError(ErrorCode.NOT_FOUND, "workspace not found")
         store = _store_of(request, kept[0])
         try:
             forgot = await registry.forget(
@@ -777,24 +798,23 @@ async def delete_workspace(
         finally:
             await store.close()
         if forgot is Forget.GONE:
-            raise HTTPException(status_code=404, detail="workspace not found")
+            raise HttpError(ErrorCode.NOT_FOUND, "workspace not found")
         if forgot is Forget.HELD:
-            raise HTTPException(
-                status_code=409,
-                detail="workspace is running on another server",
+            raise HttpError(
+                ErrorCode.WORKSPACE_BUSY,
+                "workspace is running on another server",
             )
         if forgot is Forget.BUSY:
-            raise HTTPException(
-                status_code=409,
-                detail="workspace is starting or stopping; try again",
+            raise HttpError(
+                ErrorCode.WORKSPACE_BUSY,
+                "workspace is starting or stopping; try again",
             )
         return DeleteWorkspaceResponse(id=workspace_id, closed_at=time.time())
     try:
         await registry.remove(workspace_id)
     except Exception as exc:
-        raise HTTPException(
-            status_code=500, detail=f"workspace delete failed: {exc}"
-        ) from exc
+        logger.error("mirage: workspace delete failed", exc_info=exc)
+        raise HttpError(ErrorCode.INTERNAL, INTERNAL_MESSAGE) from exc
     return DeleteWorkspaceResponse(id=workspace_id, closed_at=time.time())
 
 
@@ -813,8 +833,8 @@ async def stop_workspace(
     registry = request.app.state.registry
     account = request.state.account
     live = registry.visible(workspace_id, account) is not None
-    if not live and not await _stopped(request, workspace_id):
-        raise HTTPException(status_code=404, detail="workspace not found")
+    if not live and not await is_stopped(request, workspace_id):
+        raise HttpError(ErrorCode.NOT_FOUND, "workspace not found")
     if live or registry.removing(workspace_id):
         await registry.stop(workspace_id)
     return DeleteWorkspaceResponse(id=workspace_id, closed_at=time.time())
@@ -843,11 +863,11 @@ async def start_workspace(
         return await make_detail(held)
     written = await registry.saved_config(workspace_id, account)
     if written is None:
-        raise HTTPException(status_code=404, detail="workspace not found")
+        raise HttpError(ErrorCode.NOT_FOUND, "workspace not found")
     try:
         config = check_config(written)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        raise loader_error(e, ("config",)) from e
     return await _open_workspace(
         request, response, workspace_id, config, written
     )
@@ -898,7 +918,7 @@ async def set_profile(
         doc = _load_profile_policy(profile)
         await entry.runner.call(define())
     except (OSError, ValueError, PolicyError, SecretsError) as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise loader_error(exc) from exc
     return {"name": name}
 
 
@@ -912,8 +932,8 @@ async def clone_workspace(
     src_entry = require_entry(request, workspace_id)
     _refuse_id(req.id)
     if req.id is not None and req.id in registry:
-        raise HTTPException(
-            status_code=409, detail=f"workspace id already exists: {req.id!r}"
+        raise HttpError(
+            ErrorCode.ALREADY_EXISTS, "workspace id already exists"
         )
     wid = req.id or new_workspace_id()
     await _admit(request, req.override or {})
@@ -932,14 +952,14 @@ async def clone_workspace(
             # An override naming a source the host cannot resolve, or a
             # block the schema refuses, is the caller's mistake -- the
             # answer create, load and the historical clone already give.
-            raise HTTPException(status_code=400, detail=str(e))
+            raise refused_build(e, "override could not be built")
         try:
             entry = registry.add(
                 new_ws, workspace_id=wid, owner=request.state.account
             )
         except ValueError as e:
             await new_ws.close()
-            raise HTTPException(status_code=409, detail=str(e))
+            raise HttpError(ErrorCode.CONFLICT, str(e))
         await registry.drop_config(wid)
     return await make_detail(entry)
 
@@ -976,14 +996,14 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
     else:
         req = _parse_load_request(await request.body())
         if req.key is None:
-            raise HTTPException(
-                status_code=400,
-                detail="load needs a 'key' or an uploaded 'snapshot' part",
+            raise HttpError(
+                ErrorCode.INVALID_REQUEST,
+                "load needs a 'key' or an uploaded 'snapshot' part",
             )
     _refuse_id(req.id)
     if req.id is not None and req.id in registry:
-        raise HTTPException(
-            status_code=409, detail=f"workspace id already exists: {req.id!r}"
+        raise HttpError(
+            ErrorCode.ALREADY_EXISTS, "workspace id already exists"
         )
     await _admit(request, req.override or {})
     store: S3Config | None = None
@@ -1010,9 +1030,7 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
             # a secrets source it cannot resolve) is the caller's mistake,
             # the answer the TypeScript daemon gives too; it used to escape
             # as a 500.
-            raise HTTPException(
-                status_code=400, detail=f"override build failed: {e}"
-            )
+            raise refused_build(e, "override could not be built")
         restored: list[Policy] = []
 
         # The snapshot's saved values meet the server's policies as a live
@@ -1043,17 +1061,23 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
         try:
             runner = await WorkspaceRunner.build(restore())
         except PolicyDenied as e:
-            raise HTTPException(status_code=403, detail=str(e))
+            raise HttpError(
+                ErrorCode.POLICY_REFUSED,
+                e.refusal.reason if e.refusal is not None else str(e),
+                refusal=refusal_to_dict(e.refusal),
+            )
         except FileNotFoundError:
-            raise HTTPException(
-                status_code=400, detail=f"snapshot not found: {req.key}"
+            raise HttpError(
+                ErrorCode.INVALID_VALUE,
+                "key names no snapshot",
+                param="key",
             )
         except (SecretsError, ValueError, KeyError) as e:
             # A secrets override naming an unknown source, or one whose
             # optional dependency is absent, is a bad request like any
             # other override the deployment got wrong; so is an upload
             # that is not a snapshot.
-            raise HTTPException(status_code=400, detail=f"load failed: {e}")
+            raise refused_build(e, "snapshot could not be loaded")
         try:
             entry = registry.add(
                 runner,
@@ -1063,7 +1087,7 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
             )
         except ValueError as e:
             await runner.stop()
-            raise HTTPException(status_code=409, detail=str(e))
+            raise HttpError(ErrorCode.CONFLICT, str(e))
         await registry.drop_config(wid)
     return await make_detail(entry)
 
@@ -1078,12 +1102,12 @@ def _snapshot_store(request: Request) -> S3Config:
         S3Config: the store.
 
     Raises:
-        HTTPException: 400 when the server has none.
+        HttpError: 400 when the server has none.
     """
     store: S3Config | None = request.app.state.snapshot_store
     if store is None:
-        raise HTTPException(
-            status_code=400, detail="this server has no snapshot store"
+        raise HttpError(
+            ErrorCode.INVALID_REQUEST, "this server has no snapshot store"
         )
     return store
 
@@ -1092,7 +1116,7 @@ def _parse_load_request(body: bytes) -> LoadWorkspaceRequest:
     try:
         return LoadWorkspaceRequest.model_validate(json.loads(body or b"{}"))
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"bad load request: {e}")
+        raise HttpError(ErrorCode.INVALID_REQUEST, f"bad load request: {e}")
 
 
 async def _read_load_body(
@@ -1111,7 +1135,7 @@ async def _read_load_body(
         tuple[LoadWorkspaceRequest, io.BytesIO]: the request and the tar.
 
     Raises:
-        HTTPException: 400 for a body without both parts, or with a
+        HttpError: 400 for a body without both parts, or with a
             ``key``; 413 for an oversized part.
     """
     name = b""
@@ -1123,32 +1147,28 @@ async def _read_load_body(
             name = data
             # The daemon routes a load by its first request part alone.
             if name == b"request" and name in seen:
-                raise HTTPException(
-                    status_code=400,
-                    detail="multipart body has more than one 'request' part",
+                raise HttpError(
+                    ErrorCode.INVALID_REQUEST,
+                    "multipart body has more than one 'request' part",
                 )
             seen.add(name)
         elif event is PartEvent.DATA and name == b"request":
             body += data
             if len(body) > MAX_REQUEST_PART:
-                raise HTTPException(
-                    status_code=413, detail="request part too large"
-                )
+                raise HttpError(ErrorCode.TOO_LARGE, "request part too large")
         elif event is PartEvent.DATA and name == b"snapshot":
             tar.write(data)
             if tar.tell() > MAX_SNAPSHOT_PART:
-                raise HTTPException(
-                    status_code=413, detail="snapshot part too large"
-                )
+                raise HttpError(ErrorCode.TOO_LARGE, "snapshot part too large")
     if b"snapshot" not in seen:
-        raise HTTPException(
-            status_code=400, detail="multipart body missing 'snapshot' part"
+        raise HttpError(
+            ErrorCode.INVALID_REQUEST, "multipart body missing 'snapshot' part"
         )
     req = _parse_load_request(bytes(body))
     if req.key is not None:
-        raise HTTPException(
-            status_code=400,
-            detail="load takes a 'key' or an uploaded 'snapshot', not both",
+        raise HttpError(
+            ErrorCode.INVALID_REQUEST,
+            "load takes a 'key' or an uploaded 'snapshot', not both",
         )
     tar.seek(0)
     return req, tar

@@ -18,7 +18,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -28,12 +28,19 @@ from mirage.execution.line.handle import LineHandle
 from mirage.execution.types import LineId
 from mirage.io.pipe import BytePipe
 from mirage.io.types import ByteSource
+from mirage.runtime.workspace import WorkspaceRuntime
+from mirage.server.errors import (
+    INTERNAL_MESSAGE,
+    ErrorCode,
+    HttpError,
+    validation_error,
+)
 from mirage.server.io_serde import explanation_to_dict, io_result_to_dict
 from mirage.server.metrics import refused
 from mirage.server.multipart import MAX_REQUEST_PART, PartEvent, part_events
 from mirage.server.registry import WorkspaceEntry
 from mirage.server.requests import LineRequest, RequestTable
-from mirage.server.routers.vfs import invalid_body, require_entry, session_of
+from mirage.server.routers.vfs import require_entry, session_of
 from mirage.server.stdin import LoopStdin, UploadStdin
 from mirage.server.stream import ShellResponse
 from mirage.types import JsonValue
@@ -54,6 +61,36 @@ class ShellRequest(BaseModel):
     machine: str | None = None
     record: bool | None = None
     open_stdin: bool | None = None
+
+
+def _check_placement(ws: Workspace, req: ShellRequest) -> None:
+    """Refuse a runtime or machine the workspace does not have, before
+    the line is submitted.
+
+    Args:
+        ws (Workspace): the workspace the line runs in.
+        req (ShellRequest): the request naming them.
+
+    Raises:
+        HttpError: ``invalid_value`` naming the workspace's own choices.
+    """
+    named = (
+        (
+            "runtime",
+            req.runtime,
+            [r.name for r in ws.runtimes() if r.name != WorkspaceRuntime.name],
+        ),
+        ("machine", req.machine, ws.machine_table.names()),
+    )
+    for param, given, names in named:
+        if given is not None and given not in names:
+            raise HttpError(
+                ErrorCode.INVALID_VALUE,
+                f"{param} must be one of {', '.join(names)}"
+                if names
+                else f"{param} must be unset: the workspace has no {param}s",
+                param=param,
+            )
 
 
 def _build_shell_kwargs(
@@ -105,9 +142,8 @@ async def shell(
 ) -> Response:
     entry = require_entry(request, workspace_id)
     if stream and explain:
-        raise HTTPException(
-            status_code=400,
-            detail="stream cannot be combined with explain",
+        raise HttpError(
+            ErrorCode.INVALID_REQUEST, "stream cannot be combined with explain"
         )
     if explain:
         return await _explained(entry, request, session_id)
@@ -139,12 +175,18 @@ async def shell(
         if part is not None or not stream:
             if upload is not None:
                 await _finish_upload(upload, part)
-            raise HTTPException(
-                status_code=400,
-                detail="open_stdin takes stream=true and no stdin part",
+            raise HttpError(
+                ErrorCode.INVALID_REQUEST,
+                "open_stdin takes stream=true and no stdin part",
             )
         pipe = BytePipe(entry.runner.ws.io.buffer_bytes)
         stdin = pipe.stream()
+    try:
+        _check_placement(entry.runner.ws, req_obj)
+    except HttpError:
+        if upload is not None:
+            await _finish_upload(upload, part)
+        raise
     kwargs = _build_shell_kwargs(req_obj, stdin)
     session_id = session_id or entry.runner.ws.default_session_id
     kwargs["session_id"] = session_id
@@ -176,10 +218,8 @@ async def shell(
             await _finish_upload(upload, part)
         if jobs.draining:
             refused("shutting_down")
-            raise HTTPException(
-                status_code=503, detail="server is shutting down"
-            )
-        raise HTTPException(status_code=404, detail="workspace not found")
+            raise HttpError(ErrorCode.SHUTTING_DOWN, "server is shutting down")
+        raise HttpError(ErrorCode.NOT_FOUND, "workspace not found")
     table = entry.runner.ws.job_table
     if not table.claimed:
         # Once held, the lease is this daemon's until the workspace
@@ -190,7 +230,7 @@ async def shell(
         except WorkspaceHeldError as exc:
             if upload is not None:
                 await _finish_upload(upload, part)
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            raise HttpError(ErrorCode.WORKSPACE_BUSY, str(exc)) from exc
     job = jobs.submit(
         workspace_id=workspace_id,
         command=req_obj.command,
@@ -206,9 +246,10 @@ async def shell(
     if upload is not None:
         await _finish_upload(upload, part)
     if job.line.record.signal is not None:
-        raise HTTPException(status_code=499, detail="job canceled")
+        raise HttpError(ErrorCode.CANCELED, "job canceled")
     if job.error is not None:
-        raise HTTPException(status_code=500, detail=job.error)
+        logger.error("mirage: line %s failed: %s", job.line.id, job.error)
+        raise HttpError(ErrorCode.INTERNAL, INTERNAL_MESSAGE)
     # A large result is encoded off the server's loop.
     return Response(
         content=await run_blocking(json.dumps, job.result),
@@ -245,9 +286,9 @@ async def _explained(
         or req_obj.machine is not None
         or req_obj.open_stdin
     ):
-        raise HTTPException(
-            status_code=400,
-            detail=(
+        raise HttpError(
+            ErrorCode.INVALID_REQUEST,
+            (
                 "explain takes the line alone: no stdin, cwd, runtime or"
                 " machine"
             ),
@@ -310,7 +351,7 @@ async def _finish_upload(
         await part.discard()
     try:
         await upload
-    except HTTPException:
+    except HttpError:
         raise
     except Exception as exc:
         logger.debug("shell upload ended early: %r", exc)
@@ -351,16 +392,16 @@ async def _read_shell_body(
                 if name != b"stdin":
                     continue
                 if req_obj is None:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="the 'request' part must come before 'stdin'",
+                    raise HttpError(
+                        ErrorCode.INVALID_REQUEST,
+                        "the 'request' part must come before 'stdin'",
                     )
                 started.set_result((req_obj, stdin))
             elif event is PartEvent.DATA and name == b"request":
                 body += data
                 if len(body) > MAX_REQUEST_PART:
-                    raise HTTPException(
-                        status_code=413, detail="request part too large"
+                    raise HttpError(
+                        ErrorCode.TOO_LARGE, "request part too large"
                     )
             elif event is PartEvent.DATA and name == b"stdin":
                 await stdin.feed(data)
@@ -378,8 +419,9 @@ async def _read_shell_body(
         return
     if req_obj is None:
         started.set_exception(
-            HTTPException(
-                status_code=400, detail="multipart body missing 'request' part"
+            HttpError(
+                ErrorCode.INVALID_REQUEST,
+                "multipart body missing 'request' part",
             )
         )
         return
@@ -390,23 +432,19 @@ def _parse_request_part(body: bytes) -> ShellRequest:
     try:
         data = json.loads(body)
     except ValueError as e:
-        raise HTTPException(
-            status_code=400, detail=f"bad request part: {e}"
-        ) from e
+        raise HttpError(ErrorCode.INVALID_JSON, "body must be JSON") from e
     try:
         return ShellRequest.model_validate(data, from_attributes=True)
     except ValidationError as e:
-        raise invalid_body(e, "request") from e
+        raise validation_error(e.errors(include_url=False)) from e
 
 
 async def _parse_json_body(request: Request) -> ShellRequest:
     try:
         data = await request.json()
     except ValueError as e:
-        raise HTTPException(
-            status_code=400, detail=f"bad shell request: {e}"
-        ) from e
+        raise HttpError(ErrorCode.INVALID_JSON, "body must be JSON") from e
     try:
         return ShellRequest.model_validate(data, from_attributes=True)
     except ValidationError as e:
-        raise invalid_body(e) from e
+        raise validation_error(e.errors(include_url=False)) from e

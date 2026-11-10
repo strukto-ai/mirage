@@ -129,9 +129,9 @@ async def test_an_unknown_workspace_or_session_is_not_found(tmp_path):
                 f"/v1/workspaces/{workspace_id}/mcp?session_id=nope", json={}
             )
     assert workspace.status_code == 404
-    assert workspace.json() == {"detail": "workspace not found"}
+    assert workspace.json()["error"]["message"] == "workspace not found"
     assert session.status_code == 404
-    assert session.json() == {"detail": "session not found"}
+    assert session.json()["error"]["message"] == "session not found"
 
 
 @pytest.mark.asyncio
@@ -153,7 +153,9 @@ async def test_calls_all_serves_the_vfs_calls_and_explain(tmp_path):
     assert json.loads(read.content[0].text) == "aGk="
     assert json.loads(said.content[0].text)["outcome"] == "allow"
     assert refused.status_code == 400
-    assert refused.json() == {"detail": "calls must be tools or all"}
+    assert (
+        refused.json()["error"]["message"] == "calls must be one of tools, all"
+    )
 
 
 @pytest.mark.asyncio

@@ -68,7 +68,7 @@ async def test_a_running_job_is_listed_and_found_by_id():
             r = await client.get(f"/v1/workspaces/{wid}/jobs/{bare}")
             assert (r.status_code, r.json()) == (
                 404,
-                {"detail": "job not found"},
+                {"error": {"code": "not_found", "message": "job not found"}},
             )
             r = await client.get(
                 f"/v1/workspaces/{wid}/jobs",

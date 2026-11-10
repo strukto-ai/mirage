@@ -13,12 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict
 
 from mirage.resources.constants import POLICY_NAME
 from mirage.resources.errors import ResourceError
 from mirage.resources.types import Policy
+from mirage.server.errors import ErrorCode, HttpError
 from mirage.server.routers.templates import store_refusal
 
 # A policy is a script, not a project, so its source is at most 64 KiB.
@@ -59,12 +60,12 @@ def require_one_account(request: Request) -> None:
         request (Request): the HTTP request, for the app's registry.
 
     Raises:
-        HTTPException: 501 while the server requires accounts.
+        HttpError: 501 while the server requires accounts.
     """
     if request.app.state.registry.accounts_required:
-        raise HTTPException(
-            status_code=501,
-            detail="policies are kept only on a server of one account",
+        raise HttpError(
+            ErrorCode.NOT_SUPPORTED,
+            "policies are kept only on a server of one account",
         )
 
 
@@ -80,12 +81,13 @@ def check_source(source: str) -> str:
         source (str): the policy's program.
 
     Raises:
-        HTTPException: 400 past 64 KiB of UTF-8.
+        HttpError: 400 past 64 KiB of UTF-8.
     """
     if len(source.encode()) > MAX_SOURCE:
-        raise HTTPException(
-            status_code=400,
-            detail=f"source must be at most {MAX_SOURCE // 1024} KB",
+        raise HttpError(
+            ErrorCode.INVALID_VALUE,
+            f"source must be at most {MAX_SOURCE // 1024} KB",
+            param="source",
         )
     return source
 
@@ -115,9 +117,10 @@ async def create_policy(
         request (Request): the HTTP request, for the app's store.
     """
     if POLICY_NAME.fullmatch(req.name) is None:
-        raise HTTPException(
-            status_code=400,
-            detail="policy name must end in .py, such as guard.py",
+        raise HttpError(
+            ErrorCode.INVALID_VALUE,
+            "name must end in .py, such as guard.py",
+            param="name",
         )
     source = check_source(req.source)
     try:

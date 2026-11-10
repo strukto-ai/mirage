@@ -15,10 +15,11 @@
 import os
 import time
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from mirage.server.errors import ErrorCode, HttpError
 from mirage.server.schemas import HealthResponse
 
 router = APIRouter()
@@ -66,8 +67,8 @@ async def shutdown(request: Request) -> ShutdownResponse:
     every account, so an account may not stop it.
     """
     if request.state.account is not None:
-        raise HTTPException(
-            status_code=403, detail="an account may not shut the server down"
+        raise HttpError(
+            ErrorCode.FORBIDDEN, "an account may not shut the server down"
         )
     request.app.state.exit_event.set()
     return ShutdownResponse(status="shutting_down", pid=os.getpid())

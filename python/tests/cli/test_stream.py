@@ -414,7 +414,7 @@ async def test_raw_output_ends_with_the_refusal_line(monkeypatch, tmp_path):
     [
         (
             404,
-            '{"detail": "session not found"}',
+            '{"error": {"code": "not_found", "message": "session not found"}}',
             "application/json",
             "error 404: session not found",
         ),
@@ -427,9 +427,9 @@ async def test_raw_output_ends_with_the_refusal_line(monkeypatch, tmp_path):
         (500, '["odd"]', "application/json", 'error 500: ["odd"]'),
         (
             500,
-            '{"detail": ',
+            '{"error": ',
             "application/json",
-            'error 500: {"detail": ',
+            'error 500: {"error": ',
         ),
     ],
 )

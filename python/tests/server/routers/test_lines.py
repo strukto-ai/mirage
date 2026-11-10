@@ -72,7 +72,10 @@ async def test_a_line_is_listed_and_found_by_the_id_its_result_names():
             r = await client.get(
                 f"/v1/workspaces/{wid}/lines", params={"state": "lost"}
             )
-            assert r.status_code == 422
+            assert (r.status_code, r.json()["error"]["param"]) == (
+                400,
+                "state",
+            )
             r = await client.get(f"/v1/workspaces/{wid}/lines/nope")
             assert r.status_code == 404
         finally:

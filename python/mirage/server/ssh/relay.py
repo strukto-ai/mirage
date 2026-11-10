@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import json
+import logging
 import sys
 from collections.abc import Callable
 
@@ -23,9 +25,27 @@ from websockets.exceptions import ConnectionClosed, InvalidStatus
 from mirage.concurrency.limiter import run_blocking
 from mirage.server.ssh.constants import TUNNEL_CHUNK
 
+logger = logging.getLogger(__name__)
+
 
 class TunnelRefused(Exception):
     """The server would not open the tunnel."""
+
+
+def refusal_message(body: bytes | None) -> str:
+    """The message of an upgrade's error body, or the body's text when it
+    is not the server's JSON error.
+
+    Args:
+        body (bytes | None): the refusal's body.
+    """
+    text = (body or b"").decode(errors="replace").strip()
+    try:
+        error = json.loads(text)["error"]["message"]
+    except (ValueError, KeyError, TypeError) as exc:
+        logger.debug("mirage: a refusal without a JSON error: %s", exc)
+        return text
+    return error if isinstance(error, str) else text
 
 
 async def relay_ssh(url: str, headers: dict[str, str]) -> None:
@@ -50,7 +70,7 @@ async def relay_ssh(url: str, headers: dict[str, str]) -> None:
         )
     except InvalidStatus as exc:
         status = exc.response.status_code
-        detail = exc.response.body.decode(errors="replace").strip()
+        detail = refusal_message(exc.response.body)
         raise TunnelRefused(f"the server refused: {status} {detail}") from exc
 
     async def upload() -> None:
@@ -135,7 +155,7 @@ async def relay_codex(
             )
         except InvalidStatus as exc:
             status = exc.response.status_code
-            detail = exc.response.body.decode(errors="replace").strip()
+            detail = refusal_message(exc.response.body)
             print(
                 f"mirage: codex-exec: the server refused: {status} {detail}",
                 file=sys.stderr,

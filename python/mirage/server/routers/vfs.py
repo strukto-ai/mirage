@@ -16,23 +16,24 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any, NotRequired, TypedDict, cast
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.exceptions import RequestValidationError
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from mcp.server.transport_security import DEFAULT_MAX_REQUEST_BODY_SIZE
-from pydantic import ValidationError
 
-from mirage.errors.classify import classify
-from mirage.errors.types import FsCondition
 from mirage.io.stream import close_quietly
+from mirage.server.errors import (
+    ErrorCode,
+    HttpError,
+    WorkspaceMissing,
+    fs_error,
+)
 from mirage.server.io_serde import (
     CallArgsError,
     answered,
     checked,
     custom_answer,
-    failure_to_dict,
 )
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.server.vfs_calls import VFS_CALLS, VfsCall
@@ -42,71 +43,6 @@ from mirage.workspace.workspace.workspace import Session
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}")
-
-STATUS: dict[FsCondition, int] = {
-    FsCondition.ENOENT: 404,
-    FsCondition.NO_XATTR: 404,
-    FsCondition.EACCES: 403,
-    FsCondition.EPERM: 403,
-    FsCondition.EROFS: 403,
-    FsCondition.EEXIST: 409,
-    FsCondition.ENOTEMPTY: 409,
-    FsCondition.EBUSY: 409,
-    FsCondition.STALE_WRITE: 409,
-    FsCondition.ENOTDIR: 400,
-    FsCondition.EISDIR: 400,
-    FsCondition.EINVAL: 400,
-    FsCondition.EXDEV: 400,
-    FsCondition.ELOOP: 400,
-    FsCondition.ENOTSUP: 400,
-    FsCondition.EFBIG: 400,
-    FsCondition.EDQUOT: 507,
-    FsCondition.EIO: 500,
-    FsCondition.EPIPE: 500,
-    FsCondition.EBADF: 500,
-}
-
-
-class ValidationIssue(TypedDict):
-    """One field that failed validation, an entry of an
-    ``HTTPValidationError``'s ``detail``: ``loc`` says where it is, such
-    as ``("query", "stream")`` or ``("body", "command")``."""
-
-    type: str
-    loc: tuple[str | int, ...]
-    msg: str
-    input: JsonValue
-    ctx: NotRequired[dict[str, JsonValue]]
-
-
-def invalid(issues: list[ValidationIssue]) -> RequestValidationError:
-    """A 422 for fields that failed validation, answered as FastAPI
-    answers the ones it checks itself.
-
-    Args:
-        issues (list[ValidationIssue]): each field that failed.
-    """
-    return RequestValidationError(issues)
-
-
-def invalid_body(
-    exc: ValidationError, part: str | None = None
-) -> RequestValidationError:
-    """A body a route validates itself, refused as FastAPI refuses one
-    it validates: each ``loc`` starts at ``body``.
-
-    Args:
-        exc (ValidationError): the body model's failure.
-        part (str | None): the multipart part that carried the body, if
-            any, named after ``body`` in each ``loc``.
-    """
-    where = ("body",) if part is None else ("body", part)
-    return invalid(
-        [
-            cast(ValidationIssue, {**error, "loc": (*where, *error["loc"])})
-            for error in exc.errors(include_url=False)
-        ]
-    )
 
 
 def require_entry(request: Request, workspace_id: str) -> WorkspaceEntry:
@@ -118,12 +54,12 @@ def require_entry(request: Request, workspace_id: str) -> WorkspaceEntry:
         workspace_id (str): the workspace.
 
     Raises:
-        HTTPException: 404 when the caller sees no such workspace.
+        WorkspaceMissing: when the caller sees no such live workspace.
     """
     registry: WorkspaceRegistry = request.app.state.registry
     entry = registry.visible(workspace_id, request.state.account)
     if entry is None:
-        raise HTTPException(status_code=404, detail="workspace not found")
+        raise WorkspaceMissing(workspace_id)
     return entry
 
 
@@ -135,7 +71,7 @@ async def session_of(entry: WorkspaceEntry, session_id: str | None) -> Session:
         session_id (str | None): the session; None is the default.
 
     Raises:
-        HTTPException: 404 when no such session exists.
+        HttpError: 404 when no such session exists.
     """
     ws = entry.runner.ws
     if not ws.sessions_loaded:
@@ -143,7 +79,7 @@ async def session_of(entry: WorkspaceEntry, session_id: str | None) -> Session:
     if session_id and not any(
         s.session_id == session_id for s in ws.list_sessions()
     ):
-        raise HTTPException(status_code=404, detail="session not found")
+        raise HttpError(ErrorCode.NOT_FOUND, "session not found")
     return Session(ws, session_id or None)
 
 
@@ -154,23 +90,21 @@ async def json_body(request: Request) -> dict[str, JsonValue]:
         request (Request): the request.
 
     Raises:
-        HTTPException: 413 past the limit, 400 for anything but a JSON
+        HttpError: 413 past the limit, 400 for anything but a JSON
             object.
     """
     body = bytearray()
     async for chunk in request.stream():
         body += chunk
         if len(body) > DEFAULT_MAX_REQUEST_BODY_SIZE:
-            raise HTTPException(
-                status_code=413, detail="request body too large"
-            )
+            raise HttpError(ErrorCode.TOO_LARGE, "request body too large")
     try:
         parsed = json.loads(body)
     except ValueError:
         parsed = None
     if not isinstance(parsed, dict):
-        raise HTTPException(
-            status_code=400, detail="the body is a JSON object"
+        raise HttpError(
+            ErrorCode.INVALID_REQUEST, "body must be a JSON object"
         )
     return parsed
 
@@ -183,9 +117,7 @@ def failure(exc: Exception) -> JSONResponse:
     Args:
         exc (Exception): what the call raised.
     """
-    condition = classify(exc)
-    status = 500 if condition is None else STATUS[condition]
-    return JSONResponse(status_code=status, content=failure_to_dict(exc))
+    return fs_error(exc).response()
 
 
 async def streamed_read(
@@ -244,13 +176,15 @@ def vfs_route(call: VfsCall) -> Callable[..., Awaitable[Response]]:
         params = await json_body(request)
         stream = params.pop("stream", False) if call.name == "read" else False
         if not isinstance(stream, bool):
-            raise HTTPException(
-                status_code=400, detail="stream must be a boolean"
+            raise HttpError(
+                ErrorCode.INVALID_VALUE,
+                "stream must be a boolean",
+                param="stream",
             )
         try:
             args = checked(call, params)
         except CallArgsError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise exc.error() from exc
         session = await session_of(entry, session_id)
         if stream and not explain:
             return await streamed_read(entry, session, args)
@@ -288,7 +222,7 @@ async def custom_function(
     try:
         result = await entry.runner.call(custom_answer(session, name, params))
     except CallArgsError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise exc.error() from exc
     except Exception as exc:
         logger.debug("vfs/%s failed", name, exc_info=True)
         return failure(exc)

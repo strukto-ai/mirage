@@ -12,11 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from mirage.execution.machine.types import Machine, MachineState
 from mirage.execution.types import MachineId
+from mirage.server.errors import ErrorCode, HttpError, loader_error
 from mirage.server.routers.processes import ProcessResponse, to_response
 from mirage.server.routers.vfs import require_entry
 
@@ -67,7 +68,7 @@ async def get_machine(
     try:
         machine = MachineId.parse(machine_id)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise loader_error(exc) from exc
 
     async def read() -> MachineDetailResponse | None:
         found = await runner.ws.machines(machine)
@@ -81,5 +82,5 @@ async def get_machine(
 
     detail = await runner.call(read())
     if detail is None:
-        raise HTTPException(status_code=404, detail="machine not found")
+        raise HttpError(ErrorCode.NOT_FOUND, "machine not found")
     return detail

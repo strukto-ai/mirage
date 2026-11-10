@@ -26,6 +26,7 @@ from starlette.routing import Route
 from mirage.execution.line.handle import LineHandle
 from mirage.io.pipe import BytePipe
 from mirage.io.types import ByteSource
+from mirage.server.errors import ErrorCode, HttpError
 from mirage.server.inflight import InFlight
 from mirage.server.io_serde import io_result_to_dict
 from mirage.server.mcp.http import McpEndpoint
@@ -238,14 +239,14 @@ class RpcEndpoint:
                 request.state.account,
             )
         except LookupError as exc:
-            return JSONResponse({"detail": exc.args[0]}, status_code=404)
+            return HttpError(ErrorCode.NOT_FOUND, exc.args[0]).response()
         body = bytearray()
         async for chunk in request.stream():
             body += chunk
             if len(body) > DEFAULT_MAX_REQUEST_BODY_SIZE:
-                return JSONResponse(
-                    {"detail": "request body too large"}, status_code=413
-                )
+                return HttpError(
+                    ErrorCode.TOO_LARGE, "request body too large"
+                ).response()
         try:
             parsed = json.loads(body)
         except ValueError:

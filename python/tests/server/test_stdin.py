@@ -16,10 +16,10 @@ import asyncio
 import threading
 
 import pytest
-from fastapi import HTTPException
 
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.pipe import CAPACITY
+from mirage.server.errors import HttpError
 from mirage.server.stdin import LoopStdin, UploadStdin
 
 
@@ -109,9 +109,9 @@ async def test_upload_limit_rejects_input_and_discard_keeps_receiving():
     try:
         await upload.feed(b"ab")
         await upload.feed(b"cd")
-        with pytest.raises(HTTPException) as caught:
+        with pytest.raises(HttpError) as caught:
             await upload.feed(b"e")
-        assert caught.value.status_code == 413
+        assert caught.value.status == 413
         await upload.discard()
         await upload.feed(b"ignored")
         assert await upload.read() == b""

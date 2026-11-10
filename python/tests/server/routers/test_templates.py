@@ -76,11 +76,11 @@ async def test_a_template_is_saved_listed_deleted_and_restored(client):
 @pytest.mark.asyncio
 async def test_a_template_is_checked_when_saved(client):
     bad = {"name": "bad", "config": {"mounts": {"/": {"vfs": "ram"}}, "x": 1}}
-    assert (await client.post("/v1/templates", json=bad)).status_code == 422
+    assert (await client.post("/v1/templates", json=bad)).status_code == 400
     r = await client.post("/v1/templates", json={"name": "Bad", "config": RAM})
     assert r.status_code == 400
     typo = {"name": "typo", "descripton": "d", "config": RAM}
-    assert (await client.post("/v1/templates", json=typo)).status_code == 422
+    assert (await client.post("/v1/templates", json=typo)).status_code == 400
     pinned = {"name": "pinned", "config": {**RAM, "workspace_id": "one"}}
     assert (await client.post("/v1/templates", json=pinned)).status_code == 400
     unpinned = {"name": "unpinned", "config": {**RAM, "workspace_id": None}}
@@ -143,7 +143,7 @@ async def test_a_template_builds_from_a_saved_connection(
     r = await client.post("/v1/workspaces", json={"config": _named("gone")})
     assert r.status_code == 400
     assert (
-        r.json()["detail"]
+        r.json()["error"]["message"]
         == "gone is not saved as a VFS, CLI, runtime or machine"
     )
 
@@ -220,10 +220,12 @@ async def test_a_create_names_one_known_template_or_a_config(app, client):
         "/v1/workspaces", json={"template": "base", "config": RAM}
     )
     assert r.status_code == 400
-    assert r.json()["detail"] == "give a template or a config, not both"
+    assert (
+        r.json()["error"]["message"] == "give a template or a config, not both"
+    )
     assert (await client.post("/v1/workspaces", json={})).status_code == 400
     r = await client.post("/v1/workspaces", json={"template": ["base"]})
-    assert r.status_code == 422
+    assert r.status_code == 400
     await app.state.resources.put_template(
         TemplateInput(name="pinned", config={**RAM, "workspace_id": "one"})
     )

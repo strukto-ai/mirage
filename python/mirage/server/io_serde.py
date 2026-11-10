@@ -20,10 +20,7 @@ from typing import Any
 
 import jsonschema
 
-from mirage.errors.classify import classify
-from mirage.errors.posix import posix_phrase
 from mirage.io.types import IOResult
-from mirage.policy.errors import PolicyDenied
 from mirage.policy.types import (
     Ask,
     CommandExplanation,
@@ -35,6 +32,7 @@ from mirage.policy.types import (
     VfsExplanation,
 )
 from mirage.server.constants import RESERVED_KWARGS
+from mirage.server.errors import ErrorCode, HttpError, param_of
 from mirage.server.vfs_calls import BYTES, Args, VfsCall, schema_of
 from mirage.types import FileStat, JsonValue, PathSpec, Refusal
 from mirage.workspace.dispatcher.constants import CALLS
@@ -42,7 +40,22 @@ from mirage.workspace.workspace.workspace import Session
 
 
 class CallArgsError(ValueError):
-    """A VFS call's arguments do not fit its schema."""
+    """A VFS call's arguments do not fit its schema.
+
+    Args:
+        message (str): what is wrong, naming no value sent.
+        param (str | None): the argument at fault, when one is.
+    """
+
+    def __init__(self, message: str, param: str | None = None) -> None:
+        super().__init__(message)
+        self.param = param
+
+    def error(self) -> HttpError:
+        """The refusal a route answers."""
+        if self.param is None:
+            return HttpError(ErrorCode.INVALID_REQUEST, str(self))
+        return HttpError(ErrorCode.INVALID_VALUE, str(self), param=self.param)
 
 
 def refusal_to_dict(refusal: Refusal | None) -> dict[str, JsonValue] | None:
@@ -53,31 +66,6 @@ def refusal_to_dict(refusal: Refusal | None) -> dict[str, JsonValue] | None:
             refused.
     """
     return asdict(refusal) if refusal is not None else None
-
-
-def failure_to_dict(exc: Exception) -> dict[str, JsonValue]:
-    """A failed call's public detail, errno and policy refusal record.
-
-    Only named conditions have public text. Unknown exceptions may carry
-    credentials, backend responses or host paths, so keep their details
-    in the server's logs.
-
-    Args:
-        exc (Exception): what the call raised.
-    """
-    condition = classify(exc)
-    body: dict[str, JsonValue] = {
-        "detail": (
-            "internal server error"
-            if condition is None
-            else posix_phrase(condition)
-        )
-    }
-    if condition is not None:
-        body["errno"] = condition.name
-    if isinstance(exc, PolicyDenied):
-        body["refusal"] = refusal_to_dict(exc.refusal)
-    return body
 
 
 async def io_result_to_dict(result: IOResult) -> dict[str, Any]:
@@ -203,7 +191,8 @@ def checked(call: VfsCall, params: Mapping[str, JsonValue]) -> dict[str, Any]:
         jsonschema.validate(dict(params), schema_of(call))
     except jsonschema.ValidationError as exc:
         raise CallArgsError(
-            f"invalid arguments for vfs/{call.name}: {exc.message}"
+            f"arguments do not fit vfs/{call.name}'s schema",
+            param_of(list(exc.absolute_path))[0] or None,
         ) from exc
     args: dict[str, Any] = {}
     for name, value in params.items():
@@ -213,7 +202,7 @@ def checked(call: VfsCall, params: Mapping[str, JsonValue]) -> dict[str, Any]:
         try:
             args[name] = base64.b64decode(str(value), validate=True)
         except (binascii.Error, ValueError) as exc:
-            raise CallArgsError(f"{name} must be base64") from exc
+            raise CallArgsError(f"{name} must be base64", name) from exc
     return args
 
 

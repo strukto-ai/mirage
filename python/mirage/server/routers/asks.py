@@ -15,10 +15,11 @@
 import dataclasses
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
 from mirage.policy.types import Decision, Outcome, Scope
+from mirage.server.errors import ErrorCode, HttpError
 from mirage.server.routers.vfs import require_entry, session_of
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}/asks")
@@ -96,9 +97,9 @@ async def answer_ask(
         # covers() never lets a session-scoped deny answer anything: a
         # deny refuses the retry once, and asking again raises a new
         # record. Recording one would be a rule that can never speak.
-        raise HTTPException(
-            status_code=422,
-            detail="a deny answers once; asking again raises a new record",
+        raise HttpError(
+            ErrorCode.INVALID_REQUEST,
+            "a deny answers once; asking again raises a new record",
         )
     decisions = entry.runner.ws.decisions
     held = decisions.list()
@@ -107,10 +108,10 @@ async def answer_ask(
     )
     if waiting is None:
         if any(r.id == ask_id for r in held):
-            raise HTTPException(
-                status_code=409, detail=f"ask already answered: {ask_id}"
+            raise HttpError(
+                ErrorCode.CONFLICT, f"ask already answered: {ask_id}"
             )
-        raise HTTPException(status_code=404, detail="ask not found")
+        raise HttpError(ErrorCode.NOT_FOUND, "ask not found")
     outcome = Outcome.ALLOW if req.answer == "allow" else Outcome.DENY
     scope = Scope(req.scope)
     try:
@@ -120,8 +121,8 @@ async def answer_ask(
     except KeyError as exc:
         # Answered between our read and the write: the id exists but
         # nothing is waiting under it any more.
-        raise HTTPException(
-            status_code=409, detail=f"ask already answered: {ask_id}"
+        raise HttpError(
+            ErrorCode.CONFLICT, f"ask already answered: {ask_id}"
         ) from exc
     return _to_response(
         dataclasses.replace(

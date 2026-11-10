@@ -32,11 +32,11 @@ from mcp.types import (
 
 from mirage import __version__
 from mirage.core.render.json import compact_json_text
+from mirage.server.errors import fs_error
 from mirage.server.io_serde import (
     answered,
     checked,
     explanation_to_dict,
-    failure_to_dict,
 )
 from mirage.server.mcp.progress import McpToolOperations, OutputProgress
 from mirage.server.vfs_calls import VFS_CALLS, VfsCall, schema_of
@@ -327,5 +327,5 @@ class MirageMcpServer:
         except Exception as exc:
             logger.debug("mcp tool %s failed", params.name, exc_info=True)
             if params.name in VFS_TOOLS:
-                return _json(failure_to_dict(exc), True)
+                return _json(fs_error(exc).record(), True)
             return _to_mcp(ToolResult(str(exc), True))
