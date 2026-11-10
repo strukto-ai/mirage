@@ -169,6 +169,7 @@ jobs:
 
       - name: Check S3 cache test cleanup
         working-directory: python
+        shell: bash
         env:
           PYTHONASYNCIODEBUG: "1"
           PYTHONWARNINGS: always::ResourceWarning
