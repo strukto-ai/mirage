@@ -15,19 +15,4 @@
 
 import { main } from '../main.ts'
 
-const ALIASES: Record<string, string> = {
-  '--workspace_id': '--workspace',
-  '--session_id': '--session',
-}
-
-function rewriteArgv(argv: string[]): string[] {
-  return argv.map((arg) => {
-    for (const [from, to] of Object.entries(ALIASES)) {
-      if (arg === from) return to
-      if (arg.startsWith(from + '=')) return to + arg.slice(from.length)
-    }
-    return arg
-  })
-}
-
-await main(rewriteArgv(process.argv.slice(2)))
+await main(process.argv.slice(2))

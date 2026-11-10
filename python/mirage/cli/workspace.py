@@ -32,7 +32,8 @@ from mirage.cli.output import (
     handle_response,
 )
 from mirage.cli.policy import keep_policy_names
-from mirage.cli.settings import header, use_workspace
+from mirage.cli.settings import header, resolve_workspace, use_workspace
+from mirage.cli.vfs import WORKSPACE
 from mirage.utils.yaml import parse_yaml
 
 app = typer.Typer(no_args_is_help=True, help="Manage workspaces.")
@@ -283,15 +284,17 @@ def _format_machines(items: list[dict[str, Any]]) -> str:
 
 
 def _list_records(
-    workspace_id: str, kind: str, params: dict[str, str]
+    workspace_id: str | None, kind: str, params: dict[str, str]
 ) -> dict[str, Any] | list[Any]:
     """One of the workspace's record lists, by its route.
 
     Args:
-        workspace_id (str): the workspace.
+        workspace_id (str | None): the workspace; the current one when
+            None.
         kind (str): ``lines``, ``jobs``, ``processes`` or ``machines``.
         params (dict[str, str]): the list's filters.
     """
+    workspace_id = resolve_workspace(workspace_id)
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
         r = client.request(
@@ -676,9 +679,9 @@ def list_asks_cmd(
 
 @app.command("list-lines")
 def list_lines_cmd(
-    workspace_id: str = typer.Argument(..., help="Workspace id."),
+    workspace_id: str | None = WORKSPACE,
     session: str = typer.Option(
-        "", "--session", help="Only this session's lines."
+        "", "--session", "-s", help="Only this session's lines."
     ),
     state: str = typer.Option(
         "", "--state", help="Only the lines in this state."
@@ -691,9 +694,9 @@ def list_lines_cmd(
 
 @app.command("list-jobs")
 def list_jobs_cmd(
-    workspace_id: str = typer.Argument(..., help="Workspace id."),
+    workspace_id: str | None = WORKSPACE,
     session: str = typer.Option(
-        "", "--session", help="Only this session's jobs."
+        "", "--session", "-s", help="Only this session's jobs."
     ),
     state: str = typer.Option(
         "", "--state", help="Only the jobs in this state."
@@ -709,9 +712,9 @@ def list_jobs_cmd(
 
 @app.command("list-processes")
 def list_processes_cmd(
-    workspace_id: str = typer.Argument(..., help="Workspace id."),
+    workspace_id: str | None = WORKSPACE,
     session: str = typer.Option(
-        "", "--session", help="Only this session's processes."
+        "", "--session", "-s", help="Only this session's processes."
     ),
     state: str = typer.Option(
         "", "--state", help="Only the processes in this state."
@@ -743,9 +746,7 @@ def list_processes_cmd(
 
 
 @app.command("list-machines")
-def list_machines_cmd(
-    workspace_id: str = typer.Argument(..., help="Workspace id."),
-) -> None:
+def list_machines_cmd(workspace_id: str | None = WORKSPACE) -> None:
     """List the machines the workspace runs programs on, each checked now."""
     emit(_list_records(workspace_id, "machines", {}), human=_format_machines)
 

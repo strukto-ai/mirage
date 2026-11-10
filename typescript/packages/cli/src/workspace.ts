@@ -18,8 +18,9 @@ import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
 import { keepPolicyNames } from './policy.ts'
-import { header, useWorkspace } from './settings.ts'
+import { header, resolveWorkspace, useWorkspace } from './settings.ts'
 import { emit, fail, formatAge, formatTable, handleResponse } from './output.ts'
+import { WORKSPACE_FLAGS, WORKSPACE_HELP } from './vfs.ts'
 
 // A config handed to `load` or `clone`: env-interpolated, and with its
 // relative script paths and code refs rebased onto the file's directory
@@ -313,12 +314,17 @@ function formatMachines(items: MachineRecord[]): string {
   )
 }
 
-/** One of the workspace's record lists, by its route: `lines`, `jobs`, `processes` or `machines`. */
+/**
+ * One of the workspace's record lists, by its route: `lines`, `jobs`,
+ * `processes` or `machines`. The workspace is the current one when `id` is
+ * undefined.
+ */
 async function listRecords(
-  id: string,
+  id: string | undefined,
   kind: string,
   filters: Record<string, string | undefined>,
 ): Promise<unknown> {
+  const workspace = resolveWorkspace(id)
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(filters))
     if (value !== undefined && value !== '') params.set(key, value)
@@ -327,7 +333,7 @@ async function listRecords(
   const qs = params.toString()
   const r = await c.request(
     'GET',
-    `/v1/workspaces/${encodeURIComponent(id)}/${kind}${qs === '' ? '' : `?${qs}`}`,
+    `/v1/workspaces/${encodeURIComponent(workspace)}/${kind}${qs === '' ? '' : `?${qs}`}`,
   )
   return handleResponse(r)
 }
@@ -587,43 +593,52 @@ export function registerWorkspaceCommands(program: Command): Command {
 
   ws.command('list-lines')
     .description('List the lines the workspace keeps: running and newest ended.')
-    .argument('<id>')
-    .option('--session <sessionId>', "Only this session's lines")
+    .option(WORKSPACE_FLAGS, WORKSPACE_HELP)
+    .option('-s, --session <id>', "Only this session's lines")
     .option('--state <state>', 'Only the lines in this state')
-    .action(async (id: string, opts: { session?: string; state?: string }) => {
-      const found = await listRecords(id, 'lines', { session_id: opts.session, state: opts.state })
+    .action(async (opts: { workspace?: string; session?: string; state?: string }) => {
+      const found = await listRecords(opts.workspace, 'lines', {
+        session_id: opts.session,
+        state: opts.state,
+      })
       emit(found as LineRecord[], formatLines)
     })
 
   ws.command('list-jobs')
     .description("List the workspace's jobs, as each session's jobs shows them.")
-    .argument('<id>')
-    .option('--session <sessionId>', "Only this session's jobs")
+    .option(WORKSPACE_FLAGS, WORKSPACE_HELP)
+    .option('-s, --session <id>', "Only this session's jobs")
     .option('--state <state>', 'Only the jobs in this state')
     .option('--line <lineId>', 'Only the jobs this line started')
-    .action(async (id: string, opts: { session?: string; state?: string; line?: string }) => {
-      const found = await listRecords(id, 'jobs', {
-        session_id: opts.session,
-        state: opts.state,
-        line_id: opts.line,
-      })
-      emit(found as JobRecord[], formatJobs)
-    })
+    .action(
+      async (opts: { workspace?: string; session?: string; state?: string; line?: string }) => {
+        const found = await listRecords(opts.workspace, 'jobs', {
+          session_id: opts.session,
+          state: opts.state,
+          line_id: opts.line,
+        })
+        emit(found as JobRecord[], formatJobs)
+      },
+    )
 
   ws.command('list-processes')
     .description('List the processes the workspace keeps: live and newest ended.')
-    .argument('<id>')
-    .option('--session <sessionId>', "Only this session's processes")
+    .option(WORKSPACE_FLAGS, WORKSPACE_HELP)
+    .option('-s, --session <id>', "Only this session's processes")
     .option('--state <state>', 'Only the processes in this state')
     .option('--line <lineId>', 'Only the processes this line ran')
     .option('--job <jobId>', 'Only the processes this job ran')
     .option('--machine <machine>', 'Only the processes run on this machine (provider:name)')
     .action(
-      async (
-        id: string,
-        opts: { session?: string; state?: string; line?: string; job?: string; machine?: string },
-      ) => {
-        const found = await listRecords(id, 'processes', {
+      async (opts: {
+        workspace?: string
+        session?: string
+        state?: string
+        line?: string
+        job?: string
+        machine?: string
+      }) => {
+        const found = await listRecords(opts.workspace, 'processes', {
           session_id: opts.session,
           state: opts.state,
           line_id: opts.line,
@@ -636,9 +651,9 @@ export function registerWorkspaceCommands(program: Command): Command {
 
   ws.command('list-machines')
     .description('List the machines the workspace runs programs on, each checked now.')
-    .argument('<id>')
-    .action(async (id: string) => {
-      emit((await listRecords(id, 'machines', {})) as MachineRecord[], formatMachines)
+    .option(WORKSPACE_FLAGS, WORKSPACE_HELP)
+    .action(async (opts: { workspace?: string }) => {
+      emit((await listRecords(opts.workspace, 'machines', {})) as MachineRecord[], formatMachines)
     })
 
   ws.command('allow')

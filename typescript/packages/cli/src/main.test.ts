@@ -12,8 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildProgram } from './main.ts'
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 describe('mirage CLI program', () => {
   it('registers expected subcommands', () => {
@@ -84,5 +88,26 @@ describe('mirage CLI program', () => {
     const d = program.commands.find((c) => c.name() === 'daemon')
     const sub = d?.commands.map((c) => c.name()).sort() ?? []
     expect(sub).toEqual(['config', 'kill', 'restart', 'status', 'stop'].sort())
+  })
+
+  it.each([
+    [['shell', '-c', 'true', '--workspace_id', 'w'], "unknown option '--workspace_id'"],
+    [['shell', '-c', 'true', '--session_id', 's'], "unknown option '--session_id'"],
+    [['workspace', 'vfs', 'stat', '/', '--workspace_id', 'w'], "unknown option '--workspace_id'"],
+    [['workspace', 'session', 'list', '--workspace_id', 'w'], "unknown option '--workspace_id'"],
+    [['mcp', '--session_id', 's'], "unknown option '--session_id'"],
+    [['workspace', 'list-lines', 'w'], 'too many arguments'],
+    [['workspace', 'list-machines', 'w'], 'too many arguments'],
+  ])('refuses %j as a usage error with exit 2', async (args, said) => {
+    vi.spyOn(process, 'exit').mockImplementation((code) => {
+      throw new Error(`exit ${String(code)}`)
+    })
+    const err: string[] = []
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      err.push(String(chunk))
+      return true
+    })
+    await expect(buildProgram().parseAsync(args, { from: 'user' })).rejects.toThrow('exit 2')
+    expect(err.join('')).toContain(said)
   })
 })

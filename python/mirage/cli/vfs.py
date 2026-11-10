@@ -42,14 +42,11 @@ app = typer.Typer(
 
 WORKSPACE = typer.Option(
     None,
-    "--workspace_id",
     "--workspace",
     "-w",
     help="Workspace id; the current workspace when left out.",
 )
-SESSION = typer.Option(
-    None, "--session_id", "--session", "-s", help="Session id."
-)
+SESSION = typer.Option(None, "--session", "-s", help="Session id.")
 EXPLAIN = typer.Option(
     False, "--explain", help="Say what the call would do; run nothing."
 )

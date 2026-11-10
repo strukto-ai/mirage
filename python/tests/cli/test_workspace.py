@@ -369,31 +369,49 @@ def test_close_cancel_and_kill_are_not_workspace_commands(fake, gone):
     ("args", "path", "params"),
     [
         (
-            ("list-lines", "w", "--state", "running"),
+            ("list-lines", "-w", "w", "--state", "running"),
             "/v1/workspaces/w/lines",
             {"state": "running"},
         ),
         (
-            ("list-jobs", "w", "--session", "s1"),
+            ("list-jobs", "-w", "w", "-s", "s1"),
             "/v1/workspaces/w/jobs",
             {"session_id": "s1"},
         ),
         (
-            ("list-jobs", "w", "--line", "line_1"),
+            ("list-jobs", "--workspace", "w", "--line", "line_1"),
             "/v1/workspaces/w/jobs",
             {"line_id": "line_1"},
         ),
         (
-            ("list-processes", "w", "--line", "line_1", "--state", "exited"),
+            (
+                "list-processes",
+                "-w",
+                "w",
+                "--line",
+                "line_1",
+                "--state",
+                "exited",
+            ),
             "/v1/workspaces/w/processes",
             {"state": "exited", "line_id": "line_1"},
         ),
         (
-            ("list-processes", "w", "--job", "j1", "--machine", "docker:t"),
+            (
+                "list-processes",
+                "-w",
+                "w",
+                "--session",
+                "s1",
+                "--job",
+                "j1",
+                "--machine",
+                "docker:t",
+            ),
             "/v1/workspaces/w/processes",
-            {"job_id": "j1", "machine": "docker:t"},
+            {"session_id": "s1", "job_id": "j1", "machine": "docker:t"},
         ),
-        (("list-machines", "w"), "/v1/workspaces/w/machines", {}),
+        (("list-machines", "-w", "w"), "/v1/workspaces/w/machines", {}),
     ],
 )
 def test_a_record_list_asks_for_what_its_options_name(
@@ -404,6 +422,26 @@ def test_a_record_list_asks_for_what_its_options_name(
     assert result.exit_code == 0, result.output
     method, called, kwargs = fake.calls[0]
     assert (method, called, kwargs["params"]) == ("GET", path, params)
+
+
+@pytest.mark.parametrize(
+    "verb", ["list-lines", "list-jobs", "list-processes", "list-machines"]
+)
+def test_a_record_list_reads_the_current_workspace(fake, monkeypatch, verb):
+    monkeypatch.setenv("MIRAGE_WORKSPACE", "cur")
+    fake.answer = _FakeResponse(200, b"[]")
+    result = _invoke(verb)
+    assert result.exit_code == 0, result.output
+    assert fake.calls[0][1].startswith("/v1/workspaces/cur/")
+
+
+@pytest.mark.parametrize(
+    "verb", ["list-lines", "list-jobs", "list-processes", "list-machines"]
+)
+def test_a_record_list_takes_no_workspace_operand(fake, home, verb):
+    assert _invoke(verb, "w").exit_code == 2
+    assert _invoke(verb).exit_code == 2
+    assert fake.calls == []
 
 
 def test_processes_read_as_one_row_per_process():

@@ -24,7 +24,7 @@ import typer
 from mirage.cli.client import make_client
 from mirage.cli.output import emit, fail
 from mirage.cli.settings import resolve_workspace
-from mirage.cli.vfs import WORKSPACE, answer, post
+from mirage.cli.vfs import SESSION, WORKSPACE, answer, post
 
 app = typer.Typer(
     invoke_without_command=True, help="Run a shell line in a workspace."
@@ -51,9 +51,7 @@ def shell_cmd(
     command: str = typer.Option(
         ..., "--command", "-c", help="Shell line to run."
     ),
-    session_id: str | None = typer.Option(
-        None, "--session_id", "--session", "-s", help="Session id."
-    ),
+    session_id: str | None = SESSION,
     cwd: str | None = typer.Option(
         None,
         "--cwd",
@@ -71,6 +69,11 @@ def shell_cmd(
         help="Machine to run this line's captured stages on, by its "
         "name under machines:.",
     ),
+    no_record: bool = typer.Option(
+        False,
+        "--no-record",
+        help="Keep this line out of the session's history.",
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -87,6 +90,7 @@ def shell_cmd(
     Foreground output streams to stdout and stderr as bytes. ``--json``
     collects those same streams into the final result. Piped input uploads
     concurrently in either mode. Ctrl-C cancels the request and exits 130.
+    ``--no-record`` keeps the line out of the session's history.
     ``--explain`` describes the line without running it.
     """
     workspace_id = resolve_workspace(workspace_id)
@@ -98,6 +102,8 @@ def shell_cmd(
         payload["runtime"] = runtime
     if machine:
         payload["machine"] = machine
+    if no_record:
+        payload["record"] = False
     if explain:
         said = answer(post(workspace_id, "shell", payload, session_id, True))
         emit(said, human=None if json_output else _format_explanation)

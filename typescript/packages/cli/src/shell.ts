@@ -88,7 +88,8 @@ function explainedLines(node: ExplainedNode, depth: number, out: string[]): void
  * Run a shell line with raw stdout and stderr streamed as bytes. `--json`
  * collects the same streams into the final result. Piped stdin uploads
  * concurrently in either mode, and Ctrl-C cancels the request with exit130.
- * `--explain` runs nothing.
+ * `--no-record` keeps the line out of the session's history. `--explain`
+ * runs nothing.
  */
 export function registerShellCommand(parent: Command): void {
   parent
@@ -103,6 +104,7 @@ export function registerShellCommand(parent: Command): void {
       '--machine <name>',
       "Machine to run this line's captured stages on, by its name under machines:",
     )
+    .option('--no-record', "Keep this line out of the session's history")
     .option('--json', 'Collect output and print the final result as JSON')
     .option('--explain', 'Say what the line would do, as a tree; run nothing')
     .action(
@@ -113,6 +115,7 @@ export function registerShellCommand(parent: Command): void {
         cwd?: string
         runtime?: string
         machine?: string
+        record: boolean
         explain?: boolean
         json?: boolean
       }) => {
@@ -121,6 +124,7 @@ export function registerShellCommand(parent: Command): void {
         if (opts.cwd !== undefined) body.cwd = opts.cwd
         if (opts.runtime !== undefined) body.runtime = opts.runtime
         if (opts.machine !== undefined) body.machine = opts.machine
+        if (!opts.record) body.record = false
         if (opts.explain === true) {
           const said = await answer(await post({ ...opts, workspace }, 'shell', body))
           emit(said as ExplanationRecord, opts.json === true ? undefined : formatExplanation)

@@ -135,6 +135,7 @@ options.
 | `--cwd PATH` | Run the line in this directory. |
 | `--runtime NAME` | Run its programs on this [runtime](/home/setup/runtime/overview). |
 | `--machine NAME` | Run its programs on this [machine](/home/setup/machine/overview). |
+| `--no-record` | Keep the line out of the session's [history](/home/infrastructure/history). |
 | `--json` | Print one `{exit_code, stdout, stderr, refusal}` result instead of streaming. |
 
 - Output streams as raw bytes as it arrives, and piped stdin streams in, so a
@@ -291,10 +292,13 @@ name the daemon has no saved policy for is read as a file too.
 
 | Command | Does |
 | --- | --- |
-| `mirage workspace list-lines ID [--session S] [--state STATE]` | List the lines the workspace keeps. |
-| `mirage workspace list-jobs ID [--session S] [--state STATE] [--line LINE]` | List its jobs. |
-| `mirage workspace list-processes ID [--session S] [--state STATE] [--line LINE] [--job JOB] [--machine M]` | List its processes. |
-| `mirage workspace list-machines ID` | Check each [machine](/home/setup/machine/overview#machine-states) it runs programs on, and print its state. |
+| `mirage workspace list-lines [-s S] [--state STATE]` | List the lines the workspace keeps. |
+| `mirage workspace list-jobs [-s S] [--state STATE] [--line LINE]` | List its jobs. |
+| `mirage workspace list-processes [-s S] [--state STATE] [--line LINE] [--job JOB] [--machine M]` | List its processes. |
+| `mirage workspace list-machines` | Check each [machine](/home/setup/machine/overview#machine-states) it runs programs on, and print its state. |
+
+Each takes `-w ID`, else the current workspace, as `shell` and `vfs` do.
+`-s` keeps only that session's records.
 
 ## Saved connections
 

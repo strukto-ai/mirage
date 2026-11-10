@@ -129,6 +129,39 @@ def test_a_line_may_name_its_machine(monkeypatch):
     assert calls == [{"command": "train", "machine": "gpu"}]
 
 
+@pytest.mark.parametrize(
+    ("flags", "body"),
+    [
+        ([], {"command": "env"}),
+        (["--no-record"], {"command": "env", "record": False}),
+    ],
+)
+def test_no_record_keeps_the_line_out_of_history(monkeypatch, flags, body):
+    calls = []
+
+    async def run(client, path, payload, piped, *, json_output):
+        calls.append(payload)
+        return 0
+
+    monkeypatch.setattr(shell, "make_client", _Client)
+    monkeypatch.setattr(
+        shell,
+        "sys",
+        SimpleNamespace(stdin=SimpleNamespace(isatty=lambda: True)),
+    )
+    monkeypatch.setattr(stream, "stream_shell", run)
+    args = ["-w", "w", "-c", "env", *flags]
+    assert CliRunner().invoke(shell.app, args).exit_code == 0
+    assert calls == [body]
+
+
+@pytest.mark.parametrize("flag", ["--workspace_id", "--session_id"])
+def test_the_snake_case_spellings_are_usage_errors(flag):
+    result = CliRunner().invoke(shell.app, ["-c", "true", flag, "x"])
+    assert result.exit_code == 2
+    assert "No such option" in result.stderr
+
+
 def _command(
     text: str, outcome: str, reason: str = "", exit_code: int = 0
 ) -> dict[str, Any]:
