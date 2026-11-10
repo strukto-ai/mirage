@@ -16,6 +16,13 @@ pnpm add -D tsx typescript
 
 `npm install @struktoai/mirage-node` and `yarn add @struktoai/mirage-node` work too.
 
+The packages require ECMAScript modules (ESM). In the same directory,
+set `"type": "module"` in your `package.json`:
+
+```bash
+npm pkg set type=module
+```
+
 ## Create a Workspace
 
 Start with the RAM VFS so you can try Mirage without credentials.

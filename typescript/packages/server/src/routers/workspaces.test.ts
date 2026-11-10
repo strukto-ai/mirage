@@ -799,15 +799,51 @@ describe('workspaces router', () => {
     await app.close()
   })
 
-  it('POST /v1/workspaces returns 400 for missing mounts', async () => {
+  it.each([
+    { mounts: false, extra: false },
+    { mounts: true, extra: true },
+    { mounts: false, extra: true },
+  ])('POST /v1/workspaces validates config $mounts/$extra', async ({ mounts, extra }) => {
     const app = buildApp()
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/workspaces',
-      payload: { config: {} },
-    })
-    expect(res.statusCode).toBe(400)
-    await app.close()
+    const config = {
+      ...(mounts ? { mounts: {} } : {}),
+      ...(extra ? { unknown_setting: true } : {}),
+    }
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: { id: 'bad', config },
+      })
+      expect(res.statusCode).toBe(422)
+      expect(res.json()).toEqual({
+        detail: [
+          ...(!mounts
+            ? [
+                {
+                  type: 'missing',
+                  loc: ['body', 'config', 'mounts'],
+                  msg: 'Field required',
+                  input: config,
+                },
+              ]
+            : []),
+          ...(extra
+            ? [
+                {
+                  type: 'extra_forbidden',
+                  loc: ['body', 'config', 'unknown_setting'],
+                  msg: 'Extra inputs are not permitted',
+                  input: true,
+                },
+              ]
+            : []),
+        ],
+      })
+      expect(app.registry.has('bad')).toBe(false)
+    } finally {
+      await app.close()
+    }
   })
 
   it('POST /v1/workspaces returns 502 when VFS build fails', async () => {
@@ -1283,7 +1319,17 @@ describe('workspaces router', () => {
         url: '/v1/workspaces',
         payload: { config: '/etc/passwd' },
       })
-      expect(res.statusCode).toBe(400)
+      expect(res.statusCode).toBe(422)
+      expect(res.json()).toEqual({
+        detail: [
+          {
+            type: 'model_attributes_type',
+            loc: ['body', 'config'],
+            msg: 'Input should be a valid dictionary or object to extract fields from',
+            input: '/etc/passwd',
+          },
+        ],
+      })
     } finally {
       await app.close().catch(() => undefined)
     }

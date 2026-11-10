@@ -601,6 +601,9 @@
    }
   },
   "server/schemas": {
+   "typescript_only": {
+    "ConfigValidationError": "FastAPI raises RequestValidationError for a request config before routing; Fastify needs a typed boundary to separate schema validation from operator-policy refusals."
+   },
    "python_only": {
     "CancelLinesResponse": "A pydantic response model FastAPI validates the route's answer against; the Fastify route returns the same object literal.",
     "KillJobsResponse": "A pydantic response model FastAPI validates the route's answer against; the Fastify route returns the same object literal.",

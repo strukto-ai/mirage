@@ -74,6 +74,82 @@
    }
   }
  },
+ "invalid_workspace_configs": [
+   {
+     "id": "missing_mounts",
+     "config": {},
+     "expect": {
+       "status": 422,
+       "detail": [
+         {
+           "type": "missing",
+           "loc": [
+             "body",
+             "config",
+             "mounts"
+           ],
+           "msg": "Field required",
+           "input": {}
+         }
+       ]
+     }
+   },
+   {
+     "id": "unknown_key",
+     "config": {
+       "mounts": {},
+       "unknown_setting": true
+     },
+     "expect": {
+       "status": 422,
+       "detail": [
+         {
+           "type": "extra_forbidden",
+           "loc": [
+             "body",
+             "config",
+             "unknown_setting"
+           ],
+           "msg": "Extra inputs are not permitted",
+           "input": true
+         }
+       ]
+     }
+   },
+   {
+     "id": "missing_mounts_and_unknown_key",
+     "config": {
+       "unknown_setting": true
+     },
+     "expect": {
+       "status": 422,
+       "detail": [
+         {
+           "type": "missing",
+           "loc": [
+             "body",
+             "config",
+             "mounts"
+           ],
+           "msg": "Field required",
+           "input": {
+             "unknown_setting": true
+           }
+         },
+         {
+           "type": "extra_forbidden",
+           "loc": [
+             "body",
+             "config",
+             "unknown_setting"
+           ],
+           "msg": "Extra inputs are not permitted",
+           "input": true
+         }
+       ]
+     }
+   }
+ ],
  "suites": [
   {
    "id": "shell",

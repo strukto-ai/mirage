@@ -15,6 +15,13 @@ pnpm add @struktoai/mirage-node
 
 This ships the base runtime (Workspace, RAM VFS, Disk VFS, the shell executor) and is enough to follow the [TypeScript Quickstart](/typescript/quickstart).
 
+The packages use ECMAScript modules (ESM). In your application directory,
+set `"type": "module"` in `package.json` before importing them:
+
+```bash
+npm pkg set type=module
+```
+
 `npm install` and `yarn add` work identically; examples below use pnpm because the FUSE binding's install script needs pnpm's `onlyBuiltDependencies` allow-list.
 
 ## Optional Peer Dependencies

@@ -735,6 +735,20 @@ async def server_checks(server: Server, report: Report) -> None:
             want["unknown_host"],
         )
         auth = {"Authorization": f"Bearer {d.bearer()}"}
+        for case in CASES["invalid_workspace_configs"]:
+            reply = await http.post(
+                "/v1/workspaces",
+                headers=auth,
+                json={"id": "bad", "config": case["config"]},
+            )
+            report.check(
+                f"{server.key} server.invalid_config.{case['id']}",
+                {
+                    "status": reply.status_code,
+                    "detail": reply.json()["detail"],
+                },
+                case["expect"],
+            )
         mcp = f"/v1/workspaces/{SEED}/mcp"
         got = {}
         for method in ("GET", "DELETE"):

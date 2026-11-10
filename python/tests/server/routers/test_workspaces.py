@@ -123,6 +123,46 @@ def _make_app_with_short_grace(grace: float = 0.2):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mounts,extra", [(False, False), (True, True), (False, True)]
+)
+async def test_create_validates_config(mounts, extra):
+    app, _ = _make_app_with_short_grace(grace=10.0)
+    config = {
+        **({"mounts": {}} if mounts else {}),
+        **({"unknown_setting": True} if extra else {}),
+    }
+    detail = []
+    if not mounts:
+        detail.append(
+            {
+                "type": "missing",
+                "loc": ["body", "config", "mounts"],
+                "msg": "Field required",
+                "input": config,
+            }
+        )
+    if extra:
+        detail.append(
+            {
+                "type": "extra_forbidden",
+                "loc": ["body", "config", "unknown_setting"],
+                "msg": "Extra inputs are not permitted",
+                "input": True,
+            }
+        )
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        r = await client.post(
+            "/v1/workspaces", json={"id": "bad", "config": config}
+        )
+        assert r.status_code == 422, r.text
+        assert r.json() == {"detail": detail}
+        assert "bad" not in app.state.registry
+
+
+@pytest.mark.asyncio
 async def test_create_list_get_delete_round_trip():
     app, _ = _make_app_with_short_grace(grace=10.0)
     transport = ASGITransport(app=app)

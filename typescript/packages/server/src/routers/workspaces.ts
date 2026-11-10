@@ -52,6 +52,7 @@ import { MAX_REQUEST_PART, MAX_SNAPSHOT_PART, MultipartError, partEvents } from 
 import { Claim, Forget, type WorkspaceRegistry } from '../registry.ts'
 import {
   checkConfig,
+  ConfigValidationError,
   SnapshotWorkspaceRequest,
   type CloneWorkspaceRequest,
   type CreateWorkspaceRequest,
@@ -86,7 +87,10 @@ async function configOf(
   registry: WorkspaceRegistry,
 ): Promise<
   | { cfg: WorkspaceConfigRaw; written: Record<string, JsonValue> }
-  | { status: number; detail: string }
+  | {
+      status: number
+      detail: string | ConfigValidationError['detail']
+    }
 > {
   const given = body.config ?? undefined
   let written: unknown = given
@@ -110,7 +114,11 @@ async function configOf(
   try {
     cfg = checkConfig(written)
   } catch (e) {
-    return { status: 400, detail: (e as Error).message }
+    if (body.template === undefined && e instanceof ConfigValidationError) {
+      return { status: 422, detail: e.detail }
+    }
+    if (!(e instanceof Error)) throw e
+    return { status: 400, detail: e.message }
   }
   if (body.template !== undefined && (cfg.workspaceId ?? null) !== null) {
     return { status: 400, detail: NO_WORKSPACE_ID }

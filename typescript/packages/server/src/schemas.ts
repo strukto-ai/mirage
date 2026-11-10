@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { loadWorkspaceConfig, type WorkspaceConfigRaw } from '@struktoai/mirage-core/config'
+import { validateDocument } from '@struktoai/mirage-core/rs/document'
+import { isPlainObject } from '@struktoai/mirage-core/utils/records'
 import type { JsonValue, MountBackend } from '@struktoai/mirage-core/types'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { OverrideShape } from './clone.ts'
@@ -64,16 +66,75 @@ export interface CreateWorkspaceRequest {
   id?: string
 }
 
+/** A request config rejected by its schema, before operator-only runtime checks. */
+export class ConfigValidationError extends Error {
+  readonly detail: { type: string; loc: string[]; msg: string; input: unknown }[] = []
+
+  constructor(config: unknown, cause: Error) {
+    super(cause.message, { cause })
+    if (!isPlainObject(config)) {
+      this.detail.push({
+        type: 'model_attributes_type',
+        loc: ['body', 'config'],
+        msg: 'Input should be a valid dictionary or object to extract fields from',
+        input: config,
+      })
+      return
+    }
+    if (!Object.hasOwn(config, 'mounts')) {
+      this.detail.push({
+        type: 'missing',
+        loc: ['body', 'config', 'mounts'],
+        msg: 'Field required',
+        input: config,
+      })
+    } else if (!isPlainObject(config.mounts)) {
+      this.detail.push({
+        type: 'dict_type',
+        loc: ['body', 'config', 'mounts'],
+        msg: 'Input should be a valid dictionary',
+        input: config.mounts,
+      })
+    }
+    // The shared engine checks allowed keys without running field validators.
+    for (const [key, value] of Object.entries(config)) {
+      try {
+        validateDocument('config', { [key]: value }, 'config')
+      } catch (error) {
+        if (!(error instanceof Error)) throw error
+        this.detail.push({
+          type: 'extra_forbidden',
+          loc: ['body', 'config', key],
+          msg: 'Extra inputs are not permitted',
+          input: value,
+        })
+      }
+    }
+    if (this.detail.length === 0) {
+      this.detail.push({
+        type: 'value_error',
+        loc: ['body', 'config'],
+        msg: cause.message,
+        input: config,
+      })
+    }
+  }
+}
+
 /**
  * A workspace config checked as a create checks one, taken as written: the
  * caller's CLI expanded its `${VAR}` in the caller's env, and the server's
  * env is not a tenant's to read. Throws an Error naming what is wrong.
  */
 export function checkConfig(config: unknown): WorkspaceConfigRaw {
-  if (config === null || typeof config !== 'object' || Array.isArray(config)) {
-    throw new Error('config must be a mapping')
+  let cfg: WorkspaceConfigRaw
+  try {
+    if (!isPlainObject(config)) throw new Error('config must be a mapping')
+    cfg = loadWorkspaceConfig(config, null)
+  } catch (error) {
+    if (!(error instanceof Error)) throw error
+    throw new ConfigValidationError(config, error)
   }
-  const cfg = loadWorkspaceConfig(config as Record<string, unknown>, null)
   for (const entry of cfg.runtimes ?? []) {
     if (typeof entry === 'string') continue
     const runtimeConfig = entry.config
