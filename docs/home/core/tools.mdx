@@ -12,22 +12,22 @@ Tables list common supported flags; use `man COMMAND` or `COMMAND --help` for th
 
 | Command | Purpose | Common flags |
 | --- | --- | --- |
-| `ls` | List entries | `-l`, `-a`, `-A`, `-h`, `-R`, `-d`, `-t`, `-S`, `-r`, `-F`, `-L`, `--sort` |
+| `ls` | List entries | `-l`, `-a`, `-A`, `-h`, `-R`, `-d`, `-t`, `-S`, `-r`, `-F`, `-L`, `--sort`, `--zero`, `--author`, `-D` |
 | `dir`, `vdir` | `ls` in columns or in long format, with names escaped | The options of `ls` |
 | `stat` | Show metadata | `-c FORMAT`, `-f`, `-L` |
-| `tree` | Show a directory tree | `-a`, `-d`, `-L DEPTH`, `-I PATTERN`, `-P PATTERN`, `-x` |
-| `du` | Count file and directory bytes | `-h`, `-s`, `-a`, `-d DEPTH`, `-c`, `-L`, `-S`, `-x` |
+| `tree` | Show a directory tree | `-a`, `-d`, `-l`, `-L DEPTH`, `-I PATTERN`, `-P PATTERN`, `-x`, `-Q`, `-N`, `-q`, `-A`, `-u`, `-g`, `-c`, `-o FILE`, `--si`, `--timefmt`, `--filesfirst`, `--ignore-case`, `--matchdirs`, `--inodes` |
+| `du` | Count file and directory bytes | `-h`, `-s`, `-a`, `-d DEPTH`, `-c`, `-L`, `-S`, `-x`, `--files0-from FILE` |
 | `df` | Show mount capacity, when available | `-h`, `-H`, `-k`, `-i`, `-a`, `-T`, `-P`, `-B SIZE` |
 | `mount` | List configured mounts | `-l`, `-t TYPES` |
 | `file` | Identify content type | `-b`, `-i`, `-L`, `-h` |
 | `mkdir` | Create directories | `-p`, `-v`, `-m MODE` |
 | `touch` | Create files or update timestamps | `-a`, `-m`, `-c`, `-d DATE`, `-r FILE`, `-t TIME`, `-h` |
-| `cp` | Copy files or directories, including across mounts | `-r`, `-R`, `-a`, `-L`, `-P`, `-n`, `-u`, `-v`, `-t DIR`, `-T`, `-b`, `-x` |
+| `cp` | Copy files or directories, including across mounts | `-r`, `-R`, `-a`, `-L`, `-P`, `-n`, `-u`, `-v`, `-t DIR`, `-T`, `-b`, `-x`, `--debug` |
 | `mv` | Move or rename entries | `-f`, `-n`, `-u`, `-v`, `-t DIR`, `-T`, `-b`, `--no-copy`, `--exchange` |
 | `rm` | Remove entries | `-r`, `-R`, `-f`, `-v`, `-d`, `--one-file-system` |
 | `rmdir` | Remove empty directories | `-p`, `-v`, `--ignore-fail-on-non-empty` |
 | `unlink` | Remove one entry | No command-specific flags |
-| `truncate` | Resize a file | `-s SIZE`, `-c` |
+| `truncate` | Resize a file | `-s SIZE`, `-c`, `-o` |
 | `mktemp` | Create a temporary file or directory | `-d`, `-p DIR`, `--tmpdir`, `--suffix`, `-u`, `-q` |
 | `ln` | Create a symbolic link or copy a file's bytes | `-s`, `-r`, `-f`, `-n`, `-t DIR`, `-T`, `-b` |
 | `link` | Copy a file's bytes to a new name | No command-specific flags |
@@ -45,7 +45,7 @@ Tables list common supported flags; use `man COMMAND` or `COMMAND --help` for th
 
 | Command | Purpose | Common flags |
 | --- | --- | --- |
-| `find` | Select paths and run actions | `-name`, `-iname`, `-path`, `-type`, `-size`, `-mtime`, `-newer`, `-newermt`, `-empty`, `-mindepth`, `-maxdepth`, `-print0`, `-printf`, `-delete`, `-exec`, `-prune`, `-ls`, `-L`, `-xdev` |
+| `find` | Select paths and run actions | `-name`, `-iname`, `-path`, `-type`, `-size`, `-mtime`, `-newer`, `-anewer`, `-cnewer`, `-newermt`, `-used`, `-inum`, `-fstype`, `-fls`, `-empty`, `-mindepth`, `-maxdepth`, `-print0`, `-printf`, `-delete`, `-exec`, `-prune`, `-ls`, `-L`, `-xdev` |
 | `grep` | Search lines | `-E`, `-F`, `-G`, `-P`, `-i`, `-v`, `-n`, `-r`, `-R`, `-l`, `-c`, `-o`, `-q`, `-e`, `-f`, `-A`, `-B`, `-C`, `--include`, `--exclude` |
 | `rg` | Search recursively with path filters | `-i`, `-S`, `-F`, `-n`, `-l`, `-c`, `-g`, `-t`, `-T`, `--hidden`, `--files`, `--json`, `-U`, `-P`, `-z`, `--pre` |
 | `search` | Search through a backend's search capability | `--method`, `--top-k`, `--threshold` |

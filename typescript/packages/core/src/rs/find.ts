@@ -307,6 +307,7 @@ interface Binding {
   readonly utf8: boolean
   readonly profile: string | null
   window: Bounds | null
+  readonly fsType: string | null
 }
 
 function permBits(bits: string): 'exact' | 'all' | 'any' {
@@ -314,8 +315,8 @@ function permBits(bits: string): 'exact' | 'all' | 'any' {
   throw new TypeError(`find: mirage-rs answered the -perm kind ${JSON.stringify(bits)}`)
 }
 
-function countField(name: string): 'links' | 'uid' | 'gid' {
-  if (name === 'links' || name === 'uid' || name === 'gid') return name
+function countField(name: string): 'links' | 'uid' | 'gid' | 'inum' {
+  if (name === 'links' || name === 'uid' || name === 'gid' || name === 'inum') return name
   throw new TypeError(`find: mirage-rs answered the count ${JSON.stringify(name)}`)
 }
 
@@ -371,12 +372,19 @@ function node(raw: Obj, binding: Binding, top = true): PredNode {
         bits: permBits(str(raw.bits)),
       }
     case 'count':
+      if (str(raw.field) === 'used') {
+        return { op: 'used', cmp: cmp(str(raw.cmp)), days: int(raw.count) }
+      }
       return {
         op: 'count',
         field: countField(str(raw.field)),
         cmp: cmp(str(raw.cmp)),
         count: int(raw.count),
       }
+    case 'fstype':
+      return textView(str(raw.name)) === binding.fsType
+        ? { op: 'true' }
+        : { op: 'not', kid: { op: 'true' } }
     case 'owner':
       return {
         op: 'owner',
@@ -424,6 +432,8 @@ function timeNode(op: string, raw: Obj, binding: Binding, top: boolean): PredNod
   } else if (op === 'newermt') {
     bounds = [strictlyAfter(parseNewermt(textView(str(raw.date)))), null]
   } else {
+    if (op === 'anewer') field = 'a'
+    else if (op === 'cnewer') field = 'c'
     const ref = binding.refs[int(raw.index)]
     if (ref === undefined) return { op: 'true' }
     bounds = [strictlyAfter(ref), null]
@@ -491,6 +501,7 @@ export class FindParse {
     now: number = systemNow(),
     env: Readonly<Record<string, string>> | null = null,
     profile: string | null = null,
+    fsType: string | null = null,
   ): FindExpr {
     const binding: Binding = {
       refs: newerTimes,
@@ -499,6 +510,7 @@ export class FindParse {
       utf8: utf8Locale(env ?? undefined),
       profile,
       window: null,
+      fsType,
     }
     const tree = node(object(this.values.tree), binding)
     const [mtimeMin, mtimeMax] = binding.window ?? [null, null]

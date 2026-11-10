@@ -390,10 +390,13 @@ async def _bound_find(
                 return _failed(cmd_str, 1, ref_err)
         if bad_date is not None:
             raise bad_date[1]
+        starts = [p.virtual for p in parts[1:] if isinstance(p, PathSpec)]
+        on = registry.try_mount_for(starts[0] if starts else session.cwd)
         find_expr = parsed.bind(
             newer_times,
             env=env_snapshot(session),
             profile=identity_from(view).profile,
+            fs_type=on.vfs.name if on is not None else None,
         )
     except UsageError as exc:
         return _failed(cmd_str, exc.exit_code, encode_text(f"{exc}\n"))

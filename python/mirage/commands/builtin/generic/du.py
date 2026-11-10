@@ -11,6 +11,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from functools import partial
 
+from mirage.commands.builtin.utils.files0 import listed_names
 from mirage.commands.builtin.utils.formatting import (
     BlockSize,
     block_size_of,
@@ -18,16 +19,18 @@ from mirage.commands.builtin.utils.formatting import (
     nanoseconds_of,
     scaled_size,
 )
-from mirage.commands.builtin.utils.links import mounts_of
+from mirage.commands.builtin.utils.links import follow_of, mounts_of
 from mirage.commands.builtin.utils.operands import at_offsets
 from mirage.commands.builtin.utils.output import format_records
-from mirage.commands.builtin.utils.paths import vfs_stat_path
+from mirage.commands.builtin.utils.paths import vfs_stat_path, virtual_key
 from mirage.commands.builtin.utils.strftime import gnu_strftime
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.commands.spec.usage import usage_hint
+from mirage.context.session_context import current_caller
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import fs_strerror
+from mirage.errors.fs import eacces, fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.render import ZERO_LENGTH_NAME
 from mirage.errors.types import DotWalkError, FsCondition
@@ -40,6 +43,7 @@ from mirage.types import FileStat, Follow, LineFacts, LsTimeKind, PathSpec
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import respell_one, respell_raw
+from mirage.utils.quote import shell_quote, shell_quote_always
 from mirage.view.namespace_view import paths_scoped
 from mirage.view.types import MountView, StatPath
 
@@ -53,6 +57,8 @@ Newest = tuple[float, str]
 
 _HINT = "Try 'du --help' for more information.\n"
 _TIMES = {"atime": LsTimeKind.ATIME, "ctime": LsTimeKind.CTIME}
+
+_STDIN_NAME = "-"
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +105,8 @@ class DuFlags:
     time_style: str = "long-iso"
     null: bool = False
     excludes: tuple[str, ...] = ()
+    listed: tuple[str, ...] | None = None
+    listed_from: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,9 +228,8 @@ async def read_flags(
     if isinstance(flags, IOResult):
         return flags
     patterns = list(flags.excludes)
-    for source in FlagView(ctx.flags, spec=SPECS["du"]).as_paths(
-        "exclude_from"
-    ):
+    fl = FlagView(ctx.flags, spec=SPECS["du"])
+    for source in fl.as_paths("exclude_from"):
         held = bytearray()
         try:
             async for chunk in stream(source):
@@ -233,7 +240,25 @@ async def read_flags(
         patterns.extend(
             line for line in decode_text(bytes(held)).split("\n") if line
         )
-    return replace(flags, excludes=tuple(patterns))
+    flags = replace(flags, excludes=tuple(patterns))
+    listing = fl.as_path("files0_from")
+    if listing is None:
+        return flags
+    label = (
+        listing.raw_path if listing.raw_path is not None else listing.virtual
+    )
+    try:
+        names = await listed_names(listing, stream)
+    except IsADirectoryError as exc:
+        line = f"du: {shell_quote(label)}: read error: {fs_strerror(exc)}\n"
+        return IOResult(exit_code=1, stderr=encode_text(line))
+    except FS_ERRORS as exc:
+        line = (
+            f"du: cannot open {shell_quote_always(label)} for reading: "
+            f"{fs_strerror(exc)}\n"
+        )
+        return IOResult(exit_code=1, stderr=encode_text(line))
+    return replace(flags, listed=tuple(names), listed_from=label)
 
 
 def excluded(patterns: Sequence[str], shown: str) -> bool:
@@ -277,6 +302,65 @@ def excluded_start(
         )
         for n in range(len(steps))
     )
+
+
+def _listed_operands(
+    flags: DuFlags, cwd: PathSpec
+) -> tuple[list[PathSpec], list[str]]:
+    """The operands a ``--files0-from`` list names and what du says of
+    the entries it refuses, each in its own words.
+
+    Args:
+        flags (DuFlags): the options, the list already read.
+        cwd (PathSpec): where a relative name is resolved.
+    """
+    operands: list[PathSpec] = []
+    refused: list[str] = []
+    for run, name in enumerate(flags.listed or (), 1):
+        if not name:
+            refused.append(
+                f"du: {shell_quote(flags.listed_from)}:{run}: "
+                f"{ZERO_LENGTH_NAME}\n"
+            )
+        elif name == _STDIN_NAME and flags.listed_from == _STDIN_NAME:
+            refused.append(
+                "du: when reading file names from stdin, "
+                "no file name of '-' allowed\n"
+            )
+        else:
+            operands.append(PathSpec.from_str_path(name, cwd=cwd))
+    return operands, refused
+
+
+async def _listed_stat(
+    stat: Callable[[PathSpec], Awaitable[FileStat]],
+    stat_path: StatPath | None,
+    cwd: PathSpec,
+    path: PathSpec,
+) -> FileStat:
+    """A listed name's stat. The line's rules judged what it typed, not
+    what its list holds, so they are asked here, at the name and at where
+    it leads. A name the session cannot see stays missing, so a refusal
+    counts only for one the dispatcher finds.
+
+    Args:
+        stat (Callable[[PathSpec], Awaitable[FileStat]]): the command's stat.
+        stat_path (StatPath | None): dispatcher-backed stat.
+        cwd (PathSpec): where a relative name is resolved.
+        path (PathSpec): the listed operand, its links followed.
+    """
+    gate = current_caller().gate
+    named = PathSpec.from_str_path(path.raw_path, cwd=cwd).virtual
+    if (
+        gate is not None
+        and (
+            gate.refusal(named) is not None
+            or gate.refusal(path.virtual) is not None
+        )
+        and (stat_path is None or await stat_path(path) is not None)
+    ):
+        raise eacces(path)
+    return await stat(path)
 
 
 def cwd_spec(cwd: PathSpec | str) -> PathSpec:
@@ -370,6 +454,11 @@ async def du_operands(
                     fs_strerror(exc) or posix_phrase(FsCondition.ENOENT),
                     len(present),
                 )
+            )
+            continue
+        except PermissionError as exc:
+            missing.append(
+                (path.raw_path, fs_strerror(exc) or str(exc), len(present))
             )
             continue
         except NotADirectoryError:
@@ -1136,15 +1225,37 @@ async def du_generic(
             the walks met, under ``--time``.
 
     """
-    present, missing = await du_operands(
-        paths,
-        ctx.cwd,
-        resolve_glob,
-        stat,
-        partial(du_has_content, compute_entries),
-        stat_path=vfs_stat_path(ctx.vfs),
-        excludes=flags.excludes,
-    )
+    refused: list[str] = []
+    if flags.listed is not None:
+        if paths:
+            word = paths[0].raw_path or paths[0].virtual
+            line = (
+                f"du: extra operand {shell_quote_always(word)}\n"
+                "file operands cannot be combined with --files0-from\n"
+                f"{usage_hint('du')}\n"
+            )
+            return b"", IOResult(exit_code=1, stderr=encode_text(line))
+        paths, refused = _listed_operands(flags, ctx.cwd)
+        follow = follow_of(ctx)
+        if follow is not None:
+            paths = [
+                virtual_key(item)
+                for item in await follow(list(paths))
+                if isinstance(item, PathSpec)
+            ]
+        stat = partial(_listed_stat, stat, vfs_stat_path(ctx.vfs), ctx.cwd)
+    present: list[PathSpec] = []
+    missing: list[tuple[str, str, int]] = []
+    if paths or flags.listed is None:
+        present, missing = await du_operands(
+            paths,
+            ctx.cwd,
+            resolve_glob,
+            stat,
+            partial(du_has_content, compute_entries),
+            stat_path=vfs_stat_path(ctx.vfs),
+            excludes=flags.excludes,
+        )
     out = await du(
         present,
         compute_size=compute_size,
@@ -1159,8 +1270,11 @@ async def du_generic(
         repeated=repeated,
         times=times,
     )
-    io = IOResult(exit_code=out.exit_code, records=out.records)
-    return at_offsets(out.stdout, out.notes, io), io
+    io = IOResult(
+        exit_code=out.exit_code or (1 if refused else 0), records=out.records
+    )
+    notes = [(0, encode_text("".join(refused)))] if refused else []
+    return at_offsets(out.stdout, [*notes, *out.notes], io), io
 
 
 def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:

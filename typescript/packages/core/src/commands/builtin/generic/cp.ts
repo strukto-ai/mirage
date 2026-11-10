@@ -117,6 +117,7 @@ export interface CpFlags {
   noClobber: boolean
   interactive: boolean
   verbose: boolean
+  debug: boolean
   update: string | null
   backup: string | null
   suffix: string
@@ -168,6 +169,7 @@ export function cpFlags(init: Partial<CpFlags> = {}): CpFlags {
     noClobber: init.noClobber ?? false,
     interactive: init.interactive ?? false,
     verbose: init.verbose ?? false,
+    debug: init.debug ?? false,
     update: init.update ?? null,
     backup: init.backup ?? null,
     suffix: init.suffix ?? DEFAULT_BACKUP_SUFFIX,
@@ -723,7 +725,8 @@ export function parseFlags(fl: FlagView): CpFlags {
     recursive,
     noClobber,
     interactive: asking === 'interactive',
-    verbose: fl.asBool('verbose'),
+    verbose: fl.asBool('verbose') || fl.asBool('debug'),
+    debug: fl.asBool('debug'),
     update,
     backup: control,
     suffix: suffix ?? DEFAULT_BACKUP_SUFFIX,
@@ -1435,6 +1438,30 @@ export async function makeBackup(
 // The verbose line for one copied entry, with GNU's backup note. GNU prints
 // it before the create, so a create that fails still shows it; mv words a
 // copy across mounts `copied`. Mirrors Python's transfer_line.
+/** What --debug says of one file it copied, pinned on the reference image's
+ * files: nothing for a copy that moved no bytes, `unsupported` for bytes read
+ * and written here, as across filesystems, and `yes` or, for an empty file,
+ * `unknown` for a copy the backend made. */
+async function debugLine(
+  flags: CpFlags,
+  copier: CopyStrategy,
+  stat: (path: PathSpec) => Promise<FileStat>,
+  src: PathSpec,
+): Promise<string[]> {
+  if (!flags.debug || flags.attributesOnly || flags.link !== null) return []
+  let offload = 'unsupported'
+  if (!isPrimitiveCopy(copier)) {
+    offload = 'yes'
+    try {
+      if ((await stat(src)).size === 0) offload = 'unknown'
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      console.debug(`cp: no size for ${src.virtual}: ${String(err)}`)
+    }
+  }
+  return [`copy offload: ${offload}, reflink: unsupported, sparse detection: no`]
+}
+
 function transferLine(
   src: PathSpec,
   target: PathSpec,
@@ -1493,6 +1520,7 @@ async function treeLines(
   target: PathSpec,
   srcBase: string,
   dstBase: string,
+  flags: CpFlags,
 ): Promise<string[]> {
   const dirs = new Set([srcBase, ...(await strategy.find(src, { type: 'd' }))])
   const files = await strategy.find(src, { type: 'f' })
@@ -1506,6 +1534,7 @@ async function treeLines(
     )
     if (dirs.has(entryMount) && (await isDirectory(stat, entryDst))) continue
     lines.push(`'${entry.rawPath}' -> '${entryDst.rawPath}'`)
+    if (!dirs.has(entryMount)) lines.push(...(await debugLine(flags, strategy, stat, entry)))
   }
   return lines
 }
@@ -1706,6 +1735,8 @@ export async function copyEntries(
     removeFirst?: ((path: PathSpec) => Promise<void>) | null
     // Under --attributes-only, what moves a destination aside for its backup.
     aside?: NativeMove | null
+    // What follows each copied file's verbose line, --debug's report.
+    copiedLines?: readonly string[]
   } = {},
 ): Promise<boolean> {
   const srcBase = rstripSlash(src.virtual)
@@ -1836,7 +1867,10 @@ export async function copyEntries(
     opts.lines?.push(transferLine(entrySpec, entryDstSpec, backup, cmdName))
     if (!(await transferFile(strategy, entrySpec, entryDstSpec, cmdName, errors))) {
       copiedAll = false
-    } else await opts.keeper?.copied(entrySpec, entryDstSpec)
+      continue
+    }
+    opts.lines?.push(...(opts.copiedLines ?? []))
+    await opts.keeper?.copied(entrySpec, entryDstSpec)
   }
   return copiedAll
 }
@@ -2273,6 +2307,7 @@ export async function cpGeneric(
           keeper,
           removeFirst: unlink,
           aside,
+          copiedLines: await debugLine(flags, strategy, stat, src),
         })
         if (copies !== undefined) {
           await copyTreeLinks(
@@ -2294,7 +2329,7 @@ export async function cpGeneric(
       // only a fresh destination takes it.
       if (wholeTree && strategy.dirCopy !== undefined) {
         const tree = flags.verbose
-          ? await treeLines(strategy, stat, src, target, srcBase, dstBase)
+          ? await treeLines(strategy, stat, src, target, srcBase, dstBase, flags)
           : []
         let copied = true
         try {
@@ -2397,6 +2432,7 @@ export async function cpGeneric(
           errors.push(copyFailed('cp', entry, entryDst, err))
           continue
         }
+        lines.push(...(await debugLine(flags, strategy, stat, entry)))
         await keeper?.copied(entry, entryDst)
       }
       if (copies !== undefined) {
@@ -2466,6 +2502,7 @@ export async function cpGeneric(
         continue
       }
     }
+    lines.push(...(await debugLine(flags, copier, stat, src)))
     await keeper?.copied(src, target)
     created.add(keyOf(target))
   }

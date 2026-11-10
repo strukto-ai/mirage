@@ -1,0 +1,66 @@
+{
+  "cases": [
+    {
+      "id": "ls_zero_ends_each_entry_with_nul",
+      "seq": 16300100,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "mkdir -p /data/ez_l/d/sub /data/ez_l/e; printf x > /data/ez_l/a; printf yy > '/data/ez_l/b c'; printf z > /data/ez_l/d/f; touch /data/ez_l/d/sub/k /data/ez_l/e/k; cd /data/ez_l; ls --zero | od -c | head -3; ls --zero -1 d | od -c | head -2; ls --zero -m e d | od -c | head -3; ls --zero -F d | od -c | head -2; cd /; rm -r /data/ez_l",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000000   a  \\0   b       c  \\0   d  \\0   e  \\0\n0000012\n0000000   f  \\0   s   u   b  \\0\n0000006\n0000000   d   :  \\n   f   ,       s   u   b  \\0  \\n   e   :  \\n   k  \\0\n0000020\n0000000   f  \\0   s   u   b   /  \\0\n0000007\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ls_zero_refuses_dired",
+      "seq": 16300101,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "ls --zero -D /data; echo rc=$?; ls --dired --zero -l /data; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\n",
+        "stderr": "ls: --dired and --zero are incompatible\nls: --dired and --zero are incompatible\n"
+      }
+    },
+    {
+      "id": "ls_dired_marks_where_names_stand",
+      "seq": 16300102,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "mkdir -p /data/ez_l/d; printf ab > /data/ez_l/d/f; printf abc > /data/ez_l/d/g; chmod 644 /data/ez_l/d/f /data/ez_l/d/g; touch -d '2020-01-02 03:04:05' /data/ez_l/d/f /data/ez_l/d/g; cd /data/ez_l; ls --dired -go d/f d/g; echo rc=$?; ls -D -go d/f; cd /; rm -r /data/ez_l",
+      "expect": {
+        "exit": 0,
+        "stdout": "  -rw-r--r-- 1 2 Jan  2  2020 d/f\n  -rw-r--r-- 1 3 Jan  2  2020 d/g\n//DIRED// 30 33 64 67\n//DIRED-OPTIONS// --quoting-style=literal\nrc=0\n  -rw-r--r-- 1 2 Jan  2  2020 d/f\n//DIRED// 30 33\n//DIRED-OPTIONS// --quoting-style=literal\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ls_author_adds_a_column",
+      "seq": 16300103,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "mkdir -p /data/ez_l/d; printf ab > /data/ez_l/d/f; printf abc > /data/ez_l/d/g; cd /data/ez_l; ls -l d | awk '{print NF}'; ls -l --author d | awk '{print NF}'; ls -g --author d | awk '{print NF}'; ls -o --author d | awk '{print NF}'; ls --author d; cd /; rm -r /data/ez_l",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n9\n9\n2\n10\n10\n2\n9\n9\n2\n9\n9\nf\ng\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

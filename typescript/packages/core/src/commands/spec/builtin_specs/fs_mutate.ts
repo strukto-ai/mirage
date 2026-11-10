@@ -73,6 +73,7 @@ export const SPECS: Record<string, CommandSpec> = {
   }),
   cp: new CommandSpec({
     arguments: [
+      new Argument('--debug', { action: 'store_true' }),
       new Argument('-r', { action: 'store_true' }),
       new Argument(['-R', '--recursive'], { action: 'store_true' }),
       new Argument(['-a', '--archive'], { action: 'store_true' }),
@@ -266,6 +267,7 @@ export const SPECS: Record<string, CommandSpec> = {
     arguments: [
       new Argument(['-c', '--no-create'], { action: 'store_true' }),
       new Argument(['-s', '--size']),
+      new Argument(['-o', '--io-blocks'], { action: 'store_true' }),
       new Argument(['-r', '--reference'], { type: 'path' }),
       PATHS_OPERAND,
     ],

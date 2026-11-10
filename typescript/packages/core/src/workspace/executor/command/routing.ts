@@ -102,6 +102,13 @@ export function defaultCwdOperand(
   if (cmdName === 'rg' && new FlagView(parseToKwargs(parsed), spec).asBool('type_list')) {
     return null
   }
+  // The list names the operands in the cwd's place.
+  if (
+    cmdName === 'du' &&
+    new FlagView(parseToKwargs(parsed), spec).raw('files0_from') !== undefined
+  ) {
+    return null
+  }
   if (cmdName === 'grep') {
     if (!recurses(new FlagView(parseToKwargs(parsed), spec))) return null
   } else if (cmdName === 'rg' && stdin !== null && !(stdin instanceof DeviceInput)) {

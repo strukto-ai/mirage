@@ -87,6 +87,7 @@ class LsColumns:
 
     owner: bool = True
     group: bool = True
+    author: bool = False
     inode: bool = False
     blocks: bool = False
     context: bool = False
@@ -459,7 +460,8 @@ def format_ls_long(
     The owner is the entry's uid when a backend or the attr overlay
     reports one, else the workspace user; the group is the gid, else the
     session's profile; ``-`` when nothing names one. ``-g`` and ``-o``
-    drop a column, ``-i`` leads with the inode column, ``-s`` with the
+    drop a column, ``--author`` adds the owner again after the group,
+    ``-i`` leads with the inode column, ``-s`` with the
     block column after it, and ``-Z`` puts the context column before the
     size, each ``?``, as a filesystem with none of them prints it. A row
     whose stat failed prints the type letter the listing gave, then ``?``
@@ -500,6 +502,10 @@ def format_ls_long(
         if columns.group:
             fields.append(
                 UNKNOWN_STAT_FIELD if failed else group_name(s.gid, identity)
+            )
+        if columns.author:
+            fields.append(
+                UNKNOWN_STAT_FIELD if failed else owner_name(s.uid, identity)
             )
         if columns.context:
             fields.append(UNKNOWN_STAT_FIELD)

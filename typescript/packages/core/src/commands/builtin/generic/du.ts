@@ -19,7 +19,7 @@ import type { Context } from '../../config.ts'
 import { IOResult, type ByteSource, type PathRecord } from '../../../io/types.ts'
 import { pathsScoped } from '../../../view/namespace_view.ts'
 import { ZERO_LENGTH_NAME } from '../../../errors/render.ts'
-import { fsStrerror, isDotWalkError, isMissingPath } from '../../../errors/fs.ts'
+import { eacces, fsStrerror, isDotWalkError, isMissingPath } from '../../../errors/fs.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { respellOne, respellRaw } from '../../../utils/path.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
@@ -36,14 +36,18 @@ import { gnuStrftime } from '../utils/strftime.ts'
 import { isoTimestamp } from '../../../utils/dates.ts'
 import { UTC_ZONE } from '../../../utils/timezone.ts'
 import { decodeText, encodeText } from '../../../shell/bytes.ts'
-import { isFsError } from '../../../errors/fs.ts'
+import { isEisdir, isFsError } from '../../../errors/fs.ts'
+import { shellQuote, shellQuoteAlways } from '../../../utils/quote.ts'
+import { usageHint } from '../../spec/usage.ts'
+import { listedNames } from '../utils/files0.ts'
 import { concat } from '../../../utils/bytes.ts'
 import type { MountView, StatPath } from '../../../view/types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
 import { posixPhrase } from '../../../errors/posix.ts'
-import { mountsOf } from '../utils/links.ts'
-import { vfsStatPath } from '../utils/paths.ts'
+import { currentCaller } from '../../../context/session_context.ts'
+import { followOf, mountsOf } from '../utils/links.ts'
+import { vfsStatPath, virtualKey } from '../utils/paths.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
 import { anyTailMatcher } from '../../../rs/glob.ts'
 import { refused, scan } from '../../../rs/scan.ts'
@@ -55,6 +59,8 @@ type Newest = [key: number, stamp: string]
 
 const HINT = "Try 'du --help' for more information.\n"
 const TIMES: Record<string, LsTimeKind> = { atime: 'atime', ctime: 'ctime' }
+
+const STDIN_NAME = '-'
 
 /** The parsed `du` command line. */
 export interface DuFlags {
@@ -96,6 +102,9 @@ export interface DuFlags {
    * part after any slash in it matches one is neither walked nor counted.
    */
   excludes?: readonly string[]
+  /** What a --files0-from list named, and the list as typed. */
+  listed?: readonly string[]
+  listedFrom?: string
 }
 
 /** What `du` produced for one invocation. */
@@ -303,7 +312,8 @@ export async function readFlags(
   const flags = parseFlags(ctx)
   if (flags instanceof IOResult) return flags
   const patterns = [...(flags.excludes ?? [])]
-  for (const source of new FlagView(ctx.flags, specOf('du')).asPaths('exclude_from')) {
+  const fl = new FlagView(ctx.flags, specOf('du'))
+  for (const source of fl.asPaths('exclude_from')) {
     const held: Uint8Array[] = []
     try {
       for await (const chunk of stream(source)) held.push(chunk)
@@ -317,7 +327,39 @@ export async function readFlags(
     }
     for (const line of decodeText(concat(held)).split('\n')) if (line !== '') patterns.push(line)
   }
-  return { ...flags, excludes: patterns }
+  const listing = fl.asPath('files0_from')
+  if (listing === undefined) return { ...flags, excludes: patterns }
+  const label = listing.rawPath
+  let names: string[]
+  try {
+    names = await listedNames(listing, stream)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    const detail = fsStrerror(err) ?? posixPhrase('ENOENT')
+    const line = isEisdir(err)
+      ? `du: ${shellQuote(label)}: read error: ${detail}\n`
+      : `du: cannot open ${shellQuoteAlways(label)} for reading: ${detail}\n`
+    return new IOResult({ exitCode: 1, stderr: encodeText(line) })
+  }
+  return { ...flags, excludes: patterns, listed: names, listedFrom: label }
+}
+
+/** The operands a --files0-from list names and what du says of the entries it
+ * refuses, each in its own words. Mirrors Python's _listed_operands. */
+function listedOperands(flags: DuFlags, cwd: PathSpec): [PathSpec[], string[]] {
+  const operands: PathSpec[] = []
+  const refused: string[] = []
+  ;(flags.listed ?? []).forEach((name, index) => {
+    if (name === '') {
+      const from = shellQuote(flags.listedFrom ?? '')
+      refused.push(`du: ${from}:${String(index + 1)}: ${ZERO_LENGTH_NAME}\n`)
+    } else if (name === STDIN_NAME && flags.listedFrom === STDIN_NAME) {
+      refused.push("du: when reading file names from stdin, no file name of '-' allowed\n")
+    } else {
+      operands.push(PathSpec.fromStrPath(name, undefined, cwd.virtual))
+    }
+  })
+  return [operands, refused]
 }
 
 /** The operand GNU `du` assumes when the line names none. Mirrors Python's
@@ -378,6 +420,30 @@ async function duOperandExists(
 }
 
 /**
+ * A listed name's stat. The line's rules judged what it typed, not what its
+ * list holds, so they are asked here, at the name and at where it leads. A
+ * name the session cannot see stays missing, so a refusal counts only for one
+ * the dispatcher finds. Mirrors Python's _listed_stat.
+ */
+async function listedStat(
+  stat: (p: PathSpec) => Promise<unknown>,
+  statPath: StatPath | undefined,
+  cwd: PathSpec,
+  path: PathSpec,
+): Promise<unknown> {
+  const gate = currentCaller().gate
+  const named = PathSpec.fromStrPath(path.rawPath, undefined, cwd.virtual).virtual
+  if (
+    gate !== null &&
+    (gate.refusal(named) !== null || gate.refusal(path.virtual) !== null) &&
+    (statPath === undefined || (await statPath(path)) !== null)
+  ) {
+    throw eacces(path)
+  }
+  return stat(path)
+}
+
+/**
  * Split the operands into the ones du can read and the ones it cannot.
  *
  * GNU names every operand it fails to stat, keeps going with the rest, and
@@ -427,6 +493,10 @@ async function duOperands(
     try {
       await stat(path)
     } catch (err) {
+      if ((err as { code?: string }).code === 'EACCES') {
+        missing.push([path.rawPath, fsStrerror(err) ?? posixPhrase('EACCES'), present.length])
+        continue
+      }
       // An operand typed with a trailing slash that did not name a
       // directory. Unreadable like a missing one, but GNU reports the
       // errno it got, so the two cannot share a wording.
@@ -898,15 +968,39 @@ export async function duGeneric(
   repeated?: (p: PathSpec) => boolean,
   times?: () => ReadonlyMap<string, string>,
 ): Promise<[ByteSource, IOResult]> {
-  const { present, missing } = await duOperands(
-    paths,
-    ctx.cwd,
-    resolveGlob,
-    stat,
-    (p) => duHasContent(computeEntries, p),
-    vfsStatPath(ctx.vfs) ?? null,
-    flags.excludes ?? [],
-  )
+  let refused: string[] = []
+  if (flags.listed !== undefined) {
+    const [first] = paths
+    if (first !== undefined) {
+      const line =
+        `du: extra operand ${shellQuoteAlways(first.rawPath)}\n` +
+        'file operands cannot be combined with --files0-from\n' +
+        `${usageHint('du')}\n`
+      return [new Uint8Array(0), new IOResult({ exitCode: 1, stderr: encodeText(line) })]
+    }
+    ;[paths, refused] = listedOperands(flags, ctx.cwd)
+    const follow = followOf(ctx)
+    if (follow !== undefined) {
+      paths = (await follow([...paths]))
+        .filter((item): item is PathSpec => item instanceof PathSpec)
+        .map(virtualKey)
+    }
+    const operandStat = stat
+    const statPath = vfsStatPath(ctx.vfs)
+    stat = (p) => listedStat(operandStat, statPath, ctx.cwd, p)
+  }
+  const { present, missing } =
+    paths.length > 0 || flags.listed === undefined
+      ? await duOperands(
+          paths,
+          ctx.cwd,
+          resolveGlob,
+          stat,
+          (p) => duHasContent(computeEntries, p),
+          vfsStatPath(ctx.vfs) ?? null,
+          flags.excludes ?? [],
+        )
+      : { present: [], missing: [] }
   const out = await du(
     present,
     flags,
@@ -921,8 +1015,13 @@ export async function duGeneric(
     repeated,
     times,
   )
-  const io = new IOResult({ exitCode: out.exitCode, records: out.records })
-  return [atOffsets(out.stdout, out.notes, io), io]
+  const io = new IOResult({
+    exitCode: out.exitCode !== 0 ? out.exitCode : refused.length > 0 ? 1 : 0,
+    records: out.records,
+  })
+  const notes: (typeof out.notes)[number][] =
+    refused.length > 0 ? [[0, encodeText(refused.join(''))], ...out.notes] : [...out.notes]
+  return [atOffsets(out.stdout, notes, io), io]
 }
 
 // Spell a walked path as the operand it lies under was typed.

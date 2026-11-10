@@ -275,6 +275,7 @@ export function uriEscape(path: string): string {
 }
 
 interface RenderOpts {
+  lines: Lines
   quote: Quote | null
   // The quoting style and format line bare names up with quoted ones.
   align: boolean
@@ -354,6 +355,73 @@ export async function laidOut(
   return lines
 }
 
+/** How a listing's lines go out: as text, under --zero an entry ended by a
+ * NUL, and under --dired each indented, with the byte offsets of its names
+ * kept for the lines that close the listing. Mirrors Python's _Lines. */
+class Lines {
+  readonly headers = new Set<number>()
+  readonly extents = new Map<number, [number, number]>()
+  private offset = 0
+  private readonly names: number[] = []
+  private readonly subdirectories: number[] = []
+
+  constructor(
+    private readonly zero: boolean,
+    readonly dired: boolean,
+    private readonly quoting: string,
+  ) {}
+
+  private indented(lines: readonly string[]): Uint8Array {
+    const parts: Uint8Array[] = []
+    let written = 0
+    lines.forEach((line, i) => {
+      const raw = encodeText(line)
+      if (raw.length === 0) {
+        parts.push(ENC.encode('\n'))
+        written += 1
+        return
+      }
+      const at = this.offset + written + DIRED_INDENT
+      const extent = this.extents.get(i)
+      if (this.headers.has(i)) this.subdirectories.push(at, at + raw.length - 1)
+      else if (extent !== undefined) {
+        this.names.push(at + extent[0], at + extent[0] + extent[1])
+      }
+      parts.push(ENC.encode('  '), raw, ENC.encode('\n'))
+      written += raw.length + DIRED_INDENT + 1
+    })
+    this.offset += written
+    return concat(parts)
+  }
+
+  /** A block of lines as they go out; `lines` is left empty. */
+  written(lines: string[]): Uint8Array {
+    let out: Uint8Array
+    if (this.dired) out = this.indented(lines)
+    else if (this.zero) {
+      out = concat(
+        lines.map((line, i) =>
+          encodeText(`${line}${this.headers.has(i) || line === '' ? '\n' : '\0'}`),
+        ),
+      )
+    } else out = formatRecords(lines)
+    lines.length = 0
+    this.headers.clear()
+    this.extents.clear()
+    return out
+  }
+
+  /** What ends a --dired listing, nothing for any other. */
+  closing(): Uint8Array {
+    if (!this.dired) return new Uint8Array(0)
+    const lines: string[] = []
+    if (this.names.length > 0) lines.push(`//DIRED// ${this.names.join(' ')}`)
+    if (this.subdirectories.length > 0) lines.push(`//SUBDIRED// ${this.subdirectories.join(' ')}`)
+    lines.push(`//DIRED-OPTIONS// --quoting-style=${this.quoting}`)
+    return formatRecords(lines)
+  }
+}
+
 async function renderGroup(
   stats: readonly FileStat[],
   render: RenderOpts,
@@ -370,7 +438,17 @@ async function renderGroup(
       columns: render.columns,
       ...(marked !== null ? { names: marked } : {}),
     }
+    const first = lines.length
     for (const line of formatLsLong(stats, ctx)) lines.push(line)
+    if (render.lines.dired) {
+      stats.forEach((entry, i) => {
+        const column = marked?.[i] ?? lsName(entry)
+        const name = render.quote === null ? entry.name : render.quote(entry.name)
+        const start = encodeText(lines[first + i] ?? '').length - encodeText(column).length
+        const skipped = encodeText(column.slice(0, column.indexOf(name))).length
+        render.lines.extents.set(first + i, [start + skipped, encodeText(name).length])
+      })
+    }
     return
   }
   const rows = stats.map((s, i) => formatSimple(s, render.indicator, render.columns, names?.[i]))
@@ -380,6 +458,7 @@ async function renderGroup(
 }
 
 const ENC = new TextEncoder()
+const DIRED_INDENT = 2
 // A name may start with U+FEFF, which a default decoder drops from the front
 // of what it decodes.
 const DEC = new TextDecoder('utf-8', { ignoreBOM: true })
@@ -881,6 +960,8 @@ export interface LsFlags {
   readonly ignore: readonly string[]
   // An environment value ls ignored, each in its words.
   readonly notices: readonly string[]
+  readonly zero: boolean
+  readonly dired: boolean
 }
 
 // The three spellings of a command-line link policy; the last one wins.
@@ -901,6 +982,7 @@ const INDICATOR_DESTS = ['classify', 'file_type', 'p', 'indicator_style'] as con
 // format long.
 const FORMAT_DESTS = [
   'args_l',
+  'dired',
   'g',
   'o',
   'numeric_uid_gid',
@@ -1019,7 +1101,10 @@ function scanValues(
   env?: Readonly<Record<string, string>>,
   defaultFormat?: string,
 ): LsValues {
-  const typed = tape(fl, names)
+  const typed = tape(fl, names).map(([dest, value]): [string, string] => [
+    dest === 'dired' ? 'args_l' : dest,
+    value,
+  ])
   if (defaultFormat !== undefined && fl.typedOrder(...FORMAT_DESTS).length === 0)
     typed.unshift([defaultFormat, ''])
   for (const [variable, dest] of ENVIRONMENT) {
@@ -1168,9 +1253,13 @@ export function parseFlags(
     values.sortBy === null && values.timeKind !== 'mtime' && !long
       ? 'time'
       : (values.sortBy ?? 'name')
+  if (fl.asBool('dired') && fl.asBool('zero')) {
+    throw new UsageError('ls: --dired and --zero are incompatible', 2)
+  }
   const columns: LsColumns = Object.freeze({
     owner: !fl.asBool('g'),
     group: !(fl.asBool('o') || fl.asBool('no_group')),
+    author: fl.asBool('author'),
     inode: fl.asBool('inode'),
     blocks: fl.asBool('size'),
     context: fl.asBool('context'),
@@ -1207,6 +1296,8 @@ export function parseFlags(
     tabsize: values.tabsize,
     ignore: Object.freeze(ignore),
     notices: values.warnings,
+    zero: fl.asBool('zero'),
+    dired: fl.asBool('dired'),
   })
 }
 
@@ -1243,12 +1334,11 @@ function spoken(line: string, program: string): string {
 }
 
 function finish(
-  lines: string[],
+  out: Uint8Array,
   warnings: readonly LsWarning[],
   notices: readonly string[],
   program = 'ls',
 ): CommandFnResult {
-  const out = formatRecords(lines)
   const exitCode = exitStatusFor(warnings)
   const leading = [...notices, ...warnings.map((w) => w.message)].map((line) =>
     spoken(line, program),
@@ -1312,6 +1402,7 @@ export async function lsGeneric(
     indicator,
     identity,
     columns: flags.columns,
+    lines: new Lines(flags.zero, flags.dired && long && !flags.hyperlink, quoting),
   }
   const warnings: LsWarning[] = []
   const lines: string[] = []
@@ -1347,7 +1438,12 @@ export async function lsGeneric(
       flags.hyperlink ? rowPaths : null,
       await linkTargets(rows, rowPaths, links, render),
     )
-    return finish(lines, warnings, notices, program)
+    return finish(
+      concat([render.lines.written(lines), render.lines.closing()]),
+      warnings,
+      notices,
+      program,
+    )
   }
 
   const walkOpts: WalkOpts = {
@@ -1498,7 +1594,7 @@ export async function lsGeneric(
       await linkTargets(rows, rowPaths, links, render),
     )
     let printed = rows.length > 0
-    if (lines.length > 0) yield formatRecords(lines.splice(0))
+    if (lines.length > 0) yield render.lines.written(lines)
     for (const operand of operands) {
       for await (const item of groups(operand)) {
         if (!Array.isArray(item)) {
@@ -1515,6 +1611,7 @@ export async function lsGeneric(
         if (headed) {
           if (printed) lines.push('')
           const header = respellOne(dirSpec.virtual, operand.path.virtual, operand.path.rawPath)
+          render.lines.headers.add(lines.length)
           lines.push(`${quote === null ? header : quote(header)}:`)
         }
         // ls prints allocated blocks; VFS has no allocation metadata.
@@ -1528,9 +1625,10 @@ export async function lsGeneric(
           await linkTargets(entries, entryPaths, links, render),
         )
         printed = true
-        if (lines.length > 0) yield formatRecords(lines.splice(0))
+        if (lines.length > 0) yield render.lines.written(lines)
       }
     }
+    if (render.lines.dired) yield render.lines.closing()
   }
 
   // GNU looks at every operand before it lists one, so what that found goes

@@ -360,6 +360,10 @@ export function missingValueError(
   token: string,
   builtin = true,
 ): [Uint8Array, number] {
+  if (builtin && cmdName === 'tree') {
+    const said = token.startsWith('--') ? token : `-${token} option.`
+    return [encodeText(`tree: Missing argument to ${said}\n`), 1]
+  }
   if (builtin && PYTHON_NAMES.has(cmdName)) {
     const dashed = token.startsWith('-') ? token : `-${token}`
     return pythonOptionError(cmdName, `Argument expected for the ${dashed} option\n`)

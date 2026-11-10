@@ -12,7 +12,7 @@ from collections.abc import (
     Sequence,
 )
 from contextlib import aclosing
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, field, fields, replace
 from typing import Any
 
 from mirage.commands.builtin.generic.sort import engine_config
@@ -105,6 +105,8 @@ class LsFlags:
     tabsize: int = TAB_SIZE
     ignore: tuple[str, ...] = ()
     notices: tuple[str, ...] = ()
+    zero: bool = False
+    dired: bool = False
 
 
 # The three spellings of a command-line link policy; the last one wins.
@@ -119,6 +121,7 @@ _INDICATOR_DESTS = ("classify", "file_type", "p", "indicator_style")
 # format long.
 _FORMAT_DESTS = (
     "args_l",
+    "dired",
     "g",
     "o",
     "numeric_uid_gid",
@@ -165,6 +168,7 @@ _SCANNED = (
 # The environment ls reads where no option gives the value, and the name
 # the scan reads each one under.
 _ENVIRONMENT = (("QUOTING_STYLE", "quoting_env"), ("COLUMNS", "columns_env"))
+_DIRED_INDENT = 2
 # The options dir and vdir list as when nothing else is typed: columns,
 # and long, each with names quoted as -b does.
 DEFAULT_FORMATS = {"dir": "C", "vdir": "args_l"}
@@ -269,7 +273,10 @@ def scan_values(
         UsageError: the first value ls refuses, in its words and with its
             exit status.
     """
-    tape = _tape(fl, names)
+    tape = [
+        ("args_l" if dest == "dired" else dest, value)
+        for dest, value in _tape(fl, names)
+    ]
     if default_format is not None and not fl.typed_order(*_FORMAT_DESTS):
         tape.insert(0, (default_format, ""))
     if env is not None:
@@ -424,9 +431,12 @@ def parse_flags(
         and not long
     ):
         sort_by = LsSortBy.TIME
+    if fl.as_bool("dired") and fl.as_bool("zero"):
+        raise UsageError("ls: --dired and --zero are incompatible", 2)
     columns = formatting.LsColumns(
         owner=not fl.as_bool("g"),
         group=not (fl.as_bool("o") or fl.as_bool("no_group")),
+        author=fl.as_bool("author"),
         inode=fl.as_bool("inode"),
         blocks=fl.as_bool("size"),
         context=fl.as_bool("context"),
@@ -465,6 +475,8 @@ def parse_flags(
         tabsize=values.tabsize,
         ignore=ignore,
         notices=values.warnings,
+        zero=fl.as_bool("zero"),
+        dired=fl.as_bool("dired"),
     )
 
 
@@ -1488,6 +1500,79 @@ def stat_needed(
     )
 
 
+@dataclass(slots=True)
+class _Lines:
+    """How a listing's lines go out: as text, under ``--zero`` an entry
+    ended by a NUL, and under ``--dired`` each indented, with the byte
+    offsets of its names kept for the lines that close the listing.
+
+    Args:
+        zero (bool): ``--zero``.
+        dired (bool): ``--dired`` on a long listing.
+        quoting (str): the ``--quoting-style`` word.
+    """
+
+    zero: bool = False
+    dired: bool = False
+    quoting: str = "literal"
+    headers: set[int] = field(default_factory=set)
+    extents: dict[int, tuple[int, int]] = field(default_factory=dict)
+    offset: int = 0
+    names: list[int] = field(default_factory=list)
+    subdirectories: list[int] = field(default_factory=list)
+
+    def _indented(self, lines: list[str]) -> bytes:
+        out = bytearray()
+        for i, line in enumerate(lines):
+            raw = encode_text(line)
+            if not raw:
+                out += b"\n"
+                continue
+            at = self.offset + len(out) + _DIRED_INDENT
+            if i in self.headers:
+                self.subdirectories += [at, at + len(raw) - 1]
+            elif i in self.extents:
+                start, size = self.extents[i]
+                self.names += [at + start, at + start + size]
+            out += b"  " + raw + b"\n"
+        self.offset += len(out)
+        return bytes(out)
+
+    def written(self, lines: list[str]) -> bytes:
+        """A block of lines as they go out; ``lines`` is left empty.
+
+        Args:
+            lines (list[str]): the block.
+        """
+        if self.dired:
+            out = self._indented(lines)
+        elif self.zero:
+            out = b"".join(
+                encode_text(line)
+                + (b"\n" if i in self.headers or not line else b"\0")
+                for i, line in enumerate(lines)
+            )
+        else:
+            out = format_records(lines)
+        lines.clear()
+        self.headers.clear()
+        self.extents.clear()
+        return out
+
+    def closing(self) -> bytes:
+        """What ends a ``--dired`` listing, nothing for any other."""
+        if not self.dired:
+            return b""
+        lines = []
+        if self.names:
+            lines.append(f"//DIRED// {' '.join(map(str, self.names))}")
+        if self.subdirectories:
+            spans = " ".join(map(str, self.subdirectories))
+            lines.append(f"//SUBDIRED// {spans}")
+        lines.append(f"//DIRED-OPTIONS// --quoting-style={self.quoting}")
+        return format_records(lines)
+
+
 def _render_group(
     results: list[str],
     entries: list[FileStat],
@@ -1503,21 +1588,40 @@ def _render_group(
     tabsize: int,
     hrefs: list[str] | None = None,
     targets: list[FileStat | None] | None = None,
+    out: _Lines | None = None,
 ) -> None:
     long = layout is LsFormat.VERBOSE
     names = _decorated_names(entries, hrefs, long, quote, align)
     if long:
+        marked = long_names(
+            entries, names, indicator, targets or [None] * len(entries)
+        )
+        first = len(results)
         results.extend(
             formatting.format_ls_long(
                 entries,
                 human=human,
                 identity=identity,
                 columns=columns,
-                names=long_names(
-                    entries, names, indicator, targets or [None] * len(entries)
-                ),
+                names=marked,
             )
         )
+        if out is not None and out.dired:
+            for i, entry in enumerate(entries):
+                column = (
+                    marked[i]
+                    if marked is not None
+                    else formatting.ls_name(entry)
+                )
+                name = entry.name if quote is None else quote(entry.name)
+                start = len(encode_text(results[first + i])) - len(
+                    encode_text(column)
+                )
+                skipped = len(encode_text(column[: column.find(name)]))
+                out.extents[first + i] = (
+                    start + skipped,
+                    len(encode_text(name)),
+                )
     else:
         rows = format_simple(
             entries, indicator=indicator, columns=columns, names=names
@@ -1536,7 +1640,7 @@ def _spoken(line: str, program: str) -> str:
 
 
 def _finish(
-    results: list[str],
+    out: bytes,
     warnings: list[LsWarning],
     notices: Sequence[str],
     program: str = "ls",
@@ -1544,12 +1648,11 @@ def _finish(
     """The listing, with what GNU reports before it said on ``io`` first.
 
     Args:
-        results (list[str]): the listing's lines.
+        out (bytes): the listing.
         warnings (list[LsWarning]): reported before the listing.
         notices (Sequence[str]): stderr lines that come first of all.
         program (str): the name the listing was run under.
     """
-    out = format_records(results)
     io = IOResult(exit_code=exit_status_for(warnings))
     lines = [
         _spoken(line, program)
@@ -1594,6 +1697,8 @@ async def ls(
     ignore: Sequence[str] = (),
     notices: Sequence[str] = (),
     program: str = "ls",
+    zero: bool = False,
+    dired: bool = False,
 ) -> tuple[ByteSource, IOResult]:
     results: list[str] = []
     warnings: list[LsWarning] = []
@@ -1603,9 +1708,11 @@ async def ls(
         if quoting == "literal" and not hide_control
         else functools.partial(quote_name, style=quoting, hide=hide_control)
     )
+    lines = _Lines(zero, dired and long and not hyperlink, quoting)
     render = functools.partial(
         _render_group,
         results,
+        out=lines,
         layout=layout,
         human=human,
         indicator=indicator,
@@ -1647,7 +1754,12 @@ async def ls(
                 rows, row_hrefs, links, long, indicator
             ),
         )
-        return _finish(results, warnings, notices, program)
+        return _finish(
+            lines.written(results) + lines.closing(),
+            warnings,
+            notices,
+            program,
+        )
 
     needed = stat_needed(
         long=long,
@@ -1838,8 +1950,7 @@ async def ls(
         )
         printed = bool(rows)
         if results:
-            yield format_records(results)
-            results.clear()
+            yield lines.written(results)
         for operand in operands:
             async for item in groups(operand):
                 if isinstance(item, LsWarning):
@@ -1859,6 +1970,7 @@ async def ls(
                         operand.path.virtual,
                         operand.path.raw_path,
                     )
+                    lines.headers.add(len(results))
                     results.append(
                         f"{header if quote is None else quote(header)}:"
                     )
@@ -1879,8 +1991,9 @@ async def ls(
                 )
                 printed = True
                 if results:
-                    yield format_records(results)
-                    results.clear()
+                    yield lines.written(results)
+        if lines.dired:
+            yield lines.closing()
 
     # GNU looks at every operand before it lists one, so what that found
     # goes first; the rest goes where the walk met it.

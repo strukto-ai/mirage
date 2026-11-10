@@ -40,6 +40,7 @@ from mirage.core.generic.types import (
     Size,
     TrueNode,
     Type,
+    Used,
     XType,
 )
 from mirage.rs.regex import posix_regex
@@ -157,6 +158,9 @@ def _link_target(st: FileStat | None) -> str | None:
     return target if isinstance(target, str) else None
 
 
+SECONDS_PER_DAY = 86400
+
+
 def _stamp(entry: FindEntry, field: str) -> float | None:
     """The time one test reads: the walk's mtime, or the access or
     change time the entry's stat holds, which falls back to the mtime
@@ -175,6 +179,9 @@ def _stamp(entry: FindEntry, field: str) -> float | None:
 
 
 def _count(st: FileStat, field: str) -> int | None:
+    if field == "inum":
+        # No backend here numbers its files, as `stat %i` says.
+        return None
     if field == "links":
         # One name per entry, as ls -l counts it: mirage has no hard
         # links, and a directory's own entries are not counted.
@@ -235,6 +242,19 @@ def _test(node: PredNode, entry: FindEntry) -> bool | None:
         if node.cmp == "-":
             return value < node.count
         return value == node.count
+    if isinstance(node, Used):
+        if st is None:
+            return False
+        accessed = iso_timestamp(st.atime or st.modified)
+        changed = iso_timestamp(st.ctime or st.modified)
+        if accessed is None or changed is None:
+            return False
+        days = (accessed - changed) / SECONDS_PER_DAY
+        if node.cmp == "+":
+            return days > node.days
+        if node.cmp == "-":
+            return days < node.days
+        return node.days - 1 < days < node.days
     if isinstance(node, Owner):
         return st is not None and _owns(node, st)
     if isinstance(node, NoOwner):
@@ -377,7 +397,7 @@ def tree_reads_stat(node: PredNode) -> bool:
         node (PredNode): the predicate tree.
     """
     return tree_has(
-        node, (Mtime, Size, Perm, Count, Owner, NoOwner, Access, Lname)
+        node, (Mtime, Size, Perm, Count, Used, Owner, NoOwner, Access, Lname)
     )
 
 

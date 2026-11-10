@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.builtin.generic.tree import (
     _HELD_LINES,
     TreeFlags,
@@ -468,3 +469,108 @@ async def test_tree_writes_a_flat_directory_a_bounded_run_at_a_time():
     first = await anext(output)
     await close_quietly(output)
     assert first.count(b"\n") == _HELD_LINES
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,stdout",
+    [
+        (
+            "touch /d/a; tree -u -g --noreport /d",
+            "[-        -       ]  /d\n`-- [-        -       ]  a\n",
+        ),
+        (
+            "touch /d/a; tree --inodes --noreport /d",
+            "[      ?]  /d\n`-- [      ?]  a\n",
+        ),
+        (
+            "touch /d/a; tree -J -u -g --noreport /d",
+            '[\n  {"type":"directory","name":"/d","user":"-","group":"-",'
+            '"contents":[\n    {"type":"file","name":"a","user":"-",'
+            '"group":"-"}\n  ]}\n\n]\n',
+        ),
+        (
+            "truncate -s 9947 /d/a; tree --si --noreport -L 1 /d | tail -n 1",
+            "`-- [9.9k]  a\n",
+        ),
+        (
+            "truncate -s 9948 /d/a; tree --si --noreport -L 1 /d | tail -n 1",
+            "`-- [ 10k]  a\n",
+        ),
+        (
+            "truncate -s 10500 /d/a; tree --si --noreport -L 1 /d | tail -n 1",
+            "`-- [ 10k]  a\n",
+        ),
+        (
+            "truncate -s 1250 /d/a; tree --si --noreport -L 1 /d | tail -n 1",
+            "`-- [1.2k]  a\n",
+        ),
+        (
+            "truncate -s 999500 /d/a; tree --si --noreport -L 1 /d | "
+            "tail -n 1",
+            "`-- [1000k]  a\n",
+        ),
+        (
+            "truncate -s 1000000 /d/a; tree --si --noreport -L 1 /d | "
+            "tail -n 1",
+            "`-- [1.0M]  a\n",
+        ),
+        (
+            "touch '/d/x y'; LC_ALL=C.UTF-8 tree --noreport /d | tail -n 1",
+            "└── x y\n",
+        ),
+    ],
+)
+async def test_tree_host_flags(line, stdout):
+    ws = Workspace({"/d": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell(line)
+    assert await io.stdout_str() == stdout
+    assert await io.stderr_str() == ""
+
+
+@pytest.mark.asyncio
+async def test_tree_lx_stays_out_of_a_mount_below_a_link():
+    ws = Workspace(
+        {"/d": RAMVFS(), "/d/real/m": RAMVFS()}, mode=MountMode.WRITE
+    )
+    await ws.shell(
+        "mkdir -p /d/root /d/real; printf x > /d/real/f; "
+        "printf y > /d/real/m/g; ln -s ../real /d/root/a"
+    )
+    kept = await ws.shell("tree -lx --noreport /d/root")
+    crossed = await ws.shell("tree -l --noreport /d/root")
+    assert (
+        await kept.stdout_str()
+        == "/d/root\n`-- a -> ../real\n    |-- f\n    `-- m\n"
+    )
+    assert (
+        await crossed.stdout_str()
+        == "/d/root\n`-- a -> ../real\n    |-- f\n    `-- m\n        `-- g\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_tree_l_keeps_a_hidden_mount_below_a_link_hidden():
+    ws = Workspace(
+        {"/d": RAMVFS(), "/d/real/m": RAMVFS()}, mode=MountMode.WRITE
+    )
+    await ws.shell(
+        "mkdir -p /d/root /d/real; printf x > /d/real/f; "
+        "printf y > /d/real/m/g; ln -s ../real /d/root/a"
+    )
+    ws.create_session("agent", profile={"paths": {"hide": ["/d/root/a/m"]}})
+    io = await ws.shell("tree -lx --noreport /d/root", session_id="agent")
+    assert await io.stdout_str() == "/d/root\n`-- a -> ../real\n    `-- f\n"
+
+
+@pytest.mark.asyncio
+async def test_tree_l_draws_no_mount_added_under_a_link_name():
+    ws = Workspace({"/d": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell(
+        "mkdir -p /d/root /d/real; printf x > /d/real/f; "
+        "ln -s ../real /d/root/a"
+    )
+    ws.add_mount("/d/root/a/m", RAMVFS(), mode=MountMode.WRITE)
+    io = await ws.shell("tree -l --noreport /d/root")
+    assert await io.stdout_str() == "/d/root\n`-- a -> ../real\n    `-- f\n"
+    assert io.exit_code == 0

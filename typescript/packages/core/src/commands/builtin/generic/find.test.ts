@@ -365,3 +365,24 @@ describe('find tests that read the entry', () => {
     }
   })
 })
+
+it.each([
+  ['touch /d/a; find /d/a -used -1', '/d/a\n'],
+  ['touch /d/a; find /d/a -used 0', ''],
+  ['touch /d/a; find /d/a -used +0', ''],
+  ['touch /d/a; find /d/a -fstype ram', '/d/a\n'],
+  ['touch /d/a; find /d/a -fstype ext4', ''],
+  ['touch /d/a; find /d/a -inum 1', ''],
+  ['touch -d 2020-01-01 /d/r; touch /d/a; find /d/a -anewer /d/r', '/d/a\n'],
+  ['touch -d 2020-01-01 /d/r; touch /d/a; find /d/a -cnewer /d/r', '/d/a\n'],
+  ['touch /d/r; touch -d 2020-01-01 /d/a; find /d/a -anewer /d/r', ''],
+  [
+    "touch -d '2024-03-05 06:07:08' /d/a; find /d/a -fls /d/o; cat /d/o",
+    '        ?      ? -rw-r--r--   1 -        -               0 Mar  5  2024 /d/a\n',
+  ],
+])('%s', async (line, stdout) => {
+  const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
+  const io = await ws.shell(line)
+  await ws.close()
+  expect([io.stdoutText, io.stderrText]).toEqual([stdout, ''])
+})

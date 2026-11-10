@@ -446,3 +446,21 @@ it('du leaves no time of an earlier operand in a later one', async () => {
     await ws.close()
   }
 })
+
+it('du keeps a listed name a profile hides and denies missing', async () => {
+  const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
+  try {
+    await ws.shell("printf x > /d/s; printf '/d/s\\0' > /d/l")
+    ws.createSession('agent', {
+      profile: {
+        paths: { hide: ['/d/s'] },
+        commands: { deny: [{ reason: 'no', paths: ['/d/s'] }] },
+      },
+    })
+    const io = await ws.shell('du --files0-from=/d/l', { sessionId: 'agent' })
+    expect(io.exitCode).toBe(1)
+    expect(io.stderrText).toBe("du: cannot access '/d/s': No such file or directory\n")
+  } finally {
+    await ws.close()
+  }
+})

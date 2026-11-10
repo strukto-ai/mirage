@@ -57,7 +57,13 @@ const VALUE_PREDICATES: &[&[u8]] = &[
     b"-fprint0",
     b"-fprintf",
     b"-newer",
+    b"-anewer",
+    b"-cnewer",
     b"-newermt",
+    b"-inum",
+    b"-used",
+    b"-fstype",
+    b"-fls",
     b"-files0-from",
 ];
 const BARE_PREDICATES: &[&[u8]] = &[
@@ -90,6 +96,11 @@ const BARE_PREDICATES: &[&[u8]] = &[
 /// hold after an action: the host applies every action to the rows the
 /// tests kept, so a later test could not undo one.
 const TESTS: &[&[u8]] = &[
+    b"-anewer",
+    b"-cnewer",
+    b"-inum",
+    b"-used",
+    b"-fstype",
     b"-name",
     b"-iname",
     b"-path",
@@ -370,7 +381,9 @@ enum Time {
         daystart: bool,
     },
     Newermt(Vec<u8>),
-    Newer(usize),
+    /// `-newer`, `-anewer` and `-cnewer`: the reference's place and the
+    /// entry's stamp it is compared with (`m`, `a`, `c`).
+    Newer(usize, u8),
 }
 
 /// How `-perm` compares: the mode exactly, every bit of it, or any.
@@ -437,6 +450,7 @@ enum Node {
         batch: bool,
     },
     Time(Time, Fold),
+    FsType(Vec<u8>),
 }
 
 fn is_quit(node: &Node) -> bool {
@@ -537,6 +551,7 @@ impl Node {
                 json!({"op": "owner", "group": group, "name": byte_text(name)})
             }
             Node::NoOwner { group } => json!({"op": "nouser", "group": group}),
+            Node::FsType(name) => json!({"op": "fstype", "name": byte_text(name)}),
             Node::Access(mode) => json!({"op": "access", "mode": char::from(*mode).to_string()}),
             Node::Size { min, max } => json!({
                 "op": "size",
@@ -579,7 +594,15 @@ impl Node {
                     Time::Newermt(date) => {
                         json!({"op": "newermt", "date": byte_text(date), "fold": fold})
                     }
-                    Time::Newer(index) => json!({"op": "newer", "index": index, "fold": fold}),
+                    Time::Newer(index, field) => json!({
+                        "op": match field {
+                            b'a' => "anewer",
+                            b'c' => "cnewer",
+                            _ => "newer",
+                        },
+                        "index": index,
+                        "fold": fold,
+                    }),
                 }
             }
         }
@@ -1064,12 +1087,23 @@ impl<'a> Parser<'a> {
                 let (mode, bits) = perm(value, &mut self.warnings)?;
                 Ok(Node::Perm { mode, bits })
             }
-            b"-links" | b"-uid" | b"-gid" => {
+            b"-used" => {
+                let (cmp, count) = count(tok, value)
+                    .map_err(|_| say(&[b"find: Invalid argument ", value, b" to -used"]))?;
+                Ok(Node::Count {
+                    field: "used",
+                    cmp,
+                    count,
+                })
+            }
+            b"-fstype" => Ok(Node::FsType(value.to_vec())),
+            b"-links" | b"-uid" | b"-gid" | b"-inum" => {
                 let (cmp, count) = count(tok, value)?;
                 Ok(Node::Count {
                     field: match tok {
                         b"-links" => "links",
                         b"-uid" => "uid",
+                        b"-inum" => "inum",
                         _ => "gid",
                     },
                     cmp,
@@ -1112,8 +1146,12 @@ impl<'a> Parser<'a> {
                 };
                 self.printf(format, Some(value.to_vec()))
             }
-            b"-fprint" | b"-fprint0" => {
-                let kind = if tok == b"-fprint" { "print" } else { "print0" };
+            b"-fprint" | b"-fprint0" | b"-fls" => {
+                let kind = match tok {
+                    b"-fprint" => "print",
+                    b"-fls" => "ls",
+                    _ => "print0",
+                };
                 self.actions.push(Action::Row {
                     kind,
                     file: Some(value.to_vec()),
@@ -1137,11 +1175,15 @@ impl<'a> Parser<'a> {
                 let (min, max) = size(value)?;
                 Ok(Node::Size { min, max })
             }
-            b"-newer" => {
+            b"-newer" | b"-anewer" | b"-cnewer" => {
                 self.check_window_placement(tok)?;
                 self.newer_token = Some(tok);
                 self.newer.push(value.to_vec());
-                Ok(Node::Time(Time::Newer(self.newer.len() - 1), self.fold()))
+                let field = if tok[1] == b'n' { b'm' } else { tok[1] };
+                Ok(Node::Time(
+                    Time::Newer(self.newer.len() - 1, field),
+                    self.fold(),
+                ))
             }
             b"-newermt" => {
                 self.check_window_placement(tok)?;

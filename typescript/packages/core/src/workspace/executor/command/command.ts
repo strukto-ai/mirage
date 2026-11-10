@@ -313,11 +313,13 @@ async function boundFind(
       }
     }
     if (badDate !== null) throw badDate[1]
+    const starts = parts.slice(1).flatMap((p) => (typeof p === 'string' ? [] : [p.virtual]))
     findExpr = parsedFind.bind(
       newerTimes,
       undefined,
       envSnapshot(session),
       identityFrom(view).profile,
+      registry.tryMountFor(starts[0] ?? session.cwd)?.vfs.name ?? null,
     )
   } catch (err) {
     if (err instanceof UsageError) {

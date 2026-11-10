@@ -131,6 +131,7 @@ SPECS: dict[str, CommandSpec] = {
     ),
     "cp": CommandSpec(
         arguments=(
+            Argument("--debug", action="store_true"),
             Argument("-r", action="store_true"),
             Argument("-R", "--recursive", action="store_true"),
             Argument("-a", "--archive", action="store_true"),
@@ -200,6 +201,7 @@ SPECS: dict[str, CommandSpec] = {
         arguments=(
             Argument("-c", "--no-create", action="store_true"),
             Argument("-s", "--size"),
+            Argument("-o", "--io-blocks", action="store_true"),
             Argument("-r", "--reference", type="path"),
             PATHS_OPERAND,
         )

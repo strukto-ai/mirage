@@ -28,14 +28,17 @@ import {
   type StatFn,
 } from '../../../types.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
-import { enoent, isMissError, isWalkError } from '../../../errors/fs.ts'
+import { eisdir, enoent, isFsError, isMissError, isWalkError } from '../../../errors/fs.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import type { MountView } from '../../../view/types.ts'
+import type { LinkResolve, MountView } from '../../../view/types.ts'
+import { decodeText, encodeText, utf8Locale } from '../../../shell/bytes.ts'
+import { charWidth } from '../../../io/async_line_iterator.ts'
+import { groupName, identityOf, ownerName, type Identity } from '../utils/identity.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
 import { formatRecords } from '../utils/output.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { linksOf, mountsOf } from '../utils/links.ts'
-import { vfsReaddirPath, vfsStatPath } from '../utils/paths.ts'
+import { absentDestError, entryKind, vfsReaddirPath, vfsStatPath } from '../utils/paths.ts'
 import { WalkBudget } from '../utils/tree.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
 import { AnyTailMatcher } from '../../../rs/glob.ts'
@@ -46,6 +49,23 @@ import { isoTimestamp } from '../../../utils/dates.ts'
 import { contentSize, posixMode } from '../../../utils/stat_view.ts'
 
 const UNOPENABLE_MARK = '  [error opening dir]'
+const RECURSIVE_MARK = '  [recursive, not followed]'
+const UNKNOWN_INODE = '?'
+// The escapes a name's control characters take in the C locale.
+const C_ESCAPES: ReadonlyMap<number, string> = new Map([
+  [7, 'a'],
+  [8, 'b'],
+  [9, 't'],
+  [10, 'n'],
+  [11, 'v'],
+  [12, 'f'],
+  [13, 'r'],
+])
+const SI_UNITS = 'kMGTPE'
+const UNCLOSED = -1
+const UTF8_NAMES: ReadonlySet<string> = new Set(['utf-8', 'utf8'])
+// Where --si stops writing a tenth, pinned on tree 2.2.1.
+const SI_TENTHS_BELOW = 9.948
 // The lines a drawing holds before it writes them, whatever comes next.
 const HELD_LINES = 1024
 const ENC = new TextEncoder()
@@ -57,6 +77,16 @@ const BRANCH = '|-- '
 const LAST = '`-- '
 const VERTICAL = '|   '
 const INDENT = '    '
+// The drawing set of a UTF-8 locale.
+const UTF8_BRANCH = '\u251c\u2500\u2500 '
+const UTF8_LAST = '\u2514\u2500\u2500 '
+const UTF8_VERTICAL = '\u2502   '
+// The same four as -A draws them, in the terminal's line-drawing set.
+const ANSI_BRANCH = 'tqq '
+const ANSI_LAST = 'mqq '
+const ANSI_VERTICAL = 'x   '
+const ANSI_OPEN = '\x1b(0'
+const ANSI_CLOSE = '\x1b(B'
 
 export type TreeSort = 'name' | 'version' | 'size' | 'mtime' | 'ctime' | 'none'
 
@@ -88,13 +118,33 @@ export interface TreeFlags {
   readonly gitignore: boolean
   readonly fileLimit: number | null
   readonly json: boolean
+  readonly follow: boolean
+  readonly ansiLines: boolean
+  readonly quote: boolean
+  readonly rawNames: boolean
+  readonly question: boolean
+  readonly owner: boolean
+  readonly group: boolean
+  readonly changeTime: boolean
+  readonly si: boolean
+  readonly timeFormat: string | null
+  readonly filesFirst: boolean
+  readonly ignoreCase: boolean
+  readonly matchDirs: boolean
+  readonly inodes: boolean
+  readonly output: PathSpec | null
+  readonly utf8: boolean
+  readonly charset: string | null
+  readonly boxLines: boolean
+  readonly identity: Identity | null
 }
 
 /**
  * tree's options, -L and --filelimit read by mirage-rs before any operand is
  * resolved; -t, -v, -U and --sort each set the order, the last one typed
- * winning. The flags, or tree's refusal of a level or an order. Mirrors
- * Python's `parse_flags`.
+ * winning, and -c turns a modification time order into a change time one.
+ * The flags, or tree's refusal of a level or an order. Mirrors Python's
+ * `parse_flags`.
  */
 export function parseFlags(bag: Record<string, FlagValue>): TreeFlags | IOResult {
   const fl = new FlagView(bag, specOf('tree'))
@@ -114,7 +164,11 @@ export function parseFlags(bag: Record<string, FlagValue>): TreeFlags | IOResult
     throw new Error(`tree: mirage-rs read --filelimit as ${JSON.stringify(limit)}`)
   }
   let sort: TreeSort = 'name'
-  for (const [name, value] of fl.occurrences('t', 'v', 'U', 'sort')) {
+  for (const [name, value] of fl.occurrences('t', 'v', 'U', 'sort', 'c')) {
+    if (name === 'c') {
+      if (value === true && sort === 'mtime') sort = 'ctime'
+      continue
+    }
     const shorthand = Object.hasOwn(SHORTHANDS, name) ? SHORTHANDS[name] : undefined
     if (shorthand !== undefined) {
       if (value === true) sort = shorthand
@@ -130,6 +184,8 @@ export function parseFlags(bag: Record<string, FlagValue>): TreeFlags | IOResult
       })
     sort = known
   }
+  const timeFormat = fl.asStr('timefmt') ?? null
+  const grouped = fl.typedOrder('dirsfirst', 'filesfirst')
   return {
     maxDepth: level,
     showHidden: fl.asBool('a'),
@@ -140,18 +196,37 @@ export function parseFlags(bag: Record<string, FlagValue>): TreeFlags | IOResult
     fullPath: fl.asBool('f'),
     noIndent: fl.asBool('i'),
     sizes: fl.asBool('s'),
-    dates: fl.asBool('D'),
+    dates: fl.asBool('D') || timeFormat !== null,
     perms: fl.asBool('p'),
     classify: fl.asBool('F'),
     sort,
     reverse: fl.asBool('r'),
-    dirsFirst: fl.asBool('dirsfirst'),
+    dirsFirst: grouped[grouped.length - 1] === 'dirsfirst',
+    filesFirst: grouped[grouped.length - 1] === 'filesfirst',
     noReport: fl.asBool('noreport'),
     du: fl.asBool('du'),
     prune: fl.asBool('prune'),
     gitignore: fl.asBool('gitignore'),
     fileLimit: limit,
     json: fl.asBool('J'),
+    follow: fl.asBool('args_l'),
+    ansiLines: fl.asBool('A'),
+    quote: fl.asBool('Q'),
+    rawNames: fl.asBool('N'),
+    question: fl.asBool('q'),
+    owner: fl.asBool('u'),
+    group: fl.asBool('g'),
+    changeTime: fl.asBool('c'),
+    si: fl.asBool('si'),
+    timeFormat,
+    ignoreCase: fl.asBool('ignore_case'),
+    matchDirs: fl.asBool('matchdirs'),
+    inodes: fl.asBool('inodes'),
+    output: fl.asPath('o') ?? null,
+    utf8: false,
+    charset: fl.asStr('charset') ?? null,
+    boxLines: false,
+    identity: null,
   }
 }
 
@@ -189,6 +264,9 @@ interface TreeOpts {
   // here instead, the way real tree crosses one.
   readonly mounts: MountView | null
   readonly crossReaddir: ((p: PathSpec) => Promise<string[]>) | null
+  // What a followed link's directory is read through; under -x, unlike
+  // crossReaddir, it still lists a link that stays on the operand's mount.
+  readonly linkReaddir: ((p: PathSpec) => Promise<string[]>) | null
   readonly crossStat: ((p: PathSpec) => Promise<FileStat>) | null
   // What a drawn link leads to, from the namespace's symlink facts.
   readonly targetStat: ((path: string) => Promise<FileStat | null>) | null
@@ -197,6 +275,11 @@ interface TreeOpts {
   // The entries this operand's walk may still list; a directory past it is
   // drawn but not opened.
   readonly budget?: WalkBudget
+  // The operand this walk draws from, for --matchdirs.
+  readonly root?: string
+  // Where a link really leads, and the directories -l has been in.
+  readonly resolve: LinkResolve | null
+  readonly seen: Set<string>
 }
 
 // A .gitignore's patterns, in order: blank lines and `#` comments are
@@ -246,7 +329,11 @@ async function mountRow(
 // can take whatever an earlier one would have, so the work stays the path's
 // length times the pattern's, however many `**` a .gitignore writes. Mirrors
 // Python's `_segments_match`.
-export function segmentsMatch(parts: readonly string[], pattern: readonly string[]): boolean {
+export function segmentsMatch(
+  parts: readonly string[],
+  pattern: readonly string[],
+  fits: (name: string, pattern: string) => boolean = fnmatch,
+): boolean {
   let at = 0
   let want = 0
   let resume = 0
@@ -257,7 +344,7 @@ export function segmentsMatch(parts: readonly string[], pattern: readonly string
       star = want
       resume = at
       want += 1
-    } else if (segment !== undefined && fnmatch(parts[at] ?? '', segment)) {
+    } else if (segment !== undefined && fits(parts[at] ?? '', segment)) {
       at += 1
       want += 1
     } else if (star >= 0) {
@@ -277,6 +364,103 @@ export function segmentsMatch(parts: readonly string[], pattern: readonly string
 // matches costs one call however many there are. Mirrors Python's
 // `_name_matcher`, one for each list of rules.
 const nameMatchers = new WeakMap<readonly Ignore[], AnyTailMatcher | null>()
+
+/** Where a pattern goes on once the bracket at `start` has judged one byte:
+ * null when it refuses, UNCLOSED when no `]` ends it. A `]` closes even as
+ * the first member, only `^` negates, a backslash takes the next byte as
+ * itself, and a `-` after a member makes a range whose end may be a `]`. */
+function bracket(rule: string, start: number, char: string): number | null {
+  let at = start + 1
+  const negated = rule.charAt(at) === '^'
+  if (negated) at += 1
+  let taken = false
+  while (at < rule.length && rule.charAt(at) !== ']') {
+    if (rule.charAt(at) === '\\') at += 1
+    const low = rule.charAt(at)
+    let high = low
+    at += 1
+    if (rule.charAt(at) === '-') {
+      at += 1
+      if (rule.charAt(at) === '\\') at += 1
+      high = rule.charAt(at)
+      at += 1
+    }
+    taken = taken || (char !== '' && low <= char && char <= high)
+  }
+  if (at >= rule.length) return UNCLOSED
+  return char !== '' && taken !== negated ? at + 1 : null
+}
+
+/** One character per byte of a name or pattern. */
+function bytewise(text: string): string {
+  return Array.from(encodeText(text), (byte) => String.fromCharCode(byte)).join('')
+}
+
+/** Whether a name fits one -P or -I alternative, byte by byte: `*`, `?`, a
+ * backslash and brackets, and a bracket no `]` ends fits whatever is left of
+ * the name. Only the latest `*` is ever retried, so the work stays the name's
+ * length times the pattern's. */
+function fits(name: string, pattern: string): boolean {
+  const text = bytewise(name)
+  const rule = bytewise(pattern)
+  let at = 0
+  let want = 0
+  let resume = 0
+  let star = -1
+  for (;;) {
+    const token = rule.charAt(want)
+    if (token === '*') {
+      want += 1
+      star = want
+      resume = at
+      continue
+    }
+    if (token === '' && at === text.length) return true
+    const char = text.charAt(at)
+    let ahead: number | null = null
+    if (token === '[') {
+      ahead = bracket(rule, want, char)
+      if (ahead === UNCLOSED) return true
+    } else if (token === '\\') {
+      if (char !== '' && rule.charAt(want + 1) === char) ahead = want + 2
+    } else if (token !== '' && char !== '' && (token === '?' || token === char)) {
+      ahead = want + 1
+    }
+    if (ahead !== null) {
+      want = ahead
+      at += 1
+    } else if (star < 0 || resume >= text.length) {
+      return false
+    } else {
+      resume += 1
+      at = resume
+      want = star
+    }
+  }
+}
+
+/** Whether a name fits -P or -I, every `|` parting alternatives, even in a
+ * bracket, and an empty one fitting anything. */
+function hit(flags: TreeFlags, pattern: string, name: string): boolean {
+  const text = flags.ignoreCase ? name.toLowerCase() : name
+  const typed = flags.ignoreCase ? pattern.toLowerCase() : pattern
+  return typed.split('|').some((part) => part === '' || fits(text, part))
+}
+
+/** Whether --matchdirs passes a directory's own files: its path under the
+ * operand fits the pattern, `*` stopping at each `/`. */
+function letsFilesThrough(flags: TreeFlags, root: string, directory: string): boolean {
+  if (!flags.matchDirs || flags.matchPattern === null) return false
+  const base = rstripSlash(root)
+  if (directory === root || !directory.startsWith(`${base}/`)) return false
+  const relative = directory.slice(base.length + 1)
+  const text = flags.ignoreCase ? relative.toLowerCase() : relative
+  const typed = flags.ignoreCase ? flags.matchPattern.toLowerCase() : flags.matchPattern
+  const parts = text.split('/')
+  return typed
+    .split('|')
+    .some((part) => part === '' || segmentsMatch(parts, part.replace(/\/+$/, '').split('/'), fits))
+}
 
 function nameMatcher(rules: readonly Ignore[]): AnyTailMatcher | null {
   let matcher = nameMatchers.get(rules)
@@ -348,7 +532,12 @@ async function sorted(flags: TreeFlags, nodes: readonly TreeNode[]): Promise<Tre
     order = [...nodes].sort(compare)
   }
   if (flags.reverse && flags.sort !== 'none') order.reverse()
-  if (flags.dirsFirst) order = [...order.filter((n) => n.isDir), ...order.filter((n) => !n.isDir)]
+  if (flags.dirsFirst || flags.filesFirst) {
+    order = [
+      ...order.filter((n) => n.isDir === flags.dirsFirst),
+      ...order.filter((n) => n.isDir !== flags.dirsFirst),
+    ]
+  }
   return order
 }
 
@@ -432,6 +621,22 @@ interface Drawing {
 
 // One directory's own entries, in the order they are drawn. Mirrors Python's
 // `_open_dir`.
+/** The mount roots on a directory reached through a followed link, named as
+ * the walk draws them, null for one that was not. A mount holds where the link
+ * leads, not at the name it is drawn under. They only mark a boundary: such an
+ * entry is still stat'ed, which a session's hides answer. Mirrors Python's
+ * _linked_mounts. */
+function linkedMounts(treeOpts: TreeOpts, directory: string): string[] | null {
+  const { flags, resolve, mounts } = treeOpts
+  if (!flags.follow || resolve === null) return null
+  const real = rstripSlash(resolve(directory))
+  const drawn = rstripSlash(directory)
+  if (real === drawn) return null
+  return childMounts(mounts, real === '' ? '/' : real).map(
+    (mount) => drawn + mount.slice(real.length),
+  )
+}
+
 async function openDir(
   readdir: ReaddirFn<[p: PathSpec, nofollow?: boolean, limit?: number]>,
   stat: StatFn,
@@ -445,7 +650,8 @@ async function openDir(
   // `/repos/alpha` is mounted) has no backend to list it, so the readdir
   // throws and a merge below it never runs: `tree` reported the one path
   // whose children it could name for certain as unopenable.
-  const nested = childMounts(treeOpts.mounts, path.virtual)
+  const linked = linkedMounts(treeOpts, path.virtual)
+  const nested = linked === null ? childMounts(treeOpts.mounts, path.virtual) : []
   const limit = treeOpts.budget?.listingLimit(path.virtual) ?? null
   let entries: string[]
   try {
@@ -468,6 +674,7 @@ async function openDir(
   const found = flags.gitignore ? await gitignore(treeOpts.read, path, entries) : []
   const rules = found.length > 0 ? [...inherited, ...found] : inherited
   const names = nameMatcher(rules)
+  const allFiles = letsFilesThrough(flags, treeOpts.root ?? '', path.virtual)
   const kept: { node: TreeNode; crossing: boolean }[] = []
   for (const entry of entries) {
     const childPath = rstripSlash(entry)
@@ -492,7 +699,7 @@ async function openDir(
       }
     }
     if (!flags.showHidden && s.name.startsWith('.')) continue
-    if (flags.ignorePattern !== null && fnmatch(s.name, flags.ignorePattern)) continue
+    if (flags.ignorePattern !== null && hit(flags, flags.ignorePattern, s.name)) continue
     let isDir = s.type === FileType.DIRECTORY
     let leads: FileStat | null = null
     if (s.type === FileType.SYMLINK && treeOpts.targetStat !== null) {
@@ -511,7 +718,8 @@ async function openDir(
     if (
       flags.matchPattern !== null &&
       s.type !== FileType.DIRECTORY &&
-      !fnmatch(s.name, flags.matchPattern)
+      !allFiles &&
+      !hit(flags, flags.matchPattern, s.name)
     )
       continue
     if (rules.length > 0 && ignored(rules, names, childPath, isDir)) continue
@@ -527,7 +735,8 @@ async function openDir(
         du: contentSize(s),
         missing: false,
       },
-      crossing,
+      crossing:
+        crossing || (linked?.includes(childPath) === true && treeOpts.crossReaddir !== null),
     })
   }
   if (flags.fileLimit !== null && kept.length > flags.fileLimit)
@@ -550,13 +759,24 @@ async function openDir(
   }
 }
 
-// Whether the walk goes into a drawn entry: a real directory, above -L, and
-// inside the budget. A directory past the budget is drawn but not opened.
+// Whether the walk goes into a drawn entry: a real directory, or under -l a
+// link to one it has not been in, above -L, and inside the budget. A directory
+// past the budget is drawn but not opened.
 function opens(treeOpts: TreeOpts, node: TreeNode, depth: number): boolean {
-  if (node.stat.type !== FileType.DIRECTORY) return false
-  const { maxDepth } = treeOpts.flags
+  const { maxDepth, follow } = treeOpts.flags
+  const linked = node.stat.type === FileType.SYMLINK
+  if (node.stat.type !== FileType.DIRECTORY && !(linked && follow && node.isDir)) return false
   if (maxDepth !== null && depth + 1 >= maxDepth) return false
-  return treeOpts.budget === undefined || treeOpts.budget.opens(node.spec.virtual)
+  if (treeOpts.budget !== undefined && !treeOpts.budget.opens(node.spec.virtual)) return false
+  if (follow && treeOpts.resolve !== null) {
+    const real = treeOpts.resolve(node.spec.virtual)
+    if (linked && treeOpts.seen.has(real)) {
+      node.note = RECURSIVE_MARK
+      return false
+    }
+    treeOpts.seen.add(real)
+  }
+  return true
 }
 
 // Past a mount root the subtree belongs to another VFS, so the rest of this
@@ -569,6 +789,14 @@ function readBelow(
   readdir: ReaddirFn<[p: PathSpec, nofollow?: boolean, limit?: number]>,
   stat: StatFn,
 ): [ReaddirFn<[p: PathSpec, nofollow?: boolean, limit?: number]>, StatFn] {
+  if (node.stat.type === FileType.SYMLINK) {
+    const { mounts, resolve } = treeOpts
+    const stays =
+      mounts === null ||
+      resolve === null ||
+      mounts.rootOf(resolve(node.spec.virtual)) === mounts.rootOf(resolve(treeOpts.root ?? ''))
+    return [(stays ? treeOpts.linkReaddir : treeOpts.crossReaddir) ?? readdir, stat]
+  }
   if (!listing.crossed.has(node)) return [readdir, stat]
   return [treeOpts.crossReaddir ?? readdir, treeOpts.crossStat ?? stat]
 }
@@ -633,29 +861,124 @@ function size(flags: TreeFlags, node: TreeNode): number {
   return flags.du ? node.du : contentSize(node.stat)
 }
 
-// The bracket -p, -s (or --du) and -D open a line with, empty without them.
-// Mirrors Python's `_meta`.
+/** A size as --si writes it, in powers of 1000. */
+function siText(bytes: number): string {
+  if (bytes < 1000) return String(bytes).padStart(4)
+  let value = bytes
+  let unit = -1
+  while (value >= 1000 && unit < SI_UNITS.length - 1) {
+    value /= 1000
+    unit += 1
+  }
+  const digits = value < SI_TENTHS_BELOW ? 1 : 0
+  // printf's rounding: the double's exact value, half to even, where toFixed
+  // rounds a tie up.
+  const [whole = '0', fraction = ''] = value.toFixed(60).split('.')
+  const kept = fraction.slice(0, digits)
+  const rest = fraction.slice(digits).replace(/0+$/, '')
+  const up = rest > '5' || (rest === '5' && Number((whole + kept).slice(-1)) % 2 === 1)
+  const rounded = (BigInt(whole + kept) + (up ? 1n : 0n)).toString().padStart(digits + 1, '0')
+  const text = digits === 0 ? rounded : `${rounded.slice(0, -1)}.${rounded.slice(-1)}`
+  return `${text}${SI_UNITS.charAt(unit)}`.padStart(4)
+}
+
+/** The time -D shows: the change time under -c, in the format --timefmt names. */
+function timeText(flags: TreeFlags, node: TreeNode): string {
+  const stamp = flags.changeTime ? (node.stat.ctime ?? node.stat.modified) : node.stat.modified
+  return styledTime(stamp, flags.timeFormat === null ? 'locale' : `+${flags.timeFormat}`)
+}
+
+// The bracket --inodes, -p, -u, -g, -s (or --du, --si) and -D open a line
+// with, empty without them. Mirrors Python's `_meta`.
 function meta(flags: TreeFlags, node: TreeNode): string {
   const fields: string[] = []
+  if (flags.inodes) fields.push(UNKNOWN_INODE.padStart(7))
   if (flags.perms) fields.push(lsModeString(node.stat))
-  if (flags.sizes || flags.du) fields.push(String(size(flags, node)).padStart(11))
-  if (flags.dates) fields.push(styledTime(node.stat.modified, 'locale'))
+  if (flags.owner) fields.push(ownerName(node.stat.uid, flags.identity).padEnd(8))
+  if (flags.group) fields.push(groupName(node.stat.gid, flags.identity).padEnd(8))
+  if (flags.si) fields.push(siText(size(flags, node)))
+  else if (flags.sizes || flags.du) fields.push(String(size(flags, node)).padStart(11))
+  if (flags.dates) fields.push(timeText(flags, node))
   return fields.length > 0 ? `[${fields.join(' ')}]  ` : ''
 }
 
+/** A name as the C locale draws it, one byte at a time. */
+function cLocaleName(flags: TreeFlags, name: string): string {
+  let drawn = ''
+  for (const byte of encodeText(name)) {
+    const escape = C_ESCAPES.get(byte)
+    if (escape !== undefined) drawn += `\\${escape}`
+    else if (byte === 0x5c) drawn += '\\\\'
+    else if (byte === 0x20 && !flags.quote) drawn += '\\ '
+    else if (byte === 0x22 && flags.quote) drawn += '\\"'
+    else if (byte >= 0x20 && byte < 0x7f) drawn += String.fromCharCode(byte)
+    else drawn += flags.question ? '?' : `\\${byte.toString(8).padStart(3, '0')}`
+  }
+  return drawn
+}
+
+/** A name as a UTF-8 locale draws it: a control character escaped or under -q
+ * a `?`, a byte no character holds escaped or under -q left as it is, the rest
+ * as they are. */
+function utf8LocaleName(flags: TreeFlags, name: string): string {
+  const raw = encodeText(name)
+  const octal = (byte: number): number[] => [
+    ...ENC.encode(`\\${byte.toString(8).padStart(3, '0')}`),
+  ]
+  const drawn: number[] = []
+  let at = 0
+  while (at < raw.length) {
+    const width = charWidth(raw, at)
+    const piece = [...raw.subarray(at, at + width)]
+    const first = piece[0] ?? 0
+    const second = piece[1] ?? 0
+    at += width
+    if (width === 1 && first >= 0x80) drawn.push(...(flags.question ? piece : octal(first)))
+    else if (
+      (width === 1 && (first < 0x20 || first === 0x7f)) ||
+      (width === 2 && first === 0xc2 && second < 0xa0)
+    ) {
+      if (flags.question) drawn.push(0x3f)
+      else for (const byte of piece) drawn.push(...octal(byte))
+    } else drawn.push(...piece)
+  }
+  return decodeText(Uint8Array.from(drawn))
+}
+
+/** A name or link target as a line draws it, under -N, -q, -Q and the locale. */
+function label(flags: TreeFlags, name: string): string {
+  const drawn = flags.rawNames
+    ? name
+    : flags.utf8
+      ? utf8LocaleName(flags, name)
+      : cLocaleName(flags, name)
+  return flags.quote ? `"${drawn}"` : drawn
+}
+
 function shown(flags: TreeFlags, node: TreeNode, root = false): string {
-  const name = flags.fullPath || root ? node.spec.rawPath : node.stat.name
+  const name = label(flags, flags.fullPath || root ? node.spec.rawPath : node.stat.name)
   if (node.stat.type === FileType.SYMLINK) {
     const tail = flags.classify ? classify(node.leads) : ''
     const target = node.stat.extra[LINK_TARGET_KEY]
-    return `${name} -> ${typeof target === 'string' ? target : ''}${tail}`
+    return `${name} -> ${label(flags, typeof target === 'string' ? target : '')}${tail}`
   }
   return name + (flags.classify ? classify(node.stat) : '')
 }
 
+/** What stands left of a name, in the drawing set --charset or the locale
+ * picks or under -A the terminal's. */
+function drawnLead(flags: TreeFlags, prefix: string, last: boolean): string {
+  if (flags.noIndent) return ''
+  if (!flags.ansiLines) {
+    if (!flags.boxLines) return prefix + (last ? LAST : BRANCH)
+    return prefix.replaceAll(VERTICAL, UTF8_VERTICAL) + (last ? UTF8_LAST : UTF8_BRANCH)
+  }
+  const above = prefix.replaceAll(VERTICAL, ANSI_VERTICAL)
+  return `${ANSI_OPEN}${above}${last ? ANSI_LAST : ANSI_BRANCH}${ANSI_CLOSE}`
+}
+
 function textLine(flags: TreeFlags, node: TreeNode, prefix: string, last: boolean): string {
-  const lead = flags.noIndent ? '' : prefix + (last ? LAST : BRANCH)
-  return lead + meta(flags, node) + shown(flags, node) + node.note
+  return drawnLead(flags, prefix, last) + meta(flags, node) + shown(flags, node) + node.note
 }
 
 function rootLine(flags: TreeFlags, root: TreeNode): string {
@@ -744,8 +1067,10 @@ function jsonEntry(flags: TreeFlags, node: TreeNode, level: number, root = false
     const mode = (posixMode(node.stat) & 0o7777).toString(8).padStart(4, '0')
     text += `,"mode":"${mode}","prot":"${lsModeString(node.stat)}"`
   }
-  if (flags.sizes || flags.du) text += `,"size":${String(size(flags, node))}`
-  if (flags.dates) text += `,"time":"${styledTime(node.stat.modified, 'locale')}"`
+  if (flags.owner) text += `,"user":"${ownerName(node.stat.uid, flags.identity)}"`
+  if (flags.group) text += `,"group":"${groupName(node.stat.gid, flags.identity)}"`
+  if (flags.sizes || flags.du || flags.si) text += `,"size":${String(size(flags, node))}`
+  if (flags.dates) text += `,"time":"${timeText(flags, node)}"`
   if (node.note !== '') {
     const error = node.note.trim().replace(/^\[/, '').replace(/\]$/, '')
     const [newline, indent] = flags.noIndent ? ['', ''] : ['\n', '  '.repeat(level)]
@@ -852,7 +1177,8 @@ async function* rendered(
       continue
     }
     const budget = new WalkBudget(p, treeOpts.mounts)
-    const opts: TreeOpts = { ...treeOpts, budget }
+    const opts: TreeOpts = { ...treeOpts, budget, root: p.virtual, seen: new Set() }
+    if (opts.flags.follow && opts.resolve !== null) opts.seen.add(opts.resolve(p.virtual))
     let counted: [number, number]
     if (live) {
       const listing = await openDir(readdir, stat, spec, opts, [])
@@ -919,7 +1245,11 @@ async function* rendered(
     }
     if (!flags.noReport) {
       let tail = summary(totalDirs, totalFiles, flags.dirsOnly)
-      if (flags.du) tail = ` ${String(du).padStart(11)} bytes used in ${tail}`
+      if (flags.du) {
+        tail = flags.si
+          ? ` ${siText(du)} used in ${tail}`
+          : ` ${String(du).padStart(11)} bytes used in ${tail}`
+      }
       lines.push('', tail)
     }
     yield formatRecords(lines)
@@ -945,8 +1275,33 @@ export async function treeGeneric(
   unbounded?: [(p: PathSpec) => Promise<string[]>, (p: PathSpec) => Promise<FileStat>],
   read: ReadStreamFn | null = null,
 ): Promise<CommandFnResult> {
-  if (unbounded !== undefined && parsed.maxDepth === null) [readdir, stat] = unbounded
-  const flags = parsed
+  if (unbounded !== undefined && parsed.maxDepth === null && !parsed.follow) {
+    ;[readdir, stat] = unbounded
+  }
+  const utf8 = utf8Locale(ctx.env)
+  const flags: TreeFlags = {
+    ...parsed,
+    utf8,
+    boxLines: parsed.charset === null ? utf8 : UTF8_NAMES.has(parsed.charset.toLowerCase()),
+    identity: identityOf(ctx),
+  }
+  const output = parsed.output
+  if (output !== null) {
+    if (ctx.vfs === undefined) return [null, new IOResult({ exitCode: 1 })]
+    try {
+      const vfs = ctx.vfs
+      const statOutput = (p: PathSpec): Promise<FileStat> => vfs.stat(p)
+      const found = await entryKind(statOutput, output)
+      if (found.isDir) throw eisdir(output)
+      if (!found.exists && (await absentDestError(statOutput, output)) !== null)
+        throw enoent(output)
+      await ctx.vfs.write(output, new Uint8Array(0))
+    } catch (error) {
+      if (!isFsError(error)) throw error
+      const line = `tree: invalid filename '${output.rawPath}'\n`
+      return [null, new IOResult({ exitCode: 1, stderr: encodeText(line) })]
+    }
+  }
   const targets =
     paths.length > 0
       ? paths
@@ -970,6 +1325,7 @@ export async function treeGeneric(
         : flags.oneFileSystem
           ? notCrossed
           : (p: PathSpec) => readdirPath(p.virtual),
+    linkReaddir: readdirPath === undefined ? null : (p: PathSpec) => readdirPath(p.virtual),
     crossStat:
       statPath === undefined
         ? null
@@ -985,13 +1341,18 @@ export async function treeGeneric(
           },
     targetStat: links === undefined ? null : (path: string) => links.targetStat(path),
     read,
+    resolve: links === undefined ? null : (path: string) => links.resolve(path),
+    seen: new Set(),
   }
   const io = new IOResult()
   const pieces = rendered(targets, readdir, stat, treeOpts, statPath, io)
   // The first piece is drawn here, so what refuses the walk outright still
   // rejects before there is any output.
   const first = await pieces.next()
-  return [asyncChain([first.done === true ? null : first.value, pieces]), io]
+  const body = asyncChain([first.done === true ? null : first.value, pieces])
+  if (output === null || ctx.vfs === undefined) return [body, io]
+  await ctx.vfs.write(output, body)
+  return [null, io]
 }
 
 /**
@@ -999,5 +1360,9 @@ export async function treeGeneric(
  * unless `-x`. Mirrors Python's `facts`.
  */
 export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
-  return new LineFacts({ walks: !fl.asBool('x'), readsSubtree: true })
+  return new LineFacts({
+    walks: !fl.asBool('x'),
+    readsSubtree: true,
+    writes: fl.asPath('o') !== undefined,
+  })
 }

@@ -295,7 +295,7 @@
       "command": "tree '/discord/Mirage HQ__100000000000000001/members'",
       "expect": {
         "exit": 0,
-        "stdout": "/discord/Mirage HQ__100000000000000001/members\n|-- alice__300000000000000001.json\n|-- bob__300000000000000002.json\n`-- mirage-bot__900000000000000001.json\n\n1 directory, 3 files\n",
+        "stdout": "/discord/Mirage\\ HQ__100000000000000001/members\n|-- alice__300000000000000001.json\n|-- bob__300000000000000002.json\n`-- mirage-bot__900000000000000001.json\n\n1 directory, 3 files\n",
         "stderr": ""
       }
     },

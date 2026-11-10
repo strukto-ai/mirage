@@ -70,7 +70,12 @@ export interface TruncateFlags {
   /** `-r`: the file whose size a relative `-s` counts from, in place of each
    * operand's own. */
   readonly reference?: PathSpec | null
+  /** The `-o` count as typed when it does not fit a file offset in bytes. */
+  readonly overflow?: string | null
 }
+
+// What -o counts in, the block size of the pinned image's files.
+const IO_BLOCK = 4096n
 
 /**
  * truncate's options, `-s` read by mirage-rs before any operand is resolved:
@@ -80,6 +85,7 @@ export function parseFlags(bag: Record<string, FlagValue>): TruncateFlags | IORe
   const fl = new FlagView(bag, specOf('truncate'))
   const reference = fl.asPath('reference') ?? null
   const typed = fl.texts('size')
+  const sized = typed.length > 0
   if (reference !== null) typed.push(['reference', ''])
   let values
   try {
@@ -87,6 +93,13 @@ export function parseFlags(bag: Record<string, FlagValue>): TruncateFlags | IORe
   } catch (err) {
     if (!(err instanceof StreamRefusal)) throw err
     return refused(err)
+  }
+  const ioBlocks = fl.asBool('io_blocks')
+  if (ioBlocks && !sized) {
+    throw new UsageError(
+      `truncate: '--io-blocks' was specified but '--size' was not\n${usageHint('truncate')}`,
+      1,
+    )
   }
   const size = values.size
   if (
@@ -99,10 +112,14 @@ export function parseFlags(bag: Record<string, FlagValue>): TruncateFlags | IORe
   ) {
     throw new Error(`truncate: mirage-rs read -s as ${JSON.stringify(size)}`)
   }
+  const count = BigInt(size.size)
+  const scale = ioBlocks ? IO_BLOCK : 1n
+  const past = count * scale > (size.mode === 'reduce' ? 2n ** 63n : 2n ** 63n - 1n)
   return {
-    size: { mode: size.mode as SizeMode, number: BigInt(size.size) },
+    size: { mode: size.mode as SizeMode, number: count * scale },
     noCreate: fl.asBool('no_create'),
     reference,
+    overflow: past ? `${size.mode === 'reduce' ? '-' : ''}${count.toString()}` : null,
   }
 }
 
@@ -170,6 +187,7 @@ async function truncateOne(
 ): Promise<string | null> {
   let current = 0n
   let directory = false
+  let absent = false
   try {
     const st = await stat(path)
     current = BigInt(st.size ?? 0)
@@ -183,9 +201,15 @@ async function truncateOne(
     if (flags.noCreate) return null
     if (why !== null) throw enoent(path)
     current = 0n
+    absent = true
   }
   const slashed = path.rawPath.endsWith('/') && !endsAtDot(path.rawPath)
   if (directory || (slashed && !flags.noCreate)) throw eisdir(path)
+  if (flags.overflow !== undefined && flags.overflow !== null) {
+    if (absent) await truncate(path, 0, flags.noCreate)
+    const label = shellQuoteAlways(path.rawPath === '' ? path.virtual : path.rawPath)
+    return `truncate: overflow in ${flags.overflow} * ${IO_BLOCK.toString()} byte blocks for file ${label}\n`
+  }
   const size = resolveSize(flags.size, base ?? current)
   try {
     await truncate(path, Number(size), flags.noCreate)
