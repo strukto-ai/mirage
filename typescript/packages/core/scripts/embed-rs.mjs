@@ -71,7 +71,9 @@ function embed(crate, name, build, small = []) {
   mkdirSync(output, { recursive: true })
   writeFileSync(
     new URL(`${name}.d.ts`, output),
-    'declare const module: WebAssembly.Module | (() => WebAssembly.Module)\n\nexport default module\n',
+    'declare const module: WebAssembly.Module | (() => WebAssembly.Module)\n\n' +
+      '/** Whether instances are made ahead, asynchronously: a page refuses a synchronous one over 8 MB. */\n' +
+      'export declare const AHEAD: boolean\n\nexport default module\n',
   )
 
   // Written here rather than by the build so code run from source (tsx, the
@@ -83,12 +85,12 @@ function embed(crate, name, build, small = []) {
   writeFileSync(new URL(`${name}.wasm`, built), wasm)
   writeFileSync(
     new URL(`${name}.workerd.js`, built),
-    `import module from './${name}.wasm'\n\nexport default module\n`,
+    `import module from './${name}.wasm'\n\nexport const AHEAD = false\n\nexport default module\n`,
   )
   writeFileSync(
     new URL(`${name}.node.js`, built),
     "import { readFileSync } from 'node:fs'\n\n" +
-      'let module\n\nexport default function loadModule() {\n' +
+      'export const AHEAD = false\n\nlet module\n\nexport default function loadModule() {\n' +
       `  return module ??= new WebAssembly.Module(readFileSync(new URL('./${name}.wasm', import.meta.url)))\n` +
       '}\n',
   )
@@ -116,6 +118,8 @@ if (response.ok && type.split(';')[0].trim() === 'application/wasm') {
   }
   module = await WebAssembly.compile(bytes)
 }
+
+export const AHEAD = true
 
 export default module
 `

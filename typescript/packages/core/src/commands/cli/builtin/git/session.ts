@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { Buffer } from 'buffer'
 import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { materialize } from '../../../../io/types.ts'
 import { concat } from '../../../../utils/bytes.ts'
@@ -87,6 +88,8 @@ export function verb(
   refused: ReadOnlyRefusal | null = null,
 ): CLIVerbFn<NOOPAccessor> {
   return async (accessor, paths, texts, ctx) => {
+    // isomorphic-git calls Node's global Buffer, which a page does not have.
+    ;(globalThis as { Buffer?: unknown }).Buffer ??= Buffer
     const own = { ...ctx, argv: [...(ctx.argv ?? [])] }
     const lines: string[] = []
     AMBIGUOUS.set(own.argv, lines)

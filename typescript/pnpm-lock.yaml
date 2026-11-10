@@ -640,6 +640,9 @@ importers:
       bson:
         specifier: ^6.10.4
         version: 6.10.4
+      buffer:
+        specifier: ^6.0.3
+        version: 6.0.3
       isomorphic-git:
         specifier: ^1.38.6
         version: 1.38.6

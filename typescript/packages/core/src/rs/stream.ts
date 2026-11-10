@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import MIRAGE_RS_WASM from '#mirage-rs-wasm'
+import MIRAGE_RS_WASM, { AHEAD } from '#mirage-rs-wasm'
 import { chunks } from '../io/cooperative.ts'
 import { SEALED } from '../io/pipe.ts'
 import type { util } from 'zod'
@@ -63,6 +63,9 @@ const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 const movables = new WeakMap<Exports, Set<OpenStream>>()
 
+/** Opt in by assigning a debug sink. */
+export const logger: { debug?: (message: string) => void } = {}
+
 type ModuleSource = WebAssembly.Module | (() => WebAssembly.Module)
 
 /**
@@ -107,15 +110,29 @@ export class StreamModule {
     }
   }
 
-  // The next stream gets the instance made ahead; the movable streams still
-  // on this one close, and `live` says so to their owners.
+  // The next stream gets the instance made ahead, and another is made behind
+  // it; the movable streams still on this one close, and `live` says so to
+  // their owners. With none made ahead yet, a grown instance stays until one
+  // is: a page's main thread cannot make one synchronously. A trapped one
+  // cannot stay.
   retire(exports: Exports, trapped: boolean): void {
     if (this.exports === exports) {
+      if (this.next === undefined && !trapped) {
+        this.refill()
+        return
+      }
       this.exports = this.next
       this.next = undefined
+      this.refill()
     }
     for (const stream of movables.get(exports) ?? []) stream.drop(!trapped)
     movables.delete(exports)
+  }
+
+  private refill(): void {
+    this.ready().catch((err: unknown) => {
+      logger.debug?.(`mirage-rs: no instance made ahead: ${String(err)}`)
+    })
   }
 
   async open(kind: string, config: Readonly<Record<string, util.JSONType>>): Promise<OpenStream> {
@@ -138,6 +155,12 @@ export class StreamModule {
 
 const MAIN = new StreamModule(MIRAGE_RS_WASM)
 
+// A page's loader compiled the module asynchronously, and its main thread
+// refuses to instantiate one over 8 MB synchronously, so the page makes the
+// instances as it loads, before any synchronous utility (a profile's
+// validation) opens a stream.
+if (AHEAD) await MAIN.ready()
+
 /**
  * The compiled module, for the page to hand the workers it starts without a
  * copy. `#mirage-rs-wasm` is the module itself where the host's bundler loads
@@ -152,17 +175,6 @@ export function compiledModule(): WebAssembly.Module {
 /** An embedded module (a `#mirage-*-wasm` import), compiled now where its loader waits for a first use. */
 export function compileSync(source: ModuleSource): WebAssembly.Module {
   return source instanceof WebAssembly.Module ? source : source()
-}
-
-/**
- * The instance streams open on and the one made ahead to replace it when it
- * retires, both made asynchronously: a page's main thread refuses to
- * instantiate a module over 8 MB synchronously. The browser package waits
- * for them as the page loads it, and the workspace at every entry point, so
- * a retired instance's replacement is back before the next line.
- */
-export function streamsReady(): Promise<void> {
-  return MAIN.ready()
 }
 
 /**
