@@ -41,7 +41,8 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import DotWalkLoop, FsCondition
-from mirage.io.stream import discard_streams, ensure_stream, prime_stream
+from mirage.io.spool import spooled
+from mirage.io.stream import discard_streams
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text, encode_text
@@ -524,11 +525,10 @@ async def _source_bytes(
     typed: str,
     link_typed: str,
     flags: LnFlags,
-    lost: list[Exception],
 ) -> tuple[ByteSource | None, str | None]:
-    """The bytes a hard link copies, a stream already open, or the
-    refusal in ln's words. A read that fails once the stream is open
-    goes on ``lost``.
+    """The bytes a hard link copies, held in a spool that spills past
+    memory, or the refusal in ln's words: a read that fails does so
+    before the link name is touched.
 
     A source whose stat passes but whose read fails (a policy deny, a
     backend that answers stat but not read) is refused the way GNU
@@ -542,7 +542,6 @@ async def _source_bytes(
         typed (str): the TARGET as typed.
         link_typed (str): the link name as typed, for ``-d``'s refusal.
         flags (LnFlags): the parsed flags.
-        lost (list[Exception]): where a late read failure goes.
     """
     if links.is_link(src_abs):
         try:
@@ -572,7 +571,7 @@ async def _source_bytes(
         data, _ = await dispatch(
             "read", PathSpec.from_str_path(src_abs), stream=True
         )
-        return await prime_stream(ensure_stream(data), lost.append), None
+        return (await spooled(data)) or b"", None
     except FS_ERRORS as exc:
         return None, f"ln: failed to access '{typed}': {fs_strerror(exc)}\n"
 
@@ -744,7 +743,6 @@ async def _create_link(
     flags: LnFlags,
     typed: str,
     target_typed: str,
-    lost: list[Exception],
 ) -> str | None:
     """Make the link, and answer the line refusing it, None when made.
 
@@ -756,29 +754,13 @@ async def _create_link(
         flags (LnFlags): the parsed flags.
         typed (str): the name as typed.
         target_typed (str): the target as typed.
-        lost (list[Exception]): the copy's source read failures, once
-            its stream was open.
     """
     kind = "symbolic link" if flags.symbolic else "hard link"
     try:
         if link_target is not None:
             await dispatch("symlink", link_spec, target=link_target)
         else:
-            try:
-                await dispatch("write", link_spec, data=data)
-            except FS_ERRORS:
-                # A source read that fails once its first bytes went out
-                # is the source's, refused as one it could not read at
-                # all, so the copy it began is removed and the remaining
-                # operands still link.
-                if not lost or not isinstance(lost[0], FS_ERRORS):
-                    raise
-                try:
-                    await dispatch("unlink", link_spec)
-                except FS_ERRORS as exc:
-                    logger.debug("ln: %s not removed: %s", link_spec, exc)
-                why = fs_strerror(lost[0])
-                return f"ln: failed to access '{target_typed}': {why}\n"
+            await dispatch("write", link_spec, data=data)
     except (FileNotFoundError, NotADirectoryError, DotWalkLoop) as exc:
         # The dispatcher refuses a name its parent cannot hold (symlink(2)'s
         # ENOENT, ENOTDIR and ELOOP), and a store's write refuses the
@@ -842,7 +824,6 @@ async def _attempt_link(
     target_typed = word_text(plan.source)
     link_target: str | None = None
     data: ByteSource | None = None
-    lost: list[Exception] = []
     refusal = await _walk_refusal(links, dispatch, cwd, plan, flags)
     if refusal is not None:
         errors.append(refusal)
@@ -870,7 +851,7 @@ async def _attempt_link(
             link_target = links.readlink(src_abs)
         else:
             data, refusal = await _source_bytes(
-                links, dispatch, src_abs, target_typed, typed, flags, lost
+                links, dispatch, src_abs, target_typed, typed, flags
             )
             if refusal is not None:
                 errors.append(refusal)
@@ -988,14 +969,7 @@ async def _attempt_link(
             errors.append(_refused(flags, typed, target_typed, why))
             return
     refusal = await _create_link(
-        dispatch,
-        link_spec,
-        link_target,
-        data,
-        flags,
-        typed,
-        target_typed,
-        lost,
+        dispatch, link_spec, link_target, data, flags, typed, target_typed
     )
     if refusal is not None:
         errors.append(refusal)

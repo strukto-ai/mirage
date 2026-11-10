@@ -43,7 +43,8 @@ import {
 } from '../../../../errors/fs.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
 import type { FsCondition } from '../../../../errors/types.ts'
-import { discardStreams, ensureStream, primeStream } from '../../../../io/stream.ts'
+import { spooled } from '../../../../io/spool.ts'
+import { discardStreams } from '../../../../io/stream.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
@@ -449,8 +450,9 @@ export async function planLinks(
   return [operands.slice(0, -1).map((op) => into(op, resolved, wordText(last))), null]
 }
 
-// The bytes a hard link copies, a stream already open, or the refusal in
-// ln's words. A read that fails once the stream is open goes on `lost`.
+// The bytes a hard link copies, held in a spool that spills past memory, or
+// the refusal in ln's words: a read that fails does so before the link name
+// is touched.
 async function sourceBytes(
   links: NamespaceReader,
   dispatch: DispatchFn,
@@ -458,7 +460,6 @@ async function sourceBytes(
   typed: string,
   linkTyped: string,
   flags: LnFlags,
-  lost: unknown[],
 ): Promise<[ByteSource | null, string | null]> {
   let resolved = srcAbs
   if (links.isLink(srcAbs)) {
@@ -499,7 +500,7 @@ async function sourceBytes(
   // still link.
   try {
     const [data] = await dispatch('read', PathSpec.fromStrPath(resolved), [], { stream: true })
-    return [await primeStream(ensureStream(data as ByteSource), (err) => lost.push(err)), null]
+    return [(await spooled(data as ByteSource)) ?? new Uint8Array(), null]
   } catch (err) {
     const why = fsStrerror(err)
     if (why === null) throw err
@@ -642,26 +643,13 @@ async function createLink(
   flags: LnFlags,
   typed: string,
   targetTyped: string,
-  lost: readonly unknown[],
 ): Promise<string | null> {
   const kind = flags.symbolic ? 'symbolic link' : 'hard link'
   try {
     if (linkTarget !== null) {
       await dispatch('symlink', linkSpec, [], { target: linkTarget })
     } else {
-      try {
-        await dispatch('write', linkSpec, [data ?? new Uint8Array()])
-      } catch (err) {
-        // A source read that fails once its first bytes went out is the
-        // source's, refused as one it could not read at all, so the copy
-        // it began is removed and the remaining operands still link.
-        const why = lost.length > 0 ? fsStrerror(lost[0]) : null
-        if (why === null) throw err
-        await dispatch('unlink', linkSpec).catch((left: unknown) => {
-          logger.debug?.(`ln: ${linkSpec.virtual} not removed: ${String(left)}`)
-        })
-        return `ln: failed to access '${targetTyped}': ${why}\n`
-      }
+      await dispatch('write', linkSpec, [data ?? new Uint8Array()])
     }
   } catch (err) {
     const code = (err as { code?: string }).code
@@ -709,7 +697,6 @@ async function attemptLink(
   const targetTyped = wordText(plan.source)
   let linkTarget: string | null = null
   let data: ByteSource | null = null
-  const lost: unknown[] = []
   const refusal = await walkRefusal(links, dispatch, cwd, plan, flags)
   if (refusal !== null) {
     errors.push(refusal)
@@ -739,15 +726,7 @@ async function attemptLink(
     if (links.isLink(srcAbs) && !flags.logical) {
       linkTarget = links.readlink(srcAbs)
     } else {
-      const [bytes, refusal] = await sourceBytes(
-        links,
-        dispatch,
-        srcAbs,
-        targetTyped,
-        typed,
-        flags,
-        lost,
-      )
+      const [bytes, refusal] = await sourceBytes(links, dispatch, srcAbs, targetTyped, typed, flags)
       if (refusal !== null) {
         errors.push(refusal)
         return
@@ -870,16 +849,7 @@ async function attemptLink(
       return
     }
   }
-  const failed = await createLink(
-    dispatch,
-    linkSpec,
-    linkTarget,
-    data,
-    flags,
-    typed,
-    targetTyped,
-    lost,
-  )
+  const failed = await createLink(dispatch, linkSpec, linkTarget, data, flags, typed, targetTyped)
   if (failed !== null) {
     errors.push(failed)
     return
