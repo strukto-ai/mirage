@@ -765,6 +765,9 @@ SHELL_SPECS: dict[str, CommandSpec] = {
                 action="store_true",
                 help="list the signal names, or name the numbers given",
             ),
+            Argument(
+                "-m", metavar="machine", help="the machine the IDs are on"
+            ),
         ),
     ),
     "let": CommandSpec(
@@ -1271,6 +1274,9 @@ SHELL_SPECS: dict[str, CommandSpec] = {
                 "-n",
                 action="store_true",
                 help="wait for the next job to end and return its status",
+            ),
+            Argument(
+                "-m", metavar="machine", help="the machine the IDs are on"
             ),
             Argument(
                 "-p",

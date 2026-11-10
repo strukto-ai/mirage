@@ -17,6 +17,7 @@ import json
 import logging
 
 import pytest
+from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
@@ -24,7 +25,10 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 )
 
 from mirage import MountMode, Workspace
+from mirage.execution.process.types import Process
 from mirage.io import IOResult
+from mirage.machine.constants import CHECK_MARK
+from mirage.machine.handle import MachineHandle
 from mirage.observe import OpRecord
 from mirage.observe import observer as observer_module
 from mirage.observe.constants import (
@@ -38,6 +42,8 @@ from mirage.observe.log_entry import EVENT_COMMAND, LogEntry
 from mirage.observe.observer import Observer
 from mirage.observe.store import RAMObserverStore
 from mirage.policy import ExecuteResultContext, Policy
+from mirage.runtime.machine import MachineRuntime
+from mirage.runtime.types import RunResult
 from mirage.utils.clock import ManualClock
 from mirage.vfs.ram import RAMVFS
 
@@ -727,10 +733,13 @@ async def test_an_ended_job_and_process_are_spans(monkeypatch):
     assert attributes["mirage.line.id"] == str(line.id)
     assert attributes["mirage.session.id"] == line.session_id
     assert attributes["mirage.cwd"] == "/"
-    assert str(attributes["host.id"]).startswith("host:")
+    host = str(ws.process_table.machine)
+    assert attributes["host.id"] == host
+    assert attributes["mirage.machine.id"] == host
     [command] = [s for s in spans if s.name == "command"]
     assert (command.attributes or {})["mirage.line.id"] == str(line.id)
-    assert (command.attributes or {})["host.id"] == attributes["host.id"]
+    assert (command.attributes or {})["host.id"] == host
+    assert (command.attributes or {})["mirage.machine.ids"] == (host,)
     context = command.get_span_context()
     assert context is not None
     for span in (job, sleep):
@@ -740,5 +749,80 @@ async def test_an_ended_job_and_process_are_spans(monkeypatch):
             context.span_id,
         )
     assert (job.attributes or {})["process.pid"] == attributes["process.pid"]
-    assert (job.attributes or {})["host.id"] == attributes["host.id"]
+    assert (job.attributes or {})["host.id"] == host
+    assert (job.attributes or {})["mirage.machine.id"] == host
     assert (job.attributes or {})["mirage.cwd"] == "/"
+
+
+class _Box(MachineHandle):
+    provider = "box"
+
+    async def connect(self) -> None:
+        return None
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        return RunResult(
+            stdout=f"{CHECK_MARK}\n".encode(), stderr=None, exit_code=0
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_span_names_the_machine_its_work_ran_on(monkeypatch):
+    exporter = _exported(monkeypatch)
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"a": _Box("a")},
+        runtimes=[MachineRuntime(["train"], machine="a")],
+    )
+    try:
+        await ws.shell("train 1 & wait")
+        await ws.shell("echo hi")
+        await ws.shell("echo a\ntrain 2")
+        first, second, third = await ws.lines()
+        host = str(ws.process_table.machine)
+    finally:
+        await ws.close()
+    spans = exporter.get_finished_spans()
+    machines = {
+        (s.attributes or {})["mirage.line.id"]: (s.attributes or {}).get(
+            "mirage.machine.ids"
+        )
+        for s in spans
+        if s.name == "command"
+    }
+    assert machines == {
+        str(first.id): (host, "box:a"),
+        str(second.id): (host,),
+        str(third.id): (host,),
+        f"{third.id}.1": (host, "box:a"),
+    }
+    ran = [
+        (
+            s.name,
+            (s.attributes or {})["mirage.machine.id"],
+            (s.attributes or {})["host.id"],
+        )
+        for s in spans
+        if s.name == "job"
+        or (
+            s.name == "process"
+            and (s.attributes or {})["process.command_line"] == "train 1"
+        )
+    ]
+    assert sorted(ran) == [("job", "box:a", host), ("process", "box:a", host)]
+
+
+@pytest.mark.asyncio
+async def test_a_line_nobody_traces_reads_no_process_records(monkeypatch):
+    monkeypatch.setattr(observer_module, "_tracer", trace.NoOpTracer)
+    reads: list[None] = []
+
+    def processes() -> list[Process]:
+        reads.append(None)
+        return []
+
+    obs = Observer(processes=processes)
+    await obs.log_command("true", "s", line="line_1")
+    await obs.log_result(IOResult(exit_code=0), [], "s", line="line_1")
+    assert reads == []

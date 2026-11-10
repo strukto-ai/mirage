@@ -97,13 +97,18 @@ the backend: OTLP to Datadog, Honeycomb, Grafana, Langfuse and others.
 
 | Span | Attributes |
 | --- | --- |
-| `command` | `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.id`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.timestamp`, `mirage.duration_ms`, `mirage.stdout`, `mirage.stderr`, `mirage.vfs.dropped` |
+| `command` | `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.id`, `mirage.machine.ids`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.timestamp`, `mirage.duration_ms`, `mirage.stdout`, `mirage.stderr`, `mirage.vfs.dropped` |
 | `vfs.<call>` | `mirage.vfs.path`, `mirage.vfs.source`, `mirage.vfs.bytes`, `mirage.vfs.timestamp`, `mirage.vfs.duration_ms` |
-| `job` | `mirage.job.id`, `mirage.job.number`, `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.id`, `process.pid`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.signal` |
-| `process` | `process.pid`, `process.parent_pid`, `process.group_leader.pid`, `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.id`, `process.command_line`, `mirage.cwd`, `mirage.runtime`, `mirage.machine.pid`, `process.exit.code`, `mirage.signal`, `mirage.error` |
+| `job` | `mirage.job.id`, `mirage.job.number`, `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.id`, `mirage.machine.id`, `process.pid`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.signal` |
+| `process` | `process.pid`, `process.parent_pid`, `process.group_leader.pid`, `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.id`, `mirage.machine.id`, `process.command_line`, `mirage.cwd`, `mirage.runtime`, `mirage.machine.pid`, `process.exit.code`, `mirage.signal`, `mirage.error` |
 
-`host.id` is the machine a span's work ran on, such as `host:my-laptop` or
-`docker:tools`. Traces cover what runs on the workspace's machine and the
+`host.id` is the host running Mirage, such as `host:my-laptop`.
+`mirage.machine.id` is the machine a job or process ran on, such as
+`docker:tools`. `mirage.machine.ids` lists the machines a line's processes ran
+on by the time the line ended, while the workspace keeps their records; a
+background job that starts a program later names its machine on that
+program's own `process` span.
+Traces cover what runs on the workspace's machine and the
 runtimes it reaches; a program a runtime runs elsewhere starts no spans of its
 own there.
 

@@ -140,7 +140,15 @@ def test_a_topic_shows_its_synopsis_then_indented_help():
         "    Wait for jobs and return their status.\n    \n"
     )
     assert "    Options:\n      -f\twait until each ID ends" in out
+    assert "      -m machine\tthe machine the IDs are on" in out
     assert max(len(line) for line in out.split("\n")) <= 80
+
+
+def test_kill_names_its_machine_option():
+    assert (
+        "      -m machine\tthe machine the IDs are on"
+        in _run("help kill")[0][0]
+    )
 
 
 def test_the_manual_layout_ends_with_the_implementation():

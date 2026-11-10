@@ -16,6 +16,7 @@ import hashlib
 import json
 import logging
 import os
+from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 from urllib.parse import quote
@@ -147,8 +148,8 @@ def _start_line(
     start: int,
 ) -> trace.Span:
     """Open a typed line's ``command`` span as it starts, naming the
-    line, its session, its workspace, the machine it runs on and the cwd
-    it starts in; the spans of its jobs and processes go under it.
+    line, its session, its workspace, the host running Mirage and the
+    cwd it starts in; the spans of its jobs and processes go under it.
 
     Args:
         workspace_id (str | None): the workspace the line runs in.
@@ -182,14 +183,16 @@ def _end_line(
     exit_code: int,
     output: tuple[bytes, bytes],
     records: list[OpRecord],
+    machines: list[str],
 ) -> None:
-    """Close a typed line's ``command`` span: how it ended, the start of
-    its stdout and stderr, and under it a ``vfs.<call>`` span for each
-    call it made to a mount. Each span also carries its start or end and
-    its length in milliseconds, as the history's entries have them, for
-    a tracer that can't be given a span's times. ``TRACE_CONTENT_ENV``
-    leaves out the output and the calls, and past ``TRACE_MAX_SPANS_ENV``
-    calls the rest are only counted.
+    """Close a typed line's ``command`` span: how it ended, the machines
+    its processes ran on, the start of its stdout and stderr, and under
+    it a ``vfs.<call>`` span for each call it made to a mount. Each span
+    also carries its start or end and its length in milliseconds, as the
+    history's entries have them, for a tracer that can't be given a
+    span's times. ``TRACE_CONTENT_ENV`` leaves out the output and the
+    calls, and past ``TRACE_MAX_SPANS_ENV`` calls the rest are only
+    counted.
 
     Args:
         line (trace.Span): the line's span.
@@ -198,9 +201,12 @@ def _end_line(
         output (tuple[bytes, bytes]): its stdout and stderr as it wrote
             them.
         records (list[OpRecord]): the calls it made.
+        machines (list[str]): the machines its processes ran on.
     """
     content = _trace_content()
     line.set_attribute("mirage.exit_code", exit_code)
+    if machines:
+        line.set_attribute("mirage.machine.ids", machines)
     line.set_attribute("mirage.duration_ms", span[1] - span[0])
     calls = records[: _positive_env(TRACE_MAX_SPANS_ENV, TRACE_MAX_SPANS)]
     if content:
@@ -305,8 +311,11 @@ class Observer:
         clock (Clock | None): the workspace clock; None is the system
             clock.
         workspace_id (str | None): the workspace, named on its spans.
-        machine (str | None): the workspace's machine, named on its
-            lines' spans.
+        machine (str | None): the workspace's machine, ``host.id`` on
+            its command, job and process spans.
+        processes (Callable[[], list[Process]] | None): the process
+            records the workspace keeps, whose machines a line's span
+            lists.
     """
 
     def __init__(
@@ -315,17 +324,38 @@ class Observer:
         clock: Clock | None = None,
         workspace_id: str | None = None,
         machine: str | None = None,
+        processes: Callable[[], list[Process]] | None = None,
     ) -> None:
         self._store = store if store is not None else RAMObserverStore()
         self._clock: Clock = clock if clock is not None else SystemClock()
         self._workspace_id = workspace_id
         self._machine = machine
+        self._processes = processes
         self._newest: dict[str, int | None] = {}
         # Each open line's start (epoch ms, then monotonic) and span.
         self._started: dict[str, tuple[int, float, trace.Span]] = {}
         # The span of each recent line, which its jobs and processes go
         # under, oldest first.
         self._line_spans: dict[str, trace.SpanContext] = {}
+
+    def _machines_of(self, line: str) -> list[str]:
+        """The machines a line's processes ran on by the time it ended,
+        while the workspace keeps their records; a background job's later
+        processes name theirs on their own spans.
+
+        Args:
+            line (str): the line's id, or one of its history entries'.
+        """
+        if self._processes is None:
+            return []
+        base = line.split(".", 1)[0]
+        return list(
+            dict.fromkeys(
+                str(process.machine)
+                for process in self._processes()
+                if process.line is not None and process.line.value == base
+            )
+        )
 
     def _now_ms(self) -> int:
         """The clock's wall time in epoch milliseconds, an entry's stamp."""
@@ -469,6 +499,11 @@ class Observer:
                 io.exit_code,
                 (stdout, stderr),
                 op_records,
+                (
+                    self._machines_of(line)
+                    if line is not None and started[2].is_recording()
+                    else []
+                ),
             )
         await self._log(
             LogEntry(
@@ -496,7 +531,7 @@ class Observer:
             "process.pid": record.pid,
             "process.command_line": record.command,
             "process.group_leader.pid": record.group,
-            "host.id": str(record.machine),
+            "mirage.machine.id": str(record.machine),
             "mirage.workspace.id": record.id.workspace_id,
             "mirage.session.id": record.session_id,
             "mirage.cwd": record.cwd.virtual,
@@ -533,7 +568,7 @@ class Observer:
             "mirage.job.id": record.id.console,
             "mirage.job.number": record.number,
             "mirage.command": record.command,
-            "host.id": str(machine),
+            "mirage.machine.id": str(machine),
             "mirage.workspace.id": record.id.workspace_id,
             "mirage.session.id": record.session_id,
             "mirage.cwd": record.cwd,
@@ -566,6 +601,8 @@ class Observer:
             started_at (float): when the record started, epoch seconds.
             ended_at (float | None): when it ended, epoch seconds.
         """
+        if self._machine is not None:
+            attributes["host.id"] = self._machine
         parent = None
         if line is not None:
             attributes["mirage.line.id"] = line.value

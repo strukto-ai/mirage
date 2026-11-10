@@ -619,6 +619,7 @@ class Workspace:
             clock=self._clock,
             workspace_id=self._workspace_id,
             machine=str(self.process_table.machine),
+            processes=self.process_table.records,
         )
         self._registry.observer = self.observer
         # The stores this workspace's state lives in, whether the state

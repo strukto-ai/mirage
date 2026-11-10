@@ -470,6 +470,7 @@ export const SHELL_SPECS = Object.freeze(
           action: 'store_true',
           help: 'list the signal names, or name the numbers given',
         }),
+        new Argument('-m', { metavar: 'machine', help: 'the machine the IDs are on' }),
       ],
     }),
     let: new CommandSpec({
@@ -740,6 +741,7 @@ export const SHELL_SPECS = Object.freeze(
           action: 'store_true',
           help: 'wait for the next job to end and return its status',
         }),
+        new Argument('-m', { metavar: 'machine', help: 'the machine the IDs are on' }),
         new Argument('-p', {
           metavar: 'var',
           help: 'store in VAR the ID whose status is returned',
