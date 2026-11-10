@@ -621,14 +621,15 @@ interface Drawing {
 
 // One directory's own entries, in the order they are drawn. Mirrors Python's
 // `_open_dir`.
-/** The mount roots on a directory, named as the walk draws them: one reached
- * through a followed link holds the mounts where it really is. Mirrors
- * Python's _nested_mounts. */
-function nestedMounts(treeOpts: TreeOpts, directory: string): string[] {
+/** The mount roots on a directory reached through a followed link, named as
+ * the walk draws them. They only mark a boundary: such an entry is still
+ * stat'ed, which a session's hides answer. Mirrors Python's _linked_mounts. */
+function linkedMounts(treeOpts: TreeOpts, directory: string): string[] {
   const { flags, resolve, mounts } = treeOpts
-  if (!flags.follow || resolve === null) return childMounts(mounts, directory)
+  if (!flags.follow || resolve === null) return []
   const real = rstripSlash(resolve(directory))
   const drawn = rstripSlash(directory)
+  if (real === drawn) return []
   return childMounts(mounts, real === '' ? '/' : real).map(
     (mount) => drawn + mount.slice(real.length),
   )
@@ -647,7 +648,8 @@ async function openDir(
   // `/repos/alpha` is mounted) has no backend to list it, so the readdir
   // throws and a merge below it never runs: `tree` reported the one path
   // whose children it could name for certain as unopenable.
-  const nested = nestedMounts(treeOpts, path.virtual)
+  const nested = childMounts(treeOpts.mounts, path.virtual)
+  const linked = linkedMounts(treeOpts, path.virtual)
   const limit = treeOpts.budget?.listingLimit(path.virtual) ?? null
   let entries: string[]
   try {
@@ -731,7 +733,7 @@ async function openDir(
         du: contentSize(s),
         missing: false,
       },
-      crossing,
+      crossing: crossing || (linked.includes(childPath) && treeOpts.crossReaddir !== null),
     })
   }
   if (flags.fileLimit !== null && kept.length > flags.fileLimit)

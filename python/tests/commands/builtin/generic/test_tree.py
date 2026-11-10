@@ -547,3 +547,17 @@ async def test_tree_lx_stays_out_of_a_mount_below_a_link():
         await crossed.stdout_str()
         == "/d/root\n`-- a -> ../real\n    |-- f\n    `-- m\n        `-- g\n"
     )
+
+
+@pytest.mark.asyncio
+async def test_tree_l_keeps_a_hidden_mount_below_a_link_hidden():
+    ws = Workspace(
+        {"/d": RAMVFS(), "/d/real/m": RAMVFS()}, mode=MountMode.WRITE
+    )
+    await ws.shell(
+        "mkdir -p /d/root /d/real; printf x > /d/real/f; "
+        "printf y > /d/real/m/g; ln -s ../real /d/root/a"
+    )
+    ws.create_session("agent", profile={"paths": {"hide": ["/d/root/a/m"]}})
+    io = await ws.shell("tree -lx --noreport /d/root", session_id="agent")
+    assert await io.stdout_str() == "/d/root\n`-- a -> ../real\n    `-- f\n"

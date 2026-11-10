@@ -628,18 +628,21 @@ async def _gitignore(
     return _gitignore_lines(text, directory.virtual)
 
 
-def _nested_mounts(opts: _TreeOpts, directory: str) -> list[str]:
-    """The mount roots on a directory, named as the walk draws them: one
-    reached through a followed link holds the mounts where it really is.
+def _linked_mounts(opts: _TreeOpts, directory: str) -> list[str]:
+    """The mount roots on a directory reached through a followed link,
+    named as the walk draws them. They only mark a boundary: such an entry
+    is still stat'ed, which a session's hides answer.
 
     Args:
         opts (_TreeOpts): the operand's walk.
         directory (str): absolute virtual path being listed.
     """
     if not opts.flags.follow or opts.resolve is None:
-        return _child_mounts(opts.mounts, directory)
+        return []
     real = opts.resolve(directory).rstrip("/")
     drawn = directory.rstrip("/")
+    if real == drawn:
+        return []
     return [
         drawn + mount[len(real) :]
         for mount in _child_mounts(opts.mounts, real or "/")
@@ -678,7 +681,8 @@ async def _open_dir(
     # readdir raises and a merge below it never runs: `tree` reported the
     # one path whose children it could name for certain as unopenable.
     flags = opts.flags
-    child_mounts = _nested_mounts(opts, path.virtual)
+    child_mounts = _child_mounts(opts.mounts, path.virtual)
+    linked_mounts = _linked_mounts(opts, path.virtual)
     limit = opts.budget.listing_limit(path.virtual)
     try:
         entries = await (
@@ -749,7 +753,8 @@ async def _open_dir(
         kept.append(
             (
                 _TreeNode(entry_spec, s, is_dir, leads, du=content_size(s)),
-                crossing,
+                crossing
+                or (entry in linked_mounts and opts.cross_readdir is not None),
             )
         )
     if flags.file_limit is not None and len(kept) > flags.file_limit:

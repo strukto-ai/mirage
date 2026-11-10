@@ -581,3 +581,17 @@ it('tree -lx stays out of a mount below a link', async () => {
     '/d/root\n`-- a -> ../real\n    |-- f\n    `-- m\n        `-- g\n',
   )
 })
+
+it('tree -l keeps a hidden mount below a link hidden', async () => {
+  const ws = new Workspace(
+    { '/d': new RAMVFS(), '/d/real/m': new RAMVFS() },
+    { mode: MountMode.WRITE },
+  )
+  await ws.shell(
+    'mkdir -p /d/root /d/real; printf x > /d/real/f; printf y > /d/real/m/g; ln -s ../real /d/root/a',
+  )
+  ws.createSession('agent', { profile: { paths: { hide: ['/d/root/a/m'] } } })
+  const io = await ws.shell('tree -lx --noreport /d/root', { sessionId: 'agent' })
+  await ws.close()
+  expect(io.stdoutText).toBe('/d/root\n`-- a -> ../real\n    `-- f\n')
+})
