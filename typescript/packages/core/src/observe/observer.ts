@@ -311,8 +311,9 @@ export class Observer {
   }
 
   /**
-   * The machines a line's processes ran on, while the workspace keeps their
-   * records. `line` is the line's id or one of its
+   * The machines a line's processes ran on by the time it ended, while the
+   * workspace keeps their records; a background job's later processes name
+   * theirs on their own spans. `line` is the line's id or one of its
    * history entries'. Mirrors Python's `_machines_of`.
    */
   private machinesOf(line: string): string[] {
@@ -506,7 +507,7 @@ export class Observer {
         io.exitCode,
         [out, err],
         opRecords,
-        line === undefined ? [] : this.machinesOf(line),
+        line !== undefined && started[2].isRecording() ? this.machinesOf(line) : [],
       )
     }
     const init: LogEntryInit = {

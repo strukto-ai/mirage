@@ -825,3 +825,16 @@ it("names the machine a span's work ran on", async () => {
     trace.disable()
   }
 })
+
+// A line nobody traces leaves the process records unread.
+it('reads no process records for a line nobody traces', async () => {
+  trace.disable()
+  let reads = 0
+  const obs = new Observer(undefined, undefined, undefined, undefined, () => {
+    reads += 1
+    return []
+  })
+  await obs.logCommand('true', 's', undefined, 'line_1')
+  await obs.logResult(new IOResult({ exitCode: 0 }), [], 's', undefined, 'line_1')
+  expect(reads).toBe(0)
+})

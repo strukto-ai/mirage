@@ -105,7 +105,9 @@ the backend: OTLP to Datadog, Honeycomb, Grafana, Langfuse and others.
 `host.id` is the host running Mirage, such as `host:my-laptop`.
 `mirage.machine.id` is the machine a job or process ran on, such as
 `docker:tools`. `mirage.machine.ids` lists the machines a line's processes ran
-on while the workspace keeps their records, and is absent once none remain.
+on by the time the line ended, while the workspace keeps their records; a
+background job that starts a program later names its machine on that
+program's own `process` span.
 Traces cover what runs on the workspace's machine and the
 runtimes it reaches; a program a runtime runs elsewhere starts no spans of its
 own there.

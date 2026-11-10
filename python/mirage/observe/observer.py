@@ -339,8 +339,9 @@ class Observer:
         self._line_spans: dict[str, trace.SpanContext] = {}
 
     def _machines_of(self, line: str) -> list[str]:
-        """The machines a line's processes ran on, while the workspace
-        keeps their records.
+        """The machines a line's processes ran on by the time it ended,
+        while the workspace keeps their records; a background job's later
+        processes name theirs on their own spans.
 
         Args:
             line (str): the line's id, or one of its history entries'.
@@ -498,7 +499,11 @@ class Observer:
                 io.exit_code,
                 (stdout, stderr),
                 op_records,
-                self._machines_of(line) if line is not None else [],
+                (
+                    self._machines_of(line)
+                    if line is not None and started[2].is_recording()
+                    else []
+                ),
             )
         await self._log(
             LogEntry(

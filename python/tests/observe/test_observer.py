@@ -17,6 +17,7 @@ import json
 import logging
 
 import pytest
+from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
@@ -24,6 +25,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 )
 
 from mirage import MountMode, Workspace
+from mirage.execution.process.types import Process
 from mirage.io import IOResult
 from mirage.machine.constants import CHECK_MARK
 from mirage.machine.handle import MachineHandle
@@ -809,3 +811,18 @@ async def test_a_span_names_the_machine_its_work_ran_on(monkeypatch):
         )
     ]
     assert sorted(ran) == [("job", "box:a", host), ("process", "box:a", host)]
+
+
+@pytest.mark.asyncio
+async def test_a_line_nobody_traces_reads_no_process_records(monkeypatch):
+    monkeypatch.setattr(observer_module, "_tracer", trace.NoOpTracer)
+    reads: list[None] = []
+
+    def processes() -> list[Process]:
+        reads.append(None)
+        return []
+
+    obs = Observer(processes=processes)
+    await obs.log_command("true", "s", line="line_1")
+    await obs.log_result(IOResult(exit_code=0), [], "s", line="line_1")
+    assert reads == []
