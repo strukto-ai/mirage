@@ -357,7 +357,7 @@ jobs:
       # PYTHONSAFEPATH keeps python/ off sys.path, so the installed package
       # is imported and not the source tree, whose mirage/ has no native
       # module built in it.
-      - name: python3 degrades with an install hint; local runtime still works
+      - name: python3 runs only where named; local runtime still works
         working-directory: python
         env:
           PYTHONSAFEPATH: "1"
@@ -374,7 +374,7 @@ jobs:
               ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC)
               io = await ws.shell("python3 -c 'print(1)'")
               assert io.exit_code == 127, io.exit_code
-              assert b"monty' extra" in io.stderr, io.stderr
+              assert io.stderr == b"python3: command not found\n", io.stderr
               ws2 = Workspace({"/data": RAMVFS()},
                               mode=MountMode.EXEC,
                               runtimes=["local"])
