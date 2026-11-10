@@ -6,7 +6,7 @@ line back.
 
 | File            | Pins                                                                                                                              |
 | --------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `external.json` | captured external commands: argv, pipeline stages, path policy, globs in text slots, interpreter scripts, builtins kept, wrappers |
+| `external.json` | captured external commands: argv, pipeline stages, path policy, globs in text slots, interpreter scripts, builtins kept, wrappers and where their programs are placed, a path Mirage has no file for |
 | `fallback.json` | a captured program in a pipeline; an external fallback keeps mirage's commands and is no program to `which` or `type`             |
 | `line.json`     | whole-line capture (`@line`), literal words, interpreter scripts                                                                  |
 | `defaults.json` | the default Python runtime: monty on both hosts                                                                                   |

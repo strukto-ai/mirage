@@ -68,6 +68,12 @@ function whole(...policies: Policy[]): Workspace {
   )
 }
 
+class ProgramOnB implements Policy {
+  preCommand(ctx: CommandContext): Route | null {
+    return ctx.command === 'hostname' ? { kind: 'route', machine: 'b' } : null
+  }
+}
+
 class OnB implements Policy {
   preExecute(): Route {
     return { kind: 'route', machine: 'b', reason: 'the other box' }
@@ -220,6 +226,19 @@ describe('routing on machines', () => {
         ['hostname', 'machine', 'box:a'],
         ['hostname', 'machine', 'box:b'],
         ['ls', '', ''],
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('explains a wrapper where its program is placed', async () => {
+    const ws = workspace(new ProgramOnB())
+    try {
+      const said = await ws.explain('nohup hostname')
+      expect([...commands(said.node)].map((c) => [c.command, c.machine])).toEqual([
+        ['nohup', 'box:b'],
+        ['hostname', 'box:b'],
       ])
     } finally {
       await ws.close()

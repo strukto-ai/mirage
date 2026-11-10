@@ -195,6 +195,32 @@ def mirage_program_at(
     return at
 
 
+def wrapper_runs_outside(
+    name: str,
+    args: Sequence[str],
+    session: SessionState,
+    registry: "MountRegistry",
+    routing: RouteDecision[RuntimeIdentity] | None,
+) -> bool:
+    """Whether a wrapper goes to a runtime with its program under it
+    (``nohup python3`` on a machine), so Mirage never runs that program
+    itself.
+
+    Args:
+        name (str): expanded command name.
+        args (Sequence[str]): its words, argv[0] excluded.
+        session (SessionState): shell session (function table).
+        registry (MountRegistry): mount registry (command registration).
+        routing (RouteDecision | None): the line's placement.
+    """
+    return (
+        name in PROGRAM_WRAPPERS
+        and mirage_program_at(name, args, session, registry, routing) is None
+        and routed_consumer(name, args, session, registry, routing)[0]
+        is Consumer.EXTERNAL
+    )
+
+
 def wrapper_refusal(
     name: str,
     args: Sequence[str],

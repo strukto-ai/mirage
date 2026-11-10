@@ -92,7 +92,9 @@ class JobsOnTheBox(Policy):
 
 A `pre_command` policy may answer a Route too, which places that one
 command alone: `Route(machine="gpu")` for `python3 train.py` in
-`ls; python3 train.py` runs only `python3` there.
+`ls; python3 train.py` runs only `python3` there. Behind `nohup`, `nice`,
+`setsid`, `stdbuf` or `ionice`, the policy is asked about the program, and
+the wrapper runs where the program is placed.
 
 A line the rules refuse is never placed. A Deny beats any Route, and two
 policies naming different runtimes or machines refuse the line. Nested

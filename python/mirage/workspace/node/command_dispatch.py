@@ -29,7 +29,6 @@ from mirage.commands.builtin.general.interpreter import run_output
 from mirage.commands.builtin.utils.limit import (
     guard_io,
 )
-from mirage.commands.config import Context
 from mirage.context import (
     RedirectRunner,
     bind_caller,
@@ -60,22 +59,13 @@ from mirage.policy import (
     PolicyDenied,
     post_command_gate,
     refusal_of,
-    render_command_deny,
     render_deny,
     resolve_producer,
 )
 from mirage.policy.types import Claimant, HandOff, Route
-from mirage.runtime.base import Runtime
-from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.routing import RouteError
 from mirage.runtime.table import routed
-from mirage.runtime.types import (
-    DispatchFn,
-    OutputFn,
-    RouteDecision,
-    RunResult,
-    RuntimeIdentity,
-)
+from mirage.runtime.types import DispatchFn, OutputFn, RunResult
 from mirage.shell.bytes import decode_text, encode_text, utf8_locale
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
@@ -149,12 +139,14 @@ from mirage.workspace.lookup import (
     Consumer,
     runtime_refused,
 )
-from mirage.workspace.lookup.constants import PROGRAM_WRAPPERS, RUNNERS
+from mirage.workspace.lookup.constants import RUNNERS
 from mirage.workspace.lookup.lookup import (
+    lookup,
     mirage_program_at,
     routed_consumer,
     wrapper_answer,
     wrapper_refusal,
+    wrapper_runs_outside,
 )
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -955,23 +947,46 @@ async def _run_argv(
         # the line's placement for its run alone: the lines it runs
         # (`eval`) keep the command's placement, not the line's.
         line_routing = context.frame.routing
-        route = admitted.route if admitted is not None else None
         nested = execute_fn
-        if route is not None and line_routing is not None:
+
+        def place(route: Route | None) -> None:
+            nonlocal nested
+            here = context.frame.routing
+            if route is None or here is None:
+                return
             try:
                 context.frame.routing = routed(
                     registry.runtime_entries,
-                    line_routing.bindings,
+                    here.bindings,
                     route.runtime,
-                    route.machine or line_routing.machine,
+                    route.machine or here.machine,
                 )
             except ValueError as exc:
-                reset_caller(token)
                 raise RouteError(str(exc)) from exc
             nested = partial(
                 execute_fn, routing_decision=context.frame.routing
             )
+
         try:
+            place(admitted.route if admitted is not None else None)
+            # A wrapper a runtime takes starts its program where Mirage
+            # cannot, so the program is judged here, and where a policy
+            # places it the wrapper goes with it.
+            if wrapper_runs_outside(
+                name, argv.args, session, registry, context.frame.routing
+            ):
+                verdict = await _wrapped_verdict(
+                    [Word(w, w) for w in (name, *argv.args)],
+                    session,
+                    registry,
+                    namespace,
+                    given,
+                    cancel,
+                    claimant,
+                )
+                if isinstance(verdict, Refused):
+                    return _refused(" ".join([name, *argv.args]), verdict)
+                place(verdict)
             with command_records(own=True) as mine:
                 result = await _route_argv(
                     recurse,
@@ -986,7 +1001,7 @@ async def _run_argv(
                     job_table,
                     cancel,
                     row,
-                    claimant,
+                    claimant.line if claimant is not None else None,
                     output,
                 )
         finally:
@@ -1383,29 +1398,23 @@ def _refused(
     )
 
 
-def _placement(
-    routing: RouteDecision[RuntimeIdentity], name: str
-) -> tuple[RuntimeIdentity | None, str | None]:
-    """The runtime and machine a decision runs a native program on, as
-    ``run_external`` picks them.
+def _unreadable(name: str, session: SessionState) -> Refused | None:
+    """An allow list's refusal of what only the machine can resolve (a
+    path, a line run under the box): the list names only what the gate
+    can read. None under any other profile.
 
     Args:
-        routing (RouteDecision): the placement.
-        name (str): the program's name.
+        name (str): the word refused.
+        session (SessionState): the session running the line.
     """
-    entry = routing.bindings.get(name, routing.bindings.get(EXTERNAL_COMMANDS))
-    if entry is None:
-        return None, routing.machine
-    try:
-        machine = Runtime.require(entry).machine_for(
-            Context(machine=routing.machine)
-        )
-    except ValueError as exc:
-        raise RouteError(str(exc)) from exc
-    return entry, None if machine is None else str(machine)
+    if session.commands is None or session.commands.allow is None:
+        return None
+    deny = Deny(UNREADABLE_LINES)
+    err, code = render_deny(name, deny)
+    return Refused(err, code, refusal_of(deny))
 
 
-async def _wrapped_refusal(
+async def _wrapped_verdict(
     words: Sequence[Word],
     session: SessionState,
     registry: MountRegistry,
@@ -1413,17 +1422,15 @@ async def _wrapped_refusal(
     stdin: ByteSource | None,
     cancel: asyncio.Event | None,
     claimant: Claimant | None,
-    elsewhere: Callable[[Route], bool],
-) -> Refused | None:
-    """The refusal of a program a wrapper runs where Mirage cannot see it
-    run (``nohup python3`` on a machine). What the words run is followed as
-    the line's pass follows it (``inner_lines``): each program is admitted
-    as ``env`` and ``timeout`` have theirs admitted, at the place the pass
-    judged it, and a line the gate cannot read (``nohup /usr/bin/env``)
-    is refused under an allow list, which only names what it can read.
+) -> Refused | Route | None:
+    """The gate's answer on the programs a wrapper runs where Mirage
+    cannot see them run (``nohup python3`` on a machine). What the words
+    run is followed as the line's pass follows it (``inner_lines``):
+    each program is admitted as ``env`` and ``timeout`` have theirs
+    admitted, at the place the pass judged it, and a line the gate
+    cannot read (``nohup /usr/bin/env``) is refused under an allow list.
     The machine runs the program itself, so a function of its name does
-    not stand in for it, and a route that would place it elsewhere is
-    refused, as for a line a runtime takes whole.
+    not stand in for it.
 
     Args:
         words (Sequence[Word]): the command running the others, name
@@ -1434,20 +1441,19 @@ async def _wrapped_refusal(
         stdin (ByteSource | None): the command's stdin.
         cancel (asyncio.Event | None): the run's kill channel.
         claimant (Claimant | None): the command and its line.
-        elsewhere (Callable[[Route], bool]): whether a route places the
-            program somewhere the wrapper does not run.
 
     Returns:
-        The first refusal, or None to let the words run.
+        The first refusal; else the route of the innermost program a
+        policy placed; else None.
     """
+    placed: Route | None = None
     for inner in inner_lines(words[0].value, words[1:]):
         if not inner.argv:
             # shortcut: a line run under the box (`time sh -c`) is not judged.
-            if session.commands is None or session.commands.allow is None:
-                continue
-            deny = Deny(UNREADABLE_LINES)
-            err, code = render_deny(words[0].value, deny)
-            return Refused(err, code, refusal_of(deny))
+            unread = _unreadable(words[0].value, session)
+            if unread is not None:
+                return unread
+            continue
         name, args = inner.argv[0].value, [w.value for w in inner.argv[1:]]
         place = (
             Claimant(
@@ -1478,15 +1484,8 @@ async def _wrapped_refusal(
         )
         if isinstance(verdict, Refused):
             return verdict
-        if verdict.route is not None and elsewhere(verdict.route):
-            deny = Deny(
-                f"{verdict.route.policy} routes {name} elsewhere, and "
-                f"{words[0].value} runs it where it runs",
-                policy=verdict.route.policy,
-            )
-            err, code = await render_command_deny(name, deny, verdict.ctx)
-            return Refused(err, code, refusal_of(deny))
-        deeper = await _wrapped_refusal(
+        placed = verdict.route or placed
+        deeper = await _wrapped_verdict(
             inner.argv,
             session,
             registry,
@@ -1494,11 +1493,11 @@ async def _wrapped_refusal(
             stdin,
             cancel,
             place,
-            elsewhere,
         )
-        if deeper is not None:
+        if isinstance(deeper, Refused):
             return deeper
-    return None
+        placed = deeper or placed
+    return placed
 
 
 async def _route_argv(
@@ -1514,7 +1513,7 @@ async def _route_argv(
     job_table: JobTable,
     cancel: asyncio.Event | None,
     row: int,
-    claimant: Claimant | None = None,
+    handed: HandOff | None = None,
     sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Route one admitted command to its builtin or mount handler.
@@ -1532,6 +1531,23 @@ async def _route_argv(
     # command lookup: no builtin, function, or CLI can claim it. After
     # the admission gate so a policy sees the line like any other.
     if name and "/" in name:
+        placed = context.frame.routing
+
+        async def on_the_runtime() -> RedirectResult:
+            assert placed is not None
+            unread = _unreadable(name, session)
+            if unread is not None:
+                return _refused(" ".join([name, *argv.args]), unread)
+            return await run_external(
+                argv, stdin, session, registry, placed, sink
+            )
+
+        external = (
+            placed is not None
+            and name.startswith("/")
+            and lookup(name, session, registry, placed) is Consumer.EXTERNAL
+            and not runtime_refused(name, session, registry, placed)
+        )
         return await handle_exec_path(
             dispatch,
             execute_fn,
@@ -1544,6 +1560,7 @@ async def _route_argv(
             sink,
             job_table,
             call_stack,
+            on_the_runtime if external else None,
         )
 
     # ── unsupported bash builtins ──────────────
@@ -1583,39 +1600,6 @@ async def _route_argv(
     )
     if consumer is Consumer.EXTERNAL:
         assert routing is not None
-        here = routing
-
-        def elsewhere(route: Route) -> bool:
-            try:
-                placed = routed(
-                    registry.runtime_entries,
-                    here.bindings,
-                    route.runtime,
-                    route.machine or here.machine,
-                )
-            except ValueError as exc:
-                raise RouteError(str(exc)) from exc
-            moved = routed_consumer(
-                name, argv.args, session, registry, placed
-            )[1]
-            return _placement(moved or placed, name) != _placement(here, name)
-
-        denied = (
-            await _wrapped_refusal(
-                [Word(w, w) for w in (name, *argv.args)],
-                session,
-                registry,
-                namespace,
-                stdin,
-                cancel,
-                claimant,
-                elsewhere,
-            )
-            if name in PROGRAM_WRAPPERS
-            else None
-        )
-        if denied is not None:
-            return _refused(" ".join([name, *argv.args]), denied)
         return await run_external(
             argv, stdin, session, registry, routing, sink
         )
@@ -1736,7 +1720,7 @@ async def _route_argv(
         job_table=job_table,
         namespace=namespace,
         execute_fn=execute_fn,
-        handed=claimant.line if claimant is not None else None,
+        handed=handed,
         sink=sink,
     )
 

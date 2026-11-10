@@ -176,6 +176,14 @@
           }
         },
         {
+          "command": "/opt/native-tool a",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "/opt/native-tool: Permission denied\n"
+          }
+        },
+        {
           "command": "nohup echo hi",
           "expect": {
             "exit": 0,
@@ -694,6 +702,109 @@
           "expect": {
             "exit": 0,
             "stdout": "[\"pip\",\"install\",\"x\"]\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "external_wrapper_goes_where_its_program_is_placed",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": [
+          "processbox",
+          {
+            "name": "echobox",
+            "captures": [
+              "@external"
+            ]
+          }
+        ],
+        "policies": [
+          {
+            "name": "place_command",
+            "contains": "native-tool",
+            "runtime": "echobox"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "other-tool a",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"other-tool\",\"a\"]\n"
+          }
+        },
+        {
+          "command": "native-tool a",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:native-tool a\n"
+          }
+        },
+        {
+          "command": "nohup native-tool a",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:nohup native-tool a\n"
+          }
+        },
+        {
+          "command": "nice -n 5 native-tool a",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:nice -n 5 native-tool a\n"
+          }
+        },
+        {
+          "command": "nohup other-tool a",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"nohup\",\"other-tool\",\"a\"]\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "external_path_mirage_has_no_file_for",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": [
+          "processbox"
+        ]
+      },
+      "steps": [
+        {
+          "command": "/opt/native-tool a",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"/opt/native-tool\",\"a\"]\n"
+          }
+        },
+        {
+          "command": "env /opt/native-tool a",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"/opt/native-tool\",\"a\"]\n"
+          }
+        },
+        {
+          "command": "printf 'echo in-mirage\\n' > /ram/s.sh; /ram/s.sh",
+          "expect": {
+            "exit": 0,
+            "stdout": "in-mirage\n"
+          }
+        },
+        {
+          "command": "./native-tool a",
+          "expect": {
+            "exit": 127,
+            "stdout": "",
+            "stderr": "bash: line 1: ./native-tool: No such file or directory\n"
           }
         }
       ]

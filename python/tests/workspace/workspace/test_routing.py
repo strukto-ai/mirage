@@ -219,6 +219,25 @@ async def test_explain_names_the_machine_a_routed_eval_runs_on():
         await ws.close()
 
 
+class _ProgramOnB(Policy):
+    def pre_command(self, ctx):
+        return Route(machine="b") if ctx.command == "hostname" else None
+
+
+@pytest.mark.asyncio
+async def test_explain_places_a_wrapper_with_its_program():
+    ws = _workspace(_ProgramOnB())
+    try:
+        said = await ws.explain("nohup hostname")
+        commands = [node for node in _commands(said.node) if node.command]
+        assert [(c.command, c.machine) for c in commands] == [
+            ("nohup", "box:b"),
+            ("hostname", "box:b"),
+        ]
+    finally:
+        await ws.close()
+
+
 def _commands(node):
     for child in getattr(node, "children", ()):
         if getattr(child, "type", "") == "command":

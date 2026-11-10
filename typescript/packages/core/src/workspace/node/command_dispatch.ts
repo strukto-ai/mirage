@@ -41,14 +41,12 @@ import {
   PolicyDenied,
   postCommandGate,
   refusalOf,
-  renderCommandDeny,
   renderDeny,
   resolveProducer,
   type Route,
 } from '../../policy/index.ts'
 import type { EntryGate } from '../../policy/types.ts'
 import { RouteError } from '../../runtime/routing/index.ts'
-import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import { routed } from '../../runtime/table.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { DispatchFn, OutputFn, RouteDecision, RunResult } from '../../runtime/types.ts'
@@ -106,8 +104,15 @@ import { expandBoundaryGlobs } from '../expand/globs.ts'
 import { expandAssignment } from '../expand/node.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import { Consumer, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
-import { PROGRAM_WRAPPERS, RUNNERS } from '../lookup/constants.ts'
-import { mirageProgramAt, routedConsumer, wrapperAnswer, wrapperRefusal } from '../lookup/lookup.ts'
+import { RUNNERS } from '../lookup/constants.ts'
+import {
+  lookup,
+  mirageProgramAt,
+  routedConsumer,
+  wrapperAnswer,
+  wrapperRefusal,
+  wrapperRunsOutside,
+} from '../lookup/lookup.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { checkEnv, entryBytes } from '../session/budget.ts'
@@ -982,7 +987,7 @@ async function runArgv(
         jobTable,
         signal,
         row,
-        claimant,
+        claimant?.line ?? null,
         output,
         parser,
         admitted,
@@ -992,26 +997,49 @@ async function runArgv(
     // the command's placement, not the line's.
     const route = async (): Promise<RedirectResult> => {
       const line = context.frame.routing
-      const placed = admitted?.route ?? null
-      if (placed === null || line === undefined) return run()
-      let routing: RouteDecision<Runtime>
-      try {
-        routing = routed(
-          registry.runtimeEntries,
-          line.bindings,
-          placed.runtime,
-          placed.machine ?? line.machine,
-        )
-      } catch (caught) {
-        throw new RouteError(caught instanceof Error ? caught.message : String(caught), {
-          cause: caught,
-        })
+      let nested = executeFn
+      const place = (answer: Route | null): void => {
+        const here = context.frame.routing
+        if (answer === null || here === undefined) return
+        let routing: RouteDecision<Runtime>
+        try {
+          routing = routed(
+            registry.runtimeEntries,
+            here.bindings,
+            answer.runtime,
+            answer.machine ?? here.machine,
+          )
+        } catch (caught) {
+          throw new RouteError(caught instanceof Error ? caught.message : String(caught), {
+            cause: caught,
+          })
+        }
+        context.frame.routing = routing
+        nested = (cmd, opts) => executeFn(cmd, { ...opts, routingDecision: routing })
       }
-      context.frame.routing = routing
       try {
-        return await run((cmd, opts) => executeFn(cmd, { ...opts, routingDecision: routing }))
+        place(admitted?.route ?? null)
+        // A wrapper a runtime takes starts its program where Mirage cannot,
+        // so the program is judged here, and where a policy places it the
+        // wrapper goes with it.
+        if (wrapperRunsOutside(name, argv.args, session, registry, context.frame.routing)) {
+          const verdict = await wrappedVerdict(
+            [name, ...argv.args].map((w) => ({ raw: w, text: w })),
+            session,
+            registry,
+            namespace,
+            given,
+            signal,
+            claimant,
+          )
+          if (verdict !== null && 'stderr' in verdict) {
+            return refused([name, ...argv.args].join(' '), verdict)
+          }
+          place(verdict)
+        }
+        return await run(nested)
       } finally {
-        context.frame.routing = line
+        if (line !== undefined) context.frame.routing = line
       }
     }
     // A post method reads what the command did: its file records, gathered
@@ -1216,37 +1244,28 @@ function refused(command: string, verdict: Refused): RedirectResult {
 }
 
 /**
- * The refusal of a program a wrapper runs where Mirage cannot see it run
- * (`nohup python3` on a machine). What the words run is followed as the
- * line's pass follows it (`innerLines`): each program is admitted as `env`
- * and `timeout` have theirs admitted, at the place the pass judged it, and a
- * line the gate cannot read (`nohup /usr/bin/env`) is refused under an allow
- * list, which only names what it can read. The machine runs the program
- * itself, so a function of its name does not stand in for it, and a route
- * that would place it elsewhere is refused, as for a line a runtime takes
- * whole. Returns the first refusal, or null.
+ * An allow list's refusal of what only the machine can resolve (a path, a
+ * line run under the box): the list names only what the gate can read. Null
+ * under any other profile.
  */
-/** The runtime and machine a decision runs a native program on, as `runExternal` picks them. */
-function placement(routing: RouteDecision<Runtime>, name: string): [Runtime | null, string | null] {
-  const key = Object.hasOwn(routing.bindings, name) ? name : EXTERNAL_COMMANDS
-  const runtime = routing.bindings[key] ?? null
-  if (runtime === null) return [null, routing.machine ?? null]
-  try {
-    const machine = runtime.machineFor({
-      stdin: null,
-      flags: {},
-      cwd: PathSpec.fromStrPath('/'),
-      ...(routing.machine !== undefined ? { machine: routing.machine } : {}),
-    })
-    return [runtime, machine === null ? null : String(machine)]
-  } catch (caught) {
-    throw new RouteError(caught instanceof Error ? caught.message : String(caught), {
-      cause: caught,
-    })
-  }
+function unreadable(name: string, session: SessionState): Refused | null {
+  if ((session.commands?.allow ?? null) === null) return null
+  const deny: Deny = { kind: 'deny', reason: UNREADABLE_LINES }
+  const [stderr, exitCode] = renderDeny(name, deny)
+  return { stderr, exitCode, refusal: refusalOf(deny) }
 }
 
-async function wrappedRefusal(
+/**
+ * The gate's answer on the programs a wrapper runs where Mirage cannot see
+ * them run (`nohup python3` on a machine). What the words run is followed as
+ * the line's pass follows it (`innerLines`): each program is admitted as
+ * `env` and `timeout` have theirs admitted, at the place the pass judged it,
+ * and a line the gate cannot read (`nohup /usr/bin/env`) is refused under an
+ * allow list. The machine runs the program itself, so a function of its name
+ * does not stand in for it. Returns the first refusal; else the route of the
+ * innermost program a policy placed; else null.
+ */
+async function wrappedVerdict(
   words: readonly Word[],
   session: SessionState,
   registry: MountRegistry,
@@ -1254,18 +1273,17 @@ async function wrappedRefusal(
   stdin: ByteSource | null,
   signal: AbortSignal | undefined,
   claimant: Claimant | null,
-  elsewhere: (route: Route) => boolean,
-): Promise<Refused | null> {
+): Promise<Refused | Route | null> {
   const [first, ...rest] = words
   if (first === undefined) return null
   const head = wordValue(first)
+  let placed: Route | null = null
   for (const inner of innerLines(head, rest)) {
     if (inner.argv.length === 0) {
       // shortcut: a line run under the box (`time sh -c`) is not judged.
-      if ((session.commands?.allow ?? null) === null) continue
-      const deny: Deny = { kind: 'deny', reason: UNREADABLE_LINES }
-      const [stderr, exitCode] = renderDeny(head, deny)
-      return { stderr, exitCode, refusal: refusalOf(deny) }
+      const unread = unreadable(head, session)
+      if (unread !== null) return unread
+      continue
     }
     const [name, ...args] = inner.argv.map(wordValue) as [string, ...string[]]
     const place =
@@ -1296,17 +1314,8 @@ async function wrappedRefusal(
       true,
     )
     if (!(verdict instanceof Admitted)) return verdict
-    const route = verdict.route
-    if (route !== null && elsewhere(route)) {
-      const deny: Deny = {
-        kind: 'deny',
-        reason: `${route.policy ?? ''} routes ${name} elsewhere, and ${head} runs it where it runs`,
-        ...(route.policy !== undefined ? { policy: route.policy } : {}),
-      }
-      const [stderr, exitCode] = await renderCommandDeny(name, deny, verdict.ctx)
-      return { stderr, exitCode, refusal: refusalOf(deny) }
-    }
-    const deeper = await wrappedRefusal(
+    placed = verdict.route ?? placed
+    const deeper = await wrappedVerdict(
       inner.argv,
       session,
       registry,
@@ -1314,11 +1323,11 @@ async function wrappedRefusal(
       stdin,
       signal,
       place,
-      elsewhere,
     )
-    if (deeper !== null) return deeper
+    if (deeper !== null && 'stderr' in deeper) return deeper
+    placed = deeper ?? placed
   }
-  return null
+  return placed
 }
 
 async function routeArgv(
@@ -1339,7 +1348,7 @@ async function routeArgv(
   jobTable: JobTable | null,
   signal: AbortSignal | undefined,
   row: number,
-  claimant: Claimant | null,
+  handed: HandOff | null,
   sink?: JobConsole,
   parser?: ParseScope,
   admission: EntryGate | null = null,
@@ -1362,6 +1371,18 @@ async function routeArgv(
   // claim it. After the admission gate so a policy sees the line like
   // any other.
   if (name.includes('/')) {
+    const placed = context.frame.routing
+    const onTheRuntime =
+      placed !== undefined &&
+      name.startsWith('/') &&
+      lookup(name, session, registry, placed) === Consumer.EXTERNAL &&
+      !runtimeRefused(name, session, registry, placed)
+        ? async (): Promise<RedirectResult> => {
+            const unread = unreadable(name, session)
+            if (unread !== null) return refused([name, ...argv.args].join(' '), unread)
+            return runExternal(argv, stdin, session, registry, placed, signal, sink)
+          }
+        : undefined
     return handleExecPath(
       dispatch,
       executeFn,
@@ -1374,6 +1395,7 @@ async function routeArgv(
       sink,
       jobTable ?? undefined,
       callStack,
+      onTheRuntime,
     )
   }
 
@@ -1416,39 +1438,6 @@ async function routeArgv(
   )
   if (consumer === Consumer.EXTERNAL) {
     if (routing === undefined) throw new Error(`${name}: run outside a routed line`)
-    const here = routing
-    const elsewhere = (route: Route): boolean => {
-      let placed: RouteDecision<Runtime>
-      try {
-        placed = routed(
-          registry.runtimeEntries,
-          here.bindings,
-          route.runtime,
-          route.machine ?? here.machine,
-        )
-      } catch (caught) {
-        throw new RouteError(caught instanceof Error ? caught.message : String(caught), {
-          cause: caught,
-        })
-      }
-      const moved = routedConsumer(name, argv.args, session, registry, placed)[1] ?? placed
-      const [runtime, machine] = placement(moved, name)
-      const [mine, where] = placement(here, name)
-      return runtime !== mine || machine !== where
-    }
-    const denied = PROGRAM_WRAPPERS.has(name)
-      ? await wrappedRefusal(
-          [name, ...argv.args].map((w) => ({ raw: w, text: w })),
-          session,
-          registry,
-          namespace,
-          stdin,
-          signal,
-          claimant,
-          elsewhere,
-        )
-      : null
-    if (denied !== null) return refused([name, ...argv.args].join(' '), denied)
     return runExternal(argv, stdin, session, registry, routing, signal, sink)
   }
 
@@ -1585,7 +1574,7 @@ async function routeArgv(
     jobTable,
     namespace,
     executeFn,
-    claimant?.line ?? null,
+    handed ?? null,
     signal,
     sink,
     parser,
