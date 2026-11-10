@@ -30,6 +30,7 @@ from mirage.runtime.table import (
     NAMED,
     bind_commands,
     build_runtime,
+    built_from,
     known_runtimes,
     register_runtime,
     runtime_bindings_for,
@@ -303,3 +304,17 @@ def test_shadowed_captures_names_each_capture_an_earlier_entry_wins():
         ("@line", "box", "other"),
     ]
     assert shadowed_captures([Named("a", "x"), Named("b", "y")]) == []
+
+
+class _Unhashable(FakeRuntime):
+    __hash__ = None  # type: ignore[assignment]
+
+
+def test_a_runtime_built_by_name_need_not_be_hashable():
+    try:
+        register_runtime("unhashable", _Unhashable)
+        built = build_runtime("unhashable")
+        assert built_from(built) == "unhashable"
+        assert built_from(_Unhashable()) is None
+    finally:
+        NAMED.pop("unhashable", None)

@@ -28,8 +28,9 @@ import {
 import { GWS } from '../commands/cli/builtin/gws/index.ts'
 import { mcpCli } from '../commands/cli/mcp/index.ts'
 import { registerCliSpec, unregisterCliSpec } from '../commands/cli/specs.ts'
-import { MontyRuntime } from '../runtime/python/monty/runtime.ts'
+import { PythonRuntime } from '../runtime/python/base.ts'
 import { registerRuntime } from '../runtime/table.ts'
+import type { RunResult } from '../runtime/types.ts'
 import { CLI, CLIHandler } from '../commands/cli/types.ts'
 import { CommandSpec } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
@@ -331,18 +332,25 @@ it('a copy keeps the runtimes named by string', async () => {
 
 // Twin of test_copy_rebuilds_a_runtime_by_the_key_it_was_named_by.
 it('a copy rebuilds a runtime by the key it was named by', async () => {
-  class AliasedMonty extends MontyRuntime {
-    override readonly name = 'aliased-monty'
+  class Aliased extends PythonRuntime {
+    readonly name: string = 'aliased-python'
+    interpret(): Promise<RunResult> {
+      return Promise.resolve({
+        stdout: new TextEncoder().encode('ran\n'),
+        stderr: null,
+        exitCode: 0,
+      })
+    }
   }
-  registerRuntime('py-engine', AliasedMonty)
+  registerRuntime('py-engine', Aliased)
   const ws = new Workspace(
     { '/data': new RAMVFS() },
     { mode: MountMode.EXEC, runtimes: ['py-engine', 'workspace'] },
   )
   const copied = await ws.copy()
   try {
-    const io = await copied.shell("python3 -c 'print(6 * 7)'")
-    expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, '42\n'])
+    const io = await copied.shell('python3 -c x')
+    expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, 'ran\n'])
   } finally {
     await Promise.all([ws.close(), copied.close()])
   }
