@@ -45,6 +45,7 @@
   },
   "files": [
     "dist",
+    "!dist/**/*.map",
     "THIRD_PARTY_NOTICES"
   ],
   "scripts": {
