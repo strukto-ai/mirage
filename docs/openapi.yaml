@@ -1907,7 +1907,7 @@ paths:
                 exit_code: 0
                 stdout: "hello\n"
                 stderr: ''
-                refusal: null
+                decision: null
                 line_id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
             application/x-ndjson:
               schema:
@@ -2018,7 +2018,7 @@ paths:
         | Stream | `stream=true` | NDJSON output records as they are produced, then a status record. |
         | Explain | `explain=true` | The policy decision. Nothing runs. |
 
-        A `200` means the request was accepted, not that the command succeeded. Check `exit_code`. A policy refusal also returns `200`; check `refusal` to know whether a policy refused anything. See Refused commands below.
+        A `200` means the request was accepted, not that the command succeeded. Check `exit_code`. A policy refusal also returns `200`; check `decision` to know whether a policy refused anything. See Refused commands below.
 
         The request stays open until the command ends, and closing it cancels the command. To leave work running, end the command with `&`; it returns at once and the work appears under [jobs](/api/operations/jobs/list-jobs). Every result carries a `line_id` for the [lines](/api/operations/lines/get-command) endpoints.
 
@@ -2038,7 +2038,7 @@ paths:
 
         ```json
         {"stream":"stdout","data":"aGVsbG8K"}
-        {"status":"done","result":{"exit_code":0,"stdout":"","stderr":"","refusal":null,"line_id":"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37"},"error":null}
+        {"status":"done","result":{"exit_code":0,"stdout":"","stderr":"","decision":null,"line_id":"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37"},"error":null}
         ```
 
         ## Explain a command
@@ -2058,7 +2058,7 @@ paths:
           "line": "echo hello",
           "outcome": "allow",
           "reason": "",
-          "refusal": null,
+          "decision": null,
           "exit_code": 0,
           "node": {
             "type": "line",
@@ -2078,7 +2078,7 @@ paths:
 
         ## Refused commands
 
-        A policy refusal returns `200`. `refusal` is set whenever a policy refused something on the line, and is `null` otherwise. The exit code alone does not tell you:
+        A policy refusal returns `200`. `decision` is set whenever a policy refused something on the line, and is `null` otherwise. The exit code alone does not tell you:
 
         - A command refused before it runs usually exits `126` with `<command>: Permission denied`.
         - A refusal about a path appears as that path's own error, such as exit `1`.
@@ -2094,7 +2094,7 @@ paths:
           "exit_code": 126,
           "stdout": "",
           "stderr": "rm: Permission denied\n",
-          "refusal": {
+          "decision": {
             "kind": "deny",
             "reason": "rm is not allowed in this workspace",
             "policy": "PermissionsPolicy",
@@ -7299,9 +7299,9 @@ components:
               type: string
               description: The POSIX condition of a failed file call, such as `ENOENT` or
                 `STALE_WRITE`.
-            refusal:
-              $ref: '#/components/schemas/Refusal'
-              description: The policy refusal record, when a policy refused the call.
+            decision:
+              $ref: '#/components/schemas/PolicyDecision'
+              description: The policy decision record, when a policy refused the call.
             missing:
               type: array
               items:
@@ -7320,7 +7320,7 @@ components:
           code: missing_field
           message: config.mounts is required
           param: config.mounts
-    Refusal:
+    PolicyDecision:
       type: object
       description: Why a policy refused a command or part of it. A refusal can come after the
         command ran and does not undo what it did.
@@ -7357,16 +7357,16 @@ components:
           type: integer
           description: Exit status of the command. `0` is success and `127` command not found.
             `126` usually means a policy refused the command before it ran, but a refusal can
-            leave another code; check `refusal`.
+            leave another code; check `decision`.
         stdout:
           type: string
           description: Standard output, decoded as UTF-8. Empty in a stream's final record.
         stderr:
           type: string
           description: Standard error, decoded as UTF-8. Empty in a stream's final record.
-        refusal:
+        decision:
           anyOf:
-            - $ref: '#/components/schemas/Refusal'
+            - $ref: '#/components/schemas/PolicyDecision'
             - type: 'null'
           description: Set when a policy refused the command or any part of it, otherwise
             `null`. Part of the command may have run, and the exit code need not be `126`.
@@ -7377,7 +7377,7 @@ components:
         - exit_code
         - stdout
         - stderr
-        - refusal
+        - decision
         - line_id
       title: Result
     ShellRequest:
@@ -7460,9 +7460,9 @@ components:
           items:
             type: object
           description: Evaluation results from each policy.
-        refusal:
+        decision:
           anyOf:
-            - $ref: '#/components/schemas/Refusal'
+            - $ref: '#/components/schemas/PolicyDecision'
             - type: 'null'
       required:
         - outcome
@@ -7789,7 +7789,7 @@ components:
               code: unauthorized
               message: unauthorized
     '403':
-      description: The call is refused. A policy refused it (`policy_refused`, with `refusal`), a
+      description: The call is refused. A policy refused it (`policy_refused`, with `decision`), a
         mount mode or permission refused it (`forbidden`), the backend is out of space or quota
         (`storage_full`), or the request came for a host or from a browser origin that is not
         allowed (`host_not_allowed`, `origin_not_allowed`).
@@ -7805,7 +7805,7 @@ components:
                   code: policy_refused
                   message: Permission denied
                   errno: EACCES
-                  refusal:
+                  decision:
                     kind: deny
                     reason: writes under /data are not allowed
                     policy: PermissionsPolicy

@@ -14,7 +14,7 @@
 
 from typing import Any
 
-from mirage.types import Refusal
+from mirage.types import PolicyDecision
 
 
 class PolicyError(Exception):
@@ -44,7 +44,7 @@ class PolicyDenied(PermissionError):
 
     The error says what the terminal would (``Permission denied`` at the
     dispatcher, ``<name>: permission denied`` at the session view), and
-    the policy's own words ride ``refusal``, never the strerror, so an
+    the policy's own words ride ``decision``, never the strerror, so an
     entry point that renders the error stays byte-identical to a plain EACCES
     and an entry point that hands the agent text appends the record's line.
 
@@ -55,10 +55,12 @@ class PolicyDenied(PermissionError):
 
     Args:
         *args: the OSError arguments (errno, strerror, filename).
-        refusal (Refusal | None): the policy's record, None for an entry point
+        decision (PolicyDecision | None): the policy's record, None for an entry point
             that refuses on no policy's behalf (a hidden variable).
     """
 
-    def __init__(self, *args: Any, refusal: Refusal | None = None) -> None:
+    def __init__(
+        self, *args: Any, decision: PolicyDecision | None = None
+    ) -> None:
         super().__init__(*args)
-        self.refusal = refusal
+        self.decision = decision

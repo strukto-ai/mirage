@@ -72,7 +72,7 @@ from mirage.shell.parse.parse import syntax_refusal
 from mirage.shell.parse.scope import ParseScope
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
-from mirage.types import PathSpec, Refusal, under_ceiling
+from mirage.types import PathSpec, PolicyDecision, under_ceiling
 from mirage.utils.abort import MirageAbortError
 from mirage.utils.clock import run_with_system_clock
 from mirage.workspace.abort import line_status_writer, set_line_writer
@@ -191,7 +191,7 @@ class ExecuteEnv:
 
 
 @dataclass(slots=True)
-class NestedRefusal:
+class NestedDecision:
     """The record the line's nested evaluations earned, latest kept.
 
     Every nested line re-enters execute through ``recurse``, and a
@@ -202,10 +202,10 @@ class NestedRefusal:
     its output.
 
     Args:
-        latest (Refusal | None): the last record a nested line carried.
+        latest (PolicyDecision | None): the last record a nested line carried.
     """
 
-    latest: Refusal | None = None
+    latest: PolicyDecision | None = None
 
 
 async def recurse(
@@ -217,7 +217,7 @@ async def recurse(
     *,
     cancel: asyncio.Event | None,
     routing_decision: RouteDecision[RuntimeIdentity] | None,
-    nested: NestedRefusal,
+    nested: NestedDecision,
     line_handle: LineHandle,
     substitution: bool = False,
     **opts: Any,
@@ -245,7 +245,7 @@ async def recurse(
             node, so a background job's evaluations carry none.
         routing_decision (RouteDecision | None): the typed line's
             decision, inherited verbatim.
-        nested (NestedRefusal): where the record a nested line earned
+        nested (NestedDecision): where the record a nested line earned
             is kept for the typed line.
         substitution (bool): isolate a substitution's child shell, except
             for the single input redirect that expands in the parent.
@@ -347,8 +347,8 @@ async def recurse(
                     else None,
                 )
                 record_status(session, io.exit_code, transparent=True)
-                if io.refusal is not None:
-                    nested.latest = io.refusal
+                if io.decision is not None:
+                    nested.latest = io.decision
                 return io
         finally:
             parser.release()
@@ -470,8 +470,8 @@ async def recurse(
             if child_token is not None:
                 reset_current_session(child_token)
             await session.close_inputs()
-    if io.refusal is not None:
-        nested.latest = io.refusal
+    if io.decision is not None:
+        nested.latest = io.decision
     return io
 
 
@@ -955,7 +955,7 @@ async def _run_on_line_runtime(
     sink: JobConsole | None,
     history: LineHistory | None,
     judged: Callable[[], Awaitable[list[tuple[Walked, list[Judged]]]]],
-    nested: NestedRefusal,
+    nested: NestedDecision,
     line_seconds: float | None,
     budget_start: float,
 ) -> IOResult:
@@ -975,7 +975,7 @@ async def _run_on_line_runtime(
         sink (JobConsole | None): where the line's output goes as it runs.
         history (LineHistory | None): the line's history, command by command.
         judged (Callable): the line's commands, judged once.
-        nested (NestedRefusal): the latest refusal a nested line earned.
+        nested (NestedDecision): the latest refusal a nested line earned.
         line_seconds (float | None): the line's deadline when it is the
             outermost.
         budget_start (float): when the line's budget began.
@@ -999,7 +999,7 @@ async def _run_on_line_runtime(
         return IOResult(
             exit_code=refused.exit_code,
             stderr=refused.stderr,
-            refusal=refused.refusal,
+            decision=refused.decision,
         )
     if ws.has_managed_env():
         # Filled only after the line is admitted (a refused
@@ -1068,8 +1068,8 @@ async def _run_on_line_runtime(
             effective_session.session_id,
         ),
     )
-    if io.refusal is None:
-        io.refusal = nested.latest
+    if io.decision is None:
+        io.decision = nested.latest
     return io
 
 
@@ -1420,10 +1420,10 @@ async def run_prepared_line(
             return await _unreadable_line(
                 unreadable, session, effective_session, call_stack
             )
-        nested = NestedRefusal()
+        nested = NestedDecision()
 
-        def note(refusal: Refusal) -> None:
-            nested.latest = refusal
+        def note(decision: PolicyDecision) -> None:
+            nested.latest = decision
 
         # The line's hand-off: the grants its passes and gates claim
         # for its commands, which the gates run on and the line's end
@@ -1535,7 +1535,7 @@ async def run_prepared_line(
                     context.frame.line_timeout if top_level else None,
                     budget_start,
                 )
-                held = is_pending(io.refusal)
+                held = is_pending(io.decision)
                 record_status(session, io.exit_code)
                 return io
             # The line is the unit a rule judges, so every command in it is
@@ -1562,11 +1562,11 @@ async def run_prepared_line(
                 # which has to find the grants standing, so they are
                 # released rather than spent; any other refusal ends
                 # the line.
-                held = is_pending(refused.refusal)
+                held = is_pending(refused.decision)
                 io = IOResult(
                     exit_code=refused.exit_code,
                     stderr=refused.stderr,
-                    refusal=refused.refusal,
+                    decision=refused.decision,
                 )
                 record_status(session, io.exit_code)
                 return io
@@ -1598,15 +1598,15 @@ async def run_prepared_line(
                 budget_start,
             )
             # A record a nested line earned is the line's to report when
-            # its own tree earned none (see NestedRefusal).
-            if io.refusal is None:
-                io.refusal = nested.latest
+            # its own tree earned none (see NestedDecision).
+            if io.decision is None:
+                io.decision = nested.latest
             # A question a gate left waiting holds the line exactly as
             # one the pass left waiting does: the retry has to find the
             # grants the pass claimed for the other commands standing,
             # or it asks for them again, and the answer to this one
             # would be taken by the first spelling the pass reads.
-            held = is_pending(io.refusal)
+            held = is_pending(io.decision)
         finally:
             reset_caller(line_token)
             await _settle_grants(

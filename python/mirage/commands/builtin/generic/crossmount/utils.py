@@ -363,8 +363,8 @@ async def stream_operands(
                         io.stderr
                     ) + await materialize(branch.stderr)
                     io.exit_code = max(io.exit_code, branch.exit_code)
-                    if branch.refusal is not None:
-                        io.refusal = branch.refusal
+                    if branch.decision is not None:
+                        io.decision = branch.decision
                     records.append(branch.records)
                 start()
             io.records = (

@@ -25,7 +25,7 @@ from typing import Any, Generic, Literal, Protocol, TypeVar
 
 from mirage.io.cooperative import chunks
 from mirage.io.memory import check_memory
-from mirage.types import PathSpec, Producer, Refusal
+from mirage.types import PathSpec, PolicyDecision, Producer
 
 ByteSource = bytes | AsyncIterator[bytes]
 StreamName = Literal["stdout", "stderr"]
@@ -289,8 +289,8 @@ class IOResult:
             workspace boundary hands it to the policy layer as
             context. Facts ride the envelope as policy input; the
             decision a chain hands down rides beside them as
-            ``refusal``, written after the last method has spoken.
-        refusal (Refusal | None): why the line did not run, when a
+            ``decision``, written after the last method has spoken.
+        decision (PolicyDecision | None): why the line did not run, when a
             policy or an unanswered ask refused it; None on every
             ordinary run. stderr stays in bash's voice, this carries
             the reason. merge keeps the rightmost record, as it does
@@ -307,7 +307,7 @@ class IOResult:
         stderr: ByteSource | None = None,
         exit_code: int = 0,
         producer: Producer | None = None,
-        refusal: Refusal | None = None,
+        decision: PolicyDecision | None = None,
         records: list[PathRecord] | None = None,
         closed_stdout: ClosedPipe | None = None,
         rows: Rows[Any] | None = None,
@@ -322,7 +322,7 @@ class IOResult:
         self.output: OutputState | None = None
         self.output_finalized = False
         self.producer = producer
-        self.refusal = refusal
+        self.decision = decision
         self._stream_source: IOResult | None = None
 
     @property
@@ -371,8 +371,8 @@ class IOResult:
             records=other.records,
             stderr=merged_stderr,
             producer=other.producer,
-            refusal=(
-                other.refusal if other.refusal is not None else self.refusal
+            decision=(
+                other.decision if other.decision is not None else self.decision
             ),
             closed_stdout=other.closed_stdout,
         )

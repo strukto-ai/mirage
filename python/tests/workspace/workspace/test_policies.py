@@ -41,7 +41,7 @@ from mirage.policy.types import RouteContext
 from mirage.runtime.python.monty import runtime as monty_runtime
 from mirage.runtime.types import ScriptSource
 from mirage.shell.console.types import Channel
-from mirage.types import Limit, MountMode, OnExceed, PathSpec, Refusal
+from mirage.types import Limit, MountMode, OnExceed, PathSpec, PolicyDecision
 from mirage.utils.path import norm
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
@@ -90,8 +90,8 @@ async def test_workspace_guards_refuse_before_backend_io():
         assert result.stderr == (
             b"rm: cannot remove '/data/prod/x.txt': Permission denied\n"
         )
-        assert result.refusal is not None
-        assert result.refusal.reason == "production data is protected"
+        assert result.decision is not None
+        assert result.decision.reason == "production data is protected"
         out = await ws.shell("cat /data/prod/x.txt")
         assert out.stdout == b"keep\n"
         ok = await ws.shell(
@@ -114,7 +114,7 @@ async def test_policies_add_wins_over_runtime_placement():
         assert result.exit_code == 126
         assert result.stderr == b"python3: Permission denied\n"
         # The reason rides beside the GNU line, not inside it.
-        assert result.refusal == Refusal(
+        assert result.decision == PolicyDecision(
             kind="deny", reason="interpreters are off", policy="NoInterpreters"
         )
     finally:
@@ -159,12 +159,12 @@ async def test_guards_cover_shell_builtins_and_namespace_routes():
         result = await ws.shell("source /data/setup.sh")
         assert result.exit_code == 126
         assert result.stderr == b"source: Permission denied\n"
-        assert result.refusal == Refusal(
+        assert result.decision == PolicyDecision(
             kind="deny", reason="disabled", policy="PermissionsPolicy"
         )
         result = await ws.shell("touch /data/prod/x")
         assert result.exit_code == 1
-        assert result.refusal and "frozen" in result.refusal.reason
+        assert result.decision and "frozen" in result.decision.reason
         ok = await ws.shell("touch /data/dev-x && echo done")
         assert b"done" in ok.stdout
     finally:
@@ -194,7 +194,9 @@ async def test_guards_cover_path_valued_flags():
         await ws.shell("mkdir -p /data/prod")
         result = await ws.shell("shuf -e a -o /data/prod/out")
         assert result.exit_code == 1
-        assert result.refusal and "prod is protected" in result.refusal.reason
+        assert (
+            result.decision and "prod is protected" in result.decision.reason
+        )
         listing = await ws.shell("ls /data/prod")
         assert b"out" not in listing.stdout
     finally:
@@ -224,8 +226,8 @@ async def test_path_guards_hold_at_the_programmatic_entry_point():
         with pytest.raises(PermissionError) as excinfo:
             await ws.vfs.write("/data/prod/x.txt", b"nope\n")
         assert excinfo.value.errno == errno.EACCES
-        assert excinfo.value.refusal is not None
-        assert "prod is protected" in excinfo.value.refusal.reason
+        assert excinfo.value.decision is not None
+        assert "prod is protected" in excinfo.value.decision.reason
         with pytest.raises(PermissionError):
             await ws.vfs.read("/data/prod/x.txt")
     finally:
@@ -690,11 +692,11 @@ async def test_stream_exposes_only_post_execute_approved_output(
         assert await result.materialize_stderr() == b""
         if failed:
             assert bytes(output[Channel.STDERR]) == stderr
-            assert result.refusal == Refusal(
+            assert result.decision == PolicyDecision(
                 kind="failed", reason="Boom failed", policy="Boom"
             )
         else:
-            assert result.refusal is None
+            assert result.decision is None
     finally:
         await ws.close()
 
@@ -755,7 +757,7 @@ async def test_a_raising_post_execute_policy_fails_the_line_closed():
         assert r.exit_code == 126
         err = await r.stderr_str()
         assert err == "echo: Permission denied\n"
-        assert r.refusal == Refusal(
+        assert r.decision == PolicyDecision(
             kind="failed", reason="Boom failed", policy="Boom"
         )
         assert r.stdout is None or await r.stdout_str() == ""
@@ -979,9 +981,9 @@ async def test_a_profile_script_without_monty_fails_closed(monkeypatch):
         ws.create_session("s", profile="release")
         refused = await ws.shell("echo hi", session_id="s")
         assert refused.exit_code == 126
-        assert refused.refusal is not None
-        assert "names runtime 'monty'" in refused.refusal.reason
-        assert "monty' extra" in refused.refusal.reason
+        assert refused.decision is not None
+        assert "names runtime 'monty'" in refused.decision.reason
+        assert "monty' extra" in refused.decision.reason
     finally:
         await ws.close()
 
@@ -1048,12 +1050,12 @@ async def test_an_ask_it_computed_takes_the_approval_entry_point():
         assert held.exit_code == 126
         assert held.stderr is not None
         assert held.stderr == b"shred: Permission denied\n"
-        assert held.refusal is not None
-        assert (held.refusal.kind, held.refusal.reason) == (
+        assert held.decision is not None
+        assert (held.decision.kind, held.decision.reason) == (
             "pending",
             "sign-off",
         )
-        assert held.refusal.ask_id
+        assert held.decision.ask_id
     finally:
         await ws.close()
 
@@ -1079,8 +1081,8 @@ async def test_a_profile_script_reads_what_the_line_names():
         ws.create_session("s", profile="release")
         held = await ws.shell("cat /data/in/mail.txt", session_id="s")
         assert held.exit_code == 126
-        assert held.refusal is not None
-        assert (held.refusal.kind, held.refusal.reason) == (
+        assert held.decision is not None
+        assert (held.decision.kind, held.decision.reason) == (
             "pending",
             "sign-off on payload",
         )
@@ -1164,8 +1166,8 @@ async def test_a_broken_script_fails_closed_per_command():
         refused = await ws.shell("echo hi", session_id="s")
         assert refused.exit_code == 126
         assert refused.stderr == b"echo: Permission denied\n"
-        assert refused.refusal is not None
-        assert refused.refusal.reason.startswith(
+        assert refused.decision is not None
+        assert refused.decision.reason.startswith(
             "profile 'release' policy exited "
         )
         assert (await ws.shell("echo hi")).exit_code == 0
@@ -1185,8 +1187,8 @@ async def test_a_runtime_policies_do_not_run_on_fails_closed():
         refused = await ws.shell("echo hi", session_id="s")
         assert refused.exit_code == 126
         assert refused.stderr == b"echo: Permission denied\n"
-        assert refused.refusal is not None
-        assert refused.refusal.reason == (
+        assert refused.decision is not None
+        assert refused.decision.reason == (
             "profile 'release' policy names runtime 'local'; a policy "
             "program runs on monty or wasi"
         )
@@ -1225,8 +1227,8 @@ async def test_a_program_returning_something_else_fails_closed():
         ws.create_session("s", profile="release")
         refused = await ws.shell("echo hi", session_id="s")
         assert refused.exit_code == 126
-        assert refused.refusal is not None
-        assert refused.refusal.reason.startswith(
+        assert refused.decision is not None
+        assert refused.decision.reason.startswith(
             "profile 'release' policy must return an answer at pre_command"
         )
     finally:
@@ -1309,9 +1311,9 @@ async def test_a_policys_own_read_passes_the_dispatcher_its_op_method_guards():
         ws.create_session("s", profile="release")
         held = await ws.shell("cat /data/in/mail.txt", session_id="s")
         assert held.exit_code == 126
-        assert held.refusal is not None
-        assert held.refusal.kind == "pending"
-        assert held.refusal.reason == "sign-off on payload"
+        assert held.decision is not None
+        assert held.decision.kind == "pending"
+        assert held.decision.reason == "sign-off on payload"
         assert (
             await ws.shell("cat /data/in/note.txt", session_id="s")
         ).exit_code == 0
@@ -1449,15 +1451,15 @@ async def test_a_post_vfs_ask_holds_the_result_back_until_approved():
         ws.policies.add(policy)
         with pytest.raises(PolicyDenied) as info:
             await ws.vfs.read("/data/x")
-        assert info.value.refusal is not None
-        assert info.value.refusal.kind == "pending"
+        assert info.value.decision is not None
+        assert info.value.decision.kind == "pending"
         pre, post = policy.seen[-1]
         fields = ("call", "path", "write", "prefix", "session_id", "mode")
         assert [getattr(post, f) for f in fields] == [
             getattr(pre, f) for f in fields
         ]
         assert post.result == b"x\n"
-        await ws.decisions.answer(info.value.refusal.ask_id, Outcome.ALLOW)
+        await ws.decisions.answer(info.value.decision.ask_id, Outcome.ALLOW)
         assert await ws.vfs.read("/data/x") == b"x\n"
     finally:
         await ws.close()
@@ -1486,8 +1488,8 @@ async def test_every_ask_in_a_chain_is_put_to_the_host():
         reasons = []
         for _ in range(2):
             held = await ws.shell("rm -f /data/x")
-            assert held.refusal is not None
-            assert held.refusal.kind == "pending"
+            assert held.decision is not None
+            assert held.decision.kind == "pending"
             (record,) = ws.decisions.pending()
             reasons.append(record.reason)
             await ws.decisions.answer(record.id, Outcome.ALLOW)
@@ -1643,7 +1645,7 @@ async def test_a_once_nod_lasts_while_the_line_streams_and_no_longer():
         )
         line = "cat /data/a /data/b | tail -c 4"
         held = await ws.shell(line, session_id="agent")
-        assert held.refusal is not None and held.refusal.kind == "pending"
+        assert held.decision is not None and held.decision.kind == "pending"
         (nod,) = ws.decisions.pending()
         await ws.decisions.answer(nod.id, Outcome.ALLOW)
         out = await ws.shell(line, session_id="agent")
@@ -1652,7 +1654,7 @@ async def test_a_once_nod_lasts_while_the_line_streams_and_no_longer():
             b"b\nb\n",
         )
         again = await ws.shell(line, session_id="agent")
-        assert again.refusal is not None and again.refusal.kind == "pending"
+        assert again.decision is not None and again.decision.kind == "pending"
     finally:
         await ws.close()
 
@@ -1672,13 +1674,13 @@ async def test_a_once_nod_covers_one_streamed_read_however_far_it_is_pulled():
         ws.policies.add(AskBigReads())
         with pytest.raises(PolicyDenied) as held:
             await ws.vfs.read("/data/big", stream=True)
-        await ws.decisions.answer(held.value.refusal.ask_id, Outcome.ALLOW)
+        await ws.decisions.answer(held.value.decision.ask_id, Outcome.ALLOW)
         stream = await ws.vfs.read("/data/big", stream=True)
         assert len(await anext(stream)) == 1024
         await stream.aclose()
         with pytest.raises(PolicyDenied) as again:
             await ws.vfs.read("/data/big", stream=True)
-        assert again.value.refusal.kind == "pending"
+        assert again.value.decision.kind == "pending"
     finally:
         await ws.close()
 
@@ -1848,8 +1850,8 @@ async def test_a_program_sees_who_makes_the_call_as_a_coded_policy_does():
         await ws.shell("cd /data", session_id="s")
         denied = await ws.shell("cat owner.txt", session_id="s")
         assert denied.exit_code == 126
-        assert denied.refusal is not None
-        assert denied.refusal.reason == "s in /data"
+        assert denied.decision is not None
+        assert denied.decision.reason == "s in /data"
     finally:
         await ws.close()
 
@@ -2148,8 +2150,8 @@ async def pre_command(ctx):
         ws.create_session("s", profile="release")
         assert (await ws.shell("echo hi", session_id="s")).exit_code == 0
         refused = await ws.shell("rm /data/x", session_id="s")
-        assert refused.refusal is not None
-        assert refused.refusal.reason == "directory says no"
+        assert refused.decision is not None
+        assert refused.decision.reason == "directory says no"
         assert seen == [("echo", "t0k"), ("rm", "t0k")]
     finally:
         await ws.close()
@@ -2190,8 +2192,8 @@ async def pre_command(ctx):
     try:
         for each in (copied, restored):
             refused = await each.shell("rm /data/x", session_id="s")
-            assert refused.refusal is not None
-            assert refused.refusal.reason == "directory says no"
+            assert refused.decision is not None
+            assert refused.decision.reason == "directory says no"
     finally:
         for each in (ws, copied, restored):
             await each.close()

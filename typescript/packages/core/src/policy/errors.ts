@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Refusal } from '../types.ts'
+import type { PolicyDecision } from '../types.ts'
 
 /**
  * A policy returned something a method may not return. Raised loudly at
@@ -49,9 +49,9 @@ export class Explained extends Error {
  *
  * The message says what the terminal would (`Permission denied` at the
  * dispatcher, `<name>: permission denied` at the session view), and the
- * policy's own words ride `refusal`, never the message, so an entry point that
+ * policy's own words ride `decision`, never the message, so an entry point that
  * renders the error stays byte-identical to a plain EACCES and an entry point
- * that hands the agent text appends the record's line. `refusal` is
+ * that hands the agent text appends the record's line. `decision` is
  * null for an entry point that refuses on no policy's behalf (a hidden
  * variable).
  *
@@ -63,12 +63,12 @@ export class Explained extends Error {
 export class PolicyDenied extends Error {
   readonly code = 'EACCES'
   readonly virtualPath: string
-  readonly refusal: Refusal | null
+  readonly decision: PolicyDecision | null
 
-  constructor(message: string, virtualPath: string, refusal: Refusal | null = null) {
+  constructor(message: string, virtualPath: string, decision: PolicyDecision | null = null) {
     super(message)
     this.name = 'PolicyDenied'
     this.virtualPath = virtualPath
-    this.refusal = refusal
+    this.decision = decision
   }
 }

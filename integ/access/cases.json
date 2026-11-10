@@ -212,16 +212,16 @@
    "session": {"id": "agent", "profile": "sealed"},
    "setup": ["mkdir /sec /out", "echo k > /sec/k", "echo key > /vault/key.txt", "echo f > /f"],
    "cases": [
-    {"id": "a_line_that_runs", "input": {"call": "shell", "command": "cat /f"}, "expect": {"outcome": "allow", "reason": "", "source": "", "refusal": null, "exit_code": 0, "stderr": "", "commands": [["cat", "allow", 0]]}},
-    {"id": "a_line_a_path_rule_refuses", "input": {"call": "shell", "command": "cat /sec/k"}, "expect": {"outcome": "deny", "reason": "sealed", "source": "top", "refusal": "deny", "exit_code": 1, "stderr": "cat: /sec/k: Permission denied\n", "commands": [["cat", "deny", 1]]}},
-    {"id": "a_line_that_asks", "input": {"call": "shell", "command": "rm /f"}, "expect": {"outcome": "ask", "reason": "removal needs sign-off", "source": "top", "refusal": "pending", "exit_code": 126, "stderr": "rm: Permission denied\n", "commands": [["rm", "ask", 126]]}},
-    {"id": "a_word_the_allow_list_leaves_out_fails_in_place", "input": {"call": "shell", "command": "gerp x; echo ok"}, "expect": {"outcome": "allow", "reason": "", "source": "", "refusal": null, "exit_code": 0, "stderr": "", "commands": [["gerp", "deny", 126], ["echo", "allow", 0]]}},
-    {"id": "a_read_a_path_rule_refuses", "input": {"call": "read", "path": "/sec/k"}, "expect": {"outcome": "deny", "reason": "sealed", "source": "top", "refusal": "deny", "call": "read", "error": "EACCES"}},
-    {"id": "a_write_that_asks", "input": {"call": "write", "path": "/out/a", "data": "eA=="}, "expect": {"outcome": "ask", "reason": "nod", "source": "top", "refusal": "pending", "call": "write", "error": "EACCES"}},
-    {"id": "a_hidden_path_explains_like_a_missing_one", "input": {"call": "read", "path": "/vault/key.txt"}, "expect": {"outcome": "allow", "reason": "", "source": "", "refusal": null, "call": "read", "error": ""}},
-    {"id": "a_rename_into_a_sealed_directory", "input": {"call": "rename", "src": "/f", "dst": "/sec/g"}, "expect": {"outcome": "deny", "reason": "sealed", "source": "top", "refusal": "deny", "call": "rename", "error": "EACCES"}},
-    {"id": "a_read_only_mount", "input": {"call": "mkdir", "path": "/ro/d"}, "expect": {"outcome": "deny", "reason": "Read-only file system", "source": "", "refusal": null, "call": "mkdir", "error": "EROFS"}},
-    {"id": "a_free_write", "input": {"call": "write", "path": "/new", "data": "eA=="}, "expect": {"outcome": "allow", "reason": "", "source": "", "refusal": null, "call": "write", "error": ""}}
+    {"id": "a_line_that_runs", "input": {"call": "shell", "command": "cat /f"}, "expect": {"outcome": "allow", "reason": "", "source": "", "decision": null, "exit_code": 0, "stderr": "", "commands": [["cat", "allow", 0]]}},
+    {"id": "a_line_a_path_rule_refuses", "input": {"call": "shell", "command": "cat /sec/k"}, "expect": {"outcome": "deny", "reason": "sealed", "source": "top", "decision": "deny", "exit_code": 1, "stderr": "cat: /sec/k: Permission denied\n", "commands": [["cat", "deny", 1]]}},
+    {"id": "a_line_that_asks", "input": {"call": "shell", "command": "rm /f"}, "expect": {"outcome": "ask", "reason": "removal needs sign-off", "source": "top", "decision": "pending", "exit_code": 126, "stderr": "rm: Permission denied\n", "commands": [["rm", "ask", 126]]}},
+    {"id": "a_word_the_allow_list_leaves_out_fails_in_place", "input": {"call": "shell", "command": "gerp x; echo ok"}, "expect": {"outcome": "allow", "reason": "", "source": "", "decision": null, "exit_code": 0, "stderr": "", "commands": [["gerp", "deny", 126], ["echo", "allow", 0]]}},
+    {"id": "a_read_a_path_rule_refuses", "input": {"call": "read", "path": "/sec/k"}, "expect": {"outcome": "deny", "reason": "sealed", "source": "top", "decision": "deny", "call": "read", "error": "EACCES"}},
+    {"id": "a_write_that_asks", "input": {"call": "write", "path": "/out/a", "data": "eA=="}, "expect": {"outcome": "ask", "reason": "nod", "source": "top", "decision": "pending", "call": "write", "error": "EACCES"}},
+    {"id": "a_hidden_path_explains_like_a_missing_one", "input": {"call": "read", "path": "/vault/key.txt"}, "expect": {"outcome": "allow", "reason": "", "source": "", "decision": null, "call": "read", "error": ""}},
+    {"id": "a_rename_into_a_sealed_directory", "input": {"call": "rename", "src": "/f", "dst": "/sec/g"}, "expect": {"outcome": "deny", "reason": "sealed", "source": "top", "decision": "deny", "call": "rename", "error": "EACCES"}},
+    {"id": "a_read_only_mount", "input": {"call": "mkdir", "path": "/ro/d"}, "expect": {"outcome": "deny", "reason": "Read-only file system", "source": "", "decision": null, "call": "mkdir", "error": "EROFS"}},
+    {"id": "a_free_write", "input": {"call": "write", "path": "/new", "data": "eA=="}, "expect": {"outcome": "allow", "reason": "", "source": "", "decision": null, "call": "write", "error": ""}}
    ]
   },
   {

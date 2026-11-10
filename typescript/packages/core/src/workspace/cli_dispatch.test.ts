@@ -129,12 +129,12 @@ describe('CLI dispatch e2e', () => {
     ws.createSession('s', { profile: 'solo' })
     const denied = await ws.shell('h2 message send -t x hi', { sessionId: 'c' })
     expect([denied.exitCode, dec.decode(denied.stderr)]).toEqual([126, 'h2: Permission denied\n'])
-    expect(denied.refusal?.reason).toBe('beta is read-only')
+    expect(denied.decision?.reason).toBe('beta is read-only')
     const asked = await ws.shell('h1 message send -t x hi', { sessionId: 'c' })
     expect(asked.exitCode).toBe(126)
     expect(dec.decode(asked.stderr)).toBe('h1: Permission denied\n')
-    expect(asked.refusal?.kind).toBe('pending')
-    expect(asked.refusal?.reason.startsWith('outbound needs a nod')).toBe(true)
+    expect(asked.decision?.kind).toBe('pending')
+    expect(asked.decision?.reason.startsWith('outbound needs a nod')).toBe(true)
     const request = ws.decisions.pending()[0]
     if (request === undefined) throw new Error('no pending approval')
     expect(request.command).toBe('h1')
@@ -372,7 +372,7 @@ describe('policy cli fact', () => {
     const r = await ws.shell('slack-eng message send -t x hi')
     expect(r.exitCode).toBe(126)
     expect(r.stderrText).toBe('slack-eng: Permission denied\n')
-    expect(r.refusal?.kind).toBe('deny')
+    expect(r.decision?.kind).toBe('deny')
     expect(seen.at(-1)).toBe('message send')
     const ok = await ws.shell('echo unaffected')
     expect(ok.exitCode).toBe(0)
@@ -424,7 +424,7 @@ describe('policy cli fact', () => {
       for (const name of ['hides', 'wildcard', 'other']) {
         const refused = await ws.shell('sl message send -t x hi', { sessionId: name })
         expect([refused.exitCode, refused.stderrText]).toEqual([126, 'sl: Permission denied\n'])
-        expect(refused.refusal?.reason).toBe('sl message send is not allowed')
+        expect(refused.decision?.reason).toBe('sl message send is not allowed')
         const agent = await ws.session(name)
         const said = await agent.explain.shell('sl message send -t x hi')
         expect(said.node.children).toMatchObject([
@@ -469,7 +469,7 @@ describe('policy cli fact', () => {
       for (const name of ['peek', 'later']) {
         const refused = await ws.shell(name, { sessionId: 's' })
         expect([refused.exitCode, dec.decode(refused.stdout)]).toEqual([1, ''])
-        expect(refused.refusal?.reason).toBe('sealed')
+        expect(refused.decision?.reason).toBe('sealed')
       }
       const cat = await ws.shell('cat /data/secret.txt', { sessionId: 's' })
       expect([cat.exitCode, dec.decode(cat.stdout)]).toEqual([0, 'top\n'])
@@ -733,7 +733,7 @@ describe('a session hides reach what a CLI prints', () => {
     expect([hidden.exitCode, dec.decode(hidden.stdout)]).toEqual([0, '/data/a.txt\n1 titles\n'])
     const sealed = await ws.shell('shelf', { sessionId: 'sealed' })
     expect([sealed.exitCode, dec.decode(sealed.stdout)]).toEqual([1, ''])
-    expect(sealed.refusal?.reason).toBe('sealed')
+    expect(sealed.decision?.reason).toBe('sealed')
     const all = await ws.shell('shelf')
     expect([all.exitCode, dec.decode(all.stdout)]).toEqual([
       0,

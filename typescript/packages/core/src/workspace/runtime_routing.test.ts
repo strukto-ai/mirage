@@ -279,7 +279,7 @@ describe('routing ladder', () => {
       const denied = await ws.shell('python3 -c "x"')
       expect(denied.exitCode).toBe(126)
       expect(DEC.decode(denied.stderr)).toBe('python3: Permission denied\n')
-      expect(denied.refusal?.reason).toBe('python3 is blocked')
+      expect(denied.decision?.reason).toBe('python3 is blocked')
       const ok = await ws.shell('echo ok')
       expect(DEC.decode(ok.stdout)).toBe('ok\n')
       expect(ok.exitCode).toBe(0)
@@ -357,7 +357,7 @@ describe('routing ladder', () => {
       const denied = await ws.shell('python3 -c "secret"')
       expect(denied.exitCode).toBe(126)
       expect(DEC.decode(denied.stderr)).toBe('python3: Permission denied\n')
-      expect(denied.refusal?.reason).toBe('secrets stay put')
+      expect(denied.decision?.reason).toBe('secrets stay put')
     } finally {
       await ws.close()
     }
@@ -444,7 +444,7 @@ describe('the placement stage', () => {
         126,
         'python3: Permission denied\n',
       ])
-      expect([denied.refusal?.reason, denied.refusal?.policy]).toEqual([
+      expect([denied.decision?.reason, denied.decision?.policy]).toEqual([
         'secrets stay put',
         'NoSecrets',
       ])
@@ -461,7 +461,7 @@ describe('the placement stage', () => {
     try {
       const refused = await ws.shell('python3 -c "heavy"')
       expect(refused.exitCode).toBe(126)
-      expect(refused.refusal?.reason).toBe(
+      expect(refused.decision?.reason).toBe(
         'policies place the line on different runtimes: ' +
           'RoutePolicy on alpha, HeavyOnBeta on beta',
       )
@@ -509,7 +509,7 @@ describe('the placement stage', () => {
       })
       const rm = await ws.shell('rm /x', { sessionId: 'agent' })
       expect([rm.exitCode, DEC.decode(rm.stderr)]).toEqual([126, 'rm: Permission denied\n'])
-      expect(rm.refusal?.reason).toBe('no deletes')
+      expect(rm.decision?.reason).toBe('no deletes')
       expect(seen).toEqual([])
       const echo = await ws.shell('echo ok', { sessionId: 'agent' })
       expect(echo.exitCode).toBe(0)

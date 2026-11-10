@@ -11,18 +11,18 @@ from mirage.server.io_serde import (
     io_result_to_dict,
 )
 from mirage.server.vfs_calls import VFS_CALL_BY_NAME
-from mirage.types import Refusal
+from mirage.types import PolicyDecision
 from mirage.workspace.workspace import Session
 
 
 @pytest.mark.asyncio
-async def test_a_plain_result_carries_no_refusal():
+async def test_a_plain_result_carries_no_decision():
     body = await io_result_to_dict(IOResult(stdout=b"hi\n"))
     assert body == {
         "exit_code": 0,
         "stdout": "hi\n",
         "stderr": "",
-        "refusal": None,
+        "decision": None,
     }
 
 
@@ -31,10 +31,12 @@ async def test_a_refused_result_carries_the_record():
     io = IOResult(
         exit_code=126,
         stderr=b"rm: Permission denied\n",
-        refusal=Refusal(kind="pending", reason="sign-off", ask_id="abc123"),
+        decision=PolicyDecision(
+            kind="pending", reason="sign-off", ask_id="abc123"
+        ),
     )
     body = await io_result_to_dict(io)
-    assert body["refusal"] == {
+    assert body["decision"] == {
         "kind": "pending",
         "reason": "sign-off",
         "policy": "",

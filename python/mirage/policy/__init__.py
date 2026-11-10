@@ -39,7 +39,8 @@ if TYPE_CHECKING:
     )
     from mirage.policy.policies import (
         Policies,
-        describe_refusal,
+        decision_of,
+        describe_decision,
         policy_denied,
         post_command_gate,
         post_execute_gate,
@@ -47,7 +48,6 @@ if TYPE_CHECKING:
         post_vfs_gate,
         pre_network_gate,
         pre_vfs_gate,
-        refusal_of,
         render_command_deny,
         render_deny,
     )
@@ -127,7 +127,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     ),
     "mirage.policy.policies": (
         "Policies",
-        "describe_refusal",
+        "describe_decision",
         "policy_denied",
         "post_command_gate",
         "post_execute_gate",
@@ -135,7 +135,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "post_vfs_gate",
         "pre_network_gate",
         "pre_vfs_gate",
-        "refusal_of",
+        "decision_of",
         "render_command_deny",
         "render_deny",
     ),
@@ -244,9 +244,9 @@ __all__ = [
     "ProfileScript",
     "Route",
     "RouteContext",
-    "describe_refusal",
+    "describe_decision",
     "policy_denied",
-    "refusal_of",
+    "decision_of",
     "render_command_deny",
     "render_deny",
     "resolve_limit",

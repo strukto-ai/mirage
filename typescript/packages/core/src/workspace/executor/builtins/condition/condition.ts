@@ -91,7 +91,7 @@ export async function handleTest(
     if (exc instanceof CondRefused) {
       return [
         null,
-        new IOResult({ exitCode: exc.exitCode, stderr: exc.stderr, refusal: exc.refusal }),
+        new IOResult({ exitCode: exc.exitCode, stderr: exc.stderr, decision: exc.decision }),
         new ExecutionNode({
           command: name,
           exitCode: exc.exitCode,

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { Refusal } from '../types.ts'
+import type { PolicyDecision } from '../types.ts'
 import { MemoryExhausted } from './errors.ts'
 import { MemoryBudget, runWithMemory } from './memory.ts'
 import { type ByteSource, IOResult, materialize, type StreamName } from './types.ts'
@@ -144,18 +144,18 @@ describe('IOResult.merge', () => {
   })
 
   it('keeps the latest refusal', async () => {
-    const early: Refusal = { kind: 'deny', reason: 'a', policy: 'P', askId: null }
-    const late: Refusal = {
+    const early: PolicyDecision = { kind: 'deny', reason: 'a', policy: 'P', askId: null }
+    const late: PolicyDecision = {
       kind: 'pending',
       reason: 'b',
       policy: '',
       askId: 'x1',
     }
-    expect((await new IOResult({ refusal: early }).merge(new IOResult())).refusal).toEqual(early)
+    expect((await new IOResult({ decision: early }).merge(new IOResult())).decision).toEqual(early)
     expect(
-      (await new IOResult({ refusal: early }).merge(new IOResult({ refusal: late }))).refusal,
+      (await new IOResult({ decision: early }).merge(new IOResult({ decision: late }))).decision,
     ).toEqual(late)
-    expect((await new IOResult().merge(new IOResult())).refusal).toBeNull()
+    expect((await new IOResult().merge(new IOResult())).decision).toBeNull()
   })
 })
 

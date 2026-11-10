@@ -23,13 +23,13 @@ from mirage.context.session_context import (
     awaits_as,
     calls_as,
     current_caller,
-    note_refusal,
+    note_decision,
 )
 from mirage.execution.process.table import ProcessTable
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.types import DispatchFn, RunResult
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
-from mirage.types import MountMode, Refusal
+from mirage.types import MountMode, PolicyDecision
 from mirage.utils.hidden import is_glob, show_head
 from mirage.workspace.files import Files
 from mirage.workspace.session import SessionState
@@ -96,13 +96,13 @@ class WorkspaceBinding:
 def refused_run(name: str, reason: str) -> RunResult:
     """A run the session's restrictions refuse before it starts, as
     admission refuses a command: bash's ``<name>: Permission denied`` at
-    126, the reason on the line's refusal record and never on stderr.
+    126, the reason on the line's decision record and never on stderr.
 
     Args:
         name (str): the runtime, which names the refusal.
         reason (str): why, for the record.
     """
-    note_refusal(Refusal(kind="deny", reason=reason))
+    note_decision(PolicyDecision(kind="deny", reason=reason))
     return RunResult(
         stdout=b"",
         stderr=f"{name}: Permission denied\n".encode(),

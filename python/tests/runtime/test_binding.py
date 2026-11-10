@@ -393,8 +393,8 @@ async def test_native_runtime_refused_before_running_with_hidden_files():
         assert result.exit_code == 126
         assert result.stdout == b""
         assert result.stderr == b"shell-probe: Permission denied\n"
-        assert result.refusal is not None
-        assert result.refusal.reason == (
+        assert result.decision is not None
+        assert result.decision.reason == (
             "runtime cannot enforce this session's file restrictions"
         )
 
@@ -433,8 +433,8 @@ async def test_native_runtime_refused_where_the_network_is_judged(
     assert result.exit_code == 126
     assert result.stdout == b""
     assert result.stderr == b"shell-probe: Permission denied\n"
-    assert result.refusal is not None
-    assert result.refusal.reason == (
+    assert result.decision is not None
+    assert result.decision.reason == (
         "runtime cannot enforce this workspace's network"
     )
 

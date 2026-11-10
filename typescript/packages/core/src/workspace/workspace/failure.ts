@@ -19,7 +19,7 @@ import { MemoryExhausted } from '../../io/errors.ts'
 import { LINE_NAME } from '../../policy/builtin/output_cap.ts'
 import { ContentDriftError } from '../snapshot/drift.ts'
 import { encodeText } from '../../shell/bytes.ts'
-import { refusalOf, renderDeny } from '../../policy/policies.ts'
+import { decisionOf, renderDeny } from '../../policy/policies.ts'
 import type { Deny, Pending } from '../../policy/types.ts'
 import { ExecuteResult } from './types.ts'
 import { commandName } from './utils.ts'
@@ -68,10 +68,10 @@ export function failureResult(err: unknown): { stderr: Uint8Array; exitCode: num
  * folds into the line's result through the outcome table admission
  * renders with, never a throw. The denied party is the command, so the
  * message carries its name like every per-command error, in bash's voice;
- * the reason rides `refusal`. Mirrors Python's `placement_refused`.
+ * the reason rides `decision`. Mirrors Python's `placement_refused`.
  */
 export function placementRefused(action: Deny | Pending, command: string): ExecuteResult {
   const name = commandName(command) || command
   const [stderr, exitCode] = renderDeny(name, action)
-  return new ExecuteResult(new Uint8Array(), stderr, exitCode, refusalOf(action))
+  return new ExecuteResult(new Uint8Array(), stderr, exitCode, decisionOf(action))
 }

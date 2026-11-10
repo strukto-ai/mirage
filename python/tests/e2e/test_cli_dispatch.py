@@ -149,14 +149,14 @@ async def test_command_tiers_key_on_the_installed_name():
         err = await materialize(io.stderr) if io.stderr else b""
         assert io.exit_code == 126
         assert err == b"h2: Permission denied\n"
-        assert io.refusal is not None
-        assert io.refusal.reason == "beta is read-only"
+        assert io.decision is not None
+        assert io.decision.reason == "beta is read-only"
         io = await ws.shell("h1 message send -t x hi", session_id="c")
         err = await materialize(io.stderr) if io.stderr else b""
         assert io.exit_code == 126
         assert err == b"h1: Permission denied\n"
-        assert io.refusal is not None and io.refusal.kind == "pending"
-        assert io.refusal.reason.startswith("outbound needs a nod")
+        assert io.decision is not None and io.decision.kind == "pending"
+        assert io.decision.reason.startswith("outbound needs a nod")
         (request,) = ws.decisions.pending()
         assert request.command == "h1"
         await ws.decisions.answer(request.id, Outcome.ALLOW)
@@ -302,7 +302,7 @@ async def test_policy_sees_the_cli_verbs():
     assert io.exit_code == 126
     err = await materialize(io.stderr) if io.stderr else b""
     assert err == b"slack-eng: Permission denied\n"
-    assert io.refusal is not None and io.refusal.kind == "deny"
+    assert io.decision is not None and io.decision.kind == "deny"
     assert denied[-1] == "message send"
     io = await workspace.shell("echo unaffected")
     assert io.exit_code == 0
@@ -403,8 +403,8 @@ async def test_an_account_cli_under_hides_runs_where_the_allow_list_names_it():
             )
             err = await materialize(io.stderr) if io.stderr else b""
             assert (io.exit_code, err) == (126, b"sl: Permission denied\n")
-            assert io.refusal is not None
-            assert io.refusal.reason == "sl message send is not allowed"
+            assert io.decision is not None
+            assert io.decision.reason == "sl message send is not allowed"
             agent = await workspace.session(name)
             said = await agent.explain.shell("sl message send -t x hi")
             (command,) = said.node.children
@@ -455,7 +455,7 @@ async def test_a_rule_scoped_to_a_cli_reaches_its_own_reads():
             io = await workspace.shell(name, session_id="s")
             out = await materialize(io.stdout) if io.stdout else b""
             assert (io.exit_code, out) == (1, b"")
-            assert io.refusal is not None and io.refusal.reason == "sealed"
+            assert io.decision is not None and io.decision.reason == "sealed"
         io = await workspace.shell("cat /data/secret.txt", session_id="s")
         out = await materialize(io.stdout) if io.stdout else b""
         assert (io.exit_code, out) == (0, b"top\n")
@@ -738,7 +738,7 @@ async def test_a_cli_calling_a_custom_function_meets_hides_and_its_rules():
         io = await workspace.shell("shelf", session_id="sealed")
         out = await materialize(io.stdout) if io.stdout else b""
         assert (io.exit_code, out) == (1, b"")
-        assert io.refusal is not None and io.refusal.reason == "sealed"
+        assert io.decision is not None and io.decision.reason == "sealed"
         code, out, _ = await run(workspace, "shelf")
         assert (code, out) == (
             0,

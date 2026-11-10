@@ -53,14 +53,14 @@ from mirage.context import (
     get_current_session_unless_foreign,
     reset_caller,
     reset_current_session,
+    reset_decision_sink,
     reset_explaining,
     reset_program_invocation,
-    reset_refusal_sink,
     session_visibility,
     set_current_session,
+    set_decision_sink,
     set_explaining,
     set_program_invocation,
-    set_refusal_sink,
 )
 from mirage.context.session_context import run_as_process
 from mirage.core.history.constants import HISTFILESIZE
@@ -977,13 +977,13 @@ class Workspace:
         await self.ensure_sessions_loaded()
         # Judged inside a line, as the line runs: an ask a deciding
         # policy's read meets refuses like a deny and records nothing.
-        sink_token = set_refusal_sink(lambda refusal: None)
+        sink_token = set_decision_sink(lambda decision: None)
         token = set_explaining(DryRun.DECIDING)
         try:
             return await self._explained(line, session_id)
         finally:
             reset_explaining(token)
-            reset_refusal_sink(sink_token)
+            reset_decision_sink(sink_token)
 
     async def _explained(self, line: str, session_id: str) -> ShellExplanation:
         """:meth:`explain`'s judging, run with its policies deciding.
@@ -1064,7 +1064,7 @@ class Workspace:
                 ),
                 reason=placed.reason,
                 source="",
-                refusal=refused.refusal,
+                decision=refused.decision,
                 exit_code=refused.exit_code,
                 stderr=decode_text(await refused.materialize_stderr()),
             )
@@ -1084,15 +1084,15 @@ class Workspace:
             off_line = partial(self._router.off_line, decision=placed)
             for one in judged:
                 off = await off_line_refusal(one, off_line)
-                if off is None or off.refusal is None:
+                if off is None or off.decision is None:
                     continue
                 return dataclasses.replace(
                     said,
                     answers=answers,
                     outcome=Outcome.DENY,
-                    reason=off.refusal.reason,
+                    reason=off.decision.reason,
                     source="",
-                    refusal=off.refusal,
+                    decision=off.decision,
                     exit_code=off.exit_code,
                     stderr=decode_text(off.stderr),
                 )

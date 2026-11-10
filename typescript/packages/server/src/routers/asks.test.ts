@@ -66,7 +66,7 @@ async function execute(
 ): Promise<{
   exit_code: number
   stderr: string
-  refusal: { kind: string; reason: string } | null
+  decision: { kind: string; reason: string } | null
 }> {
   const r = await app.inject({
     method: 'POST',
@@ -77,7 +77,7 @@ async function execute(
   return r.json<{
     exit_code: number
     stderr: string
-    refusal: { kind: string; reason: string } | null
+    decision: { kind: string; reason: string } | null
   }>()
 }
 
@@ -89,7 +89,7 @@ async function raiseAsk(
   const refused = await execute(app, wsId, sessionId, 'rm /f.txt')
   expect(refused.exit_code).toBe(126)
   expect(refused.stderr).toBe('rm: Permission denied\n')
-  expect(refused.refusal?.kind).toBe('pending')
+  expect(refused.decision?.kind).toBe('pending')
   const r = await app.inject({
     method: 'GET',
     url: `/v1/workspaces/${wsId}/asks?session_id=${sessionId}`,
@@ -171,8 +171,8 @@ describe('asks router', () => {
     const retried = await execute(app, 'asks-deny', 'agent_a', 'rm /f.txt')
     expect(retried.exit_code).toBe(126)
     expect(retried.stderr).toBe('rm: Permission denied\n')
-    expect(retried.refusal?.kind).toBe('deny')
-    expect(retried.refusal?.reason).toContain(ASK_REASON)
+    expect(retried.decision?.kind).toBe('deny')
+    expect(retried.decision?.reason).toContain(ASK_REASON)
     await app.close()
   })
 

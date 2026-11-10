@@ -275,7 +275,7 @@ async def test_a_profile_path_rule_holds_on_the_dispatcher():
     dispatcher, _ = _dispatcher(policies)
     with pytest.raises(PolicyDenied) as excinfo:
         await dispatcher.dispatch("read", _path("/data/locked/a.txt"))
-    assert excinfo.value.refusal and "frozen" in excinfo.value.refusal.reason
+    assert excinfo.value.decision and "frozen" in excinfo.value.decision.reason
 
 
 def _structure_only(dispatcher) -> None:
@@ -3776,11 +3776,11 @@ async def test_a_hide_answers_before_any_policy_and_leaves_no_record():
         )
         with pytest.raises(FileNotFoundError) as hidden:
             await ws.vfs.read("/data/secret", session_id="veiled")
-        assert getattr(hidden.value, "refusal", None) is None
+        assert getattr(hidden.value, "decision", None) is None
         with pytest.raises(PermissionError) as denied:
             await ws.vfs.read("/data/secret")
-        refusal = getattr(denied.value, "refusal", None)
-        assert refusal is not None and refusal.reason == "sealed"
+        decision = getattr(denied.value, "decision", None)
+        assert decision is not None and decision.reason == "sealed"
     finally:
         await ws.close()
 

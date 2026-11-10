@@ -56,7 +56,7 @@ import { readSnapshotTar, writeSnapshotTar } from '@struktoai/mirage-core/worksp
 import type { WorkspaceStateDict } from '@struktoai/mirage-core/workspace/snapshot/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
-import { decode, withRefusal } from '@struktoai/mirage-core/workspace/tools/io_text'
+import { decode, withDecision } from '@struktoai/mirage-core/workspace/tools/io_text'
 import { DEFAULT_EXEC_YIELD_MS, DEFAULT_WRITE_YIELD_MS, INTERRUPT, NO_STDIN } from './constants.ts'
 import { INTERRUPTED_STATUS } from '@struktoai/mirage-core/shell/constants'
 
@@ -85,7 +85,7 @@ class Line {
       (io) => {
         this.outcome = {
           stdout: io.stdoutText,
-          stderr: withRefusal(io.stderrText, io.refusal),
+          stderr: withDecision(io.stderrText, io.decision),
           exitCode: io.exitCode,
         }
       },

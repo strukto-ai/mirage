@@ -37,7 +37,7 @@ import type {
   WriteResult,
 } from 'deepagents'
 import { ioToExecuteResponse, ioToFileInfos, ioToGrepMatches } from './convert.ts'
-import { decode, replaceText, withRefusal } from '@struktoai/mirage-core/workspace/tools/io_text'
+import { decode, replaceText, withDecision } from '@struktoai/mirage-core/workspace/tools/io_text'
 
 const TEXT_EXTENSIONS = new Set([
   'txt',
@@ -86,7 +86,7 @@ function shellQuote(s: string): string {
 
 function commandError(io: ExecuteResult): string | undefined {
   if (io.exitCode === 0) return undefined
-  const stderr = withRefusal(io.stderrText.trim(), io.refusal).trim()
+  const stderr = withDecision(io.stderrText.trim(), io.decision).trim()
   return stderr || `Command failed with exit code ${String(io.exitCode)}`
 }
 

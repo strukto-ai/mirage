@@ -298,7 +298,7 @@ async def test_actual_shell_policy_refuses_relation_write_before_requests(
             "linear issue relation add ENG-1 duplicate ENG-2"
         )
         assert result.exit_code != 0
-        assert result.refusal.reason == "read only"
+        assert result.decision.reason == "read only"
     finally:
         await workspace.close()
     request.assert_not_called()

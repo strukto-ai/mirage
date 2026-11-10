@@ -476,7 +476,7 @@ async def _run_pipeline(
         io = IOResult(
             exit_code=0 if io.exit_code != 0 else 1,
             stderr=io.stderr,
-            refusal=io.refusal,
+            decision=io.decision,
         )
         exec_node.exit_code = io.exit_code
         session.errexit_immune = True
@@ -548,7 +548,7 @@ async def _negated(
     io = IOResult(
         exit_code=0 if io.exit_code != 0 else 1,
         stderr=io.stderr,
-        refusal=io.refusal,
+        decision=io.decision,
     )
     exec_node.exit_code = io.exit_code
     session.errexit_immune = True

@@ -18,7 +18,7 @@ from pydantic_ai.workspaces import CommandResult, FileEntry
 
 from mirage.io.types import IOResult
 from mirage.types import FileStat, FileType
-from mirage.workspace.tools.io_text import with_refusal
+from mirage.workspace.tools.io_text import with_decision
 
 
 async def io_to_command_result(io: IOResult) -> CommandResult:
@@ -29,7 +29,7 @@ async def io_to_command_result(io: IOResult) -> CommandResult:
             to stderr.
     """
     stdout = await io.stdout_str()
-    stderr = with_refusal(await io.stderr_str(), io.refusal)
+    stderr = with_decision(await io.stderr_str(), io.decision)
     return CommandResult(exit_code=io.exit_code, stdout=stdout, stderr=stderr)
 
 

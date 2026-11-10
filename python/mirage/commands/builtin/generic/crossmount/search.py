@@ -434,8 +434,8 @@ async def run_search(
                     if run.stderr is not None:
                         err = await materialize(run.stderr)
                         said.append(err.removeprefix(noted) if noted else err)
-                    if run.refusal is not None:
-                        io.refusal = run.refusal
+                    if run.decision is not None:
+                        io.decision = run.decision
                 if stops and run.exit_code == 0:
                     break
             if footers:

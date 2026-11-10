@@ -61,12 +61,12 @@ def classify_error(err: BaseException) -> int:
     Returns:
         int: positive POSIX errno; ``errno.EIO`` when nothing matches.
     """
-    if isinstance(err, PolicyDenied) and err.refusal is not None:
+    if isinstance(err, PolicyDenied) and err.decision is not None:
         logger.info(
             "policy %s refused %s: %s",
-            err.refusal.policy,
+            err.decision.policy,
             err.filename,
-            err.refusal.reason,
+            err.decision.reason,
         )
     condition = classify(err)
     if condition is not None:

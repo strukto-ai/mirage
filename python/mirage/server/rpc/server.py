@@ -204,7 +204,7 @@ class MirageRpcServer:
             pipe (BytePipe | None): the pipe behind an open ``stdin``.
 
         Returns:
-            JsonValue: ``{exit_code, stdout, stderr, refusal}``.
+            JsonValue: ``{exit_code, stdout, stderr, decision}``.
         """
         io = await self._session.shell(command, stdin=stdin, cwd=cwd, env=env)
         return await io_result_to_dict(io)

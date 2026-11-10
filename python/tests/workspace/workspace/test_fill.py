@@ -1103,8 +1103,8 @@ async def test_a_coded_line_deny_never_fetches():
     try:
         io = await ws.shell("printenv TOKEN")
         assert io.exit_code == 126
-        assert io.refusal is not None
-        assert "printenv is off" in io.refusal.reason
+        assert io.decision is not None
+        assert "printenv is off" in io.decision.reason
         assert calls == []
     finally:
         await ws.close()
@@ -1123,8 +1123,8 @@ async def test_a_coded_command_deny_answers_after_the_fetch():
     try:
         io = await ws.shell("printenv TOKEN")
         assert io.exit_code == 126
-        assert io.refusal is not None
-        assert "printenv is off" in io.refusal.reason
+        assert io.decision is not None
+        assert "printenv is off" in io.decision.reason
         assert calls == ["r"]
     finally:
         await ws.close()
@@ -1138,8 +1138,8 @@ async def test_denied_literal_line_never_fetches():
     try:
         io = await ws.shell("printenv TOKEN")
         assert io.exit_code == 126
-        assert io.refusal is not None
-        assert "printenv is off" in io.refusal.reason
+        assert io.decision is not None
+        assert "printenv is off" in io.decision.reason
         assert calls == []
         io = await ws.shell("echo $TOKEN")
         assert (await io.stdout_str()) == "t0\n"
@@ -1161,7 +1161,7 @@ async def test_dynamic_word_deny_fetches_before_the_value_gate():
     try:
         io = await ws.shell("echo $TOKEN")
         assert io.exit_code == 126
-        assert io.refusal is not None and "echo is off" in io.refusal.reason
+        assert io.decision is not None and "echo is off" in io.decision.reason
         assert calls == ["r"]
     finally:
         await ws.close()
@@ -1219,8 +1219,8 @@ async def test_asked_literal_line_denied_never_fetches():
     try:
         io = await ws.shell("printenv TOKEN")
         assert io.exit_code == 126
-        assert io.refusal is not None
-        assert "printenv needs sign-off" in io.refusal.reason
+        assert io.decision is not None
+        assert "printenv needs sign-off" in io.decision.reason
         assert calls == ["ask"]
     finally:
         await ws.close()
@@ -1237,7 +1237,7 @@ async def test_asked_literal_line_left_pending_never_fetches():
         io = await ws.shell("printenv TOKEN")
         assert io.exit_code == 126
         assert io.stderr == b"printenv: Permission denied\n"
-        assert io.refusal is not None and io.refusal.kind == "pending"
+        assert io.decision is not None and io.decision.kind == "pending"
         assert calls == []
         (pending,) = ws.decisions.pending()
         await ws.decisions.answer(pending.id, Outcome.ALLOW, Scope.ONCE)
@@ -1261,8 +1261,8 @@ async def test_denied_function_body_never_fetches():
         assert (await ws.shell("f() { printenv TOKEN; }")).exit_code == 0
         io = await ws.shell("f")
         assert io.exit_code == 126
-        assert io.refusal is not None
-        assert "printenv is off" in io.refusal.reason
+        assert io.decision is not None
+        assert "printenv is off" in io.decision.reason
         assert calls == []
         io = await ws.shell("echo $TOKEN")
         assert (await io.stdout_str()) == "t0\n"
@@ -1301,8 +1301,8 @@ async def test_denied_body_statement_keeps_a_sibling_reader_fetching():
         session.functions["f"] = 'f() { printenv TOKEN; echo "e:$TOKEN"; }'
         io = await ws.shell("f")
         assert (await io.stdout_str()) == "e:t0\n"
-        assert io.refusal is not None
-        assert "printenv is off" in io.refusal.reason
+        assert io.decision is not None
+        assert "printenv is off" in io.decision.reason
         assert calls == ["r"]
     finally:
         await ws.close()
@@ -1413,8 +1413,8 @@ async def test_asked_function_body_denied_never_fetches():
         await ws.shell("f() { printenv TOKEN; }")
         io = await ws.shell("f")
         assert io.exit_code == 126
-        assert io.refusal is not None
-        assert "printenv needs sign-off" in io.refusal.reason
+        assert io.decision is not None
+        assert "printenv needs sign-off" in io.decision.reason
         assert calls == ["ask"]
     finally:
         await ws.close()

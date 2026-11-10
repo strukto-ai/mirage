@@ -1064,7 +1064,7 @@ describe('fillEnv through execute', () => {
     try {
       const io = await ws.shell('printenv TOKEN')
       expect(io.exitCode).toBe(126)
-      expect(io.refusal?.reason).toContain('printenv is off')
+      expect(io.decision?.reason).toContain('printenv is off')
       expect(calls).toEqual([])
       expect(stdoutStr(await ws.shell('echo $TOKEN'))).toBe('t0\n')
       expect(calls).toEqual(['r'])
@@ -1083,7 +1083,7 @@ describe('fillEnv through execute', () => {
     try {
       const io = await ws.shell('printenv TOKEN')
       expect(io.exitCode).toBe(126)
-      expect(io.refusal?.reason).toContain('printenv is off')
+      expect(io.decision?.reason).toContain('printenv is off')
       expect(calls).toEqual([])
     } finally {
       await ws.close()
@@ -1099,7 +1099,7 @@ describe('fillEnv through execute', () => {
     try {
       const io = await ws.shell('printenv TOKEN')
       expect(io.exitCode).toBe(126)
-      expect(io.refusal?.reason).toContain('printenv is off')
+      expect(io.decision?.reason).toContain('printenv is off')
       expect(calls).toEqual(['r'])
     } finally {
       await ws.close()
@@ -1121,7 +1121,7 @@ describe('fillEnv through execute', () => {
     try {
       const io = await ws.shell('echo $TOKEN')
       expect(io.exitCode).toBe(126)
-      expect(io.refusal?.reason).toContain('echo is off')
+      expect(io.decision?.reason).toContain('echo is off')
       expect(calls).toEqual(['r'])
     } finally {
       await ws.close()
@@ -1170,7 +1170,7 @@ describe('fillEnv through execute', () => {
     try {
       const io = await ws.shell('printenv TOKEN')
       expect(io.exitCode).toBe(126)
-      expect(io.refusal?.reason).toContain('printenv needs sign-off')
+      expect(io.decision?.reason).toContain('printenv needs sign-off')
       expect(calls).toEqual(['ask'])
     } finally {
       await ws.close()
@@ -1190,7 +1190,7 @@ describe('fillEnv through execute', () => {
       const io = await ws.shell('printenv TOKEN')
       expect(io.exitCode).toBe(126)
       expect(stderrStr(io)).toBe('printenv: Permission denied\n')
-      expect(io.refusal?.kind).toBe('pending')
+      expect(io.decision?.kind).toBe('pending')
       expect(calls).toEqual([])
       const pending = ws.decisions.pending()
       expect(pending).toHaveLength(1)
@@ -1218,7 +1218,7 @@ describe('fillEnv through execute', () => {
       expect((await ws.shell('f() { printenv TOKEN; }')).exitCode).toBe(0)
       const io = await ws.shell('f')
       expect(io.exitCode).toBe(126)
-      expect(io.refusal?.reason).toContain('printenv is off')
+      expect(io.decision?.reason).toContain('printenv is off')
       expect(calls).toEqual([])
       expect(stdoutStr(await ws.shell('echo $TOKEN'))).toBe('t0\n')
       expect(calls).toEqual(['r'])
@@ -1262,7 +1262,7 @@ describe('fillEnv through execute', () => {
       session.functions.f = 'f() { printenv TOKEN; echo "e:$TOKEN"; }'
       const io = await ws.shell('f')
       expect(stdoutStr(io)).toBe('e:t0\n')
-      expect(io.refusal?.reason).toContain('printenv is off')
+      expect(io.decision?.reason).toContain('printenv is off')
       expect(calls).toEqual(['r'])
     } finally {
       await ws.close()
@@ -1373,7 +1373,7 @@ describe('fillEnv through execute', () => {
       await ws.shell('f() { printenv TOKEN; }')
       const io = await ws.shell('f')
       expect(io.exitCode).toBe(126)
-      expect(io.refusal?.reason).toContain('printenv needs sign-off')
+      expect(io.decision?.reason).toContain('printenv needs sign-off')
       expect(calls).toEqual(['ask'])
     } finally {
       await ws.close()

@@ -140,7 +140,7 @@ describe('errors', () => {
     expect(fsError(err).record()).toEqual({ code, message, errno })
   })
 
-  it("keeps a policy's refusal record", () => {
+  it("keeps a policy's decision record", () => {
     const err = new PolicyDenied('backend token=secret', '/private/config', {
       kind: 'pending',
       reason: 'sign-off',
@@ -151,7 +151,7 @@ describe('errors', () => {
       code: 'policy_refused',
       message: 'Permission denied',
       errno: 'EACCES',
-      refusal: { kind: 'pending', reason: 'sign-off', policy: '', ask_id: 'abc123' },
+      decision: { kind: 'pending', reason: 'sign-off', policy: '', ask_id: 'abc123' },
     })
   })
 })

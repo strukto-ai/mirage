@@ -29,8 +29,8 @@ from mirage.io.types import ByteSource, materialize
 from mirage.policy import (
     Claimant,
     ExecuteResultContext,
+    decision_of,
     post_execute_gate,
-    refusal_of,
     render_deny,
     resolve_limit,
 )
@@ -165,7 +165,7 @@ async def run_whole_line(
             exit_code=code,
             stdout=None,
             stderr=stderr + err,
-            refusal=refusal_of(refused),
+            decision=decision_of(refused),
         )
     capped, capped_err, exit_code = await guard_output(
         data,

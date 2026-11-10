@@ -46,7 +46,7 @@ import { completedLogs, logAttachment, logLines, logPage, sessionFilter } from '
 import { createHash } from 'node:crypto'
 import { buildOverrideMounts, cloneWorkspaceWithOverride } from '../clone.ts'
 import { MAX_SNAPSHOT_BYTES } from '../constants.ts'
-import { explanationToDict, refusalToDict } from '../io_serde.ts'
+import { explanationToDict, decisionToDict } from '../io_serde.ts'
 import { refused } from '../metrics.ts'
 import { MAX_REQUEST_PART, MAX_SNAPSHOT_PART, partEvents } from '../multipart.ts'
 import { Claim, Forget, type WorkspaceRegistry } from '../registry.ts'
@@ -753,8 +753,8 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
         })
       } catch (e) {
         if (e instanceof PolicyDenied) {
-          throw new HttpError('policy_refused', e.refusal?.reason ?? e.message, {
-            refusal: refusalToDict(e.refusal ?? null),
+          throw new HttpError('policy_refused', e.decision?.reason ?? e.message, {
+            decision: decisionToDict(e.decision ?? null),
           })
         }
         if ((e as { code?: unknown }).code === 'ENOENT') {

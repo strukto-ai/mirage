@@ -411,7 +411,7 @@ async def test_named_external_capture_cannot_bypass_path_policy(kind, line):
         await ws.shell("cd /work")
         result = await ws.shell(line)
         assert result.exit_code != 0
-        assert result.refusal and result.refusal.reason == "protected"
+        assert result.decision and result.decision.reason == "protected"
         assert not (
             probe.requests if isinstance(probe, ProcessProbe) else probe.lines
         )
@@ -536,7 +536,7 @@ async def test_external_admission_reads_the_expanded_argv(kind):
         # match that lands in the file slot is a path the gate reads.
         refused = await ws.shell("grep *.txt")
         assert refused.exit_code != 0
-        assert refused.refusal and "protected" in refused.refusal.reason
+        assert refused.decision and "protected" in refused.decision.reason
         assert not (
             probe.requests if isinstance(probe, ProcessProbe) else probe.lines
         )
@@ -592,7 +592,7 @@ async def test_interpreter_script_cannot_bypass_path_policy(kind, line):
             await result.stderr_str()
             == f"{name}: {operand}: Permission denied\n"
         )
-        assert result.refusal and result.refusal.reason == "protected"
+        assert result.decision and result.decision.reason == "protected"
         assert not (
             probe.requests if isinstance(probe, ProcessProbe) else probe.lines
         )

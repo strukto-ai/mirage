@@ -32,16 +32,16 @@ class OnMonty implements Policy {
 }
 
 describe('ioResultToDict', () => {
-  it('carries a null refusal on an ordinary run', () => {
+  it('carries a null decision on an ordinary run', () => {
     expect(ioResultToDict(new ExecuteResult(enc('hi\n'), enc(''), 0))).toEqual({
       exit_code: 0,
       stdout: 'hi\n',
       stderr: '',
-      refusal: null,
+      decision: null,
     })
   })
 
-  it('serializes the refusal record beside the bash-voiced stderr', () => {
+  it('serializes the decision record beside the bash-voiced stderr', () => {
     const refused = new ExecuteResult(enc(''), enc('rm: Permission denied\n'), 126, {
       kind: 'pending',
       reason: 'sign-off',
@@ -52,7 +52,7 @@ describe('ioResultToDict', () => {
       exit_code: 126,
       stdout: '',
       stderr: 'rm: Permission denied\n',
-      refusal: {
+      decision: {
         kind: 'pending',
         reason: 'sign-off',
         policy: '',

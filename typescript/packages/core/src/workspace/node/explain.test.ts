@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import type { Context } from '../../commands/config.ts'
-import { runExplaining, runWithRefusalSink } from '../../context/session_context.ts'
+import { runExplaining, runWithDecisionSink } from '../../context/session_context.ts'
 import type {
   Action,
   AskHandler,
@@ -118,7 +118,7 @@ async function judged(
 ): Promise<Judgment[]> {
   await w.ensureSessionsLoaded()
   const session = w.getSession(sessionId === '' ? w.defaultSessionId : sessionId)
-  const said = await runWithRefusalSink(
+  const said = await runWithDecisionSink(
     () => undefined,
     () =>
       runExplaining(DryRun.DECIDING, () =>
@@ -306,10 +306,10 @@ describe('explain', () => {
     const line = 'gerp x; rm /data/prod/x.txt'
     said = await w.explain(line, 's')
     ran = await w.shell(line, { sessionId: 's' })
-    expect([said.exitCode, said.stderr, said.refusal?.reason]).toEqual([
+    expect([said.exitCode, said.stderr, said.decision?.reason]).toEqual([
       ran.exitCode,
       DEC.decode(ran.stderr),
-      ran.refusal?.reason,
+      ran.decision?.reason,
     ])
   })
 
@@ -481,7 +481,7 @@ describe('explain', () => {
     expect(asked?.exitCode).toBe(0)
     expect(asked?.stderr).toBe('')
     const said = await w.explain('git push origin main', 's')
-    expect([said.outcome, said.reason, said.exitCode, said.refusal]).toEqual([
+    expect([said.outcome, said.reason, said.exitCode, said.decision]).toEqual([
       Outcome.ASK,
       'pushes need sign-off',
       0,
@@ -543,7 +543,7 @@ describe('prejudge', () => {
     const w = await sealedWs()
     const ran = await w.shell('rm /data/a.txt && echo x > /data/prod/x.txt', { sessionId: 's' })
     expect(ran.exitCode).not.toBe(0)
-    expect(ran.refusal?.reason).toContain('sealed until review')
+    expect(ran.decision?.reason).toContain('sealed until review')
     expect(await w.vfs.readdir('/data')).toContain('/data/a.txt')
   })
 
@@ -562,7 +562,7 @@ describe('prejudge', () => {
     const ran = await w.shell('rm /data/a.txt && cat /data/b.txt')
     expect(ran.exitCode).not.toBe(0)
     expect(DEC.decode(ran.stderr)).toBe('cat: Permission denied\n')
-    expect(ran.refusal?.reason).toBe('cat is refused by policy')
+    expect(ran.decision?.reason).toBe('cat is refused by policy')
     expect(await w.vfs.readdir('/data')).not.toContain('/data/a.txt')
   })
 
@@ -575,7 +575,7 @@ describe('prejudge', () => {
     const w = await inlineWs(answering([], Outcome.ALLOW))
     const ran = await w.shell('cat /data/secret.txt && rm /data/prod/x.txt', { sessionId: 's' })
     expect(ran.exitCode).not.toBe(0)
-    expect(ran.refusal?.reason).toContain('production data is protected')
+    expect(ran.decision?.reason).toContain('production data is protected')
     expect(DEC.decode(ran.stdout)).not.toContain('s')
     expect(await w.vfs.readdir('/data/prod')).toContain('/data/prod/x.txt')
   })
@@ -718,8 +718,8 @@ describe('prejudge', () => {
     const w = await ws()
     const line = "eval 'sleep 0.2 && cat /data/secret.txt > /data/read.txt &'"
     const first = await w.shell(line, { sessionId: 's' })
-    expect(first.refusal?.kind).toBe('pending')
-    await w.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW)
+    expect(first.decision?.kind).toBe('pending')
+    await w.decisions.answer(first.decision?.askId ?? '', Outcome.ALLOW)
     const ran = await w.shell(line, { sessionId: 's' })
     expect(ran.exitCode).toBe(0)
     expect(w.decisions.list('s')).toHaveLength(1)
@@ -753,8 +753,8 @@ describe('prejudge', () => {
     const line = 'echo $(cat /data/secret.txt) && ls /data'
     const first = await w.shell(line, { sessionId: 's' })
     expect(first.exitCode).toBe(126)
-    expect(first.refusal?.kind).toBe('pending')
-    await w.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW)
+    expect(first.decision?.kind).toBe('pending')
+    await w.decisions.answer(first.decision?.askId ?? '', Outcome.ALLOW)
     const ran = await w.shell(line, { sessionId: 's' })
     expect(ran.exitCode).toBe(0)
     expect(DEC.decode(ran.stdout).startsWith('s\n')).toBe(true)
@@ -797,14 +797,14 @@ describe('prejudge', () => {
     const line = 'cat /data/secret.txt && git push origin main'
     const first = await w.shell(line, { sessionId: 's' })
     expect(first.exitCode).toBe(126)
-    expect(first.refusal?.kind).toBe('pending')
-    await w.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW)
+    expect(first.decision?.kind).toBe('pending')
+    await w.decisions.answer(first.decision?.askId ?? '', Outcome.ALLOW)
     const second = await w.shell(line, { sessionId: 's' })
     expect(second.exitCode).toBe(126)
-    expect(second.refusal?.kind).toBe('pending')
+    expect(second.decision?.kind).toBe('pending')
     expect(w.decisions.list('s')).toHaveLength(2)
     expect(box.lines).toEqual([])
-    await w.decisions.answer(second.refusal?.askId ?? '', Outcome.ALLOW)
+    await w.decisions.answer(second.decision?.askId ?? '', Outcome.ALLOW)
     const ran = await w.shell(line, { sessionId: 's' })
     expect(ran.exitCode).toBe(0)
     expect(box.lines).toEqual([line])
@@ -907,7 +907,7 @@ describe('prejudge', () => {
     ] as const) {
       const said = await w.explain(line, 's')
       const ran = await w.shell(line, { sessionId: 's' })
-      expect(ran.refusal?.reason).toBe(reason)
+      expect(ran.decision?.reason).toBe(reason)
       expect([said.outcome, said.reason]).toEqual([Outcome.DENY, reason])
       expect([said.exitCode, said.stderr]).toEqual([ran.exitCode, DEC.decode(ran.stderr)])
     }
@@ -955,14 +955,14 @@ describe('prejudge', () => {
       w.getSession('s').cwd = cwd
       const said = await w.explain(line, 's')
       const ran = await w.shell(line, { sessionId: 's' })
-      expect(ran.refusal?.reason).toBe(reason)
+      expect(ran.decision?.reason).toBe(reason)
       expect([said.outcome, said.reason]).toEqual([Outcome.DENY, reason])
     }
     expect(box.lines).toEqual([])
     const line = 'for i in 1 2; do cd /data | true; cd /data & cat notes; done'
     const said = await w.explain(line, 's')
     const ran = await w.shell(line, { sessionId: 's' })
-    expect([said.exitCode, ran.refusal ?? null]).toEqual([0, null])
+    expect([said.exitCode, ran.decision ?? null]).toEqual([0, null])
     expect(box.lines).toEqual([line])
   })
 
@@ -989,7 +989,7 @@ describe('prejudge', () => {
     ]) {
       const said = await w.explain(line)
       const ran = await w.shell(line)
-      expect(ran.refusal?.reason).toBe('sealed')
+      expect(ran.decision?.reason).toBe('sealed')
       expect([said.outcome, said.reason]).toEqual([Outcome.DENY, 'sealed'])
     }
     expect(box.lines).toEqual([])
@@ -1034,7 +1034,7 @@ describe('prejudge', () => {
     const reason = 'walks a tree the gate cannot follow'
     const said = await w.explain(line, 's')
     const ran = await w.shell(line, { sessionId: 's' })
-    expect(ran.refusal?.reason).toBe(reason)
+    expect(ran.decision?.reason).toBe(reason)
     expect([said.outcome, said.reason]).toEqual([Outcome.DENY, reason])
     expect(box.lines).toEqual([])
   })
@@ -1167,14 +1167,14 @@ describe('prejudge', () => {
     const line = 'cat /data/secret.txt && cat /data/secret.txt'
     const first = await w.shell(line, { sessionId: 's' })
     expect(first.exitCode).toBe(126)
-    expect(first.refusal?.kind).toBe('pending')
-    await w.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW)
+    expect(first.decision?.kind).toBe('pending')
+    await w.decisions.answer(first.decision?.askId ?? '', Outcome.ALLOW)
     const second = await w.shell(line, { sessionId: 's' })
     expect(second.exitCode).toBe(126)
     expect(DEC.decode(second.stdout)).toBe('')
-    expect(second.refusal?.kind).toBe('pending')
+    expect(second.decision?.kind).toBe('pending')
     expect(w.decisions.list('s')).toHaveLength(2)
-    await w.decisions.answer(second.refusal?.askId ?? '', Outcome.ALLOW)
+    await w.decisions.answer(second.decision?.askId ?? '', Outcome.ALLOW)
     const ran = await w.shell(line, { sessionId: 's' })
     expect(ran.exitCode).toBe(0)
     expect(DEC.decode(ran.stdout)).toBe('s\ns\n')
@@ -1189,8 +1189,8 @@ describe('prejudge', () => {
     const w = await ws()
     const line = 'ls /data && cat /data/secret.txt'
     const first = await w.shell(line, { sessionId: 's' })
-    expect(first.refusal?.kind).toBe('pending')
-    await w.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW)
+    expect(first.decision?.kind).toBe('pending')
+    await w.decisions.answer(first.decision?.askId ?? '', Outcome.ALLOW)
     const both = await Promise.all([
       w.shell(line, { sessionId: 's' }),
       w.shell(line, { sessionId: 's' }),
@@ -1201,7 +1201,7 @@ describe('prejudge', () => {
     expect(DEC.decode(ran.stdout)).toBe('a.txt\nprod\nsecret.txt\ns\n')
     expect(held.exitCode).toBe(126)
     expect(DEC.decode(held.stdout)).toBe('')
-    expect(held.refusal?.kind).toBe('pending')
+    expect(held.decision?.kind).toBe('pending')
   })
 
   it('spends a grant given before a line it then refuses', async () => {
@@ -1214,15 +1214,15 @@ describe('prejudge', () => {
     const line = 'cat /data/secret.txt && rm /data/prod/x.txt'
     const first = await w.shell(line, { sessionId: 's' })
     expect(first.exitCode).toBe(126)
-    expect(first.refusal?.kind).toBe('pending')
-    await w.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW)
+    expect(first.decision?.kind).toBe('pending')
+    await w.decisions.answer(first.decision?.askId ?? '', Outcome.ALLOW)
     const retry = await w.shell(line, { sessionId: 's' })
     expect(retry.exitCode).not.toBe(0)
-    expect(retry.refusal?.reason).toContain('production data is protected')
+    expect(retry.decision?.reason).toContain('production data is protected')
     expect(w.decisions.list('s')).toEqual([])
     const again = await w.shell('cat /data/secret.txt', { sessionId: 's' })
     expect(again.exitCode).toBe(126)
-    expect(again.refusal?.kind).toBe('pending')
+    expect(again.decision?.kind).toBe('pending')
   })
 })
 
@@ -1265,14 +1265,14 @@ describe('prejudge scope', () => {
     const line = 'F=/data/secret.txt; cat $F && cat /data/secret.txt'
     const first = await w.shell(line, { sessionId: 's' })
     expect(first.exitCode).toBe(126)
-    expect(first.refusal?.kind).toBe('pending')
-    await w.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW)
+    expect(first.decision?.kind).toBe('pending')
+    await w.decisions.answer(first.decision?.askId ?? '', Outcome.ALLOW)
     const second = await w.shell(line, { sessionId: 's' })
     expect(second.exitCode).toBe(126)
     expect(DEC.decode(second.stdout)).toBe('')
-    expect(second.refusal?.kind).toBe('pending')
+    expect(second.decision?.kind).toBe('pending')
     expect(w.decisions.list('s')).toHaveLength(2)
-    await w.decisions.answer(second.refusal?.askId ?? '', Outcome.ALLOW)
+    await w.decisions.answer(second.decision?.askId ?? '', Outcome.ALLOW)
     const ran = await w.shell(line, { sessionId: 's' })
     expect(ran.exitCode).toBe(0)
     expect(DEC.decode(ran.stdout)).toBe('s\ns\n')
@@ -1320,14 +1320,14 @@ describe('prejudge scope', () => {
     const w = await ws()
     const line = 'F=/data/secret.txt; sleep 0.5 && cat /data/secret.txt & cat $F'
     const first = await w.shell(line, { sessionId: 's' })
-    expect(first.refusal?.kind).toBe('pending')
-    await w.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW)
+    expect(first.decision?.kind).toBe('pending')
+    await w.decisions.answer(first.decision?.askId ?? '', Outcome.ALLOW)
     const held = await w.shell(line, { sessionId: 's' })
     expect(held.exitCode).toBe(126)
-    expect(held.refusal?.kind).toBe('pending')
+    expect(held.decision?.kind).toBe('pending')
     const other = await w.shell('cat /data/secret.txt', { sessionId: 's' })
     expect(other.exitCode).toBe(126)
-    expect(other.refusal?.kind).toBe('pending')
+    expect(other.decision?.kind).toBe('pending')
     const waited = await w.shell('wait', { sessionId: 's' })
     expect(waited.exitCode).toBe(0)
     expect(w.decisions.pending('s')).toHaveLength(w.decisions.list('s').length)
@@ -1344,8 +1344,8 @@ describe('prejudge scope', () => {
     const first = await w.shell(line, { sessionId: 's' })
     expect(first.exitCode).toBe(126)
     expect(DEC.decode(first.stdout)).toBe('')
-    expect(first.refusal?.kind).toBe('pending')
-    await w.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW)
+    expect(first.decision?.kind).toBe('pending')
+    await w.decisions.answer(first.decision?.askId ?? '', Outcome.ALLOW)
     const ran = await w.shell(line, { sessionId: 's' })
     expect(ran.exitCode).toBe(0)
     expect(DEC.decode(ran.stdout)).toBe('x\ns ok\n')
@@ -1396,8 +1396,8 @@ describe('prejudge scope', () => {
     await w.shell('echo s > /data/secrét')
     const line = 'echo x && echo `cat /data/secrét`'
     const first = await w.shell(line, { sessionId: 's' })
-    expect(first.refusal?.kind).toBe('pending')
-    await w.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW)
+    expect(first.decision?.kind).toBe('pending')
+    await w.decisions.answer(first.decision?.askId ?? '', Outcome.ALLOW)
     const ran = await w.shell(line, { sessionId: 's' })
     expect(ran.exitCode).toBe(0)
     expect(DEC.decode(ran.stdout)).toBe('x\ns\n')
@@ -1495,7 +1495,7 @@ describe('prejudge scope', () => {
     const w = await ws()
     const line = "printf '/data/secret.txt /data/secret.txt' | xargs -n1 cat"
     const first = await w.shell(line, { sessionId: 's' })
-    expect(first.refusal?.kind).toBe('pending')
+    expect(first.decision?.kind).toBe('pending')
     const [pending] = w.decisions.pending()
     expect(w.decisions.pending()).toHaveLength(1)
     await w.decisions.answer(pending?.id ?? '', Outcome.ALLOW)
@@ -1697,7 +1697,7 @@ describe('explain answers and the op form', () => {
       ])
       // A policy's refusal is the command's: the line itself runs.
       expect(
-        rm !== undefined && 'command' in rm ? [rm.exitCode, rm.refusal?.reason] : null,
+        rm !== undefined && 'command' in rm ? [rm.exitCode, rm.decision?.reason] : null,
       ).toEqual([126, 'no'])
       expect([said.outcome, said.exitCode]).toEqual([Outcome.ALLOW, 0])
       expect(await new Session(ws, null).explain.shell('rm /data/x')).toEqual(said)
@@ -1716,7 +1716,7 @@ describe('explain answers and the op form', () => {
       const ran = await ws.shell('echo hi')
       const [echo] = said.node.children
       if (echo === undefined || !('command' in echo)) throw new Error('no command node')
-      expect([echo.outcome, echo.refusal?.kind]).toEqual([Outcome.DENY, 'failed'])
+      expect([echo.outcome, echo.decision?.kind]).toEqual([Outcome.DENY, 'failed'])
       expect([echo.exitCode, echo.stderr]).toEqual([ran.exitCode, DEC.decode(ran.stderr)])
     } finally {
       await ws.close()

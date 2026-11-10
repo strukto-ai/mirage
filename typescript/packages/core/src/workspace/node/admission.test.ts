@@ -156,7 +156,7 @@ describe('admission', () => {
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const run = async (name: string, args: string[], stdin: Uint8Array | null = null) => {
       const words = await classifyParts([name, ...args], w.registry, session.cwd)
-      const refusal = await admit(
+      const decision = await admit(
         name,
         args,
         words.slice(1),
@@ -165,7 +165,7 @@ describe('admission', () => {
         w.namespace,
         stdin,
       )
-      return refusal instanceof Admitted ? null : [refusal.exitCode, voicedStderr(refusal)]
+      return decision instanceof Admitted ? null : [decision.exitCode, voicedStderr(decision)]
     }
     expect(await run('ls', [])).toBeNull()
     await w.shell('cd /data/private')
@@ -200,8 +200,8 @@ describe('admission', () => {
     const plain = w.sessionManager.get(w.sessionManager.defaultId)
     const run = async (session: typeof plain, name: string, ...args: string[]) => {
       const words = await classifyParts([name, ...args], w.registry, session.cwd)
-      const refusal = await admit(name, args, words.slice(1), session, w.registry, w.namespace)
-      return refusal instanceof Admitted ? null : [refusal.exitCode, voicedStderr(refusal)]
+      const decision = await admit(name, args, words.slice(1), session, w.registry, w.namespace)
+      return decision instanceof Admitted ? null : [decision.exitCode, voicedStderr(decision)]
     }
     expect(await run(plain, 'cat', '/data/secret')).toEqual([
       1,
@@ -235,8 +235,8 @@ describe('admission', () => {
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const reparse = (text: string) => parse(text)
     const line = async (text: string) => {
-      const refusal = await admitLine(parse(text), session, w.registry, w.namespace, reparse)
-      return refusal === null ? null : [refusal.exitCode, voicedStderr(refusal)]
+      const decision = await admitLine(parse(text), session, w.registry, w.namespace, reparse)
+      return decision === null ? null : [decision.exitCode, voicedStderr(decision)]
     }
     const unread = (raw: string) =>
       `Permission denied\npolicy denied: cannot read ${raw} before the runtime expands it\n`
@@ -378,10 +378,10 @@ describe('admission', () => {
     const w = ws()
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const line = async (text: string) => {
-      const refusal = await admitLine(parse(text), session, w.registry, w.namespace, (t) =>
+      const decision = await admitLine(parse(text), session, w.registry, w.namespace, (t) =>
         parse(t),
       )
-      return refusal === null ? null : [refusal.exitCode, voicedStderr(refusal)]
+      return decision === null ? null : [decision.exitCode, voicedStderr(decision)]
     }
     expect(await line('grep -r x /data')).toEqual([
       126,
@@ -410,10 +410,10 @@ describe('admission', () => {
     const w = ws()
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const line = async (text: string) => {
-      const refusal = await admitLine(parse(text), session, w.registry, w.namespace, (t) =>
+      const decision = await admitLine(parse(text), session, w.registry, w.namespace, (t) =>
         parse(t),
       )
-      return refusal === null ? null : [refusal.exitCode, voicedStderr(refusal)]
+      return decision === null ? null : [decision.exitCode, voicedStderr(decision)]
     }
     expect(await line('cat < /data/secret')).toEqual([
       1,
@@ -449,8 +449,8 @@ describe('admission', () => {
   it.each(HOISTED)('admitLine binds a hoisted redirect to its command: %s', async (text) => {
     const w = ws()
     const session = w.sessionManager.get(w.sessionManager.defaultId)
-    const refusal = await admitLine(parse(text), session, w.registry, w.namespace, (t) => parse(t))
-    expect(refusal === null ? null : [refusal.exitCode, voicedStderr(refusal)]).toEqual([
+    const decision = await admitLine(parse(text), session, w.registry, w.namespace, (t) => parse(t))
+    expect(decision === null ? null : [decision.exitCode, voicedStderr(decision)]).toEqual([
       1,
       'cat: /data/secret: Permission denied\npolicy denied: sealed\n',
     ])
@@ -467,7 +467,7 @@ describe('admission', () => {
     expect(DEC.decode(await materialize(io.stderr))).toContain(
       'cat: /data/secret: Permission denied',
     )
-    expect(io.refusal?.reason).toBe('sealed')
+    expect(io.decision?.reason).toBe('sealed')
   })
   it('the admitted gate judges what the line did not name', () => {
     const deny: CommandRule = { reason: 'sealed', paths: ['/data/sealed'] }
@@ -489,7 +489,7 @@ describe('admission', () => {
     }
     expect(thrown).toBeInstanceOf(PolicyDenied)
     expect((thrown as PolicyDenied).message).toBe('Permission denied')
-    expect((thrown as PolicyDenied).refusal?.reason).toBe('sealed')
+    expect((thrown as PolicyDenied).decision?.reason).toBe('sealed')
     expect((thrown as PolicyDenied).virtualPath).toBe('/data/sealed/s')
     try {
       gate.check('/data/asked/a')
@@ -497,7 +497,7 @@ describe('admission', () => {
     } catch (err) {
       thrown = err
     }
-    expect((thrown as PolicyDenied | null)?.refusal?.reason).toBe('nod')
+    expect((thrown as PolicyDenied | null)?.decision?.reason).toBe('nod')
     // An operand the gate judged passes whatever the rules say about it
     // (the line was admitted on it), and a grant under the asking rule
     // opens its scope to the walk.
@@ -830,7 +830,7 @@ describe('what the handler a command resolves to declares', () => {
       ])
       const result = await w.shell('remote --account team deliver')
       expect(result.exitCode).not.toBe(0)
-      expect(result.refusal).not.toBeNull()
+      expect(result.decision).not.toBeNull()
       expect(calls).toEqual([])
     },
   )

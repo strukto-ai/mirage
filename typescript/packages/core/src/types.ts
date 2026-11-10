@@ -526,7 +526,7 @@ const LIMIT_AGGR: { [K in LimitAggrField]: (present: readonly Limit[]) => Limit[
  * (output caps today; budgets and attribution later) read it as
  * context. Facts only: no policy reads a decision off the envelope;
  * the one a chain hands down is written beside it as
- * `IOResult.refusal` after the last method has spoken. `declared` is
+ * `IOResult.decision` after the last method has spoken. `declared` is
  * the bound the command's own registration declared,
  * when the dispatch site knows it (e.g. a CLI leaf). `native` is set when
  * a native program a runtime runs produced it, writing as it goes, so a
@@ -539,7 +539,7 @@ export interface Producer {
   readonly native?: boolean
 }
 
-export type RefusalKind = 'deny' | 'pending' | 'failed'
+export type PolicyDecisionKind = 'deny' | 'pending' | 'failed'
 
 /**
  * Why a line did not run, for the caller that reads the result.
@@ -554,10 +554,10 @@ export type RefusalKind = 'deny' | 'pending' | 'failed'
  * `failed` for a policy that raised and so refused by default;
  * `policy` is the class name of the policy that spoke, empty for an
  * ask, which belongs to the host; `askId` is the approval to quote,
- * for `pending`. Mirrors the Python `Refusal`.
+ * for `pending`. Mirrors the Python `PolicyDecision`.
  */
-export interface Refusal {
-  readonly kind: RefusalKind
+export interface PolicyDecision {
+  readonly kind: PolicyDecisionKind
   readonly reason: string
   readonly policy: string
   readonly askId: string | null

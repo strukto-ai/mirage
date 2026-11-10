@@ -322,7 +322,7 @@ export async function runSearch(
                 : err,
             )
           }
-          if (run.refusal !== null) io.refusal = run.refusal
+          if (run.decision !== null) io.decision = run.decision
         }
         if (stops && run.exitCode === 0) break
       }

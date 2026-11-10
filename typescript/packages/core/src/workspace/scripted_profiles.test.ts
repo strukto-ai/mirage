@@ -92,7 +92,7 @@ describe('profile policies', () => {
       const denied = await ws.shell('cat /data/sealed/k', { sessionId: 's' })
       expect(denied.exitCode).toBe(126)
       expect(denied.stderrText).toBe('cat: Permission denied\n')
-      expect(denied.refusal).toMatchObject({ kind: 'deny', reason: 'sealed by release' })
+      expect(denied.decision).toMatchObject({ kind: 'deny', reason: 'sealed by release' })
     } finally {
       await ws.close()
     }
@@ -106,7 +106,7 @@ describe('profile policies', () => {
       await ws.shell('cd /data', { sessionId: 's' })
       const denied = await ws.shell('cat owner.txt', { sessionId: 's' })
       expect(denied.exitCode).toBe(126)
-      expect(denied.refusal).toMatchObject({ kind: 'deny', reason: 's in /data' })
+      expect(denied.decision).toMatchObject({ kind: 'deny', reason: 's in /data' })
     } finally {
       await ws.close()
     }
@@ -164,8 +164,8 @@ describe('profile policies', () => {
       const held = await ws.shell('shred /data/x', { sessionId: 's' })
       expect(held.exitCode).toBe(126)
       expect(held.stderrText).toBe('shred: Permission denied\n')
-      expect(held.refusal).toMatchObject({ kind: 'pending', reason: 'sign-off' })
-      expect(held.refusal?.askId).toBeTruthy()
+      expect(held.decision).toMatchObject({ kind: 'pending', reason: 'sign-off' })
+      expect(held.decision?.askId).toBeTruthy()
     } finally {
       await ws.close()
     }
@@ -208,7 +208,7 @@ describe('profile policies', () => {
       ws.createSession('s', { profile: 'release' })
       const held = await ws.shell('cat /data/in/mail.txt', { sessionId: 's' })
       expect(held.exitCode).toBe(126)
-      expect(held.refusal).toMatchObject({ kind: 'pending', reason: 'sign-off on payload' })
+      expect(held.decision).toMatchObject({ kind: 'pending', reason: 'sign-off on payload' })
       expect((await ws.shell('cat /data/in/note.txt', { sessionId: 's' })).exitCode).toBe(0)
       expect((await ws.shell('ls /data/in', { sessionId: 's' })).exitCode).toBe(0)
     } finally {
@@ -242,7 +242,7 @@ describe('profile policies', () => {
       const refused = await ws.shell('echo hi', { sessionId: 's' })
       expect(refused.exitCode).toBe(126)
       expect(refused.stderrText).toBe('echo: Permission denied\n')
-      expect(refused.refusal?.reason).toMatch(/^profile 'release' policy exited /)
+      expect(refused.decision?.reason).toMatch(/^profile 'release' policy exited /)
       expect((await ws.shell('echo hi')).exitCode).toBe(0)
     } finally {
       await ws.close()
@@ -256,7 +256,7 @@ describe('profile policies', () => {
       const refused = await ws.shell('echo hi', { sessionId: 's' })
       expect(refused.exitCode).toBe(126)
       expect(refused.stderrText).toBe('echo: Permission denied\n')
-      expect(refused.refusal?.reason).toBe(
+      expect(refused.decision?.reason).toBe(
         "profile 'release' policy names runtime 'workspace'; a policy program runs on monty or pyodide",
       )
     } finally {
@@ -271,7 +271,7 @@ describe('profile policies', () => {
       ws.createSession('s', { profile: 'release' })
       const refused = await ws.shell('echo hi', { sessionId: 's' })
       expect(refused.exitCode).toBe(126)
-      expect(refused.refusal?.reason).toMatch(
+      expect(refused.decision?.reason).toMatch(
         /^profile 'release' policy must return an answer at pre_command/,
       )
     } finally {
@@ -306,7 +306,7 @@ describe('profile policies', () => {
       ws.createSession('s', { profile: 'release' })
       const refused = await ws.shell('echo hi', { sessionId: 's' })
       expect(refused.exitCode).toBe(126)
-      expect(refused.refusal?.reason).toMatch(/^profile 'release' policy .*@pydantic\/monty/)
+      expect(refused.decision?.reason).toMatch(/^profile 'release' policy .*@pydantic\/monty/)
     } finally {
       await ws.close()
       vi.doUnmock('@pydantic/monty')
@@ -405,7 +405,7 @@ describe('profile policies at the op view', () => {
       ws.createSession('s', { profile: 'release' })
       const held = await ws.shell('cat /data/in/mail.txt', { sessionId: 's' })
       expect(held.exitCode).toBe(126)
-      expect(held.refusal).toMatchObject({ kind: 'pending', reason: 'sign-off on payload' })
+      expect(held.decision).toMatchObject({ kind: 'pending', reason: 'sign-off on payload' })
       expect((await ws.shell('cat /data/in/note.txt', { sessionId: 's' })).exitCode).toBe(0)
       await expect(ws.vfs.write('/data/frozen/f', 'x\n', 's')).rejects.toThrow()
     } finally {
@@ -447,7 +447,7 @@ describe('a profile policy reads as the session it judges for', () => {
       expect(ran.stdoutText).toBe('hi\nthere\n')
       const denied = await ws.shell('echo hi && echo there', { sessionId: 's' })
       expect(denied.exitCode).toBe(126)
-      expect(denied.refusal).toMatchObject({ kind: 'deny', reason: 'saw k' })
+      expect(denied.decision).toMatchObject({ kind: 'deny', reason: 'saw k' })
     } finally {
       await ws.close()
     }
@@ -483,7 +483,7 @@ async def pre_command(ctx):
     try {
       for (const each of [copied, restored]) {
         const refused = await each.shell('rm /data/x', { sessionId: 's' })
-        expect(refused.refusal).toMatchObject({ kind: 'deny', reason: 'directory says no' })
+        expect(refused.decision).toMatchObject({ kind: 'deny', reason: 'directory says no' })
       }
     } finally {
       for (const each of [ws, copied, restored]) await each.close()

@@ -22,7 +22,7 @@ from mirage.io.errors import MemoryExhausted
 from mirage.policy import (
     Deny,
     Pending,
-    refusal_of,
+    decision_of,
     render_deny,
 )
 from mirage.policy.builtin.output_cap import LINE_NAME
@@ -49,7 +49,7 @@ def placement_refused(action: Deny | Pending, command: str) -> IOResult:
     """
     name = command_name(command) or command
     err, code = render_deny(name, action)
-    return IOResult(exit_code=code, stderr=err, refusal=refusal_of(action))
+    return IOResult(exit_code=code, stderr=err, decision=decision_of(action))
 
 
 def failure_result(exc: BaseException, command: str) -> IOResult:

@@ -49,7 +49,7 @@ from mirage.agents.openai_agents.constants import (
 from mirage.concurrency.limiter import run_blocking
 from mirage.shell.constants import INTERRUPTED_STATUS
 from mirage.workspace.snapshot import apply_state_dict, read_tar
-from mirage.workspace.tools.io_text import with_refusal_bytes
+from mirage.workspace.tools.io_text import with_decision_bytes
 from mirage.workspace.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -139,8 +139,8 @@ class MirageSandboxSession(BaseSandboxSession):
             env=env or None,
         )
         stdout = await io_result.materialize_stdout()
-        stderr = with_refusal_bytes(
-            await io_result.materialize_stderr(), io_result.refusal
+        stderr = with_decision_bytes(
+            await io_result.materialize_stderr(), io_result.decision
         )
         return ExecResult(
             exit_code=io_result.exit_code, stdout=stdout, stderr=stderr

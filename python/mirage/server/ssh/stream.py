@@ -26,7 +26,7 @@ from mirage.io.types import IOResult
 from mirage.shell.bytes import encode_text
 from mirage.shell.console.types import Channel
 from mirage.workspace.shell_execution import ShellExecution
-from mirage.workspace.tools.io_text import refusal_line
+from mirage.workspace.tools.io_text import decision_line
 
 logger = logging.getLogger(__name__)
 
@@ -447,7 +447,7 @@ async def deliver(execution: ShellExecution, send: Send) -> IOResult:
     the refusal's line on stderr when a policy refused part of it.
 
     The terminal's output goes out as the line printed it; the policy's
-    reason is the one line ``refusal_line`` appends, read once the line
+    reason is the one line ``decision_line`` appends, read once the line
     has ended, since an op a streaming command reads late is refused
     only then.
 
@@ -463,7 +463,7 @@ async def deliver(execution: ShellExecution, send: Send) -> IOResult:
             continue
         await send(event.data, Channel(event.stream) == Channel.STDERR)
     result = await execution.wait()
-    line = refusal_line(result.refusal)
+    line = decision_line(result.decision)
     if line:
         await send(encode_text(line), True)
     return result

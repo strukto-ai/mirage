@@ -72,8 +72,8 @@ const MESSAGE_CODES: [string[], number][] = [
  * names.
  */
 export function classifyErrno(err: unknown): number {
-  if (err instanceof PolicyDenied && err.refusal !== null) {
-    console.info(`policy ${err.refusal.policy} refused ${err.virtualPath}: ${err.refusal.reason}`)
+  if (err instanceof PolicyDenied && err.decision !== null) {
+    console.info(`policy ${err.decision.policy} refused ${err.virtualPath}: ${err.decision.reason}`)
   }
   const condition = classify(err)
   if (condition !== null) return CONDITION_ERRNO[condition]

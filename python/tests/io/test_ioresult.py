@@ -15,7 +15,7 @@
 import asyncio
 
 from mirage.io.types import IOResult
-from mirage.types import Refusal
+from mirage.types import PolicyDecision
 
 
 def test_default_exit_code():
@@ -93,12 +93,16 @@ def test_chain_of_merges_stays_fresh_end_to_end():
 
 def test_merge_keeps_the_latest_refusal():
     async def _run():
-        refused = Refusal(kind="deny", reason="no deletes", policy="Rule")
-        merged = await IOResult(refusal=refused).merge(IOResult())
-        assert merged.refusal == refused
-        later = Refusal(kind="pending", reason="sign-off", ask_id="a1")
-        merged = await IOResult(refusal=refused).merge(IOResult(refusal=later))
-        assert merged.refusal == later
-        assert (await IOResult().merge(IOResult())).refusal is None
+        refused = PolicyDecision(
+            kind="deny", reason="no deletes", policy="Rule"
+        )
+        merged = await IOResult(decision=refused).merge(IOResult())
+        assert merged.decision == refused
+        later = PolicyDecision(kind="pending", reason="sign-off", ask_id="a1")
+        merged = await IOResult(decision=refused).merge(
+            IOResult(decision=later)
+        )
+        assert merged.decision == later
+        assert (await IOResult().merge(IOResult())).decision is None
 
     asyncio.run(_run())

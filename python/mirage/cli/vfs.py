@@ -130,9 +130,9 @@ def answer(r: httpx.Response) -> Any:
         error = error_of(r.text)
         if error is not None and "errno" in error:
             typer.echo(f"{error['message']} ({error['errno']})", err=True)
-            refusal = error.get("refusal")
-            if isinstance(refusal, dict):
-                typer.echo(f"policy denied: {refusal['reason']}", err=True)
+            decision = error.get("decision")
+            if isinstance(decision, dict):
+                typer.echo(f"policy denied: {decision['reason']}", err=True)
             raise typer.Exit(code=1)
     return handle_response(r)
 

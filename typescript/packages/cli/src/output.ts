@@ -77,7 +77,7 @@ export function exitCodeFromResponse(r: unknown): number {
  */
 export function errorOf(
   text: string,
-): { message: string; errno?: string; refusal?: { reason: string } | null } | null {
+): { message: string; errno?: string; decision?: { reason: string } | null } | null {
   let body: unknown
   try {
     body = JSON.parse(text)
@@ -91,7 +91,7 @@ export function errorOf(
       : undefined
   if (error === null || typeof error !== 'object' || Array.isArray(error)) return null
   return typeof (error as { message?: unknown }).message === 'string'
-    ? (error as { message: string; errno?: string; refusal?: { reason: string } | null })
+    ? (error as { message: string; errno?: string; decision?: { reason: string } | null })
     : null
 }
 

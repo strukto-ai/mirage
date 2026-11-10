@@ -13,14 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ExecuteResponse, FileInfo, GrepMatch } from 'deepagents'
-import type { Refusal } from '@struktoai/mirage-core/types'
-import { withRefusal } from '@struktoai/mirage-core/workspace/tools/io_text'
+import type { PolicyDecision } from '@struktoai/mirage-core/types'
+import { withDecision } from '@struktoai/mirage-core/workspace/tools/io_text'
 
 interface IOLike {
   stdoutText: string
   stderrText: string
   exitCode: number | null
-  refusal?: Refusal | null
+  decision?: PolicyDecision | null
 }
 
 export function ioToExecuteResponse(io: IOLike): ExecuteResponse {
@@ -31,7 +31,7 @@ export function ioToExecuteResponse(io: IOLike): ExecuteResponse {
     output = stdout.length > 0 ? `${stdout}\n${stderr}` : stderr
   }
   return {
-    output: withRefusal(output, io.refusal ?? null),
+    output: withDecision(output, io.decision ?? null),
     exitCode: io.exitCode,
     truncated: false,
   }

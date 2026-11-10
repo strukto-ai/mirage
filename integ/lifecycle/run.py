@@ -306,7 +306,7 @@ def explained(expl: ShellExplanation | VfsExplanation) -> dict[str, Any]:
         "outcome": expl.outcome.value,
         "reason": expl.reason,
         "answers": answered(expl.answers),
-        "refusal": expl.refusal.kind if expl.refusal is not None else None,
+        "decision": expl.decision.kind if expl.decision is not None else None,
     }
     if isinstance(expl, VfsExplanation):
         return {"call": expl.call, **verdict, "error": expl.error}
@@ -540,8 +540,8 @@ async def action(
                     "exit_code": result.exit_code,
                     "stdout": await result.stdout_str(),
                     "stderr": await result.stderr_str(),
-                    "refusal": result.refusal.reason
-                    if result.refusal
+                    "decision": result.decision.reason
+                    if result.decision
                     else None,
                 }
             except MirageAbortError:
@@ -623,7 +623,7 @@ async def action(
             "exit_code": result.exit_code,
             "stdout": await result.stdout_str(),
             "stderr": await result.stderr_str(),
-            "refusal": result.refusal.reason if result.refusal else None,
+            "decision": result.decision.reason if result.decision else None,
         }
         if sink is not None:
             value["streamed"] = (await sink.snapshot(Channel.STDOUT)).decode()
@@ -711,8 +711,8 @@ async def run(case: dict[str, Any]) -> int:
                     actual["errno"] = errno.errorcode.get(exc.errno)
                 elif condition is not None:
                     actual["errno"] = condition.name
-                if isinstance(exc, PolicyDenied) and exc.refusal is not None:
-                    actual["reason"] = exc.refusal.reason
+                if isinstance(exc, PolicyDenied) and exc.decision is not None:
+                    actual["reason"] = exc.decision.reason
             expected = step.get("expect", {"value": None})
             if not matches(actual, expected):
                 raise AssertionError(

@@ -142,7 +142,7 @@ export class ShellExecution {
         await onEvent?.(event)
       }
       const result = await this.wait()
-      return new ExecuteResult(concat(stdout), concat(stderr), result.exitCode, result.refusal)
+      return new ExecuteResult(concat(stdout), concat(stderr), result.exitCode, result.decision)
     } finally {
       await this.close()
     }

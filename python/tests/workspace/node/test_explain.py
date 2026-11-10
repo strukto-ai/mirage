@@ -22,10 +22,10 @@ from pydantic import BaseModel, ConfigDict
 
 from mirage import Session, Workspace
 from mirage.context.session_context import (
+    reset_decision_sink,
     reset_explaining,
-    reset_refusal_sink,
+    set_decision_sink,
     set_explaining,
-    set_refusal_sink,
 )
 from mirage.execution.ram import RAMExecutionStore
 from mirage.policy import (
@@ -67,7 +67,7 @@ async def _judged(
     """
     await ws.ensure_sessions_loaded()
     session = ws.get_session(session_id or ws.default_session_id)
-    sink_token = set_refusal_sink(lambda refusal: None)
+    sink_token = set_decision_sink(lambda decision: None)
     token = set_explaining(DryRun.DECIDING)
     try:
         judged = await explain_line(
@@ -80,7 +80,7 @@ async def _judged(
         )
     finally:
         reset_explaining(token)
-        reset_refusal_sink(sink_token)
+        reset_decision_sink(sink_token)
     return [one.judgment for one in judged]
 
 
@@ -276,11 +276,11 @@ async def test_only_a_verdict_refuses_the_whole_line(ws):
     line = "gerp x; rm /data/prod/x.txt"
     said = await ws.explain(line, "s")
     ran = await ws.shell(line, session_id="s")
-    assert ran.refusal is not None and said.refusal is not None
-    assert (said.exit_code, said.stderr, said.refusal.reason) == (
+    assert ran.decision is not None and said.decision is not None
+    assert (said.exit_code, said.stderr, said.decision.reason) == (
         ran.exit_code,
         await ran.stderr_str(),
-        ran.refusal.reason,
+        ran.decision.reason,
     )
 
 
@@ -473,7 +473,7 @@ async def test_a_grant_the_session_holds_shows_the_line_running(ws):
     assert asked.exit_code == 0
     assert asked.stderr == ""
     said = await ws.explain("git push origin main", "s")
-    assert (said.outcome, said.reason, said.exit_code, said.refusal) == (
+    assert (said.outcome, said.reason, said.exit_code, said.decision) == (
         Outcome.ASK,
         "pushes need sign-off",
         0,
@@ -524,7 +524,7 @@ async def test_a_rule_on_a_redirect_target_holds_the_whole_line(sealed):
         "rm /data/a.txt && echo x > /data/prod/x.txt", session_id="s"
     )
     assert ran.exit_code != 0
-    assert ran.refusal and "sealed until review" in ran.refusal.reason
+    assert ran.decision and "sealed until review" in ran.decision.reason
     assert "/data/a.txt" in await sealed.vfs.readdir("/data")
 
 
@@ -560,8 +560,8 @@ async def test_a_coded_policy_answers_as_the_command_runs(coded):
     ran = await coded.shell("rm /data/a.txt && cat /data/b.txt")
     assert ran.exit_code != 0
     assert ran.stderr == b"cat: Permission denied\n"
-    assert ran.refusal is not None
-    assert ran.refusal.reason == "cat is refused by policy"
+    assert ran.decision is not None
+    assert ran.decision.reason == "cat is refused by policy"
     assert "/data/a.txt" not in await coded.vfs.readdir("/data")
 
 
@@ -622,7 +622,9 @@ async def test_an_answered_ask_does_not_end_the_scan(inline):
         "cat /data/secret.txt && rm /data/prod/x.txt", session_id="s"
     )
     assert ran.exit_code != 0
-    assert ran.refusal and "production data is protected" in ran.refusal.reason
+    assert (
+        ran.decision and "production data is protected" in ran.decision.reason
+    )
     assert b"s\n" not in (ran.stdout or b"")
     assert "/data/prod/x.txt" in await inline.vfs.readdir("/data/prod")
 
@@ -795,8 +797,8 @@ async def test_a_grant_stays_with_a_background_job_until_it_ends(line):
 async def test_an_out_of_band_grant_stays_with_a_nested_background_job(ws):
     line = "eval 'sleep 0.2 && cat /data/secret.txt > /data/read.txt &'"
     first = await ws.shell(line, session_id="s")
-    assert first.refusal is not None and first.refusal.kind == "pending"
-    await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
+    assert first.decision is not None and first.decision.kind == "pending"
+    await ws.decisions.answer(first.decision.ask_id, Outcome.ALLOW)
     ran = await ws.shell(line, session_id="s")
     assert ran.exit_code == 0
     assert len(ws.decisions.list("s")) == 1
@@ -817,14 +819,14 @@ async def test_a_command_spelled_twice_on_a_line_needs_two_answers(ws):
     line = "cat /data/secret.txt && cat /data/secret.txt"
     first = await ws.shell(line, session_id="s")
     assert first.exit_code == 126
-    assert first.refusal is not None and first.refusal.kind == "pending"
-    await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
+    assert first.decision is not None and first.decision.kind == "pending"
+    await ws.decisions.answer(first.decision.ask_id, Outcome.ALLOW)
     second = await ws.shell(line, session_id="s")
     assert second.exit_code == 126
     assert second.stdout == b""
-    assert second.refusal is not None and second.refusal.kind == "pending"
+    assert second.decision is not None and second.decision.kind == "pending"
     assert len(ws.decisions.list("s")) == 2
-    await ws.decisions.answer(second.refusal.ask_id, Outcome.ALLOW)
+    await ws.decisions.answer(second.decision.ask_id, Outcome.ALLOW)
     ran = await ws.shell(line, session_id="s")
     assert ran.exit_code == 0
     assert ran.stdout == b"s\ns\n"
@@ -839,8 +841,8 @@ async def test_two_lines_judged_at_once_cannot_both_run_on_one_nod(ws):
     # find the grant gone at its cat.
     line = "ls /data && cat /data/secret.txt"
     first = await ws.shell(line, session_id="s")
-    assert first.refusal is not None and first.refusal.kind == "pending"
-    await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
+    assert first.decision is not None and first.decision.kind == "pending"
+    await ws.decisions.answer(first.decision.ask_id, Outcome.ALLOW)
     ran, held = sorted(
         await asyncio.gather(
             ws.shell(line, session_id="s"), ws.shell(line, session_id="s")
@@ -851,7 +853,7 @@ async def test_two_lines_judged_at_once_cannot_both_run_on_one_nod(ws):
     assert ran.stdout == b"a.txt\nprod\nsecret.txt\ns\n"
     assert held.exit_code == 126
     assert held.stdout == b""
-    assert held.refusal is not None and held.refusal.kind == "pending"
+    assert held.decision is not None and held.decision.kind == "pending"
 
 
 @pytest.mark.asyncio
@@ -864,16 +866,16 @@ async def test_a_grant_given_before_a_refused_line_does_not_outlive_it(ws):
     line = "cat /data/secret.txt && rm /data/prod/x.txt"
     first = await ws.shell(line, session_id="s")
     assert first.exit_code == 126
-    assert first.refusal is not None and first.refusal.kind == "pending"
-    await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
+    assert first.decision is not None and first.decision.kind == "pending"
+    await ws.decisions.answer(first.decision.ask_id, Outcome.ALLOW)
     retry = await ws.shell(line, session_id="s")
     assert retry.exit_code != 0
-    assert retry.refusal is not None
-    assert "production data is protected" in retry.refusal.reason
+    assert retry.decision is not None
+    assert "production data is protected" in retry.decision.reason
     assert ws.decisions.list("s") == ()
     again = await ws.shell("cat /data/secret.txt", session_id="s")
     assert again.exit_code == 126
-    assert again.refusal is not None and again.refusal.kind == "pending"
+    assert again.decision is not None and again.decision.kind == "pending"
 
 
 @pytest.mark.asyncio
@@ -932,8 +934,8 @@ async def test_a_nested_line_runs_on_the_answer_its_outer_line_was_given(ws):
     line = "echo $(cat /data/secret.txt) && ls /data"
     first = await ws.shell(line, session_id="s")
     assert first.exit_code == 126
-    assert first.refusal is not None and first.refusal.kind == "pending"
-    await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
+    assert first.decision is not None and first.decision.kind == "pending"
+    await ws.decisions.answer(first.decision.ask_id, Outcome.ALLOW)
     ran = await ws.shell(line, session_id="s")
     assert ran.exit_code == 0
     assert ran.stdout.startswith(b"s\n")
@@ -997,14 +999,16 @@ async def test_a_whole_line_keeps_its_first_answer_while_its_second_waits():
         line = "cat /data/secret.txt && git push origin main"
         first = await ws.shell(line, session_id="s")
         assert first.exit_code == 126
-        assert first.refusal is not None and first.refusal.kind == "pending"
-        await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
+        assert first.decision is not None and first.decision.kind == "pending"
+        await ws.decisions.answer(first.decision.ask_id, Outcome.ALLOW)
         second = await ws.shell(line, session_id="s")
         assert second.exit_code == 126
-        assert second.refusal is not None and second.refusal.kind == "pending"
+        assert (
+            second.decision is not None and second.decision.kind == "pending"
+        )
         assert len(ws.decisions.list("s")) == 2
         assert box.lines == []
-        await ws.decisions.answer(second.refusal.ask_id, Outcome.ALLOW)
+        await ws.decisions.answer(second.decision.ask_id, Outcome.ALLOW)
         ran = await ws.shell(line, session_id="s")
         assert ran.exit_code == 0
         assert box.lines == [line]
@@ -1112,7 +1116,7 @@ async def test_explain_says_what_a_whole_line_gate_refuses_past_the_chain():
         ):
             said = await ws.explain(line, "s")
             ran = await ws.shell(line, session_id="s")
-            assert ran.refusal is not None and ran.refusal.reason == reason
+            assert ran.decision is not None and ran.decision.reason == reason
             assert (said.outcome, said.reason) == (Outcome.DENY, reason)
             assert (said.exit_code, said.stderr) == (
                 ran.exit_code,
@@ -1158,13 +1162,13 @@ async def test_a_whole_line_is_judged_wherever_a_cd_may_leave_it():
             ws.get_session("s").cwd = cwd
             said = await ws.explain(line, "s")
             ran = await ws.shell(line, session_id="s")
-            assert ran.refusal is not None and ran.refusal.reason == reason
+            assert ran.decision is not None and ran.decision.reason == reason
             assert (said.outcome, said.reason) == (Outcome.DENY, reason)
         assert box.lines == []
         line = "for i in 1 2; do cd /data | true; cd /data & cat notes; done"
         said = await ws.explain(line, "s")
         ran = await ws.shell(line, session_id="s")
-        assert (said.exit_code, ran.refusal) == (0, None)
+        assert (said.exit_code, ran.decision) == (0, None)
         assert box.lines == [line]
     finally:
         await ws.close()
@@ -1199,7 +1203,7 @@ async def test_a_coded_policy_judges_a_whole_line_where_it_may_stand():
         ):
             said = await ws.explain(line)
             ran = await ws.shell(line)
-            assert ran.refusal is not None and ran.refusal.reason == "sealed"
+            assert ran.decision is not None and ran.decision.reason == "sealed"
             assert (said.outcome, said.reason) == (Outcome.DENY, "sealed")
         assert box.lines == []
     finally:
@@ -1250,7 +1254,7 @@ async def test_explain_judges_a_held_line_as_its_runtime_takes_it():
         reason = "walks a tree the gate cannot follow"
         said = await ws.explain(line, "s")
         ran = await ws.shell(line, session_id="s")
-        assert ran.refusal is not None and ran.refusal.reason == reason
+        assert ran.decision is not None and ran.decision.reason == reason
         assert (said.outcome, said.reason) == (Outcome.DENY, reason)
         assert box.lines == []
     finally:
@@ -1433,14 +1437,14 @@ async def test_a_word_that_expands_to_a_judged_command_does_not_run_on_its_nod(
     line = "F=/data/secret.txt; cat $F && cat /data/secret.txt"
     first = await ws.shell(line, session_id="s")
     assert first.exit_code == 126
-    assert first.refusal is not None and first.refusal.kind == "pending"
-    await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
+    assert first.decision is not None and first.decision.kind == "pending"
+    await ws.decisions.answer(first.decision.ask_id, Outcome.ALLOW)
     second = await ws.shell(line, session_id="s")
     assert second.exit_code == 126
     assert second.stdout == b""
-    assert second.refusal is not None and second.refusal.kind == "pending"
+    assert second.decision is not None and second.decision.kind == "pending"
     assert len(ws.decisions.list("s")) == 2
-    await ws.decisions.answer(second.refusal.ask_id, Outcome.ALLOW)
+    await ws.decisions.answer(second.decision.ask_id, Outcome.ALLOW)
     ran = await ws.shell(line, session_id="s")
     assert ran.exit_code == 0
     assert ran.stdout == b"s\ns\n"
@@ -1499,14 +1503,14 @@ async def test_a_held_line_keeps_its_jobs_grant_reserved(ws):
     # the other line asks, and the job runs on its nod.
     line = "F=/data/secret.txt; sleep 0.5 && cat /data/secret.txt & cat $F"
     first = await ws.shell(line, session_id="s")
-    assert first.refusal is not None and first.refusal.kind == "pending"
-    await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
+    assert first.decision is not None and first.decision.kind == "pending"
+    await ws.decisions.answer(first.decision.ask_id, Outcome.ALLOW)
     held = await ws.shell(line, session_id="s")
     assert held.exit_code == 126
-    assert held.refusal is not None and held.refusal.kind == "pending"
+    assert held.decision is not None and held.decision.kind == "pending"
     other = await ws.shell("cat /data/secret.txt", session_id="s")
     assert other.exit_code == 126
-    assert other.refusal is not None and other.refusal.kind == "pending"
+    assert other.decision is not None and other.decision.kind == "pending"
     waited = await ws.shell("wait", session_id="s")
     assert waited.exit_code == 0
     assert len(ws.decisions.pending("s")) == len(ws.decisions.list("s"))
@@ -1523,8 +1527,8 @@ async def test_touching_backtick_pairs_hold_the_line_as_the_lines_they_run(ws):
     first = await ws.shell(line, session_id="s")
     assert first.exit_code == 126
     assert first.stdout == b""
-    assert first.refusal is not None and first.refusal.kind == "pending"
-    await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
+    assert first.decision is not None and first.decision.kind == "pending"
+    await ws.decisions.answer(first.decision.ask_id, Outcome.ALLOW)
     ran = await ws.shell(line, session_id="s")
     assert ran.exit_code == 0
     assert ran.stdout == b"x\ns ok\n"
@@ -1595,8 +1599,8 @@ async def test_a_held_pair_holding_a_multibyte_character_runs_on_its_grant(
     await ws.vfs.write("/data/secrét", b"s\n")
     line = "echo x && echo `cat /data/secrét`"
     first = await ws.shell(line, session_id="s")
-    assert first.refusal is not None and first.refusal.kind == "pending"
-    await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
+    assert first.decision is not None and first.decision.kind == "pending"
+    await ws.decisions.answer(first.decision.ask_id, Outcome.ALLOW)
     ran = await ws.shell(line, session_id="s")
     assert ran.exit_code == 0
     assert ran.stdout == b"x\ns\n"
@@ -1728,7 +1732,7 @@ async def test_every_batch_xargs_hands_on_runs_on_one_nod():
 async def test_a_held_xargs_line_replays_every_batch_on_one_answer(ws):
     line = "printf '/data/secret.txt /data/secret.txt' | xargs -n1 cat"
     first = await ws.shell(line, session_id="s")
-    assert first.refusal is not None and first.refusal.kind == "pending"
+    assert first.decision is not None and first.decision.kind == "pending"
     (pending,) = ws.decisions.pending()
     await ws.decisions.answer(pending.id, Outcome.ALLOW)
     again = await ws.shell(line, session_id="s")
@@ -1952,7 +1956,10 @@ async def test_explain_shows_every_policys_answer_in_chain_order():
             Deny("no", policy="_DenyRm"),
         )
         # A policy's refusal is the command's: the line itself runs.
-        assert (rm.exit_code, rm.refusal and rm.refusal.reason) == (126, "no")
+        assert (rm.exit_code, rm.decision and rm.decision.reason) == (
+            126,
+            "no",
+        )
         assert (said.outcome, said.exit_code) == (Outcome.ALLOW, 0)
         assert await Session(ws, None).explain.shell("rm /data/x") == said
     finally:
@@ -1969,8 +1976,8 @@ async def test_a_policy_that_fails_explains_as_a_deny():
         ran = await ws.shell("echo hi")
         [echo] = said.node.children
         assert isinstance(echo, CommandExplanation)
-        assert echo.refusal is not None and ran.refusal is not None
-        assert (echo.outcome, echo.refusal.kind) == (Outcome.DENY, "failed")
+        assert echo.decision is not None and ran.decision is not None
+        assert (echo.outcome, echo.decision.kind) == (Outcome.DENY, "failed")
         assert (echo.exit_code, echo.stderr) == (
             ran.exit_code,
             await ran.stderr_str(),

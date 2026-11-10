@@ -102,7 +102,7 @@ async def handle_test(
             IOResult(
                 exit_code=refused.exit_code,
                 stderr=refused.stderr,
-                refusal=refused.refusal,
+                decision=refused.decision,
             ),
             ExecutionNode(
                 command=name,

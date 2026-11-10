@@ -36,7 +36,7 @@ from mirage.workspace.node.admission import (
     policy_scopes,
 )
 from mirage.workspace.node.explain import admit_line
-from mirage.workspace.tools.io_text import with_refusal
+from mirage.workspace.tools.io_text import with_decision
 
 DOC = {
     "commands": {
@@ -97,7 +97,7 @@ async def _virtuals(ws: Workspace, name: str, *args: str) -> list[str]:
 def _voiced(refused) -> str:
     """stderr as bash prints it, then the record as one more line: what
     an agent reading through the text adapters sees."""
-    return with_refusal(refused.stderr.decode(), refused.refusal)
+    return with_decision(refused.stderr.decode(), refused.decision)
 
 
 @pytest.mark.asyncio
@@ -145,20 +145,20 @@ async def test_admit_line_refuses_the_first_offending_command():
             is None
         )
         # An unlisted word anywhere in the line is the allow list's Deny.
-        refusal = await admit_line(
+        decision = await admit_line(
             parse("cat /data/a | sort"), session, registry, namespace
         )
-        assert refusal is not None
-        assert (refusal.exit_code, refusal.stderr) == (
+        assert decision is not None
+        assert (decision.exit_code, decision.stderr) == (
             126,
             b"sort: Permission denied\n",
         )
         # A rule reads the literal words, path-shaped ones as paths.
-        refusal = await admit_line(
+        decision = await admit_line(
             parse("ls /data && cat /data/secret"), session, registry, namespace
         )
-        assert refusal is not None
-        assert (refusal.exit_code, refusal.stderr) == (
+        assert decision is not None
+        assert (decision.exit_code, decision.stderr) == (
             1,
             b"cat: /data/secret: Permission denied\n",
         )
@@ -185,7 +185,7 @@ async def test_a_bare_listing_reads_the_working_directory():
 
         async def run(name: str, *args: str, stdin: bytes | None = None):
             words = await classify_parts([name, *args], registry, session.cwd)
-            refusal = await admit(
+            decision = await admit(
                 name,
                 list(args),
                 words[1:],
@@ -196,8 +196,8 @@ async def test_a_bare_listing_reads_the_working_directory():
             )
             return (
                 None
-                if isinstance(refusal, Admitted)
-                else (refusal.exit_code, _voiced(refusal))
+                if isinstance(decision, Admitted)
+                else (decision.exit_code, _voiced(decision))
             )
 
         assert await run("ls") is None
@@ -231,13 +231,13 @@ async def test_admit_line_reads_literal_words_and_refuses_the_unreadable():
         registry, namespace = ws._registry, ws._namespace
 
         async def line(text: str):
-            refusal = await admit_line(
+            decision = await admit_line(
                 parse(text), session, registry, namespace
             )
             return (
                 None
-                if refusal is None
-                else (refusal.exit_code, _voiced(refusal))
+                if decision is None
+                else (decision.exit_code, _voiced(decision))
             )
 
         # Quotes and escapes read as the text they name: a quoted path
@@ -327,11 +327,11 @@ async def test_admit_line_classifies_bare_operands_with_the_spec():
         await ws.shell("cd /data")
         session = ws._session_mgr.get(ws._session_mgr.default_id)
         registry, namespace = ws._registry, ws._namespace
-        refusal = await admit_line(
+        decision = await admit_line(
             parse("cat secret"), session, registry, namespace
         )
-        assert refusal is not None
-        assert (refusal.exit_code, refusal.stderr) == (
+        assert decision is not None
+        assert (decision.exit_code, decision.stderr) == (
             1,
             b"cat: secret: Permission denied\n",
         )
@@ -365,19 +365,19 @@ async def test_admit_line_reads_an_interpreters_script_as_a_path():
         await ws.shell("cd /data")
         session = ws._session_mgr.get(ws._session_mgr.default_id)
         registry, namespace = ws._registry, ws._namespace
-        refusal = await admit_line(
+        decision = await admit_line(
             parse("python3 secret.py"), session, registry, namespace
         )
-        assert refusal is not None
-        assert (refusal.exit_code, refusal.stderr) == (
+        assert decision is not None
+        assert (decision.exit_code, decision.stderr) == (
             1,
             b"python3: secret.py: Permission denied\n",
         )
-        refusal = await admit_line(
+        decision = await admit_line(
             parse("node -- secret.js"), session, registry, namespace
         )
-        assert refusal is not None
-        assert (refusal.exit_code, refusal.stderr) == (
+        assert decision is not None
+        assert (decision.exit_code, decision.stderr) == (
             1,
             b"node: secret.js: Permission denied\n",
         )
@@ -406,13 +406,13 @@ async def test_admit_line_refuses_a_walk_or_a_glob_under_a_path_rule():
         registry, namespace = ws._registry, ws._namespace
 
         async def line(text: str):
-            refusal = await admit_line(
+            decision = await admit_line(
                 parse(text), session, registry, namespace
             )
             return (
                 None
-                if refusal is None
-                else (refusal.exit_code, _voiced(refusal))
+                if decision is None
+                else (decision.exit_code, _voiced(decision))
             )
 
         assert await line("grep -r x /data") == (
@@ -452,13 +452,13 @@ async def test_admit_line_reads_redirect_targets_as_words_of_the_command():
         registry, namespace = ws._registry, ws._namespace
 
         async def line(text: str):
-            refusal = await admit_line(
+            decision = await admit_line(
                 parse(text), session, registry, namespace
             )
             return (
                 None
-                if refusal is None
-                else (refusal.exit_code, _voiced(refusal))
+                if decision is None
+                else (decision.exit_code, _voiced(decision))
             )
 
         assert await line("cat < /data/secret") == (
@@ -503,11 +503,11 @@ async def test_admit_line_binds_a_hoisted_redirect_to_its_command(text):
     ws = _ws()
     try:
         session = ws._session_mgr.get(ws._session_mgr.default_id)
-        refusal = await admit_line(
+        decision = await admit_line(
             parse(text), session, ws._registry, ws._namespace
         )
-        assert refusal is not None
-        assert (refusal.exit_code, _voiced(refusal)) == (
+        assert decision is not None
+        assert (decision.exit_code, _voiced(decision)) == (
             1,
             "cat: /data/secret: Permission denied\npolicy denied: sealed\n",
         )
@@ -527,7 +527,7 @@ async def test_a_hoisted_redirect_is_judged_with_its_command_on_the_run(text):
         io = await ws.shell(text)
         assert "TOPSECRET" not in await io.stdout_str()
         assert "cat: /data/secret: Permission denied" in await io.stderr_str()
-        assert io.refusal is not None and io.refusal.reason == "sealed"
+        assert io.decision is not None and io.decision.reason == "sealed"
     finally:
         await ws.close()
 
@@ -551,13 +551,13 @@ async def test_a_hidden_path_is_no_path_to_any_policy():
 
         async def run(session, name: str, *args: str):
             words = await classify_parts([name, *args], registry, session.cwd)
-            refusal = await admit(
+            decision = await admit(
                 name, list(args), words[1:], session, registry, namespace
             )
             return (
                 None
-                if isinstance(refusal, Admitted)
-                else (refusal.exit_code, _voiced(refusal))
+                if isinstance(decision, Admitted)
+                else (decision.exit_code, _voiced(decision))
             )
 
         assert await run(plain, "cat", "/data/secret") == (
@@ -643,12 +643,12 @@ def test_the_admitted_gate_judges_what_the_line_did_not_name():
         gate.check("/data/sealed/s")
     assert info.value.errno == errno.EACCES
     assert info.value.strerror == "Permission denied"
-    assert info.value.refusal and info.value.refusal.reason == "sealed"
+    assert info.value.decision and info.value.decision.reason == "sealed"
     assert info.value.filename == "/data/sealed/s"
     with pytest.raises(PolicyDenied) as info:
         gate.check("/data/asked/a")
     assert info.value.strerror == "Permission denied"
-    assert info.value.refusal and info.value.refusal.reason == "nod"
+    assert info.value.decision and info.value.decision.reason == "nod"
     # An operand the gate judged passes whatever the rules say about it
     # (the line was admitted on it), and a grant under the asking rule
     # opens its scope to the walk.
@@ -875,7 +875,7 @@ async def test_fallback_tree_policy_matches_the_verb_after_group_options(
         )
         result = await ws.shell("remote --account team deliver")
         assert result.exit_code != 0
-        assert result.refusal is not None
+        assert result.decision is not None
         assert calls == []
     finally:
         await ws.close()

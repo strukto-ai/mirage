@@ -1,4 +1,4 @@
-from mirage.types import Refusal
+from mirage.types import PolicyDecision
 
 
 class CondError(Exception):
@@ -32,13 +32,13 @@ class CondRefused(Exception):
     Args:
         stderr (bytes): the refusal's message, newline-terminated.
         exit_code (int): the status it answers with.
-        refusal (Refusal | None): the record the result carries.
+        decision (PolicyDecision | None): the record the result carries.
     """
 
     def __init__(
-        self, stderr: bytes, exit_code: int, refusal: Refusal | None
+        self, stderr: bytes, exit_code: int, decision: PolicyDecision | None
     ) -> None:
         super().__init__(stderr)
         self.stderr = stderr
         self.exit_code = exit_code
-        self.refusal = refusal
+        self.decision = decision

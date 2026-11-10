@@ -20,7 +20,7 @@ import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 import { FileVersionTracker } from '@struktoai/mirage-core/workspace/tools/file_version'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { readWorkspaceFile } from '@struktoai/mirage-core/workspace/tools/read_file'
-import { decode, replaceText, withRefusal } from '@struktoai/mirage-core/workspace/tools/io_text'
+import { decode, replaceText, withDecision } from '@struktoai/mirage-core/workspace/tools/io_text'
 
 const z = tool.schema
 
@@ -222,7 +222,7 @@ export function mirageTools(
       const parts: string[] = []
       if (io.stdoutText.length > 0) parts.push(io.stdoutText)
       if (io.stderrText.length > 0) parts.push(io.stderrText)
-      return withRefusal(parts.join('\n'), io.refusal).trim()
+      return withDecision(parts.join('\n'), io.decision).trim()
     },
   })
 

@@ -389,7 +389,7 @@ export class WorkspaceRegistry {
       reason: deny?.reason ?? '',
       source: '',
       answers,
-      refusal: null,
+      decision: null,
     }
   }
 

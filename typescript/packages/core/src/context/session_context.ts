@@ -31,7 +31,7 @@ import { useVoice } from '../shell/voice.ts'
 import type { JobConsole } from '../shell/console/index.ts'
 import type { FileDescription } from '../shell/descriptors.ts'
 import type { Redirect } from '../shell/types.ts'
-import type { Limit, PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
+import type { Limit, PathSpec, PolicyDecision, Visibility, WalkProbe } from '../types.ts'
 import { MountMode, weakerMode } from '../types.ts'
 import { mergeSignals } from '../utils/abort.ts'
 import { asyncContextIsolatesTasks, createAsyncContext } from '../utils/async_context.ts'
@@ -50,7 +50,7 @@ export abstract class SessionOwner {
 }
 
 /** Where a refusal an entry point raises is noted for the line running it. */
-export type RefusalSink = (refusal: Refusal) => void
+export type DecisionSink = (decision: PolicyDecision) => void
 
 /** Runs a prepared command under ordered redirects, gating each target. */
 export type RedirectResult = [ByteSource | null, IOResult, ExecutionNode]
@@ -118,7 +118,7 @@ export interface Caller {
   // command's own calls carry it, the shell's own I/O around them does not.
   readonly ruleGate: EntryGate | null
   readonly mount: readonly [string, MountMode] | null
-  readonly refusals: RefusalSink | null
+  readonly refusals: DecisionSink | null
   readonly explaining: VfsExplanation[] | DryRun | null
   readonly walkProbe: readonly [string, WalkProbe] | null
   readonly redirects:
@@ -791,9 +791,9 @@ export function runWithMountGate<T>(
  * entry point notes the record here and the line carries it on its result.
  * Every task and nested line the line starts inherits the binding, so a
  * stream drained after its command returned still reaches it. Mirrors
- * Python's set_refusal_sink.
+ * Python's set_decision_sink.
  */
-export function runWithRefusalSink<T>(sink: RefusalSink, fn: () => Promise<T>): Promise<T> {
+export function runWithDecisionSink<T>(sink: DecisionSink, fn: () => Promise<T>): Promise<T> {
   return runChanged({ refusals: sink }, fn)
 }
 
@@ -833,8 +833,8 @@ export function explaining(): VfsExplanation[] | DryRun | null {
  * reached outside any line (a programmatic op) has no line to tell, and
  * the record rides the thrown error alone.
  */
-export function noteRefusal(refusal: Refusal): void {
-  currentCaller().refusals?.(refusal)
+export function noteDecision(decision: PolicyDecision): void {
+  currentCaller().refusals?.(decision)
 }
 
 /**

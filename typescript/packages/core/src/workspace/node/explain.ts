@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { YieldBudget } from '../../io/yield_budget.ts'
-import { PermissionsPolicy, refusalOf, renderCommandDeny, renderDeny } from '../../policy/index.ts'
+import { PermissionsPolicy, decisionOf, renderCommandDeny, renderDeny } from '../../policy/index.ts'
 import { isPending } from '../../policy/decisions.ts'
 import { sourceOf } from '../../policy/match/decide.ts'
 import { hasRules, readsArgs, scopesPaths } from '../../policy/match/reads.ts'
@@ -45,7 +45,7 @@ import {
 import { opaqueReads, referencedNames } from '../../shell/parse/index.ts'
 import { NodeType, type TSNodeLike } from '../../shell/types.ts'
 import { VarAttr } from '../../shell/variable.ts'
-import { PathSpec, type Refusal } from '../../types.ts'
+import { PathSpec, type PolicyDecision } from '../../types.ts'
 import { isGlob } from '../../utils/hidden.ts'
 import { resolvePath } from '../../utils/path.ts'
 import { commandWords } from '../executor/command/routing.ts'
@@ -181,7 +181,7 @@ export interface Judgment {
   /** What the agent would read, empty to run. */
   readonly stderr: string
   /** The record the refused result would carry, null when the line would run. */
-  readonly refusal: Refusal | null
+  readonly decision: PolicyDecision | null
   /** Every policy's answer to the command, in the order the chain asks them. */
   readonly answers: readonly (Deny | Ask | Route)[]
   /** The command line word by word, each with its kind and the path it names, redirect targets last. */
@@ -304,7 +304,7 @@ function denied(command: string, reason: string): Judgment {
     paths: [],
     exitCode,
     stderr: decodeText(stderr),
-    refusal: refusalOf(deny),
+    decision: decisionOf(deny),
     answers: [],
     words: [],
   }
@@ -351,7 +351,7 @@ async function explained(
     paths: ctx.paths.map((p) => p.virtual),
     exitCode: 0,
     stderr: '',
-    refusal: null,
+    decision: null,
     answers,
     words: [],
   }
@@ -364,7 +364,7 @@ async function explained(
     reason: base.reason === '' ? action.reason : base.reason,
     exitCode,
     stderr: decodeText(stderr),
-    refusal: refusalOf(action),
+    decision: decisionOf(action),
   }
 }
 
@@ -384,9 +384,9 @@ async function explained(
  * typed, which is all a coded policy ever saw. `words` are the words after
  * the name and the statement's redirect targets, as the gate read them;
  * `operands` the words after the name, classified; `cwd` the working
- * directory the line runs in. Mirrors the Python `_line_refusal`.
+ * directory the line runs in. Mirrors the Python `_line_decision`.
  */
-function lineRefusal(
+function lineDecision(
   name: string,
   args: readonly string[],
   words: readonly Word[],
@@ -430,7 +430,7 @@ function lineRefusal(
  * runs. For a runtime that takes the line whole this is the gate itself
  * (`admitLine`), so what `explain` says about such a line is what its
  * admission does: a deny first, then what the runtime would do past the gate
- * (`lineRefusal`), then an ask. `stated` is whether the words reach here as
+ * (`lineDecision`), then an ask. `stated` is whether the words reach here as
  * the gate will read them; false under a command the runtime completes,
  * since a line built from its words (`eval`) or run on its operands
  * (`xargs`) is completed with them. `wholeLine` is whether a runtime takes
@@ -516,7 +516,7 @@ async function* judgeWords(
   const inners = innerLines(name, words.slice(1))
   const refused =
     wholeLine && asked?.kind !== 'deny'
-      ? lineRefusal(
+      ? lineDecision(
           name,
           args,
           readWords,
@@ -929,7 +929,7 @@ function uncovered(expl: Judgment): boolean {
  * answered.
  */
 function refuses(expl: Judgment): boolean {
-  return expl.exitCode !== 0 && !isPending(expl.refusal)
+  return expl.exitCode !== 0 && !isPending(expl.decision)
 }
 
 /**
@@ -1126,7 +1126,7 @@ async function admitted(
     return {
       stderr: encodeText(judgment.stderr),
       exitCode: judgment.exitCode,
-      refusal: judgment.refusal,
+      decision: judgment.decision,
     }
   }
   const action = await resolved(
@@ -1138,7 +1138,7 @@ async function admitted(
   )
   if (action === null) return null
   const [stderr, exitCode] = await renderCommandDeny(judgment.command, action, one.ctx)
-  return { stderr, exitCode, refusal: refusalOf(action) }
+  return { stderr, exitCode, decision: decisionOf(action) }
 }
 
 /**
@@ -1152,7 +1152,7 @@ async function admitted(
  * command, so `cat < /data/secret` is judged on the file it opens; the lines
  * a command runs (`eval`, `sh -c`, `xargs`, `env` ... see `innerLines`) are
  * judged in turn; and what the runtime would do past the gate is refused
- * under a rule that would have read it (`lineRefusal`). A command a
+ * under a rule that would have read it (`lineDecision`). A command a
  * `preCommand` route places off the runtime or machine the line runs whole
  * on (`offLine`) is refused too, since one run cannot put it elsewhere.
  * `reparse` parses the text a word runs the way the line reader parsed the
@@ -1212,7 +1212,7 @@ export function refusedWhereItStands(one: Judged, deny: Deny): Judged {
       reason: deny.reason,
       exitCode,
       stderr: decodeText(stderr),
-      refusal: refusalOf(deny),
+      decision: decisionOf(deny),
     },
   }
 }
@@ -1236,7 +1236,7 @@ export async function offLineRefusal(
     ...(route.policy === undefined ? {} : { policy: route.policy }),
   }
   const [stderr, exitCode] = await renderCommandDeny(command, action, one.ctx)
-  return { stderr, exitCode, refusal: refusalOf(action) }
+  return { stderr, exitCode, decision: decisionOf(action) }
 }
 
 /**
@@ -1579,7 +1579,7 @@ export function explainedLine(
       reason,
       source,
       answers: [],
-      refusal: judgment.refusal,
+      decision: judgment.decision,
       exitCode: judgment.exitCode,
       stderr: judgment.stderr,
     }
@@ -1596,7 +1596,7 @@ export function explainedLine(
     reason,
     source,
     answers: [],
-    refusal: null,
+    decision: null,
     exitCode: 0,
     stderr: '',
   }
@@ -1643,7 +1643,7 @@ function verdictOf(judgment: Judgment): [Outcome, string, string] {
       : judgment.source === 'commands.allow'
         ? judgment.source
         : ''
-  const refused = judgment.refusal
+  const refused = judgment.decision
   if (refused !== null) {
     return [isPending(refused) ? Outcome.ASK : Outcome.DENY, refused.reason, source]
   }
@@ -1735,7 +1735,7 @@ function commandOf(
     reason,
     source,
     answers: judgment.answers,
-    refusal: judgment.refusal,
+    decision: judgment.decision,
     runtime,
     machine,
     text,

@@ -18,7 +18,7 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { MountRegistry } from '../../workspace/mount/registry.ts'
 import { MountRootPolicy, hasParentsFlag, lnFlagPresent } from './mount_root.ts'
-import { refusalOf, renderDeny } from '../policies.ts'
+import { decisionOf, renderDeny } from '../policies.ts'
 import { CommandWord, type CommandContext, type Deny } from '../types.ts'
 import { WordKind } from '../../commands/spec/types.ts'
 
@@ -72,7 +72,7 @@ describe('MountRootPolicy', () => {
     const [err, code] = renderDeny(cmd, deny as Deny)
     expect(new TextDecoder().decode(err)).toBe(`${cmd}: ${(deny as Deny).reason}\n`)
     expect(code).toBe(1)
-    expect(refusalOf(deny as Deny)).toBeNull()
+    expect(decisionOf(deny as Deny)).toBeNull()
   })
 
   it('treats mkdir -p on a mount root as a no-op', () => {

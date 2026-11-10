@@ -75,7 +75,7 @@ describe('mirage shell', () => {
               { stream: 'stdout', data: Buffer.from([0x82, 0xac, 0xff, 0]).toString('base64') },
               {
                 status: 'done',
-                result: { exit_code: 7, refusal: { reason: 'test' } },
+                result: { exit_code: 7, decision: { reason: 'test' } },
                 error: null,
               },
             ]
@@ -118,7 +118,7 @@ describe('mirage shell', () => {
         if (jsonOutput) {
           expect(JSON.parse(Buffer.concat(out).toString())).toEqual({
             exit_code: 7,
-            refusal: { reason: 'test' },
+            decision: { reason: 'test' },
             stdout: '€�\0',
             stderr: 'diagnostic\n',
           })

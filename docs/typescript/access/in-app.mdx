@@ -288,9 +288,9 @@ Runs a shell line as the session. With `stream: false` (the default), it collect
   <ResponseField name="exitCode" type="number" />
   <ResponseField name="stdoutText" type="string">The output as text. `stdout` is the bytes.</ResponseField>
   <ResponseField name="stderrText" type="string">The error output as text. `stderr` is the bytes.</ResponseField>
-  <ResponseField name="refusal" type="Refusal | null">
+  <ResponseField name="decision" type="PolicyDecision | null">
     Why the line did not run, or `null`.
-    <Expandable title="Refusal">
+    <Expandable title="PolicyDecision">
       <ResponseField name="kind" type="string">`deny` for a refusal, `pending` for an ask nobody answered, `failed` for a policy that raised.</ResponseField>
       <ResponseField name="reason" type="string">The rule's or the policy's words.</ResponseField>
       <ResponseField name="policy" type="string">The policy class that refused; empty for an ask.</ResponseField>

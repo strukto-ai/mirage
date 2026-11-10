@@ -288,7 +288,7 @@ export function streamOperands(
           // reported is not lost.
           io.stderr = concatBytes([await materialize(io.stderr), await materialize(branch.stderr)])
           io.exitCode = Math.max(io.exitCode, branch.exitCode)
-          if (branch.refusal !== null) io.refusal = branch.refusal
+          if (branch.decision !== null) io.decision = branch.decision
           records.push(branch.records)
         }
         start()

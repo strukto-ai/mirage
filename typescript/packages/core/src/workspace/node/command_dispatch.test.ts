@@ -448,7 +448,7 @@ describe('routes under one wrapper', () => {
     try {
       const io = await ws.shell(line)
       expect([io.exitCode, text(io.stdout)]).toEqual([126, ''])
-      expect(io.refusal?.reason.startsWith('policies place the line on different runtimes')).toBe(
+      expect(io.decision?.reason.startsWith('policies place the line on different runtimes')).toBe(
         true,
       )
     } finally {

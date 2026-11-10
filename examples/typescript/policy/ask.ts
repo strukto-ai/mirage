@@ -48,7 +48,7 @@ const reviewer: AskHandler = (record: Decision): Promise<Decision> => {
 async function run(ws: Workspace, line: string): Promise<void> {
   await ws.vfs.write("/data/a.txt", "a\n");
   const res = await ws.shell(line, { sessionId: "agent" });
-  const how = res.refusal === null ? "ran" : `refused (${res.refusal.kind})`;
+  const how = res.decision === null ? "ran" : `refused (${res.decision.kind})`;
   console.log(`${line}: ${how}, exit ${String(res.exitCode)}`);
 }
 

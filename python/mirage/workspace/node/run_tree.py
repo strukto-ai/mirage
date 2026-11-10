@@ -27,8 +27,8 @@ from mirage.io.stream import materialize
 from mirage.policy import (
     ExecuteResultContext,
     HandOff,
+    decision_of,
     post_execute_gate,
-    refusal_of,
     render_deny,
 )
 from mirage.policy.types import RouteContext
@@ -164,7 +164,7 @@ async def run_command_tree(
             io = IOResult(
                 exit_code=verdict.exit_code,
                 stderr=verdict.stderr,
-                refusal=verdict.refusal,
+                decision=verdict.decision,
             )
             exec_node = ExecutionNode(
                 command="cat",
@@ -226,7 +226,7 @@ async def run_command_tree(
         io.stderr = existing + err
         io.exit_code = code
         io.stdout = None
-        io.refusal = refusal_of(refused)
+        io.decision = decision_of(refused)
         if screen is not None:
             screen.put_back(b"", io.stderr)
             io.stderr = None

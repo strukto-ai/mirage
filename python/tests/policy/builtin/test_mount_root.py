@@ -18,7 +18,7 @@ from mirage.commands.spec.types import WordKind
 from mirage.policy import (
     CommandContext,
     MountRootPolicy,
-    refusal_of,
+    decision_of,
     render_deny,
 )
 from mirage.policy.builtin.mount_root import (
@@ -95,7 +95,7 @@ async def test_mount_root_refuses(cmd, needle):
     # and no policy refusal is recorded.
     assert deny.error is not None
     assert render_deny(cmd, deny) == (f"{cmd}: {deny.reason}\n".encode(), 1)
-    assert refusal_of(deny) is None
+    assert decision_of(deny) is None
 
 
 @pytest.mark.asyncio

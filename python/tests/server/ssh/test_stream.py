@@ -37,7 +37,7 @@ from mirage.server.ssh.stream import (
 from mirage.server.stdin import LoopStdin
 from mirage.shell.console import JobConsole
 from mirage.shell.console.types import Channel
-from mirage.types import Refusal
+from mirage.types import PolicyDecision
 from mirage.workspace.shell_execution import ShellExecution
 
 Step = str | BaseException
@@ -339,10 +339,10 @@ async def test_deliver_sends_output_before_the_line_ends():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "refusal,last",
+    "decision,last",
     [
         (
-            Refusal(kind="deny", reason="sealed"),
+            PolicyDecision(kind="deny", reason="sealed"),
             (b"policy denied: sealed\n", True),
         ),
         (
@@ -352,8 +352,8 @@ async def test_deliver_sends_output_before_the_line_ends():
     ],
     ids=["appended", "no_record"],
 )
-async def test_deliver_appends_the_refusal_line_when_there_is_a_record(
-    refusal: Refusal | None, last: tuple[bytes, bool]
+async def test_deliver_appends_the_decision_line_when_there_is_a_record(
+    decision: PolicyDecision | None, last: tuple[bytes, bool]
 ):
     sent: list[tuple[bytes, bool]] = []
 
@@ -361,7 +361,7 @@ async def test_deliver_appends_the_refusal_line_when_there_is_a_record(
         sent.append((data, is_stderr))
 
     execution = _execution(
-        IOResult(exit_code=1, refusal=refusal),
+        IOResult(exit_code=1, decision=decision),
         (
             Channel.STDERR,
             b"rm: cannot remove '/data': Device or resource busy\n",

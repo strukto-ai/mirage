@@ -353,7 +353,7 @@ export async function finishShell(
     stdout: asyncChain([io.stdout, cleanup.stdout]),
     stderr: stderr.byteLength > 0 ? stderr : null,
     exitCode: cleanup.exitCode,
-    refusal: io.refusal,
+    decision: io.decision,
   })
 }
 

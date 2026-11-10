@@ -241,7 +241,7 @@ describe('MirageService', () => {
     const denied = await ws.shell('rm /data/x.txt')
     expect(denied.exitCode).toBe(126)
     expect(denied.stderrText).toBe('rm: Permission denied\n')
-    expect(denied.refusal?.reason).toBe('no removes')
+    expect(denied.decision?.reason).toBe('no removes')
     await fiber.dispose()
   })
 

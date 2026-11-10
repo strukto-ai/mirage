@@ -33,7 +33,7 @@ from mirage.context import (
     RedirectRunner,
     bind_caller,
     current_caller,
-    note_refusal,
+    note_decision,
     program_invocation,
     redirect_paths_for,
     redirect_runner_for,
@@ -57,8 +57,8 @@ from mirage.policy import (
     CommandResultContext,
     Deny,
     PolicyDenied,
+    decision_of,
     post_command_gate,
-    refusal_of,
     render_deny,
     resolve_producer,
 )
@@ -910,9 +910,9 @@ async def _run_argv(
     ) -> RedirectResult:
         if seed_prefix is not None:
             seed_prefix(name)
-        refusal = await guard(paths, given)
-        if refusal is not None:
-            return refusal
+        decision = await guard(paths, given)
+        if decision is not None:
+            return decision
         # ── run ────────────────────────────────────
         # The admitted command's gate is bound for its run and reset after,
         # so its own I/O can ask about the entries the gate did not see and
@@ -994,7 +994,7 @@ async def _run_argv(
                     err, code = render_deny(name, answer)
                     return _refused(
                         " ".join([name, *argv.args]),
-                        Refused(err, code, refusal_of(answer)),
+                        Refused(err, code, decision_of(answer)),
                     )
                 place(answer)
             with command_records(own=True) as mine:
@@ -1029,7 +1029,7 @@ async def _run_argv(
         # one does), so the method is asked when the stream ends or its
         # reader stops, and at once for output already whole. A refusal
         # leaves what was sent as sent: exit 126, the refusal line on
-        # stderr, the refusal record.
+        # stderr, the decision record.
         async def settle() -> None:
             # A function hands back its last command's node, which keeps
             # the records that command made.
@@ -1071,9 +1071,9 @@ async def _run_argv(
             io.stderr = stderr + err
             node.stderr = node.stderr + err
             io.exit_code = node.exit_code = code
-            io.refusal = refusal_of(action)
-            if io.refusal is not None:
-                note_refusal(io.refusal)
+            io.decision = decision_of(action)
+            if io.decision is not None:
+                note_decision(io.decision)
 
         if stdout is None or isinstance(stdout, bytes):
             await settle()
@@ -1397,7 +1397,7 @@ def _refused(
         IOResult(
             exit_code=verdict.exit_code,
             stderr=verdict.stderr,
-            refusal=verdict.refusal,
+            decision=verdict.decision,
         ),
         ExecutionNode(
             command=command,
@@ -1421,7 +1421,7 @@ def _unreadable(name: str, session: SessionState) -> Refused | None:
         return None
     deny = Deny(UNREADABLE_LINES)
     err, code = render_deny(name, deny)
-    return Refused(err, code, refusal_of(deny))
+    return Refused(err, code, decision_of(deny))
 
 
 async def _wrapped_verdict(

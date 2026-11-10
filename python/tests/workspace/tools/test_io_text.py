@@ -2,13 +2,13 @@ import errno
 
 from mirage.io.types import IOResult
 from mirage.policy import PolicyDenied
-from mirage.types import Refusal
+from mirage.types import PolicyDecision
 from mirage.workspace.tools.io_text import (
     decode,
     error_text,
     io_to_str,
     replace_text,
-    with_refusal_bytes,
+    with_decision_bytes,
 )
 
 
@@ -48,7 +48,9 @@ def test_io_to_str_appends_the_refusal_after_stderr():
     io = IOResult(
         stderr=b"rm: Permission denied\n",
         exit_code=126,
-        refusal=Refusal(kind="deny", reason="no deletes", policy="RulePolicy"),
+        decision=PolicyDecision(
+            kind="deny", reason="no deletes", policy="RulePolicy"
+        ),
     )
     assert (
         io_to_str(io) == "rm: Permission denied\npolicy denied: no deletes\n"
@@ -56,53 +58,57 @@ def test_io_to_str_appends_the_refusal_after_stderr():
 
 
 def test_io_to_str_starts_a_line_for_the_refusal_when_needed():
-    pending = Refusal(kind="pending", reason="sign-off", ask_id="a1")
+    pending = PolicyDecision(kind="pending", reason="sign-off", ask_id="a1")
     assert (
-        io_to_str(IOResult(stdout=b"partial", refusal=pending))
+        io_to_str(IOResult(stdout=b"partial", decision=pending))
         == "partial\nrequires approval: sign-off (ask a1)\n"
     )
     assert (
-        io_to_str(IOResult(refusal=pending))
+        io_to_str(IOResult(decision=pending))
         == "requires approval: sign-off (ask a1)\n"
     )
 
 
-def test_with_refusal_bytes_appends_after_stderr():
-    denied = Refusal(kind="deny", reason="no deletes", policy="RulePolicy")
+def test_with_decision_bytes_appends_after_stderr():
+    denied = PolicyDecision(
+        kind="deny", reason="no deletes", policy="RulePolicy"
+    )
     assert (
-        with_refusal_bytes(b"rm: Permission denied\n", denied)
+        with_decision_bytes(b"rm: Permission denied\n", denied)
         == b"rm: Permission denied\npolicy denied: no deletes\n"
     )
 
 
-def test_with_refusal_bytes_starts_a_line_when_needed():
-    pending = Refusal(kind="pending", reason="sign-off", ask_id="a1")
+def test_with_decision_bytes_starts_a_line_when_needed():
+    pending = PolicyDecision(kind="pending", reason="sign-off", ask_id="a1")
     assert (
-        with_refusal_bytes(b"partial", pending)
+        with_decision_bytes(b"partial", pending)
         == b"partial\nrequires approval: sign-off (ask a1)\n"
     )
     assert (
-        with_refusal_bytes(b"", pending)
+        with_decision_bytes(b"", pending)
         == b"requires approval: sign-off (ask a1)\n"
     )
 
 
-def test_with_refusal_bytes_leaves_the_bytes_alone_otherwise():
+def test_with_decision_bytes_leaves_the_bytes_alone_otherwise():
     # No record: the bytes pass through untouched, invalid UTF-8 included.
-    assert with_refusal_bytes(b"\xff raw", None) == b"\xff raw"
+    assert with_decision_bytes(b"\xff raw", None) == b"\xff raw"
 
 
-def test_with_refusal_describes_a_command_refusal_the_output_quotes():
+def test_with_decision_describes_a_command_refusal_the_output_quotes():
     # `V=secret; printf 'secrets stay put'; echo "$V" 2>/dev/null`: the
     # bare `Permission denied` was redirected away and the earlier
     # output carries the reason by coincidence; a record is never
     # already said, so the line is still appended.
-    denied = Refusal(
+    denied = PolicyDecision(
         kind="deny", reason="secrets stay put", policy="DenySecret"
     )
     assert (
         io_to_str(
-            IOResult(stdout=b"secrets stay put", exit_code=126, refusal=denied)
+            IOResult(
+                stdout=b"secrets stay put", exit_code=126, decision=denied
+            )
         )
         == "secrets stay put\npolicy denied: secrets stay put\n"
     )
@@ -129,7 +135,7 @@ def test_error_text_adds_the_policy_line_to_a_plain_eacces():
         errno.EACCES,
         "Permission denied",
         "/data/x",
-        refusal=Refusal(kind="deny", reason="sealed"),
+        decision=PolicyDecision(kind="deny", reason="sealed"),
     )
     assert error_text(refused) == (
         "Error: /data/x: Permission denied\npolicy denied: sealed\n"
