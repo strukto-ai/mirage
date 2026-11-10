@@ -1111,7 +1111,7 @@ class CliSteps:
     async def records(
         self, wid: str, kind: str, state: str | None
     ) -> list[dict[str, Any]]:
-        args = ["workspace", f"list-{kind}", wid]
+        args = ["workspace", f"list-{kind}", "-w", wid]
         if state is not None:
             args += ["--state", state]
         return await self._json(*args)
