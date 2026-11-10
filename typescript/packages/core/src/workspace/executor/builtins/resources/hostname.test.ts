@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import type { JobTable } from '../../../../execution/job/index.ts'
 import {
   decoded,
   resources,
@@ -20,13 +21,14 @@ import {
 } from '../../../../../tests/workspace/fixtures/machine_resources.ts'
 import { handleHostname } from './hostname.ts'
 
-describe('hostname', () => {
-  const two = () =>
-    tableOf([
-      resources('docker:a', { hostname: 'box-one' }),
-      resources('e2b:b', { hostname: 'e2b.local' }),
-    ])
+function two(): JobTable {
+  return tableOf([
+    resources('docker:a', { hostname: 'box-one' }),
+    resources('e2b:b', { hostname: 'e2b.local' }),
+  ])
+}
 
+describe('hostname', () => {
   it('lists the workspace then each machine', async () => {
     const [out, io] = await handleHostname(two(), ['hostname'])
     expect([decoded(out), io.exitCode]).toEqual(['mirage\nbox-one\ne2b.local\n', 0])
