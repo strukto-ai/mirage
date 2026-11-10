@@ -90,8 +90,7 @@ export async function readCliFile(
 
 let ghModule: StreamModule | undefined
 
-// gh's module stays apart from the main one, which is at the browser's
-// compile limit, and loads the first time gh runs.
+// gh's module stays apart from the main one and loads the first time gh runs.
 async function openGhStream(config: Readonly<Record<string, util.JSONType>>): Promise<OpenStream> {
   if (ghModule === undefined) {
     const { default: source } = await import('#mirage-gh-wasm')

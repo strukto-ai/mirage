@@ -74,6 +74,7 @@ import type { ProcessId } from '../../execution/types.ts'
 import { type JobId, type LineId, type MachineId, type MachinePid } from '../../execution/types.ts'
 import type { SessionProcesses } from '../../execution/process/session.ts'
 import { DiffPool } from '../../rs/diff_pool.ts'
+import { streamsReady } from '../../rs/stream.ts'
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
 import {
   captureBinding,
@@ -1583,10 +1584,13 @@ export class Workspace {
    * stored pointer before hydration keys off it. The first call also starts
    * stopping what lapsed instances of the workspace left running
    * (`JobTable.stopLapsed`). Closing waits for the record's write in
-   * flight, so it never races the state's drop.
+   * flight, so it never races the state's drop. Every entry point waits
+   * here, so it also makes the mirage-rs instances the line's synchronous
+   * utilities open streams on, which a browser makes only asynchronously.
    */
   async ensureSessionsLoaded(): Promise<void> {
     this.jobTable.stopLapsed()
+    await streamsReady()
     this.metaWrite ??= this.meta.ensure().finally(() => {
       this.metaWrite = null
     })

@@ -67,8 +67,8 @@ export class NFSEngine {
    * and `port` is the port the host listens on.
    */
   static async open(exportPath: string, generation: number, port: number): Promise<NFSEngine> {
-    const module = await compiledModule()
-    const exports = new WebAssembly.Instance(module, {}).exports as unknown as Exports
+    const instance = await WebAssembly.instantiate(compiledModule(), {})
+    const exports = instance.exports as unknown as Exports
     const config = encoder.encode(JSON.stringify({ export: exportPath, generation, port }))
     const ptr = exports.mirage_rs_args(config.length)
     new Uint8Array(exports.memory.buffer, ptr, config.length).set(config)

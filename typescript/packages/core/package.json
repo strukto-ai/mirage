@@ -64,19 +64,19 @@
   },
   "imports": {
     "#mirage-rs-wasm": {
-      "types": "./src/generated/mirage_rs.ts",
+      "types": "./src/generated/mirage_rs.d.ts",
       "workerd": "./dist/generated/mirage_rs.workerd.js",
       "node": "./dist/generated/mirage_rs.node.js",
       "default": "./dist/generated/mirage_rs.js"
     },
     "#mirage-shell-wasm": {
-      "types": "./src/generated/mirage_shell.ts",
+      "types": "./src/generated/mirage_shell.d.ts",
       "workerd": "./dist/generated/mirage_shell.workerd.js",
       "node": "./dist/generated/mirage_shell.node.js",
       "default": "./dist/generated/mirage_shell.js"
     },
     "#mirage-gh-wasm": {
-      "types": "./src/generated/mirage_gh.ts",
+      "types": "./src/generated/mirage_gh.d.ts",
       "workerd": "./dist/generated/mirage_gh.workerd.js",
       "node": "./dist/generated/mirage_gh.node.js",
       "default": "./dist/generated/mirage_gh.js"

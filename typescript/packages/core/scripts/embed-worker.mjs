@@ -52,7 +52,8 @@ for (const [name, entry] of Object.entries(workers)) {
             }),
           )
           context.onLoad({ filter: /.*/, namespace: 'without-mirage-rs' }, () => ({
-            contents: 'export default ""',
+            contents:
+              "export default () => { throw new Error('a worker runs on the module its page hands it') }",
             loader: 'js',
           }))
         },

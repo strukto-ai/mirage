@@ -290,11 +290,11 @@
     "bytesAt": "Copies bytes out of linear memory; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
     "compiledModule": "Hands the compiled module to the browser workers a page starts without a copy; Python imports mirage-rs as a native PyO3 module, so it has no module to compile or share.",
     "adoptModule": "Runs a browser worker on the module its page compiled; Python imports mirage-rs as a native PyO3 module, so it has no module to compile or share.",
-    "moduleSync": "Compiles the module for a caller that cannot wait, as the shell parser's own instance does; Python imports mirage-rs as a native PyO3 module, so it has no module to compile.",
+    "streamsReady": "Makes again the instance that replaces a retiring one, which a page's main thread cannot make synchronously for a module over 8 MB; Python imports mirage-rs as a native PyO3 module, so it has no instance to make.",
     "open": "Shares Wasm argument allocation between asynchronous and synchronous stream openers; Python constructs the native stream directly.",
     "openStreamSync": "Synchronous pure utilities lazily initialize embedded Wasm; Python native streams open synchronously.",
     "movables": "The matcher streams each instance holds, which close with it when it retires; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
-    "moduleSource": "TypeScript accepts a lazy Node Wasm loader alongside bundled bytes or a precompiled module; Python loads its native extension.",
+    "ModuleSource": "What a `#mirage-*-wasm` import gives: the module its host compiled (a page as it loads, workerd's bundler) or Node's loader that compiles it on first use; Python loads its native extension.",
     "compileSync": "Compiles a module synchronously, which the shell module's loader shares; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has nothing to compile.",
     "StreamModule": "A Wasm module the TypeScript host compiles and instantiates itself; Python's native module needs no loader.",
     "MAIN": "A Wasm module the TypeScript host compiles and instantiates itself; Python's native module needs no loader."

@@ -92,7 +92,7 @@ async function createPort(): Promise<WorkerPort | null> {
   // this module: a bundler that moves this module (Vite's dependency
   // pre-bundling) leaves no file where a relative URL would look.
   const { default: source } = await import('../../../../generated/pyodide_worker.ts')
-  const wasm = await compiledModule()
+  const wasm = compiledModule()
   const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }))
   const worker = new Worker(url, { type: 'module' })
   return {

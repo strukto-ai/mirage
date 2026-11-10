@@ -10,7 +10,6 @@ const env = {
   ...process.env,
   PATH: [process.env.PATH, join(homedir(), '.cargo', 'bin')].filter(Boolean).join(delimiter),
 }
-const browserLimit = 8 * 1024 * 1024
 // A dependency's panic messages carry its source path. Dropping the registry
 // prefix keeps a module the same bytes wherever cargo lives, and smaller.
 const registry = join(process.env.CARGO_HOME ?? join(homedir(), '.cargo'), 'registry', 'src')
@@ -18,8 +17,8 @@ const output = new URL('../src/generated/', import.meta.url)
 const built = new URL('../dist/generated/', import.meta.url)
 
 // Build one crate's module and write the files its `#mirage-*-wasm` import
-// names. The streams module's dependencies and its LTO run at opt-level 2 to
-// fit the browser's limit, mirage-rs at the profile's 3 (awk is a tenth slower
+// names. The streams module's dependencies and its LTO run at opt-level 2,
+// which keeps it smaller, mirage-rs at the profile's 3 (awk is a tenth slower
 // at 2), as does the shell module; gh's, which waits on GitHub, is built for
 // size. `small` names the crates built for size inside a module, the codecs and
 // parsers no hot loop waits on.
@@ -69,22 +68,18 @@ function embed(crate, name, build, small = []) {
     .find((file) => file.endsWith(artifact))
   if (path === undefined) throw new Error(`cargo reported no ${artifact}`)
   const wasm = readFileSync(path)
-  if (wasm.byteLength > browserLimit) {
-    throw new Error(
-      `${crate} Wasm is ${wasm.byteLength} bytes, exceeding the browser synchronous compilation and instantiation limit of ${browserLimit} bytes`,
-    )
-  }
   mkdirSync(output, { recursive: true })
-  const base64 = JSON.stringify(wasm.toString('base64'))
-  writeFileSync(new URL(`${name}.ts`, output), `export default ${base64} as string\n`)
-  writeFileSync(new URL(`${name}.wasm`, output), wasm)
+  writeFileSync(
+    new URL(`${name}.d.ts`, output),
+    'declare const module: WebAssembly.Module | (() => WebAssembly.Module)\n\nexport default module\n',
+  )
 
   // Written here rather than by the build so code run from source (tsx, the
   // integ runners) finds them too: under workerd the .wasm its bundler loads,
   // under Node the .wasm read and compiled on first use from beside it, and
-  // elsewhere the base64 string.
+  // in a browser the .wasm fetched and compiled as the page loads.
   mkdirSync(built, { recursive: true })
-  writeFileSync(new URL(`${name}.js`, built), `export default ${base64}\n`)
+  writeFileSync(new URL(`${name}.js`, built), fetched(name))
   writeFileSync(new URL(`${name}.wasm`, built), wasm)
   writeFileSync(
     new URL(`${name}.workerd.js`, built),
@@ -97,6 +92,33 @@ function embed(crate, name, build, small = []) {
       `  return module ??= new WebAssembly.Module(readFileSync(new URL('./${name}.wasm', import.meta.url)))\n` +
       '}\n',
   )
+}
+
+// A browser's main thread refuses to compile a module over 8 MB synchronously,
+// so the page compiles it as it loads, and the top-level await hands every
+// importer a compiled module. The `new URL` names the .wasm by the package's
+// own export, which a bundler (Vite, webpack) resolves and ships: Vite's dev
+// server resolves it from the dependency it pre-bundled, where a relative URL
+// names a file it never copied there.
+function fetched(name) {
+  return `const url = new URL('@struktoai/mirage-core/${name}.wasm', import.meta.url)
+const response = await fetch(url)
+const type = response.headers.get('Content-Type') ?? ''
+let module
+if (response.ok && type.split(';')[0].trim() === 'application/wasm') {
+  module = await WebAssembly.compileStreaming(response)
+} else {
+  const bytes = new Uint8Array(await response.arrayBuffer())
+  if (!response.ok || String.fromCharCode(...bytes.subarray(0, 4)) !== '\\0asm') {
+    throw new Error(
+      \`\${url} answered \${response.status} \${type}, not WebAssembly: the page's bundler has to resolve and ship @struktoai/mirage-core/${name}.wasm, as Vite and webpack do. Vite's dev server resolves it from the app, so under pnpm add @struktoai/mirage-core to the app's dependencies.\`,
+    )
+  }
+  module = await WebAssembly.compile(bytes)
+}
+
+export default module
+`
 }
 
 embed(
