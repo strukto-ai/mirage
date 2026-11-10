@@ -77,7 +77,7 @@ async def test_a_name_is_taken_once_across_kinds(client):
     assert (await client.post("/v1/vfs", json=GITHUB)).status_code == 201
     r = await client.post("/v1/vfs", json=GITHUB)
     assert r.status_code == 409
-    assert r.json()["detail"] == "github already exists"
+    assert r.json()["error"]["message"] == "github already exists"
     gh = {"name": "github", "type": "gh", "fields": {"token": "t"}}
     assert (await client.post("/v1/clis", json=gh)).status_code == 409
 
@@ -87,7 +87,7 @@ async def test_an_entry_answers_only_under_its_kind(client):
     await client.post("/v1/vfs", json=GITHUB)
     r = await client.get("/v1/clis/github")
     assert r.status_code == 404
-    assert r.json()["detail"] == "CLI not found"
+    assert r.json()["error"]["message"] == "CLI not found"
 
 
 @pytest.mark.asyncio
@@ -109,7 +109,7 @@ async def test_put_keeps_a_sealed_field_left_out_and_null_removes_it(
         "/v1/vfs/github", json={"fields": {"owner": "o", "token": None}}
     )
     assert r.status_code == 400
-    assert r.json()["detail"] == "token is required"
+    assert r.json()["error"]["message"] == "token is required"
     await client.post(
         "/v1/clis",
         json={
@@ -153,15 +153,18 @@ async def test_fields_are_checked_against_the_type(client):
     for body, detail in cases:
         r = await client.post("/v1/vfs", json={"name": "x", **body})
         assert r.status_code == 400, body
-        assert r.json()["detail"].startswith(detail), r.json()
+        assert r.json()["error"]["message"].startswith(detail), r.json()
     r = await client.post(
         "/v1/clis",
         json={"name": "m", "type": "mcp", "fields": {"url": "http://a.b"}},
     )
-    assert r.json()["detail"] == "url must be the MCP server's https URL"
+    assert (
+        r.json()["error"]["message"]
+        == "url must be the MCP server's https URL"
+    )
     r = await client.post("/v1/vfs", json={**GITHUB, "name": "sec_x"})
     assert r.status_code == 400
-    assert "not look like an id" in r.json()["detail"]
+    assert "not look like an id" in r.json()["error"]["message"]
 
 
 @pytest.mark.asyncio
@@ -171,8 +174,11 @@ async def test_a_pointer_is_refused_until_its_store_is_saved(client):
     r = await client.post("/v1/vfs", json=body)
     assert r.status_code == 400
     assert r.json() == {
-        "detail": "add aws under Secret stores first",
-        "missing": ["aws"],
+        "error": {
+            "code": "invalid_request",
+            "message": "add aws under Secret stores first",
+            "missing": ["aws"],
+        }
     }
     r = await client.get("/v1/stores")
     assert r.status_code == 404
@@ -201,7 +207,7 @@ async def test_delete_wipes_and_is_refused_while_a_template_uses_it(
     assert (await client.get("/v1/vfs")).json()["items"][0]["used_by"] == 1
     r = await client.delete("/v1/vfs/github")
     assert r.status_code == 409
-    assert r.json()["detail"] == "github is used by agent"
+    assert r.json()["error"]["message"] == "github is used by agent"
     await store.delete_template("agent")
     assert (await client.delete("/v1/vfs/github")).status_code == 204
     assert (await client.get("/v1/vfs/github")).status_code == 404

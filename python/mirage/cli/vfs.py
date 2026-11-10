@@ -23,7 +23,7 @@ import httpx
 import typer
 
 from mirage.cli.client import make_client
-from mirage.cli.output import emit, handle_response
+from mirage.cli.output import emit, error_of, handle_response
 from mirage.cli.settings import resolve_workspace
 from mirage.server.vfs_calls import (
     BYTES,
@@ -127,13 +127,10 @@ def answer(r: httpx.Response) -> Any:
         r (httpx.Response): the daemon's response.
     """
     if r.status_code >= 400:
-        try:
-            body = r.json()
-        except ValueError:
-            body = {}
-        if isinstance(body, dict) and "errno" in body:
-            typer.echo(f"{body['detail']} ({body['errno']})", err=True)
-            refusal = body.get("refusal")
+        error = error_of(r.text)
+        if error is not None and "errno" in error:
+            typer.echo(f"{error['message']} ({error['errno']})", err=True)
+            refusal = error.get("refusal")
             if isinstance(refusal, dict):
                 typer.echo(f"policy denied: {refusal['reason']}", err=True)
             raise typer.Exit(code=1)

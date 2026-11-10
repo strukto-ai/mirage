@@ -95,12 +95,19 @@ async def test_bad_arguments_and_unknown_targets_are_refused():
             params={"session_id": "nope"},
             json={"path": "/a"},
         )
-    assert bad.status_code == 400
-    assert bad.json()["detail"].startswith("Invalid arguments for tool read")
+    assert (bad.status_code, bad.json()) == (
+        400,
+        {
+            "error": {
+                "code": "invalid_request",
+                "message": "arguments do not fit tool read's input schema",
+            }
+        },
+    )
     assert workspace.status_code == 404
-    assert workspace.json() == {"detail": "workspace not found"}
+    assert workspace.json()["error"]["message"] == "workspace not found"
     assert session.status_code == 404
-    assert session.json() == {"detail": "session not found"}
+    assert session.json()["error"]["message"] == "session not found"
 
 
 @pytest.mark.asyncio

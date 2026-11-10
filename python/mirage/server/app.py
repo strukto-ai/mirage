@@ -26,7 +26,9 @@ from pathlib import Path
 from types import FrameType
 from typing import Any, cast
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import Response
+from starlette.types import ASGIApp, Receive, Scope, Send
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from mirage.concurrency.limiter import run_blocking
@@ -40,10 +42,12 @@ from mirage.server.auth import (
     AuthMode,
     resolve_auth_config,
 )
+from mirage.server.constants import RAW_BODIES
 from mirage.server.daemon_config import (
     read_daemon_table,
     validate_daemon_table,
 )
+from mirage.server.errors import WorkspaceMissing, register_error_handlers
 from mirage.server.host_validation import (
     HostHeaderMiddleware,
     resolve_allowed_hosts,
@@ -301,6 +305,54 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
                 await run_blocking(_remove_pid_file, app.state.pid_file)
 
 
+async def answer_missing(request: Request, exc: Exception) -> Response:
+    """A workspace a route needs and the caller has none of live: 409
+    when the caller's own is stopped, else 404.
+
+    Args:
+        request (Request): the request.
+        exc (Exception): the ``WorkspaceMissing`` raised.
+    """
+    missing = cast(WorkspaceMissing, exc)
+    if await workspaces.is_stopped(request, missing.workspace_id):
+        return missing.stopped().response()
+    return missing.response()
+
+
+class LenientJson:
+    """Read a request body as JSON whatever its Content-Type says, save a
+    multipart or raw byte upload, so ``curl -d`` reaches a JSON route as
+    sent.
+
+    Args:
+        app (ASGIApp): the app behind.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(
+        self, scope: Scope, receive: Receive, send: Send
+    ) -> None:
+        if scope["type"] == "http":
+            given = next(
+                (v for k, v in scope["headers"] if k == b"content-type"), b""
+            ).lower()
+            if not given.startswith(RAW_BODIES):
+                scope = {
+                    **scope,
+                    "headers": [
+                        *(
+                            h
+                            for h in scope["headers"]
+                            if h[0] != b"content-type"
+                        ),
+                        (b"content-type", b"application/json"),
+                    ],
+                }
+        await self.app(scope, receive, send)
+
+
 def build_app(
     idle_grace_seconds: float = 30.0,
     exit_event: asyncio.Event | None = None,
@@ -428,6 +480,9 @@ def build_app(
     validate_daemon_table(read_daemon_table(mirage_home()))
     register_secrets(STRUKTO, StruktoSourceConfig, fetch_strukto)
     app = FastAPI(title="Mirage daemon", version="0.1", lifespan=_lifespan)
+    register_error_handlers(app)
+    app.add_exception_handler(WorkspaceMissing, answer_missing)
+    app.add_middleware(LenientJson)
     hosts = resolve_allowed_hosts(allowed_hosts)
     app.add_middleware(HostHeaderMiddleware, allowed_hosts=hosts)
     limits = resolve_rate_limits(rate_limits)

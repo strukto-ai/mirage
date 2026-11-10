@@ -27,13 +27,13 @@ from mirage.errors.types import FsCondition
 from mirage.io.errors import PipeClosed
 from mirage.io.pipe import BytePipe
 from mirage.io.types import ByteSource
+from mirage.server.errors import fs_error
 from mirage.server.inflight import InFlight
 from mirage.server.io_serde import (
     CallArgsError,
     answered,
     checked,
     explanation_to_dict,
-    failure_to_dict,
     io_result_to_dict,
 )
 from mirage.server.mcp.server import TOOLS
@@ -269,13 +269,13 @@ class MirageRpcServer:
             raise
         except Exception as exc:
             logger.debug("rpc %s failed", method, exc_info=True)
-            data = failure_to_dict(exc)
+            data = fs_error(exc).record()
             code = (
                 RPC_NOT_FOUND
                 if data.get("errno") == FsCondition.ENOENT.name
                 else RPC_INTERNAL_ERROR
             )
-            return error_response(request_id, code, str(data["detail"]), data)
+            return error_response(request_id, code, str(data["message"]), data)
         return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
     async def serve(

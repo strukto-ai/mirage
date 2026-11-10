@@ -153,7 +153,7 @@ async def test_create_session_refuses_a_bare_mount_list():
                 "mounts": ["/"],
             },
         )
-        assert r.status_code == 422, r.text
+        assert r.status_code == 400, r.text
 
 
 @pytest.mark.asyncio
@@ -194,7 +194,7 @@ async def test_create_session_rejects_bad_profile():
                 "mounts": {"/": "admin"},
             },
         )
-        assert r.status_code == 422, r.text
+        assert r.status_code == 400, r.text
 
 
 @pytest.mark.asyncio
@@ -214,7 +214,7 @@ async def test_create_session_rejects_an_unknown_profile():
                 "profile": "nope",
             },
         )
-        assert r.status_code == 422, r.text
+        assert r.status_code == 400, r.text
         assert "nope" in r.text
 
 
@@ -351,7 +351,20 @@ async def test_update_session_takes_a_profile_document(tmp_path):
             f"/v1/workspaces/{wid}/sessions/a",
             json={"profile": {"commands": {"bogus": []}}},
         )
-        assert r.status_code == 422
+        assert r.status_code == 400
+        r = await client.patch(
+            f"/v1/workspaces/{wid}/sessions/a", json={"profile": 42}
+        )
+        assert (r.status_code, r.json()) == (
+            400,
+            {
+                "error": {
+                    "code": "invalid_value",
+                    "message": "profile is not valid",
+                    "param": "profile",
+                }
+            },
+        )
         await client.delete(f"/v1/workspaces/{wid}")
 
 
@@ -370,7 +383,9 @@ async def test_a_workspace_at_max_sessions_refuses_another():
             f"/v1/workspaces/{wid}/sessions", json={"session_id": "b"}
         )
         assert r.status_code == 429
-        assert r.json() == {"detail": "workspace is at max_sessions (2)"}
+        assert (
+            r.json()["error"]["message"] == "workspace is at max_sessions (2)"
+        )
         await client.delete(f"/v1/workspaces/{wid}/sessions/a")
         r = await client.post(
             f"/v1/workspaces/{wid}/sessions", json={"session_id": "b"}

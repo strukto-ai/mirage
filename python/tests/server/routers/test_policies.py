@@ -75,7 +75,7 @@ async def test_a_missing_policy_is_not_updated(client):
 async def test_a_policy_name_and_source_are_checked(client):
     r = await client.post("/v1/policies", json={"name": "guard", "source": ""})
     assert r.status_code == 400
-    assert "end in .py" in r.json()["detail"]
+    assert "end in .py" in r.json()["error"]["message"]
     big = "#" * (64 * 1024 + 1)
     r = await client.post(
         "/v1/policies", json={"name": "big.py", "source": big}
@@ -84,4 +84,4 @@ async def test_a_policy_name_and_source_are_checked(client):
     r = await client.post(
         "/v1/policies", json={"name": "a.py", "source": "", "x": 1}
     )
-    assert r.status_code == 422
+    assert r.status_code == 400

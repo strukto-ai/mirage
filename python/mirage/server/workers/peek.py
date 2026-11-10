@@ -16,9 +16,9 @@ import json
 import logging
 from collections.abc import AsyncIterator
 
-from fastapi import HTTPException
 from starlette.types import Receive, Scope
 
+from mirage.server.errors import HttpError
 from mirage.server.multipart import MAX_REQUEST_PART, PartEvent, part_events
 from mirage.server.workers.types import Peeked
 
@@ -114,9 +114,9 @@ async def peek(scope: Scope, receive: Receive) -> Peeked:
                 request.append(bytes(value))
             elif kind == PartEvent.END and name == b"request":
                 named = True
-    except HTTPException as exc:
+    except HttpError as exc:
         # A malformed body goes on as it is, for the worker to refuse.
-        logger.debug("mirage: a load body did not parse: %s", exc.detail)
+        logger.debug("mirage: a load body did not parse: %s", exc.message)
     finally:
         await events.aclose()
     return Peeked(

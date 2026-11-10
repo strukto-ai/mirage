@@ -143,7 +143,7 @@ async def test_a_page_on_another_origin_cannot_open_the_route(tmp_path):
                 f"ws://{address}/v1/workspaces/w/ssh",
                 additional_headers={"Origin": "https://evil.example"},
             )
-        assert refused.value.response.status_code == 400
+        assert refused.value.response.status_code == 403
 
 
 @pytest.mark.asyncio

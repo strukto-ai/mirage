@@ -32,6 +32,7 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from websockets.asyncio.client import unix_connect
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 
+from mirage.server.errors import ErrorCode, HttpError
 from mirage.server.host_validation import HostHeaderMiddleware
 from mirage.server.multipart import MAX_REQUEST_PART
 from mirage.server.rate_limit import COUNTED_HEADER
@@ -43,6 +44,7 @@ from mirage.server.workers.http import (
     passable,
     path_parts,
     send_answer,
+    send_error,
     send_json,
     target,
 )
@@ -292,8 +294,9 @@ class WorkerProxy:
         and its body goes on as sent."""
         pool = self.pool
         if self.draining:
-            return await send_json(
-                send, 503, {"detail": "server is shutting down"}
+            return await send_error(
+                send,
+                HttpError(ErrorCode.SHUTTING_DOWN, "server is shutting down"),
             )
         reserved = False
         try:
@@ -313,22 +316,21 @@ class WorkerProxy:
                 )
             )
             if peeked.lost:
-                return await send_json(
+                return await send_error(
                     send,
-                    413,
-                    {
-                        "detail": "the workspace id must come in the body's "
-                        f"first {MAX_REQUEST_PART} bytes"
-                    },
+                    HttpError(
+                        ErrorCode.TOO_LARGE,
+                        "the workspace id must come in the body's "
+                        f"first {MAX_REQUEST_PART} bytes",
+                    ),
                 )
             if peeked.twice:
-                return await send_json(
+                return await send_error(
                     send,
-                    400,
-                    {
-                        "detail": "multipart body has more than one "
-                        "'request' part"
-                    },
+                    HttpError(
+                        ErrorCode.INVALID_REQUEST,
+                        "multipart body has more than one 'request' part",
+                    ),
                 )
             named = peeked.id
             home = pool.home(named) if named is not None else None
@@ -337,20 +339,20 @@ class WorkerProxy:
             # holds a slot too: the worker may stop that id first and
             # build it again.
             if not live and not self._has_room(1):
-                return await send_json(
+                return await send_error(
                     send,
-                    503,
-                    {
-                        "detail": "server is at max_workspaces "
-                        f"({self.max_workspaces})"
-                    },
+                    HttpError(
+                        ErrorCode.SERVER_FULL,
+                        f"server is at max_workspaces ({self.max_workspaces})",
+                    ),
                 )
             building = pool.building(named) if named is not None else None
             if source is not None and building not in (None, source):
-                return await send_json(
+                return await send_error(
                     send,
-                    409,
-                    {"detail": f"workspace id already exists: {named}"},
+                    HttpError(
+                        ErrorCode.ALREADY_EXISTS, "workspace id already exists"
+                    ),
                 )
             # A clone builds on its source's worker, so an id another
             # worker holds, even stopped, stays there: a create reaches it.
@@ -360,13 +362,18 @@ class WorkerProxy:
                 and not home.dead
                 and home is not source
             ):
-                detail = (
-                    f"workspace id already exists: {named}"
+                return await send_error(
+                    send,
+                    HttpError(
+                        ErrorCode.ALREADY_EXISTS, "workspace id already exists"
+                    )
                     if live
-                    else "workspace id was used on another worker; "
-                    f"create it there instead: {named}"
+                    else HttpError(
+                        ErrorCode.CONFLICT,
+                        "workspace id was used on another worker; "
+                        "create it there instead",
+                    ),
                 )
-                return await send_json(send, 409, {"detail": detail})
             alive = home if home is not None and not home.dead else None
             worker = source or alive or pool.random()
             if worker is None:

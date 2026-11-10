@@ -151,7 +151,7 @@ async def test_default_rejects_unknown_host(monkeypatch):
         transport=transport, base_url="http://attacker.example"
     ) as client:
         r = await client.get("/v1/workspaces")
-        assert r.status_code == 400
+        assert r.status_code == 403
 
 
 @pytest.mark.no_host_override
@@ -194,7 +194,7 @@ async def test_default_rejects_malformed_bracketed_host(monkeypatch):
         transport=transport, base_url="http://127.0.0.1"
     ) as client:
         r = await client.get("/v1/workspaces", headers={"host": "[::1]evil"})
-        assert r.status_code == 400
+        assert r.status_code == 403
 
 
 @pytest.mark.no_host_override
@@ -209,7 +209,7 @@ async def test_default_rejects_non_digit_port(monkeypatch):
         r = await client.get(
             "/v1/workspaces", headers={"host": "127.0.0.1:8765x"}
         )
-        assert r.status_code == 400
+        assert r.status_code == 403
 
 
 @pytest.mark.no_host_override
@@ -229,7 +229,7 @@ async def test_env_override_extends_allowlist(monkeypatch):
         transport=transport, base_url="http://attacker.example"
     ) as client:
         r = await client.get("/v1/workspaces")
-        assert r.status_code == 400
+        assert r.status_code == 403
 
 
 @pytest.mark.no_host_override
@@ -256,7 +256,7 @@ async def test_rejection_emits_log_warning(monkeypatch, caplog):
         transport=transport, base_url="http://attacker.example"
     ) as client:
         r = await client.get("/v1/workspaces")
-        assert r.status_code == 400
+        assert r.status_code == 403
     rejection_logs = [
         rec for rec in caplog.records if "attacker.example" in rec.getMessage()
     ]
@@ -280,8 +280,8 @@ async def test_default_refuses_a_page_on_another_origin(monkeypatch, caplog):
             {"sec-fetch-site": "cross-site"},
         ):
             r = await client.post("/v1/workspaces", headers=headers)
-            assert r.status_code == 400, headers
-            assert r.text == "Cross-origin request refused"
+            assert r.status_code == 403, headers
+            assert r.json()["error"]["code"] == "origin_not_allowed"
         r = await client.get(
             "/v1/workspaces",
             headers={
@@ -305,7 +305,7 @@ async def test_wildcard_still_refuses_a_page_on_another_origin(monkeypatch):
         r = await client.get(
             "/v1/workspaces", headers={"origin": "https://evil.example"}
         )
-        assert r.status_code == 400
+        assert r.status_code == 403
 
 
 def test_resolve_allowed_hosts_config_beats_default(tmp_path, monkeypatch):

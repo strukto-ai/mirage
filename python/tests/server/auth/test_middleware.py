@@ -579,7 +579,9 @@ async def test_retained_adapter_cannot_submit_after_deletion(
                 r = await pending
                 if protocol in ("rpc_lookup", "rpc_before_lookup"):
                     assert r.status_code == 404, r.text
-                    assert r.json() == {"detail": "workspace not found"}
+                    assert (
+                        r.json()["error"]["message"] == "workspace not found"
+                    )
                 else:
                     assert "error" in r.json(), r.text
             assert [

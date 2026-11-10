@@ -14,13 +14,14 @@
 
 import asyncio
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel
 
 from mirage.execution.line.types import Line, LineState
 from mirage.execution.types import LineId
 from mirage.io.errors import PipeClosed
 from mirage.io.pipe import BytePipe
+from mirage.server.errors import ErrorCode, HttpError
 from mirage.server.requests import RequestTable
 from mirage.server.routers.vfs import require_entry
 
@@ -104,7 +105,7 @@ async def get_line(
 
     detail = await runner.call(read())
     if detail is None:
-        raise HTTPException(status_code=404, detail="line not found")
+        raise HttpError(ErrorCode.NOT_FOUND, "line not found")
     return detail
 
 
@@ -117,15 +118,15 @@ def _open_stdin(request: Request, workspace_id: str, line_id: str) -> BytePipe:
         line_id (str): the line.
 
     Raises:
-        HTTPException: 404 when no such line is running there, 409 when
+        HttpError: 404 when no such line is running there, 409 when
             it did not open its stdin.
     """
     jobs: RequestTable = request.app.state.jobs
     job = jobs.get(LineId(line_id))
     if job is None or job.workspace_id != workspace_id:
-        raise HTTPException(status_code=404, detail="line not found")
+        raise HttpError(ErrorCode.NOT_FOUND, "line not found")
     if job.stdin is None:
-        raise HTTPException(status_code=409, detail=NOT_OPEN)
+        raise HttpError(ErrorCode.CONFLICT, NOT_OPEN)
     return job.stdin
 
 
@@ -163,7 +164,7 @@ async def write_stdin(
                 return Response(status_code=499)
             await writing
     except PipeClosed as exc:
-        raise HTTPException(status_code=409, detail=NOT_OPEN) from exc
+        raise HttpError(ErrorCode.CONFLICT, NOT_OPEN) from exc
     finally:
         arrival.cancel()
     return Response(status_code=204)

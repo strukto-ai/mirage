@@ -89,7 +89,7 @@ async def test_past_the_rate_a_request_answers_429_until_the_window_ends():
         assert (await client.get("/v1/workspaces")).status_code == 200
         refused = await client.get("/v1/workspaces")
         assert refused.status_code == 429
-        assert refused.json() == {"detail": "Too Many Requests"}
+        assert refused.json()["error"]["message"] == "too many requests"
         assert 1 <= int(refused.headers["retry-after"]) <= 60
         assert (await client.get("/v1/health")).status_code == 200
         assert (await client.get("/v1/daemon/ready")).status_code == 200
@@ -192,7 +192,7 @@ async def test_default_limits_authentication_before_verifying_tokens(
         right = {"authorization": "Bearer right"}
         refused = await client.get("/v1/workspaces", headers=right)
         assert refused.status_code == 429
-        assert refused.json() == {"detail": "Too Many Requests"}
+        assert refused.json()["error"]["message"] == "too many requests"
         assert refused.headers["retry-after"] == "60"
         assert (await client.get("/v1/health")).status_code == 200
         assert (await client.get("/v1/daemon/ready")).status_code == 200

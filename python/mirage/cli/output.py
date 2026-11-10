@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import logging
 import math
 import sys
 import time
@@ -23,6 +24,8 @@ import httpx
 import typer
 
 from mirage.utils.yaml import dump_yaml
+
+logger = logging.getLogger(__name__)
 
 
 class Output(StrEnum):
@@ -91,15 +94,39 @@ def exit_code_from_response(r: Any) -> int:
     return 0
 
 
+def error_of(text: str) -> dict[str, Any] | None:
+    """The ``error`` object of a daemon's error body, or None when the
+    body is not one, such as a proxy's error page.
+
+    Args:
+        text (str): the body.
+    """
+    try:
+        body = json.loads(text)
+    except ValueError as exc:
+        logger.debug("error body is not JSON: %s", exc)
+        return None
+    error = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(error, dict) or not isinstance(
+        error.get("message"), str
+    ):
+        return None
+    return cast(dict[str, Any], error)
+
+
+def error_message(text: str) -> str:
+    """The message of a daemon's error body, or the body as it came.
+
+    Args:
+        text (str): the body.
+    """
+    error = error_of(text)
+    return text if error is None else cast(str, error["message"])
+
+
 def handle_response(r: httpx.Response) -> dict[str, Any] | list[Any]:
     if r.status_code >= 400:
-        try:
-            detail = r.json().get("detail", r.text)
-        except ValueError:
-            detail = r.text
-        if not isinstance(detail, str):
-            detail = json.dumps(detail, ensure_ascii=False)
-        fail(f"error {r.status_code}: {detail}", exit_code=2)
+        fail(f"error {r.status_code}: {error_message(r.text)}", exit_code=2)
     if not r.content:
         return {}
     return cast(dict[str, Any] | list[Any], r.json())

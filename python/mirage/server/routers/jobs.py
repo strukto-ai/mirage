@@ -12,11 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from mirage.execution.job import Job, JobState
 from mirage.execution.types import JobId, LineId
+from mirage.server.errors import ErrorCode, HttpError
 from mirage.server.routers.vfs import require_entry
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}/jobs")
@@ -102,5 +103,5 @@ async def get_job(
 
     detail = await runner.call(read())
     if detail is None:
-        raise HTTPException(status_code=404, detail="job not found")
+        raise HttpError(ErrorCode.NOT_FOUND, "job not found")
     return detail

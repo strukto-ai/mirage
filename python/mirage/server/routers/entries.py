@@ -17,13 +17,13 @@ import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request, Response
-from fastapi.responses import JSONResponse
 
 from mirage.resources.base import ResourceStore
 from mirage.resources.constants import NAME, NOUN
 from mirage.resources.errors import ResourceError
 from mirage.resources.refs import uses_of
 from mirage.resources.types import Entry, EntryInput, EntryKind, Fields
+from mirage.server.errors import ErrorCode, HttpError
 from mirage.server.resources.fields import types_of
 from mirage.server.resources.values import check_values, stores_of
 from mirage.server.routers.templates import (
@@ -45,21 +45,6 @@ TYPES_ROUTE = "types"
 
 # A name that reads as an id, which no entry may take.
 ID_PREFIX = re.compile(r"(ws|sec|pol|key|tpl|team|usr)_")
-
-
-class Refused(Exception):
-    """A request answered with a 4xx and extra keys beside ``detail``."""
-
-    def __init__(self, status: int, detail: str, **extra: JsonValue) -> None:
-        super().__init__(detail)
-        self.status = status
-        self.extra = extra
-
-    def answer(self) -> JSONResponse:
-        return JSONResponse(
-            status_code=self.status,
-            content={"detail": str(self), **self.extra},
-        )
 
 
 def present(
@@ -92,22 +77,29 @@ def present(
 def required_string(body: dict[str, JsonValue], key: str) -> str:
     value = body.get(key)
     if value is not None and not isinstance(value, str):
-        raise Refused(400, f"{key} must be a string")
+        raise HttpError(
+            ErrorCode.INVALID_VALUE, f"{key} must be a string", param=key
+        )
     if not value:
-        raise Refused(400, f"{key} is required")
+        raise HttpError(
+            ErrorCode.MISSING_FIELD, f"{key} is required", param=key
+        )
     return value
 
 
 def check_name(kind: EntryKind, name: str) -> str:
     if NAME.fullmatch(name) is None or ID_PREFIX.match(name) is not None:
-        raise Refused(
-            400,
+        raise HttpError(
+            ErrorCode.INVALID_VALUE,
             f"{NOUN[kind]} name must be 1-63 of a-z 0-9 . _ -, start with "
             "a letter or digit, and not look like an id",
+            param="name",
         )
     if name == TYPES_ROUTE:
-        raise Refused(
-            400, f"{TYPES_ROUTE} names the types route; pick another"
+        raise HttpError(
+            ErrorCode.INVALID_VALUE,
+            f"{TYPES_ROUTE} names the types route; pick another",
+            param="name",
         )
     return name
 
@@ -116,9 +108,11 @@ async def json_body(request: Request) -> dict[str, JsonValue]:
     try:
         body = await request.json()
     except ValueError:
-        raise Refused(400, "body must be JSON") from None
+        raise HttpError(ErrorCode.INVALID_JSON, "body must be JSON") from None
     if not isinstance(body, dict):
-        raise Refused(400, "body must be a JSON object")
+        raise HttpError(
+            ErrorCode.INVALID_REQUEST, "body must be a JSON object"
+        )
     return body
 
 
@@ -136,7 +130,9 @@ async def entry_named(
         return await store.get_entry(kind, ref)
     except ResourceError as e:
         if e.code in ("not_found", "invalid"):
-            raise Refused(404, f"{NOUN[kind]} not found") from e
+            raise HttpError(
+                ErrorCode.NOT_FOUND, f"{NOUN[kind]} not found"
+            ) from e
         raise
 
 
@@ -150,8 +146,8 @@ async def require_stores(store: ResourceStore, config: Fields) -> None:
     saved = {e.name for e in await store.list_entries("store")}
     missing = [s for s in stores_of(config) if s not in saved]
     if missing:
-        raise Refused(
-            400,
+        raise HttpError(
+            ErrorCode.INVALID_REQUEST,
             f"add {', '.join(missing)} under Secret stores first",
             missing=list(missing),
         )
@@ -225,8 +221,6 @@ def entry_router(kind: EntryKind) -> APIRouter:
                     sealed=dict(checked.sealed),
                 ),
             )
-        except Refused as e:
-            return e.answer()
         except ResourceError as e:
             raise store_refusal(e) from e
         return present(kind, saved)
@@ -238,8 +232,6 @@ def entry_router(kind: EntryKind) -> APIRouter:
         store: ResourceStore = request.app.state.resources
         try:
             entry = await entry_named(store, kind, ref)
-        except Refused as e:
-            return e.answer()
         except ResourceError as e:
             raise store_refusal(e) from e
         return {**present(kind, entry), "sealed": entry.sealed}
@@ -270,8 +262,6 @@ def entry_router(kind: EntryKind) -> APIRouter:
                     sealed=sealed,
                 ),
             )
-        except Refused as e:
-            return e.answer()
         except ResourceError as e:
             raise store_refusal(e) from e
         return present(kind, saved)
@@ -282,8 +272,6 @@ def entry_router(kind: EntryKind) -> APIRouter:
         try:
             current = await entry_named(store, kind, ref)
             await store.delete_entry(kind, current.name)
-        except Refused as e:
-            return e.answer()
         except ResourceError as e:
             raise store_refusal(e) from e
         return Response(status_code=204)

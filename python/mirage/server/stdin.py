@@ -17,12 +17,11 @@ import tempfile
 from collections import deque
 from typing import BinaryIO, Protocol
 
-from fastapi import HTTPException
-
 from mirage.concurrency.limiter import on_loop, run_blocking
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.pipe import CAPACITY
 from mirage.server.constants import MAX_STDIN_BYTES
+from mirage.server.errors import ErrorCode, HttpError
 
 
 class StdinSource(Protocol):
@@ -96,8 +95,8 @@ class UploadStdin:
                 chunk = data[offset : offset + CHUNK_SIZE]
                 self._received += len(chunk)
                 if self._received > self._limit:
-                    raise HTTPException(
-                        status_code=413, detail="stdin part too large"
+                    raise HttpError(
+                        ErrorCode.TOO_LARGE, "stdin part too large"
                     )
                 if (
                     self._file is None

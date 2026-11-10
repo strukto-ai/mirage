@@ -16,9 +16,10 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from fastapi import HTTPException
 from python_multipart.exceptions import MultipartParseError
 from python_multipart.multipart import MultipartParser, parse_options_header
+
+from mirage.server.errors import ErrorCode, HttpError
 
 if TYPE_CHECKING:
     from python_multipart.multipart import MultipartCallbacks
@@ -113,14 +114,14 @@ async def part_events(
             with a chunk of it, ``END``.
 
     Raises:
-        HTTPException: 400 for a body without a boundary, a malformed
+        HttpError: 400 for a body without a boundary, a malformed
             one, or one that stops before its closing boundary.
     """
     _, options = parse_options_header(content_type)
     boundary = options.get(b"boundary")
     if not boundary:
-        raise HTTPException(
-            status_code=400, detail="multipart body without a boundary"
+        raise HttpError(
+            ErrorCode.INVALID_REQUEST, "multipart body without a boundary"
         )
     parts = Parts()
     parser = MultipartParser(
@@ -132,14 +133,14 @@ async def part_events(
     async for chunk in chunks:
         try:
             parser.write(chunk)
-        except MultipartParseError as e:
-            raise HTTPException(
-                status_code=400, detail=f"bad multipart body: {e}"
+        except MultipartParseError:
+            raise HttpError(
+                ErrorCode.INVALID_REQUEST, "multipart body is malformed"
             )
         for event in parts.take():
             yield event
     parser.finalize()
     if not parts.finished:
-        raise HTTPException(
-            status_code=400, detail="multipart body ended early"
+        raise HttpError(
+            ErrorCode.INVALID_REQUEST, "multipart body ended early"
         )

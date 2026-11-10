@@ -13,17 +13,22 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
 
-from mirage.resources.errors import ResourceError
+from mirage.resources.errors import ResourceError, ResourceErrorCode
 from mirage.resources.types import Template, TemplateInput
+from mirage.server.errors import ErrorCode, HttpError
 from mirage.server.schemas import (
     CreateTemplateRequest,
     TemplateList,
     TemplateResponse,
 )
 
-STATUS = {"not_found": 404, "conflict": 409, "invalid": 400}
+CODE: dict[ResourceErrorCode, ErrorCode] = {
+    "not_found": ErrorCode.NOT_FOUND,
+    "conflict": ErrorCode.CONFLICT,
+    "invalid": ErrorCode.INVALID_REQUEST,
+}
 
 # Every workspace made from a template would claim one id, which a worker
 # proxy cannot see without reading the template; the create names it.
@@ -41,12 +46,12 @@ def require_one_account(request: Request) -> None:
         request (Request): the HTTP request, for the app's registry.
 
     Raises:
-        HTTPException: 501 while the server requires accounts.
+        HttpError: 501 while the server requires accounts.
     """
     if request.app.state.registry.accounts_required:
-        raise HTTPException(
-            status_code=501,
-            detail="templates are kept only on a server of one account",
+        raise HttpError(
+            ErrorCode.NOT_SUPPORTED,
+            "templates are kept only on a server of one account",
         )
 
 
@@ -55,13 +60,13 @@ router = APIRouter(
 )
 
 
-def store_refusal(e: ResourceError) -> HTTPException:
-    """The answer for a store's refusal: 404, 409 or 400 by its code.
+def store_refusal(e: ResourceError) -> HttpError:
+    """The answer for a store's refusal, by its code.
 
     Args:
         e (ResourceError): what the store raised.
     """
-    return HTTPException(status_code=STATUS[e.code], detail=str(e))
+    return HttpError(CODE[e.code], str(e))
 
 
 def present(template: Template) -> TemplateResponse:
@@ -94,7 +99,7 @@ async def create_template(
         request (Request): the HTTP request, for the app's store.
     """
     if req.config.workspace_id is not None:
-        raise HTTPException(status_code=400, detail=NO_WORKSPACE_ID)
+        raise HttpError(ErrorCode.INVALID_REQUEST, NO_WORKSPACE_ID)
     written = (await request.json())["config"]
     try:
         saved = await request.app.state.resources.create_template(

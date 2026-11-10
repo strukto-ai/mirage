@@ -14,11 +14,13 @@
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict
 
+from mirage.errors.classify import classify
 from mirage.policy.errors import PolicyError
+from mirage.server.errors import ErrorCode, HttpError, fs_error, loader_error
 from mirage.server.routers.vfs import require_entry
 
 router = APIRouter(prefix="/v1/workspaces")
@@ -49,26 +51,13 @@ async def document(
             method(path, session_id=session_id, profile=profile)
         )
     except KeyError as exc:
-        raise HTTPException(404, "session not found") from exc
+        raise HttpError(ErrorCode.NOT_FOUND, "session not found") from exc
     except (ValueError, PolicyError) as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise loader_error(exc) from exc
     except OSError as exc:
-        status = next(
-            (
-                status
-                for cls, status in (
-                    (FileNotFoundError, 404),
-                    (FileExistsError, 409),
-                    (NotADirectoryError, 422),
-                    (PermissionError, 403),
-                )
-                if isinstance(exc, cls)
-            ),
-            None,
-        )
-        if status is None:
+        if classify(exc) is None:
             raise
-        raise HTTPException(status, str(exc)) from exc
+        raise fs_error(exc) from exc
     return Response(content, media_type="text/markdown")
 
 

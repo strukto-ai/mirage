@@ -90,7 +90,9 @@ def test_a_refused_session_check_deletes_the_workspace(tree, tmp_path):
             refused = self.path.endswith("/sessions")
             status = 500 if refused else 201 if self.command == "POST" else 200
             body = (
-                {"detail": "sessions on fire"} if refused else {"id": "minted"}
+                {"error": {"code": "internal", "message": "sessions on fire"}}
+                if refused
+                else {"id": "minted"}
             )
             data = json.dumps(body).encode()
             self.send_response(status)

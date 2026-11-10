@@ -21,30 +21,56 @@ from mirage.vfs.types import Effect
         (
             RuntimeError("backend token=secret"),
             500,
-            {"detail": "internal server error"},
+            {
+                "error": {
+                    "code": "internal",
+                    "message": "internal server error",
+                }
+            },
         ),
         (
             FileNotFoundError("backend token=secret"),
             404,
-            {"detail": "No such file or directory", "errno": "ENOENT"},
+            {
+                "error": {
+                    "code": "not_found",
+                    "message": "No such file or directory",
+                    "errno": "ENOENT",
+                }
+            },
         ),
         (
             OSError(errno.EDQUOT, "backend token=secret"),
-            507,
-            {"detail": "Disk quota exceeded", "errno": "EDQUOT"},
+            403,
+            {
+                "error": {
+                    "code": "storage_full",
+                    "message": "Disk quota exceeded",
+                    "errno": "EDQUOT",
+                }
+            },
         ),
         (
             StaleWriteError("backend token=secret"),
             409,
             {
-                "detail": posix_phrase(FsCondition.STALE_WRITE),
-                "errno": "STALE_WRITE",
+                "error": {
+                    "code": "stale_write",
+                    "message": posix_phrase(FsCondition.STALE_WRITE),
+                    "errno": "STALE_WRITE",
+                }
             },
         ),
         (
             FileTooLargeError("backend token=secret"),
             400,
-            {"detail": "File too large", "errno": "EFBIG"},
+            {
+                "error": {
+                    "code": "invalid_request",
+                    "message": "File too large",
+                    "errno": "EFBIG",
+                }
+            },
         ),
     ],
 )
@@ -69,10 +95,6 @@ async def test_failures_keep_private_details_in_logs(
             assert response.status_code == status
             assert response.json() == body
             assert "backend token=secret" in caplog.text
-
-
-def test_every_condition_has_a_status():
-    assert set(vfs.STATUS) == set(FsCondition)
 
 
 class PeekVFS(RAMVFS):

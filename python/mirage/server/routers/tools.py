@@ -18,9 +18,10 @@ from collections.abc import Awaitable, Callable
 
 import anyio
 import jsonschema
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
+from mirage.server.errors import ErrorCode, HttpError, param_of
 from mirage.server.mcp.server import TOOLS
 from mirage.server.routers.vfs import json_body
 from mirage.types import JsonValue
@@ -73,18 +74,22 @@ async def call_tool(
     try:
         jsonschema.validate(arguments, INPUTS[name])
     except jsonschema.ValidationError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid arguments for tool {name}: {exc.message}",
+        param = param_of(list(exc.absolute_path))[0] or None
+        raise HttpError(
+            ErrorCode.INVALID_REQUEST
+            if param is None
+            else ErrorCode.INVALID_VALUE,
+            f"arguments do not fit tool {name}'s input schema",
+            param=param,
         ) from exc
     try:
         tools = await request.app.state.mcp.tools(
             workspace_id, session_id, request.state.account
         )
     except LookupError as exc:
-        raise HTTPException(status_code=404, detail=exc.args[0]) from exc
+        raise HttpError(ErrorCode.NOT_FOUND, exc.args[0]) from exc
     if name not in await tools.offered():
-        raise HTTPException(status_code=404, detail=f"Tool {name} not found")
+        raise HttpError(ErrorCode.NOT_FOUND, f"tool {name} not found")
     call = asyncio.ensure_future(tools.call(name, arguments))
     gone = asyncio.ensure_future(_caller_gone(request))
     try:

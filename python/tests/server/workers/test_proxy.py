@@ -280,7 +280,7 @@ async def test_a_refused_caller_and_an_uploading_body_hold_no_slot():
             json={"id": "x", "config": CONFIG},
             headers={"host": "evil.example"},
         )
-        assert refused.status_code == 400
+        assert refused.status_code == 403
         finish = asyncio.Event()
 
         async def body() -> AsyncIterator[bytes]:
@@ -305,7 +305,7 @@ async def test_a_refused_caller_and_an_uploading_body_hold_no_slot():
         assert [i for ids in _ids(d) for i in ids] == ["a"]
         for path in ("/v1/health", "/v1/daemon/ready"):
             got = await d.client.get(path, headers={"host": "evil.example"})
-            assert got.status_code == 400
+            assert got.status_code == 403
         explained = await d.client.post(
             "/v1/workspaces?explain=true", json={"id": "b", "config": CONFIG}
         )
@@ -508,7 +508,10 @@ async def test_workers_serve_lose_their_workspaces_and_leave_nothing_behind(
             gone = await client.post(
                 "/v1/workspaces/b/shell", json={"command": "true"}
             )
-            assert gone.status_code == 404
+            assert (gone.status_code, gone.json()["error"]["code"]) == (
+                409,
+                "workspace_stopped",
+            )
             kept = await client.post(
                 "/v1/workspaces/a/shell", json={"command": "true"}
             )

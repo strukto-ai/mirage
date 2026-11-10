@@ -30,7 +30,6 @@ from limits import (
 from limits.aio.storage import MemoryStorage
 from limits.aio.strategies import FixedWindowRateLimiter
 from starlette.requests import HTTPConnection
-from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from mirage.server.auth.middleware import PUBLIC_PATHS
@@ -40,6 +39,7 @@ from mirage.server.daemon_config import (
     read_daemon_table,
 )
 from mirage.server.env import ENV_RATE_LIMITS, ENV_WORKER_TOKEN
+from mirage.server.errors import ErrorCode, error_response
 from mirage.server.metrics import refused
 from mirage.server.paths import mirage_home
 
@@ -260,9 +260,9 @@ class RateLimitMiddleware:
                 limit.rate,
             )
             refused("rate_limit")
-            response = JSONResponse(
-                {"detail": "Too Many Requests"},
-                status_code=429,
+            response = error_response(
+                ErrorCode.RATE_LIMITED,
+                "too many requests",
                 headers={"Retry-After": str(wait)},
             )
             await response(scope, receive, send)

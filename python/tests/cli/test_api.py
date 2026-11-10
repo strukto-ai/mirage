@@ -25,13 +25,6 @@ from mirage.cli.main import app
 
 TAR = b"\x00\xffTAR\x80"
 NDJSON = b'{"stream": "stdout", "data": "aGkK"}\n{"status": "done"}\n'
-VALIDATION_DETAIL = [
-    {
-        "type": "missing",
-        "loc": ["body", "config", "mounts"],
-        "msg": "Field required",
-    }
-]
 
 
 class _Client:
@@ -58,9 +51,12 @@ class _Client:
         if method == "DELETE":
             answer = httpx.Response(204)
         elif path.startswith("/missing"):
-            answer = httpx.Response(404, json={"detail": "not found"})
-        elif path.startswith("/invalid"):
-            answer = httpx.Response(422, json={"detail": VALIDATION_DETAIL})
+            answer = httpx.Response(
+                404,
+                json={"error": {"code": "not_found", "message": "not found"}},
+            )
+        elif path.startswith("/odd"):
+            answer = httpx.Response(500, json={"detail": "odd"})
         elif path.endswith("/snapshot"):
             answer = httpx.Response(
                 200, content=TAR, headers={"content-type": "application/x-tar"}
@@ -211,7 +207,7 @@ def test_an_error_answer_exits_two_with_its_detail(client):
     assert "404: not found" in r.output
 
 
-def test_a_validation_answer_exits_two_with_structured_detail(client):
-    r = _run("/invalid")
+def test_a_body_without_an_error_prints_as_it_came(client):
+    r = _run("/odd")
     assert r.exit_code == 2
-    assert json.loads(r.output.split("error 422: ", 1)[1]) == VALIDATION_DETAIL
+    assert 'error 500: {"detail":"odd"}' in r.output

@@ -120,7 +120,7 @@ async def test_unknown_failure_is_redacted_in_message_and_data(monkeypatch):
     assert result["error"] == {
         "code": -32603,
         "message": "internal server error",
-        "data": {"detail": "internal server error"},
+        "data": {"code": "internal", "message": "internal server error"},
     }
 
 

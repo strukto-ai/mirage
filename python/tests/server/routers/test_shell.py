@@ -76,26 +76,56 @@ async def test_shell_sync_returns_io_result():
         assert body["stdout"].startswith("hello")
 
 
-# A body that reads but fails the schema is a 422 in FastAPI's own shape,
-# located under "body"; a body that does not read is a 400.
+# A body that reads but fails the schema is a 400 naming its first bad
+# field; a body that does not read is a 400 too.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("body", "issues"),
+    ("body", "error"),
     [
         (
             {"command": "echo hello", "provision": True},
-            [("extra_forbidden", ["body", "provision"], True)],
+            {
+                "code": "unknown_field",
+                "message": "provision is not a known field",
+                "param": "provision",
+            },
         ),
-        ({}, [("missing", ["body", "command"], {})]),
-        ({"command": 5}, [("string_type", ["body", "command"], 5)]),
+        (
+            {},
+            {
+                "code": "missing_field",
+                "message": "command is required",
+                "param": "command",
+            },
+        ),
+        (
+            {"command": 5},
+            {
+                "code": "invalid_value",
+                "message": "command must be a string",
+                "param": "command",
+            },
+        ),
         (
             {"command": "echo hi", "record": 1},
-            [("bool_type", ["body", "record"], 1)],
+            {
+                "code": "invalid_value",
+                "message": "record must be a boolean",
+                "param": "record",
+            },
+        ),
+        (
+            {"provision": True, "command": 5},
+            {
+                "code": "invalid_value",
+                "message": "command must be a string",
+                "param": "command",
+            },
         ),
     ],
 )
 @pytest.mark.parametrize("explain", [False, True])
-async def test_shell_answers_a_bad_field_422(body, issues, explain):
+async def test_shell_answers_a_bad_field_400(body, error, explain):
     app = build_app(idle_grace_seconds=10.0)
     transport = ASGITransport(app=app)
     async with AsyncClient(
@@ -107,14 +137,11 @@ async def test_shell_answers_a_bad_field_422(body, issues, explain):
             params={"explain": str(explain).lower()},
             json=body,
         )
-        assert r.status_code == 422, r.text
-        assert [
-            (d["type"], d["loc"], d["input"]) for d in r.json()["detail"]
-        ] == issues
+        assert (r.status_code, r.json()) == (400, {"error": error})
 
 
 @pytest.mark.asyncio
-async def test_shell_answers_a_bad_request_part_422():
+async def test_shell_answers_a_bad_request_part_400():
     async with _served() as client:
         wid = await _create_workspace(client)
         r = await client.post(
@@ -127,9 +154,8 @@ async def test_shell_answers_a_bad_request_part_422():
                 ),
             },
         )
-        assert r.status_code == 422, r.text
-        [issue] = r.json()["detail"]
-        assert issue["loc"] == ["body", "request", "provision"]
+        assert r.status_code == 400, r.text
+        assert r.json()["error"]["param"] == "provision"
 
 
 @pytest.mark.asyncio
@@ -205,11 +231,16 @@ async def test_shell_checks_in_order():
             "/v1/workspaces/nope/shell?stream=abc&explain=xyz",
             json={"command": "echo hi"},
         )
-        assert flags.status_code == 422
-        assert [d["loc"] for d in flags.json()["detail"]] == [
-            ["query", "explain"],
-            ["query", "stream"],
-        ]
+        assert (flags.status_code, flags.json()) == (
+            400,
+            {
+                "error": {
+                    "code": "invalid_value",
+                    "message": "explain must be a boolean",
+                    "param": "explain",
+                }
+            },
+        )
         for route in [
             "/v1/workspaces/nope/shell",
             "/v1/workspaces/nope/shell?stream=true&explain=true",
@@ -235,7 +266,7 @@ async def test_shell_refuses_a_workspace_another_daemon_holds():
             f"/v1/workspaces/{wid}/shell", json={"command": "echo hello"}
         )
         assert r.status_code == 409, r.text
-        assert "'elsewhere'" in r.json()["detail"]
+        assert "'elsewhere'" in r.json()["error"]["message"]
         await store.release("elsewhere")
         r = await client.post(
             f"/v1/workspaces/{wid}/shell", json={"command": "echo hello"}
@@ -267,21 +298,41 @@ async def test_shell_honors_cwd():
 
 
 @pytest.mark.asyncio
-async def test_shell_passes_runtime_through():
+async def test_shell_refuses_a_runtime_or_machine_the_workspace_lacks():
     app = build_app(idle_grace_seconds=10.0)
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport, base_url="http://test"
     ) as client:
         wid = await _create_workspace(client)
-        # An unknown entry name fails loud inside Workspace.shell,
-        # proving the field reaches the runtime argument.
-        r = await client.post(
-            f"/v1/workspaces/{wid}/shell",
-            json={"command": "echo hi", "runtime": "no-such-runtime"},
+        route = f"/v1/workspaces/{wid}/shell"
+        runtime = await client.post(
+            route, json={"command": "echo hi", "runtime": "no-such-runtime"}
         )
-        assert r.status_code == 500, r.text
-        assert "unknown runtime" in r.json()["detail"]
+        assert (runtime.status_code, runtime.json()) == (
+            400,
+            {
+                "error": {
+                    "code": "invalid_value",
+                    "message": "runtime must be one of monty",
+                    "param": "runtime",
+                }
+            },
+        )
+        machine = await client.post(
+            route, json={"command": "echo hi", "machine": ""}
+        )
+        assert (machine.status_code, machine.json()) == (
+            400,
+            {
+                "error": {
+                    "code": "invalid_value",
+                    "message": "machine must be unset: the workspace has "
+                    "no machines",
+                    "param": "machine",
+                }
+            },
+        )
 
 
 @pytest.mark.asyncio
@@ -441,7 +492,7 @@ async def test_unknown_session_404(stream):
             json={"command": "echo hi"},
         )
         assert r.status_code == 404
-        assert r.json() == {"detail": "session not found"}
+        assert r.json()["error"]["message"] == "session not found"
 
 
 @pytest.mark.asyncio
@@ -645,7 +696,7 @@ async def test_a_body_that_stops_before_its_last_boundary_is_refused():
             10,
         )
         assert r.status_code == 400, r.text
-        assert r.json()["detail"] == "multipart body ended early"
+        assert r.json()["error"]["message"] == "multipart body ended early"
 
 
 @pytest.mark.asyncio
@@ -684,9 +735,7 @@ async def test_part_headers_past_the_bound_are_refused():
             f"/v1/workspaces/{wid}/shell", content=body, headers=MULTIPART
         )
         assert r.status_code == 400, r.text
-        assert r.json()["detail"] == (
-            "bad multipart body: Maximum header size exceeded"
-        )
+        assert r.json()["error"]["message"] == "multipart body is malformed"
 
 
 @pytest.mark.asyncio
@@ -706,7 +755,7 @@ async def test_stdin_before_the_request_part_is_refused():
             f"/v1/workspaces/{wid}/shell", content=body, headers=MULTIPART
         )
         assert r.status_code == 400, r.text
-        assert "before 'stdin'" in r.json()["detail"]
+        assert "before 'stdin'" in r.json()["error"]["message"]
 
 
 @pytest.mark.asyncio
@@ -850,7 +899,7 @@ async def test_a_server_shutting_down_refuses_a_new_line():
             f"/v1/workspaces/{wid}/shell", json={"command": "echo late"}
         )
     assert r.status_code == 503
-    assert r.json() == {"detail": "server is shutting down"}
+    assert r.json()["error"]["message"] == "server is shutting down"
     await app.state.registry.close_all()
 
 
@@ -900,7 +949,12 @@ async def test_a_closed_stdin_refuses_a_write():
             refused = await client.post(route, content=b"late")
             assert (refused.status_code, refused.json()) == (
                 409,
-                {"detail": "the line's stdin is not open"},
+                {
+                    "error": {
+                        "code": "conflict",
+                        "message": "the line's stdin is not open",
+                    }
+                },
             )
 
 

@@ -35,6 +35,7 @@ from starlette.types import Message, Receive, Scope, Send
 
 from mirage import __version__
 from mirage.execution.line.handle import LineHandle
+from mirage.server.errors import ErrorCode, HttpError
 from mirage.server.inflight import InFlight, rpc_messages
 from mirage.server.io_serde import io_result_to_dict
 from mirage.server.mcp.progress import (
@@ -284,9 +285,11 @@ class McpEndpoint:
         request = Request(scope, receive)
         workspace_id = request.path_params["workspace_id"]
         if request.query_params.get("calls", "tools") not in CALLS:
-            refused = JSONResponse(
-                {"detail": "calls must be tools or all"}, status_code=400
-            )
+            refused = HttpError(
+                ErrorCode.INVALID_VALUE,
+                "calls must be one of tools, all",
+                param="calls",
+            ).response()
             await refused(scope, receive, send)
             return
         try:
@@ -296,7 +299,7 @@ class McpEndpoint:
                 request.state.account,
             )
         except LookupError as exc:
-            response = JSONResponse({"detail": exc.args[0]}, status_code=404)
+            response = HttpError(ErrorCode.NOT_FOUND, exc.args[0]).response()
             await response(scope, receive, send)
             return
         await self._start()
@@ -307,9 +310,9 @@ class McpEndpoint:
         async for chunk in request.stream():
             received += chunk
             if len(received) > DEFAULT_MAX_REQUEST_BODY_SIZE:
-                response = JSONResponse(
-                    {"detail": "request body too large"}, status_code=413
-                )
+                response = HttpError(
+                    ErrorCode.TOO_LARGE, "request body too large"
+                ).response()
                 await response(scope, receive, send)
                 return
         body = bytes(received)

@@ -16,11 +16,11 @@ import logging
 import os
 from collections.abc import Iterable
 
-from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from mirage.server.daemon_config import read_daemon_table
 from mirage.server.env import ENV_ALLOWED_HOSTS, ENV_FORWARDED_ALLOW_IPS
+from mirage.server.errors import ErrorCode, error_response
 from mirage.server.host_validation_constants import (
     DEFAULT_ALLOWED_HOSTS,
     HOST_PATTERN,
@@ -196,8 +196,8 @@ class HostHeaderMiddleware:
                 raw_host,
                 self.allowed_hosts,
             )
-            response = PlainTextResponse(
-                "Invalid host header", status_code=400
+            response = error_response(
+                ErrorCode.HOST_NOT_ALLOWED, "host header is not allowed"
             )
             await response(scope, receive, send)
             return
@@ -213,8 +213,8 @@ class HostHeaderMiddleware:
                 fetch_site,
                 raw_host,
             )
-            response = PlainTextResponse(
-                "Cross-origin request refused", status_code=400
+            response = error_response(
+                ErrorCode.ORIGIN_NOT_ALLOWED, "cross-origin request refused"
             )
             await response(scope, receive, send)
             return

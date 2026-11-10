@@ -18,7 +18,6 @@ import re
 from typing import Any
 
 import jwt as pyjwt
-from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from mirage.concurrency.limiter import run_blocking
@@ -28,6 +27,7 @@ from mirage.server.auth.config import (
     AuthMode,
 )
 from mirage.server.auth.jwt import JWTVerificationError, verify_jwt
+from mirage.server.errors import ErrorCode, error_response
 
 logger = logging.getLogger(__name__)
 
@@ -67,9 +67,9 @@ async def _unauthorized(
     logger.warning(
         "rejecting request from %s:%s: %s", client[0], client[1], reason
     )
-    response = PlainTextResponse(
-        "Unauthorized",
-        status_code=401,
+    response = error_response(
+        ErrorCode.UNAUTHORIZED,
+        "unauthorized",
         headers={"WWW-Authenticate": "Bearer"},
     )
     await response(scope, receive, send)

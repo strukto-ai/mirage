@@ -221,13 +221,13 @@ async def test_answer_refusals():
         r = await client.post(
             f"/v1/workspaces/{wid}/asks/{ask_id}", json={"answer": "ask"}
         )
-        assert r.status_code == 422
+        assert r.status_code == 400
 
         r = await client.post(
             f"/v1/workspaces/{wid}/asks/{ask_id}",
             json={"answer": "deny", "scope": "session"},
         )
-        assert r.status_code == 422
+        assert r.status_code == 400
 
         r = await client.post(
             f"/v1/workspaces/{wid}/asks/nope", json={"answer": "allow"}

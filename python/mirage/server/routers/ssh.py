@@ -18,9 +18,9 @@ import logging
 import socket
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from starlette.responses import PlainTextResponse
 from starlette.websockets import WebSocketState
 
+from mirage.server.errors import ErrorCode, HttpError
 from mirage.server.registry import WorkspaceRegistry
 from mirage.server.ssh.constants import (
     CODEX_SOCKET_MODULE,
@@ -51,7 +51,7 @@ async def ssh_tunnel(websocket: WebSocket, workspace_id: str) -> None:
     account = websocket.state.account
     if registry.visible(workspace_id, account) is None:
         await websocket.send_denial_response(
-            PlainTextResponse("workspace not found", status_code=404)
+            HttpError(ErrorCode.NOT_FOUND, "workspace not found").response()
         )
         return
     module_path, attr = TUNNEL_MODULE.split(":")
@@ -59,11 +59,11 @@ async def ssh_tunnel(websocket: WebSocket, workspace_id: str) -> None:
         module = importlib.import_module(module_path)
     except ModuleNotFoundError:
         await websocket.send_denial_response(
-            PlainTextResponse(
+            HttpError(
+                ErrorCode.NOT_SUPPORTED,
                 "SSH over HTTPS needs asyncssh; install the ssh extra "
                 "(pip install 'mirage-ai[ssh]')",
-                status_code=501,
-            )
+            ).response()
         )
         return
     serve: ServeTunnel = getattr(module, attr)
@@ -151,7 +151,7 @@ async def codex_exec(websocket: WebSocket, workspace_id: str) -> None:
     entry = registry.visible(workspace_id, websocket.state.account)
     if entry is None:
         await websocket.send_denial_response(
-            PlainTextResponse("workspace not found", status_code=404)
+            HttpError(ErrorCode.NOT_FOUND, "workspace not found").response()
         )
         return
     module_path, attr = CODEX_SOCKET_MODULE.split(":")
@@ -159,11 +159,11 @@ async def codex_exec(websocket: WebSocket, workspace_id: str) -> None:
         module = importlib.import_module(module_path)
     except ModuleNotFoundError:
         await websocket.send_denial_response(
-            PlainTextResponse(
+            HttpError(
+                ErrorCode.NOT_SUPPORTED,
                 "codex-exec needs asyncssh; install the ssh extra "
                 "(pip install 'mirage-ai[ssh]')",
-                status_code=501,
-            )
+            ).response()
         )
         return
     serve: ServeCodexSocket = getattr(module, attr)
