@@ -26,8 +26,8 @@ import { KUBERNETES_CONFIG_FIELDS, type KubernetesConfig } from './config.ts'
 import {
   EXIT_PREFIX,
   EXIT_STATUS,
+  emptyStdin,
   KUBECTL_HINT,
-  noStdin,
   ownStdin,
   RUNNING_PHASE,
 } from './constants.ts'
@@ -185,7 +185,7 @@ export class KubernetesMachine extends ProgramMachine<KubernetesConfig> {
     let done: RunResult
     try {
       done = await this.execProgram(
-        [...head, ...tail, '/bin/sh', '-c', given ? line : noStdin(line)],
+        [...head, ...tail, '/bin/sh', '-c', given ? line : emptyStdin(line)],
         given ? stdin : null,
         output,
         signal,

@@ -46,12 +46,13 @@ export function ownStdin(command: string): string {
 }
 
 /**
- * `command` reading /dev/null, for an exec that takes no stdin because it
- * has no input to send: the program's end of input then comes from the pod,
- * not from a close kubectl forwards as the exec starts.
+ * `command` reading an empty pipe made in the pod, for an exec that takes no
+ * stdin because it has no input to send: the program reads a pipe, as it
+ * would anywhere else, whose end comes from the pod rather than from a close
+ * kubectl forwards as the exec starts.
  *
  * @param command the shell command.
  */
-export function noStdin(command: string): string {
-  return `exec </dev/null\n${command}`
+export function emptyStdin(command: string): string {
+  return `: | {\n${command}\n}`
 }
