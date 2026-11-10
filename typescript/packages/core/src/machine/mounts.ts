@@ -22,6 +22,7 @@ import { strerrorOf } from '../errors/fs.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import { singleQuote } from '../utils/quote.ts'
 import { compareCodePoints } from '../utils/sort.ts'
+import { abortable, mergeSignals } from '../utils/abort.ts'
 import { runDetached } from '../utils/async_context.ts'
 import type { Files } from '../workspace/files.ts'
 import type { SessionState } from '../workspace/session/session.ts'
@@ -255,6 +256,8 @@ export class MachineMounts {
   private readonly name = `${SSHFS_SOURCE_PREFIX}${crypto.randomUUID().replaceAll('-', '')}`
   // The prefixes served so far, numbering each sshfs's source.
   private serves = 0
+  // Each kill of an ended server's sshfs still running, which close stops.
+  private readonly kills = new Set<AbortController>()
 
   /**
    * @param provider the machine's provider, for messages.
@@ -404,6 +407,8 @@ export class MachineMounts {
 
   /** Unmount every served prefix and end its SFTP server. */
   close(): Promise<void> {
+    for (const kill of this.kills) kill.abort()
+    this.kills.clear()
     return this.locked(async () => {
       await this.unmount()
       this.session = null
@@ -723,23 +728,34 @@ export class MachineMounts {
    * already: a program blocked on the mount then gets an error rather than
    * hanging. The next line unmounts it and serves the prefix again, as for
    * any server that ended; a kill that lands late reaches only this serve's
-   * sshfs, never the one serving the prefix again.
+   * sshfs, never the one serving the prefix again. A kill the machine does
+   * not answer is let go after `UNMOUNT_WAIT_SECONDS`, or when the mounts
+   * close.
    */
   private ended(prefix: string, entry: Served): void {
     entry.ended = true
     if (this.served.get(prefix) !== entry) return
-    this.run(killLine(entry.source)).then(
-      (killed) => {
-        if (killed.exitCode !== 0) {
-          console.warn(
-            `${this.provider}: killing the sshfs for ${prefix} failed: ${said(killed.stderr)}`,
-          )
-        }
-      },
-      (err: unknown) => {
-        console.warn(`${this.provider}: killing the sshfs for ${prefix} failed:`, err)
-      },
-    )
+    const kill = new AbortController()
+    const signal = mergeSignals(kill.signal, AbortSignal.timeout(UNMOUNT_WAIT_SECONDS * 1000))
+    this.kills.add(kill)
+    abortable(this.run(killLine(entry.source), signal), signal)
+      .then(
+        (killed) => {
+          if (killed.exitCode !== 0) {
+            console.warn(
+              `${this.provider}: killing the sshfs for ${prefix} failed: ${said(killed.stderr)}`,
+            )
+          }
+        },
+        (err: unknown) => {
+          if (!kill.signal.aborted) {
+            console.warn(`${this.provider}: killing the sshfs for ${prefix} failed:`, err)
+          }
+        },
+      )
+      .finally(() => {
+        this.kills.delete(kill)
+      })
   }
 
   /** Remove the helper's setup log; keeping it only costs a file. */

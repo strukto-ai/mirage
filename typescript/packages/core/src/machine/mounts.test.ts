@@ -35,7 +35,7 @@ import type { MachinePipe, MountType } from './types.ts'
 import type { OutputFn, RunResult } from '../runtime/types.ts'
 import { MachineHandle } from './handle.ts'
 import { PIPE_TRANSPORT, type PipeTransport } from './mixin.ts'
-import { isRun, MOUNT_GUARD, SSHFS_OPTIONS } from './constants.ts'
+import { isRun, MOUNT_GUARD, SSHFS_OPTIONS, UNMOUNT_WAIT_SECONDS } from './constants.ts'
 import {
   killLine,
   mountTable,
@@ -76,6 +76,8 @@ class FakeMachine extends MachineHandle implements PipeTransport {
   failCheck = false
   failKill = false
   hangKill = false
+  // Kills that never answered and were let go.
+  killsStopped = 0
   // How long the kill line takes to land.
   killMs = 0
   hang = false
@@ -175,7 +177,12 @@ class FakeMachine extends MachineHandle implements PipeTransport {
       )
     }
     if (line.startsWith('for p in /proc/[0-9]*') && this.hangKill) {
-      return new Promise(() => undefined)
+      return new Promise((_, reject) => {
+        signal?.addEventListener('abort', () => {
+          this.killsStopped += 1
+          reject(new Error('aborted'))
+        })
+      })
     }
     if (line.startsWith('for p in /proc/[0-9]*') && this.failKill) {
       return Promise.reject(new Error('the machine went away'))
@@ -1076,6 +1083,50 @@ describe('MachineMounts', () => {
     expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
     expect(sandbox.served()).toEqual(['/data', '/my notes', '/data'])
     await ws.close()
+  })
+
+  it('lets go of an unanswered kill at its deadline, warning', async () => {
+    const sandbox = new FakeMachine('ssh')
+    sandbox.hangKill = true
+    const ws = workspace(sandbox)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    const timeout = AbortSignal.timeout.bind(AbortSignal)
+    const short = vi
+      .spyOn(AbortSignal, 'timeout')
+      .mockImplementation((ms) => timeout(ms === UNMOUNT_WAIT_SECONDS * 1000 ? 50 : ms))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      sandbox.ends.get('/data')?.()
+      await until(() => warn.mock.calls.length > 0)
+      expect(sandbox.killsStopped).toBe(1)
+      expect(warn).toHaveBeenCalledWith(
+        'fake: killing the sshfs for /data failed:',
+        expect.anything(),
+      )
+    } finally {
+      short.mockRestore()
+      warn.mockRestore()
+      await ws.close()
+    }
+  })
+
+  it('lets go of an unanswered kill when the mounts close, quietly', async () => {
+    const sandbox = new FakeMachine('ssh')
+    sandbox.hangKill = true
+    const ws = workspace(sandbox)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      sandbox.ends.get('/data')?.()
+      await until(() => sandbox.commands.some((c) => c.startsWith('for p in /proc/[0-9]*')))
+      await ws.close()
+      await until(() => sandbox.killsStopped === 1)
+      expect(warn.mock.calls.filter(([said]) => String(said).includes('killing'))).toEqual([])
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('never kills the sshfs serving a prefix again with a kill that lands late', async () => {
