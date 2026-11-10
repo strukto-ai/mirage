@@ -290,19 +290,21 @@ def _table(
 
 def _since(
     rows: list[Process],
-    samples: dict[int, tuple[float, float]],
+    samples: dict[int, tuple[ProcessUsage, float, float | None]],
     now: float,
 ) -> list[Process]:
-    """The rows with each one's ``%CPU`` over the time since the frame
-    before, as top shows a frame after its first; a process that frame
-    did not see keeps its average over its life. ``samples`` then holds
-    this frame's.
+    """The rows with each one's ``%CPU`` over the time since its reading
+    before, as top shows a frame after its first; a process no frame
+    before read keeps its average over its life. A reading a failed scan
+    left in place is no new one: its sample stays, and the row shows
+    what it showed last. ``samples`` then holds this frame's.
 
     Args:
         rows (list[Process]): the processes this frame shows.
-        samples (dict[int, tuple[float, float]]): each pid's CPU seconds
-            and when the frame before read them.
-        now (float): when this frame read them, on a monotonic clock.
+        samples (dict[int, tuple[ProcessUsage, float, float | None]]):
+            each pid's last reading, when it came on a monotonic clock,
+            and the ``%CPU`` it showed (None for its lifetime's).
+        now (float): when this frame's readings came.
     """
     before = dict(samples)
     samples.clear()
@@ -312,14 +314,22 @@ def _since(
         if usage is None:
             shown.append(info)
             continue
-        samples[info.pid] = (usage.cpu_seconds, now)
         seen = before.get(info.pid)
-        if seen is None or now <= seen[1]:
-            shown.append(info)
-            continue
-        spent = max(0.0, usage.cpu_seconds - seen[0])
-        percent = spent / (now - seen[1]) * 100
-        shown.append(replace(info, usage=replace(usage, cpu_percent=percent)))
+        if seen is not None and seen[0] is usage:
+            samples[info.pid] = seen
+            percent = seen[2]
+        elif seen is None or now <= seen[1]:
+            samples[info.pid] = (usage, now, None)
+            percent = None
+        else:
+            spent = max(0.0, usage.cpu_seconds - seen[0].cpu_seconds)
+            percent = spent / (now - seen[1]) * 100
+            samples[info.pid] = (usage, now, percent)
+        shown.append(
+            info
+            if percent is None
+            else replace(info, usage=replace(usage, cpu_percent=percent))
+        )
     return shown
 
 
@@ -328,7 +338,7 @@ async def _frame_of(
     session: SessionState | None,
     scope: MachineScope,
     options: TopOptions,
-    samples: dict[int, tuple[float, float]],
+    samples: dict[int, tuple[ProcessUsage, float, float | None]],
 ) -> tuple[str, str]:
     """One frame of output, and what the machines that did not answer
     said.
@@ -338,8 +348,8 @@ async def _frame_of(
         session (SessionState | None): the shell session.
         scope (MachineScope): the machines.
         options (TopOptions): how to print.
-        samples (dict[int, tuple[float, float]]): the frame before's CPU
-            readings, which this frame's replace (``_since``).
+        samples (dict[int, tuple[ProcessUsage, float, float | None]]):
+            the readings before, which this frame's replace (``_since``).
     """
     processes = job_table.processes
     machines, errors = await read_machines(processes, scope, "top", cpu=True)
@@ -377,7 +387,7 @@ async def _frames_of(
     options: TopOptions,
     io: IOResult,
     node: ExecutionNode,
-    samples: dict[int, tuple[float, float]],
+    samples: dict[int, tuple[ProcessUsage, float, float | None]],
 ) -> AsyncIterator[bytes]:
     """The first frame, then one every ``delay`` until ``iterations``.
     A machine that stops answering says so on stderr, and the command
@@ -391,8 +401,8 @@ async def _frames_of(
         options (TopOptions): how to print.
         io (IOResult): the result, settled as the output ends.
         node (ExecutionNode): the command's node, settled with it.
-        samples (dict[int, tuple[float, float]]): the first frame's CPU
-            readings.
+        samples (dict[int, tuple[ProcessUsage, float, float | None]]):
+            the first frame's readings.
     """
     try:
         yield encode_text(first)
@@ -516,7 +526,7 @@ async def handle_top(
     scope = machine_scope(job_table.processes, named)
     if scope is None:
         return job_result(cmd_str, f"top: {named}: no such machine\n", 1)
-    samples: dict[int, tuple[float, float]] = {}
+    samples: dict[int, tuple[ProcessUsage, float, float | None]] = {}
     text, errors = await _frame_of(job_table, session, scope, options, samples)
     code = 1 if errors else 0
     err = encode_text(errors) or None

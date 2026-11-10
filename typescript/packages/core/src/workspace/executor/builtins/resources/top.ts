@@ -206,15 +206,17 @@ function table(
 }
 
 /**
- * The rows with each one's `%CPU` over the time since the frame before, as top
- * shows a frame after its first; a process that frame did not see keeps its
- * average over its life. `samples` then holds this frame's: each pid's CPU
- * seconds and when they were read, on a monotonic clock. Mirrors Python's
- * `_since`.
+ * The rows with each one's `%CPU` over the time since its reading before, as
+ * top shows a frame after its first; a process no frame before read keeps its
+ * average over its life. A reading a failed scan left in place is no new one:
+ * its sample stays, and the row shows what it showed last. `samples` holds
+ * each pid's last reading, when it came on a monotonic clock, and the `%CPU`
+ * it showed (null for its lifetime's), and then this frame's. Mirrors
+ * Python's `_since`.
  */
 export function since(
   rows: readonly Process[],
-  samples: Map<number, [number, number]>,
+  samples: Map<number, [ProcessUsage, number, number | null]>,
   now: number,
 ): Process[] {
   const before = new Map(samples)
@@ -222,11 +224,19 @@ export function since(
   return rows.map((info) => {
     const usage = info.usage
     if (usage === undefined || usage === null) return info
-    samples.set(info.id.pid, [usage.cpuSeconds, now])
     const seen = before.get(info.id.pid)
-    if (seen === undefined || now <= seen[1]) return info
-    const spent = Math.max(0, usage.cpuSeconds - seen[0])
-    return { ...info, usage: { ...usage, cpuPercent: (spent / (now - seen[1])) * 100 } }
+    let percent: number | null
+    if (seen?.[0] === usage) {
+      samples.set(info.id.pid, seen)
+      percent = seen[2]
+    } else if (seen === undefined || now <= seen[1]) {
+      samples.set(info.id.pid, [usage, now, null])
+      percent = null
+    } else {
+      percent = (Math.max(0, usage.cpuSeconds - seen[0].cpuSeconds) / (now - seen[1])) * 100
+      samples.set(info.id.pid, [usage, now, percent])
+    }
+    return percent === null ? info : { ...info, usage: { ...usage, cpuPercent: percent } }
   })
 }
 
@@ -235,7 +245,7 @@ async function frameOf(
   session: SessionState | null,
   scope: MachineScope,
   options: TopOptions,
-  samples: Map<number, [number, number]>,
+  samples: Map<number, [ProcessUsage, number, number | null]>,
 ): Promise<[string, string]> {
   const processes = jobTable.processes
   const [machines, errors] = await readMachines(processes, scope, 'top', true)
@@ -270,7 +280,7 @@ async function* framesOf(
   options: TopOptions,
   io: IOResult,
   node: ExecutionNode,
-  samples: Map<number, [number, number]>,
+  samples: Map<number, [ProcessUsage, number, number | null]>,
   signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
   try {
@@ -373,7 +383,7 @@ export async function handleTop(
   const named = typeof name === 'string' ? name : null
   const scope = machineScope(jobTable.processes, named)
   if (scope === null) return jobResult(cmdStr, `top: ${named ?? ''}: no such machine\n`, 1)
-  const samples = new Map<number, [number, number]>()
+  const samples = new Map<number, [ProcessUsage, number, number | null]>()
   const [text, errors] = await frameOf(jobTable, session, scope, options, samples)
   const code = errors === '' ? 0 : 1
   const err = errors === '' ? null : encodeText(errors)
