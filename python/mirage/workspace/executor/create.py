@@ -140,8 +140,8 @@ async def write_description(
     advanced yet. A writer killed while it waits for its turn writes
     nothing: its cancelled task leaves the queue. A store that rewrites
     the file per pwrite rewrites it once per write; writing nothing sends
-    none, and a write that fails leaves the offset no further than the
-    file's end.
+    none, and a write that fails advances the offset by what its store
+    landed, as the dispatcher's report counts it.
 
     Args:
         dispatch (DispatchFn): operation dispatcher.
@@ -193,21 +193,28 @@ async def write_description(
                 yield step
                 step = await anext(parts, None)
 
+        report = OpReport()
         try:
             if isinstance(data, bytes):
                 if data:
                     await dispatch(
-                        "pwrite", file.where, data=data, offset=start
+                        "pwrite",
+                        file.where,
+                        data=data,
+                        offset=start,
+                        report=report,
                     )
                 moved = len(data)
             elif step is not None:
                 await dispatch(
-                    "pwrite", file.where, data=counted(), offset=start
+                    "pwrite",
+                    file.where,
+                    data=counted(),
+                    offset=start,
+                    report=report,
                 )
         except BaseException:
-            size = await _size_of(dispatch, file.where)
-            if size is not None:
-                moved = min(moved, max(size - start, 0))
+            moved = min(moved, report.bytes or 0)
             raise
         finally:
             await parts.aclose()

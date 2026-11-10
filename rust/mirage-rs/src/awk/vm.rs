@@ -2282,6 +2282,7 @@ impl Machine {
             if self.io.files_out.contains(&name) {
                 self.io.send_file(&name);
                 self.io.files_out.remove(&name);
+                self.io.written.retain(|written| written != &name);
                 self.io.push(Request::Flush {
                     path: Some(name.to_vec()),
                 });

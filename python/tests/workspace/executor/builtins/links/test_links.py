@@ -1,8 +1,11 @@
 import errno
+from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
 
+from mirage.errors.fs import efbig
+from mirage.io.types import ByteSource
 from mirage.policy import Action, Deny, Policy, VfsContext
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
@@ -258,14 +261,21 @@ async def test_ln_backup_refuses_a_directory_destination():
     assert ws.namespace.readlink("/data/lk~") == "/data/d"
 
 
+async def _first_page(path: PathSpec) -> AsyncIterator[bytes]:
+    yield b"a"
+    raise efbig(path)
+
+
 class SealedReads(RAMVFS):
     async def read(
         self, path: PathSpec, offset: int = 0, size: int | None = None
-    ) -> bytes:
+    ) -> ByteSource:
         if path.virtual.endswith(".sealed"):
             raise PermissionError(
                 errno.EACCES, "Permission denied", path.virtual
             )
+        if path.virtual.endswith(".late"):
+            return _first_page(path)
         return await super().read(path, offset, size)
 
 
@@ -278,12 +288,14 @@ async def test_ln_keeps_going_after_a_source_it_cannot_read():
         {"/data": (SealedReads(), MountMode.WRITE)}, mode=MountMode.WRITE
     )
     await ws.shell(
-        "mkdir /data/d; printf a > /data/a.sealed; printf b > /data/b.txt"
+        "mkdir /data/d; printf a > /data/a.sealed; printf b > /data/b.txt; "
+        "printf c > /data/c.late"
     )
-    r = await ws.shell("ln /data/a.sealed /data/b.txt /data/d")
+    r = await ws.shell("ln /data/a.sealed /data/c.late /data/b.txt /data/d")
     assert r.exit_code == 1
     assert r.stderr == (
         b"ln: failed to access '/data/a.sealed': Permission denied\n"
+        b"ln: failed to access '/data/c.late': File too large\n"
     )
     assert (
         await ws.shell("ls /data/d; cat /data/d/b.txt")

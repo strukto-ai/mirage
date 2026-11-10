@@ -141,8 +141,8 @@ export class RAMConsoleStore implements ConsoleStore {
     return Promise.resolve()
   }
 
-  // Drop the oldest chunks past the budget by moving the head, letting go of
-  // the dropped ones once they are half the list.
+  // Drop the oldest chunks past the budget by moving the head: a dropped slot
+  // lets go of its bytes at once, and the slots go once they are half the list.
   private trim(): void {
     if (this.maxBytes === null) return
     while (this.bytes > this.maxBytes) {
@@ -151,6 +151,7 @@ export class RAMConsoleStore implements ConsoleStore {
       // follow(); dropping it would leave both blocked forever, so it
       // outranks the byte budget.
       if (first === undefined || first.channel === Channel.CONTROL) break
+      this.chunks[this.head] = { ...first, data: new Uint8Array(0) }
       this.head += 1
       this.bytes -= first.data.byteLength
       this.baseSeq += 1

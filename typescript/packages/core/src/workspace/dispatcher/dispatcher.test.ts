@@ -34,6 +34,7 @@ import { runInCommandScope } from '../../cache/index/scope.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { apiRequest } from '../../core/api/client.ts'
 import { MemoryExhausted } from '../../io/errors.ts'
+import { MEMORY_LIMIT } from '../../io/spool.ts'
 import { ResponseTooLargeError } from '../../core/api/errors.ts'
 import { bodyLimit, memoryRoom } from '../../io/memory.ts'
 import { BaseVFS } from '../../vfs/base.ts'
@@ -1925,6 +1926,50 @@ describe('dispatch runs writers to one path one at a time', () => {
       await ws.close()
     }
   })
+})
+
+/**
+ * A RAM mount that fills up: its pwrite refuses past the first window, or
+ * with `rewrites` it has no pwrite and its rewrite of the file is refused.
+ * Mirrors Python's _FullRAM.
+ */
+class FullRAM extends RAMVFS {
+  constructor(readonly rewrites: boolean) {
+    super()
+  }
+
+  override supports(name: string): boolean {
+    return !(this.rewrites && name === 'pwrite') && super.supports(name)
+  }
+
+  override async pwrite(path: PathSpec, data: Uint8Array, offset: number): Promise<void> {
+    if (offset >= MEMORY_LIMIT) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' })
+    await super.pwrite(path, data, offset)
+  }
+
+  override write(): Promise<void> {
+    return Promise.reject(Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' }))
+  }
+}
+
+it.each([
+  [false, MEMORY_LIMIT],
+  [true, 0],
+])('reports what a failed streamed pwrite landed (rewrites: %s)', async (rewrites, landed) => {
+  const vfs = new FullRAM(rewrites)
+  vfs.store.files.set('/f', new Uint8Array(3 * MEMORY_LIMIT))
+  const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
+  try {
+    const report = new OpReport()
+    const { dispatcher } = ws as unknown as { dispatcher: { dispatch: DispatchFn } }
+    const data = yieldBytes(new Uint8Array(2 * MEMORY_LIMIT))
+    await expect(
+      dispatcher.dispatch('pwrite', PathSpec.fromStrPath('/data/f'), [data, 0], {}, report),
+    ).rejects.toThrow('ENOSPC')
+    expect(report.bytes).toBe(landed)
+  } finally {
+    await ws.close()
+  }
 })
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))

@@ -2945,7 +2945,10 @@ class Dispatcher:
         changes beside the store (caches, the node table's links and
         attributes) changes under the same hold: a chain of renames
         finishing out of order would move one name's attributes onto
-        another.
+        another. A pwrite that fails stamps the caller's report with the
+        bytes its store's own pwrites landed, from their records: what a
+        store that pwrites lands window by window, and nothing for one
+        that rewrites the file.
 
         Args:
             call (_Call): the admitted write.
@@ -2992,6 +2995,12 @@ class Dispatcher:
                         call.name, call.path.virtual, **kwargs
                     )
             except BaseException:
+                if call.name == "pwrite" and call.report is not None:
+                    call.report.bytes = sum(
+                        rec.bytes
+                        for rec in mine
+                        if rec.op == "pwrite" and rec.path == call.path.virtual
+                    )
                 await self._evict_failed_write(
                     mount, call.name, call.path, kwargs
                 )

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import threading
 from collections.abc import Iterable, Iterator, MutableMapping
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
@@ -64,12 +65,15 @@ class RAMFiles(MutableMapping[str, bytes]):
     A file ``splice`` changed is a ``bytearray`` it grows and overwrites
     where it lies, so a run of appends or pwrites copies nothing; a read
     takes a ``bytes`` copy, kept in its place until the next change, so
-    a reader holds what was there when it read. Mirrors the TS
+    a reader holds what was there when it read. The table's own lock
+    keeps a read's copy and a change apart across threads, so no change
+    lands in a buffer a read has just replaced. Mirrors the TS
     ``RAMFiles``.
     """
 
     def __init__(self, usage: StorageUsage | None = None) -> None:
         self._data: dict[str, bytes | bytearray] = {}
+        self._lock = threading.Lock()
         self.usage = usage
         self.held = 0
 
@@ -82,14 +86,17 @@ class RAMFiles(MutableMapping[str, bytes]):
         return key in self._data
 
     def __getitem__(self, key: str) -> bytes:
-        data = self._data[key]
-        if isinstance(data, bytearray):
-            data = self._data[key] = bytes(data)
-        return data
+        with self._lock:
+            data = self._data[key]
+            if isinstance(data, bytearray):
+                data = self._data[key] = bytes(data)
+            return data
 
     def __setitem__(self, key: str, value: bytes) -> None:
-        self._count(len(value) - self.size(key))
-        self._data[key] = bytes(value)
+        with self._lock:
+            delta = len(value) - self.size(key)
+            self._data[key] = bytes(value)
+        self._count(delta)
 
     def size(self, key: str) -> int:
         """A key's length without copying it, 0 for a missing one.
@@ -109,19 +116,22 @@ class RAMFiles(MutableMapping[str, bytes]):
             offset (int): where the bytes land.
             data (bytes): the bytes to write.
         """
-        buffer = self._data.setdefault(key, b"")
-        if not data:
-            return
-        if not isinstance(buffer, bytearray):
-            buffer = self._data[key] = bytearray(buffer)
-        before = len(buffer)
-        buffer.extend(bytes(max(offset - before, 0)))
-        buffer[offset : offset + len(data)] = data
-        self._count(len(buffer) - before)
+        with self._lock:
+            buffer = self._data.setdefault(key, b"")
+            if not data:
+                return
+            if not isinstance(buffer, bytearray):
+                buffer = self._data[key] = bytearray(buffer)
+            before = len(buffer)
+            buffer.extend(bytes(max(offset - before, 0)))
+            buffer[offset : offset + len(data)] = data
+            delta = len(buffer) - before
+        self._count(delta)
 
     def __delitem__(self, key: str) -> None:
-        self._count(-len(self._data[key]))
-        del self._data[key]
+        with self._lock:
+            delta = -len(self._data.pop(key))
+        self._count(delta)
 
     def __iter__(self) -> Iterator[str]:
         return iter(self._data)
@@ -130,14 +140,12 @@ class RAMFiles(MutableMapping[str, bytes]):
         return len(self._data)
 
     def clear(self) -> None:
-        if self.usage is None:
+        usage = self.usage
+        with usage.lock if usage is not None else nullcontext(), self._lock:
             self._data.clear()
             self.held = 0
-            return
-        with self.usage.lock:
-            self._data.clear()
-            self.held = 0
-            self.usage.used = 0
+            if usage is not None:
+                usage.used = 0
 
 
 @dataclass

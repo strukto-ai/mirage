@@ -3173,6 +3173,17 @@
               "stderr": "bash: xmalloc: cannot allocate 2465197 bytes (past max_env of 2097152 bytes, a mirage workspace setting)\n"
             }
           }
+        },
+        {
+          "op": "exec",
+          "command": "head -c 1500000 /dev/zero | tr \"\\0\" x > /a/mo_big; { cat /a/mo_big; echo; echo; } > /a/mo; (q=(s \"$(cat /a/mo_big)\"); mapfile -O 0 -t q < /a/mo; echo ${#q[@]} ${#q[0]} ${#q[1]}); echo rc=$?",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "2 1500000 0\nrc=0\n",
+              "stderr": ""
+            }
+          }
         }
       ]
     },

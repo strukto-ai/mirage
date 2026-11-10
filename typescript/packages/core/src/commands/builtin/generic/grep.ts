@@ -287,6 +287,12 @@ export async function grepGeneric(
     if (!(error instanceof UsageError)) throw error
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(error.message + '\n') })]
   }
+  // -m over a file leaves standard input past its last selected line, so a
+  // stdin operand gives back the rest of the descriptor.
+  const shared =
+    ctx.stdin instanceof SharedInput && ctx.stdin.seekable && (f.maxCount ?? 0) > 0
+      ? ctx.stdin
+      : null
   const search = (
     source: AsyncIterable<Uint8Array>,
     label: string,
@@ -294,8 +300,21 @@ export async function grepGeneric(
     fileIO: IOResult,
     afterOutput = false,
     size: number | null = null,
+    readsStdin = false,
   ): AsyncIterable<Uint8Array> =>
-    streamInput(source, searcher, label, show, fileIO, afterOutput, size, ctx.signal)
+    streamInput(
+      source,
+      searcher,
+      label,
+      show,
+      fileIO,
+      afterOutput,
+      size,
+      ctx.signal,
+      false,
+      null,
+      readsStdin ? shared : null,
+    )
   // The stream is released however the output ends, read or not.
   const owned = (output: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array> =>
     new OutputStream(output[Symbol.asyncIterator](), () => {
@@ -307,33 +326,11 @@ export async function grepGeneric(
   const first = paths[0]
   if (first === undefined) {
     try {
-      // -m over a file leaves standard input past its last selected line,
-      // so grep reads that descriptor itself and gives back the rest.
-      const shared =
-        ctx.stdin instanceof SharedInput && ctx.stdin.seekable && (f.maxCount ?? 0) > 0
-          ? ctx.stdin
-          : null
+      // grep reads a descriptor it gives back to itself, unguarded.
       const source = shared ?? guardInput(resolveSource(ctx.stdin), ctx)
       const label = f.label ?? GREP_STDIN_LABEL
       const show = f.withFilename && !f.noFilename
-      return [
-        owned(
-          streamInput(
-            source,
-            searcher,
-            label,
-            show,
-            io,
-            false,
-            null,
-            ctx.signal,
-            false,
-            null,
-            shared,
-          ),
-        ),
-        io,
-      ]
+      return [owned(search(source, label, show, io, false, null, true)), io]
     } catch (error) {
       searcher.close()
       if (!(error instanceof Error)) throw error
@@ -466,6 +463,7 @@ export async function grepGeneric(
           fileIO,
           printed,
           info.type === FileType.FILE ? (info.size ?? null) : null,
+          isStdin(p),
         )) {
           updateStatus(fileIO)
           printed = true

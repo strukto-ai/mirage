@@ -16,6 +16,7 @@ import asyncio
 import logging
 import threading
 import time
+from dataclasses import replace
 
 from mirage.shell.console.constants import END_OF_CONSOLE
 from mirage.shell.console.types import Channel, ConsoleChunk, ReadResult
@@ -146,8 +147,9 @@ class RAMConsoleStore:
             self._schedule(loop, future)
 
     def _trim(self) -> None:
-        """Drop the oldest chunks past the budget by moving the head,
-        letting go of the dropped ones once they are half the list."""
+        """Drop the oldest chunks past the budget by moving the head:
+        a dropped slot lets go of its bytes at once, and the slots go
+        once they are half the list."""
         if self._max_bytes is None:
             return
         while self._head < len(self._chunks) and self._bytes > self._max_bytes:
@@ -157,6 +159,7 @@ class RAMConsoleStore:
                 # and ends follow(); dropping it would leave both
                 # blocked forever, so it outranks the byte budget.
                 break
+            self._chunks[self._head] = replace(dropped, data=b"")
             self._head += 1
             self._bytes -= len(dropped.data)
             self._base_seq += 1
