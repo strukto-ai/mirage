@@ -19,19 +19,50 @@ export MIRAGE_AUTH_TOKEN='replace-with-your-token'
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
-    ```python
+    In an activated Python environment, install the server:
+
+    ```bash
+    python -m pip install mirage-ai
+    ```
+
+    Save this as `server.py`:
+
+    ```python server.py
     import uvicorn
 
     from mirage.server.app import build_app
 
     uvicorn.run(build_app(), host="127.0.0.1", port=8765)
     ```
+
+    Start it in the terminal where you set the token, and leave it running:
+
+    ```bash
+    python server.py
+    ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
-    ```typescript
+    In your Node project, install the server and TypeScript runner:
+
+    ```bash
+    npm install @struktoai/mirage-server
+    npm install -D tsx typescript
+    npm pkg set type=module
+    ```
+
+    The packages require [ES modules](/typescript/install#quick-install).
+    Save this as `server.ts`:
+
+    ```typescript server.ts
     import { buildApp } from '@struktoai/mirage-server'
 
     await buildApp().listen({ host: '127.0.0.1', port: 8765 })
+    ```
+
+    Start it in the terminal where you set the token, and leave it running:
+
+    ```bash
+    npx tsx server.ts
     ```
   </Tab>
 </Tabs>
