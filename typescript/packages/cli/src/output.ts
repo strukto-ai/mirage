@@ -12,6 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { debuglog } from 'node:util'
+
+const logger = { debug: debuglog('mirage') }
+
 export type Formatter<T = unknown> = (obj: T) => string
 
 export function emit<T = unknown>(obj: T, human?: Formatter<T>): void {
@@ -77,7 +81,8 @@ export function errorOf(
   let body: unknown
   try {
     body = JSON.parse(text)
-  } catch {
+  } catch (err) {
+    logger.debug('error body is not JSON: %s', err)
     return null
   }
   const error =

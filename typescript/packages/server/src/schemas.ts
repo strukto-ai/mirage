@@ -76,18 +76,21 @@ export type CreateWorkspaceRequest = z.infer<typeof CreateWorkspaceRequest>
  * is wrong. Mirrors Python's `check_config`.
  */
 export function checkConfig(config: unknown): WorkspaceConfigRaw {
-  const time = (value: string | null | undefined, ctx: z.RefinementCtx): void => {
-    if (value === undefined || value === null) return
-    try {
-      parseSystemTime(value)
-    } catch (error) {
-      if (!(error instanceof Error)) throw error
-      ctx.addIssue({ code: 'custom', message: error.message })
-    }
-  }
   const shape = z.looseObject({
     mounts: z.record(z.string(), z.unknown()),
-    system_time: z.string().nullable().optional().superRefine(time),
+    system_time: z
+      .string()
+      .nullable()
+      .optional()
+      .superRefine((value, ctx) => {
+        if (value === undefined || value === null) return
+        try {
+          parseSystemTime(value)
+        } catch (error) {
+          if (!(error instanceof Error)) throw error
+          ctx.addIssue({ code: 'custom', message: error.message })
+        }
+      }),
     profile: z.string().nullable().optional(),
     default_session_id: z.string().nullable().optional(),
     workspace_id: z.string().nullable().optional(),

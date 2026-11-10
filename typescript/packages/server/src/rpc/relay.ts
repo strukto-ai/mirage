@@ -12,9 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { debuglog } from 'node:util'
 import { createInterface } from 'node:readline'
 import { RPC_PARSE_ERROR } from './constants.ts'
 import { CANCEL_REQUEST, errorResponse } from './server.ts'
+
+const logger = { debug: debuglog('mirage') }
 
 /**
  * Relay this process's line-delimited JSON-RPC to a daemon's `/rpc`.
@@ -44,7 +47,8 @@ export async function relayStdio(url: string, token: () => Promise<string>): Pro
       try {
         const message = (JSON.parse(text) as { error?: { message?: unknown } }).error?.message
         if (typeof message === 'string') detail = message
-      } catch {
+      } catch (err) {
+        logger.debug('rpc error body is not an error: %s', err)
         detail = text
       }
       throw new Error(`error ${String(response.status)}: ${detail}`)
@@ -57,7 +61,8 @@ export async function relayStdio(url: string, token: () => Promise<string>): Pro
     let message: unknown
     try {
       message = JSON.parse(line)
-    } catch {
+    } catch (err) {
+      logger.debug('rpc line is not JSON: %s', err)
       write(JSON.stringify(errorResponse(null, RPC_PARSE_ERROR, 'parse error')))
       continue
     }
