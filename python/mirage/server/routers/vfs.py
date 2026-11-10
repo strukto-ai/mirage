@@ -16,11 +16,13 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any
+from typing import Any, NotRequired, TypedDict, cast
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from mcp.server.transport_security import DEFAULT_MAX_REQUEST_BODY_SIZE
+from pydantic import ValidationError
 
 from mirage.errors.classify import classify
 from mirage.errors.types import FsCondition
@@ -63,6 +65,48 @@ STATUS: dict[FsCondition, int] = {
     FsCondition.EPIPE: 500,
     FsCondition.EBADF: 500,
 }
+
+
+class ValidationIssue(TypedDict):
+    """One field that failed validation, an entry of an
+    ``HTTPValidationError``'s ``detail``: ``loc`` says where it is, such
+    as ``("query", "stream")`` or ``("body", "command")``."""
+
+    type: str
+    loc: tuple[str | int, ...]
+    msg: str
+    input: JsonValue
+    ctx: NotRequired[dict[str, JsonValue]]
+
+
+def invalid(issues: list[ValidationIssue]) -> RequestValidationError:
+    """A 422 for fields that failed validation, answered as FastAPI
+    answers the ones it checks itself.
+
+    Args:
+        issues (list[ValidationIssue]): each field that failed.
+    """
+    return RequestValidationError(issues)
+
+
+def invalid_body(
+    exc: ValidationError, part: str | None = None
+) -> RequestValidationError:
+    """A body a route validates itself, refused as FastAPI refuses one
+    it validates: each ``loc`` starts at ``body``.
+
+    Args:
+        exc (ValidationError): the body model's failure.
+        part (str | None): the multipart part that carried the body, if
+            any, named after ``body`` in each ``loc``.
+    """
+    where = ("body",) if part is None else ("body", part)
+    return invalid(
+        [
+            cast(ValidationIssue, {**error, "loc": (*where, *error["loc"])})
+            for error in exc.errors(include_url=False)
+        ]
+    )
 
 
 def require_entry(request: Request, workspace_id: str) -> WorkspaceEntry:

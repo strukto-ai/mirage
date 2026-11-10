@@ -477,8 +477,7 @@
   },
   "server/routers/shell": {
    "python_only": {
-    "_finish_upload": "TypeScript keeps it as ShellUpload.finish.",
-    "_parse_json_body": "TypeScript parses a JSON body inline with ShellRequestSchema."
+    "_finish_upload": "TypeScript keeps it as ShellUpload.finish."
    },
    "typescript_only": {
     "ShellUpload": "Python holds the upload's reader task and its stdin as locals of the route.",
@@ -581,7 +580,6 @@
    "python_only": {
     "cancel_session_lines": "FastAPI routes are module functions; Fastify registers the same handler inline in registerSessionsRoutes.",
     "kill_session_jobs": "FastAPI routes are module functions; Fastify registers the same handler inline in registerSessionsRoutes.",
-    "UpdateSessionRequest": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
     "update_session": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access."
    }
   },
@@ -820,6 +818,7 @@
     "CallQuery": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "HttpError": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "queryFlag": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
+    "invalidChoice": "FastAPI checks an enum query parameter against the enum itself; Fastify's routes check a state filter by hand and refuse it in pydantic's enum wording through invalidChoice.",
     "registerVfsRoutes": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access."
    }
   },

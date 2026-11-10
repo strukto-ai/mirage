@@ -78,6 +78,48 @@ describe('sessions router', () => {
     await app.close()
   })
 
+  it('names a session whose id is empty or null, as Python does', async () => {
+    const app = buildApp()
+    await createWs(app, 'sw-empty')
+    for (const sessionId of ['', null]) {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/sw-empty/sessions',
+        payload: { session_id: sessionId },
+      })
+      expect(created.statusCode).toBe(201)
+      expect(created.json<{ session_id: string }>().session_id).toMatch(/^sess_[0-9a-f]{12}$/)
+    }
+    await app.close()
+  })
+
+  it('answers a bad body 422 in FastAPI shape, before the workspace', async () => {
+    const app = buildApp()
+    await createWs(app, 'sw-bad')
+    const cases: [string, string, unknown, unknown[]][] = [
+      ['POST', 'sw-bad/sessions', { session_id: 5 }, ['string_type', ['body', 'session_id'], 5]],
+      ['POST', 'nope/sessions', { mounts: ['/'] }, ['dict_type', ['body', 'mounts'], ['/']]],
+      ['PATCH', 'sw-bad/sessions/nope', {}, ['missing', ['body', 'profile'], {}]],
+      [
+        'PATCH',
+        'nope/sessions/nope',
+        { profile: null, x: 1 },
+        ['extra_forbidden', ['body', 'x'], 1],
+      ],
+    ]
+    for (const [method, path, payload, issue] of cases) {
+      const res = await app.inject({
+        method: method as 'POST' | 'PATCH',
+        url: `/v1/workspaces/${path}`,
+        payload: payload as Record<string, unknown>,
+      })
+      expect(res.statusCode, path).toBe(422)
+      const { detail } = res.json<{ detail: { type: string; loc: unknown[]; input: unknown }[] }>()
+      expect(detail.map((d) => [d.type, d.loc, d.input])).toEqual([issue])
+    }
+    await app.close()
+  })
+
   it('returns 409 on duplicate session id', async () => {
     const app = buildApp()
     await createWs(app, 'dup-ws')

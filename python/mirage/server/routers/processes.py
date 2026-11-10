@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from mirage.execution.process.types import Process, ProcessState
 from mirage.execution.types import JobId, LineId, MachineId, ProcessId
-from mirage.server.routers.vfs import require_entry
+from mirage.server.routers.vfs import invalid, require_entry
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}/processes")
 
@@ -96,7 +96,16 @@ async def list_processes(
     try:
         where = MachineId.parse(machine) if machine else None
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise invalid(
+            [
+                {
+                    "type": "value_error",
+                    "loc": ("query", "machine"),
+                    "msg": f"Value error, {exc}",
+                    "input": machine,
+                }
+            ]
+        ) from exc
 
     async def read() -> list[ProcessResponse]:
         records = await runner.ws.processes(

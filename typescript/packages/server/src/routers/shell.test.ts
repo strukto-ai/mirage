@@ -199,7 +199,16 @@ describe('execute router', () => {
         payload: { command: 'echo hi' },
       })
       expect(res.statusCode).toBe(422)
-      expect(res.json()).toEqual({ detail: `${name} must be a valid boolean` })
+      expect(res.json()).toEqual({
+        detail: [
+          {
+            type: 'bool_parsing',
+            loc: ['query', name],
+            msg: 'Input should be a valid boolean, unable to interpret input',
+            input: flag,
+          },
+        ],
+      })
     }
     await app.close()
   })
@@ -243,16 +252,111 @@ describe('execute router', () => {
     await app.close()
   })
 
-  it('refuses an unknown field rather than ignoring it', async () => {
+  // A body that reads but fails the schema is a 422 in FastAPI's shape,
+  // located under "body"; a body that does not read is a 400.
+  it.each([
+    [
+      { command: 'echo hello', provision: true },
+      [['extra_forbidden', ['body', 'provision'], true]],
+    ],
+    [{}, [['missing', ['body', 'command'], {}]]],
+    [{ command: 5 }, [['string_type', ['body', 'command'], 5]]],
+    [{ command: 'echo hi', record: 1 }, [['bool_type', ['body', 'record'], 1]]],
+    [[1], [['model_attributes_type', ['body'], [1]]]],
+  ])('answers 422 for the body %j', async (payload, issues) => {
     const app = buildApp()
     await createWs(app, 'ew-strict')
+    for (const explain of ['false', 'true']) {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/v1/workspaces/ew-strict/shell?explain=${explain}`,
+        payload,
+      })
+      expect(res.statusCode).toBe(422)
+      const { detail } = res.json<{ detail: { type: string; loc: unknown[]; input: unknown }[] }>()
+      expect(detail.map((issue) => [issue.type, issue.loc, issue.input])).toEqual(issues)
+    }
+    await app.close()
+  })
+
+  it('answers 400 for a body that is not JSON', async () => {
+    const app = buildApp()
+    await createWs(app, 'ew-unread')
     const res = await app.inject({
       method: 'POST',
-      url: '/v1/workspaces/ew-strict/shell',
-      payload: { command: 'echo hi', provision: true },
+      url: '/v1/workspaces/ew-unread/shell',
+      headers: { 'content-type': 'application/json' },
+      payload: '{"command":',
     })
     expect(res.statusCode).toBe(400)
-    expect(res.json<{ detail: string }>().detail).toContain('provision')
+    for (const explain of ['false', 'true']) {
+      const empty = await app.inject({
+        method: 'POST',
+        url: `/v1/workspaces/ew-unread/shell?explain=${explain}`,
+      })
+      expect(empty.statusCode).toBe(400)
+      const text = await app.inject({
+        method: 'POST',
+        url: `/v1/workspaces/ew-unread/shell?explain=${explain}`,
+        headers: { 'content-type': 'text/plain' },
+        payload: 'echo hi',
+      })
+      expect(text.statusCode).toBe(400)
+    }
+    await app.close()
+  })
+
+  // A field's null is the field unset; an empty string is a value.
+  it('reads null as unset', async () => {
+    const app = buildApp()
+    await createWs(app, 'ew-null')
+    const unset = { cwd: null, runtime: null, machine: null, record: null, open_stdin: null }
+    for (const explain of ['false', 'true']) {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/v1/workspaces/ew-null/shell?explain=${explain}`,
+        payload: { command: 'echo hi', ...unset },
+      })
+      expect(res.statusCode, res.body).toBe(200)
+    }
+    await app.close()
+  })
+
+  it.each(['cwd', 'runtime', 'machine'])('explain refuses an empty %s as set', async (field) => {
+    const app = buildApp()
+    await createWs(app, 'ew-empty')
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/ew-empty/shell?explain=true',
+      payload: { command: 'echo hi', [field]: '' },
+    })
+    expect(res.statusCode).toBe(400)
+    await app.close()
+  })
+
+  // Query parameters are checked before the workspace, the body after the
+  // workspace and the session, as FastAPI orders them.
+  it('checks in the order the Python server does', async () => {
+    const app = buildApp()
+    await createWs(app, 'ew-order')
+    const flags = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/nope/shell?stream=abc&explain=xyz',
+      payload: { command: 'echo hi' },
+    })
+    expect(flags.statusCode).toBe(422)
+    expect(flags.json<{ detail: { loc: string[] }[] }>().detail.map((issue) => issue.loc)).toEqual([
+      ['query', 'explain'],
+      ['query', 'stream'],
+    ])
+    for (const url of [
+      '/v1/workspaces/nope/shell',
+      '/v1/workspaces/nope/shell?stream=true&explain=true',
+      '/v1/workspaces/ew-order/shell?session_id=nope',
+    ]) {
+      const res = await app.inject({ method: 'POST', url, payload: { bogus: 1 } })
+      expect(res.statusCode, url).toBe(404)
+    }
     await app.close()
   })
 
@@ -299,7 +403,7 @@ describe('execute router', () => {
       url: '/v1/workspaces/estdin/shell',
       payload: { command: 'wc -l', stdinBase64: 'YQo=' },
     })
-    expect(res.statusCode).toBe(400)
+    expect(res.statusCode).toBe(422)
     await app.close()
   })
 
@@ -513,6 +617,11 @@ describe('a foreground shell request', () => {
 
   it('drops a held write whose caller hung up', async () => {
     const app = buildApp()
+    const statuses: number[] = []
+    app.addHook('onSend', (req, reply, payload, done) => {
+      if (req.url.endsWith('/stdin')) statuses.push(reply.statusCode)
+      done(null, payload)
+    })
     try {
       const base = await served(app, 'gone')
       const capacity = app.registry.get('gone').runner.ws.io.bufferBytes
@@ -543,6 +652,31 @@ describe('a foreground shell request', () => {
       }
       await records.next()
       expect(seen).toBe('x'.repeat(capacity))
+      expect(statuses).toEqual([204, 499, 204])
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('answers 422 for a bad request part and 400 for one that is not JSON', async () => {
+    const app = buildApp()
+    try {
+      const base = await served(app, 'parts')
+      const route = `${base}/v1/workspaces/parts/shell`
+      const form = (request: string): FormData => {
+        const body = new FormData()
+        body.append('request', new Blob([request], { type: 'application/json' }))
+        return body
+      }
+      const bad = await fetch(route, {
+        method: 'POST',
+        body: form(JSON.stringify({ command: 'echo hi', provision: true })),
+      })
+      expect(bad.status).toBe(422)
+      const { detail } = (await bad.json()) as { detail: { loc: string[] }[] }
+      expect(detail.map((issue) => issue.loc)).toEqual([['body', 'request', 'provision']])
+      const unread = await fetch(route, { method: 'POST', body: form('{"command":') })
+      expect(unread.status).toBe(400)
     } finally {
       await app.close()
     }

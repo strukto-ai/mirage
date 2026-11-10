@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import re
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -88,17 +89,20 @@ async def test_a_session_is_created_on_the_workspace_loop(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_session_without_id_auto_assigns():
+@pytest.mark.parametrize(
+    "body", [{}, {"session_id": ""}, {"session_id": None}]
+)
+async def test_create_session_without_id_auto_assigns(body):
     app = build_app(idle_grace_seconds=10.0)
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport, base_url="http://test"
     ) as client:
         wid = await _create_workspace(client)
-        r = await client.post(f"/v1/workspaces/{wid}/sessions", json={})
+        r = await client.post(f"/v1/workspaces/{wid}/sessions", json=body)
         assert r.status_code == 201
         sid = r.json()["session_id"]
-        assert sid.startswith("sess_")
+        assert re.fullmatch(r"sess_[0-9a-f]{12}", sid)
 
 
 @pytest.mark.asyncio

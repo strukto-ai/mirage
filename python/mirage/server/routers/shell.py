@@ -20,7 +20,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from mirage.concurrency.limiter import run_blocking
 from mirage.execution.errors import WorkspaceHeldError
@@ -33,7 +33,7 @@ from mirage.server.metrics import refused
 from mirage.server.multipart import MAX_REQUEST_PART, PartEvent, part_events
 from mirage.server.registry import WorkspaceEntry
 from mirage.server.requests import LineRequest, RequestTable
-from mirage.server.routers.vfs import require_entry, session_of
+from mirage.server.routers.vfs import invalid_body, require_entry, session_of
 from mirage.server.stdin import LoopStdin, UploadStdin
 from mirage.server.stream import ShellResponse
 from mirage.types import JsonValue
@@ -46,14 +46,14 @@ router = APIRouter(prefix="/v1/workspaces/{workspace_id}/shell")
 
 
 class ShellRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     command: str
     cwd: str | None = None
     runtime: str | None = None
     machine: str | None = None
-    record: bool = True
-    open_stdin: bool = False
+    record: bool | None = None
+    open_stdin: bool | None = None
 
 
 def _build_shell_kwargs(
@@ -61,7 +61,7 @@ def _build_shell_kwargs(
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {
         "command": req.command,
-        "record": req.record,
+        "record": req.record is not False,
     }
     if req.cwd is not None:
         kwargs["cwd"] = req.cwd
@@ -240,9 +240,9 @@ async def _explained(
     )
     if (
         req_obj is None
-        or req_obj.cwd
-        or req_obj.runtime
-        or req_obj.machine
+        or req_obj.cwd is not None
+        or req_obj.runtime is not None
+        or req_obj.machine is not None
         or req_obj.open_stdin
     ):
         raise HTTPException(
@@ -388,13 +388,25 @@ async def _read_shell_body(
 
 def _parse_request_part(body: bytes) -> ShellRequest:
     try:
-        return ShellRequest.model_validate(json.loads(body))
+        data = json.loads(body)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"bad request part: {e}")
+        raise HTTPException(
+            status_code=400, detail=f"bad request part: {e}"
+        ) from e
+    try:
+        return ShellRequest.model_validate(data, from_attributes=True)
+    except ValidationError as e:
+        raise invalid_body(e, "request") from e
 
 
 async def _parse_json_body(request: Request) -> ShellRequest:
     try:
-        return ShellRequest.model_validate(await request.json())
+        data = await request.json()
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"bad shell request: {e}")
+        raise HTTPException(
+            status_code=400, detail=f"bad shell request: {e}"
+        ) from e
+    try:
+        return ShellRequest.model_validate(data, from_attributes=True)
+    except ValidationError as e:
+        raise invalid_body(e) from e

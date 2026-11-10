@@ -16,6 +16,7 @@ import type { Job, JobState } from '@struktoai/mirage-core/execution/job/types'
 import { JobId, LineId } from '@struktoai/mirage-core/execution/types'
 import type { RouteApp } from '../routes.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
+import { failure, invalidChoice } from './vfs.ts'
 
 interface WsIdParams {
   wsId: string
@@ -84,12 +85,12 @@ export function registerJobsRoutes(
       // The jobs the workspace's sessions list, as `jobs` does, a
       // session's, those in a state or those a line started when named.
       const { wsId } = req.params
-      if (deps.registry.visible(wsId, req.account) === null) {
-        return reply.status(404).send({ detail: 'workspace not found' })
-      }
       const { session_id: sessionId, state, line_id: lineId } = req.query
       if (state !== undefined && !(STATES as readonly string[]).includes(state)) {
-        return reply.status(422).send({ detail: `state must be one of ${STATES.join(', ')}` })
+        return failure(reply, invalidChoice(['query', 'state'], STATES, state))
+      }
+      if (deps.registry.visible(wsId, req.account) === null) {
+        return reply.status(404).send({ detail: 'workspace not found' })
       }
       const ws = deps.registry.get(wsId).runner.ws
       const records = await ws.jobs({

@@ -608,7 +608,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       // is built; explain answers what they say without creating anything.
       let explain: boolean
       try {
-        explain = queryFlag(req.query.explain, 'explain')
+        explain = queryFlag(req.query, 'explain').explain
       } catch (e) {
         return failure(reply, e)
       }
@@ -760,7 +760,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       }
       let verbose: boolean
       try {
-        verbose = queryFlag(req.query.verbose, 'verbose')
+        verbose = queryFlag(req.query, 'verbose').verbose
       } catch (e) {
         return failure(reply, e)
       }

@@ -93,7 +93,7 @@ export function registerAsksRoutes(
       }
       let settled: boolean
       try {
-        settled = queryFlag(req.query.all, 'all')
+        settled = queryFlag(req.query, 'all').all
       } catch (e) {
         return failure(reply, e)
       }

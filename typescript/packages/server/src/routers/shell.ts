@@ -17,6 +17,7 @@ import type { LineId } from '@struktoai/mirage-core/execution/types'
 import { BytePipe } from '@struktoai/mirage-core/io/pipe'
 import { currentRequest } from '@struktoai/mirage-core/io/web/request'
 import type { ShellExplanation } from '@struktoai/mirage-core/policy/types'
+import type { JsonValue } from '@struktoai/mirage-core/types'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
 import type { RouteApp, RouteReply, RouteRequest } from '../routes.ts'
@@ -25,10 +26,10 @@ import { explanationToDict, ioResultToDict } from '../io_serde.ts'
 import type { LineRequest, RequestTable } from '../requests.ts'
 import { refused } from '../metrics.ts'
 import { MAX_REQUEST_PART, MultipartError, partEvents, type PartEvent } from '../multipart.ts'
-import type { WorkspaceRegistry } from '../registry.ts'
+import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import { UploadStdin } from '../stdin.ts'
 import { shellResponse } from '../stream.ts'
-import { failure, HttpError, queryFlag, requireEntry, sessionOf } from './vfs.ts'
+import { failure, HttpError, invalidBody, queryFlag, requireEntry, sessionOf } from './vfs.ts'
 
 export interface ShellRoutesDeps {
   registry: WorkspaceRegistry
@@ -42,11 +43,26 @@ interface ShellParams {
 const ShellRequest = z
   .object({
     command: z.string(),
-    cwd: z.string().optional(),
-    runtime: z.string().optional(),
-    machine: z.string().optional(),
-    record: z.boolean().optional(),
-    open_stdin: z.boolean().optional(),
+    cwd: z
+      .string()
+      .nullish()
+      .transform((value) => value ?? undefined),
+    runtime: z
+      .string()
+      .nullish()
+      .transform((value) => value ?? undefined),
+    machine: z
+      .string()
+      .nullish()
+      .transform((value) => value ?? undefined),
+    record: z
+      .boolean()
+      .nullish()
+      .transform((value) => value ?? undefined),
+    open_stdin: z
+      .boolean()
+      .nullish()
+      .transform((value) => value ?? undefined),
   })
   .strict()
 
@@ -60,8 +76,41 @@ interface ShellUpload {
   finish: () => Promise<void>
 }
 
+/** A multipart body's `request` part: 400 when it does not read, 422 when a field fails. */
 function parseRequestPart(chunks: Uint8Array[]): ShellRequest {
-  return ShellRequest.parse(JSON.parse(Buffer.concat(chunks).toString()))
+  let data: JsonValue
+  try {
+    data = JSON.parse(Buffer.concat(chunks).toString()) as JsonValue
+  } catch (error) {
+    throw new MultipartError(400, `bad request part: ${(error as Error).message}`)
+  }
+  const parsed = ShellRequest.safeParse(data)
+  if (!parsed.success) throw invalidBody(parsed.error, data, 'request')
+  return parsed.data
+}
+
+/**
+ * A JSON shell body: 400 when there is none or it does not read as JSON, 422
+ * when a field fails. A body the host left unparsed, sent under another
+ * content type, is read as JSON, as Python's `request.json()` reads any body.
+ * Mirrors Python's `_parse_json_body`.
+ */
+function parseJsonBody(req: RouteRequest): ShellRequest {
+  let data = req.body as JsonValue | undefined
+  if (
+    typeof data === 'string' &&
+    req.headers['content-type']?.startsWith('application/json') !== true
+  ) {
+    try {
+      data = JSON.parse(data) as JsonValue
+    } catch (error) {
+      throw new HttpError(400, `bad shell request: ${(error as Error).message}`)
+    }
+  }
+  if (data === undefined) throw new HttpError(400, 'bad shell request: the body is empty')
+  const parsed = ShellRequest.safeParse(data)
+  if (!parsed.success) throw invalidBody(parsed.error, data)
+  return parsed.data
 }
 
 /**
@@ -95,7 +144,7 @@ async function readShellBody(req: RouteRequest, capacity: number): Promise<Shell
   const contentType = req.headers['content-type'] ?? ''
   if (!contentType.startsWith('multipart/')) {
     return {
-      body: ShellRequest.parse(req.body),
+      body: parseJsonBody(req),
       stdin: undefined,
       failed: Promise.resolve(undefined),
       finish: () => Promise.resolve(),
@@ -195,9 +244,7 @@ function refuse(req: RouteRequest, reply: RouteReply, error: unknown): RouteRepl
   if (error instanceof MultipartError) {
     return reply.status(error.statusCode).send({ detail: error.message })
   }
-  if (error instanceof SyntaxError || error instanceof z.ZodError) {
-    return reply.status(400).send({ detail: `bad shell request: ${error.message}` })
-  }
+  if (error instanceof HttpError) return failure(reply, error)
   throw error
 }
 
@@ -222,20 +269,19 @@ async function explained(
   let said: ShellExplanation
   try {
     const entry = requireEntry(deps.registry, req.params.wsId, req.account)
-    const parsed = ShellRequest.safeParse(req.body)
+    const multipart = req.headers['content-type']?.startsWith('multipart/') === true
+    const body = multipart ? null : parseJsonBody(req)
     if (
-      req.headers['content-type']?.startsWith('multipart/') === true ||
-      (parsed.success &&
-        (parsed.data.cwd !== undefined ||
-          parsed.data.runtime !== undefined ||
-          parsed.data.machine !== undefined ||
-          parsed.data.open_stdin === true))
+      body === null ||
+      body.cwd !== undefined ||
+      body.runtime !== undefined ||
+      body.machine !== undefined ||
+      body.open_stdin === true
     ) {
       throw new HttpError(400, 'explain takes the line alone: no stdin, cwd, runtime or machine')
     }
-    if (!parsed.success) throw new HttpError(400, `bad shell request: ${parsed.error.message}`)
     const session = await sessionOf(entry.runner.ws, req.query.session_id)
-    said = await session.explain.shell(parsed.data.command)
+    said = await session.explain.shell(body.command)
   } catch (err) {
     return failure(reply, err)
   }
@@ -246,20 +292,19 @@ export function registerShellRoutes(app: RouteApp, deps: ShellRoutesDeps): void 
   app.post<{ Params: ShellParams; Body: ShellRequest; Querystring: ShellQuery }>(
     '/v1/workspaces/:wsId/shell',
     async (req, reply) => {
+      const { wsId } = req.params
       let streaming: boolean
+      let entry: WorkspaceEntry
       try {
-        streaming = queryFlag(req.query.stream, 'stream')
-        if (streaming && queryFlag(req.query.explain, 'explain')) {
+        const flags = queryFlag(req.query, 'explain', 'stream')
+        streaming = flags.stream
+        entry = requireEntry(deps.registry, wsId, req.account)
+        if (streaming && flags.explain) {
           throw new HttpError(400, 'stream cannot be combined with explain')
         }
-        if (queryFlag(req.query.explain, 'explain')) return await explained(req, reply, deps)
+        if (flags.explain) return await explained(req, reply, deps)
       } catch (err) {
         return failure(reply, err)
-      }
-      const { wsId } = req.params
-      const entry = deps.registry.visible(wsId, req.account)
-      if (entry === null) {
-        return reply.status(404).send({ detail: 'workspace not found' })
       }
       try {
         await sessionOf(entry.runner.ws, req.query.session_id)

@@ -19,7 +19,7 @@ import type { BytePipe } from '@struktoai/mirage-core/io/pipe'
 import type { RouteApp } from '../routes.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
 import type { RequestTable } from '../requests.ts'
-import { failure, HttpError, requireEntry } from './vfs.ts'
+import { failure, HttpError, invalidChoice, requireEntry } from './vfs.ts'
 
 const NOT_OPEN = "the line's stdin is not open"
 
@@ -100,12 +100,12 @@ export function registerLinesRoutes(
       // yet and the newest ended ones, a session's or those in a state
       // when named.
       const { wsId } = req.params
-      if (deps.registry.visible(wsId, req.account) === null) {
-        return reply.status(404).send({ detail: 'workspace not found' })
-      }
       const { session_id: sessionId, state } = req.query
       if (state !== undefined && !(STATES as readonly string[]).includes(state)) {
-        return reply.status(422).send({ detail: `state must be one of ${STATES.join(', ')}` })
+        return failure(reply, invalidChoice(['query', 'state'], STATES, state))
+      }
+      if (deps.registry.visible(wsId, req.account) === null) {
+        return reply.status(404).send({ detail: 'workspace not found' })
       }
       const ws = deps.registry.get(wsId).runner.ws
       const records = await ws.lines({
@@ -147,6 +147,8 @@ export function registerLinesRoutes(
         const stdin = openStdin(deps.registry, deps.jobs, wsId, lineId, req.account)
         for await (const chunk of req.raw) await stdin.write(chunk, req.closed)
       } catch (err) {
+        // A caller that hung up takes the bytes not yet buffered with it.
+        if (req.closed.aborted) return reply.status(499).send()
         // The rest of a refused body is left unread, so the connection closes
         // after the answer.
         reply.header('connection', 'close')

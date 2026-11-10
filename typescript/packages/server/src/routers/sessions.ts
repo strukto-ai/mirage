@@ -13,11 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
-import type { MountMode } from '@struktoai/mirage-core/types'
+import type { JsonValue, MountMode } from '@struktoai/mirage-core/types'
+import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { RouteApp } from '../routes.ts'
 import { refused } from '../metrics.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
+import { failure, invalidBody } from './vfs.ts'
 
 interface WsIdParams {
   wsId: string
@@ -28,21 +30,27 @@ interface WsSessionParams {
   sessionId: string
 }
 
-interface CreateSessionRequest {
-  session_id?: string
-  /**
-   * Optional per-mount modes for this session: a mapping of prefix to
-   * mode ('read', 'write', 'exec', or the filesystem aliases), never a
-   * bare list. A list of prefixes used to mean "only these mounts" and
-   * now means nothing at all, so it is refused here rather than
-   * accepted as a no-op that reads like confinement. A named mount is
-   * narrowed to the weaker of its own mode and this one; a mount the
-   * mapping omits keeps its own mode.
-   */
-  mounts?: Record<string, string> | null
-  /** The profile this session runs under, by name from the workspace. */
-  profile?: string | null
-}
+/**
+ * A new session: its id (generated when unset or empty), optional
+ * per-mount modes and the profile it runs under, by name from the
+ * workspace. `mounts` maps a prefix to its mode ('read', 'write', 'exec',
+ * or the filesystem aliases), never a bare list. A list of prefixes used
+ * to mean "only these mounts" and now means nothing at all, so it is
+ * refused here rather than accepted as a no-op that reads like
+ * confinement. A named mount is narrowed to the weaker of its own mode and
+ * this one; a mount the mapping omits keeps its own mode. Fields it does
+ * not name are ignored, as Python's model ignores them.
+ */
+const CreateSessionRequest = z.object({
+  session_id: z.string().nullish(),
+  mounts: z.record(z.string(), z.string()).nullish(),
+  profile: z.string().nullish(),
+})
+
+/** A session's new profile: a name, null for none, or an inline profile. */
+const UpdateSessionRequest = z
+  .object({ profile: z.union([z.string(), z.null(), z.record(z.string(), z.unknown())]) })
+  .strict()
 
 export function registerSessionsRoutes(
   app: RouteApp,
@@ -55,16 +63,20 @@ export function registerSessionsRoutes(
     loadProfile: (profile: SessionProfile) => SessionProfile
   },
 ): void {
-  app.post<{ Params: WsIdParams; Body: CreateSessionRequest }>(
+  app.post<{ Params: WsIdParams; Body: JsonValue }>(
     '/v1/workspaces/:wsId/sessions',
     async (req, reply) => {
       const { wsId } = req.params
+      const parsed = CreateSessionRequest.safeParse(req.body)
+      if (!parsed.success) return failure(reply, invalidBody(parsed.error, req.body))
       if (deps.registry.visible(wsId, req.account) === null) {
         return reply.status(404).send({ detail: 'workspace not found' })
       }
+      const named = parsed.data.session_id ?? ''
       const sid =
-        req.body.session_id ??
-        `sess_${Array.from(crypto.getRandomValues(new Uint8Array(6)), (byte) => byte.toString(16).padStart(2, '0')).join('')}`
+        named !== ''
+          ? named
+          : `sess_${Array.from(crypto.getRandomValues(new Uint8Array(6)), (byte) => byte.toString(16).padStart(2, '0')).join('')}`
       const ws = deps.registry.get(wsId).runner.ws
       await ws.ensureSessionsLoaded()
       const held = ws.listSessions()
@@ -76,8 +88,8 @@ export function registerSessionsRoutes(
         refused('max_sessions')
         return reply.status(429).send({ detail: `workspace is at max_sessions (${String(cap)})` })
       }
-      const mounts = req.body.mounts ?? null
-      const profile = req.body.profile ?? null
+      const mounts = parsed.data.mounts ?? null
+      const profile = parsed.data.profile ?? null
       let sess
       try {
         sess = ws.createSession(sid, {
@@ -113,22 +125,14 @@ export function registerSessionsRoutes(
   )
 
   /** Replace the session's profile; its cwd, env and history stay. */
-  app.patch<{ Params: WsSessionParams; Body: { profile: unknown } }>(
+  app.patch<{ Params: WsSessionParams; Body: JsonValue }>(
     '/v1/workspaces/:wsId/sessions/:sessionId',
-    {
-      schema: {
-        body: {
-          type: 'object',
-          required: ['profile'],
-          properties: { profile: { type: ['string', 'null', 'object'] } },
-          additionalProperties: false,
-        },
-      },
-    },
     async (req, reply) => {
+      const parsed = UpdateSessionRequest.safeParse(req.body)
+      if (!parsed.success) return failure(reply, invalidBody(parsed.error, req.body))
       const ws = await sessionWorkspace(req.params, req.account)
       if (typeof ws === 'string') return reply.status(404).send({ detail: ws })
-      const asked = req.body.profile
+      const asked = parsed.data.profile
       try {
         const profile =
           typeof asked === 'string' || asked === null
