@@ -1,6 +1,6 @@
 ---
 title: Overview
-description: Where a workspace keeps its state, and how to move it.
+description: Where a workspace keeps its data, and how to move it.
 icon: network-wired
 ---
 
@@ -9,31 +9,69 @@ in memory. A workspace the server builds keeps it on disk under
 `~/.mirage/state`. Each store below can move onto infrastructure you run, on
 its own or together with the others.
 
+## Workspace state
+
+Mirage creates this data, so none of your mounts, such as S3 or GitHub, has a
+copy. The `store` key sets where Mirage saves it.
+
 | Store | Holds | Backends | Key |
 | --- | --- | --- | --- |
 | [Namespace](/home/infrastructure/namespace) | Symlinks and file attributes | `ram`, `disk`, `redis` | `store.namespace` |
 | [Sessions](/home/infrastructure/sessions) | Each session's working directory, variables and functions | `ram`, `disk`, `redis`, `s3` | `store.workspace` |
 | [Command Logs](/home/infrastructure/command-logs) | Every command run, its output and the files it touched | `ram`, `disk` | `store.observer` |
 | [Jobs](/home/infrastructure/jobs) | Background jobs, their output and the processes the workspace runs | `ram`, `redis` | `store.execution` |
-| [File cache](/home/infrastructure/file-cache) | File content Mirage has read | `ram`, `redis` | `cache` |
-| [Index](/home/infrastructure/file-index) | Directory listings and file metadata | `ram`, `redis` | `index`, or a mount's `index` |
 
 To see command logs from many machines in one place, send them to an
 OpenTelemetry backend as [traces](/home/infrastructure/tracing).
 
-The rest has pages of its own: [runtimes](/home/setup/runtime/overview) run
-programs inside Mirage, on the host or on a
-[machine](/home/setup/machine/overview);
-[host folders](/home/setup/fuse) show a mount through FUSE, FSKit or NFS;
-and [credentials](/home/authentication) come from the environment, a dotenv
-file, AWS Secrets Manager or 1Password.
+## Caches
+
+Copies of files and listings Mirage read from your mounts, kept to make the
+next read faster. If a cache is lost, the next read is just slower. The
+`cache` and `index` keys sit next to `store`, not inside it.
+
+| Cache | Holds | Backends | Key |
+| --- | --- | --- | --- |
+| [File Cache](/home/infrastructure/file-cache) | File content Mirage has read | `ram`, `redis` | `cache` |
+| [Index](/home/infrastructure/file-index) | Directory listings and metadata | `ram`, `redis` | `index` |
+
+A mount can also set its own `index`, which replaces the workspace's for
+that mount.
+
+## What each backend gives you
+
+Every store keeps its state by `workspace_id`. Give the workspace a fixed id
+whenever its state should be found again, after a restart or by another
+process.
+
+| `type` | Survives a restart | Shared with |
+| --- | --- | --- |
+| `ram` | No | Workspaces in the same process given the same store object |
+| `disk` | Yes | Processes on the same machine. Jobs stay in each process's memory. |
+| `redis` | Yes | Every process on that Redis, on any machine. Command logs stay on each machine's disk. |
+| `s3` | Yes | Every process that reaches the bucket. Sessions only. |
+
+In Python and TypeScript, `SqlWorkspaceStateStore` keeps the namespace,
+sessions and jobs in SQLite or Postgres, so every process on the database
+shares them. Command logs stay in each process's memory. YAML has no `sql`
+type.
 
 ## One store or several
 
-`store.type` places the namespace, sessions, command logs and jobs together. A
-group key (`namespace`, `workspace`, `observer`, `execution`) moves one of them to
-a backend of its own. Here symlinks and jobs live on Redis, command logs on disk
-and sessions in a bucket:
+`store.type` sets one backend for all four stores. This config keeps the
+workspace state on Redis. Redis holds no command logs, so they go to disk
+under `root`, `~/.mirage/state` by default.
+
+```yaml workspace.yaml
+workspace_id: agent
+store:
+  type: redis
+  url: redis://redis.internal:6379/0
+```
+
+To move one store to a backend of its own, add its key under `store`:
+`namespace`, `workspace` for sessions, `observer` for command logs or
+`execution` for jobs. Here the command logs go to a disk path you choose:
 
 <Tabs>
   <Tab title="YAML" icon="file-code">
@@ -45,9 +83,6 @@ and sessions in a bucket:
       observer:
         type: disk
         root: /var/lib/mirage
-      workspace:
-        type: s3
-        bucket: agent-state
     mounts:
       /data:
         vfs: ram
@@ -56,17 +91,11 @@ and sessions in a bucket:
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.vfs.s3 import S3Config
-    from mirage.workspace.store import (
-        DiskWorkspaceStateStore,
-        RedisWorkspaceStateStore,
-        S3WorkspaceStateStore,
-    )
+    from mirage.workspace.store import DiskWorkspaceStateStore, RedisWorkspaceStateStore
 
     store = RedisWorkspaceStateStore(
         url="redis://redis.internal:6379/0",
         observer=DiskWorkspaceStateStore(root="/var/lib/mirage"),
-        workspace=S3WorkspaceStateStore(S3Config(bucket="agent-state")),
     )
     ws = Workspace(
         {"/data": RAMVFS()},
@@ -84,14 +113,12 @@ and sessions in a bucket:
       MountMode,
       RAMVFS,
       RedisWorkspaceStateStore,
-      S3WorkspaceStateStore,
       Workspace,
     } from '@struktoai/mirage-node'
 
     const store = new RedisWorkspaceStateStore({
       url: 'redis://redis.internal:6379/0',
       observer: new DiskWorkspaceStateStore({ root: '/var/lib/mirage' }),
-      workspace: new S3WorkspaceStateStore({ bucket: 'agent-state' }),
     })
     const ws = new Workspace(
       { '/data': new RAMVFS() },
@@ -101,16 +128,8 @@ and sessions in a bucket:
   </Tab>
 </Tabs>
 
-Every store keeps its state by `workspace_id`. Give the workspace a fixed id
-whenever its state should be found again, after a restart or by another
-process. Closing the workspace closes a store it owns, group stores included.
-
-| `type` | Survives a restart | Shared with |
-| --- | --- | --- |
-| `ram` | No | Workspaces in the same process given the same store object |
-| `disk` | Yes | Processes on the same machine. Jobs stay in each process's memory. |
-| `redis` | Yes | Every process on that Redis, on any machine |
-| `s3` | Yes | Every process that reaches the bucket. Sessions only. |
+Closing the workspace closes a store it owns, the stores under its keys
+included.
 
 [stores.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/configuration/stores.py)
 and
@@ -118,22 +137,11 @@ and
 place one store at a time on disk, build the workspace again and print what
 came back.
 
-A `store` block replaces either default: memory for a workspace built in
-code, or `~/.mirage/state` for one built by `mirage workspace create` or
-`POST /v1/workspaces`.
-
 ## Where you set it
 
 One config describes a workspace, the same [YAML](/home/configuration) on
 every surface. Python and TypeScript also take each store as a constructor
 argument, as each store's page shows.
-
-| Surface | Takes the config as |
-| --- | --- |
-| [CLI](/home/access/cli) | A YAML or JSON file: `mirage workspace create workspace.yaml` |
-| [HTTP](/home/access/http) | JSON under `config` in `POST /v1/workspaces` |
-| Python | `load_config("workspace.yaml")` |
-| TypeScript | `loadWorkspaceConfigFile("workspace.yaml")` |
 
 <Tabs>
   <Tab title="CLI" icon="terminal">
