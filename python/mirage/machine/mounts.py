@@ -127,6 +127,20 @@ def top_prefixes(prefixes: Iterable[str]) -> list[str]:
     return tops
 
 
+def served_prefixes(prefixes: Iterable[str]) -> list[str]:
+    """The prefixes ssh serves a machine: its top prefixes but ``/tmp``.
+
+    ``/tmp`` stays the machine's own. The machine keeps its sockets,
+    temporary files and Mirage's own run reports there, and a user who is
+    not root cannot mount over it. A mount under ``/tmp`` is still served
+    at its own path.
+
+    Args:
+        prefixes (Iterable[str]): the mount prefixes the session sees.
+    """
+    return top_prefixes(p for p in prefixes if p.rstrip("/") != "/tmp")
+
+
 def mount_paths(prefixes: Iterable[str]) -> set[str]:
     """The mountpoints a machine could hold of ``prefixes``.
 
@@ -326,7 +340,7 @@ class MachineMounts:
             and seen
             and not any(
                 seen == p or seen.startswith(p + "/")
-                for p in mount_paths(binding.mount_prefixes())
+                for p in served_prefixes(binding.mount_prefixes())
             )
         ):
             return RunResult(
@@ -574,7 +588,7 @@ class MachineMounts:
             machine's own gone, which ``validate`` refuses.
         """
         visible = frozenset(
-            top_prefixes(binding.resolver.prefixes())
+            served_prefixes(binding.resolver.prefixes())
             if self._mount_type != "fuse"
             else ()
         )

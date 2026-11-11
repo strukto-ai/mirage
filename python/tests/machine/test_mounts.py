@@ -48,6 +48,7 @@ from mirage.machine.mounts import (
     kill_line,
     mount_table,
     running_line,
+    served_prefixes,
     top_prefixes,
 )
 from mirage.machine.types import MachinePipe
@@ -376,6 +377,11 @@ def test_top_prefixes_leave_out_the_root_devices_and_nested_mounts():
     assert top_prefixes(prefixes) == ["/a/b", "/data", "/database"]
 
 
+def test_served_prefixes_leave_out_tmp_and_keep_a_mount_under_it():
+    prefixes = ["/", "/dev/", "/tmp/", "/tmp/cache/", "/data/", "/data/sub/"]
+    assert served_prefixes(prefixes) == ["/data", "/tmp/cache"]
+
+
 @pytest.mark.asyncio
 async def test_ssh_serves_every_prefix_the_session_sees():
     sandbox = FakeMachine("ssh")
@@ -393,6 +399,44 @@ async def test_ssh_serves_every_prefix_the_session_sees():
     assert len(sandbox.pipes) == 2
     await ws.close()
     assert sandbox.table == {}
+
+
+@pytest.mark.asyncio
+async def test_ssh_leaves_the_machine_its_own_tmp():
+    sandbox = FakeMachine("ssh")
+    ws = Workspace(
+        {"/": RAMVFS(), "/data": RAMVFS(), "/tmp": RAMVFS()},
+        mode=MountMode.WRITE,
+        **on(sandbox, "workspace"),
+    )
+    assert (await ws.shell("python3 job.py")).exit_code == 0
+    assert served(sandbox) == ["/data"]
+    from_tmp = await ws.shell("cd /tmp && python3 job.py")
+    assert (from_tmp.exit_code, await from_tmp.stderr_str()) == (
+        126,
+        "fake: the machine cannot see the working directory /tmp; "
+        "cd into a mount first\n",
+    )
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_ssh_refuses_a_line_while_the_session_restricts_tmp():
+    sandbox = FakeMachine("ssh")
+    ws = Workspace(
+        {"/": RAMVFS(), "/data": RAMVFS(), "/tmp": RAMVFS()},
+        mode=MountMode.WRITE,
+        profiles={"agent": {"paths": {"hide": ["/tmp/secret"]}}},
+        **on(sandbox, "workspace"),
+    )
+    agent = await ws.session("agent", profile="agent")
+    result = await agent.shell("python3 job.py")
+    assert result.exit_code == 126
+    assert result.decision is not None
+    assert result.decision.reason == (
+        "a mount this session restricts is not served through the dispatcher"
+    )
+    await ws.close()
 
 
 @pytest.mark.asyncio
@@ -1204,6 +1248,23 @@ async def test_lines_wait_for_a_mount_of_the_sandboxs_own_it_lost(mount_type):
     assert (await agent.shell("python3 back.py")).exit_code == 0
     assert "python3 back.py" in sandbox.commands
     assert sandbox.pipes == pipes
+    await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mount_type", ["fuse", "both"])
+async def test_a_line_is_refused_once_the_sandboxs_own_tmp_is_gone(mount_type):
+    sandbox = FakeMachine(mount_type, own=["/tmp"])
+    ws = Workspace(
+        {"/": RAMVFS(), "/data": RAMVFS(), "/tmp": RAMVFS()},
+        mode=MountMode.WRITE,
+        **on(sandbox, "workspace"),
+    )
+    assert (await ws.shell("python3 job.py")).exit_code == 0
+    del sandbox.table["/tmp"]
+    result = await ws.shell("python3 lost.py")
+    assert (result.exit_code, await result.stderr_str()) == (126, lost("/tmp"))
+    assert "python3 lost.py" not in sandbox.commands
     await ws.close()
 
 

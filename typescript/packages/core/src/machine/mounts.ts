@@ -118,6 +118,16 @@ export function topPrefixes(prefixes: Iterable<string>): string[] {
   return tops
 }
 
+/**
+ * The prefixes ssh serves a machine: its top prefixes but `/tmp`, which
+ * stays the machine's own. The machine keeps its sockets, temporary files
+ * and Mirage's own run reports there, and a user who is not root cannot
+ * mount over it. A mount under `/tmp` is still served at its own path.
+ */
+export function servedPrefixes(prefixes: Iterable<string>): string[] {
+  return topPrefixes([...prefixes].filter((p) => rstripSlash(p) !== '/tmp'))
+}
+
 /** The machine command that lazily unmounts `prefix`. */
 function unmountLine(prefix: string): string {
   const path = singleQuote(prefix)
@@ -303,7 +313,7 @@ export class MachineMounts {
     if (
       this.mountType === 'ssh' &&
       seen !== '' &&
-      ![...mountPaths(mountPrefixes())].some((p) => seen === p || seen.startsWith(`${p}/`))
+      !servedPrefixes(mountPrefixes()).some((p) => seen === p || seen.startsWith(`${p}/`))
     )
       return {
         stdout: new Uint8Array(),
@@ -523,7 +533,7 @@ export class MachineMounts {
     ruled: ReadonlySet<string>,
     signal?: AbortSignal,
   ): Promise<string | null> {
-    const visible = this.mountType === 'fuse' ? [] : topPrefixes(binding.resolver.prefixes())
+    const visible = this.mountType === 'fuse' ? [] : servedPrefixes(binding.resolver.prefixes())
     const seen = JSON.stringify([[...every].sort(compareCodePoints), visible])
     const ended = [...this.served].filter(([, entry]) => entry.ended).map(([prefix]) => prefix)
     if (

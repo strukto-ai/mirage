@@ -34,6 +34,48 @@
       ]
     },
     {
+      "id": "mount_type_ssh_leaves_the_box_its_own_tmp",
+      "note": "/tmp is the box's own, as / and /dev are: a workspace /tmp is not served over it, a file a program writes there stays on the box, and a line run from the workspace's /tmp exits 126.",
+      "runtimes": ["docker", "e2b", "microsandbox"],
+      "requires": ["env:MIRAGE_INTEG_BOX_MOUNTS"],
+      "world": {
+        "mounts": {
+          "/served": { "vfs": "ram", "files": { "seed.txt": "seed\n" } },
+          "/tmp": { "vfs": "ram", "files": { "note.txt": "workspace\n" } }
+        }
+      },
+      "entry": {
+        "captures": ["dash"],
+        "config": { "mount_type": "ssh" }
+      },
+      "steps": [
+        {
+          "command": "dash -c 'cat /served/seed.txt'",
+          "expect": { "exit": 0, "stdout": "seed\n", "stderr": "" }
+        },
+        {
+          "command": "dash -c 'test -e /tmp/note.txt; echo $?'",
+          "expect": { "exit": 0, "stdout": "1\n" }
+        },
+        {
+          "command": "dash -c 'echo box > /tmp/mirage-integ-own-tmp.txt'",
+          "expect": { "exit": 0, "stdout": "", "stderr": "" }
+        },
+        {
+          "command": "cat /tmp/mirage-integ-own-tmp.txt",
+          "expect": { "exit": 1, "stdout": "", "stderr_contains": "No such file or directory" }
+        },
+        {
+          "command": "cd /tmp && dash -c true",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr_contains": "cannot see the working directory /tmp; cd into a mount first"
+          }
+        }
+      ]
+    },
+    {
       "id": "mount_type_ssh_serves_the_sessions_view",
       "runtimes": [
         "docker",
