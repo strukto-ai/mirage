@@ -18,7 +18,7 @@ import logging
 import math
 import os
 import time
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from enum import StrEnum
 from pathlib import Path
@@ -907,7 +907,11 @@ class WorkspaceRegistry:
                 self._start_idle_timer()
         return entry
 
-    async def stop(self, workspace_id: str) -> WorkspaceEntry:
+    async def stop(
+        self,
+        workspace_id: str,
+        then: Callable[[], Awaitable[None]] | None = None,
+    ) -> WorkspaceEntry:
         """Stop ``workspace_id`` and keep its state.
 
         The runner stops, which cancels its lines and closes its
@@ -917,8 +921,14 @@ class WorkspaceRegistry:
         reserved until it has stopped, so a start never loads state the
         old runner is still writing.
 
+        ``then`` runs once the runner has stopped, while the id is still
+        reserved, so what it reads is never a start that landed after.
+        A stop that joins one already in flight runs it once that ends.
+
         Args:
             workspace_id (str): id to stop.
+            then (Callable[[], Awaitable[None]] | None): what to read
+                about the stopped workspace before its id is released.
 
         Returns:
             WorkspaceEntry: the stopped entry.
@@ -927,21 +937,43 @@ class WorkspaceRegistry:
             KeyError: ``workspace_id`` is not registered.
         """
         removal = self._removals.get(workspace_id)
-        if removal is None:
-            entry = self._entries.pop(workspace_id)
-            entry.accepting_jobs = False
-            removal = asyncio.create_task(self._stop_kept(entry))
-            self._removals[workspace_id] = removal
+        if removal is not None:
+            entry = await asyncio.shield(removal)
+            if then is not None:
+                await then()
+            return entry
+        entry = self._entries.pop(workspace_id)
+        entry.accepting_jobs = False
+        removal = asyncio.create_task(self._stop_kept(entry, then))
+        self._removals[workspace_id] = removal
         return await asyncio.shield(removal)
 
-    async def _stop_kept(self, entry: WorkspaceEntry) -> WorkspaceEntry:
-        """Run one stop, releasing the id once the runner has stopped.
+    async def _stop_kept(
+        self,
+        entry: WorkspaceEntry,
+        then: Callable[[], Awaitable[None]] | None,
+    ) -> WorkspaceEntry:
+        """Run one stop, releasing the id once the runner has stopped and
+        ``then`` has read what it needs. A ``then`` that fails is logged,
+        so a delete joining this stop still sees it succeed.
 
         Args:
             entry (WorkspaceEntry): the entry being stopped.
+            then (Callable[[], Awaitable[None]] | None): the stopper's
+                read, run before the id is released.
         """
         try:
             await _stop(entry, self.jobs)
+            if then is not None:
+                try:
+                    await then()
+                except Exception as exc:
+                    logger.warning(
+                        "mirage: workspace %s stopped, but its stop could "
+                        "not read what it keeps: %s",
+                        entry.id,
+                        exc,
+                    )
         finally:
             del self._removals[entry.id]
             if not self._entries:

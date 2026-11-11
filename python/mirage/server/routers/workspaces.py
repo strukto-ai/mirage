@@ -172,7 +172,7 @@ def _store_of(
 
 
 async def _kept(
-    request: Request, workspace_id: str, at: float = 0.0
+    request: Request, workspace_id: str
 ) -> tuple[dict[str, JsonValue], float] | None:
     """What the caller's stopped ``workspace_id`` keeps: the config it
     starts from and when it was first created, or None when no config is
@@ -183,12 +183,10 @@ async def _kept(
     Args:
         request (Request): the request, for the registry and its account.
         workspace_id (str): the id asked about.
-        at (float): when the caller's claim on it was made; a live
-            workspace's own creation time reaches its config.
     """
     registry = request.app.state.registry
     account = request.state.account
-    if not await registry.allows(workspace_id, account, at):
+    if not await registry.allows(workspace_id, account, 0.0):
         return None
     config = await registry.saved_config(workspace_id, account)
     if config is None:
@@ -838,13 +836,16 @@ async def stop_workspace(
     entry = registry.visible(workspace_id, account)
     if entry is None and not await is_stopped(request, workspace_id):
         raise HttpError(ErrorCode.NOT_FOUND, "workspace not found")
-    # Read what it keeps while the id is still held, so a start that
-    # lands once the stop releases it is never answered for.
-    kept = await _kept(
-        request, workspace_id, entry.created_at if entry is not None else 0.0
-    )
+    kept: tuple[dict[str, JsonValue], float] | None = None
+
+    async def read_kept() -> None:
+        nonlocal kept
+        kept = await _kept(request, workspace_id)
+
     if entry is not None or registry.removing(workspace_id):
-        await registry.stop(workspace_id)
+        await registry.stop(workspace_id, read_kept)
+    else:
+        await read_kept()
     if kept is not None:
         return make_stopped_detail(workspace_id, *kept)
     # Nothing to start from: a server that keeps no state, or state kept

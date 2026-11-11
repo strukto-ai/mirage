@@ -1807,6 +1807,24 @@ async def test_a_second_stop_answers_as_the_first(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_signed_in_stop_answers_as_get(tmp_path):
+    secret = "s" * 32
+    app = _jwt_app(secret, tmp_path / "state")
+    async with _account(app, secret, "alice") as alice:
+        body = {**_minimal_config(), "id": "keep"}
+        assert (
+            await alice.post("/v1/workspaces", json=body)
+        ).status_code == 201
+        stopped = await alice.post("/v1/workspaces/keep/stop")
+        assert stopped.status_code == 200, stopped.text
+        assert stopped.json()["mounts"]
+        assert (
+            stopped.json() == (await alice.get("/v1/workspaces/keep")).json()
+        )
+    await app.state.registry.close_all()
+
+
+@pytest.mark.asyncio
 async def test_a_second_start_answers_the_running_workspace(tmp_path):
     app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
     async with AsyncClient(
