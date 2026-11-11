@@ -24,6 +24,11 @@ attributes.
 the others, as the [overview](/home/infrastructure/overview#one-store-or-several)
 shows.
 
+Set `store.type` as well. A `store` block without it keeps the other
+stores in memory, even on a server: the server keeps them on disk only
+when the config has no `store` block. The examples below set
+`type: disk`, which matches that default.
+
 ## On disk
 
 <Tabs>
@@ -31,6 +36,7 @@ shows.
     ```yaml
     workspace_id: agent
     store:
+      type: disk
       namespace:
         type: disk
         root: /var/lib/mirage
@@ -39,9 +45,9 @@ shows.
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import Workspace
-    from mirage.workspace.store import DiskWorkspaceStateStore, RAMWorkspaceStateStore
+    from mirage.workspace.store import DiskWorkspaceStateStore
 
-    store = RAMWorkspaceStateStore(
+    store = DiskWorkspaceStateStore(
         namespace=DiskWorkspaceStateStore(root="/var/lib/mirage"),
     )
     ws = Workspace(mounts, workspace_id="agent", store=store, owns_store=True)
@@ -49,9 +55,9 @@ shows.
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { DiskWorkspaceStateStore, RAMWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
+    import { DiskWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
 
-    const store = new RAMWorkspaceStateStore({
+    const store = new DiskWorkspaceStateStore({
       namespace: new DiskWorkspaceStateStore({ root: '/var/lib/mirage' }),
     })
     const ws = new Workspace(mounts, { workspaceId: 'agent', store, ownsStore: true })
@@ -66,6 +72,7 @@ shows.
     ```yaml
     workspace_id: agent
     store:
+      type: disk
       namespace:
         type: redis
         url: redis://redis.internal:6379/0
@@ -74,9 +81,9 @@ shows.
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import Workspace
-    from mirage.workspace.store import RAMWorkspaceStateStore, RedisWorkspaceStateStore
+    from mirage.workspace.store import DiskWorkspaceStateStore, RedisWorkspaceStateStore
 
-    store = RAMWorkspaceStateStore(
+    store = DiskWorkspaceStateStore(
         namespace=RedisWorkspaceStateStore(url="redis://redis.internal:6379/0"),
     )
     ws = Workspace(mounts, workspace_id="agent", store=store, owns_store=True)
@@ -84,9 +91,9 @@ shows.
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { RAMWorkspaceStateStore, RedisWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
+    import { DiskWorkspaceStateStore, RedisWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
 
-    const store = new RAMWorkspaceStateStore({
+    const store = new DiskWorkspaceStateStore({
       namespace: new RedisWorkspaceStateStore({ url: 'redis://redis.internal:6379/0' }),
     })
     const ws = new Workspace(mounts, { workspaceId: 'agent', store, ownsStore: true })
