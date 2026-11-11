@@ -2780,7 +2780,7 @@ def build_disk(
 
 def build_sql(
     mount: dict, run_id: str, service: Service | None
-) -> tuple[object, Callable[[], Awaitable[None]]]:
+) -> tuple[SqlVFS, Callable[[], Awaitable[None]]]:
     # Named by the run and the database, not minted, so mounts naming one
     # database share its file, and the second build of one run (a
     # consistency case's shadow) opens the file the first one made; each
