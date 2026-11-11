@@ -222,9 +222,10 @@ def command(call: VfsCall) -> Callable[..., None]:
         if call.name == "read" and not as_json and not explain:
             _read_to_stdout(workspace_id, body, session_id)
             return
-        result = answer(
+        said = answer(
             post(workspace_id, f"vfs/{call.name}", body, session_id, explain)
         )
+        result = said["explanation" if explain else "result"]
         if result is not None:
             emit(result, human=_explained if explain else HUMAN.get(call.name))
 

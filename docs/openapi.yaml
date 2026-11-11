@@ -2475,31 +2475,40 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns. With `explain=true`, its explanation; nothing runs.
+          description: '`result` is what the call returns. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
-                  - type: string
+                  - type: object
                     title: Result
-                    description: The bytes, base64.
-                  - $ref: '#/components/schemas/VfsExplanation'
+                    properties:
+                      result:
+                        type: string
+                        description: The bytes, base64.
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
-                  value: aGVsbG8K
+                  value:
+                    result: aGVsbG8K
                 explain:
                   summary: Explain
                   value:
-                    call: read
-                    paths:
-                      - /hello.txt
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: read
+                      paths:
+                        - /hello.txt
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
             application/octet-stream:
               schema:
                 type: string
@@ -2575,31 +2584,39 @@ paths:
             default: false
       responses:
         '200':
-          description: On success the body is `null`. With `explain=true`, its explanation; nothing
-            runs.
+          description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
+            what the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
-                  - type: 'null'
+                  - type: object
                     title: Result
-                  - $ref: '#/components/schemas/VfsExplanation'
+                    properties:
+                      result:
+                        type: 'null'
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
-                  value: null
+                  value:
+                    result: null
                 explain:
                   summary: Explain
                   value:
-                    call: write
-                    paths:
-                      - /hello.txt
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: write
+                      paths:
+                        - /hello.txt
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -2660,31 +2677,39 @@ paths:
             default: false
       responses:
         '200':
-          description: On success the body is `null`. With `explain=true`, its explanation; nothing
-            runs.
+          description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
+            what the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
-                  - type: 'null'
+                  - type: object
                     title: Result
-                  - $ref: '#/components/schemas/VfsExplanation'
+                    properties:
+                      result:
+                        type: 'null'
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
-                  value: null
+                  value:
+                    result: null
                 explain:
                   summary: Explain
                   value:
-                    call: append
-                    paths:
-                      - /hello.txt
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: append
+                      paths:
+                        - /hello.txt
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -2745,31 +2770,39 @@ paths:
             default: false
       responses:
         '200':
-          description: On success the body is `null`. With `explain=true`, its explanation; nothing
-            runs.
+          description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
+            what the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
-                  - type: 'null'
+                  - type: object
                     title: Result
-                  - $ref: '#/components/schemas/VfsExplanation'
+                    properties:
+                      result:
+                        type: 'null'
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
-                  value: null
+                  value:
+                    result: null
                 explain:
                   summary: Explain
                   value:
-                    call: pwrite
-                    paths:
-                      - /hello.txt
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: pwrite
+                      paths:
+                        - /hello.txt
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -2835,43 +2868,53 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns. With `explain=true`, its explanation; nothing runs.
+          description: '`result` is what the call returns. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
-                  - $ref: '#/components/schemas/FileStat'
-                  - $ref: '#/components/schemas/VfsExplanation'
+                  - type: object
+                    title: Result
+                    properties:
+                      result:
+                        $ref: '#/components/schemas/FileStat'
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
                   value:
-                    name: hello.txt
-                    size: 6
-                    modified: '2026-11-11T06:10:55.182632Z'
-                    fingerprint: null
-                    revision: null
-                    type: file
-                    content: text
-                    mode: null
-                    uid: null
-                    gid: null
-                    atime: null
-                    ctime: null
-                    birthtime: null
-                    dev: 192842459547137
+                    result:
+                      name: hello.txt
+                      size: 6
+                      modified: '2026-11-11T06:10:55.182632Z'
+                      fingerprint: null
+                      revision: null
+                      type: file
+                      content: text
+                      mode: null
+                      uid: null
+                      gid: null
+                      atime: null
+                      ctime: null
+                      birthtime: null
+                      dev: 192842459547137
                 explain:
                   summary: Explain
                   value:
-                    call: stat
-                    paths:
-                      - /hello.txt
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: stat
+                      paths:
+                        - /hello.txt
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -2929,35 +2972,44 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns. With `explain=true`, its explanation; nothing runs.
+          description: '`result` is what the call returns. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
-                  - type: array
+                  - type: object
                     title: Result
-                    items:
-                      type: string
-                    description: Full paths.
-                  - $ref: '#/components/schemas/VfsExplanation'
+                    properties:
+                      result:
+                        type: array
+                        items:
+                          type: string
+                        description: Full paths.
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
                   value:
-                    - /hello.txt
-                    - /notes
+                    result:
+                      - /hello.txt
+                      - /notes
                 explain:
                   summary: Explain
                   value:
-                    call: readdir
-                    paths:
-                      - /
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: readdir
+                      paths:
+                        - /
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3012,30 +3064,39 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns. With `explain=true`, its explanation; nothing runs.
+          description: '`result` is what the call returns. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
-                  - type: boolean
+                  - type: object
                     title: Result
-                  - $ref: '#/components/schemas/VfsExplanation'
+                    properties:
+                      result:
+                        type: boolean
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
-                  value: true
+                  value:
+                    result: true
                 explain:
                   summary: Explain
                   value:
-                    call: exists
-                    paths:
-                      - /hello.txt
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: exists
+                      paths:
+                        - /hello.txt
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3090,30 +3151,39 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns. With `explain=true`, its explanation; nothing runs.
+          description: '`result` is what the call returns. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
-                  - type: boolean
+                  - type: object
                     title: Result
-                  - $ref: '#/components/schemas/VfsExplanation'
+                    properties:
+                      result:
+                        type: boolean
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
-                  value: true
+                  value:
+                    result: true
                 explain:
                   summary: Explain
                   value:
-                    call: is_dir
-                    paths:
-                      - /
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: is_dir
+                      paths:
+                        - /
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3168,30 +3238,39 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns. With `explain=true`, its explanation; nothing runs.
+          description: '`result` is what the call returns. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
-                  - type: boolean
+                  - type: object
                     title: Result
-                  - $ref: '#/components/schemas/VfsExplanation'
+                    properties:
+                      result:
+                        type: boolean
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
-                  value: true
+                  value:
+                    result: true
                 explain:
                   summary: Explain
                   value:
-                    call: is_file
-                    paths:
-                      - /hello.txt
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: is_file
+                      paths:
+                        - /hello.txt
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3246,34 +3325,43 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns. With `explain=true`, its explanation; nothing runs.
+          description: '`result` is what the call returns. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
-                  - type: array
+                  - type: object
                     title: Result
-                    items:
-                      type: string
-                    description: File names only.
-                  - $ref: '#/components/schemas/VfsExplanation'
+                    properties:
+                      result:
+                        type: array
+                        items:
+                          type: string
+                        description: File names only.
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
                   value:
-                    - hello.txt
+                    result:
+                      - hello.txt
                 explain:
                   summary: Explain
                   value:
-                    call: list_files
-                    paths:
-                      - /
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: list_files
+                      paths:
+                        - /
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3328,31 +3416,39 @@ paths:
             default: false
       responses:
         '200':
-          description: On success the body is `null`. With `explain=true`, its explanation; nothing
-            runs.
+          description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
+            what the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
-                  - type: 'null'
+                  - type: object
                     title: Result
-                  - $ref: '#/components/schemas/VfsExplanation'
+                    properties:
+                      result:
+                        type: 'null'
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
-                  value: null
+                  value:
+                    result: null
                 explain:
                   summary: Explain
                   value:
-                    call: mkdir
-                    paths:
-                      - /notes
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: mkdir
+                      paths:
+                        - /notes
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3407,31 +3503,39 @@ paths:
             default: false
       responses:
         '200':
-          description: On success the body is `null`. With `explain=true`, its explanation; nothing
-            runs.
+          description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
+            what the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
-                  - type: 'null'
+                  - type: object
                     title: Result
-                  - $ref: '#/components/schemas/VfsExplanation'
+                    properties:
+                      result:
+                        type: 'null'
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
-                  value: null
+                  value:
+                    result: null
                 explain:
                   summary: Explain
                   value:
-                    call: rmdir
-                    paths:
-                      - /notes
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: rmdir
+                      paths:
+                        - /notes
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3486,31 +3590,39 @@ paths:
             default: false
       responses:
         '200':
-          description: On success the body is `null`. With `explain=true`, its explanation; nothing
-            runs.
+          description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
+            what the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
-                  - type: 'null'
+                  - type: object
                     title: Result
-                  - $ref: '#/components/schemas/VfsExplanation'
+                    properties:
+                      result:
+                        type: 'null'
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
-                  value: null
+                  value:
+                    result: null
                 explain:
                   summary: Explain
                   value:
-                    call: unlink
-                    paths:
-                      - /hello.txt
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: unlink
+                      paths:
+                        - /hello.txt
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3565,31 +3677,39 @@ paths:
             default: false
       responses:
         '200':
-          description: On success the body is `null`. With `explain=true`, its explanation; nothing
-            runs.
+          description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
+            what the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
-                  - type: 'null'
+                  - type: object
                     title: Result
-                  - $ref: '#/components/schemas/VfsExplanation'
+                    properties:
+                      result:
+                        type: 'null'
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
-                  value: null
+                  value:
+                    result: null
                 explain:
                   summary: Explain
                   value:
-                    call: create
-                    paths:
-                      - /hello.txt
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: create
+                      paths:
+                        - /hello.txt
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3644,32 +3764,40 @@ paths:
             default: false
       responses:
         '200':
-          description: On success the body is `null`. With `explain=true`, its explanation; nothing
-            runs.
+          description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
+            what the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
-                  - type: 'null'
+                  - type: object
                     title: Result
-                  - $ref: '#/components/schemas/VfsExplanation'
+                    properties:
+                      result:
+                        type: 'null'
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
-                  value: null
+                  value:
+                    result: null
                 explain:
                   summary: Explain
                   value:
-                    call: rename
-                    paths:
-                      - /hello.txt
-                      - /goodbye.txt
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: rename
+                      paths:
+                        - /hello.txt
+                        - /goodbye.txt
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3730,31 +3858,39 @@ paths:
             default: false
       responses:
         '200':
-          description: On success the body is `null`. With `explain=true`, its explanation; nothing
-            runs.
+          description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
+            what the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
-                  - type: 'null'
+                  - type: object
                     title: Result
-                  - $ref: '#/components/schemas/VfsExplanation'
+                    properties:
+                      result:
+                        type: 'null'
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
-                  value: null
+                  value:
+                    result: null
                 explain:
                   summary: Explain
                   value:
-                    call: symlink
-                    paths:
-                      - /hello-link.txt
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: symlink
+                      paths:
+                        - /hello-link.txt
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3814,31 +3950,40 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns. With `explain=true`, its explanation; nothing runs.
+          description: '`result` is what the call returns. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
-                  - type: string
+                  - type: object
                     title: Result
-                    description: The link's target.
-                  - $ref: '#/components/schemas/VfsExplanation'
+                    properties:
+                      result:
+                        type: string
+                        description: The link's target.
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
-                  value: /hello.txt
+                  value:
+                    result: /hello.txt
                 explain:
                   summary: Explain
                   value:
-                    call: readlink
-                    paths:
-                      - /hello-link.txt
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: readlink
+                      paths:
+                        - /hello-link.txt
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3893,35 +4038,44 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns. With `explain=true`, its explanation; nothing runs.
+          description: '`result` is what the call returns. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
                   - type: object
                     title: Result
-                    description: The fields the backend could not keep, which Mirage stores instead.
-                    additionalProperties:
-                      type:
-                        - integer
-                        - string
-                  - $ref: '#/components/schemas/VfsExplanation'
+                    properties:
+                      result:
+                        type: object
+                        description: The fields the backend could not keep, which Mirage stores instead.
+                        additionalProperties:
+                          type:
+                            - integer
+                            - string
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
-                  value: {}
+                  value:
+                    result: {}
                 explain:
                   summary: Explain
                   value:
-                    call: setattr
-                    paths:
-                      - /hello.txt
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: setattr
+                      paths:
+                        - /hello.txt
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3997,31 +4151,40 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns. With `explain=true`, its explanation; nothing runs.
+          description: '`result` is what the call returns. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
-                  - type: string
+                  - type: object
                     title: Result
-                    description: The bytes, base64.
-                  - $ref: '#/components/schemas/VfsExplanation'
+                    properties:
+                      result:
+                        type: string
+                        description: The bytes, base64.
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
-                  value: aGVsbG8K
+                  value:
+                    result: aGVsbG8K
                 explain:
                   summary: Explain
                   value:
-                    call: getxattr
-                    paths:
-                      - /hello.txt
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: getxattr
+                      paths:
+                        - /hello.txt
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -4084,33 +4247,42 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns. With `explain=true`, its explanation; nothing runs.
+          description: '`result` is what the call returns. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
-                  - type: array
+                  - type: object
                     title: Result
-                    items:
-                      type: string
-                  - $ref: '#/components/schemas/VfsExplanation'
+                    properties:
+                      result:
+                        type: array
+                        items:
+                          type: string
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
                   value:
-                    - user.note
+                    result:
+                      - user.note
                 explain:
                   summary: Explain
                   value:
-                    call: listxattr
-                    paths:
-                      - /hello.txt
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: listxattr
+                      paths:
+                        - /hello.txt
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -4168,31 +4340,39 @@ paths:
             default: false
       responses:
         '200':
-          description: On success the body is `null`. With `explain=true`, its explanation; nothing
-            runs.
+          description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
+            what the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
-                  - type: 'null'
+                  - type: object
                     title: Result
-                  - $ref: '#/components/schemas/VfsExplanation'
+                    properties:
+                      result:
+                        type: 'null'
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
-                  value: null
+                  value:
+                    result: null
                 explain:
                   summary: Explain
                   value:
-                    call: setxattr
-                    paths:
-                      - /hello.txt
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: setxattr
+                      paths:
+                        - /hello.txt
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -4267,31 +4447,39 @@ paths:
             default: false
       responses:
         '200':
-          description: On success the body is `null`. With `explain=true`, its explanation; nothing
-            runs.
+          description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
+            what the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
-                  - type: 'null'
+                  - type: object
                     title: Result
-                  - $ref: '#/components/schemas/VfsExplanation'
+                    properties:
+                      result:
+                        type: 'null'
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
-                  value: null
+                  value:
+                    result: null
                 explain:
                   summary: Explain
                   value:
-                    call: removexattr
-                    paths:
-                      - /hello.txt
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: removexattr
+                      paths:
+                        - /hello.txt
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -4354,31 +4542,39 @@ paths:
             default: false
       responses:
         '200':
-          description: On success the body is `null`. With `explain=true`, its explanation; nothing
-            runs.
+          description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
+            what the call would do; nothing runs.'
           content:
             application/json:
               schema:
                 anyOf:
-                  - type: 'null'
+                  - type: object
                     title: Result
-                  - $ref: '#/components/schemas/VfsExplanation'
+                    properties:
+                      result:
+                        type: 'null'
+                    required:
+                      - result
+                    additionalProperties: false
+                  - $ref: '#/components/schemas/VfsExplained'
               examples:
                 result:
                   summary: '200'
-                  value: null
+                  value:
+                    result: null
                 explain:
                   summary: Explain
                   value:
-                    call: truncate
-                    paths:
-                      - /hello.txt
-                    outcome: allow
-                    reason: ''
-                    source: ''
-                    decision: null
-                    answers: []
-                    error: ''
+                    explanation:
+                      call: truncate
+                      paths:
+                        - /hello.txt
+                      outcome: allow
+                      reason: ''
+                      source: ''
+                      decision: null
+                      answers: []
+                      error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -4436,10 +4632,20 @@ paths:
         - $ref: '#/components/parameters/sessionId'
       responses:
         '200':
-          description: OK
+          description: '`result` is what the function returns.'
           content:
             application/json:
-              schema: {}
+              schema:
+                type: object
+                title: Result
+                properties:
+                  result:
+                    description: What the function returns.
+                required:
+                  - result
+                additionalProperties: false
+              example:
+                result: null
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -4457,7 +4663,7 @@ paths:
         '500':
           $ref: '#/components/responses/500'
       description: Call a VFS function by name using the selected session and its permissions. Request
-        arguments and the JSON response depend on the function. The response example shows headers only.
+        arguments and the JSON response depend on the function.
         A name no mount declares answers `400` with `errno` `ENOTSUP`. A name Mirage defines
         itself, such as `copy`, answers `400` without an `errno`.
       tags:
@@ -8061,6 +8267,16 @@ components:
             - paths
             - error
       title: Explanation (explain=true)
+    VfsExplained:
+      type: object
+      title: Explanation (explain=true)
+      description: A VFS call's answer with `explain=true`.
+      properties:
+        explanation:
+          $ref: '#/components/schemas/VfsExplanation'
+      required:
+        - explanation
+      additionalProperties: false
     FileStat:
       type: object
       title: FileStat

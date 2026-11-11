@@ -6,6 +6,7 @@ from mirage.policy import Policy, Route, RouteContext
 from mirage.server.io_serde import (
     CallArgsError,
     answered,
+    body_of,
     checked,
     explanation_to_dict,
     io_result_to_dict,
@@ -106,7 +107,32 @@ def test_arguments_outside_the_schema_are_refused():
     write = VFS_CALL_BY_NAME["write"]
     with pytest.raises(CallArgsError, match="data must be base64"):
         checked(write, {"path": "/a", "data": "%%"})
-    with pytest.raises(
-        CallArgsError, match="arguments do not fit vfs/write.s schema"
-    ):
-        checked(write, {"path": "/a"})
+    with pytest.raises(CallArgsError, match="data is required") as missing:
+        checked(write, {"path": "/a", "extra": 1})
+    assert missing.value.error().record() == {
+        "code": "missing_field",
+        "message": "data is required",
+        "param": "data",
+    }
+    with pytest.raises(CallArgsError) as unknown:
+        checked(write, {"path": "/a", "data": "", "extra": 1})
+    assert unknown.value.error().record() == {
+        "code": "unknown_field",
+        "message": "extra is not a known field",
+        "param": "extra",
+    }
+    with pytest.raises(CallArgsError) as wrong:
+        checked(write, {"path": 1, "data": ""})
+    assert wrong.value.error().record() == {
+        "code": "invalid_value",
+        "message": "arguments do not fit vfs/write's schema",
+        "param": "path",
+    }
+
+
+def test_a_call_answers_one_object():
+    assert body_of(None) == {"result": None}
+    assert body_of(["/a"]) == {"result": ["/a"]}
+    assert body_of({"outcome": "allow"}, explain=True) == {
+        "explanation": {"outcome": "allow"}
+    }

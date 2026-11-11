@@ -35,7 +35,7 @@ import { CALLS } from '@struktoai/mirage-core/workspace/dispatcher/constants'
 import type { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { RESERVED_KWARGS, STAT_TIMES } from './constants.ts'
-import { HttpError, paramOf } from './errors.ts'
+import { HttpError, paramOf, type ErrorCode } from './errors.ts'
 import { BYTES, schemaOf, type Args, type VfsCall } from './vfs_calls.ts'
 
 export interface ResultDict {
@@ -142,23 +142,38 @@ export class CallArgsError extends Error {
   constructor(
     message: string,
     readonly param?: string,
+    readonly code?: ErrorCode,
   ) {
     super(message)
   }
 
   /** The refusal a route answers. */
   error(): HttpError {
-    if (this.param === undefined) return new HttpError('invalid_request', this.message)
-    return new HttpError('invalid_value', this.message, { param: this.param })
+    if (this.param === undefined) return new HttpError(this.code ?? 'invalid_request', this.message)
+    return new HttpError(this.code ?? 'invalid_value', this.message, { param: this.param })
   }
 }
 
 /**
  * A VFS call's arguments, held to its schema, as its method takes them:
- * each bytes argument decoded from base64. Throws
- * `CallArgsError` when they do not fit. Mirrors Python's `checked`.
+ * each bytes argument decoded from base64. A missing argument is refused
+ * before an unknown one, each in order, as the other routes refuse their
+ * fields. Throws `CallArgsError` when they do not fit. Mirrors Python's
+ * `checked`.
  */
 export async function checked(call: VfsCall, params: unknown): Promise<Record<string, unknown>> {
+  if (params !== null && typeof params === 'object' && !Array.isArray(params)) {
+    const given = params as Record<string, unknown>
+    for (const name of call.required) {
+      if (!Object.hasOwn(given, name))
+        throw new CallArgsError(`${name} is required`, name, 'missing_field')
+    }
+    for (const name of Object.keys(given)) {
+      if (!Object.hasOwn(call.params, name)) {
+        throw new CallArgsError(`${name} is not a known field`, name, 'unknown_field')
+      }
+    }
+  }
   const result = await fromJsonSchema(schemaOf(call))['~standard'].validate(params)
   const issue = result.issues?.[0]
   if (issue !== undefined) {
@@ -232,6 +247,15 @@ export async function answered(
   }
   const result = await call.run(session.vfs, args)
   return toJson(result)
+}
+
+/**
+ * A VFS call's answer as the HTTP routes and the MCP tools carry it: one
+ * object, whose `result` is what the call returned, or whose `explanation`
+ * is what it would do. Mirrors Python's `body_of`.
+ */
+export function bodyOf(value: JsonValue, explain = false): Record<string, JsonValue> {
+  return explain ? { explanation: value } : { result: value }
 }
 
 /** Validate a remote function call without accepting host context overrides. */

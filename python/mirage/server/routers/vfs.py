@@ -32,6 +32,7 @@ from mirage.server.errors import (
 from mirage.server.io_serde import (
     CallArgsError,
     answered,
+    body_of,
     checked,
     custom_answer,
 )
@@ -197,7 +198,7 @@ def vfs_route(call: VfsCall) -> Callable[..., Awaitable[Response]]:
         except Exception as exc:
             logger.debug("vfs/%s failed", call.name, exc_info=True)
             return failure(exc)
-        return JSONResponse(content=result)
+        return JSONResponse(content=body_of(result, explain))
 
     return endpoint
 
@@ -226,4 +227,4 @@ async def custom_function(
     except Exception as exc:
         logger.debug("vfs/%s failed", name, exc_info=True)
         return failure(exc)
-    return JSONResponse(content=result)
+    return JSONResponse(content=body_of(result))

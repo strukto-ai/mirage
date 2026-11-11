@@ -172,7 +172,8 @@ function command(vfs: Command, call: VfsCall): void {
       await readToStdout(opts, body)
       return
     }
-    const result = await answer(await post(opts, `vfs/${call.name}`, body))
+    const said = (await answer(await post(opts, `vfs/${call.name}`, body))) as Answer
+    const result = said[opts.explain === true ? 'explanation' : 'result']
     if (result !== null)
       emit(result, opts.explain === true ? (r) => explained(r as Answer) : HUMAN[call.name])
   })

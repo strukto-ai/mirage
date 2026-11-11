@@ -38,6 +38,7 @@ afterEach(() => {
 
 async function run(
   args: string[],
+  verb = 'read',
 ): Promise<{ code: number | null; stdout: Buffer; posted: unknown[] }> {
   const posted: unknown[] = []
   const stub = createServer((req, res) => {
@@ -54,7 +55,13 @@ async function run(
           return
         }
         res.writeHead(200, { 'content-type': 'application/json' })
-        res.end(JSON.stringify(Buffer.concat(BINARY).toString('base64')))
+        res.end(JSON.stringify({ result: Buffer.concat(BINARY).toString('base64') }))
+        return
+      }
+      if (req.url?.startsWith('/v1/workspaces/demo/vfs/') === true) {
+        posted.push(JSON.parse(Buffer.concat(chunks).toString('utf-8')))
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ result: ['/a.py'] }))
         return
       }
       res.writeHead(200, { 'content-type': 'application/json' })
@@ -76,7 +83,7 @@ async function run(
       [ENV_AUTH_TOKEN]: TOKEN,
       [ENV_TOKEN]: TOKEN,
     })
-    const child = spawn(process.execPath, [BIN, 'workspace', 'vfs', 'read', ...args], { env })
+    const child = spawn(process.execPath, [BIN, 'workspace', 'vfs', verb, ...args], { env })
     const out: Buffer[] = []
     child.stdout.on('data', (c: Buffer) => out.push(c))
     child.stdin.end()
@@ -100,5 +107,15 @@ describe('mirage workspace vfs read', () => {
     expect(code).toBe(0)
     expect(JSON.parse(stdout.toString('utf-8'))).toBe(Buffer.concat(BINARY).toString('base64'))
     expect(posted).toEqual([{ path: '/img.png' }])
+  }, 60_000)
+})
+
+describe('mirage workspace vfs <call>', () => {
+  it('prints what the call returned', async () => {
+    const { code, stdout, posted } = await run(['/data', '-w', 'demo'], 'readdir')
+    expect(code).toBe(0)
+    expect(stdout.toString('utf-8')).toContain('/a.py')
+    expect(stdout.toString('utf-8')).not.toContain('result')
+    expect(posted).toEqual([{ path: '/data' }])
   }, 60_000)
 })

@@ -142,7 +142,7 @@ async def test_custom_functions_and_streams_keep_the_session_gate():
                 base + "/peek?session_id=agent", json={"path": "/data/visible"}
             )
             assert reply.status_code == 200, reply.text
-            assert reply.json() == "/data/visible"
+            assert reply.json() == {"result": "/data/visible"}
             reply = await client.post(
                 base + "/peek?session_id=agent", json={"path": "/data/secret"}
             )
@@ -185,3 +185,66 @@ async def test_custom_functions_and_streams_keep_the_session_gate():
                 json={"path": "/data/visible", "stream": "yes"},
             )
             assert reply.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_calls_answer_one_object_and_name_the_field_at_fault():
+    app = build_app()
+    async with app.router.lifespan_context(app):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            created = await client.post(
+                "/v1/workspaces",
+                json={"config": {"mounts": {"/": {"vfs": "ram"}}}},
+            )
+            base = f"/v1/workspaces/{created.json()['id']}/vfs"
+            written = await client.post(
+                base + "/write", json={"path": "/a", "data": "aGkK"}
+            )
+            assert written.json() == {"result": None}
+            listed = await client.post(
+                base + "/list_files", json={"path": "/"}
+            )
+            assert "a" in listed.json()["result"]
+            explained = await client.post(
+                base + "/unlink?explain=true", json={"path": "/a"}
+            )
+            said = explained.json()["explanation"]
+            assert (said["call"], said["outcome"]) == ("unlink", "allow")
+            streamed = await client.post(
+                base + "/read", json={"path": "/a", "stream": True}
+            )
+            assert streamed.headers["content-type"] == (
+                "application/octet-stream"
+            )
+            assert streamed.content == b"hi\n"
+            for body, error in (
+                (
+                    {"path": "/a"},
+                    {
+                        "code": "missing_field",
+                        "message": "data is required",
+                        "param": "data",
+                    },
+                ),
+                (
+                    {"path": "/a", "data": "", "mode": 1},
+                    {
+                        "code": "unknown_field",
+                        "message": "mode is not a known field",
+                        "param": "mode",
+                    },
+                ),
+                (
+                    {"path": 1, "data": ""},
+                    {
+                        "code": "invalid_value",
+                        "message": "arguments do not fit vfs/write's schema",
+                        "param": "path",
+                    },
+                ),
+            ):
+                refused = await client.post(base + "/write", json=body)
+                assert refused.status_code == 400
+                assert refused.json() == {"error": error}

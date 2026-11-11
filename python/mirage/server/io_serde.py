@@ -46,17 +46,28 @@ class CallArgsError(ValueError):
     Args:
         message (str): what is wrong, naming no value sent.
         param (str | None): the argument at fault, when one is.
+        code (ErrorCode | None): the code to answer; by default
+            ``invalid_value`` for an argument at fault, else
+            ``invalid_request``.
     """
 
-    def __init__(self, message: str, param: str | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        param: str | None = None,
+        code: ErrorCode | None = None,
+    ) -> None:
         super().__init__(message)
         self.param = param
+        self.code = code
 
     def error(self) -> HttpError:
         """The refusal a route answers."""
         if self.param is None:
-            return HttpError(ErrorCode.INVALID_REQUEST, str(self))
-        return HttpError(ErrorCode.INVALID_VALUE, str(self), param=self.param)
+            return HttpError(self.code or ErrorCode.INVALID_REQUEST, str(self))
+        return HttpError(
+            self.code or ErrorCode.INVALID_VALUE, str(self), param=self.param
+        )
 
 
 def decision_to_dict(
@@ -181,7 +192,9 @@ def answer_to_dict(action: Deny | Ask | Route) -> dict[str, JsonValue]:
 
 def checked(call: VfsCall, params: Mapping[str, JsonValue]) -> dict[str, Any]:
     """A VFS call's arguments, held to its schema, as its method takes
-    them: each bytes argument decoded from base64.
+    them: each bytes argument decoded from base64. A missing argument is
+    refused before an unknown one, each in order, as the other routes
+    refuse their fields.
 
     Args:
         call (VfsCall): the call.
@@ -190,6 +203,16 @@ def checked(call: VfsCall, params: Mapping[str, JsonValue]) -> dict[str, Any]:
     Raises:
         CallArgsError: the arguments do not fit the schema.
     """
+    for name in call.required:
+        if name not in params:
+            raise CallArgsError(
+                f"{name} is required", name, ErrorCode.MISSING_FIELD
+            )
+    for name in params:
+        if name not in call.params:
+            raise CallArgsError(
+                f"{name} is not a known field", name, ErrorCode.UNKNOWN_FIELD
+            )
     try:
         jsonschema.validate(dict(params), schema_of(call))
     except jsonschema.ValidationError as exc:
@@ -250,6 +273,18 @@ async def answered(
     if explain:
         return explanation_to_dict(result)
     return _to_json(result)
+
+
+def body_of(value: JsonValue, explain: bool = False) -> dict[str, JsonValue]:
+    """A VFS call's answer as the HTTP routes and the MCP tools carry it:
+    one object, whose ``result`` is what the call returned, or whose
+    ``explanation`` is what it would do.
+
+    Args:
+        value (JsonValue): the call's answer, as :func:`answered` gives it.
+        explain (bool): the answer is an explanation.
+    """
+    return {"explanation" if explain else "result": value}
 
 
 def custom_args(
