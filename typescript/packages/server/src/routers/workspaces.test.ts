@@ -1634,6 +1634,27 @@ describe('workspace cancel, kill, stop and start', () => {
     }
   })
 
+  it('answers the error when a stop cannot read what it keeps', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ws-stop-unreadable-'))
+    const app = buildApp({ stateRoot: join(root, 'state') })
+    try {
+      expect((await post(app, '/v1/workspaces', { ...RAM, id: 'keep' })).statusCode).toBe(201)
+      const read = vi
+        .spyOn(app.registry, 'savedConfig')
+        .mockRejectedValueOnce(new Error('store down'))
+      expect((await post(app, '/v1/workspaces/keep/stop')).statusCode).toBe(500)
+      expect(app.registry.has('keep')).toBe(false)
+      expect(app.registry.removing('keep')).toBe(false)
+      read.mockRestore()
+      const again = await post(app, '/v1/workspaces/keep/stop')
+      expect(again.statusCode).toBe(200)
+      expect(again.json<{ mounts: unknown[] }>().mounts).not.toEqual([])
+    } finally {
+      await app.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('answers a second start with the running workspace', async () => {
     const root = mkdtempSync(join(tmpdir(), 'ws-start-twice-'))
     const app = buildApp({ stateRoot: join(root, 'state') })
