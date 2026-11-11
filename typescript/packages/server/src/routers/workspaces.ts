@@ -323,14 +323,17 @@ interface Kept {
  * it was first created, null when no config is saved. State alone, as a
  * rejected create leaves, is not a workspace to list or start. A store
  * that cannot be read, such as a Redis that is down, leaves the config
- * with no creation time. Mirrors Python's `_kept`.
+ * with no creation time. `at` is when the caller's claim on it was made; a
+ * live workspace's own creation time reaches its config. Mirrors Python's
+ * `_kept`.
  */
 async function kept(
   deps: WorkspaceRoutesDeps,
   id: string,
   account: string | null,
+  at = 0,
 ): Promise<Kept | null> {
-  if (!(await deps.registry.allows(id, account, 0))) return null
+  if (!(await deps.registry.allows(id, account, at))) return null
   const config = await deps.registry.savedConfig(id, account)
   if (config === null) return null
   const store = storeOf(deps, config)
@@ -872,8 +875,10 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       if (entry === null && !(await isStopped(deps, id, req.account))) {
         throw new HttpError('not_found', 'workspace not found')
       }
+      // Read what it keeps while the id is still held, so a start that
+      // lands once the stop releases it is never answered for.
+      const k = await kept(deps, id, req.account, entry?.createdAt ?? 0)
       if (entry !== null || deps.registry.removing(id)) await deps.registry.stop(id)
-      const k = await kept(deps, id, req.account)
       if (k !== null) return makeStoppedDetail(id, k.config, k.createdAt)
       // Nothing to start from: a server that keeps no state, or state kept
       // with no config. The workspace is stopped all the same.

@@ -17,7 +17,7 @@ import math
 import re
 from collections.abc import Generator, Mapping
 from contextlib import closing
-from datetime import datetime, timezone, tzinfo
+from datetime import datetime, timedelta, timezone, tzinfo
 
 from mirage.io.yield_budget import YieldBudget
 from mirage.rs.stream import open_stream
@@ -288,9 +288,9 @@ def ns_to_iso(ns: int) -> str:
 # An ISO 8601 date-time as backends spell one: a date, an optional time
 # with optional seconds and fraction, and an optional offset.
 _DATE_TIME = re.compile(
-    r"(\d{4})-(\d{2})-(\d{2})"
-    r"(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?)?"
-    r"(Z|[+-]\d{2}:?\d{2})?"
+    r"([0-9]{4})-([0-9]{2})-([0-9]{2})"
+    r"(?:[T ]([0-9]{2}):([0-9]{2})(?::([0-9]{2})(?:\.([0-9]+))?)?)?"
+    r"(Z|[+-][0-9]{2}:?[0-9]{2})?"
 )
 
 
@@ -322,8 +322,6 @@ def rfc3339_of(text: str | None) -> str | None:
     if m is None:
         return None
     year, month, day, hour, minute, second, fraction, offset = m.groups()
-    if int(year) < 1000:
-        return None
     try:
         moment = datetime(
             int(year),
@@ -336,14 +334,21 @@ def rfc3339_of(text: str | None) -> str | None:
         )
     except ValueError:
         return None
-    ms = int(moment.timestamp()) * 1000 + int(
-        (fraction or "")[:3].ljust(3, "0")
-    )
     if offset and offset != "Z":
-        sign = -1 if offset[0] == "-" else 1
-        digits = offset[1:].replace(":", "")
-        ms -= sign * (int(digits[:2]) * 60 + int(digits[2:])) * 60_000
-    return ms_to_rfc3339(ms)
+        hours, minutes = int(offset[1:3]), int(offset[-2:])
+        if hours > 23 or minutes > 59:
+            return None
+        shift = timedelta(hours=hours, minutes=minutes)
+        try:
+            moment = moment - shift if offset[0] == "+" else moment + shift
+        except OverflowError:
+            return None
+    if moment.year < 1000:
+        return None
+    return ms_to_rfc3339(
+        int(moment.timestamp()) * 1000
+        + int((fraction or "")[:3].ljust(3, "0"))
+    )
 
 
 def epoch_to_iso(seconds: float) -> str:

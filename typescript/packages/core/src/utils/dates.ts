@@ -67,7 +67,6 @@ export function rfc3339Of(text: string | null | undefined): string | null {
   const back = new Date(whole)
   // Date.UTC rolls an out-of-range field over; Python's datetime refuses it.
   if (
-    fields[0] < 1000 ||
     back.getUTCFullYear() !== fields[0] ||
     back.getUTCMonth() !== fields[1] - 1 ||
     back.getUTCDate() !== fields[2] ||
@@ -80,10 +79,13 @@ export function rfc3339Of(text: string | null | undefined): string | null {
   let ms = whole + Number((m[7] ?? '').slice(0, 3).padEnd(3, '0'))
   const offset = m[8]
   if (offset !== undefined && offset !== 'Z') {
-    const sign = offset.startsWith('-') ? -1 : 1
-    const digits = offset.slice(1).replace(':', '')
-    ms -= sign * (Number(digits.slice(0, 2)) * 60 + Number(digits.slice(2))) * 60_000
+    const hours = Number(offset.slice(1, 3))
+    const minutes = Number(offset.slice(-2))
+    if (hours > 23 || minutes > 59) return null
+    ms -= (offset.startsWith('-') ? -1 : 1) * (hours * 60 + minutes) * 60_000
   }
+  const year = new Date(ms).getUTCFullYear()
+  if (year < 1000 || year > 9999) return null
   return msToRfc3339(ms)
 }
 

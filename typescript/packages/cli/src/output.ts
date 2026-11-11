@@ -111,7 +111,7 @@ export async function handleResponse(r: Response): Promise<unknown> {
 /** The `items` of a list route's answer, failing on any other. */
 export async function handleList(r: Response): Promise<unknown[]> {
   const items = ((await handleResponse(r)) as { items?: unknown } | null)?.items
-  if (!Array.isArray(items)) fail('the server answered no list', 1)
+  if (!Array.isArray(items)) fail('the server answered no list', 2)
   return items as unknown[]
 }
 
