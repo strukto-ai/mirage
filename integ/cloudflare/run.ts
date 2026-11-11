@@ -852,6 +852,8 @@ async function main(): Promise<void> {
       if (Object.keys(profiles).length > 0) config.profiles = profiles
       if (target.profile !== undefined) config.profile = target.profile
       if (target.env !== undefined) config.env = target.env
+      // The corpus's python3 cases run on Monty, named since no runtime is a default.
+      config.runtimes = ['monty', 'workspace']
       const id = `integ-${target.id}-${runId()}`
       const ws = edgeWorkspace(base, id)
       const auth = { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` }
