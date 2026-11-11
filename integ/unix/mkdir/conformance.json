@@ -7,7 +7,8 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "ssh"
       ],
       "command": "mkdir -p /data/mkc/deep/inner && printf 'hi' > /data/mkc/f.txt && printf 'hi' > /data/mkc/deep/g.txt && echo ok",
       "expect": {
@@ -23,7 +24,8 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "ssh"
       ],
       "command": "mkdir -p /data/mkc/f.txt/sub",
       "expect": {
@@ -39,7 +41,8 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "ssh"
       ],
       "command": "mkdir -p /data/mkc/deep/g.txt/sub",
       "expect": {
@@ -55,7 +58,8 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "ssh"
       ],
       "command": "mkdir -p /data/mkc/f.txt/x/y/z",
       "expect": {
@@ -71,7 +75,8 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "ssh"
       ],
       "command": "touch /data/pmkd10f && mkdir -p -m 700 /data/pmkd10f/sub /data/pmkd10g; echo rc=$?; stat -c %a /data/pmkd10g",
       "expect": {
@@ -155,7 +160,8 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "ssh"
       ],
       "command": "mkdir -p /data/mkc/f.txt/sub /data/mkc/okp 2>/dev/null; test -d /data/mkc/okp && echo made",
       "expect": {
@@ -203,7 +209,8 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "ssh"
       ],
       "command": "cd /data/mkc && mkdir -p f.txt/sub",
       "expect": {

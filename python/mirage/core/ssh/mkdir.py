@@ -16,8 +16,9 @@ import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
 from mirage.core.ssh.utils import join_root
-from mirage.errors.fs import eexist, enoent
+from mirage.errors.fs import eacces, eexist, enoent, enotdir
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mounted_path
 
 
 async def mkdir(
@@ -26,9 +27,31 @@ async def mkdir(
     config = accessor.config
     sftp = await accessor.sftp()
     if parents:
-        await sftp.makedirs(
-            join_root(config.root, path.mount_path), exist_ok=True
-        )
+        key = path.mount_path.strip("/")
+        current = ""
+        for part in filter(None, key.split("/")):
+            current += "/" + part
+            remote = join_root(config.root, current)
+            if await sftp.isdir(remote):
+                continue
+            try:
+                await sftp.mkdir(remote)
+            except asyncssh.SFTPError as exc:
+                if await sftp.isdir(remote):
+                    continue
+                # The step -p tripped on, in the kernel's words: a name in
+                # the way is EEXIST at the operand and ENOTDIR above it.
+                named = mounted_path(path, current)
+                if isinstance(exc, asyncssh.SFTPPermissionDenied):
+                    raise eacces(named) from exc
+                if isinstance(exc, asyncssh.SFTPNoSuchFile):
+                    raise enoent(named) from exc
+                if isinstance(
+                    exc, asyncssh.SFTPFailure
+                ) and await sftp.lexists(remote):
+                    last = current == "/" + key
+                    raise (eexist if last else enotdir)(named) from exc
+                raise
     else:
         remote = join_root(config.root, path.mount_path)
         try:

@@ -12,13 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { mountedPath, rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { eexist, enoent } from '@struktoai/mirage-core/errors/fs'
+import { eacces, eexist, enoent, enotdir } from '@struktoai/mirage-core/errors/fs'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { SFTPWrapper, Stats } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { isFailure, isNoSuchFile, joinRoot, sftpCall } from './utils.ts'
+import { isFailure, isNoSuchFile, isPermissionDenied, joinRoot, sftpCall } from './utils.ts'
 
 async function statRemote(sftp: SFTPWrapper, remote: string): Promise<Stats | null> {
   return new Promise<Stats | null>((resolveFn) => {
@@ -50,19 +50,35 @@ export async function mkdir(accessor: SSHAccessor, p: PathSpec, recursive = fals
   }
   const cleaned = stripSlash(virtual)
   if (cleaned.length === 0) return
+  // Whether a directory stands at `remote`, past a server-side link to one,
+  // as asyncssh's isdir asks on Python.
+  const isDir = (remote: string): Promise<boolean> =>
+    new Promise<boolean>((resolveFn) => {
+      sftp.stat(remote, (err, stats) => {
+        resolveFn(!err && stats.isDirectory())
+      })
+    })
   const parts = cleaned.split('/')
   let cur = ''
   for (const part of parts) {
     cur = cur === '' ? `/${part}` : `${cur}/${part}`
     const stepRemote = joinRoot(root, cur)
-    const existing = await statRemote(sftp, stepRemote)
-    if (existing?.isDirectory()) continue
+    if (await isDir(stepRemote)) continue
     try {
       await sftpCall((done) => {
         sftp.mkdir(stepRemote, done)
       })
     } catch (err) {
-      if (!(await statRemote(sftp, stepRemote))?.isDirectory()) throw err
+      if (await isDir(stepRemote)) continue
+      // The step -p tripped on, in the kernel's words: a name in the way is
+      // EEXIST at the operand and ENOTDIR above it.
+      const named = mountedPath(p, cur)
+      if (isPermissionDenied(err)) throw eacces(named)
+      if (isNoSuchFile(err)) throw enoent(named)
+      if (isFailure(err) && (await statRemote(sftp, stepRemote)) !== null) {
+        throw cur === `/${cleaned}` ? eexist(named) : enotdir(named)
+      }
+      throw err
     }
   }
 }
