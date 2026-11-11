@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Stats } from 'ssh2'
 import { describe, expect, it } from 'vitest'
 import { FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { makeFakeAccessor } from '../../../tests/core/ssh/_test_utils.ts'
@@ -55,12 +56,52 @@ describe('core/ssh/mkdir', () => {
     await expect(mkdir(accessor, spec('/d'), true)).resolves.toBeUndefined()
   })
 
-  it('fails when recursive meets a file', async () => {
+  it('passes a server-side link to a directory when recursive', async () => {
+    const state = {
+      files: new Map(),
+      dirs: new Map([
+        ['/', {}],
+        ['/lnk', {}],
+      ]),
+    }
+    const accessor = makeFakeAccessor(state)
+    Object.assign(await accessor.sftp(), {
+      lstat(_path: string, cb: (err: Error | undefined, stats: Stats) => void): void {
+        cb(undefined, { isDirectory: () => false, isSymbolicLink: () => true } as Stats)
+      },
+    })
+    await mkdir(accessor, spec('/lnk/new'), true)
+    expect(state.dirs.has('/lnk/new')).toBe(true)
+  })
+
+  it('names a file in the way as ENOTDIR when recursive', async () => {
     const accessor = makeFakeAccessor({
       files: new Map([['/f', { data: new Uint8Array() }]]),
       dirs: new Map([['/', {}]]),
     })
-    await expect(mkdir(accessor, spec('/f/x'), true)).rejects.toThrow()
+    await expect(mkdir(accessor, spec('/f/x'), true)).rejects.toMatchObject({
+      code: 'ENOTDIR',
+      message: '/f',
+    })
+  })
+
+  it('names a refused step as EACCES when recursive', async () => {
+    const accessor = makeFakeAccessor({
+      files: new Map(),
+      dirs: new Map([
+        ['/', {}],
+        ['/locked', {}],
+      ]),
+    })
+    Object.assign(await accessor.sftp(), {
+      mkdir(_path: string, cb: (err: Error) => void): void {
+        cb(Object.assign(new Error('Permission denied'), { code: 3 }))
+      },
+    })
+    await expect(mkdir(accessor, spec('/locked/new'), true)).rejects.toMatchObject({
+      code: 'EACCES',
+      message: '/locked/new',
+    })
   })
 
   it('fails when parent missing and not recursive', async () => {
