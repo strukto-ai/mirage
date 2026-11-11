@@ -244,7 +244,13 @@ async def test_all_calls_serves_the_vfs_calls_and_explain(workspace):
     line = await call_tool(
         server, "shell", {"command": "rm /a", "explain": True}
     )
-    assert json.loads(read.content[0].text) == "aGk="
+    unlink = await call_tool(
+        server, "vfs_unlink", {"path": "/a", "explain": True}
+    )
+    assert json.loads(read.content[0].text) == {"result": "aGk="}
+    assert (
+        json.loads(unlink.content[0].text)["explanation"]["call"] == "unlink"
+    )
     assert missing.is_error is True
     assert json.loads(missing.content[0].text)["errno"] == "ENOENT"
     assert json.loads(line.content[0].text)["outcome"] == "allow"

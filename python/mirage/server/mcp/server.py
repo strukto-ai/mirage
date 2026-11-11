@@ -35,6 +35,7 @@ from mirage.core.render.json import compact_json_text
 from mirage.server.errors import fs_error
 from mirage.server.io_serde import (
     answered,
+    body_of,
     checked,
     explanation_to_dict,
 )
@@ -292,10 +293,16 @@ class MirageMcpServer:
             if params.name in VFS_TOOLS:
                 call = VFS_TOOLS[params.name][1]
                 return _json(
-                    await self.hop(
-                        answered(
-                            self._session, call, checked(call, given), explain
-                        )
+                    body_of(
+                        await self.hop(
+                            answered(
+                                self._session,
+                                call,
+                                checked(call, given),
+                                explain,
+                            )
+                        ),
+                        explain,
                     )
                 )
             if tool is EXPLAINED_SHELL and explain:

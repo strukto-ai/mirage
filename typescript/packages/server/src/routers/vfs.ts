@@ -20,7 +20,7 @@ import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { stderr } from 'node:process'
 import { format } from 'node:util'
 import { errorOf, errorResponse, fsError, HttpError, WorkspaceMissing } from '../errors.ts'
-import { answered, CallArgsError, checked, customAnswer } from '../io_serde.ts'
+import { answered, bodyOf, CallArgsError, checked, customAnswer } from '../io_serde.ts'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import { streamOf, type RouteApp, type RouteReply } from '../routes.ts'
 import { VFS_CALLS } from '../vfs_calls.ts'
@@ -160,7 +160,7 @@ export function registerVfsRoutes(
               .header('Cache-Control', 'no-store')
               .send(streamOf(source))
           }
-          body = await answered(session, call, args, explain)
+          body = bodyOf(await answered(session, call, args, explain), explain)
         } catch (err) {
           logger.debug('vfs/%s failed', call.name, err)
           return failure(reply, err)
@@ -179,7 +179,7 @@ export function registerVfsRoutes(
         const session = await sessionOf(ws, req.query.session_id)
         return reply
           .type('application/json; charset=utf-8')
-          .send(JSON.stringify(await customAnswer(session, req.params.name, params)))
+          .send(JSON.stringify(bodyOf(await customAnswer(session, req.params.name, params))))
       } catch (err) {
         logger.debug('vfs/%s failed', req.params.name, err)
         return failure(reply, err)

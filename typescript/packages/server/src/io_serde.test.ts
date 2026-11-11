@@ -20,7 +20,14 @@ import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { Workspace } from '@struktoai/mirage-node'
 import { describe, expect, it } from 'vitest'
-import { CallArgsError, answered, checked, explanationToDict, ioResultToDict } from './io_serde.ts'
+import {
+  CallArgsError,
+  answered,
+  bodyOf,
+  checked,
+  explanationToDict,
+  ioResultToDict,
+} from './io_serde.ts'
 import { VFS_CALL_BY_NAME, type VfsCall } from './vfs_calls.ts'
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s)
@@ -131,8 +138,32 @@ describe('checked and answered', () => {
       message: 'data must be base64',
       param: 'data',
     })
-    await expect(checked(byName('write'), { path: '/a' })).rejects.toThrow(
-      new CallArgsError("arguments do not fit vfs/write's schema"),
+    await expect(checked(byName('write'), { path: '/a', extra: 1 })).rejects.toMatchObject({
+      message: 'data is required',
+      param: 'data',
+      code: 'missing_field',
+    })
+    await expect(
+      checked(byName('write'), { path: '/a', data: '', extra: 1 }),
+    ).rejects.toMatchObject({
+      message: 'extra is not a known field',
+      param: 'extra',
+      code: 'unknown_field',
+    })
+    const wrong = await checked(byName('write'), { path: 1, data: '' }).catch(
+      (err: unknown) => err as CallArgsError,
     )
+    expect(wrong).toBeInstanceOf(CallArgsError)
+    expect((wrong as CallArgsError).error()).toMatchObject({
+      code: 'invalid_value',
+      message: "arguments do not fit vfs/write's schema",
+      param: 'path',
+    })
+  })
+
+  it('answers a call as one object', () => {
+    expect(bodyOf(null)).toEqual({ result: null })
+    expect(bodyOf(['/a'])).toEqual({ result: ['/a'] })
+    expect(bodyOf({ outcome: 'allow' }, true)).toEqual({ explanation: { outcome: 'allow' } })
   })
 })

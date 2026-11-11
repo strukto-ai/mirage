@@ -49,7 +49,12 @@ describe('vfs request refusals', () => {
     [
       '{"path": "/a", "bogus": 1}',
       'application/json',
-      { code: 'invalid_request', message: "arguments do not fit vfs/read's schema" },
+      { code: 'unknown_field', message: 'bogus is not a known field', param: 'bogus' },
+    ],
+    [
+      '{"offset": 1}',
+      'application/json',
+      { code: 'missing_field', message: 'path is required', param: 'path' },
     ],
     [
       '{"path": "/a", "stream": "yes"}',
@@ -72,6 +77,36 @@ describe('vfs request refusals', () => {
         payload,
       })
       expect([response.statusCode, response.json()]).toEqual([400, { error }])
+    } finally {
+      await app.close()
+    }
+  })
+})
+
+describe('vfs answers', () => {
+  it('answers one object: a result, an explanation, or the raw bytes', async () => {
+    const app = buildApp()
+    try {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: { config: { mounts: { '/': { vfs: 'ram' } } } },
+      })
+      const base = `/v1/workspaces/${created.json<{ id: string }>().id}/vfs`
+      const post = (url: string, payload: unknown) =>
+        app.inject({ method: 'POST', url: base + url, payload: payload as object })
+      expect((await post('/write', { path: '/a', data: 'aGkK' })).json()).toEqual({
+        result: null,
+      })
+      const listed = (await post('/list_files', { path: '/' })).json<{ result: string[] }>()
+      expect(listed.result).toContain('a')
+      const said = (await post('/unlink?explain=true', { path: '/a' })).json<{
+        explanation: { call: string; outcome: string }
+      }>()
+      expect([said.explanation.call, said.explanation.outcome]).toEqual(['unlink', 'allow'])
+      const streamed = await post('/read', { path: '/a', stream: true })
+      expect(streamed.headers['content-type']).toBe('application/octet-stream')
+      expect(streamed.body).toBe('hi\n')
     } finally {
       await app.close()
     }
@@ -182,7 +217,7 @@ it('keeps the session gate for custom functions and streamed reads', async () =>
       payload: { path: '/data/visible' },
     })
     expect(reply.statusCode, reply.body).toBe(200)
-    expect(reply.json()).toBe('/data/visible')
+    expect(reply.json()).toEqual({ result: '/data/visible' })
     reply = await app.inject({
       method: 'POST',
       url: base + '/peek?session_id=agent',
@@ -196,7 +231,7 @@ it('keeps the session gate for custom functions and streamed reads', async () =>
       payload: { path: '/data/visible' },
     })
     expect(reply.statusCode, reply.body).toBe(200)
-    expect(reply.json()).toBeNull()
+    expect(reply.json()).toEqual({ result: null })
     expect(backend.calls).toBe(2)
     for (const reserved of ['session_id', 'report', 'admit_only', 'retained', 'stream']) {
       reply = await app.inject({

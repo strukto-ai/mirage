@@ -49,7 +49,7 @@ import type { JsonValue } from '@struktoai/mirage-core/types'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { McpToolOperations, OutputProgress } from './progress.ts'
 import { fsError } from '../errors.ts'
-import { answered, checked, explanationToDict } from '../io_serde.ts'
+import { answered, bodyOf, checked, explanationToDict } from '../io_serde.ts'
 import { VFS_CALLS, schemaOf, type VfsCall } from '../vfs_calls.ts'
 
 // Diagnostics go to stderr, never stdout, which a stdio transport speaks on;
@@ -219,7 +219,10 @@ export function createMirageMcpServer(
     try {
       if (vfs !== undefined) {
         return json(
-          await answered(session, vfs.call, await checked(vfs.call, given), explain === true),
+          bodyOf(
+            await answered(session, vfs.call, await checked(vfs.call, given), explain === true),
+            explain === true,
+          ),
         )
       }
       if (tool === EXPLAINED_SHELL && explain === true) {
