@@ -332,7 +332,8 @@ def rfc3339_of(text: str | None) -> str | None:
             int(second or 0),
             tzinfo=timezone.utc,
         )
-    except ValueError:
+    except ValueError as exc:
+        logger.debug("mirage: %r is not a date-time: %s", text, exc)
         return None
     if offset and offset != "Z":
         hours, minutes = int(offset[1:3]), int(offset[-2:])
@@ -341,7 +342,8 @@ def rfc3339_of(text: str | None) -> str | None:
         shift = timedelta(hours=hours, minutes=minutes)
         try:
             moment = moment - shift if offset[0] == "+" else moment + shift
-        except OverflowError:
+        except OverflowError as exc:
+            logger.debug("mirage: %r is not a date-time: %s", text, exc)
             return None
     if moment.year < 1000:
         return None
