@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -52,10 +52,15 @@ class WorkspaceInternals(BaseModel):
 WorkspaceStatus = Literal["running", "stopped"]
 
 
+# An instant as the API reports every time: RFC 3339 in UTC to the
+# millisecond, from ``ms_to_rfc3339``.
+Instant = Annotated[str, Field(json_schema_extra={"format": "date-time"})]
+
+
 class WorkspaceBrief(BaseModel):
     id: str
     status: WorkspaceStatus
-    created_at: float
+    created_at: Instant
 
 
 class WorkspaceList(BaseModel):
@@ -65,7 +70,7 @@ class WorkspaceList(BaseModel):
 class WorkspaceDetail(BaseModel):
     id: str
     status: WorkspaceStatus
-    created_at: float
+    created_at: Instant
     system_time: str | None = None
     sessions: list[SessionSummary] = Field(default_factory=list)
     mounts: list[MountSummary] = Field(default_factory=list)
@@ -142,7 +147,7 @@ class LoadWorkspaceRequest(BaseModel):
 
 class DeleteWorkspaceResponse(BaseModel):
     id: str
-    closed_at: float
+    closed_at: Instant
 
 
 class CancelLinesResponse(BaseModel):

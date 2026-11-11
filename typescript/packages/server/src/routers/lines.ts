@@ -17,7 +17,9 @@ import { LineId } from '@struktoai/mirage-core/execution/types'
 import { PipeClosed } from '@struktoai/mirage-core/io/errors'
 import type { BytePipe } from '@struktoai/mirage-core/io/pipe'
 import type { RouteApp } from '../routes.ts'
+import { msToRfc3339 } from '@struktoai/mirage-core/utils/dates'
 import type { WorkspaceRegistry } from '../registry.ts'
+import type { Instant } from '../schemas.ts'
 import type { RequestTable } from '../requests.ts'
 import { HttpError, oneOf, WorkspaceMissing } from '../errors.ts'
 import { failure, requireEntry } from './vfs.ts'
@@ -43,8 +45,8 @@ interface LineResponse {
   session_id: string
   command: string
   state: string
-  started_at: number
-  ended_at: number | null
+  started_at: Instant
+  ended_at: Instant | null
   exit: number | null
   signal: number | null
   error: string | null
@@ -68,8 +70,8 @@ function toResponse(record: Line): LineResponse {
     session_id: record.sessionId,
     command: record.command,
     state: record.state,
-    started_at: record.startedAt,
-    ended_at: record.endedAt,
+    started_at: msToRfc3339(record.startedAt * 1000),
+    ended_at: record.endedAt === null ? null : msToRfc3339(record.endedAt * 1000),
     exit: record.exit,
     signal: record.signal,
     error: record.error,

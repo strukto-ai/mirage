@@ -8,11 +8,13 @@ from mirage.utils.dates import (
     epoch_to_iso,
     iso_timestamp,
     iso_to_epoch,
+    ms_to_rfc3339,
     now_iso,
     ns_to_iso,
     parse_date_expr,
     parse_date_expr_async,
     parse_posix_time_async,
+    rfc3339_of,
     timestamp_iso,
     to_iso_z,
 )
@@ -759,3 +761,46 @@ async def test_async_date_parser_can_cancel_a_long_expression():
 
 def test_date_parser_refuses_invalid_raw_utf8_as_a_date():
     assert parse_date_expr("\udcff", tz=timezone.utc, now=NOW) is None
+
+
+# The same table runs in TypeScript's dates.test.ts: both hosts must
+# spell every time alike.
+@pytest.mark.parametrize(
+    "ms, want",
+    [
+        (1794381854062, "2026-11-11T07:24:14.062Z"),
+        (1794381854061.9998, "2026-11-11T07:24:14.062Z"),
+        (1794381854062.5, "2026-11-11T07:24:14.063Z"),
+        (0, "1970-01-01T00:00:00.000Z"),
+        (-1.5, "1969-12-31T23:59:59.999Z"),
+    ],
+)
+def test_ms_to_rfc3339_rounds_to_the_millisecond(ms, want):
+    assert ms_to_rfc3339(ms) == want
+
+
+@pytest.mark.parametrize(
+    "text, want",
+    [
+        ("2026-11-11T07:24:14.062Z", "2026-11-11T07:24:14.062Z"),
+        ("2026-11-11T07:24:14Z", "2026-11-11T07:24:14.000Z"),
+        ("2026-11-11T07:24:14.062345Z", "2026-11-11T07:24:14.062Z"),
+        ("2026-11-11T07:24:14.0629+00:00", "2026-11-11T07:24:14.062Z"),
+        ("2026-11-11T15:24:14+08:00", "2026-11-11T07:24:14.000Z"),
+        ("2026-11-11T02:24:14-0500", "2026-11-11T07:24:14.000Z"),
+        ("2026-11-11 07:24:14", "2026-11-11T07:24:14.000Z"),
+        ("2026-11-11T07:24", "2026-11-11T07:24:00.000Z"),
+        ("2026-11-11", "2026-11-11T00:00:00.000Z"),
+        ("1969-12-31T23:59:59.5Z", "1969-12-31T23:59:59.500Z"),
+        ("2026-02-30T00:00:00Z", None),
+        ("2026-11-11T24:00:00Z", None),
+        ("2026-11-11T07:24:60Z", None),
+        ("0050-01-01T00:00:00Z", None),
+        ("Wed, 21 Oct 2015 07:28:00 GMT", None),
+        ("1794381854", None),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_rfc3339_of_reads_one_iso_grammar(text, want):
+    assert rfc3339_of(text) == want

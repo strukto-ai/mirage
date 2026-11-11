@@ -240,7 +240,7 @@ def test_logs_terminal_rows_and_cursor():
         {
             "items": [
                 {
-                    "started_at": 1000,
+                    "started_at": "1970-01-01T00:00:01.000Z",
                     "exit_code": 0,
                     "command": "echo hi\necho bye",
                 }

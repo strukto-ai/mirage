@@ -22,6 +22,8 @@ from urllib.parse import quote
 
 from pydantic import BaseModel, Field
 
+from mirage.server.schemas import Instant
+from mirage.utils.dates import ms_to_rfc3339
 from mirage.utils.ids import check_name
 
 
@@ -30,9 +32,7 @@ class LogMount(BaseModel):
     path: str
     source: str
     bytes: int | None
-    started_at: float = Field(
-        description="Start time as Unix epoch milliseconds."
-    )
+    started_at: Instant = Field(description="When it started.")
     duration_ms: float
 
 
@@ -40,9 +40,7 @@ class CommandLog(BaseModel):
     id: str
     command: str
     cwd: str | None
-    started_at: float = Field(
-        description="Start time as Unix epoch milliseconds."
-    )
+    started_at: Instant = Field(description="When it started.")
     duration_ms: float
     exit_code: int | None
     stdout: str
@@ -102,7 +100,7 @@ def completed_logs(records: list[dict[str, Any]]) -> list[LoggedCommand]:
             id=command["id"],
             command=command["command"],
             cwd=command.get("cwd"),
-            started_at=command["timestamp"],
+            started_at=ms_to_rfc3339(command["timestamp"]),
             duration_ms=result.get("duration_ms", 0),
             exit_code=result.get("exit_code"),
             stdout=result.get("stdout", ""),
@@ -115,7 +113,9 @@ def completed_logs(records: list[dict[str, Any]]) -> list[LoggedCommand]:
                     path=e["path"],
                     source=e.get("source", ""),
                     bytes=e.get("bytes"),
-                    started_at=e["timestamp"] - e.get("duration_ms", 0),
+                    started_at=ms_to_rfc3339(
+                        e["timestamp"] - e.get("duration_ms", 0)
+                    ),
                     duration_ms=e.get("duration_ms", 0),
                 )
                 for e in mounts
@@ -178,7 +178,8 @@ def log_page(
 def log_lines(logs: list[LoggedCommand]) -> Iterator[str]:
     for log in reversed(logs):
         for record in log.records:
+            shown = {**record, "timestamp": ms_to_rfc3339(record["timestamp"])}
             yield (
-                json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+                json.dumps(shown, ensure_ascii=False, separators=(",", ":"))
                 + "\n"
             )

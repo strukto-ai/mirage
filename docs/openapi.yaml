@@ -98,7 +98,7 @@ paths:
               example:
                 id: demo
                 status: running
-                created_at: 1794009600
+                created_at: '2026-11-07T00:00:00.000Z'
                 system_time: null
                 sessions:
                   - session_id: 01a1b425-ec80-7038-86e0-75b597344043
@@ -120,7 +120,7 @@ paths:
               example:
                 id: demo
                 status: running
-                created_at: 1794009600
+                created_at: '2026-11-07T00:00:00.000Z'
                 system_time: null
                 sessions:
                   - session_id: 01a1b425-ec80-7038-86e0-75b597344043
@@ -168,10 +168,10 @@ paths:
                 items:
                   - id: demo
                     status: running
-                    created_at: 1794009600
+                    created_at: '2026-11-07T00:00:00.000Z'
                   - id: notes
                     status: stopped
-                    created_at: 1793923200
+                    created_at: '2026-11-06T00:00:00.000Z'
         '401':
           $ref: '#/components/responses/401'
         '429':
@@ -271,7 +271,7 @@ paths:
           in: query
           description: Use `json` for paginated results, newest first, or `jsonl` to export all retained
             matches oldest first. JSONL ignores `limit` and `after` and contains `command`, `vfs`, and
-            `result` records linked by `parent`. Each record has a `timestamp` in Unix milliseconds.
+            `result` records linked by `parent`. Each record has a `timestamp`, an RFC 3339 string in UTC.
             Values other than `jsonl` select JSON.
           schema:
             type: string
@@ -289,7 +289,7 @@ paths:
                   - id: c1
                     command: echo hi
                     cwd: /
-                    started_at: 1700000000000
+                    started_at: '2023-11-14T22:13:20.000Z'
                     duration_ms: 8
                     exit_code: 0
                     stdout: 'hi
@@ -303,10 +303,10 @@ paths:
             application/x-ndjson:
               schema:
                 type: string
-              example: '{"type":"command","session":"s1","timestamp":1700000000000,"id":"c1","command":"echo
+              example: '{"type":"command","session":"s1","timestamp":"2023-11-14T22:13:20.000Z","id":"c1","command":"echo
                 hi"}
 
-                {"type":"result","session":"s1","timestamp":1700000000008,"parent":"c1","duration_ms":8,"exit_code":0,"stdout":"hi\n","stderr":""}
+                {"type":"result","session":"s1","timestamp":"2023-11-14T22:13:20.008Z","parent":"c1","duration_ms":8,"exit_code":0,"stdout":"hi\n","stderr":""}
 
                 '
         '400':
@@ -1394,7 +1394,7 @@ paths:
                     session_id: default
                     command: sleep 30 & wait
                     state: running
-                    started_at: 1794009600
+                    started_at: '2026-11-07T00:00:00.000Z'
                     ended_at: null
                     exit: null
                     signal: null
@@ -1410,7 +1410,7 @@ paths:
       description: |-
         List running and recently completed commands, oldest first. Each record represents one submitted shell command or script.
 
-        Completed commands are retained for up to one hour, with a maximum of 1,024 records. Servers sharing a workspace store share these records; snapshots preserve completed records. Timestamps are Unix seconds.
+        Completed commands are retained for up to one hour, with a maximum of 1,024 records. Servers sharing a workspace store share these records; snapshots preserve completed records. Times are RFC 3339 strings in UTC.
       tags:
         - Lines
       x-hosts:
@@ -1439,7 +1439,7 @@ paths:
                 session_id: default
                 command: sleep 30 & wait
                 state: running
-                started_at: 1794009600
+                started_at: '2026-11-07T00:00:00.000Z'
                 ended_at: null
                 exit: null
                 signal: null
@@ -1461,7 +1461,7 @@ paths:
       description: |-
         Get a command execution with its job, process, and machine IDs. Use the `line_id` returned by the shell endpoint.
 
-        Completed commands are retained for up to one hour, with a maximum of 1,024 records. Servers sharing a workspace store share these records; snapshots preserve completed records. Timestamps are Unix seconds.
+        Completed commands are retained for up to one hour, with a maximum of 1,024 records. Servers sharing a workspace store share these records; snapshots preserve completed records. Times are RFC 3339 strings in UTC.
       tags:
         - Lines
       x-hosts:
@@ -1579,7 +1579,7 @@ paths:
                     group: 42
                     pid: 42
                     state: running
-                    started_at: 1794009600
+                    started_at: '2026-11-07T00:00:00.000Z'
                     ended_at: null
                     exit: null
                     signal: null
@@ -1594,7 +1594,7 @@ paths:
       description: |-
         List jobs tracked by workspace sessions. Filter by session, state, or command execution.
 
-        Completed jobs remain available until the session removes them. Running `wait` or `jobs` can remove completed jobs after reporting them. Timestamps are Unix seconds.
+        Completed jobs remain available until the session removes them. Running `wait` or `jobs` can remove completed jobs after reporting them. Times are RFC 3339 strings in UTC.
       tags:
         - Jobs
       x-hosts:
@@ -1628,7 +1628,7 @@ paths:
                 group: 42
                 pid: 42
                 state: running
-                started_at: 1794009600
+                started_at: '2026-11-07T00:00:00.000Z'
                 ended_at: null
                 exit: null
                 signal: null
@@ -1645,7 +1645,7 @@ paths:
       description: |-
         Get a job with its process IDs, including descendant processes still tracked by the workspace.
 
-        Completed jobs remain available until the session removes them. Running `wait` or `jobs` can remove completed jobs after reporting them. Timestamps are Unix seconds.
+        Completed jobs remain available until the session removes them. Running `wait` or `jobs` can remove completed jobs after reporting them. Times are RFC 3339 strings in UTC.
       tags:
         - Jobs
       x-hosts:
@@ -1709,7 +1709,7 @@ paths:
                       started: 1794009600
                       exited: null
                     state: running
-                    started_at: 1794009600
+                    started_at: '2026-11-07T00:00:00.000Z'
                     ended_at: null
                     exit: null
                     signal: null
@@ -1727,7 +1727,7 @@ paths:
       description: |-
         List running and recently ended processes, ordered by process ID. Filter by session, state, command execution, job, or machine.
 
-        Ended processes are retained for up to one hour, with a maximum of 1,024 records. Servers sharing a workspace store share these records; snapshots preserve ended records. Timestamps are Unix seconds.
+        Ended processes are retained for up to one hour, with a maximum of 1,024 records. Servers sharing a workspace store share these records; snapshots preserve ended records. Times are RFC 3339 strings in UTC.
       tags:
         - Processes
       x-hosts:
@@ -1766,7 +1766,7 @@ paths:
                   started: 1794009600
                   exited: null
                 state: running
-                started_at: 1794009600
+                started_at: '2026-11-07T00:00:00.000Z'
                 ended_at: null
                 exit: null
                 signal: null
@@ -1782,7 +1782,7 @@ paths:
       description: |-
         Get a tracked process by its process ID.
 
-        Ended processes are retained for up to one hour, with a maximum of 1,024 records. Servers sharing a workspace store share these records; snapshots preserve ended records. Timestamps are Unix seconds.
+        Ended processes are retained for up to one hour, with a maximum of 1,024 records. Servers sharing a workspace store share these records; snapshots preserve ended records. Times are RFC 3339 strings in UTC.
       tags:
         - Processes
       x-hosts:
@@ -5155,9 +5155,10 @@ components:
             - type: 'null'
           title: Cwd
         started_at:
-          description: Command start time in Unix milliseconds.
+          type: string
+          format: date-time
           title: Started At
-          type: number
+          description: When the command started.
         duration_ms:
           title: Duration Ms
           type: number
@@ -5219,9 +5220,10 @@ components:
             - type: 'null'
           title: Bytes
         started_at:
-          description: Start time as Unix epoch milliseconds.
+          type: string
+          format: date-time
           title: Started At
-          type: number
+          description: When the call started.
         duration_ms:
           title: Duration Ms
           type: number
@@ -5336,7 +5338,8 @@ components:
           type: string
         ended_at:
           anyOf:
-            - type: number
+            - type: string
+              format: date-time
             - type: 'null'
           title: Ended At
         exit:
@@ -5380,8 +5383,9 @@ components:
             - type: 'null'
           title: Signal
         started_at:
+          type: string
+          format: date-time
           title: Started At
-          type: number
         state:
           title: State
           type: string
@@ -5412,7 +5416,8 @@ components:
           type: string
         ended_at:
           anyOf:
-            - type: number
+            - type: string
+              format: date-time
             - type: 'null'
           title: Ended At
         exit:
@@ -5451,8 +5456,9 @@ components:
             - type: 'null'
           title: Signal
         started_at:
+          type: string
+          format: date-time
           title: Started At
-          type: number
         state:
           title: State
           type: string
@@ -5486,7 +5492,8 @@ components:
           type: string
         ended_at:
           anyOf:
-            - type: number
+            - type: string
+              format: date-time
             - type: 'null'
           title: Ended At
         error:
@@ -5527,8 +5534,9 @@ components:
             - type: 'null'
           title: Signal
         started_at:
+          type: string
+          format: date-time
           title: Started At
-          type: number
         state:
           $ref: '#/components/schemas/LineState'
       required:
@@ -5553,7 +5561,8 @@ components:
           type: string
         ended_at:
           anyOf:
-            - type: number
+            - type: string
+              format: date-time
             - type: 'null'
           title: Ended At
         error:
@@ -5578,8 +5587,9 @@ components:
             - type: 'null'
           title: Signal
         started_at:
+          type: string
+          format: date-time
           title: Started At
-          type: number
         state:
           $ref: '#/components/schemas/LineState'
       required:
@@ -5621,9 +5631,10 @@ components:
         state:
           $ref: '#/components/schemas/MachineState'
         checked_at:
-          type: number
+          type: string
+          format: date-time
           title: Checked At
-          description: When the check ran, in epoch seconds.
+          description: When the check ran.
       type: object
       required:
         - id
@@ -5639,9 +5650,10 @@ components:
         state:
           $ref: '#/components/schemas/MachineState'
         checked_at:
-          type: number
+          type: string
+          format: date-time
           title: Checked At
-          description: When the check ran, in epoch seconds.
+          description: When the check ran.
         processes:
           items:
             $ref: '#/components/schemas/ProcessResponse'
@@ -5684,7 +5696,8 @@ components:
           type: string
         ended_at:
           anyOf:
-            - type: number
+            - type: string
+              format: date-time
             - type: 'null'
           title: Ended At
         error:
@@ -5734,8 +5747,9 @@ components:
             - type: 'null'
           title: Signal
         started_at:
+          type: string
+          format: date-time
           title: Started At
-          type: number
         state:
           title: State
           type: string
@@ -5951,9 +5965,10 @@ components:
           type: string
           title: Id
         closed_at:
-          type: number
+          type: string
+          format: date-time
           title: Closed At
-          description: When the workspace stopped or was deleted, in epoch seconds.
+          description: When the workspace stopped or was deleted.
       type: object
       required:
         - id
@@ -6985,12 +7000,11 @@ components:
           description: running while the server holds the workspace in memory; stopped while
             it keeps only its config and state, until a start.
         created_at:
-          type: number
+          type: string
+          format: date-time
           title: Created At
-          description: >-
-            Creation time as Unix seconds. For example, 1794009600 is
-            2026-11-07T00:00:00Z. Fractional values include sub-second precision.
-          example: 1794009600
+          description: When the workspace was created. A stopped workspace that kept no creation time reports 1970-01-01T00:00:00.000Z.
+          example: '2026-11-07T00:00:00.000Z'
       type: object
       required:
         - id
@@ -7181,12 +7195,11 @@ components:
           description: running while the server holds the workspace in memory; stopped while
             it keeps only its config and state, until a start.
         created_at:
-          type: number
+          type: string
+          format: date-time
           title: Created At
-          description: >-
-            Creation time as Unix seconds. For example, 1794009600 is
-            2026-11-07T00:00:00Z. Fractional values include sub-second precision.
-          example: 1794009600
+          description: When the workspace was created. A stopped workspace that kept no creation time reports 1970-01-01T00:00:00.000Z.
+          example: '2026-11-07T00:00:00.000Z'
         system_time:
           anyOf:
             - type: string
@@ -7587,10 +7600,12 @@ components:
           type:
             - string
             - 'null'
+          format: date-time
         updated_at:
           type:
             - string
             - 'null'
+          format: date-time
         used_by:
           type: integer
           description: Number of templates using this configuration. Included in list responses only.

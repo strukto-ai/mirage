@@ -83,6 +83,24 @@ describe('checked and answered', () => {
     await ws.close()
   })
 
+  it("reports a stat's times as RFC 3339", async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    const session = new Session(ws, null)
+    await answered(
+      session,
+      byName('write'),
+      await checked(byName('write'), { path: '/a', data: 'aGk=' }),
+      false,
+    )
+    const mtime = { path: '/a', mtime: '2026-11-11T15:24:14.0629+08:00' }
+    await answered(session, byName('setattr'), await checked(byName('setattr'), mtime), false)
+    const said = (await answered(session, byName('stat'), { path: '/a' }, false)) as {
+      modified: string
+    }
+    expect(said.modified).toBe('2026-11-11T07:24:14.062Z')
+    await ws.close()
+  })
+
   it('carries the reason an explained route gives', async () => {
     const ws = new Workspace(
       { '/': new RAMVFS() },

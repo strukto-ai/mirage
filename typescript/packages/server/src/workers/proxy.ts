@@ -343,8 +343,12 @@ export class WorkerProxy {
     }
     const merged = [...byId.values()]
     const stopped = (item: Record<string, unknown>): number => (item.status === 'running' ? 0 : 1)
-    const key = (item: Record<string, unknown>): number => Number(item.created_at ?? 0)
-    merged.sort((a, b) => stopped(a) - stopped(b) || key(a) - key(b))
+    // RFC 3339 in UTC at one width, so the text sorts as the time does.
+    const key = (item: Record<string, unknown>): string =>
+      typeof item.created_at === 'string' ? item.created_at : ''
+    merged.sort(
+      (a, b) => stopped(a) - stopped(b) || (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0),
+    )
     sendJson(res, 200, { items: merged })
   }
 

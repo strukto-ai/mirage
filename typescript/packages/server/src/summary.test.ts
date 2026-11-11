@@ -28,7 +28,7 @@ describe('summary', () => {
     expect(makeBrief(entry)).toEqual({
       id: 'ws-x',
       status: 'running',
-      created_at: entry.createdAt,
+      created_at: new Date(Math.floor(entry.createdAt * 1000 + 0.5)).toISOString(),
     })
   })
 

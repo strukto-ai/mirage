@@ -129,7 +129,7 @@ interface Internals {
 interface WorkspaceDetail {
   id: string
   status: string
-  created_at: number
+  created_at: string
   mounts?: MountSummary[]
   sessions?: SessionSummary[]
   internals?: Internals | null
@@ -158,7 +158,7 @@ function formatWorkspaceDetail(d: WorkspaceDetail): string {
   const lines: string[] = [
     `ID:        ${d.id}`,
     `Status:    ${d.status}`,
-    `Created:   ${formatAge(d.created_at)} ago`,
+    `Created:   ${formatAge(Date.parse(d.created_at) / 1000)} ago`,
   ]
   if (d.mounts !== undefined && d.mounts.length > 0) {
     const rows = d.mounts.map((m) => [m.prefix, m.vfs, m.mode])
@@ -226,7 +226,7 @@ interface ProcessRecord {
 }
 
 interface LogPage {
-  items: { id: string; command: string; started_at: number; exit_code: number | null }[]
+  items: { id: string; command: string; started_at: string; exit_code: number | null }[]
   next: string | null
 }
 
@@ -235,7 +235,7 @@ function formatLogs(page: LogPage): string {
   const text = formatTable(
     ['TIME', 'EXIT', 'COMMAND'],
     page.items.map((item) => [
-      new Date(item.started_at).toISOString().slice(0, 19).replace('T', ' '),
+      item.started_at.slice(0, 19).replace('T', ' '),
       item.exit_code === null ? '' : String(item.exit_code),
       item.command.replaceAll('\n', '\\n'),
     ]),

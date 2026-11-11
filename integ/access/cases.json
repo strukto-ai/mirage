@@ -591,6 +591,7 @@
   "health_without_token": 200,
   "ready_without_token": [200, {"status": "ready"}],
   "unknown_host": 403,
+  "time_shape": ["YYYY-MM-DDTHH:MM:SS.mmmZ"],
   "errors": [
    {"id": "body_not_json", "request": {"method": "POST", "path": "/v1/workspaces/{seed}/shell", "content": "{\"command\":", "type": "application/json"}, "expect": {"status": 400, "code": "invalid_json"}},
    {"id": "body_not_object", "request": {"method": "POST", "path": "/v1/workspaces/{seed}/shell", "json": [1]}, "expect": {"status": 400, "code": "invalid_request"}},

@@ -37,3 +37,6 @@ RESERVED_KWARGS = frozenset(
 
 # Bodies read as sent, never as JSON: an upload, by its Content-Type.
 RAW_BODIES = (b"multipart/", b"application/octet-stream")
+
+# The FileStat fields an answer reports as RFC 3339 instants.
+STAT_TIMES = frozenset({"modified", "atime", "ctime", "birthtime"})

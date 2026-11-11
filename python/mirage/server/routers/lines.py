@@ -24,6 +24,8 @@ from mirage.io.pipe import BytePipe
 from mirage.server.errors import ErrorCode, HttpError
 from mirage.server.requests import RequestTable
 from mirage.server.routers.vfs import require_entry
+from mirage.server.schemas import Instant
+from mirage.utils.dates import ms_to_rfc3339
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}/lines")
 
@@ -35,8 +37,8 @@ class LineResponse(BaseModel):
     session_id: str
     command: str
     state: str
-    started_at: float
-    ended_at: float | None
+    started_at: Instant
+    ended_at: Instant | None
     exit: int | None
     signal: int | None
     error: str | None
@@ -58,8 +60,12 @@ def _to_response(record: Line) -> LineResponse:
         session_id=record.session_id,
         command=record.command,
         state=record.state.value,
-        started_at=record.started_at,
-        ended_at=record.ended_at,
+        started_at=ms_to_rfc3339(record.started_at * 1000),
+        ended_at=(
+            None
+            if record.ended_at is None
+            else ms_to_rfc3339(record.ended_at * 1000)
+        ),
         exit=record.exit,
         signal=record.signal,
         error=record.error,

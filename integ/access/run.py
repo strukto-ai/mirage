@@ -771,6 +771,52 @@ async def error_checks(
         await http.delete(f"/v1/workspaces/{stopped}", headers=auth)
 
 
+# Every time the API reports: RFC 3339 in UTC to the millisecond.
+INSTANT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z")
+
+
+async def time_checks(
+    server: Server,
+    http: httpx.AsyncClient,
+    auth: dict[str, str],
+    report: Report,
+) -> None:
+    """Each time a workspace, its lines and its logs report has one shape.
+
+    Args:
+        server (Server): the server under test.
+        http (httpx.AsyncClient): a client on it.
+        auth (dict[str, str]): the bearer header.
+        report (Report): where the check lands.
+    """
+    base = f"/v1/workspaces/{SEED}"
+    ran = await http.post(
+        f"{base}/shell", headers=auth, json={"command": "true"}
+    )
+    ran.raise_for_status()
+    listed = (await http.get("/v1/workspaces", headers=auth)).json()
+    detail = (await http.get(base, headers=auth)).json()
+    lines = (await http.get(f"{base}/lines", headers=auth)).json()
+    logs = (await http.get(f"{base}/logs", headers=auth)).json()
+    stamps = [w["created_at"] for w in listed["items"]]
+    stamps.append(detail["created_at"])
+    for line in lines["items"]:
+        stamps += [line["started_at"], line["ended_at"]]
+    stamps += [log["started_at"] for log in logs["items"]]
+    shapes = {
+        "YYYY-MM-DDTHH:MM:SS.mmmZ"
+        if isinstance(s, str) and INSTANT.fullmatch(s)
+        else repr(s)
+        for s in stamps
+        if s is not None
+    }
+    report.check(
+        f"{server.key} server.time_shape",
+        sorted(shapes),
+        CASES["server"]["time_shape"],
+    )
+
+
 async def server_checks(server: Server, report: Report) -> None:
     d = server.d
     want = CASES["server"]
@@ -809,6 +855,7 @@ async def server_checks(server: Server, report: Report) -> None:
                 case["expect"],
             )
         await error_checks(server, http, auth, report)
+        await time_checks(server, http, auth, report)
         mcp = f"/v1/workspaces/{SEED}/mcp"
         got = {}
         for method in ("GET", "DELETE"):

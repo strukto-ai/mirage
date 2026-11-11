@@ -19,6 +19,7 @@ import io
 import json
 import lzma
 import os
+import re
 import shutil
 import tarfile
 import threading
@@ -61,6 +62,9 @@ from mirage.workspace.snapshot.tar_io import write_tar
 from mirage.workspace.snapshot.utils import BLOB_REF_KEY
 from mirage.workspace.store import DiskWorkspaceStateStore
 from tests.fixtures.mcp_server import TOKEN, served_mcp
+
+# Every time the API reports: RFC 3339 in UTC to the millisecond.
+INSTANT = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z"
 
 
 class HeldSourceConfig(BaseModel):
@@ -1853,7 +1857,7 @@ async def test_a_stopped_workspace_is_listed_shown_and_deleted(tmp_path):
             ("on", "running"),
             ("off", "stopped"),
         ]
-        assert listed[1]["created_at"] > 0
+        assert listed[1]["created_at"] > "1970-01-01T00:00:00.000Z"
         got = (await client.get("/v1/workspaces/off")).json()
         assert got["status"] == "stopped"
         assert got["sessions"] == [] and got["internals"] is None
@@ -1891,7 +1895,7 @@ async def test_a_stopped_workspace_is_deleted_from_the_store_its_config_names(
         await client.post("/v1/workspaces/mine/stop")
         got = (await client.get("/v1/workspaces/mine")).json()
         assert got["status"] == "stopped"
-        assert got["created_at"] > 0
+        assert got["created_at"] > "1970-01-01T00:00:00.000Z"
         assert (own / "workspaces" / "mine").exists()
         r = await client.delete("/v1/workspaces/mine")
         assert r.status_code == 200, r.text
@@ -1951,7 +1955,10 @@ async def test_a_stopped_workspace_whose_store_cannot_be_read_is_listed(
             )
             for w in listed.json()["items"]
         ]
-        assert rows == [("on", "running", None), ("mine", "stopped", 0)]
+        assert rows == [
+            ("on", "running", None),
+            ("mine", "stopped", "1970-01-01T00:00:00.000Z"),
+        ]
 
 
 @pytest.mark.asyncio
@@ -2136,7 +2143,7 @@ async def test_logs_page_and_export():
             }
             assert item["exit_code"] == 0
             assert item["user_id"] is None and item["api_key_id"] is None
-            assert 1_000_000_000_000 < item["started_at"] < 10_000_000_000_000
+            assert re.fullmatch(INSTANT, item["started_at"])
             assert len(item["mounts"]) == 1
         first = (await client.get(url, params={"limit": 1})).json()
         second = (

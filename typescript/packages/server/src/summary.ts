@@ -16,6 +16,7 @@ import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { BIN_PREFIX } from '@struktoai/mirage-core/shell/constants'
 import { HISTORY_PREFIX } from '@struktoai/mirage-core/vfs/history/history'
 import { MountBackend, parseMountMode, type JsonValue } from '@struktoai/mirage-core/types'
+import { msToRfc3339 } from '@struktoai/mirage-core/utils/dates'
 import { isPlainObject } from '@struktoai/mirage-core/utils/records'
 import { normDir } from '@struktoai/mirage-core/utils/slash'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -66,7 +67,7 @@ async function buildInternals(ws: Workspace): Promise<WorkspaceInternals> {
 }
 
 export function makeBrief(entry: WorkspaceEntry): WorkspaceBrief {
-  return { id: entry.id, status: 'running', created_at: entry.createdAt }
+  return { id: entry.id, status: 'running', created_at: msToRfc3339(entry.createdAt * 1000) }
 }
 
 /** A kernel-mount map keyed by directory prefix, as mounts list theirs. */
@@ -98,7 +99,7 @@ export async function makeDetail(entry: WorkspaceEntry, verbose = false): Promis
   return {
     id: entry.id,
     status: 'running',
-    created_at: entry.createdAt,
+    created_at: msToRfc3339(entry.createdAt * 1000),
     system_time: ws.systemTime,
     mounts: mountSummaries,
     sessions,
@@ -159,7 +160,7 @@ function modeOf(value: JsonValue | undefined, fallback: string): string {
  * Python's `make_stopped_brief`.
  */
 export function makeStoppedBrief(id: string, createdAt: number): WorkspaceBrief {
-  return { id, status: 'stopped', created_at: createdAt }
+  return { id, status: 'stopped', created_at: msToRfc3339(createdAt * 1000) }
 }
 
 /** A stopped workspace's detail, as `makeStoppedBrief`. Mirrors Python's `make_stopped_detail`. */
@@ -171,7 +172,7 @@ export function makeStoppedDetail(
   return {
     id,
     status: 'stopped',
-    created_at: createdAt,
+    created_at: msToRfc3339(createdAt * 1000),
     system_time: null,
     mounts: configMounts(config),
     sessions: [],

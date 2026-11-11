@@ -19,6 +19,8 @@ from mirage.execution.process.types import Process, ProcessState
 from mirage.execution.types import JobId, LineId, MachineId, ProcessId
 from mirage.server.errors import ErrorCode, HttpError
 from mirage.server.routers.vfs import require_entry
+from mirage.server.schemas import Instant
+from mirage.utils.dates import ms_to_rfc3339
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}/processes")
 
@@ -41,8 +43,8 @@ class ProcessResponse(BaseModel):
     runtime: str | None
     machine_pid: MachinePidResponse | None
     state: str
-    started_at: float
-    ended_at: float | None
+    started_at: Instant
+    ended_at: Instant | None
     exit: int | None
     signal: int | None
     error: str | None
@@ -73,8 +75,12 @@ def to_response(record: Process) -> ProcessResponse:
             else None
         ),
         state=record.state.value,
-        started_at=record.started_at,
-        ended_at=record.ended_at,
+        started_at=ms_to_rfc3339(record.started_at * 1000),
+        ended_at=(
+            None
+            if record.ended_at is None
+            else ms_to_rfc3339(record.ended_at * 1000)
+        ),
         exit=record.exit,
         signal=record.signal,
         error=record.error,

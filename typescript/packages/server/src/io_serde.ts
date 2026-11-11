@@ -30,10 +30,11 @@ import {
   type JsonValue,
   type PolicyDecision,
 } from '@struktoai/mirage-core/types'
+import { rfc3339Of } from '@struktoai/mirage-core/utils/dates'
 import { CALLS } from '@struktoai/mirage-core/workspace/dispatcher/constants'
 import type { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { RESERVED_KWARGS } from './constants.ts'
+import { RESERVED_KWARGS, STAT_TIMES } from './constants.ts'
 import { HttpError, paramOf } from './errors.ts'
 import { BYTES, schemaOf, type Args, type VfsCall } from './vfs_calls.ts'
 
@@ -192,7 +193,11 @@ function toJson(value: unknown): JsonValue {
   if (value === undefined) return null
   if (value instanceof Uint8Array) return Buffer.from(value).toString('base64')
   if (value instanceof FileStat) {
-    return Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'extra')) as JsonValue
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => key !== 'extra')
+        .map(([key, item]) => [key, STAT_TIMES.has(key) ? rfc3339Of(item as string | null) : item]),
+    ) as JsonValue
   }
   if (value instanceof PathSpec) return value.virtual
   if (Array.isArray(value)) return value.map(toJson)

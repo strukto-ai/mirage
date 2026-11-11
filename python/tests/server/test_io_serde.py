@@ -59,6 +59,21 @@ async def test_a_vfs_call_runs_or_explains_as_json():
     assert await session.vfs.exists("/a")
 
 
+@pytest.mark.asyncio
+async def test_a_stat_reports_its_times_as_rfc3339():
+    session = Session(Workspace({"/": RAMVFS()}, mode=MountMode.WRITE), None)
+    write, setattr_ = VFS_CALL_BY_NAME["write"], VFS_CALL_BY_NAME["setattr"]
+    await answered(
+        session, write, checked(write, {"path": "/a", "data": "aGk="}), False
+    )
+    mtime = {"path": "/a", "mtime": "2026-11-11T15:24:14.0629+08:00"}
+    await answered(session, setattr_, checked(setattr_, mtime), False)
+    said = await answered(
+        session, VFS_CALL_BY_NAME["stat"], {"path": "/a"}, False
+    )
+    assert said["modified"] == "2026-11-11T07:24:14.062Z"
+
+
 class _OnMonty(Policy):
     async def pre_execute(self, ctx: RouteContext) -> Route:
         return Route("monty", "plain arithmetic")
