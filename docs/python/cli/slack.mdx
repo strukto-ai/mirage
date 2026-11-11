@@ -1,5 +1,5 @@
 ---
-title: Slack
+title: slack
 description: "Supported Slack commands for messages, reactions, pins, members and search."
 icon: /images/slack-logo.svg
 ---
@@ -24,7 +24,7 @@ No service mount is required. For YAML and multiple accounts, see the
 [CLI overview](/python/cli/index#register-a-cli).
 
 {/* BEGIN GENERATED CLI COMMANDS */}
-## Supported Commands
+## Supported commands
 
 Run `slack <command> --help` for the supported flags and operands.
 This list is generated from Mirage's registered command tree.
@@ -47,7 +47,7 @@ This list is generated from Mirage's registered command tree.
 | `slack search` | Search messages with Slack query operators |
 {/* END GENERATED CLI COMMANDS */}
 
-## Messages, Reactions and Pins
+## Messages, reactions and pins
 
 ```bash
 slack read-messages --channel C04KEPWF6V7 --limit 20
@@ -67,7 +67,7 @@ Channels and users are Slack IDs. A message is identified by its channel
 and timestamp (`--ts`); replies use the parent's timestamp in `--thread-ts`.
 `upload-file` reads `--file` from the workspace, so any mount can be the source.
 
-## Find People and Messages
+## Find people and messages
 
 ```bash
 slack member-info --user U04K21SEVR9
@@ -79,7 +79,7 @@ slack search --query 'from:@priya in:#general launch' --count 20 --page 1
 Search accepts Slack operators such as `from:`, `in:` and `after:`. Results
 are JSON and can be piped to `jq`.
 
-## VFS and Limits
+## VFS and limits
 
 The optional [Slack VFS](/python/vfs/slack) exposes channels and messages
 as files. Its IDs can be passed to this CLI, but the CLI gets credentials

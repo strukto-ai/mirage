@@ -117,28 +117,28 @@ to use the same commands on your own data. Continue with the
 ## FAQ
 
 <AccordionGroup>
-  <Accordion title="Do I Need FUSE?">
+  <Accordion title="Do I need FUSE?">
     No. Agents can use workspace files through Mirage directly. Use <a href="/home/setup/fuse">FUSE</a> when host tools, such as editors or language servers, need to open those files.
   </Accordion>
-  <Accordion title="Where Does the Shell Run? Is It Really Bash?">
+  <Accordion title="Where does the shell run? Is it really bash?">
     Mirage provides a Bash-compatible shell in your application. It supports common commands, pipes, redirects, variables and jobs. See the <a href="/home/core/shell">shell guide</a> for supported behavior and differences from Bash.
   </Accordion>
-  <Accordion title="Is It Sandboxed?">
+  <Accordion title="Is it sandboxed?">
     The shell sees the files you mount. The Monty and QuickJS runtimes cannot access host files or the network. Other runtimes have different access; see <a href="/home/setup/runtime/overview#files">runtime file and network access</a> before choosing one.
   </Accordion>
-  <Accordion title="What About Latency and Cost?">
+  <Accordion title="What about latency and cost?">
     Operations use the APIs of the services you connect, so their latency and usage charges apply.
   </Accordion>
-  <Accordion title="Hosted or Self-Hosted?">
+  <Accordion title="Hosted or self-hosted?">
     Self-hosted. Run Mirage in your own application, server or sandbox, and connect the services you need.
   </Accordion>
-  <Accordion title="Which Agent Frameworks Are Supported?">
+  <Accordion title="Which agent frameworks are supported?">
     Any agent that can call a shell tool can use Mirage. See the <a href="/home/agents">agent integrations</a> for setup guides.
   </Accordion>
   <Accordion title="Python or TypeScript?">
     Both SDKs provide workspaces, shell commands and service integrations. Runtime availability differs; see the <a href="/home/setup/runtime/overview">runtime comparison</a>. Start with the <a href="/python/quickstart">Python</a> or <a href="/typescript/quickstart">TypeScript</a> quickstart.
   </Accordion>
-  <Accordion title="What If a VFS I Want Isn't Supported Yet?">
+  <Accordion title="What if a VFS I want isn't supported yet?">
     You can add a custom filesystem. See <a href="/python/vfs/new">Add a VFS</a> for the required API and examples.
   </Accordion>
 </AccordionGroup>
@@ -171,7 +171,7 @@ To let your coding agent search these docs, connect it to the docs MCP server at
   <Card title="Book a Call" icon="calendar" href="https://cal.com/strukto/30min">
     Talk to the team directly if you are blocked.
   </Card>
-  <Card title="Join Our Discord" icon="discord" href="https://discord.gg/u8BPQ65KsS">
+  <Card title="Join our Discord" icon="discord" href="https://discord.gg/u8BPQ65KsS">
     Chat with the community and get help from the team.
   </Card>
   <Card title="GitHub Issues" icon="github" href="https://github.com/strukto-ai/mirage/issues">

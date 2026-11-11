@@ -17,7 +17,7 @@ Credentials are obtained the same way in both runtimes, see
 [Dropbox Credentials](/home/setup/dropbox). The Python package ships the same
 backend, see [Dropbox (Python)](/python/vfs/dropbox).
 
-## Node (Server-Side)
+## Node (server-side)
 
 ```bash
 pnpm add @struktoai/mirage-node
@@ -56,7 +56,7 @@ expiry, so cold-start API calls don't pay the refresh round-trip.
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table dropbox end */}
 
-## Mount a Subfolder
+## Mount a subfolder
 
 Pass `rootPath` to expose a single Dropbox folder as the mount root instead of the whole
 account. Every command and FUSE/VFS op is scoped to that folder; paths outside it are
@@ -155,7 +155,7 @@ What Dropbox answers through its own API, so fewer files are read. [Integration]
 
 The [Python Dropbox docs](/python/vfs/dropbox#integration) list when each search answers and what it can miss.
 
-## Names Missing from a Listing
+## Names missing from a listing
 
 A name missing from a cached listing that the running command did not
 fetch is looked up on Dropbox by path before mirage answers that it does
@@ -174,7 +174,7 @@ Some lookups run outside any shell command: FUSE, programmatic calls,
 caller's own there, so each lookup of a name missing from a cached
 listing costs one request.
 
-## Reads Under `fresh`
+## Reads under `fresh`
 
 Under `read: fresh`, a cached file is checked against its `content_hash`
 before it is served: one `get_metadata` per warm read, never a folder
@@ -187,7 +187,7 @@ not used: Dropbox repeats it across same-size rewrites.
 A write records the `content_hash` its upload reply names, so a `fresh` read
 right after a `tee` or `sed -i` downloads nothing.
 
-## Conditional Writes
+## Conditional writes
 
 A rewrite that observes a missing file requires atomic create-only support,
 which this backend does not currently enable. Appending to a missing file
@@ -205,7 +205,7 @@ mount is Dropbox's own move, which is not refused when its source changed
 (a `mv` to another mount is a copy and a conditioned delete, so there a
 changed source stays and `mv` reports the failed removal).
 
-## Browser (PKCE, No Client Secret)
+## Browser (PKCE, no client secret)
 
 ```bash
 pnpm add @struktoai/mirage-browser
@@ -229,7 +229,7 @@ Set the redirect URI on your Dropbox app's **Settings** tab to your dev/prod ori
 [`examples/browser/vfs/dropbox/dropbox_pkce.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/browser/vfs/dropbox/dropbox_pkce.ts)
 runs the full PKCE dance end-to-end and persists the refresh token to `localStorage`.
 
-## VFS Mode (`patchNodeFs`)
+## VFS mode (`patchNodeFs`)
 
 Mirage exposes a `patchNodeFs(workspace)` shim that routes `fs` calls under a mount
 through the workspace, so any library that uses Node's `fs` API can read directly from Dropbox
@@ -261,7 +261,7 @@ restore()
 The async forms (`fs.promises.*` and the callbacks) are routed. Sync forms like `fs.statSync` and
 `fs.readFileSync` refuse a mounted path because remote reads can't block the event loop.
 
-## FUSE Mode
+## FUSE mode
 
 For tools that need a real filesystem path (CLI tools, editors, system utilities), mount the
 workspace under FUSE:
@@ -290,7 +290,7 @@ await ws.close()
 Requires [macFUSE](https://osxfuse.github.io/) on macOS or libfuse on Linux. See
 [FUSE setup](/home/setup/macos).
 
-## Available Commands
+## Available commands
 
 `DropboxVFS` ships the same shell command set as the GDrive VFS:
 

@@ -9,7 +9,7 @@ call fails with a POSIX condition, a shell line ends with an exit status and a
 GNU-worded line on stderr, and HTTP, RPC, MCP and the kernel mounts carry one of
 those two.
 
-## File Calls
+## File calls
 
 A file call (`read`, `write`, `stat`, `readdir`, `rename`, ...) names its
 failure with one of these conditions, whatever the backend. A service's own
@@ -57,7 +57,7 @@ Each surface carries the condition its own way:
 | NFS | An NFS3 status code, such as `NFS3ERR_NOTSUPP` (`10004`) for an unsupported call. |
 | [Runtimes](/home/setup/runtime/overview) | The guest's own error: an `OSError` with its errno in Python, the WASI errno in a WebAssembly guest. |
 
-## Shell Lines
+## Shell lines
 
 A line that runs to completion returns `exit_code`, `stdout` and `stderr`. A
 non-zero status is the line's result, not a failed call: HTTP returns `200`, RPC
@@ -77,7 +77,7 @@ These statuses come from the shell itself:
 | `128` + n | Signal n ended it: `130` for an interrupt (the CLI and SSH report a Ctrl-C so), `141` for a write to a closed pipe. |
 | `254` | The session's `processes.max` refused a fork. |
 
-## Service Errors
+## Service errors
 
 A command that reaches a service through a mount reports the service's failure
 as the condition it maps to, or in the service's own words after the command's

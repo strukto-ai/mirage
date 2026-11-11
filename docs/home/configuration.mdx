@@ -31,7 +31,7 @@ The shell command prints `ready`. Replace RAM using a [VFS setup guide](/home/se
 YAML defaults `mode` to `write`; direct Python and TypeScript `Workspace`
 constructors default to `read`.
 
-### From a Template
+### From a template
 
 A config saved on the server as a template creates workspaces without the
 file. The template's `config` is the same document as `workspace.yaml`:
@@ -44,7 +44,7 @@ mirage workspace create --template ram-only -w config-demo
 Each workspace gets a copy of the config, so editing the template later does
 not change it. See [From a template](/home/access/cli#from-a-template).
 
-## Workspace Settings
+## Workspace settings
 
 | Key | Purpose |
 | --- | --- |
@@ -72,7 +72,7 @@ not change it. See [From a template](/home/access/cli#from-a-template).
 Unknown keys are errors. Provider fields belong under `mounts.<prefix>.config`,
 CLI fields under `clis.<name>.config`, and runtime fields under `runtimes[].config`.
 
-## Mount Settings
+## Mount settings
 
 Each mount key is an absolute virtual prefix, such as `/data`.
 
@@ -171,7 +171,7 @@ process on this machine (`local`, Sandlock) opens its connections where
 Mirage cannot judge them, so while `network` limits anything, or a policy
 judges connections, it refuses to run: `Permission denied`, exit 126.
 
-## System Time
+## System time
 
 `system_time` sets the time the workspace starts at, as an ISO 8601 time
 with a zone offset, from 1970 through 2261. From there it moves forward in
@@ -209,7 +209,7 @@ also reads the machine's clock. Programs on a machine work the same way,
 with libfaketime in the [machine image](/home/setup/machine/overview#the-machine-image)
 and the machine's clock without it.
 
-## Read and Write Policies
+## Read and write policies
 
 `read` decides when Mirage serves cached file content:
 
@@ -253,14 +253,14 @@ Conditional appends may refuse a competing update. Conflicts return an error
 without retrying the append or rerunning the command. Existing-file appends under
 `unconditional` remain last-write-wins.
 
-### S3-Compatible Stores
+### S3-compatible stores
 
 On AWS S3 and the provider VFSes built on it (R2, GCS, Wasabi and the rest), a conditional mount conditions writes, copies and deletes; a provider that ignores a copy or delete condition runs it unconditioned. MinIO, and the `s3` VFS pointed at a non-AWS endpoint, condition only writes, so they refuse what would copy or delete within the mount (`cp`, `mv`, `rm`, `find -delete`) with `ENOTSUP`. A TypeScript browser mount signed by presigned URLs cannot declare `write: conditional`.
 
 `read: pinned` and `write: staged` are reserved names. A mount that declares
 either is refused when it mounts.
 
-## CLI Entries
+## CLI entries
 
 Each `clis` key is the command name the CLI installs under. An entry takes
 exactly one of `cli` or `script`:
@@ -286,7 +286,7 @@ clis:
 A `script` entry's `config` cannot hold a credential pointer. Read the
 credential from a managed `env` entry instead.
 
-## Cache, Index and Store
+## Cache, index and store
 
 Each block takes a `type`, and the other keys depend on it. A `redis` type
 defaults `url` to `redis://localhost:6379/0`.
@@ -342,7 +342,7 @@ store:
     bucket: my-mirage-state
 ```
 
-## Environment and Credential Pointers
+## Environment and credential pointers
 
 A string sets a literal exported variable. A pointer fetches a credential
 instead of storing its value in YAML:
@@ -364,7 +364,7 @@ Pointers inside mount or registered CLI configs require an explicit `key` and
 are resolved before the provider is constructed. See [Service credentials](/home/authentication)
 for `from`, `ref` and `key` examples.
 
-## Values and Paths
+## Values and paths
 
 `${NAME}` placeholders are substituted from the host process environment when
 the config loads. `NAME` is uppercase letters, digits and underscores, not

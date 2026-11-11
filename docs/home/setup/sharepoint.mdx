@@ -14,7 +14,7 @@ you, so a token with the right SharePoint permissions is all it needs.
 
 You only need an **access token**. Pick whichever path fits.
 
-### Option A: App-Only (Client Credentials)
+### Option A: App-only (client credentials)
 
 Best for scripted, automated, and CI runs. There is no signed-in user, and it
 works for SharePoint because the VFS uses `/sites` and `/sites/{id}/drives`
@@ -58,7 +58,7 @@ a `Callable[[], str]` provider as `access_token` instead of a string. The
 VFS refreshes on `401`, so the mount survives token expiry.
 </Note>
 
-### Verify Access
+### Verify access
 
 With your token exported as `TOKEN`:
 
@@ -72,7 +72,7 @@ curl -s -H "Authorization: Bearer $TOKEN" \
   "https://graph.microsoft.com/v1.0/sites/{site-id}/drives" | jq '.value[] | {name, id}'
 ```
 
-### Set Environment Variables
+### Set environment variables
 
 ```bash
 # .env.development

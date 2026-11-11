@@ -94,14 +94,14 @@ Python in the sandbox too.
   </Tab>
 </Tabs>
 
-## Connecting the Workspace
+## Connecting the workspace
 
 Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). `ssh` and `both` do not work in browsers, and
 each file call is about 150 ms for a small file from a laptop. With `fuse`,
 base the template on [the machine image](/home/setup/machine/overview#the-machine-image)
 and run `mirage workspace create /tmp/sandbox.yaml` in the sandbox.
 
-### A Template for ssh
+### A template for ssh
 
 Build a template with `sshfs` and pass its sandbox ID as `sandbox_id`:
 

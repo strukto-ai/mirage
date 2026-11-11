@@ -236,7 +236,7 @@ processing (`awk`, `sed`, `sort`, `cut`, `diff`, ...), file operations
 encoding. Range reads (`head -c`, `tail -c`) seek chunk-wise, so large
 files are never downloaded whole.
 
-## Scoping a VFS to a Key Prefix
+## Scoping a VFS to a key prefix
 
 Pass `key_prefix` to `GridFSConfig` to transparently scope every operation
 to a subpath of the bucket, mirroring the S3 `key_prefix` behavior:

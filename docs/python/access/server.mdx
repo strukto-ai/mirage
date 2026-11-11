@@ -20,7 +20,7 @@ pip install 'mirage-ai[ssh]'
 
 The `ssh` extra adds [asyncssh](https://asyncssh.readthedocs.io), needed only for the SSH server.
 
-## Run It
+## Run it
 
 `build_app` returns the app. Run it with any ASGI server; it serves until you stop it.
 
@@ -78,7 +78,7 @@ sys.setswitchinterval(0.001)
 
 Its other settings are on the [CLI page](/home/access/cli#daemon-config).
 
-## Beside Your Own Event Loop
+## Beside your own event loop
 
 `WorkspaceRunner` pins a [workspace](/python/access/in-app) to a thread and event loop of its own. A line waiting on I/O then never stalls your app's loop, and workspaces in one process never wait on each other's I/O. CPU-bound work still shares the GIL with every other thread in the process. The Mirage server hosts every workspace this way.
 
@@ -92,7 +92,7 @@ await runner.stop()
 
 `call` runs a coroutine on the workspace's loop and is safe from any other loop; cancelling the caller cancels the coroutine. `stop` closes the workspace (`delete=True` also deletes its state), then stops the loop and refuses new calls.
 
-## MCP and RPC on Their Own
+## MCP and RPC on their own
 
 The [MCP](/home/access/mcp) and [RPC](/home/access/rpc) servers are classes you can run over a transport of your own, without the Mirage server. Both serve one session of a [workspace](/python/access/in-app).
 
@@ -123,7 +123,7 @@ answer = await server.handle({
 
 `MirageRpcServer(workspace, session_id=None, operations=None, name="mirage", version=...)`. `handle(message)` answers one message, and `None` for a notification. `serve(read_line, write_line)` answers newline-delimited messages until `read_line` returns `""`.
 
-## What Is Particular to This Server
+## What is particular to this server
 
 The protocol is the same on both servers. These are the differences in how this one serves it:
 
@@ -132,7 +132,7 @@ The protocol is the same on both servers. These are the differences in how this 
 - **Terminal line limit.** 1024 characters.
 - **A thread per workspace.** Each workspace runs on its own thread and event loop through a [`WorkspaceRunner`](#beside-your-own-event-loop), so a busy workspace does not hold up another or the HTTP server.
 
-## Code Map
+## Code map
 
 | Path | What |
 | --- | --- |
@@ -146,7 +146,7 @@ The protocol is the same on both servers. These are the differences in how this 
 | [`mirage/cli/`](https://github.com/strukto-ai/mirage/tree/main/python/mirage/cli) | The `mirage` CLI, one module per verb. |
 
 
-## Custom VFS Calls and Streaming Reads
+## Custom VFS calls and streaming reads
 
 `POST /v1/workspaces/{id}/vfs/{name}` dispatches a registered VFS operation with
 JSON `{ "path": "/data/item", "kwargs": {} }` and returns its result as JSON.

@@ -8,7 +8,7 @@ OCI's S3 Compatibility API accepts AWS Signature V4 against `https://<namespace>
 
 Credentials (bucket, namespace, region, customer secret key pair) are created the same way in both runtimes, see [OCI Credentials](/home/setup/oci).
 
-## Node (Server-Side)
+## Node (server-side)
 
 ```bash
 pnpm add @struktoai/mirage-node
@@ -51,7 +51,7 @@ console.log(res.stdoutText)
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table oci end */}
 
-## Browser (Presigned URLs)
+## Browser (presigned URLs)
 
 ```bash
 pnpm add @struktoai/mirage-browser
@@ -76,7 +76,7 @@ The browser `OCIVFS` is secret-free, your backend signs each operation using you
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table browser/oci end */}
 
-### 1. Server: Sign URLs with the OCI Endpoint
+### 1. Server: sign URLs with the OCI endpoint
 
 ```ts
 import {
@@ -134,7 +134,7 @@ app.post('/presign/oci', async (req, res) => {
 OCI requires **path-style** URLs (`forcePathStyle: true`), virtual-hosted style is not supported on the S3 Compatibility API.
 </Warning>
 
-### 2. Browser: Wire It Up
+### 2. Browser: wire it up
 
 ```ts
 import { MountMode, OCIVFS, Workspace } from '@struktoai/mirage-browser'

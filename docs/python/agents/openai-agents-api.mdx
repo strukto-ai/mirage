@@ -38,7 +38,7 @@ printf 'customer,item,amount\nacme,widget,120\nglobex,gadget,75\nacme,gizmo,30\n
   | mirage shell -w demo -c 'cat > /workspace/orders.csv'
 ```
 
-## Create a Session
+## Create a session
 
 ```python
 from openai import OpenAI
@@ -51,11 +51,11 @@ session = client.beta.agents.sessions.create(
 print(session.environment.id, session.environment.remote_url)
 ```
 
-## Connect the Workspace
+## Connect the workspace
 
 Hand the session's `environment.id` and `environment.remote_url`, with an [environment key](https://developers.openai.com/api/docs/guides/agents-api/environments/self-hosted#authentication), to [`codex exec-server forward`](/home/agents/codex#exec-server-forward) pointed at workspace `demo`. The agent's commands then run in the workspace, and what it writes lands in its mounts.
 
-## Run a Task
+## Run a task
 
 Open the session's event stream, then send the task. The agent's reply streams back while its commands run in the workspace:
 

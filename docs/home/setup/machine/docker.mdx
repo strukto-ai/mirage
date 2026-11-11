@@ -106,7 +106,7 @@ mirage shell -w box-demo -c 'echo hello > /data/hi.txt; python3 -c "print(open(\
 prints `HELLO`. Remove both with `mirage workspace delete box-demo` and
 `docker rm -f my-sandbox`.
 
-## Connecting the Workspace
+## Connecting the workspace
 
 Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). With `ssh`, the image needs only `sshfs`. With
 `fuse`, copy `sandbox.yaml` in and start Mirage in the container:

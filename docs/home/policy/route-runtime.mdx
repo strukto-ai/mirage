@@ -39,7 +39,7 @@ def pre_execute(ctx):
 `python3 /jobs/train.py` runs in the container; `cat data.csv | python3
 -c ...` stays on monty.
 
-## Input and Answers
+## Input and answers
 
 A runtime routing script is a [policy program](/home/policy/scripts) shared
 by every session. Its `pre_execute` function takes the same `ctx` a program
@@ -73,7 +73,7 @@ def policy(ctx: RouteContext) -> str | None:
 ws = Workspace(mounts, runtimes=runtimes, route_policy=policy)
 ```
 
-## Admit, Then Route
+## Admit, then route
 
 Runtime selection happens at
 [`pre_execute`](/home/policy/policies#lifecycle), before commands run.
@@ -103,7 +103,7 @@ lines (`$( )`, `eval`, `source`, `xargs`) keep the outer line's placement.
 and machine. The caller's `runtime=` and `machine=` arguments place the
 line itself.
 
-## Ask a Model
+## Ask a model
 
 A routing program can ask an LLM where a line runs. A program on monty has
 no network, so the model call is a

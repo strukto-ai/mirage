@@ -59,7 +59,7 @@ that a `with` block uses first, or that a
 server runs, has a loop of its own, so your code may block there. A `with`
 block entered after async calls keeps their loop.
 
-## Per-Mount Backends
+## Per-mount backends
 
 How a mount is exposed is configured **per mount**, through one `backend`
 field:
@@ -91,7 +91,7 @@ mounts:
 
 `ws.fuse_mountpoints` returns a `{prefix: path}` map of the live mountpoints.
 
-## Mounting Without the Kernel Extension (FSKit)
+## Mounting without the kernel extension (FSKit)
 
 Apple has deprecated third-party kernel extensions: on Apple Silicon the
 macFUSE kext already needs a reduced-security boot plus admin approval, and
@@ -180,7 +180,7 @@ but it cannot create new names: `create`, `mkdir` and `rename` return
 ENOSYS there ([details](/typescript/setup/fuse#mounting-without-the-kernel-extension-fskit));
 `examples/typescript/fuse/fskit.ts` is its live end-to-end check.
 
-## Size Semantics for API-Backed Files
+## Size semantics for API-backed files
 
 Some mounts (Linear, Trello, Slack, ...) cannot report a file's size
 without fetching its content, so `stat` returns an unknown size. Over the

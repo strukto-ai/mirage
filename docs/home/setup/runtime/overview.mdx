@@ -135,7 +135,7 @@ workspace. A host runtime or a machine also has its own files and network,
 which they do not cover. Pyodide has its own containment limits; use a machine
 with a process and kernel boundary for hostile code.
 
-### Verify Workspace File Access
+### Verify workspace file access
 
 Run these lines inside Mirage's shell after configuring a writable `/data`
 mount visible to the runtime capturing `python3`. They check that Python can
@@ -158,7 +158,7 @@ For `local` and Sandlock, first mount a [FUSE folder](/home/setup/fuse).
 For a machine, finish its provider page's **Connecting the workspace** steps
 first.
 
-## Resource Limits
+## Resource limits
 
 `command_limits` apply to a runtime's programs as to any command: a line past
 its `@line` entry's `timeout_seconds` exits 124 (`line: timed out after Ns`), and

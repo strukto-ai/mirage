@@ -8,7 +8,7 @@ QingStor (QingCloud Object Storage) exposes an S3-compatible API with AWS Signat
 
 Credentials (QingCloud API access key pair) are created the same way in both runtimes, see [QingStor Credentials](/home/setup/qingstor).
 
-## Node (Server-Side)
+## Node (server-side)
 
 ```bash
 pnpm add @struktoai/mirage-node
@@ -49,7 +49,7 @@ console.log(res.stdoutText)
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table qingstor end */}
 
-## Browser (Presigned URLs)
+## Browser (presigned URLs)
 
 ```bash
 pnpm add @struktoai/mirage-browser
@@ -73,7 +73,7 @@ The browser `QingStorVFS` is secret-free, your backend signs each operation usin
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table browser/qingstor end */}
 
-### 1. Server: Sign URLs with the QingStor Endpoint
+### 1. Server: sign URLs with the QingStor endpoint
 
 ```ts
 import {
@@ -125,7 +125,7 @@ app.post('/presign/qingstor', async (req, res) => {
 })
 ```
 
-### 2. Browser: Wire It Up
+### 2. Browser: wire it up
 
 ```ts
 import { MountMode, QingStorVFS, Workspace } from '@struktoai/mirage-browser'

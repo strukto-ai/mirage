@@ -13,7 +13,7 @@ generic WebDAV endpoint. Authentication is HTTP Basic with an
 
 ## Credentials
 
-### 1. Pick a Server
+### 1. Pick a server
 
 Any of these works:
 
@@ -21,7 +21,7 @@ Any of these works:
 - **Self-hosted**: `docker run -p 8080:80 nextcloud`
 - **Hetzner Storage Share**, **ownCloud**, or any WebDAV server
 
-### 2. Create an App Password
+### 2. Create an app password
 
 In your Nextcloud web UI:
 
@@ -32,7 +32,7 @@ In your Nextcloud web UI:
 Login password also works but **app passwords are strongly preferred** so
 you can revoke per-app access without changing your account password.
 
-### 3. Find Your WebDAV URL
+### 3. Find your WebDAV URL
 
 The standard Nextcloud path is:
 
@@ -44,7 +44,7 @@ For example: `https://cloud.example.com/remote.php/dav/files/alice/`.
 
 For generic WebDAV servers, use whatever URL the provider gives.
 
-### 4. Set Environment Variables
+### 4. Set environment variables
 
 ```bash
 # .env.development

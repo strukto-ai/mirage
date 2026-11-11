@@ -122,7 +122,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Dropbox mounted at `/<path>
 </Tabs>
 {/* generated: vfs-md dropbox end */}
 
-## Mount a Subfolder
+## Mount a subfolder
 
 Pass `root_path` to expose a single Dropbox folder as the mount root instead
 of the whole account. Every command and FUSE/VFS op is scoped to that folder;
@@ -181,7 +181,7 @@ listing. A download names the hash in its `Dropbox-API-Result` header, full
 or ranged, so a read stamps it with no extra request. `server_modified` is
 not used: Dropbox repeats it across same-size rewrites.
 
-## Names Missing from a Listing
+## Names missing from a listing
 
 A name missing from a cached listing that the running command did not
 fetch is looked up on Dropbox by path before mirage answers that it does
@@ -205,7 +205,7 @@ listing costs one request.
 A write records the `content_hash` its upload reply names, so a `fresh` read
 right after a `tee` or `sed -i` downloads nothing.
 
-## Conditional Writes
+## Conditional writes
 
 A rewrite that observes a missing file requires atomic create-only support,
 which this backend does not currently enable. Appending to a missing file

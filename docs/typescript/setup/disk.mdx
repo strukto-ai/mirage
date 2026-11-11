@@ -35,11 +35,11 @@ await ws.shell('cat /disk/note.txt')
 
 A folder changed in the last 2 seconds gets no version and is re-listed until it has been quiet that long.
 
-## Mount Mode
+## Mount mode
 
 `read`, `write`, `exec`. Use `MountMode.EXEC` if `python3` or `js` should run scripts from the mount.
 
-## Snapshot Behavior
+## Snapshot behavior
 
 A snapshot carries the mount's files, and loading it restores them.
 

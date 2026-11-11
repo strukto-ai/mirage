@@ -75,7 +75,7 @@ before running `search`.
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table qdrant end */}
 
-### Document and Chunk Lineage
+### Document and chunk lineage
 
 Config fields accept Qdrant's dotted nested-key syntax. A LangChain-style
 payload with `page_content` and `metadata: { source, page }` can therefore use:
@@ -218,7 +218,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Qdrant mounted at `/<path>`
 ranked points as the canonical `.txt` (or `.json`) paths
 above, annotated with the similarity score.
 
-## Search Embedding
+## Search embedding
 
 `search` needs a vector for the query, and the config decides where it comes
 from. With `embed` set, a `(text: string) => Promise<number[]>` the caller
@@ -242,7 +242,7 @@ What Qdrant answers through its own API, so fewer files are read. [Integration](
 
 The [Python Qdrant docs](/python/vfs/qdrant#integration) list when each search answers and what it can miss.
 
-## Supported Commands
+## Supported commands
 
 `ls`, `cd`, `tree`, `cat`, `stat`, `find`, `wc`, `head` and `tail`. `grep`/`rg` stay
 lexical; the `search` CLI's `search "<query>" <path>` is the semantic path, returning ranked

@@ -157,7 +157,7 @@ appears in MIRAGE as
 `root_path` is normalized before use, and MIRAGE rejects any virtual path that
 would escape above that configured subtree.
 
-## Supported Operations
+## Supported operations
 
 Reads: `readdir`, `stat`, `exists`, `read` (streamed whole or a byte range),
 and glob resolution. Writes: `write`, `create`, `mkdir`, `rmdir`, `unlink`,
@@ -168,7 +168,7 @@ Standard shell commands like `ls`, `cat`, `head`, `tail`, `grep`, `rg`,
 primitives. `mv`/`cp` are non-atomic download + upload — the Files API has no
 server-side rename. A directory `mv` removes only what it copied: a file or directory written into the source after the copy listed its directory stays there, and `mv` fails with `Directory not empty`.
 
-## Snapshot Behavior
+## Snapshot behavior
 
 `token` is redacted in VFS state. A callback is never called or serialized
 during a snapshot. Loading the snapshot requires a live VFS override with
