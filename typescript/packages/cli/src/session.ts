@@ -14,7 +14,7 @@
 
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
-import { emit, fail, handleResponse } from './output.ts'
+import { emit, fail, handleList, handleResponse } from './output.ts'
 import { WORKSPACE_FLAGS, WORKSPACE_HELP } from './vfs.ts'
 import { resolveWorkspace } from './settings.ts'
 import { loadProfileArgument } from './workspace.ts'
@@ -140,7 +140,13 @@ export function registerSessionCommands(parent: Command): void {
     .option(WORKSPACE_FLAGS, WORKSPACE_HELP)
     .action(async (opts: { workspace?: string }) => {
       const wsId = resolveWorkspace(opts.workspace)
-      await send('GET', `/v1/workspaces/${encodeURIComponent(wsId)}/sessions`)
+      const c = makeClient()
+      await c.ensureRunning({ allowSpawn: false })
+      emit(
+        await handleList(
+          await c.request('GET', `/v1/workspaces/${encodeURIComponent(wsId)}/sessions`),
+        ),
+      )
     })
 
   for (const [name, description, method, suffix] of ACTIONS) {

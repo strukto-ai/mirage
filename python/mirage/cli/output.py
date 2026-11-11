@@ -132,6 +132,20 @@ def handle_response(r: httpx.Response) -> dict[str, Any] | list[Any]:
     return cast(dict[str, Any] | list[Any], r.json())
 
 
+def handle_list(r: httpx.Response) -> list[Any]:
+    """The ``items`` of a list route's answer, failing on any other.
+
+    Args:
+        r (httpx.Response): the list route's response.
+    """
+    answer = handle_response(r)
+    if not isinstance(answer, dict) or not isinstance(
+        answer.get("items"), list
+    ):
+        fail("the server answered no list", 1)
+    return cast(list[Any], answer["items"])
+
+
 def format_age(epoch: float) -> str:
     """Render a Unix timestamp as a short relative age (``2m``, ``3h``)."""
     delta = max(0, time.time() - epoch)

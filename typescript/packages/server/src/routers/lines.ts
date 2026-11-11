@@ -50,6 +50,10 @@ interface LineResponse {
   error: string | null
 }
 
+interface LineList {
+  items: LineResponse[]
+}
+
 interface LineDetailResponse extends LineResponse {
   jobs: string[]
   processes: number[]
@@ -96,7 +100,7 @@ export function registerLinesRoutes(
 ): void {
   app.get<{ Params: WsIdParams; Querystring: ListLinesQuery }>(
     '/v1/workspaces/:wsId/lines',
-    async (req) => {
+    async (req): Promise<LineList> => {
       // The lines the workspace keeps, oldest first: every one not ended
       // yet and the newest ended ones, a session's or those in a state
       // when named.
@@ -113,7 +117,7 @@ export function registerLinesRoutes(
         ...(sessionId !== undefined && sessionId !== '' ? { sessionId } : {}),
         ...(state !== undefined ? { state: state as LineState } : {}),
       })
-      return records.map(toResponse)
+      return { items: records.map(toResponse) }
     },
   )
 

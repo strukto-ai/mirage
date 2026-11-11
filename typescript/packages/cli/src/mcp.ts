@@ -34,7 +34,7 @@ async function hasSession(
   if (r.status >= 400) {
     throw new Error(`error ${String(r.status)}: ${errorMessage(await r.text())}`)
   }
-  const rows: unknown = await r.json()
+  const rows = ((await r.json()) as { items?: unknown } | null)?.items
   return (
     Array.isArray(rows) &&
     rows.some((row) => (row as { session_id?: unknown }).session_id === sessionId)

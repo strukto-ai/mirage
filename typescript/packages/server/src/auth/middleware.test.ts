@@ -352,9 +352,9 @@ describe('AuthMiddleware integration', () => {
         })
         expect(r.statusCode, r.body).toBe(200)
         r = await app.inject({ method: 'GET', url: '/v1/workspaces', headers: alice })
-        expect(r.json()).toHaveLength(1)
+        expect(r.json<{ items: unknown[] }>().items).toHaveLength(1)
         r = await app.inject({ method: 'GET', url: '/v1/workspaces', headers: bob })
-        expect(r.json()).toEqual([])
+        expect(r.json()).toEqual({ items: [] })
         const denied: [string, string, Record<string, unknown> | undefined][] = [
           ['GET', '/v1/workspaces/a', undefined],
           ['DELETE', '/v1/workspaces/a', undefined],

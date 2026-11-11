@@ -67,7 +67,7 @@ it('lists a running job and finds it by id', async () => {
           },
         },
       ])
-      const [job] = listed.body as {
+      const [job] = (listed.body as { items: unknown[] }).items as {
         id: string
         number: number
         command: string
@@ -89,11 +89,11 @@ it('lists a running job and finds it by id', async () => {
         404,
         { error: { code: 'not_found', message: 'job not found' } },
       ])
-      expect((await get(app, `/v1/workspaces/w/jobs?line_id=${result.line_id}`)).body).toEqual([
-        job,
-      ])
-      expect((await get(app, '/v1/workspaces/w/jobs?line_id=nope')).body).toEqual([])
-      expect((await get(app, '/v1/workspaces/w/jobs?session_id=other')).body).toEqual([])
+      expect((await get(app, `/v1/workspaces/w/jobs?line_id=${result.line_id}`)).body).toEqual({
+        items: [job],
+      })
+      expect((await get(app, '/v1/workspaces/w/jobs?line_id=nope')).body).toEqual({ items: [] })
+      expect((await get(app, '/v1/workspaces/w/jobs?session_id=other')).body).toEqual({ items: [] })
       expect((await get(app, '/v1/workspaces/w/jobs/nope')).status).toBe(404)
     } finally {
       await shell(app, 'w', 'kill %1; wait')

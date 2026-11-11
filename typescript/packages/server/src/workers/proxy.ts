@@ -335,16 +335,17 @@ export class WorkerProxy {
     // the running ones first, as each worker lists them.
     const byId = new Map<string, Record<string, unknown>>()
     for (const answer of answers) {
-      for (const item of JSON.parse(answer.body.toString()) as Record<string, unknown>[]) {
+      const { items } = JSON.parse(answer.body.toString()) as { items: Record<string, unknown>[] }
+      for (const item of items) {
         const id = String(item.id)
         if (byId.get(id)?.status !== 'running') byId.set(id, item)
       }
     }
-    const items = [...byId.values()]
+    const merged = [...byId.values()]
     const stopped = (item: Record<string, unknown>): number => (item.status === 'running' ? 0 : 1)
     const key = (item: Record<string, unknown>): number => Number(item.created_at ?? 0)
-    items.sort((a, b) => stopped(a) - stopped(b) || key(a) - key(b))
-    sendJson(res, 200, items)
+    merged.sort((a, b) => stopped(a) - stopped(b) || key(a) - key(b))
+    sendJson(res, 200, { items: merged })
   }
 
   /**

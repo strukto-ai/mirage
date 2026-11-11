@@ -13,7 +13,7 @@ from typer.testing import CliRunner
 from mirage.cli import credentials
 from mirage.cli.credentials import Login, remove_login, write_login
 from mirage.cli.main import app
-from mirage.cli.mcp import MCP_ENV_NAMES, relay_workspace
+from mirage.cli.mcp import MCP_ENV_NAMES, has_session, relay_workspace
 
 MINIMAL = "mounts:\n  /:\n    vfs: ram\n    mode: WRITE\n"
 
@@ -123,6 +123,35 @@ def test_a_refused_session_check_deletes_the_workspace(tree, tmp_path):
     assert result.exit_code == 2
     assert "error 500: sessions on fire" in result.output
     assert "DELETE /v1/workspaces/minted" in calls
+
+
+def test_has_session_reads_the_session_list_items(tmp_path, monkeypatch):
+    class Sessions(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            data = json.dumps(
+                {"items": [{"session_id": "agent", "cwd": "/"}]}
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, format: str, *args: str) -> None:
+            pass
+
+    stub = ThreadingHTTPServer(("127.0.0.1", 0), Sessions)
+    threading.Thread(target=stub.serve_forever, daemon=True).start()
+    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
+    monkeypatch.setenv(
+        "MIRAGE_DAEMON_URL", f"http://127.0.0.1:{stub.server_port}"
+    )
+    try:
+        assert has_session("/v1/workspaces/w", "agent")
+        assert not has_session("/v1/workspaces/w", "other")
+    finally:
+        stub.shutdown()
+        stub.server_close()
 
 
 @contextmanager

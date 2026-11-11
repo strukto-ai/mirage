@@ -49,33 +49,35 @@ async def test_a_process_is_listed_live_and_after_it_ends():
             f"/v1/workspaces/{wid}/processes", params={"state": "running"}
         )
         assert r.status_code == 200, r.text
-        assert [p["pid"] for p in r.json()] == [pid]
+        assert [p["pid"] for p in r.json()["items"]] == [pid]
         r = await client.get(
             f"/v1/workspaces/{wid}/processes",
             params={"line_id": result["line_id"]},
         )
-        assert pid in [p["pid"] for p in r.json()]
-        [job] = (await client.get(f"/v1/workspaces/{wid}/jobs")).json()
+        assert pid in [p["pid"] for p in r.json()["items"]]
+        [job] = (await client.get(f"/v1/workspaces/{wid}/jobs")).json()[
+            "items"
+        ]
         r = await client.get(
             f"/v1/workspaces/{wid}/processes", params={"job_id": job["id"]}
         )
-        [live] = r.json()
+        [live] = r.json()["items"]
         assert (live["pid"], live["machine_pid"]) == (pid, None)
         r = await client.get(
             f"/v1/workspaces/{wid}/processes",
             params={"job_id": job["id"].removeprefix("job_")},
         )
-        assert (r.status_code, r.json()) == (200, [])
+        assert (r.status_code, r.json()) == (200, {"items": []})
         r = await client.get(
             f"/v1/workspaces/{wid}/processes",
             params={"machine": live["machine"]},
         )
-        assert pid in [p["pid"] for p in r.json()]
+        assert pid in [p["pid"] for p in r.json()["items"]]
         r = await client.get(
             f"/v1/workspaces/{wid}/processes",
             params={"machine": "docker:nowhere"},
         )
-        assert r.json() == []
+        assert r.json() == {"items": []}
         r = await client.get(
             f"/v1/workspaces/{wid}/processes", params={"machine": "nowhere"}
         )

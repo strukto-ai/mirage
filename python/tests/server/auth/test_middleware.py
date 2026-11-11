@@ -355,8 +355,11 @@ async def test_an_account_reaches_only_its_own_workspaces(rsa_keys, tmp_path):
             json={"command": "echo hi"},
         )
         assert r.status_code == 200, r.text
-        assert [w["id"] for w in (await alice.get("/v1/workspaces")).json()]
-        assert (await bob.get("/v1/workspaces")).json() == []
+        assert [
+            w["id"]
+            for w in (await alice.get("/v1/workspaces")).json()["items"]
+        ]
+        assert (await bob.get("/v1/workspaces")).json() == {"items": []}
         for method, path, body in [
             ("GET", "/v1/workspaces/a", None),
             ("DELETE", "/v1/workspaces/a", None),

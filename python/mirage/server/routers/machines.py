@@ -30,6 +30,10 @@ class MachineResponse(BaseModel):
     checked_at: float
 
 
+class MachineList(BaseModel):
+    items: list[MachineResponse]
+
+
 class MachineDetailResponse(MachineResponse):
     processes: list[ProcessResponse]
 
@@ -40,10 +44,8 @@ def _to_response(record: Machine) -> MachineResponse:
     )
 
 
-@router.get("", response_model=list[MachineResponse])
-async def list_machines(
-    workspace_id: str, request: Request
-) -> list[MachineResponse]:
+@router.get("", response_model=MachineList)
+async def list_machines(workspace_id: str, request: Request) -> MachineList:
     """The machines the workspace runs programs on, its own host first,
     each checked now: ``managed`` when Mirage sees and stops every process
     its programs start there, ``reachable`` when only what it started
@@ -51,8 +53,10 @@ async def list_machines(
     own loop."""
     runner = require_entry(request, workspace_id).runner
 
-    async def read() -> list[MachineResponse]:
-        return [_to_response(r) for r in await runner.ws.machines()]
+    async def read() -> MachineList:
+        return MachineList(
+            items=[_to_response(r) for r in await runner.ws.machines()]
+        )
 
     return await runner.call(read())
 

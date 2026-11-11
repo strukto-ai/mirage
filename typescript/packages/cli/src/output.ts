@@ -108,6 +108,13 @@ export async function handleResponse(r: Response): Promise<unknown> {
   return JSON.parse(text) as unknown
 }
 
+/** The `items` of a list route's answer, failing on any other. */
+export async function handleList(r: Response): Promise<unknown[]> {
+  const items = ((await handleResponse(r)) as { items?: unknown } | null)?.items
+  if (!Array.isArray(items)) fail('the server answered no list', 1)
+  return items as unknown[]
+}
+
 export function formatAge(epoch: number): string {
   const delta = Math.max(0, Date.now() / 1000 - epoch)
   if (delta < 60) return `${String(Math.floor(delta))}s`

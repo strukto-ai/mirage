@@ -29,6 +29,7 @@ from mirage.cli.output import (
     fail,
     format_age,
     format_table,
+    handle_list,
     handle_response,
 )
 from mirage.cli.policy import keep_policy_names
@@ -285,7 +286,7 @@ def _format_machines(items: list[dict[str, Any]]) -> str:
 
 def _list_records(
     workspace_id: str | None, kind: str, params: dict[str, str]
-) -> dict[str, Any] | list[Any]:
+) -> list[Any]:
     """One of the workspace's record lists, by its route.
 
     Args:
@@ -302,7 +303,7 @@ def _list_records(
             f"/v1/workspaces/{quote(workspace_id, safe='')}/{kind}",
             params={k: v for k, v in params.items() if v},
         )
-    return handle_response(r)
+    return handle_list(r)
 
 
 @app.command("create")
@@ -362,7 +363,7 @@ def list_cmd() -> None:
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
         r = client.request("GET", "/v1/workspaces")
-    emit(handle_response(r), human=_format_workspace_list)
+    emit(handle_list(r), human=_format_workspace_list)
 
 
 @app.command("get")
@@ -676,7 +677,7 @@ def list_asks_cmd(
             f"/v1/workspaces/{quote(workspace_id, safe='')}/asks",
             params=params,
         )
-    emit(handle_response(r), human=_format_asks)
+    emit(handle_list(r), human=_format_asks)
 
 
 @app.command("list-lines")

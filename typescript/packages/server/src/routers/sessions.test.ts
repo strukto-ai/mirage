@@ -34,7 +34,7 @@ describe('sessions router', () => {
     })
     expect(created.statusCode).toBe(201)
     const list = await app.inject({ method: 'GET', url: '/v1/workspaces/sw/sessions' })
-    const sessions = list.json<{ session_id: string; cwd: string }[]>()
+    const sessions = list.json<{ items: { session_id: string; cwd: string }[] }>().items
     expect(sessions.some((s) => s.session_id === 'agent_a')).toBe(true)
     const del = await app.inject({
       method: 'DELETE',

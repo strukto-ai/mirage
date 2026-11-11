@@ -95,7 +95,7 @@ async function raiseAsk(
     url: `/v1/workspaces/${wsId}/asks?session_id=${sessionId}`,
   })
   expect(r.statusCode).toBe(200)
-  const pending = r.json<AskRow[]>()
+  const pending = r.json<{ items: AskRow[] }>().items
   expect(pending).toHaveLength(1)
   const first = pending[0]
   if (first === undefined) throw new Error('no pending ask')
@@ -111,7 +111,7 @@ describe('asks router', () => {
     const askId = await raiseAsk(app, 'asks-allow', 'agent_a')
 
     const list = await app.inject({ method: 'GET', url: '/v1/workspaces/asks-allow/asks' })
-    const rows = list.json<AskRow[]>()
+    const rows = list.json<{ items: AskRow[] }>().items
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({
       id: askId,
@@ -136,12 +136,12 @@ describe('asks router', () => {
     })
 
     const pendingAfter = await app.inject({ method: 'GET', url: '/v1/workspaces/asks-allow/asks' })
-    expect(pendingAfter.json<AskRow[]>()).toHaveLength(0)
+    expect(pendingAfter.json<{ items: AskRow[] }>().items).toHaveLength(0)
     const allAfter = await app.inject({
       method: 'GET',
       url: '/v1/workspaces/asks-allow/asks?all=true',
     })
-    expect(allAfter.json<AskRow[]>().map((a) => a.id)).toEqual([askId])
+    expect(allAfter.json<{ items: AskRow[] }>().items.map((a) => a.id)).toEqual([askId])
 
     const retried = await execute(app, 'asks-allow', 'agent_a', 'rm /f.txt')
     expect(retried.exit_code).toBe(0)
@@ -150,7 +150,7 @@ describe('asks router', () => {
       method: 'GET',
       url: '/v1/workspaces/asks-allow/asks?all=true',
     })
-    expect(spent.json<AskRow[]>()).toHaveLength(0)
+    expect(spent.json<{ items: AskRow[] }>().items).toHaveLength(0)
     await app.close()
   })
 
@@ -207,14 +207,14 @@ describe('asks router', () => {
     await raiseAsk(app, 'asks-filter', 'agent_b')
 
     const all = await app.inject({ method: 'GET', url: '/v1/workspaces/asks-filter/asks' })
-    expect(new Set(all.json<AskRow[]>().map((a) => a.session_id))).toEqual(
+    expect(new Set(all.json<{ items: AskRow[] }>().items.map((a) => a.session_id))).toEqual(
       new Set(['agent_a', 'agent_b']),
     )
     const one = await app.inject({
       method: 'GET',
       url: '/v1/workspaces/asks-filter/asks?session_id=agent_b',
     })
-    expect(one.json<AskRow[]>().map((a) => a.session_id)).toEqual(['agent_b'])
+    expect(one.json<{ items: AskRow[] }>().items.map((a) => a.session_id)).toEqual(['agent_b'])
     const unknown = await app.inject({
       method: 'GET',
       url: '/v1/workspaces/asks-filter/asks?session_id=nope',

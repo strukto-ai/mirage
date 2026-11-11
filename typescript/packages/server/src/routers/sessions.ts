@@ -30,6 +30,15 @@ interface WsSessionParams {
   sessionId: string
 }
 
+interface SessionResponse {
+  session_id: string
+  cwd: string
+}
+
+interface SessionList {
+  items: SessionResponse[]
+}
+
 /**
  * A new session: its id (generated when unset or empty), optional
  * per-mount modes and the profile it runs under, by name from the
@@ -104,15 +113,18 @@ export function registerSessionsRoutes(
     },
   )
 
-  app.get<{ Params: WsIdParams }>('/v1/workspaces/:wsId/sessions', async (req) => {
-    const { wsId } = req.params
-    if (deps.registry.visible(wsId, req.account) === null) {
-      throw new WorkspaceMissing(wsId)
-    }
-    const ws = deps.registry.get(wsId).runner.ws
-    await ws.ensureSessionsLoaded()
-    return ws.listSessions().map((s) => ({ session_id: s.sessionId, cwd: s.cwd }))
-  })
+  app.get<{ Params: WsIdParams }>(
+    '/v1/workspaces/:wsId/sessions',
+    async (req): Promise<SessionList> => {
+      const { wsId } = req.params
+      if (deps.registry.visible(wsId, req.account) === null) {
+        throw new WorkspaceMissing(wsId)
+      }
+      const ws = deps.registry.get(wsId).runner.ws
+      await ws.ensureSessionsLoaded()
+      return { items: ws.listSessions().map((s) => ({ session_id: s.sessionId, cwd: s.cwd })) }
+    },
+  )
 
   app.delete<{ Params: WsSessionParams }>(
     '/v1/workspaces/:wsId/sessions/:sessionId',

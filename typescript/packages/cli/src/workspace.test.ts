@@ -91,6 +91,9 @@ interface Seen {
  * A server double: answers health, a snapshot, a load and an empty record
  * list, and keeps every other request.
  */
+// What the fake answers every list route, under `items`.
+const ROWS = [{ id: 'r1', state: 'running' }]
+
 async function fakeServer(): Promise<{ url: string; seen: Seen[]; server: Server }> {
   const seen: Seen[] = []
   const server = createServer((req: IncomingMessage, res) => {
@@ -125,8 +128,14 @@ async function fakeServer(): Promise<{ url: string; seen: Seen[]; server: Server
         res.writeHead(204).end()
         return
       }
-      if (req.method === 'GET' && /\/(lines|jobs|processes|machines)(\?|$)/.test(url)) {
-        res.writeHead(200, { 'content-type': 'application/json' }).end('[]')
+      if (
+        req.method === 'GET' &&
+        (url === '/v1/workspaces' ||
+          /\/(sessions|asks|lines|jobs|processes|machines)(\?|$)/.test(url))
+      ) {
+        res
+          .writeHead(200, { 'content-type': 'application/json' })
+          .end(JSON.stringify({ items: ROWS }))
         return
       }
       if (req.method === 'GET') {
@@ -324,6 +333,40 @@ describe('mirage workspace logs', () => {
           else reject(error)
         }),
       )
+    }
+  })
+})
+
+// A list route answers `{items}`; the command prints the items, as it
+// printed the bare array before.
+describe('mirage workspace list commands', () => {
+  it('print the items they were answered', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-lists-'))
+    tempDirs.push(dir)
+    const { url, server } = await fakeServer()
+    try {
+      for (const args of [
+        ['list'],
+        ['list-asks', '-w', 'w'],
+        ['list-lines', '-w', 'w'],
+        ['list-jobs', '-w', 'w'],
+        ['list-processes', '-w', 'w'],
+        ['list-machines', '-w', 'w'],
+        ['session', 'list', '-w', 'w'],
+      ]) {
+        const child = spawn(process.execPath, [BIN, 'workspace', ...args], {
+          env: { ...process.env, MIRAGE_WORKSPACE: '', MIRAGE_HOME: dir, MIRAGE_DAEMON_URL: url },
+        })
+        let stdout = ''
+        child.stdout.on('data', (chunk: Buffer) => {
+          stdout += chunk.toString()
+        })
+        const code = await new Promise<number | null>((resolve) => child.on('close', resolve))
+        expect(code, args.join(' ')).toBe(0)
+        expect(JSON.parse(stdout), args.join(' ')).toEqual(ROWS)
+      }
+    } finally {
+      server.close()
     }
   })
 })

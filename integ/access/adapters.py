@@ -732,7 +732,8 @@ class HttpSteps:
         )
 
     async def ids(self) -> list[str]:
-        return [w["id"] for w in await self._ok("GET", "/v1/workspaces")]
+        listed = await self._ok("GET", "/v1/workspaces")
+        return [w["id"] for w in listed["items"]]
 
     async def mounts(self, wid: str) -> list[str]:
         detail = await self._ok("GET", f"/v1/workspaces/{wid}")
@@ -760,10 +761,8 @@ class HttpSteps:
         )
 
     async def session_ids(self, wid: str) -> list[str]:
-        return [
-            s["session_id"]
-            for s in await self._ok("GET", f"/v1/workspaces/{wid}/sessions")
-        ]
+        listed = await self._ok("GET", f"/v1/workspaces/{wid}/sessions")
+        return [s["session_id"] for s in listed["items"]]
 
     async def session_delete(self, wid: str, session: str) -> None:
         await self._ok("DELETE", f"/v1/workspaces/{wid}/sessions/{session}")
@@ -861,10 +860,8 @@ class HttpSteps:
         return _logs_as_events(page, vfs, last)
 
     async def asks(self, wid: str) -> list[tuple[str, str]]:
-        return [
-            (a["id"], a["reason"])
-            for a in await self._ok("GET", f"/v1/workspaces/{wid}/asks")
-        ]
+        listed = await self._ok("GET", f"/v1/workspaces/{wid}/asks")
+        return [(a["id"], a["reason"]) for a in listed["items"]]
 
     async def records(
         self, wid: str, kind: str, state: str | None
@@ -877,7 +874,7 @@ class HttpSteps:
         key = "pid" if kind == "processes" else "id"
         return [
             await self._ok("GET", f"/v1/workspaces/{wid}/{kind}/{r[key]}")
-            for r in listed
+            for r in listed["items"]
         ]
 
     async def explain(

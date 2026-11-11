@@ -155,7 +155,9 @@ describe('WorkerProxy', () => {
       )
     }
     expect(ids(d)).toEqual([['b'], ['a', 'c']])
-    const listed = (await call(`${d.url}/v1/workspaces`, 'GET')).json as { id: string }[]
+    const listed = (
+      (await call(`${d.url}/v1/workspaces`, 'GET')).json as { items: { id: string }[] }
+    ).items
     expect(listed.map((w) => w.id)).toEqual(['a', 'b', 'c'])
     expect((await call(`${d.url}/v1/health`, 'GET')).json).toMatchObject({
       workspaces: 3,
@@ -243,7 +245,8 @@ describe('WorkerProxy', () => {
       ['a', 'b', 'c'].map((id) => call(`${d.url}/v1/workspaces`, 'POST', { id, config: CONFIG })),
     )
     expect(racing.map((r) => r.status).sort()).toEqual([201, 201, 503])
-    const live = (await call(`${d.url}/v1/workspaces`, 'GET')).json as { id: string }[]
+    const live = ((await call(`${d.url}/v1/workspaces`, 'GET')).json as { items: { id: string }[] })
+      .items
     const [kept, other] = live.map((w) => w.id)
     const retry = await call(`${d.url}/v1/workspaces`, 'POST', { id: kept, config: CONFIG })
     expect(retry.status).toBe(200)

@@ -53,7 +53,7 @@ async def test_a_running_job_is_listed_and_found_by_id():
                 f"/v1/workspaces/{wid}/jobs", params={"state": "running"}
             )
             assert r.status_code == 200, r.text
-            [job] = r.json()
+            [job] = r.json()["items"]
             assert (
                 job["number"],
                 job["command"],
@@ -74,15 +74,15 @@ async def test_a_running_job_is_listed_and_found_by_id():
                 f"/v1/workspaces/{wid}/jobs",
                 params={"line_id": result["line_id"]},
             )
-            assert r.json() == [job]
+            assert r.json() == {"items": [job]}
             r = await client.get(
                 f"/v1/workspaces/{wid}/jobs", params={"line_id": "nope"}
             )
-            assert r.json() == []
+            assert r.json() == {"items": []}
             r = await client.get(
                 f"/v1/workspaces/{wid}/jobs", params={"session_id": "other"}
             )
-            assert r.json() == []
+            assert r.json() == {"items": []}
             r = await client.get(f"/v1/workspaces/{wid}/jobs/nope")
             assert r.status_code == 404
         finally:

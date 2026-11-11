@@ -60,6 +60,10 @@ export interface ProcessResponse {
   error: string | null
 }
 
+interface ProcessList {
+  items: ProcessResponse[]
+}
+
 const STATES: readonly ProcessState[] = ['running', 'stopping', 'exited']
 
 export function toResponse(record: Process): ProcessResponse {
@@ -98,7 +102,7 @@ export function registerProcessesRoutes(
 ): void {
   app.get<{ Params: WsIdParams; Querystring: ListProcessesQuery }>(
     '/v1/workspaces/:wsId/processes',
-    async (req) => {
+    async (req): Promise<ProcessList> => {
       // The processes the workspace keeps, by pid: every live one and the
       // newest ended ones, a session's, those in a state, those a line
       // ran, those a job ran or those run on a machine (`provider:name`)
@@ -128,7 +132,7 @@ export function registerProcessesRoutes(
         ...(jobId !== undefined && jobId !== '' ? { jobId: new JobId(ws.workspaceId, jobId) } : {}),
         ...(where !== null ? { machine: where } : {}),
       })
-      return records.map(toResponse)
+      return { items: records.map(toResponse) }
     },
   )
 

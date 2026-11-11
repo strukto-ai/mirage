@@ -54,22 +54,27 @@ it('lists a process live and after it ends', async () => {
     const pid = Number(result.stdout)
     const running = await get(app, '/v1/workspaces/w/processes?state=running')
     expect(running.status).toBe(200)
-    expect((running.body as { pid: number }[]).map((p) => p.pid)).toEqual([pid])
+    expect((running.body as { items: { pid: number }[] }).items.map((p) => p.pid)).toEqual([pid])
     const ran = await get(app, `/v1/workspaces/w/processes?line_id=${result.line_id}`)
-    expect((ran.body as { pid: number }[]).map((p) => p.pid)).toContain(pid)
-    const [job] = (await get(app, '/v1/workspaces/w/jobs')).body as { id: string }[]
+    expect((ran.body as { items: { pid: number }[] }).items.map((p) => p.pid)).toContain(pid)
+    const [job] = ((await get(app, '/v1/workspaces/w/jobs')).body as { items: { id: string }[] })
+      .items
     const bare = (job?.id ?? '').replace('job_', '')
     const ofBare = await get(app, `/v1/workspaces/w/processes?job_id=${bare}`)
-    expect([ofBare.status, ofBare.body]).toEqual([200, []])
+    expect([ofBare.status, ofBare.body]).toEqual([200, { items: [] }])
     const ofJob = await get(app, `/v1/workspaces/w/processes?job_id=${job?.id ?? ''}`)
-    const [live] = ofJob.body as { pid: number; machine: string; machine_pid: unknown }[]
+    const [live] = (
+      ofJob.body as { items: { pid: number; machine: string; machine_pid: unknown }[] }
+    ).items
     expect([live?.pid, live?.machine_pid]).toEqual([pid, null])
     const there = await get(
       app,
       `/v1/workspaces/w/processes?machine=${encodeURIComponent(live?.machine ?? '')}`,
     )
-    expect((there.body as { pid: number }[]).map((p) => p.pid)).toContain(pid)
-    expect((await get(app, '/v1/workspaces/w/processes?machine=docker:nowhere')).body).toEqual([])
+    expect((there.body as { items: { pid: number }[] }).items.map((p) => p.pid)).toContain(pid)
+    expect((await get(app, '/v1/workspaces/w/processes?machine=docker:nowhere')).body).toEqual({
+      items: [],
+    })
     const nowhere = await get(app, '/v1/workspaces/w/processes?machine=nowhere')
     expect([nowhere.status, nowhere.body]).toEqual([
       400,
