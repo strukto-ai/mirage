@@ -38,8 +38,6 @@ const GITHUB_RETRIES = 3
 // spent 14 s on a refused connection before failing anyway, and a real 500
 // is no more worth a retry: gh retries neither.
 const NO_RETRY_STATUSES = [400, 401, 403, 404, 410, 422, 451, 500]
-// The resolver's codes for a host that does not resolve.
-const DNS_FAILURES = new Set(['ENOTFOUND', 'EAI_AGAIN', 'EAI_NONAME'])
 
 export interface GitHubTransport {
   get(path: string, params?: Record<string, string>): Promise<unknown>
@@ -269,7 +267,8 @@ function connectionError(err: RequestError): GitHubConnectionError {
       `${verb} "${err.request.url}": dial tcp ${address}:${String(reason.port)}: connect: connection refused`,
     )
   }
-  if (!DNS_FAILURES.has(code)) return new GitHubConnectionError(err.message)
+  if (!['ENOTFOUND', 'EAI_AGAIN', 'EAI_NONAME'].includes(code))
+    return new GitHubConnectionError(err.message)
   let host = ''
   try {
     host = new URL(err.request.url).hostname

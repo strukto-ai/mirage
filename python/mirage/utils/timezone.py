@@ -40,11 +40,6 @@ _FIELD_CEILING = "18446744073709551615"
 # day, so both hosts stop one second short of it.
 _OFFSET_LIMIT = 24 * _HOUR - 1
 
-# The window zone_abbreviations samples: tzdata's post-1970 rules, up to
-# the 32-bit horizon every zone's rules are laid out to.
-_ABBREV_SAMPLE_START = datetime(1970, 1, 1, tzinfo=timezone.utc)
-_ABBREV_SAMPLE_END = datetime(2038, 1, 1, tzinfo=timezone.utc)
-
 
 def _weekday_in_month(year: int, month: int, week: int, weekday: int) -> date:
     """The day an ``Mm.w.d`` rule names.
@@ -734,8 +729,11 @@ def zone_abbreviations(
     zone = ZoneInfo(name)
     rows: list[tuple[int, str, int]] = []
     current: dict[int, str] = {}
-    previous = at = _ABBREV_SAMPLE_START
-    while at < _ABBREV_SAMPLE_END:
+    # The window sampled: tzdata's post-1970 rules, up to the 32-bit
+    # horizon every zone's rules are laid out to.
+    previous = at = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    end = datetime(2038, 1, 1, tzinfo=timezone.utc)
+    while at < end:
         reading = _reading(zone, at)
         offset, abbrev = reading
         if current.get(offset) != abbrev:

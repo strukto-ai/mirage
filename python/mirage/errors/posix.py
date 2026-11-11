@@ -16,15 +16,6 @@ import errno
 
 from mirage.errors.types import FsCondition, PosixErrno
 
-# "attribute not set": ENOATTR on macOS, ENODATA on Linux. One
-# condition, resolved once; the phrase follows the number so a raw
-# strerror on either platform reads consistently.
-_NO_XATTR = (
-    PosixErrno(errno.ENOATTR, "Attribute not found")
-    if hasattr(errno, "ENOATTR")
-    else PosixErrno(errno.ENODATA, "No data available")
-)
-
 POSIX: dict[FsCondition, PosixErrno] = {
     FsCondition.EBADF: PosixErrno(errno.EBADF, "Bad file descriptor"),
     FsCondition.ENOENT: PosixErrno(errno.ENOENT, "No such file or directory"),
@@ -46,7 +37,14 @@ POSIX: dict[FsCondition, PosixErrno] = {
     FsCondition.EFBIG: PosixErrno(errno.EFBIG, "File too large"),
     FsCondition.EDQUOT: PosixErrno(errno.EDQUOT, "Disk quota exceeded"),
     FsCondition.EPIPE: PosixErrno(errno.EPIPE, "Broken pipe"),
-    FsCondition.NO_XATTR: _NO_XATTR,
+    # "attribute not set": ENOATTR on macOS, ENODATA on Linux. One
+    # condition, resolved once; the phrase follows the number so a raw
+    # strerror on either platform reads consistently.
+    FsCondition.NO_XATTR: (
+        PosixErrno(errno.ENOATTR, "Attribute not found")
+        if hasattr(errno, "ENOATTR")
+        else PosixErrno(errno.ENODATA, "No data available")
+    ),
     FsCondition.STALE_WRITE: PosixErrno(
         errno.ESTALE,
         "changed since it was read; read it again before writing",
