@@ -56,6 +56,12 @@ describe('core/ssh/mkdir', () => {
     await expect(mkdir(accessor, spec('/d'), true)).resolves.toBeUndefined()
   })
 
+  it('makes a missing configured root when recursive', async () => {
+    const state = { files: new Map(), dirs: new Map([['/', {}]]) }
+    await mkdir(makeFakeAccessor(state, '/srv/ws'), spec('/a'), true)
+    expect(['/srv', '/srv/ws', '/srv/ws/a'].every((d) => state.dirs.has(d))).toBe(true)
+  })
+
   it('passes a server-side link to a directory when recursive', async () => {
     const state = {
       files: new Map(),

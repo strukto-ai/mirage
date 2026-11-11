@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import posixpath
+
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
@@ -27,29 +29,30 @@ async def mkdir(
     config = accessor.config
     sftp = await accessor.sftp()
     if parents:
-        key = path.mount_path.strip("/")
-        current = ""
-        for part in filter(None, key.split("/")):
-            current += "/" + part
-            remote = join_root(config.root, current)
-            if await sftp.isdir(remote):
+        remote = join_root(config.root, path.mount_path)
+        base = len(config.root.rstrip("/"))
+        current = "/" if remote.startswith("/") else ""
+        for part in filter(None, remote.split("/")):
+            current = posixpath.join(current, part)
+            if await sftp.isdir(current):
                 continue
             try:
-                await sftp.mkdir(remote)
+                await sftp.mkdir(current)
             except asyncssh.SFTPError as exc:
-                if await sftp.isdir(remote):
+                if await sftp.isdir(current):
                     continue
                 # The step -p tripped on, in the kernel's words: a name in
-                # the way is EEXIST at the operand and ENOTDIR above it.
-                named = mounted_path(path, current)
+                # the way is EEXIST at the operand and ENOTDIR above it. A
+                # step at or above the configured root names the mount root.
+                named = mounted_path(path, current[base:] or "/")
                 if isinstance(exc, asyncssh.SFTPPermissionDenied):
                     raise eacces(named) from exc
                 if isinstance(exc, asyncssh.SFTPNoSuchFile):
                     raise enoent(named) from exc
                 if isinstance(
                     exc, asyncssh.SFTPFailure
-                ) and await sftp.lexists(remote):
-                    last = current == "/" + key
+                ) and await sftp.lexists(current):
+                    last = current == remote
                     raise (eexist if last else enotdir)(named) from exc
                 raise
     else:
