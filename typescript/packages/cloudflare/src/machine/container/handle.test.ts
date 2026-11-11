@@ -216,6 +216,8 @@ class FakeContainer implements Container {
   // What the container has mounted, which a line's mount guard checks; null checks nothing.
   mounted: (() => ReadonlySet<string>) | null = null
   onExit: () => void = () => undefined
+  // The next exec's container exits as the exec starts, before its caller hears back.
+  exitsOnExec = false
   asked = 0
   private exited = deferred<undefined>()
 
@@ -236,6 +238,11 @@ class FakeContainer implements Container {
         : (this.programs[line.split(' ')[0] ?? ''] ?? (() => 0))
     const proc = new FakeProcess(line, program, this.log)
     this.execs.push({ argv, options, proc })
+    if (this.exitsOnExec) {
+      this.exitsOnExec = false
+      this.exit()
+      return new Promise((resolve) => setTimeout(resolve, 0, proc))
+    }
     return Promise.resolve(proc)
   }
 
@@ -605,6 +612,16 @@ describe('ContainerMachine connection', () => {
       },
     })
     const cut = await run(machine, ['boom'])
+    expect([cut.exitCode, DEC.decode(cut.stderr ?? undefined)]).toEqual([129, lost])
+    expect((await run(machine, ['true'])).exitCode).toBe(0)
+    expect(start).toHaveBeenCalledTimes(2)
+  })
+
+  it('loses the connection when the container exits as an exec starts', async () => {
+    const { box, start, machine } = boxed({ sleep })
+    expect((await run(machine, ['true'])).exitCode).toBe(0)
+    box.exitsOnExec = true
+    const cut = await run(machine, ['sleep', '60'])
     expect([cut.exitCode, DEC.decode(cut.stderr ?? undefined)]).toEqual([129, lost])
     expect((await run(machine, ['true'])).exitCode).toBe(0)
     expect(start).toHaveBeenCalledTimes(2)
