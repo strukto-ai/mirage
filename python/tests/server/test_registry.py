@@ -285,54 +285,6 @@ async def test_a_stopping_id_stays_reserved_until_the_runner_stops(
 
 
 @pytest.mark.asyncio
-async def test_a_stop_reads_after_the_runner_stops_and_before_release(
-    monkeypatch,
-):
-    registry = WorkspaceRegistry(idle_grace_seconds=10.0)
-    entry = registry.add(_ws(), "w")
-    stopped = False
-    reading = asyncio.Event()
-    read = asyncio.Event()
-    seen: list[bool] = []
-    stop = entry.runner.stop
-
-    async def stop_and_mark(*, delete: bool = False) -> None:
-        nonlocal stopped
-        await stop(delete=delete)
-        stopped = True
-
-    async def then() -> None:
-        seen.extend([stopped, registry.removing("w")])
-        reading.set()
-        await read.wait()
-
-    monkeypatch.setattr(entry.runner, "stop", stop_and_mark)
-    stopping_task = asyncio.create_task(registry.stop("w", then))
-    await reading.wait()
-    assert seen == [True, True]
-    with pytest.raises(ValueError):
-        registry.add(_ws(), "w")
-    read.set()
-    assert await stopping_task is entry
-    assert not registry.removing("w")
-    await registry.close_all()
-
-
-@pytest.mark.asyncio
-async def test_a_failed_stop_read_still_releases_the_id():
-    registry = WorkspaceRegistry(idle_grace_seconds=10.0)
-    entry = registry.add(_ws(), "w")
-
-    async def then() -> None:
-        raise OSError("store down")
-
-    assert await registry.stop("w", then) is entry
-    assert not registry.removing("w")
-    registry.add(_ws(), "w")
-    await registry.close_all()
-
-
-@pytest.mark.asyncio
 async def test_a_workspace_reaches_only_records_made_since_its_creation():
     # A workspace created under a deleted one's id must not read the jobs
     # the deleted one left.

@@ -22,6 +22,7 @@ import { ResourceError } from '@struktoai/mirage-core/resources/errors'
 import { secretRefs } from '@struktoai/mirage-core/resources/refs'
 import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
 import type { JsonValue } from '@struktoai/mirage-core/types'
+import { msToRfc3339 } from '@struktoai/mirage-core/utils/dates'
 import { checkName, newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
@@ -56,8 +57,8 @@ import {
   CreateWorkspaceRequest,
   LoadWorkspaceRequest,
   SnapshotWorkspaceRequest,
+  type StopWorkspaceResponse,
   type WorkspaceBrief,
-  type WorkspaceDetail,
   type WorkspaceList,
 } from '../schemas.ts'
 import { HttpError, INTERNAL_MESSAGE, loaderError, validationError } from '../errors.ts'
@@ -860,36 +861,19 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
   })
 
   /**
-   * Stop the workspace and keep its state and config for start, answering it
-   * as GET now does. A stopped workspace answers as it is, so a stop can be
-   * repeated.
+   * Stop the workspace and keep its state and config for start. A stopped
+   * workspace answers as it is, so a stop can be repeated.
    */
   app.post<{ Params: WorkspaceIdParams }>(
     '/v1/workspaces/:id/stop',
-    async (req): Promise<WorkspaceDetail> => {
+    async (req): Promise<StopWorkspaceResponse> => {
       const { id } = req.params
-      const entry = deps.registry.visible(id, req.account)
-      if (entry === null && !(await isStopped(deps, id, req.account))) {
+      const live = deps.registry.visible(id, req.account) !== null
+      if (!live && !(await isStopped(deps, id, req.account))) {
         throw new HttpError('not_found', 'workspace not found')
       }
-      let k = null as Kept | null
-      let failure = null as Error | null
-      // The stop is shared with any delete joining it, so a failed read is
-      // carried out to this caller rather than failing the stop.
-      const readKept = async (): Promise<void> => {
-        try {
-          k = await kept(deps, id, req.account)
-        } catch (e) {
-          failure = e instanceof Error ? e : new Error(String(e))
-        }
-      }
-      if (entry !== null || deps.registry.removing(id)) await deps.registry.stop(id, readKept)
-      else await readKept()
-      if (failure !== null) throw failure
-      if (k !== null) return makeStoppedDetail(id, k.config, k.createdAt)
-      // Nothing to start from: a server that keeps no state, or state kept
-      // with no config. The workspace is stopped all the same.
-      return makeStoppedDetail(id, null, entry?.createdAt ?? 0)
+      if (live || deps.registry.removing(id)) await deps.registry.stop(id)
+      return { id, closed_at: msToRfc3339(Date.now()) }
     },
   )
 

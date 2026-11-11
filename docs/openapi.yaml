@@ -331,25 +331,14 @@ paths:
         - $ref: '#/components/parameters/workspaceId'
       responses:
         '200':
-          description: The stopped workspace, as `GET` returns it.
+          description: OK
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WorkspaceDetail'
+                $ref: '#/components/schemas/StopWorkspaceResponse'
               example:
                 id: demo
-                status: stopped
-                created_at: '2026-11-07T00:00:00.000Z'
-                system_time: null
-                sessions: []
-                mounts:
-                  - prefix: /
-                    vfs: ram
-                    mode: write
-                    description: ''
-                    backend: workspace
-                    mountpoint: null
-                internals: null
+                closed_at: '2026-11-11T07:24:14.062Z'
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -6831,6 +6820,21 @@ components:
         - key
         - size
       title: SnapshotWorkspaceResponse
+    StopWorkspaceResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        closed_at:
+          type: string
+          format: date-time
+          title: Closed At
+          description: When the workspace stopped.
+      type: object
+      required:
+        - id
+        - closed_at
+      title: StopWorkspaceResponse
     StoreBlock:
       properties:
         type:
