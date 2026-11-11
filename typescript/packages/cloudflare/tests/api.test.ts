@@ -175,9 +175,9 @@ describe('the server API in workerd', () => {
       ).toBe(200)
       const page = await call('GET', `${base}/logs?session=${encodeURIComponent(session_id)}`)
       expect(page.status).toBe(200)
-      const items = (page.json as { items: { started_at: number }[] }).items
+      const items = (page.json as { items: { started_at: string }[] }).items
       expect(items).toHaveLength(1)
-      expect(items[0]?.started_at).toBeGreaterThan(1_000_000_000_000)
+      expect(items[0]?.started_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
       const response = await worker.fetch(
         `http://edge.test${base}/logs?format=jsonl&session=${encodeURIComponent(session_id)}`,
         { headers: { authorization: `Bearer ${TOKEN}` } },
@@ -364,7 +364,8 @@ describe('the server API in workerd', () => {
     expect((await call('POST', '/v1/workspaces', { id: 'keep', config })).status).toBe(201)
     await call('POST', '/v1/workspaces/keep/sessions', { session_id: 'agent' })
     await call('POST', '/v1/workspaces/keep/shell?session_id=agent', { command: 'export N=7' })
-    expect((await call('POST', '/v1/workspaces/keep/stop')).status).toBe(200)
+    const stopped = await call('POST', '/v1/workspaces/keep/stop')
+    expect([stopped.status, (stopped.json as { status: string }).status]).toEqual([200, 'stopped'])
     const kept = await call('GET', '/v1/workspaces/keep')
     expect([kept.status, (kept.json as { status: string }).status]).toEqual([200, 'stopped'])
     const held = await call('POST', '/v1/workspaces/keep/shell', { command: 'true' })
@@ -778,7 +779,7 @@ describe('the server API in workerd', () => {
       id: 'gone',
       config: { mounts: { '/': { vfs: 'ram' } } },
     })
-    expect((await call('DELETE', '/v1/workspaces/gone')).status).toBe(200)
+    expect((await call('DELETE', '/v1/workspaces/gone')).status).toBe(204)
     expect((await call('GET', '/v1/workspaces/gone')).status).toBe(404)
   })
 })
