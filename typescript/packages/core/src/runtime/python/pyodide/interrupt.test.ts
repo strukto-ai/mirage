@@ -72,6 +72,8 @@ it('rings the carrier again while a sent signal or a hold waits to be taken', as
         expect(Atomics.load(cells, 0)).toBe(64)
       })
       clearSignals(cells)
+      // A tick that read the cells before the clear writes its carrier within the same task.
+      await new Promise((resolve) => setTimeout(resolve, 30))
       Atomics.store(cells, 0, 0)
     }
     await new Promise((resolve) => setTimeout(resolve, 50))
