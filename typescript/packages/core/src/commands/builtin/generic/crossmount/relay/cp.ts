@@ -18,13 +18,14 @@ import type { ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import { cpGeneric, parseFlags } from '../../cp.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
-import { flatScopes, readdirOp, relayCopy, relayWrite, statOp } from '../utils.ts'
+import { flatScopes, parentFollowed, readdirOp, relayCopy, relayWrite, statOp } from '../utils.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import type { LinkView, MountView } from '../../../../../view/types.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { specOf } from '../../../../spec/builtins.ts'
 import { rstripSlash } from '../../../../../utils/slash.ts'
-import type { Files } from '../../../../../workspace/files.ts'
+import { readerOf, type Files } from '../../../../../workspace/files.ts'
+import type { NamespaceReader } from '../../../../../workspace/dispatcher/reader.ts'
 import { linkView, mountView } from '../../../utils/links.ts'
 
 // List a directory for cp -x: a mount root below the operands is empty, so
@@ -53,6 +54,12 @@ function ownLinks(
     const root = rstripSlash(mounts.rootOf(virtual)) || '/'
     return starts.has(root) || !`${root}/`.startsWith(below)
   })
+}
+
+// The mount a name sits on, as link(2) finds it: the links above the name
+// followed, the name itself kept. Mirrors Python's _device_of.
+function deviceOf(reader: NamespaceReader, mounts: MountView, virtual: string): string {
+  return mounts.rootOf(parentFollowed(reader, virtual))
 }
 
 // Copy operands that span mounts via the shared generic cp. Pure wiring: the
@@ -115,6 +122,8 @@ export async function runCp(
     dispatch,
     undefined,
     cwd,
-    view === undefined ? undefined : (path: string) => view.rootOf(path),
+    vfs === undefined || view === undefined
+      ? undefined
+      : (path: string) => deviceOf(readerOf(vfs), view, path),
   )
 }

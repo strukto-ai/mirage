@@ -38,6 +38,8 @@ import { groupLine } from '../../grep_binary.ts'
 import { betweenFiles as rgBetweenFiles, parseFlags as parseRgFlags } from '../rg.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { currentCaller, withCaller } from '../../../../context/session_context.ts'
+import { CycleError } from '../../../../utils/path.ts'
+import type { NamespaceReader } from '../../../../workspace/dispatcher/reader.ts'
 
 // Run one native single-mount command per operand, in operand order. Each
 // operand executes on its owning mount through `runSingle` (which also
@@ -50,6 +52,19 @@ import { currentCaller, withCaller } from '../../../../context/session_context.t
  * groups, so the runs a line splits into join the way one run would. Nothing
  * for any other output, a plain line stream.
  */
+// A path with the links above its final name followed and the name kept as it
+// is, where a call on the name itself lands; a loop above it leaves the path
+// as typed, for the call to meet. Mirrors Python's parent_followed.
+export function parentFollowed(reader: NamespaceReader, virtual: string): string {
+  try {
+    return reader.followParent(virtual)
+  } catch (err) {
+    if (!(err instanceof CycleError)) throw err
+    console.debug(`a link loop stands above ${virtual}: ${String(err)}`)
+    return virtual
+  }
+}
+
 export function runSeparator(cmdName: string, flagKwargs: Record<string, FlagValue>): string {
   if (cmdName === 'rg') {
     return rgBetweenFiles(parseRgFlags(new FlagView(flagKwargs, specOf('rg'))))

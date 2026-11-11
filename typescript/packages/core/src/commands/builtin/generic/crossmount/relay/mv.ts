@@ -20,36 +20,32 @@ import type { PathSpec } from '../../../../../types.ts'
 import { refuseReveal } from '../../../generic_bind/files.ts'
 import { mvGeneric, parseFlags } from '../../mv.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
-import { flatScopes, readdirOp, relayCopy, relayWrite, statOp } from '../utils.ts'
+import { flatScopes, parentFollowed, readdirOp, relayCopy, relayWrite, statOp } from '../utils.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { specOf } from '../../../../spec/builtins.ts'
 import { readerOf, type Files } from '../../../../../workspace/files.ts'
 import type { NamespaceReader } from '../../../../../workspace/dispatcher/reader.ts'
 import type { MountView } from '../../../../../view/types.ts'
-import { CycleError } from '../../../../../utils/path.ts'
 import { linkView, mountView } from '../../../utils/links.ts'
 
 // Whether a source moves by a rename: it and its target sit on one mount once
-// the links above both are followed, and no mount sits below it, which a
-// rename would leave where it is. Mirrors Python's _renames.
+// the links above both are followed, and no mount sits below either, which a
+// rename (or --exchange's swap) would leave where it is. Mirrors Python's
+// _renames.
 function renames(
   reader: NamespaceReader,
   mounts: MountView,
   src: PathSpec,
   target: PathSpec,
 ): boolean {
-  let here: string
-  let there: string
-  try {
-    here = reader.followParent(src.virtual)
-    there = reader.followParent(target.virtual)
-  } catch (err) {
-    if (!(err instanceof CycleError)) throw err
-    console.debug(`mv: no rename past a loop at ${src.virtual}: ${String(err)}`)
-    return false
-  }
-  return mounts.rootOf(here) === mounts.rootOf(there) && mounts.descendants(here).length === 0
+  const here = parentFollowed(reader, src.virtual)
+  const there = parentFollowed(reader, target.virtual)
+  return (
+    mounts.rootOf(here) === mounts.rootOf(there) &&
+    mounts.descendants(here).length === 0 &&
+    mounts.descendants(there).length === 0
+  )
 }
 
 // Move operands that span mounts via the shared generic mv. Pure wiring: a

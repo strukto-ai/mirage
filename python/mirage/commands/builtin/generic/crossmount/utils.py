@@ -15,6 +15,7 @@
 import asyncio
 import dataclasses
 import functools
+import logging
 from collections import deque
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing
@@ -58,7 +59,27 @@ from mirage.io.types import ByteSource, PathRecord
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, PrimitiveCopy
+from mirage.utils.path import CycleError
 from mirage.view.types import LinkView
+from mirage.workspace.dispatcher.reader import NamespaceReader
+
+logger = logging.getLogger(__name__)
+
+
+def parent_followed(reader: NamespaceReader, virtual: str) -> str:
+    """A path with the links above its final name followed and the name
+    kept as it is, where a call on the name itself lands; a loop above it
+    leaves the path as typed, for the call to meet.
+
+    Args:
+        reader (NamespaceReader): the links as the session sees them.
+        virtual (str): absolute virtual path.
+    """
+    try:
+        return reader.follow_parent(virtual)
+    except CycleError as exc:
+        logger.debug("a link loop stands above %s: %s", virtual, exc)
+        return virtual
 
 
 def file_stream_op(
