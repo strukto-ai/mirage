@@ -41,6 +41,12 @@ RUN apt-get update \
 CMD ["sleep", "infinity"]
 ```
 
+Programs do not see the image's `ENV` lines: a program starts from
+Cloudflare's own `PATH` and `HOME=/root`, with the machine's `env` and the
+session's environment on top. Put anything a program needs, such as a
+`PATH` entry for a tool installed outside `/usr/local/bin` or `/usr/bin`, in
+the machine's `env`.
+
 ## Usage
 
 Build the handle in the Durable Object, from its own `ctx.container` and a
@@ -103,10 +109,12 @@ so it works in a container with `enableInternet: false`.
 
 - The container's own disk is scratch: it is gone when the container stops.
   Files a program should keep belong in a mounted folder.
-- If the container stops while a line runs, the line exits 129 and says the
-  container stopped. The next line starts it again.
-- The first line after a start waits for the container to answer, up to 10
-  seconds.
+- If the container stops while a line runs, the line fails: it exits 129 and
+  says the container stopped, or, when the Durable Object destroys the
+  container itself, it may exit 137. The next line starts it again.
+- The first line after a start waits for the container to answer, up to 60
+  seconds. Most starts answer within a second; a start that never comes up
+  fails that line, and the next line starts the container again.
 - Output comes back as the program wrote it, binary included, with stdout
   and stderr separate. Without piped input, stdin starts closed.
 - Closing the workspace leaves a running container running and starts no

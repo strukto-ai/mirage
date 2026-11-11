@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CHECK_WAIT_SECONDS } from '@struktoai/mirage-core/machine/constants'
-
 // A handle built from config alone has no container: only the Durable
 // Object that owns one can hand it over.
 export const NO_CONTAINER =
@@ -26,7 +24,9 @@ export const STOPPED = 'the container stopped; the next line starts it again'
 // Why a closing workspace does not reach a container that has stopped.
 export const CLOSING = 'the container has stopped, and closing the workspace starts none'
 
-// How often a container that was just started is asked the check line.
+// How often a container that was just started is asked the check line, and for how long:
+// most answer within a second, but one start of 33 on real Cloudflare took 32 s.
 export const CHECK_POLL_SECONDS = 0.1
+export const START_WAIT_SECONDS = 60
 
-export const NOT_ANSWERING = `the container did not answer within ${String(CHECK_WAIT_SECONDS)}s of starting`
+export const NOT_ANSWERING = `the container did not answer within ${String(START_WAIT_SECONDS)}s of starting`
