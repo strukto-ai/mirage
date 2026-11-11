@@ -1,21 +1,25 @@
 ---
 title: Overview
-description: The stores a workspace keeps, the infrastructure each one can live on, and where you set it.
+description: Where a workspace keeps its state, and how to move it.
 icon: network-wired
 ---
 
-A workspace needs no services. Out of the box it keeps everything in memory.
-Each store below can move onto infrastructure you run, on its own or together
-with the others.
+A workspace needs no services. A workspace you build in code keeps its state
+in memory. A workspace the server builds keeps it on disk under
+`~/.mirage/state`. Each store below can move onto infrastructure you run, on
+its own or together with the others.
 
 | Store | Holds | Backends | Key |
 | --- | --- | --- | --- |
 | [Namespace](/home/infrastructure/namespace) | Symlinks and file attributes | `ram`, `disk`, `redis` | `store.namespace` |
 | [Sessions](/home/infrastructure/sessions) | Each session's working directory, variables and functions | `ram`, `disk`, `redis`, `s3` | `store.workspace` |
-| [History](/home/infrastructure/history) | Command history | `ram`, `disk` | `store.observer` |
+| [Command Logs](/home/infrastructure/command-logs) | Every command run, its output and the files it touched | `ram`, `disk` | `store.observer` |
 | [Jobs](/home/infrastructure/jobs) | Background jobs, their output and the processes the workspace runs | `ram`, `redis` | `store.execution` |
 | [File cache](/home/infrastructure/file-cache) | File content Mirage has read | `ram`, `redis` | `cache` |
 | [Index](/home/infrastructure/file-index) | Directory listings and file metadata | `ram`, `redis` | `index`, or a mount's `index` |
+
+To see command logs from many machines in one place, send them to an
+OpenTelemetry backend as [traces](/home/infrastructure/tracing).
 
 The rest has pages of its own: [runtimes](/home/setup/runtime/overview) run
 programs inside Mirage, on the host or on a
@@ -26,9 +30,9 @@ file, AWS Secrets Manager or 1Password.
 
 ## One store or several
 
-`store.type` places the namespace, sessions, history and jobs together. A
+`store.type` places the namespace, sessions, command logs and jobs together. A
 group key (`namespace`, `workspace`, `observer`, `execution`) moves one of them to
-a backend of its own. Here symlinks and jobs live on Redis, history on disk
+a backend of its own. Here symlinks and jobs live on Redis, command logs on disk
 and sessions in a bucket:
 
 <Tabs>
@@ -114,9 +118,9 @@ and
 place one store at a time on disk, build the workspace again and print what
 came back.
 
-A workspace built in code keeps its state in memory. One the server builds,
-through `mirage workspace create` or `POST /v1/workspaces`, keeps it on disk
-under `~/.mirage/state`. A `store` block replaces either default.
+A `store` block replaces either default: memory for a workspace built in
+code, or `~/.mirage/state` for one built by `mirage workspace create` or
+`POST /v1/workspaces`.
 
 ## Where you set it
 

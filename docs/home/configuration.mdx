@@ -307,7 +307,7 @@ or `redis`. A mount's own `index` replaces this block.
 | `ttl` | `600` | Seconds a listing stays cached. |
 | `url`, `key_prefix` | the workspace's own keys | Redis only. Name one `key_prefix` in several workspaces to share their index. |
 
-`store` holds workspace state: symlinks and file attributes, command history,
+`store` holds workspace state: symlinks and file attributes, command logs,
 sessions, and background jobs with their output. `type` is `ram` (default),
 `disk` or `redis`, and sets the backend for all of them; each group key below
 moves one part to a backend of its own.
@@ -317,7 +317,7 @@ moves one part to a backend of its own.
 | `root` | `~/.mirage/state` | Disk only. The state directory. |
 | `url`, `key_prefix` | `mirage:` | Redis only. |
 | `namespace` | unset | A separate store block for symlinks and file attributes. |
-| `observer` | unset | A separate store block for command history. |
+| `observer` | unset | A separate store block for [command logs](/home/infrastructure/command-logs). |
 | `workspace` | unset | A separate store block for sessions and workspace metadata. |
 | `execution` | unset | A separate store block for background jobs: each session's job list and each job's output, the processes the workspace runs and which instance runs them. |
 
