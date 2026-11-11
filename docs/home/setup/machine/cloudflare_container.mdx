@@ -30,12 +30,13 @@ does, then give the Durable Object class a container in your wrangler config:
 ```
 
 Start the image from a Debian or Ubuntu base, which has the shell tools
-Mirage's own lines use, and add `sshfs` and `fuse3` for `mountType: 'ssh'`:
+Mirage's own lines use. Add the interpreters it runs, here `python3` and
+`nodejs`, and `sshfs` and `fuse3` for `mountType: 'ssh'`:
 
 ```dockerfile Dockerfile
 FROM ubuntu:24.04
 RUN apt-get update \
- && apt-get install -y --no-install-recommends fuse3 sshfs python3 \
+ && apt-get install -y --no-install-recommends fuse3 sshfs python3 nodejs \
  && rm -rf /var/lib/apt/lists/*
 CMD ["sleep", "infinity"]
 ```
@@ -62,7 +63,7 @@ export class WorkspaceObject extends DurableObject {
         }),
       },
       runtimes: [
-        new RemoteRuntime({ captures: ['@python', '@external'], machine: 'box' }),
+        new RemoteRuntime({ captures: ['@external', '@python', '@js'], machine: 'box' }),
         'workspace',
       ],
     },
