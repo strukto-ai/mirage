@@ -42,6 +42,10 @@ class LineResponse(BaseModel):
     error: str | None
 
 
+class LineList(BaseModel):
+    items: list[LineResponse]
+
+
 class LineDetailResponse(LineResponse):
     jobs: list[str]
     processes: list[int]
@@ -62,21 +66,21 @@ def _to_response(record: Line) -> LineResponse:
     )
 
 
-@router.get("", response_model=list[LineResponse])
+@router.get("", response_model=LineList)
 async def list_lines(
     workspace_id: str,
     request: Request,
     session_id: str | None = None,
     state: LineState | None = None,
-) -> list[LineResponse]:
+) -> LineList:
     """The lines the workspace keeps, oldest first: every one not ended
     yet and the newest ended ones, a session's or those in a state when
     named. Read on the workspace's own loop."""
     runner = require_entry(request, workspace_id).runner
 
-    async def read() -> list[LineResponse]:
+    async def read() -> LineList:
         records = await runner.ws.lines(session_id or None, state)
-        return [_to_response(r) for r in records]
+        return LineList(items=[_to_response(r) for r in records])
 
     return await runner.call(read())
 

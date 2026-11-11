@@ -39,7 +39,7 @@ async def test_the_host_is_listed_and_read_with_its_processes():
         assert r.status_code == 200, r.text
         r = await client.get(f"/v1/workspaces/{wid}/machines")
         assert r.status_code == 200, r.text
-        [machine] = r.json()
+        [machine] = r.json()["items"]
         assert (machine["id"], machine["state"]) == (host, "managed")
         r = await client.get(f"/v1/workspaces/{wid}/machines/{host}")
         assert r.status_code == 200, r.text

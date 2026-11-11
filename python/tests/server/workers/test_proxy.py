@@ -122,7 +122,7 @@ async def test_each_new_workspace_goes_to_a_worker_at_random(monkeypatch):
             )
             assert r.status_code == 201
         assert _ids(d) == [["b"], ["a", "c"]]
-        listed = (await d.client.get("/v1/workspaces")).json()
+        listed = (await d.client.get("/v1/workspaces")).json()["items"]
         assert [w["id"] for w in listed] == ["a", "b", "c"]
         health = (await d.client.get("/v1/health")).json()
         assert health["workspaces"] == 3 and health["workers"] == 2
@@ -252,7 +252,8 @@ async def test_max_workspaces_holds_across_workers_and_lets_a_retry_through():
         )
         assert sorted(r.status_code for r in racing) == [201, 201, 503]
         kept, other = [
-            w["id"] for w in (await d.client.get("/v1/workspaces")).json()
+            w["id"]
+            for w in (await d.client.get("/v1/workspaces")).json()["items"]
         ]
         retry = await d.client.post(
             "/v1/workspaces", json={"id": kept, "config": CONFIG}

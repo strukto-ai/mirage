@@ -34,6 +34,10 @@ interface MachineResponse {
   checked_at: number
 }
 
+interface MachineList {
+  items: MachineResponse[]
+}
+
 interface MachineDetailResponse extends MachineResponse {
   processes: ProcessResponse[]
 }
@@ -48,18 +52,21 @@ export function registerMachinesRoutes(
     registry: WorkspaceRegistry
   },
 ): void {
-  app.get<{ Params: WsIdParams }>('/v1/workspaces/:wsId/machines', async (req) => {
-    // The machines the workspace runs programs on, its own host first, each
-    // checked now: `managed` when Mirage sees and stops every process its
-    // programs start there, `reachable` when only what it started itself,
-    // `unreachable` when the check failed.
-    const { wsId } = req.params
-    if (deps.registry.visible(wsId, req.account) === null) {
-      throw new WorkspaceMissing(wsId)
-    }
-    const ws = deps.registry.get(wsId).runner.ws
-    return (await ws.machines()).map(toResponse)
-  })
+  app.get<{ Params: WsIdParams }>(
+    '/v1/workspaces/:wsId/machines',
+    async (req): Promise<MachineList> => {
+      // The machines the workspace runs programs on, its own host first, each
+      // checked now: `managed` when Mirage sees and stops every process its
+      // programs start there, `reachable` when only what it started itself,
+      // `unreachable` when the check failed.
+      const { wsId } = req.params
+      if (deps.registry.visible(wsId, req.account) === null) {
+        throw new WorkspaceMissing(wsId)
+      }
+      const ws = deps.registry.get(wsId).runner.ws
+      return { items: (await ws.machines()).map(toResponse) }
+    },
+  )
 
   app.get<{ Params: WsMachineParams }>('/v1/workspaces/:wsId/machines/:machineId', async (req) => {
     // One machine, by its id (`provider:name`), checked now, with the

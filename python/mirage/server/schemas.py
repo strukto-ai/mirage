@@ -58,6 +58,10 @@ class WorkspaceBrief(BaseModel):
     created_at: float
 
 
+class WorkspaceList(BaseModel):
+    items: list[WorkspaceBrief]
+
+
 class WorkspaceDetail(BaseModel):
     id: str
     status: WorkspaceStatus

@@ -768,7 +768,7 @@ describe('workspaces router', () => {
           },
         })
         const list = await app.inject({ method: 'GET', url: '/v1/workspaces', headers })
-        expect(list.json()).toEqual([])
+        expect(list.json()).toEqual({ items: [] })
       } finally {
         await app.close()
         rmSync(stateRoot, { recursive: true, force: true })
@@ -807,7 +807,7 @@ describe('workspaces router', () => {
     })
     const res = await app.inject({ method: 'GET', url: '/v1/workspaces' })
     expect(res.statusCode).toBe(200)
-    const body = res.json<{ id: string }[]>()
+    const body = res.json<{ items: { id: string }[] }>().items
     expect(body.some((w) => w.id === 'fixed-id')).toBe(true)
     await app.close()
   })
@@ -1579,7 +1579,7 @@ describe('workspace cancel, kill, stop and start', () => {
         expect(r.json<{ id: string }>().id).toBe('keep')
       }
       const listed = await app.inject({ method: 'GET', url: '/v1/workspaces' })
-      expect(listed.json()).toMatchObject([{ id: 'keep', status: 'stopped' }])
+      expect(listed.json()).toMatchObject({ items: [{ id: 'keep', status: 'stopped' }] })
       // State kept with no config, as a workspace created before configs
       // were saved: it stops again, and cannot be started.
       rmSync(join(root, 'state', 'configs', 'keep.json'))
@@ -1634,9 +1634,9 @@ describe('workspace cancel, kill, stop and start', () => {
         expect((await post(app, '/v1/workspaces', { ...RAM, id })).statusCode).toBe(201)
       }
       await post(app, '/v1/workspaces/off/stop')
-      const listed = (await app.inject({ method: 'GET', url: '/v1/workspaces' })).json<
-        { id: string; status: string; created_at: number }[]
-      >()
+      const listed = (await app.inject({ method: 'GET', url: '/v1/workspaces' })).json<{
+        items: { id: string; status: string; created_at: number }[]
+      }>().items
       expect(listed.map((w) => [w.id, w.status])).toEqual([
         ['on', 'running'],
         ['off', 'stopped'],
@@ -1655,9 +1655,9 @@ describe('workspace cancel, kill, stop and start', () => {
       expect(deleted.json<{ id: string }>().id).toBe('off')
       expect((await app.inject({ method: 'GET', url: '/v1/workspaces/off' })).statusCode).toBe(404)
       expect((await post(app, '/v1/workspaces/off/start')).statusCode).toBe(404)
-      expect((await app.inject({ method: 'GET', url: '/v1/workspaces' })).json()).toMatchObject([
-        { id: 'on', status: 'running' },
-      ])
+      expect((await app.inject({ method: 'GET', url: '/v1/workspaces' })).json()).toMatchObject({
+        items: [{ id: 'on', status: 'running' }],
+      })
     } finally {
       await app.close()
       rmSync(root, { recursive: true, force: true })
@@ -1699,7 +1699,9 @@ describe('workspace cancel, kill, stop and start', () => {
       expect((await app.inject({ method: 'GET', url: '/v1/workspaces/orphan' })).statusCode).toBe(
         404,
       )
-      expect((await app.inject({ method: 'GET', url: '/v1/workspaces' })).json()).toEqual([])
+      expect((await app.inject({ method: 'GET', url: '/v1/workspaces' })).json()).toEqual({
+        items: [],
+      })
       expect(
         (await app.inject({ method: 'DELETE', url: '/v1/workspaces/orphan' })).statusCode,
       ).toBe(404)
@@ -1726,10 +1728,12 @@ describe('workspace cancel, kill, stop and start', () => {
       writeFileSync(own, 'not a directory')
       const listed = await app.inject({ method: 'GET', url: '/v1/workspaces' })
       expect(listed.statusCode).toBe(200)
-      expect(listed.json()).toEqual([
-        expect.objectContaining({ id: 'on', status: 'running' }),
-        expect.objectContaining({ id: 'mine', status: 'stopped', created_at: 0 }),
-      ])
+      expect(listed.json()).toEqual({
+        items: [
+          expect.objectContaining({ id: 'on', status: 'running' }),
+          expect.objectContaining({ id: 'mine', status: 'stopped', created_at: 0 }),
+        ],
+      })
     } finally {
       await app.close()
       rmSync(root, { recursive: true, force: true })

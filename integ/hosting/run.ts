@@ -169,7 +169,10 @@ async function run(
     }
 
     async function sessionCwd(workspaceId: string, sessionId: string): Promise<string | undefined> {
-      const sessions = await request<Session[]>('GET', `/v1/workspaces/${workspaceId}/sessions`)
+      const { items: sessions } = await request<{ items: Session[] }>(
+        'GET',
+        `/v1/workspaces/${workspaceId}/sessions`,
+      )
       return sessions.find((session) => session.sessionId === sessionId)?.cwd
     }
 
@@ -257,7 +260,10 @@ async function run(
         }
         let attempts = 1
         if (result.decision?.kind === 'pending') {
-          const asks = await request<{ id: string; sessionId: string }[]>('GET', `${path}/asks`)
+          const { items: asks } = await request<{ items: { id: string; sessionId: string }[] }>(
+            'GET',
+            `${path}/asks`,
+          )
           assert.equal(asks.length, 1)
           assert.equal(asks[0]!.id, result.decision.askId)
           assert.equal(asks[0]!.sessionId, 'agent')
@@ -267,7 +273,7 @@ async function run(
           })
           assert.equal(allowed.exitCode, 0)
           assert.equal(allowed.decision, null)
-          assert.deepEqual(await request('GET', `${path}/asks`), [])
+          assert.deepEqual(await request('GET', `${path}/asks`), { items: [] })
           const removed = await request<Result>('POST', `${path}/shell`, {
             command: 'test ! -e /work/keep',
             record: false,

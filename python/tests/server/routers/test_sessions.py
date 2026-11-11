@@ -52,7 +52,7 @@ async def test_create_list_delete_session_round_trip():
         assert r.json()["session_id"] == "agent_a"
 
         r = await client.get(f"/v1/workspaces/{wid}/sessions")
-        ids = {s["session_id"] for s in r.json()}
+        ids = {s["session_id"] for s in r.json()["items"]}
         assert "agent_a" in ids
         assert len(ids) == 2
 
@@ -60,7 +60,7 @@ async def test_create_list_delete_session_round_trip():
         assert r.status_code == 200
 
         r = await client.get(f"/v1/workspaces/{wid}/sessions")
-        ids = {s["session_id"] for s in r.json()}
+        ids = {s["session_id"] for s in r.json()["items"]}
         assert "agent_a" not in ids
 
 
@@ -232,7 +232,7 @@ async def test_session_isolated_per_workspace():
             json={"session_id": "only_in_a"},
         )
         r = await client.get(f"/v1/workspaces/{wid_b}/sessions")
-        ids = {s["session_id"] for s in r.json()}
+        ids = {s["session_id"] for s in r.json()["items"]}
         assert "only_in_a" not in ids
 
 

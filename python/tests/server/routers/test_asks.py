@@ -69,7 +69,7 @@ async def _raise_ask(client: AsyncClient, wid: str, sid: str) -> str:
     assert body["decision"]["kind"] == "pending"
     r = await client.get(f"/v1/workspaces/{wid}/asks?session_id={sid}")
     assert r.status_code == 200
-    pending = r.json()
+    pending = r.json()["items"]
     assert len(pending) == 1
     return pending[0]["id"]
 
@@ -91,7 +91,7 @@ async def test_ask_allow_round_trip():
         ask_id = await _raise_ask(client, wid, "agent_a")
 
         r = await client.get(f"/v1/workspaces/{wid}/asks")
-        record = r.json()[0]
+        record = r.json()["items"][0]
         assert record["id"] == ask_id
         assert record["session_id"] == "agent_a"
         assert record["command"] == "rm"
@@ -110,9 +110,9 @@ async def test_ask_allow_round_trip():
         assert settled["note"] == "reviewed"
 
         r = await client.get(f"/v1/workspaces/{wid}/asks")
-        assert r.json() == []
+        assert r.json() == {"items": []}
         r = await client.get(f"/v1/workspaces/{wid}/asks?all=true")
-        assert [a["id"] for a in r.json()] == [ask_id]
+        assert [a["id"] for a in r.json()["items"]] == [ask_id]
 
         r = await client.post(
             f"/v1/workspaces/{wid}/shell",
@@ -122,7 +122,7 @@ async def test_ask_allow_round_trip():
         assert r.json()["exit_code"] == 0, r.text
         # The ONCE answer is consumed by the retry that used it.
         r = await client.get(f"/v1/workspaces/{wid}/asks?all=true")
-        assert r.json() == []
+        assert r.json() == {"items": []}
 
 
 @pytest.mark.asyncio
@@ -200,9 +200,12 @@ async def test_list_asks_filters_by_session():
         await _raise_ask(client, wid, "agent_b")
 
         r = await client.get(f"/v1/workspaces/{wid}/asks")
-        assert {a["session_id"] for a in r.json()} == {"agent_a", "agent_b"}
+        assert {a["session_id"] for a in r.json()["items"]} == {
+            "agent_a",
+            "agent_b",
+        }
         r = await client.get(f"/v1/workspaces/{wid}/asks?session_id=agent_b")
-        assert [a["session_id"] for a in r.json()] == ["agent_b"]
+        assert [a["session_id"] for a in r.json()["items"]] == ["agent_b"]
         r = await client.get(f"/v1/workspaces/{wid}/asks?session_id=nope")
         assert r.status_code == 404, r.text
 

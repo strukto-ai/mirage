@@ -163,17 +163,15 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/WorkspaceBrief'
-                title: Response List Workspaces V1 Workspaces Get
+                $ref: '#/components/schemas/WorkspaceList'
               example:
-                - id: demo
-                  status: running
-                  created_at: 1794009600
-                - id: notes
-                  status: stopped
-                  created_at: 1793923200
+                items:
+                  - id: demo
+                    status: running
+                    created_at: 1794009600
+                  - id: notes
+                    status: stopped
+                    created_at: 1793923200
         '401':
           $ref: '#/components/responses/401'
         '429':
@@ -1128,10 +1126,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/SessionResponse'
-                title: Response List Sessions V1 Workspaces  Workspace Id  Sessions Get
+                $ref: '#/components/schemas/SessionList'
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -1312,10 +1307,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/AskResponse'
-                title: Response List Asks V1 Workspaces  Workspace Id  Asks Get
+                $ref: '#/components/schemas/AskList'
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -1395,20 +1387,18 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/LineResponse'
-                title: Response List Lines V1 Workspaces  Workspace Id  Lines Get
+                $ref: '#/components/schemas/LineList'
               example:
-                - id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
-                  session_id: default
-                  command: sleep 30 & wait
-                  state: running
-                  started_at: 1794009600
-                  ended_at: null
-                  exit: null
-                  signal: null
-                  error: null
+                items:
+                  - id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
+                    session_id: default
+                    command: sleep 30 & wait
+                    state: running
+                    started_at: 1794009600
+                    ended_at: null
+                    exit: null
+                    signal: null
+                    error: null
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -1577,24 +1567,22 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/JobResponse'
-                title: Response List Jobs V1 Workspaces  Workspace Id  Jobs Get
+                $ref: '#/components/schemas/JobList'
               example:
-                - id: job_019a5e2c7b417c3e9f204d8e1a6b5c38
-                  number: 1
-                  session_id: default
-                  command: sleep 30
-                  cwd: /
-                  line_id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
-                  group: 42
-                  pid: 42
-                  state: running
-                  started_at: 1794009600
-                  ended_at: null
-                  exit: null
-                  signal: null
+                items:
+                  - id: job_019a5e2c7b417c3e9f204d8e1a6b5c38
+                    number: 1
+                    session_id: default
+                    command: sleep 30
+                    cwd: /
+                    line_id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
+                    group: 42
+                    pid: 42
+                    state: running
+                    started_at: 1794009600
+                    ended_at: null
+                    exit: null
+                    signal: null
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -1704,30 +1692,28 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ProcessResponse'
-                title: Response List Processes V1 Workspaces  Workspace Id  Processes Get
+                $ref: '#/components/schemas/ProcessList'
               example:
-                - pid: 42
-                  session_id: default
-                  line_id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
-                  parent: null
-                  group: 42
-                  command: sleep 30
-                  cwd: /
-                  machine: host:my-laptop
-                  runtime: process
-                  machine_pid:
-                    pid: 12345
-                    started: 1794009600
-                    exited: null
-                  state: running
-                  started_at: 1794009600
-                  ended_at: null
-                  exit: null
-                  signal: null
-                  error: null
+                items:
+                  - pid: 42
+                    session_id: default
+                    line_id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
+                    parent: null
+                    group: 42
+                    command: sleep 30
+                    cwd: /
+                    machine: host:my-laptop
+                    runtime: process
+                    machine_pid:
+                      pid: 12345
+                      started: 1794009600
+                      exited: null
+                    state: running
+                    started_at: 1794009600
+                    ended_at: null
+                    exit: null
+                    signal: null
+                    error: null
         '400':
           $ref: '#/components/responses/400'
           description: A query parameter is not valid (`invalid_value`, with `param`), such as
@@ -1813,10 +1799,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/MachineResponse'
-                title: Response List Machines V1 Workspaces  Workspace Id  Machines Get
+                $ref: '#/components/schemas/MachineList'
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -7725,6 +7708,69 @@ components:
         items:
           items:
             $ref: '#/components/schemas/TemplateResponse'
+          type: array
+      required:
+        - items
+      type: object
+    WorkspaceList:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/WorkspaceBrief'
+          type: array
+      required:
+        - items
+      type: object
+    SessionList:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/SessionResponse'
+          type: array
+      required:
+        - items
+      type: object
+    AskList:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/AskResponse'
+          type: array
+      required:
+        - items
+      type: object
+    LineList:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/LineResponse'
+          type: array
+      required:
+        - items
+      type: object
+    JobList:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/JobResponse'
+          type: array
+      required:
+        - items
+      type: object
+    ProcessList:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ProcessResponse'
+          type: array
+      required:
+        - items
+      type: object
+    MachineList:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/MachineResponse'
           type: array
       required:
         - items

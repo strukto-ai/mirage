@@ -38,6 +38,10 @@ class AskResponse(BaseModel):
     note: str
 
 
+class AskList(BaseModel):
+    items: list[AskResponse]
+
+
 class AnswerAskRequest(BaseModel):
     answer: Literal["allow", "deny"]
     scope: Literal["once", "session"] = "once"
@@ -59,13 +63,13 @@ def _to_response(record: Decision) -> AskResponse:
     )
 
 
-@router.get("", response_model=list[AskResponse])
+@router.get("", response_model=AskList)
 async def list_asks(
     workspace_id: str,
     request: Request,
     session_id: str = "",
     include_settled: bool = Query(False, alias="all"),
-) -> list[AskResponse]:
+) -> AskList:
     """The workspace's asks: pending by default, every decision under
     ``all=true``. The ledger already serves both views from one store,
     so the entry point only picks which query to run."""
@@ -80,7 +84,7 @@ async def list_asks(
         if include_settled
         else decisions.pending(session_id)
     )
-    return [_to_response(r) for r in records]
+    return AskList(items=[_to_response(r) for r in records])
 
 
 @router.post("/{ask_id}", response_model=AskResponse)

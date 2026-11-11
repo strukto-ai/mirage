@@ -417,7 +417,7 @@ def test_close_cancel_and_kill_are_not_workspace_commands(fake, gone):
 def test_a_record_list_asks_for_what_its_options_name(
     fake, args, path, params
 ):
-    fake.answer = _FakeResponse(200, b"[]")
+    fake.answer = _FakeResponse(200, b'{"items": []}')
     result = _invoke(*args)
     assert result.exit_code == 0, result.output
     method, called, kwargs = fake.calls[0]
@@ -425,11 +425,37 @@ def test_a_record_list_asks_for_what_its_options_name(
 
 
 @pytest.mark.parametrize(
+    "args",
+    [
+        ("list",),
+        ("list-asks", "-w", "w"),
+        ("list-lines", "-w", "w"),
+        ("list-jobs", "-w", "w"),
+        ("list-processes", "-w", "w"),
+        ("list-machines", "-w", "w"),
+    ],
+)
+def test_a_list_prints_the_items_it_was_answered(fake, args):
+    rows = [{"id": "a", "state": "running"}]
+    fake.answer = _FakeResponse(200, json.dumps({"items": rows}).encode())
+    result = _invoke(*args)
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == rows
+
+
+def test_a_list_answered_without_items_fails(fake):
+    fake.answer = _FakeResponse(200, b"[]")
+    result = _invoke("list-lines", "-w", "w")
+    assert result.exit_code == 1
+    assert "the server answered no list" in result.output
+
+
+@pytest.mark.parametrize(
     "verb", ["list-lines", "list-jobs", "list-processes", "list-machines"]
 )
 def test_a_record_list_reads_the_current_workspace(fake, monkeypatch, verb):
     monkeypatch.setenv("MIRAGE_WORKSPACE", "cur")
-    fake.answer = _FakeResponse(200, b"[]")
+    fake.answer = _FakeResponse(200, b'{"items": []}')
     result = _invoke(verb)
     assert result.exit_code == 0, result.output
     assert fake.calls[0][1].startswith("/v1/workspaces/cur/")

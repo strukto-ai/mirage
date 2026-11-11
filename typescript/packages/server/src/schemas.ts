@@ -36,6 +36,10 @@ export interface WorkspaceBrief {
   created_at: number
 }
 
+export interface WorkspaceList {
+  items: WorkspaceBrief[]
+}
+
 export interface SessionSummary {
   session_id: string
   cwd: string

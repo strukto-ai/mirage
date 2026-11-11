@@ -56,7 +56,12 @@ it('lists a line and finds it by the id its result names', async () => {
     try {
       const listed = await get(app, '/v1/workspaces/w/lines')
       expect(listed.status).toBe(200)
-      const [line] = listed.body as { id: string; command: string; state: string; exit: number }[]
+      const [line] = (listed.body as { items: unknown[] }).items as {
+        id: string
+        command: string
+        state: string
+        exit: number
+      }[]
       expect([line?.id, line?.command, line?.state, line?.exit]).toEqual([
         result.line_id,
         'sleep 30 & echo $!',
@@ -66,7 +71,8 @@ it('lists a line and finds it by the id its result names', async () => {
       const detail = await get(app, `/v1/workspaces/w/lines/${result.line_id}`)
       expect(detail.status).toBe(200)
       const found = detail.body as { jobs: string[]; processes: number[]; machines: string[] }
-      const [job] = (await get(app, '/v1/workspaces/w/jobs')).body as { id: string }[]
+      const [job] = ((await get(app, '/v1/workspaces/w/jobs')).body as { items: { id: string }[] })
+        .items
       expect(found.jobs).toEqual([job?.id])
       expect(job?.id.startsWith('job_')).toBe(true)
       expect(found.processes).toContain(pid)
@@ -74,7 +80,7 @@ it('lists a line and finds it by the id its result names', async () => {
         machine: string
       }
       expect(found.machines).toEqual([process.machine])
-      expect((await get(app, '/v1/workspaces/w/lines?state=running')).body).toEqual([])
+      expect((await get(app, '/v1/workspaces/w/lines?state=running')).body).toEqual({ items: [] })
       expect((await get(app, '/v1/workspaces/nope/lines?state=lost')).body).toEqual({
         error: {
           code: 'invalid_value',

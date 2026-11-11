@@ -57,6 +57,7 @@ import {
   LoadWorkspaceRequest,
   SnapshotWorkspaceRequest,
   type WorkspaceBrief,
+  type WorkspaceList,
 } from '../schemas.ts'
 import { HttpError, INTERNAL_MESSAGE, loaderError, validationError } from '../errors.ts'
 import type { OverrideShape } from '../clone.ts'
@@ -662,7 +663,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
   )
 
   // The running workspaces, then the stopped ones.
-  app.get('/v1/workspaces', async (req) => {
+  app.get('/v1/workspaces', async (req): Promise<WorkspaceList> => {
     const running = deps.registry
       .list()
       .filter((e) => deps.registry.visible(e.id, req.account) !== null)
@@ -675,7 +676,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       const k = await kept(deps, id, req.account)
       if (k !== null) idle.push(makeStoppedBrief(id, k.createdAt))
     }
-    return [...running, ...idle]
+    return { items: [...running, ...idle] }
   })
 
   app.post('/v1/workspaces/load', async (req, reply) => {

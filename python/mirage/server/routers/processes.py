@@ -48,6 +48,10 @@ class ProcessResponse(BaseModel):
     error: str | None
 
 
+class ProcessList(BaseModel):
+    items: list[ProcessResponse]
+
+
 def to_response(record: Process) -> ProcessResponse:
     return ProcessResponse(
         pid=record.pid,
@@ -77,7 +81,7 @@ def to_response(record: Process) -> ProcessResponse:
     )
 
 
-@router.get("", response_model=list[ProcessResponse])
+@router.get("", response_model=ProcessList)
 async def list_processes(
     workspace_id: str,
     request: Request,
@@ -86,7 +90,7 @@ async def list_processes(
     line_id: str | None = None,
     job_id: str | None = None,
     machine: str | None = None,
-) -> list[ProcessResponse]:
+) -> ProcessList:
     """The processes the workspace keeps, by pid: every live one and the
     newest ended ones, a session's, those in a state, those a line ran,
     those a job ran or those run on a machine (``provider:name``) when
@@ -103,11 +107,11 @@ async def list_processes(
             param="machine",
         ) from exc
 
-    async def read() -> list[ProcessResponse]:
+    async def read() -> ProcessList:
         records = await runner.ws.processes(
             session_id or None, state, line, job, where
         )
-        return [to_response(r) for r in records]
+        return ProcessList(items=[to_response(r) for r in records])
 
     return await runner.call(read())
 

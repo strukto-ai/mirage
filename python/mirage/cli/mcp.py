@@ -24,7 +24,7 @@ import typer
 
 from mirage.cli.client import DaemonClient, DaemonUnreachable, make_client
 from mirage.cli.credentials import LoginError
-from mirage.cli.output import fail, handle_response
+from mirage.cli.output import fail, handle_list, handle_response
 from mirage.cli.workspace import resolve_config
 from mirage.server.workspace_config import resolve_workspace_config
 
@@ -42,9 +42,7 @@ def has_session(workspace_path: str, session_id: str) -> bool:
         bool: True when the workspace lists the session.
     """
     with make_client() as client:
-        rows = handle_response(
-            client.request("GET", f"{workspace_path}/sessions")
-        )
+        rows = handle_list(client.request("GET", f"{workspace_path}/sessions"))
     return any(
         isinstance(row, dict) and row.get("session_id") == session_id
         for row in rows

@@ -32,6 +32,14 @@ class _FakeResponse:
         return {"session_id": "agent", "cwd": "/"}
 
 
+class _FakeListResponse:
+    status_code = 200
+    content = b'{"items": [{"session_id": "agent", "cwd": "/"}]}'
+
+    def json(self) -> dict:
+        return {"items": [{"session_id": "agent", "cwd": "/"}]}
+
+
 class _FakeClient:
     def __init__(self) -> None:
         self.last_body: dict | None = None
@@ -49,7 +57,7 @@ class _FakeClient:
     def request(self, method: str, path: str, json: dict | None = None):
         self.last_body = json
         self.last_path = path
-        return _FakeResponse()
+        return _FakeListResponse() if method == "GET" else _FakeResponse()
 
 
 @contextmanager

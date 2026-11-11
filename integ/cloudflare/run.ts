@@ -456,9 +456,9 @@ async function applyProfiles(
   const auth = { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` }
   const sessions = `${base}/v1/workspaces/${id}/sessions`
   for (const [sid, profile] of Object.entries(profiles)) {
-    const listed = (await (await edgeFetch(sessions, { headers: auth })).json()) as {
-      session_id: string
-    }[]
+    const { items: listed } = (await (await edgeFetch(sessions, { headers: auth })).json()) as {
+      items: { session_id: string }[]
+    }
     if (!listed.some((s) => s.session_id === sid)) {
       const created = await edgeFetch(sessions, {
         method: 'POST',

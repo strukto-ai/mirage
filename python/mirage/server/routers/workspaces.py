@@ -90,8 +90,8 @@ from mirage.server.schemas import (
     LoadWorkspaceRequest,
     SnapshotWorkspaceRequest,
     SnapshotWorkspaceResponse,
-    WorkspaceBrief,
     WorkspaceDetail,
+    WorkspaceList,
     check_config,
 )
 from mirage.server.summary import (
@@ -686,8 +686,8 @@ async def create_workspace(
     return await _open_workspace(request, response, wid, config, written)
 
 
-@router.get("", response_model=list[WorkspaceBrief])
-async def list_workspaces(request: Request) -> list[WorkspaceBrief]:
+@router.get("", response_model=WorkspaceList)
+async def list_workspaces(request: Request) -> WorkspaceList:
     """The running workspaces, then the stopped ones.
 
     Args:
@@ -708,7 +708,7 @@ async def list_workspaces(request: Request) -> list[WorkspaceBrief]:
         kept = await _kept(request, wid)
         if kept is not None:
             briefs.append(make_stopped_brief(wid, kept[1]))
-    return briefs
+    return WorkspaceList(items=briefs)
 
 
 @router.get("/{workspace_id}", response_model=WorkspaceDetail)

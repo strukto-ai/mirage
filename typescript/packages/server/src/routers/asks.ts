@@ -53,6 +53,10 @@ interface AskResponse {
   note: string
 }
 
+interface AskList {
+  items: AskResponse[]
+}
+
 function toResponse(record: Decision): AskResponse {
   return {
     id: record.id,
@@ -76,7 +80,7 @@ export function registerAsksRoutes(
 ): void {
   app.get<{ Params: WsIdParams; Querystring: ListAsksQuery }>(
     '/v1/workspaces/:wsId/asks',
-    async (req) => {
+    async (req): Promise<AskList> => {
       // The workspace's asks: pending by default, every decision under
       // all=true. The ledger already serves both views from one store,
       // so the entry point only picks which query to run. A mistyped
@@ -87,7 +91,7 @@ export function registerAsksRoutes(
       const sessionId = req.query.session_id ?? ''
       await sessionOf(ws, sessionId)
       const records = settled ? ws.decisions.list(sessionId) : ws.decisions.pending(sessionId)
-      return records.map(toResponse)
+      return { items: records.map(toResponse) }
     },
   )
 

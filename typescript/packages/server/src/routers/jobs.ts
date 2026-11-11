@@ -49,6 +49,10 @@ interface JobResponse {
   signal: number | null
 }
 
+interface JobList {
+  items: JobResponse[]
+}
+
 interface JobDetailResponse extends JobResponse {
   processes: number[]
 }
@@ -81,7 +85,7 @@ export function registerJobsRoutes(
 ): void {
   app.get<{ Params: WsIdParams; Querystring: ListJobsQuery }>(
     '/v1/workspaces/:wsId/jobs',
-    async (req) => {
+    async (req): Promise<JobList> => {
       // The jobs the workspace's sessions list, as `jobs` does, a
       // session's, those in a state or those a line started when named.
       const { wsId } = req.params
@@ -98,7 +102,7 @@ export function registerJobsRoutes(
         ...(state !== undefined ? { state: state as JobState } : {}),
         ...(lineId !== undefined && lineId !== '' ? { lineId: new LineId(lineId) } : {}),
       })
-      return records.map(toResponse)
+      return { items: records.map(toResponse) }
     },
   )
 

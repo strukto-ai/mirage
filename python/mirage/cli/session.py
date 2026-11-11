@@ -19,7 +19,7 @@ from urllib.parse import quote
 import typer
 
 from mirage.cli.client import make_client
-from mirage.cli.output import emit, handle_response
+from mirage.cli.output import emit, handle_list, handle_response
 from mirage.cli.settings import resolve_workspace
 from mirage.cli.vfs import WORKSPACE
 from mirage.cli.workspace import load_profile_argument
@@ -131,7 +131,7 @@ def list_cmd(workspace_id: str | None = WORKSPACE) -> None:
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
         r = client.request("GET", path)
-    emit(handle_response(r))
+    emit(handle_list(r))
 
 
 @app.command("delete")

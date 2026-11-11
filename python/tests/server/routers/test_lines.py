@@ -49,7 +49,7 @@ async def test_a_line_is_listed_and_found_by_the_id_its_result_names():
         try:
             r = await client.get(f"/v1/workspaces/{wid}/lines")
             assert r.status_code == 200, r.text
-            [line] = r.json()
+            [line] = r.json()["items"]
             assert line["id"] == result["line_id"]
             assert (line["command"], line["state"], line["exit"]) == (
                 "sleep 30 & echo $!",
@@ -59,7 +59,9 @@ async def test_a_line_is_listed_and_found_by_the_id_its_result_names():
             r = await client.get(f"/v1/workspaces/{wid}/lines/{line['id']}")
             assert r.status_code == 200, r.text
             detail = r.json()
-            [job] = (await client.get(f"/v1/workspaces/{wid}/jobs")).json()
+            [job] = (await client.get(f"/v1/workspaces/{wid}/jobs")).json()[
+                "items"
+            ]
             assert detail["jobs"] == [job["id"]]
             assert job["id"].startswith("job_")
             assert pid in detail["processes"]
@@ -68,7 +70,7 @@ async def test_a_line_is_listed_and_found_by_the_id_its_result_names():
             r = await client.get(
                 f"/v1/workspaces/{wid}/lines", params={"state": "running"}
             )
-            assert r.json() == []
+            assert r.json() == {"items": []}
             r = await client.get(
                 f"/v1/workspaces/{wid}/lines", params={"state": "lost"}
             )

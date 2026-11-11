@@ -1005,7 +1005,7 @@ async def lifecycle(
             for w in httpx.get(
                 f"{url}/v1/workspaces",
                 headers={"Authorization": f"Bearer {token}"},
-            ).json()
+            ).json()["items"]
         }
 
     def ids() -> list[str]:

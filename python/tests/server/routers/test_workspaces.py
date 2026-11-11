@@ -194,7 +194,7 @@ async def test_create_list_get_delete_round_trip():
 
         r = await client.get("/v1/workspaces")
         assert r.status_code == 200
-        briefs = r.json()
+        briefs = r.json()["items"]
         assert len(briefs) == 1
         assert briefs[0].keys() == {"id", "status", "created_at"}
         assert briefs[0]["id"] == wid
@@ -790,7 +790,7 @@ async def test_clone_returns_new_workspace_with_same_mounts():
         assert {m["prefix"] for m in clone["mounts"]} == {"/"}
 
         r = await client.get("/v1/workspaces")
-        assert len(r.json()) == 2
+        assert len(r.json()["items"]) == 2
 
 
 @pytest.mark.asyncio
@@ -1415,7 +1415,7 @@ async def test_create_workspace_rolls_back_on_fuse_failure(monkeypatch):
         assert r.status_code == 409, r.text
 
         r = await client.get("/v1/workspaces")
-        assert r.json() == []
+        assert r.json() == {"items": []}
     assert closed == [True]
 
 
@@ -1788,7 +1788,7 @@ async def test_a_second_stop_answers_as_the_first(tmp_path):
             r = await client.post("/v1/workspaces/keep/stop")
             assert r.status_code == 200, r.text
             assert r.json()["id"] == "keep"
-        listed = (await client.get("/v1/workspaces")).json()
+        listed = (await client.get("/v1/workspaces")).json()["items"]
         assert [(w["id"], w["status"]) for w in listed] == [
             ("keep", "stopped")
         ]
@@ -1848,7 +1848,7 @@ async def test_a_stopped_workspace_is_listed_shown_and_deleted(tmp_path):
             r = await client.post("/v1/workspaces", json=body)
             assert r.status_code == 201, r.text
         await client.post("/v1/workspaces/off/stop")
-        listed = (await client.get("/v1/workspaces")).json()
+        listed = (await client.get("/v1/workspaces")).json()["items"]
         assert [(w["id"], w["status"]) for w in listed] == [
             ("on", "running"),
             ("off", "stopped"),
@@ -1865,7 +1865,7 @@ async def test_a_stopped_workspace_is_listed_shown_and_deleted(tmp_path):
         assert (await client.get("/v1/workspaces/off")).status_code == 404
         r = await client.post("/v1/workspaces/off/start")
         assert r.status_code == 404
-        listed = (await client.get("/v1/workspaces")).json()
+        listed = (await client.get("/v1/workspaces")).json()["items"]
         assert [w["id"] for w in listed] == ["on"]
         await client.delete("/v1/workspaces/on")
 
@@ -1909,7 +1909,7 @@ async def test_an_id_with_state_but_no_saved_config_answers_404(tmp_path):
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         assert (await client.get("/v1/workspaces/orphan")).status_code == 404
-        assert (await client.get("/v1/workspaces")).json() == []
+        assert (await client.get("/v1/workspaces")).json() == {"items": []}
         assert (
             await client.delete("/v1/workspaces/orphan")
         ).status_code == 404
@@ -1949,7 +1949,7 @@ async def test_a_stopped_workspace_whose_store_cannot_be_read_is_listed(
                 w["status"],
                 w["created_at"] if w["id"] == "mine" else None,
             )
-            for w in listed.json()
+            for w in listed.json()["items"]
         ]
         assert rows == [("on", "running", None), ("mine", "stopped", 0)]
 

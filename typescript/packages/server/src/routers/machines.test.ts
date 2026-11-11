@@ -38,7 +38,7 @@ it('lists the host and reads it with its processes', async () => {
     expect(ran.statusCode).toBe(200)
     const listed = await app.inject({ method: 'GET', url: '/v1/workspaces/w/machines' })
     expect(listed.statusCode).toBe(200)
-    const [host] = listed.json<Machine[]>()
+    const [host] = listed.json<{ items: Machine[] }>().items
     expect(host?.id.startsWith('host:')).toBe(true)
     expect(host?.state).toBe('managed')
     const one = await app.inject({

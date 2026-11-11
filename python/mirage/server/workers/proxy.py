@@ -421,7 +421,7 @@ class WorkerProxy:
         # once, the running ones first, as each worker lists them.
         by_id: dict[str, dict[str, Any]] = {}
         for answer in answers:
-            for item in json.loads(answer.body):
+            for item in json.loads(answer.body)["items"]:
                 seen = by_id.get(str(item["id"]))
                 if seen is None or seen.get("status") != "running":
                     by_id[str(item["id"])] = item
@@ -432,7 +432,7 @@ class WorkerProxy:
                 float(item.get("created_at") or 0),
             ),
         )
-        await send_json(send, 200, items)
+        await send_json(send, 200, {"items": items})
 
     async def _refused(
         self, scope: Scope, worker: Worker | None

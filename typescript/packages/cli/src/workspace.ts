@@ -19,7 +19,7 @@ import type { Command } from 'commander'
 import { makeClient } from './client.ts'
 import { keepPolicyNames } from './policy.ts'
 import { header, resolveWorkspace, useWorkspace } from './settings.ts'
-import { emit, fail, formatAge, formatTable, handleResponse } from './output.ts'
+import { emit, fail, formatAge, formatTable, handleList, handleResponse } from './output.ts'
 import { WORKSPACE_FLAGS, WORKSPACE_HELP } from './vfs.ts'
 
 // A config handed to `load` or `clone`: env-interpolated, and with its
@@ -323,7 +323,7 @@ async function listRecords(
   id: string | undefined,
   kind: string,
   filters: Record<string, string | undefined>,
-): Promise<unknown> {
+): Promise<unknown[]> {
   const workspace = resolveWorkspace(id)
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(filters))
@@ -335,7 +335,7 @@ async function listRecords(
     'GET',
     `/v1/workspaces/${encodeURIComponent(workspace)}/${kind}${qs === '' ? '' : `?${qs}`}`,
   )
-  return handleResponse(r)
+  return handleList(r)
 }
 
 export function registerWorkspaceCommands(program: Command): Command {
@@ -423,7 +423,7 @@ export function registerWorkspaceCommands(program: Command): Command {
       const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       emit(
-        (await handleResponse(await c.request('GET', '/v1/workspaces'))) as WorkspaceBrief[],
+        (await handleList(await c.request('GET', '/v1/workspaces'))) as WorkspaceBrief[],
         formatWorkspaceList,
       )
     })
@@ -593,7 +593,7 @@ export function registerWorkspaceCommands(program: Command): Command {
         'GET',
         `/v1/workspaces/${encodeURIComponent(id)}/asks${qs === '' ? '' : `?${qs}`}`,
       )
-      emit((await handleResponse(r)) as AskRecord[], formatAsks)
+      emit((await handleList(r)) as AskRecord[], formatAsks)
     })
 
   ws.command('list-lines')

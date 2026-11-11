@@ -39,6 +39,10 @@ class JobResponse(BaseModel):
     signal: int | None
 
 
+class JobList(BaseModel):
+    items: list[JobResponse]
+
+
 class JobDetailResponse(JobResponse):
     processes: list[int]
 
@@ -61,23 +65,23 @@ def _to_response(record: Job) -> JobResponse:
     )
 
 
-@router.get("", response_model=list[JobResponse])
+@router.get("", response_model=JobList)
 async def list_jobs(
     workspace_id: str,
     request: Request,
     session_id: str | None = None,
     state: JobState | None = None,
     line_id: str | None = None,
-) -> list[JobResponse]:
+) -> JobList:
     """The jobs the workspace's sessions list, as ``jobs`` does, a
     session's, those in a state or those a line started when named.
     Read on the workspace's own loop."""
     runner = require_entry(request, workspace_id).runner
     line = LineId(line_id) if line_id else None
 
-    async def read() -> list[JobResponse]:
+    async def read() -> JobList:
         records = await runner.ws.jobs(session_id or None, state, line)
-        return [_to_response(r) for r in records]
+        return JobList(items=[_to_response(r) for r in records])
 
     return await runner.call(read())
 

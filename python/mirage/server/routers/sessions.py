@@ -44,6 +44,10 @@ class SessionResponse(BaseModel):
     cwd: str
 
 
+class SessionList(BaseModel):
+    items: list[SessionResponse]
+
+
 class DeleteSessionResponse(BaseModel):
     session_id: str
 
@@ -88,16 +92,16 @@ async def create_session(
     return SessionResponse(session_id=sess.session_id, cwd=sess.cwd)
 
 
-@router.get("", response_model=list[SessionResponse])
-async def list_sessions(
-    workspace_id: str, request: Request
-) -> list[SessionResponse]:
+@router.get("", response_model=SessionList)
+async def list_sessions(workspace_id: str, request: Request) -> SessionList:
     entry = require_entry(request, workspace_id)
     await entry.runner.call(entry.runner.ws.ensure_sessions_loaded())
-    return [
-        SessionResponse(session_id=s.session_id, cwd=s.cwd)
-        for s in entry.runner.ws.list_sessions()
-    ]
+    return SessionList(
+        items=[
+            SessionResponse(session_id=s.session_id, cwd=s.cwd)
+            for s in entry.runner.ws.list_sessions()
+        ]
+    )
 
 
 @router.delete("/{session_id}", response_model=DeleteSessionResponse)
