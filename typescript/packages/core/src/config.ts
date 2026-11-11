@@ -614,7 +614,7 @@ interface RedisStoreBlock {
  * An S3 group IS an S3Config plus the discriminator, so its keys are
  * the backend's, validated by the s3 config model rather than here.
  * It hosts only the sessions+meta plane (conditional-PUT CAS), so it
- * is valid as the `workspace` override and never as the default.
+ * is valid as the `sessions` override and never as the default.
  */
 interface S3StoreBlock {
   type: 's3'
