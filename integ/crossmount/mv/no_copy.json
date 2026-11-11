@@ -216,6 +216,42 @@
         "stderr": "mv: cannot move '/data2/xm_ncq' to '/data/xm_ncd/xm_ncq': Invalid cross-device link\n"
       },
       "note": "coreutils 9.7 over tmpfs mounts: only the source on the other mount meets the other device. A line spanning mounts refused every source."
+    },
+    {
+      "id": "xm_mv_no_copy_renames_a_link_on_its_mount",
+      "seq": 15601020,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln -s /data/a.txt /data/xm_nl && mkdir /data/xm_nld && echo k > /data/xm_nld/k && echo q > /data2/xm_nlq && mv --no-copy /data/xm_nl /data2/xm_nlq /data/xm_nld; echo rc=$?; readlink /data/xm_nld/xm_nl; test -L /data/xm_nl || echo moved; rm -r /data/xm_nld /data2/xm_nlq",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n/data/a.txt\nmoved\n",
+        "stderr": "mv: cannot move '/data2/xm_nlq' to '/data/xm_nld/xm_nlq': Invalid cross-device link\n"
+      },
+      "note": "coreutils 9.7 over tmpfs mounts: a link that stays on its mount is renamed, by the namespace even on a store with no rename of its own; only the source on the other mount meets the other device."
     }
   ]
 }
