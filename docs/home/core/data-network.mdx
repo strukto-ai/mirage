@@ -8,7 +8,7 @@ These commands extend [Core Tools](/home/core/tools) with structured data, compr
 
 Tables list common supported flags. Use `man COMMAND` or `COMMAND --help` for the full reference; unlisted options are not necessarily supported.
 
-## JSON and Calculations
+## JSON and calculations
 
 | Command | Purpose | Common flags |
 | --- | --- | --- |
@@ -20,7 +20,7 @@ Tables list common supported flags. Use `man COMMAND` or `COMMAND --help` for th
 
 **Limits:** `jq -C`, `-L`, `--stream-errors`, and `--build-configuration` are unsupported. Input-consuming programs follow the common `input` / `inputs` patterns; partial drains or multiple conditional reads can differ from jq. Halts inside error handling can also differ.
 
-## Encoding and Checksums
+## Encoding and checksums
 
 | Command | Purpose | Common flags |
 | --- | --- | --- |
@@ -31,7 +31,7 @@ Tables list common supported flags. Use `man COMMAND` or `COMMAND --help` for th
 | `md5` | Print an MD5 digest | No command-specific flags |
 | `md5sum`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `b2sum` | Generate or verify checksums | `-c`, `-b`, `-t`, `--tag`, `-z`, `--status`, `--quiet`, `--strict`, `--ignore-missing`, `-l BITS` (`b2sum`) |
 
-## Archives and Compression
+## Archives and compression
 
 | Command | Purpose | Common flags |
 | --- | --- | --- |
@@ -67,6 +67,6 @@ Tables list common supported flags. Use `man COMMAND` or `COMMAND --help` for th
 
 `curl -w` supports `http_code`, `response_code`, `url_effective`, `num_redirects`, `size_download`, `content_type`, `method`, `exitcode`, and `time_total`. Other variables produce a diagnostic.
 
-## Language Runtimes
+## Language runtimes
 
 For `python`, `python3`, `js`, and `node`, see [Runtimes](/home/setup/runtime/overview) for available engines, configuration, and execution limits.

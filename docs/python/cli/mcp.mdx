@@ -8,7 +8,7 @@ An MCP server's tools become one CLI: each tool is a subcommand that takes
 the tool's arguments as one JSON object. Profiles, network rules and
 snapshots apply to it as to any CLI.
 
-## Register a Server
+## Register a server
 
 `mcp_cli` reads the server's tool list and returns a `CLI`; install it
 with `register_cli`, passing the same config:
@@ -97,7 +97,7 @@ ws = Workspace(
 )
 ```
 
-## Call a Tool
+## Call a tool
 
 | Call | Result |
 | --- | --- |
@@ -132,7 +132,7 @@ profiles:
 A tool the server marks `readOnlyHint` runs as a read; every other tool
 counts as a write.
 
-## On a Server
+## On a server
 
 The [server](/python/access/server) takes `cli: mcp` entries in a
 workspace's create body. `${VAR}` is expanded only in files; over HTTP, send

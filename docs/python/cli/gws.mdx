@@ -24,7 +24,7 @@ No service mount is required. For YAML and multiple accounts, see the
 [CLI overview](/python/cli/index#register-a-cli).
 
 {/* BEGIN GENERATED CLI COMMANDS */}
-## Supported Commands
+## Supported commands
 
 Run `gws <command> --help` for the supported flags and operands.
 This list is generated from Mirage's registered command tree.
@@ -87,7 +87,7 @@ This list is generated from Mirage's registered command tree.
 | `gws gmail triage` | List message summaries (id, from, subject, date, snippet) for a Gmail search query. Aliases: `+triage`. |
 {/* END GENERATED CLI COMMANDS */}
 
-## Call an API Method
+## Call an API method
 
 ```bash
 gws drive files list --params '{"pageSize":10}'
@@ -105,7 +105,7 @@ raw bytes instead of JSON.
 The supported methods are the registered subset above, not every method in
 Google's Discovery documents.
 
-## Use Helpers
+## Use helpers
 
 ```bash
 gws gmail triage --query 'is:unread' --max 10
@@ -122,7 +122,7 @@ gws docs write --document DOC_ID --tab TAB_ID --text 'Into this tab'
 Helpers omit the upstream CLI's `+` prefix: use `gws docs write`, not
 `gws docs +write`. `--tab` is Mirage's addition for document tabs.
 
-## Choose a Document Tab
+## Choose a document tab
 
 `gws docs documents get --params '{"documentId":"DOC_ID"}'` returns the
 legacy body of the first tab. Add `"includeTabsContent":true` to receive
@@ -133,7 +133,7 @@ Mounted `.gdoc.json` files always use the tab-aware shape.
 A raw `batchUpdate` follows the API's defaults: `replaceAllText` without a
 tab restriction can affect every tab.
 
-## VFS, Folder Placement and Limits
+## VFS, folder placement and limits
 
 The CLI can share `GoogleConfig` with Google's VFS adapters. Each registration
 owns its config and requires no mount. Setting `folder_id` (`folderId` in

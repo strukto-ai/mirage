@@ -20,7 +20,7 @@ folder as the workspace root instead of the whole account; folder ids are stable
 renames and moves. The Python package ships the same backend, see
 [Box (Python)](/python/vfs/box).
 
-## Quick Start: Developer Token
+## Quick start: developer token
 
 For exploration, skip the OAuth flow and use a developer token (one-button-click in the Box
 app console, 60-minute lifetime). The `BoxVFS` accepts an `accessToken` field that
@@ -39,7 +39,7 @@ await ws.shell('ls /box/')
 When the token expires (Box 401s with `invalid_token`), regenerate it in the console and
 re-run. See [Box Credentials -> Quick Start](/home/setup/box#quick-start-developer-token-60-minutes-no-oauth).
 
-## Service Account (Client Credentials, No Refresh Token)
+## Service account (client credentials, no refresh token)
 
 For headless server auth, skip OAuth and refresh tokens entirely. Create a Box app with the
 **Server Authentication (Client Credentials Grant)** method, authorize it once in the Box
@@ -62,7 +62,7 @@ your content, share folders with the service account's email address, shown unde
 **General Settings** in the developer console.
 </Warning>
 
-## Node (Server-Side, Long-Running)
+## Node (server-side, long-running)
 
 ```bash
 pnpm add @struktoai/mirage-node
@@ -110,7 +110,7 @@ is in-memory only and a process restart needs a fresh refresh token.
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table box end */}
 
-## Browser (PKCE, No Client Secret)
+## Browser (PKCE, no client secret)
 
 ```bash
 pnpm add @struktoai/mirage-browser
@@ -135,7 +135,7 @@ Box requires the origin to be allowlisted on the app's **Allowed Origins** confi
 [`examples/browser/vfs/box/box_pkce.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/browser/vfs/box/box_pkce.ts)
 runs the full PKCE dance and persists the rotated refresh token to `localStorage`.
 
-## VFS Mode (`patchNodeFs`)
+## VFS mode (`patchNodeFs`)
 
 ```ts
 import { createRequire } from 'node:module'
@@ -158,7 +158,7 @@ restore()
 
 The async forms (`fs.promises.*` and the callbacks) are routed; a sync form like `fs.statSync` refuses a mounted path.
 
-## FUSE Mode
+## FUSE mode
 
 ```ts
 import { BoxVFS, Mount, MountBackend, MountMode, Workspace } from '@struktoai/mirage-node'
@@ -177,7 +177,7 @@ await ws.close()
 
 Requires [macFUSE](https://osxfuse.github.io/) on macOS or libfuse on Linux.
 
-## Path → ID Resolution
+## Path → ID resolution
 
 Box uses numeric folder/file IDs internally (root folder is id `0`). Mirage caches the path → ID
 mapping in the mount's index store (RAM unless an `index:` is configured). The first time you `ls /box/foo/bar/`,
@@ -191,7 +191,7 @@ With no `index:` configured, listings live for the mount's `ttl` (600 s by defau
 A write records the `sha1` its upload reply names, so a `fresh` read
 right after a `tee` or `sed -i` downloads nothing.
 
-## Conditional Writes
+## Conditional writes
 
 A rewrite that observes a missing file requires atomic create-only support,
 which this backend does not currently enable. Appending to a missing file
@@ -210,7 +210,7 @@ which is not refused when its source changed (a `mv` to another mount is a
 copy and a conditioned delete, so there a changed source stays and `mv`
 reports the failed removal).
 
-## Reads Under `fresh`
+## Reads under `fresh`
 
 A Box mount accepts `read: fresh`. The token is the file's `sha1`, which a
 folder listing and `GET /files/{id}` both carry; a download names no version,
@@ -248,7 +248,7 @@ replaced under the same name is therefore resolved to the replacement on
 the next fresh command. This costs one listing per ancestor level; a warm
 file check still uses one metadata request.
 
-## Box-Native File Types
+## Box-native file types
 
 Every Box item is served as its **raw bytes**, keeping its real name (no `.json` suffix).
 Box has no API to edit these formats from a structured payload, so Mirage does not render
@@ -383,7 +383,7 @@ What Box answers through its own API, so fewer files are read. [Integration](/ho
 
 The [Python Box docs](/python/vfs/box#integration) list when each search answers and what it can miss.
 
-## Available Commands
+## Available commands
 
 `BoxVFS` ships the same shell command set as `GoogleDriveVFS` and `DropboxVFS`:
 

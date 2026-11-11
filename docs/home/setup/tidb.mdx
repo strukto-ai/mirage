@@ -33,13 +33,13 @@ TIDB_FILESYSTEM_HOST=https://aws-us-east-1.drive9.ai
 TIDB_FILESYSTEM_TOKEN=...
 ```
 
-### Scoped Tokens
+### Scoped tokens
 
 A scoped token reaches only the path it was created for, and only with the
 operations it allows (read, list, search, write, delete). Mount it with
 `root_path` set to that path, since it cannot list the file system's root.
 
-## Self-Hosted drive9
+## Self-hosted drive9
 
 TiDB Cloud Filesystem runs on the open-source
 [drive9](https://github.com/mem9-ai/drive9) server, and the same VFS mounts a

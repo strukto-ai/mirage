@@ -8,7 +8,7 @@ Alibaba Cloud OSS exposes an S3-compatible API with AWS Signature V4 against `ht
 
 Credentials (RAM `AccessKey ID` and `AccessKey Secret`) are created the same way in both runtimes, see [Alibaba OSS Credentials](/home/setup/aliyun).
 
-## Node (Server-Side)
+## Node (server-side)
 
 ```bash
 pnpm add @struktoai/mirage-node
@@ -49,7 +49,7 @@ console.log(res.stdoutText)
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table aliyun end */}
 
-## Browser (Presigned URLs)
+## Browser (presigned URLs)
 
 ```bash
 pnpm add @struktoai/mirage-browser
@@ -73,7 +73,7 @@ The browser `AliyunVFS` is secret-free, your backend signs each operation using 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table browser/aliyun end */}
 
-### 1. Server: Sign URLs with the OSS Endpoint
+### 1. Server: sign URLs with the OSS endpoint
 
 ```ts
 import {
@@ -125,7 +125,7 @@ app.post('/presign/oss', async (req, res) => {
 })
 ```
 
-### 2. Browser: Wire It Up
+### 2. Browser: wire it up
 
 ```ts
 import { AliyunVFS, MountMode, Workspace } from '@struktoai/mirage-browser'

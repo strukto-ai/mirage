@@ -30,7 +30,7 @@ await ws.shell('git -C /repo init -b main')
 For YAML registration, see the [CLI overview](/typescript/cli/index#register-a-cli).
 
 {/* BEGIN GENERATED CLI COMMANDS */}
-## Supported Commands
+## Supported commands
 
 Run `git <command> --help` for the supported flags and operands.
 This list is generated from Mirage's registered command tree.
@@ -83,7 +83,7 @@ This list is generated from Mirage's registered command tree.
 | `git tag` | Create, list or delete a tag |
 {/* END GENERATED CLI COMMANDS */}
 
-## Create and Inspect a Repository
+## Create and inspect a repository
 
 ```bash
 git -C /repo init -b main
@@ -110,7 +110,7 @@ use the same VFS operations as the shell.
 `mirage <mirage@localhost>` unless `--author 'Name <email>'` overrides it.
 `fsck` checks the object database without modifying it.
 
-## Stage and Change Files
+## Stage and change files
 
 Continue from the initial commit above. Record a second version before using
 `HEAD~1` to restore the original:
@@ -143,7 +143,7 @@ git -C /repo commit -am 'Remove greeting'
 path beginning with `-`. Permission and read-only refusals go through the
 workspace dispatcher and are reported in Git's command-specific wording.
 
-## Branches, Tags and History
+## Branches, tags and history
 
 ```bash
 git -C /repo branch topic
@@ -167,7 +167,7 @@ right. Invalid suffixes are refused as part of the whole revision.
 and `ls-tree` provide inspection without a host Git process. Run each command's
 `--help` for supported formatting, filtering, path and diff options.
 
-## Clone, Fetch and Repository Configuration
+## Clone, fetch and repository configuration
 
 ```bash
 git clone /repo /work/copy
@@ -192,7 +192,7 @@ against `-C`. Repository `core.worktree` and `core.bare` affect discovery;
 linked worktrees use their recorded layout. Working-tree commands refuse bare
 repositories. No repository operation opens a host path behind the VFS.
 
-## Limits and Intentional Differences
+## Limits and intentional differences
 
 - Only the listed command subset is implemented. Merge, rebase, push, pull,
   `reset --hard` and `switch -` are absent; stash supports inspection only.
@@ -225,7 +225,7 @@ These boundaries are exercised by the shared Git integration corpus on RAM
 and disk mounts. The VFS determines which filesystem operations are available;
 registering `git` does not make a read-only mount writable.
 
-## Upstream and Dependency Licenses
+## Upstream and dependency licenses
 
 | Project | Role in Mirage | License |
 | --- | --- | --- |

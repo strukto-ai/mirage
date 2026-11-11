@@ -65,7 +65,7 @@ in Mirage: `ffmpeg -i in.mp4 out.webm | wc -c` sends only `ffmpeg`.
   </Tab>
 </Tabs>
 
-## Connecting the Workspace
+## Connecting the workspace
 
 A local program opens host paths, not the workspace's. To give it workspace
 files, expose a mount as a [FUSE folder](/home/setup/fuse):
@@ -93,7 +93,7 @@ After the folder is mounted, run the shared
   `addFuseMount(prefix, mountpoint, sessionId)`, also follows that
   session's permissions.
 
-## Python Compatibility
+## Python compatibility
 
 `python3` is the same Mirage command on every Python runtime: Mirage reads
 the script from the workspace and checks it like any file, and `local` runs
@@ -120,7 +120,7 @@ the host interpreter's Python version.
 | `+` | Host interpreter |
 
 <AccordionGroup>
-  <Accordion title="Example: Append to a Workspace File" id="open-example">
+  <Accordion title="Example: append to a workspace file" id="open-example">
     ```python
     with open("/data/log.txt", "a") as f:
         f.write("Job completed.\n")
@@ -133,13 +133,13 @@ the host interpreter's Python version.
   </Accordion>
 </AccordionGroup>
 
-### File Objects
+### File objects
 
 | API | Support |
 | --- | --- |
 | File-object methods | Host interpreter |
 
-<Accordion title="Example: Write, Read and Truncate a File" id="file-objects-example">
+<Accordion title="Example: write, read and truncate a file" id="file-objects-example">
   ```python
   with open("/data/example.txt", "w+") as f:
       f.write("first\nsecond\n")
@@ -158,7 +158,7 @@ the host interpreter's Python version.
 | `os.getcwd()` | ✓ |
 
 <AccordionGroup>
-  <Accordion title="Example: List a Workspace Directory" id="os-example">
+  <Accordion title="Example: list a workspace directory" id="os-example">
     ```python
     import os
 
@@ -181,7 +181,7 @@ the host interpreter's Python version.
 | `Path` | Host interpreter |
 
 <AccordionGroup>
-  <Accordion title="Example: Create and Inspect a Workspace File" id="pathlib-example">
+  <Accordion title="Example: create and inspect a workspace file" id="pathlib-example">
     ```python
     from pathlib import Path
 
@@ -207,7 +207,7 @@ the host interpreter's Python version.
 | `sys.path[0]` | Host interpreter |
 
 <AccordionGroup>
-  <Accordion title="Example: Read Arguments and Piped Input" id="sys-example">
+  <Accordion title="Example: read arguments and piped input" id="sys-example">
     ```python
     import sys
 
@@ -222,7 +222,7 @@ the host interpreter's Python version.
   </Accordion>
 </AccordionGroup>
 
-### Runtime Globals
+### Runtime globals
 
 | API | Support |
 | --- | --- |
@@ -230,13 +230,13 @@ the host interpreter's Python version.
 
 - `__file__`: The script's workspace path; tracebacks use that path too.
 
-<Accordion title="Example: Print the Script Path" id="globals-example">
+<Accordion title="Example: print the script path" id="globals-example">
   ```python
   print(__file__)
   ```
 </Accordion>
 
-## Runtime Behavior
+## Runtime behavior
 
 | Capability | `python3` | Other programs |
 | --- | --- | --- |

@@ -8,7 +8,7 @@ icon: robot
 A profile gives an agent session its permissions. Agents can share a
 workspace while seeing different files and using different commands.
 
-## What a Profile Controls
+## What a profile controls
 
 | Setting | Purpose |
 | --- | --- |
@@ -71,7 +71,7 @@ still connects under the workspace's `network`, since it serves every
 session. A profile's `routes` replace the workspace's for the same address:
 see [Route Network](/home/policy/route-network#per-session).
 
-## Example: A Research Agent
+## Example: a research agent
 
 This profile lets an agent browse and search `/data`, keeps it read-only,
 and hides `/data/private`.
@@ -104,7 +104,7 @@ so a session under it is refused both with `Permission denied`. The session's
 own shell functions are exempt, because each line in a function body passes
 the same check.
 
-## Use a Profile
+## Use a profile
 
 Name the profile when you create a session:
 
@@ -118,7 +118,7 @@ A session that names no profile gets the one `profile:` selects. Without
 `profile:`, it gets the profile named `default` if the workspace defines one,
 and no restrictions otherwise.
 
-## Change a Profile While It Runs
+## Change a profile while it runs
 
 A host can add a profile or replace what a name means on a running
 workspace, then move sessions onto it. A session keeps its rules until it is
@@ -139,7 +139,7 @@ For HTTP, send a JSON body such as `{"profile":"researcher"}` to the session's
 An agent cannot reach these: they are host operations, so no builtin, MCP tool
 or RPC method changes a profile.
 
-## Rule Matching
+## Rule matching
 
 Command patterns match token prefixes. `git push` matches `git push origin main`.
 Spelling and order matter: `rm -rf` does not match `rm -r -f` or

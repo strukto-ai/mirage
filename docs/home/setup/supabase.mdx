@@ -8,14 +8,14 @@ description: Set up Supabase Storage credentials for the Supabase VFS.
 
 Supabase Storage exposes an S3-compatible API at `https://<project-ref>.storage.supabase.co/storage/v1/s3`, signed with **S3 Access Keys** scoped to a Supabase project (not your `anon` or `service_role` JWT).
 
-### 1. Create an S3 Access Key
+### 1. Create an S3 access key
 
 1. Open the [Supabase dashboard](https://supabase.com/dashboard) and pick your project.
 2. **Storage** -> **Settings** -> **S3 Access Keys**.
 3. **New access key** -> scope to the bucket(s) you want Mirage to mount.
 4. Copy the **Access key ID** and **Secret access key**, the secret is shown once.
 
-### 2. Note the Project Reference and Region
+### 2. Note the project reference and region
 
 - **Project reference** is in the dashboard URL: `https://supabase.com/dashboard/project/<project-ref>`.
 - **Region** is the region you selected when creating the project. Supabase requires a region string for SigV4 signing even though it is metadata only.

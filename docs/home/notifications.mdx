@@ -9,7 +9,7 @@ Notifications tell an agent when files or directories change in the virtual
 filesystem. For example, a teammate edits a report in connected storage, and
 your agent receives the report's virtual path and what happened to it.
 
-## How It Works
+## How it works
 
 1. Your application receives a service notification or checks for changes.
 2. It reports each change to Mirage with `ws.notify()`.
@@ -18,7 +18,7 @@ your agent receives the report's virtual path and what happened to it.
 Your application connects the service's notifications to Mirage. Subscribing
 with `ws.events()` alone does not start a file watcher or check the service.
 
-## Listen for Changes
+## Listen for changes
 
 Here, `ws` is your workspace with a VFS connected at `/data`. This listens for
 changes anywhere under that path:
@@ -55,7 +55,7 @@ To listen to fewer files, change the path:
 | `/data/*.csv` | Changes to CSV files directly inside `/data` |
 | `["/data/reports", "/data/config.json"]` | Changes under reports or to the config file |
 
-## Notification Types
+## Notification types
 
 Each notification includes the virtual path and what happened:
 
@@ -67,7 +67,7 @@ Each notification includes the virtual path and what happened:
 | `move` | It was renamed or moved; the notification also includes its previous path |
 | `unknown` | Something changed, but the details are unavailable; check the path again |
 
-## Connect Your VFS
+## Connect your VFS
 
 - **Push:** Receive changes from a webhook, stream or external file watcher. See the [Disk, S3 and GitHub examples](/home/notifications/support#push-examples).
 - **Poll:** Fetch changes from a service. See the [Dropbox, Box and Google Drive examples](/home/notifications/support#poll-examples).

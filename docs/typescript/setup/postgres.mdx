@@ -73,11 +73,11 @@ try {
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table postgres end */}
 
-## Mount Mode
+## Mount mode
 
 `read` only. Postgres mounts are read-only at the VFS level.
 
-## Snapshot Behavior
+## Snapshot behavior
 
 The DSN is redacted on snapshot. Hand the mount back at load (the third argument of `Workspace.load`, or a config over the server and CLI).
 

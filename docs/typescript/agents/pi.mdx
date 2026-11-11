@@ -50,7 +50,7 @@ After asking Pi to create a file, you can verify that the native UI is using Mir
 
 Omit `--no-context-files` when you intentionally want Pi to combine host-project instructions with the mounted Mirage workspace.
 
-## Stale-Write Protection
+## Stale-write protection
 
 Pi serializes its own mutations and its `edit` tool checks that the requested old text still exists in the current file. It does not, however, retain a file revision from an earlier agent read.
 

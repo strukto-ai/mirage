@@ -89,7 +89,7 @@ const script = await run({
 
 [`examples/typescript/agents/dsh/dsh.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/dsh/dsh.ts) is the runnable version of this whole page, with the script in [`example.py`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/dsh/example.py).
 
-## Install into a dsh Profile
+## Install into a dsh profile
 
 The package is also a dsh bundle: its manifest carries a patch layer that swaps dsh's filesystem, bash and spill providers for the mirage ones and disables the host-subprocess surfaces the workspace does not contain (PowerShell, the ripgrep search tool). Stock dsh, including its web app, then runs on mounted data:
 
@@ -131,7 +131,7 @@ await ctx.fs.writeText(await ctx.fs.resolve('/tmp/out.txt'), 'hi', undefined, un
 
 So `DSH_PERMISSION_MODE=read-only` confines a Mirage world, and the result reports the mode the command actually ran under. The `/dev` null sink stays writable, as that mode requires. The policy's `workspaceRoot` is a directory on the host and is deliberately never consulted: here the mounts and their modes are the boundary.
 
-## Permissions: Allow, Ask, Deny
+## Permissions: allow, ask, deny
 
 A sandbox mode says where writes may land. It says nothing about which commands a session may run at all, and that is what a Mirage **permission document** is for. A role lists the tools it admits, the lines it refuses, and the lines a human has to sign off on:
 
@@ -237,7 +237,7 @@ One gap is worth naming: a rule scoped to a path refuses one operand in GNU's ow
 
 Through `ctx.fs`, a rule refusal arrives as `FS_SANDBOX_DENIED` rather than `FS_PERMISSION_DENIED`, which is what makes dsh's tool layer attach its escalation hint. A plain mount-mode refusal keeps `FS_PERMISSION_DENIED`: a mode is the shape of this world, while a rule is a confinement the call may be entitled to escalate past.
 
-### Asking What a Line Would Do
+### Asking what a line would do
 
 `explain` runs a line through the same gate the dispatcher uses, without running it:
 
@@ -252,7 +252,7 @@ const what = await ctx.mirage.explain('rm /data/notes.txt')
 
 It spends no approval, records no question and never reaches the human, so it is safe to call about a line nobody typed — a pre-execute check, or an operator asking why a command was refused. Because it is the same gate, an explanation of a refused line is byte-identical to the refusal.
 
-## Custom Backends
+## Custom backends
 
 A mount is not limited to the builtin VFS (`ram`, `s3`, `slack`, `redis`, ...). Register your own VFS factory host-side and its name becomes usable in a `mounts` block exactly like a builtin:
 
@@ -271,7 +271,7 @@ registerVfs('acme', (config) => Promise.resolve(new AcmeVFS(config)))
 
 The registration must run before the workspace builds, since a `mounts` block only names a VFS, it does not construct one. In a dsh bundle that means a small plugin the profile loads alongside `@struktoai/mirage-dsh` (or a plain import in code, before `MirageService` starts), not the declarative patch. A builtin name cannot be shadowed, so a custom backend needs its own name. Nothing else changes: the shell, the commands, and the sandbox claim treat a custom mount like any other.
 
-## Background Commands
+## Background commands
 
 A backgrounded command streams its output through a workspace console rather than arriving whole: each statement of a compound line lands as it finishes, and stdout and stderr keep their own channels. The unread backlog is bounded to the stdout budget, so a reader that never drains cannot grow it without limit; output past the budget is flagged lossy, with the freshest kept. Set `spillDir` on `MirageShellExecutor` to a workspace path (for example `/tmp` on a ram mount) and an overrunning command's full stdout and stderr are written there, so the agent can read the complete output back through the same VFS; unset, nothing spills.
 
@@ -285,7 +285,7 @@ A concrete scenario: serving agents from a TypeScript server (an Express endpoin
 
 Concurrency is estimated as about 6 GB of free memory divided by a session's measured resident footprint (a dsh session with a live Python engine is about 27 MB, idle workspaces 240 KB, a Codex session about 200 MB, a Claude Code CLI session about 430 MB); startup is the measured time to bring one session up, process boot for the CLIs and workspace construction for dsh. The dsh numbers already include isolation, since monty is the sandbox and each engine runs on its own crash-isolated worker process; the CLI sessions run on the host, so isolating them means provisioning a container or remote sandbox per session, measured at about 150 ms even for a warm local container and more for a cold or remote one.
 
-## Subprocess Provider
+## Subprocess provider
 
 The bundle also replaces `dsh-subprocess-local` with `MirageSubprocess`. Executable
 lookup and argv execution stay in the same workspace as `ctx.fs` and `ctx.shell`.

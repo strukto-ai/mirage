@@ -36,7 +36,7 @@ pnpm add @struktoai/mirage-node @zkochan/fuse-native
   Non-FUSE users don't need `@zkochan/fuse-native`, the base `@struktoai/mirage-node` package works without it. Only install the binding when you want a real mountpoint.
 </Tip>
 
-### Allow pnpm to Run the Install Script
+### Allow pnpm to run the install script
 
 `@zkochan/fuse-native` compiles native code on install. pnpm blocks install scripts by default, allow this one explicitly in `pnpm-workspace.yaml`:
 
@@ -55,7 +55,7 @@ Or, if you're not using a pnpm workspace, in `package.json`:
 }
 ```
 
-## macFUSE 4 Symlink Workaround
+## macFUSE 4 symlink workaround
 
 <Tabs>
   <Tab title="macOS">
@@ -94,7 +94,7 @@ Mounts are async, so `await ws.fuseReady()` once after constructing the workspac
 
 The folder is served on Node's event loop. Never block it on the folder: a synchronous `fs` call there, or a child process spawned with `cwd` inside it, waits on a call only that loop can answer. Use the async `fs` API, or pass the folder's paths as arguments to the child.
 
-## Per-Mount Backends
+## Per-mount backends
 
 How a mount is exposed is configured **per mount**, through one `backend`
 field:
@@ -124,7 +124,7 @@ mounts:
 Programmatically, set `backend` per mount: `{ '/data': new Mount(dataVfs, { backend: MountBackend.FUSE, mountpoint: '/tmp/data-repo' }), '/s3': new Mount(s3Vfs, { backend: MountBackend.FUSE }) }`.
 `ws.fuseMountpoints` returns a `{ prefix: path }` map of the live mountpoints.
 
-## Mounting Without the Kernel Extension (FSKit)
+## Mounting without the kernel extension (FSKit)
 
 Apple has deprecated third-party kernel extensions; FSKit (macOS 15.4+) is
 the supported userspace replacement, and macFUSE 5.x serves the same libfuse
@@ -181,7 +181,7 @@ cannot gain from JavaScript.
   the live end-to-end check.
 </Warning>
 
-## Size Semantics for API-Backed Files
+## Size semantics for API-backed files
 
 Some mounts (Linear, Trello, Slack, ...) cannot report a file's size
 without fetching its content, so over the FUSE mount those files behave like

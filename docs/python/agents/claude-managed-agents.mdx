@@ -12,7 +12,7 @@ icon: /images/claude-logo.svg
 uv add 'mirage-ai[claude-managed-agents]'
 ```
 
-## Run a Worker
+## Run a worker
 
 The workspace here keeps its files in Redis next to RAM, which needs a Redis server and the `redis` extra:
 
@@ -47,7 +47,7 @@ worker = AsyncAnthropic().beta.environments.work.worker(
 asyncio.run(worker.run())
 ```
 
-## How It Behaves
+## How it behaves
 
 - The tools keep the toolset's names. One the session's [profile](/home/policy/overview) would always refuse is left out: a read-only workspace gets no `write` or `edit`.
 - `bash` runs Mirage's shell, so a line sees the workspace's mounts and commands, not the worker's machine. A `restart` is refused, since the session keeps its directory and variables. A relative path resolves against the session's working directory, which `cd` moves.

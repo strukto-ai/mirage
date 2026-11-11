@@ -64,7 +64,7 @@ runtimes:
 A run that needs more raises `MemoryError`. CPython starts at about 40M, so
 a cap below that fails every run. There is no cap by default.
 
-## Python Compatibility
+## Python compatibility
 
 Examples assume a writable `/data` mount. Mount modes and permissions still apply.
 
@@ -83,7 +83,7 @@ Modes and modifiers are listed separately; for example, `rb` combines `r` and `b
 | `+` | ✓ |
 
 <AccordionGroup>
-  <Accordion title="Example: Append to a Workspace File" id="open-example">
+  <Accordion title="Example: append to a workspace file" id="open-example">
     ```python
     with open("/data/log.txt", "a") as f:
         f.write("Job completed.\n")
@@ -96,7 +96,7 @@ Modes and modifiers are listed separately; for example, `rb` combines `r` and `b
   </Accordion>
 </AccordionGroup>
 
-### File Objects
+### File objects
 
 Reads fetch ranges from the mount as the program asks for them.
 
@@ -107,7 +107,7 @@ Reads fetch ranges from the mount as the program asks for them.
 | `f.truncate()` | ✓ |
 
 <AccordionGroup>
-  <Accordion title="Example: Write, Read and Truncate a File" id="file-objects-example">
+  <Accordion title="Example: write, read and truncate a file" id="file-objects-example">
     ```python
     with open("/data/example.txt", "w+") as f:
         f.write("first\nsecond\n")
@@ -125,7 +125,7 @@ Reads fetch ranges from the mount as the program asks for them.
 
 ### `os`
 
-#### File Operations
+#### File operations
 
 `os.read()` and `os.pread()` fetch ranges from the mount as the program asks.
 
@@ -143,7 +143,7 @@ Reads fetch ranges from the mount as the program asks for them.
 | `os.rename()` | ✓ |
 | `os.replace()` | ✓ |
 
-#### Directory Operations
+#### Directory operations
 
 | API | Support |
 | --- | --- |
@@ -154,7 +154,7 @@ Reads fetch ranges from the mount as the program asks for them.
 | `os.makedirs()` | ✓ |
 | `os.rmdir()` | ✓ |
 
-#### Metadata and Links
+#### Metadata and links
 
 | API | Support |
 | --- | --- |
@@ -165,7 +165,7 @@ Reads fetch ranges from the mount as the program asks for them.
 | `os.readlink()` | ✓ |
 | `os.utime()` | ✓ |
 
-#### Environment and Working Directory
+#### Environment and working directory
 
 | API | Support |
 | --- | --- |
@@ -174,7 +174,7 @@ Reads fetch ranges from the mount as the program asks for them.
 | `os.environ` | ✓ |
 
 <AccordionGroup>
-  <Accordion title="Example: List a Workspace Directory" id="os-example">
+  <Accordion title="Example: list a workspace directory" id="os-example">
     ```python
     import os
 
@@ -204,7 +204,7 @@ Reads fetch ranges from the mount as the program asks for them.
 | --- | --- |
 | `os.path` | ✓ |
 
-<Accordion title="Example: Check a Workspace Path" id="os-path-example">
+<Accordion title="Example: check a workspace path" id="os-path-example">
   ```python
   import os.path
 
@@ -223,7 +223,7 @@ Reads fetch ranges from the mount as the program asks for them.
 | `Path.touch()` | ✓ |
 
 <AccordionGroup>
-  <Accordion title="Example: Create and Inspect a Workspace File" id="pathlib-example">
+  <Accordion title="Example: create and inspect a workspace file" id="pathlib-example">
     ```python
     from pathlib import Path
 
@@ -247,7 +247,7 @@ Reads fetch ranges from the mount as the program asks for them.
 | `sys.argv` | ✓ |
 | `sys.stdin` | ✓ |
 
-<Accordion title="Example: Read Arguments and Piped Input" id="sys-example">
+<Accordion title="Example: read arguments and piped input" id="sys-example">
   ```python
   import sys
 
@@ -271,7 +271,7 @@ clock. `time.monotonic()` and `time.perf_counter()` measure elapsed time.
 | `datetime.date.today()` | ✓ |
 
 <AccordionGroup>
-  <Accordion title="Example: Print Today's Date" id="time-example">
+  <Accordion title="Example: print today's date" id="time-example">
     ```python
     import datetime
 
@@ -291,7 +291,7 @@ clock. `time.monotonic()` and `time.perf_counter()` measure elapsed time.
 | --- | --- |
 | `json.load()` | ✓ |
 
-<Accordion title="Example: Write and Read Workspace JSON" id="json-example">
+<Accordion title="Example: write and read workspace JSON" id="json-example">
   ```python
   import json
 
@@ -310,7 +310,7 @@ clock. `time.monotonic()` and `time.perf_counter()` measure elapsed time.
 | --- | --- |
 | `glob.glob()` | ✓ |
 
-<Accordion title="Example: Find Workspace Text Files" id="glob-example">
+<Accordion title="Example: find workspace text files" id="glob-example">
   ```python
   import glob
 
@@ -326,7 +326,7 @@ clock. `time.monotonic()` and `time.perf_counter()` measure elapsed time.
 | `shutil.move()` | ✓ |
 
 <AccordionGroup>
-  <Accordion title="Example: Move a Workspace File" id="shutil-example">
+  <Accordion title="Example: move a workspace file" id="shutil-example">
     ```python
     import shutil
 

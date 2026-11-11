@@ -9,7 +9,7 @@ the line, not that the line succeeded: check `exit_code`. Every HTTP error
 answers JSON in one shape, on both servers. Requests past a limit answer `429`
 with `Retry-After` ([rate limits](/home/access/http#rate-limits)).
 
-## Error Body
+## Error body
 
 ```json
 {
@@ -34,7 +34,7 @@ Detect an error by its HTTP status, never by the presence of an `error` key: a
 success body can carry an `error` field of its own, such as a finished line's
 `error` in `GET /v1/workspaces/{workspace_id}/lines/{line_id}`.
 
-## Status Codes
+## Status codes
 
 | Status | Codes | Means | Recovery |
 | --- | --- | --- | --- |
@@ -81,7 +81,7 @@ inside an NDJSON stream follow the stream's own format once the `200` is sent.
 The readiness endpoint answers `503` with `{"status": "full"}` or
 `{"status": "shutting_down"}` when the server cannot accept new workspaces.
 
-## Which Error Is Reported
+## Which error is reported
 
 A response reports one error, the first one found:
 
@@ -108,7 +108,7 @@ Request-shape errors use these messages, where `<param>` is the field's path:
 
 ## Examples
 
-### Missing or Invalid Credentials
+### Missing or invalid credentials
 
 A request without a valid token returns HTTP `401` with
 `WWW-Authenticate: Bearer`:
@@ -119,7 +119,7 @@ A request without a valid token returns HTTP `401` with
 
 Supply a valid token before retrying. See [Authentication](/api/authentication).
 
-### Workspace Identifier Conflict
+### Workspace identifier conflict
 
 Creating `demo` again with a different configuration returns HTTP `409`:
 
@@ -131,7 +131,7 @@ Choose another identifier for a different workspace. Retrying the original
 configuration with the same identifier returns HTTP `200` and the existing
 workspace, with the same response shape as a successful `201` creation.
 
-### Invalid Request Field
+### Invalid request field
 
 Sending a numeric workspace `id` returns HTTP `400`:
 
@@ -141,7 +141,7 @@ Sending a numeric workspace `id` returns HTTP `400`:
 
 Change `id` to a string before retrying.
 
-### Unknown Runtime or Machine
+### Unknown runtime or machine
 
 A shell request whose `runtime` or `machine` the workspace does not have is
 refused with HTTP `400` before anything runs:
@@ -153,7 +153,7 @@ refused with HTTP `400` before anything runs:
 The message lists the names the workspace has, or says the field must be unset
 when the workspace has none.
 
-### Policy Refusal of a File Call
+### Policy refusal of a file call
 
 A VFS call a policy refuses returns HTTP `403`:
 
@@ -175,7 +175,7 @@ A VFS call a policy refuses returns HTTP `403`:
 
 A shell line a policy refuses still returns `200`; check its `decision`.
 
-### Failed Shell Job
+### Failed shell job
 
 A shell job that fails inside the server returns HTTP `500` with the fixed
 message:
@@ -188,7 +188,7 @@ The job's own error stays readable as `error` in
 `GET /v1/workspaces/{workspace_id}/lines/{line_id}`, and in the final record of
 a stream. Check for side effects before retrying.
 
-## Shell Exit Codes
+## Shell exit codes
 
 A completed shell request can return HTTP `200` with a nonzero `exit_code`.
 Inspect `exit_code`, `stdout`, `stderr` and `decision` before treating the command

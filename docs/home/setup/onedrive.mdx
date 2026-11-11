@@ -15,7 +15,7 @@ You need an **access token** and, for app-only auth or a drive other than the
 signed-in user's default, one explicit drive selector. Pick whichever token
 path fits.
 
-### Option A: Quick Token (Graph Explorer)
+### Option A: Quick token (Graph Explorer)
 
 Fastest way to try it. The token lasts about an hour, which is plenty for a test run.
 
@@ -26,7 +26,7 @@ Fastest way to try it. The token lasts about an hour, which is plenty for a test
 This is a **delegated** token, so it works against your own `/me/drive` and you do
 **not** need a drive ID.
 
-### Option B: Interactive Device-Code Token
+### Option B: Interactive device-code token
 
 Use this to obtain a delegated token through your own app registration; the
 initial sign-in makes it a development bootstrap, not an unattended credential.
@@ -63,7 +63,7 @@ The response includes access and refresh tokens. Mirage accepts an access
 token or provider callback but does not refresh Microsoft tokens itself, so a
 long-running application must refresh through that callback.
 
-### Save the Token for the Examples
+### Save the token for the examples
 
 ```bash
 # .env.development
@@ -73,7 +73,7 @@ MS_GRAPH_DRIVE_ID=<drive id>   # optional; use at most one drive selector
 
 For SDK configuration and the other drive selectors, see [Python OneDrive](/python/vfs/onedrive) or [TypeScript OneDrive](/typescript/setup/onedrive).
 
-### Get Your Drive ID (Optional)
+### Get your drive ID (optional)
 
 <Note>
 App-only tokens cannot use `/me/drive`; set one of `drive_id`, `site_id`,

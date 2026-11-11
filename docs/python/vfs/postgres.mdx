@@ -165,15 +165,15 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Postgres mounted at `/<path
 </Tabs>
 {/* generated: vfs-md postgres end */}
 
-## Mount Mode
+## Mount mode
 
 `read` only. Postgres mounts are read-only at the VFS level.
 
-## Snapshot Behavior
+## Snapshot behavior
 
 The DSN is redacted on snapshot. Hand the mount back at load (`mounts=`, or a config over the server and CLI).
 
-## File Size and `du`
+## File size and `du`
 
 `rows.jsonl` is rendered on demand. `stat -c %s` and `ls -l` show `-` when its rendered byte length is unknown; physical table storage is never used as a file size. `stat` checks existence and type without fetching columns, row counts, or relation sizes. Planner counts cannot identify content changes, so they are not used as a content fingerprint.
 

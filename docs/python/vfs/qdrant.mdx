@@ -70,7 +70,7 @@ The mapping is config-driven; nothing about the dataset is hardcoded. Point
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table qdrant end */}
 
-### Document and Chunk Lineage
+### Document and chunk lineage
 
 Config fields use Qdrant's dotted nested-key syntax. For example, a LangChain-style
 point can be mounted by source document and named by page:
@@ -238,7 +238,7 @@ mount root is that collection:
         3.jpg
 ```
 
-### Point Files
+### Point files
 
 A point is shown as its underlying data in its original format, never as the
 embedding vector:
@@ -257,7 +257,7 @@ $ cat /fashion/Men/Shoes/White/3.json
 {"gender":"Men","articleType":"Shoes","baseColour":"White","productDisplayName":"Nike Men White Running Sneakers","id":3}
 ```
 
-## Semantic Search
+## Semantic search
 
 Search is the [`search` CLI](/python/cli/search), not a path. Register it on the
 workspace:
@@ -281,7 +281,7 @@ Nike Men White Running Sneakers
 Flags: `--top-k <n>` (default `search_limit`), `--threshold <min-score>`,
 `--method semantic` (the only supported method; `grep`/`rg` stay lexical).
 
-### Search Embedding
+### Search embedding
 
 `search` needs a vector for the query, and the config decides where it comes
 from. With `embed` set, an async `(text: str) -> list[float]` the caller brings,
@@ -294,7 +294,7 @@ the same `embedding_model` (default `sentence-transformers/all-MiniLM-L6-v2`).
 With neither, `search` refuses the query. The hook never lands in a snapshot: a
 restored mount asks for a fresh VFS.
 
-## Supported Commands
+## Supported commands
 
 All commands delegate to Mirage's shared implementations.
 
@@ -324,7 +324,7 @@ scroll each folder once more, as a listing does, and read only the `.json` and
 since the last listing is still found. A blob, a `.json` or `.txt` over 8 KiB,
 and every file for a text that is not ASCII are read as usual.
 
-## Access Pattern
+## Access pattern
 
 The mount is **read-only** (`MountMode.READ`); writes are not supported. The two
 read modes are:

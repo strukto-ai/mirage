@@ -47,13 +47,13 @@ To select another config or disable stale-write protection, pass plugin options:
 
 You can also set `MIRAGE_OPENCODE_CONFIG` or `MIRAGE_CONFIG` to the workspace config path.
 
-## Stale Writes
+## Stale writes
 
 Stale-write protection is enabled by default and isolated per OpenCode session. `read` records a content fingerprint; `write` and `edit` verify it immediately before changing the file. If the file changed, OpenCode must reread it before retrying.
 
 `bash` commands are not tracked because they can read or mutate arbitrary paths. Use the structured `read`, `write`, and `edit` tools when stale-write protection is required.
 
-## Custom Plugin
+## Custom plugin
 
 Use `@struktoai/mirage-opencode/plugin` directly when the workspace is constructed in code rather than YAML:
 
@@ -96,7 +96,7 @@ Add the dependencies to `.opencode/package.json`:
 | <code style={{ whiteSpace: 'nowrap' }}>miragePlugin</code> | Returns a native OpenCode plugin whose tools are `mirageTools(ws, options)`. |
 {/* generated: exports opencode/plugin end */}
 
-### Tool Reference
+### Tool reference
 
 Tools return text except PDF and image reads, which return OpenCode attachments.
 

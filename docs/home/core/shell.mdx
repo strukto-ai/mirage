@@ -28,7 +28,7 @@ Mirage's shell combines commands from [Core Tools](/home/core/tools) and [Data &
 | Timing | `time`, `time -p`, and `TIMEFORMAT`; CPU times are reported as zero |
 | Comments | `#` outside quotes |
 
-## Shell Commands
+## Shell commands
 
 These are common options, not an exhaustive flag reference.
 
@@ -56,11 +56,11 @@ These are common options, not an exhaustive flag reference.
 | `help` | Show help for a shell builtin: `help`, `help cd` |
 | `man` | Show command help, including registered CLI subcommands: `man ls`, `man linear issue create` |
 
-## Sessions and Permissions
+## Sessions and permissions
 
 `ws.shell(...)` keeps the session's working directory, variables, and functions between calls. Supplying `cwd` or `env` uses an isolated copy for that call. Calls on one session run in order; use separate sessions for concurrent command streams. Python accepts a cancellation event through `cancel`; TypeScript accepts an abort `signal`.
 
-### Jobs Across Instances
+### Jobs across instances
 
 A workspace runs as several instances when more than one process builds it
 under the same `workspace_id` on one shared
@@ -92,7 +92,7 @@ commands show `mirage`:
 Mirage's pids start at 4194305, past any Linux pid, so `$!`, `kill`, `wait` and
 `ps -p` take either kind.
 
-### Per-Session Mount Modes
+### Per-session mount modes
 
 Session mount modes can narrow access to `read`, `write`, or `exec` (`r`, `rw`, `rwx`). Unlisted mounts keep their configured modes. Interpreters such as `python3` and `js` require `exec`; shell scripts run with the permissions of each command they contain. Use an [agent profile](/home/profiles) to hide paths or restrict commands.
 

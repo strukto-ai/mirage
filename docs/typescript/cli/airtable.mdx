@@ -1,5 +1,5 @@
 ---
-title: Airtable
+title: airtable
 description: "Supported Airtable commands for querying and changing records and comments."
 icon: /images/airtable-logo.svg
 ---
@@ -22,7 +22,7 @@ No service mount is required. For YAML and multiple accounts, see the
 [CLI overview](/typescript/cli/index#register-a-cli).
 
 {/* BEGIN GENERATED CLI COMMANDS */}
-## Supported Commands
+## Supported commands
 
 Run `airtable <command> --help` for the supported flags and operands.
 This list is generated from Mirage's registered command tree.
@@ -41,7 +41,7 @@ This list is generated from Mirage's registered command tree.
 | `airtable comment add` | Comment on a record |
 {/* END GENERATED CLI COMMANDS */}
 
-## Read and Filter Records
+## Read and filter records
 
 ```bash
 airtable base list
@@ -58,7 +58,7 @@ API output or in the VFS's `name__id` directory names; record lines carry
 `base list` and `comment list` return JSON arrays. `base get` and `table get`
 return the same schema objects as the mount. Record commands return JSONL.
 
-## Write Records
+## Write records
 
 ```bash
 airtable record create --base appRoadmapBase001 --table tblFeatures000001 --fields '{"Name":"Search"}'
@@ -86,7 +86,7 @@ validates every line before the first request, drops computed fields from
 stdin writes, and sends batches of at most ten records. Inline `--fields`
 is sent as given. Use `--typecast` to allow Airtable's type conversion.
 
-## VFS and Limits
+## VFS and limits
 
 The optional [Airtable VFS](/typescript/setup/airtable) exposes bases and tables as
 files. Record output uses the same JSONL shape, so mounted records can feed

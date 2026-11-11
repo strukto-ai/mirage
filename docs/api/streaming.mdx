@@ -8,7 +8,7 @@ Use [Run shell command](/api/operations/shell/run-shell-command) with an
 existing workspace. Set `MIRAGE_AUTH_TOKEN` to your server's configured token, or
 omit the authorization header in local mode without a token.
 
-## Stream Command Output
+## Stream command output
 
 The server supports streaming shell output. Set `stream=true` and use
 `curl --no-buffer` to display the response as it arrives:
@@ -94,7 +94,7 @@ process.stdout.write(result.stdout)
 
 The command sorts the input and returns `a\nb\n` in `stdout`.
 
-## Write to a Running Command
+## Write to a running command
 
 A `stdin` part is one upload. To keep sending input after the line starts, from
 any request, set `open_stdin` and `stream=true`. The first record names the line:

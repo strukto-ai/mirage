@@ -8,13 +8,13 @@ Supabase Storage exposes an S3-compatible API at `https://<project-ref>.storage.
 
 ## Credentials
 
-### 1. Create an S3 Access Key
+### 1. Create an S3 access key
 
 1. Open the Supabase dashboard → your project → **Storage → Settings → S3 Access Keys**
 2. Click **New access key**, scope to the bucket(s) you want MIRAGE to see
 3. Copy the **Access key ID** and **Secret access key**, the secret is shown once
 
-### 2. Environment Variables
+### 2. Environment variables
 
 ```bash
 # .env.development
@@ -29,7 +29,7 @@ SUPABASE_SECRET_ACCESS_KEY=...
 `SUPABASE_REGION` is metadata only, Supabase Storage accepts any region string but requires one for SigV4 signing. Use the region you selected when creating the project.
 </Tip>
 
-## Node (Server-Side)
+## Node (server-side)
 
 ```bash
 pnpm add @struktoai/mirage-node
@@ -72,7 +72,7 @@ console.log(res.stdoutText)
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table supabase end */}
 
-## Browser (Presigned URLs)
+## Browser (presigned URLs)
 
 ```bash
 pnpm add @struktoai/mirage-browser
@@ -97,7 +97,7 @@ Same pattern as every other S3-compat backend: the browser calls a `presignedUrl
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table browser/supabase end */}
 
-### 1. Server: Sign URLs with the Supabase Endpoint
+### 1. Server: sign URLs with the Supabase endpoint
 
 ```ts
 import {
@@ -155,7 +155,7 @@ app.post('/presign/supabase', async (req, res) => {
 Supabase requires **path-style** URLs (`forcePathStyle: true`). Virtual-hosted style is not supported.
 </Warning>
 
-### 2. Browser: Wire It Up
+### 2. Browser: wire it up
 
 ```ts
 import { MountMode, SupabaseVFS, Workspace } from '@struktoai/mirage-browser'
@@ -177,7 +177,7 @@ const sb = new SupabaseVFS({
 const ws = new Workspace({ '/bucket/': sb }, { mode: MountMode.READ })
 ```
 
-### 3. Configure CORS on the Bucket
+### 3. Configure CORS on the bucket
 
 Supabase Storage's S3 API respects the bucket's CORS configuration, which is set in the Supabase dashboard:
 

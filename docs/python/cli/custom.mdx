@@ -11,7 +11,7 @@ or a script CLI when the program should parse its own arguments.
 Shell builtins and CLIs keep separate catalogs and dispatch. Both use
 `CommandSpec` for argument parsing.
 
-## Define a Typed Command
+## Define a typed command
 
 Each handler receives `(accessor, paths, texts, ctx)`, the shape a shell
 command takes: the installation's accessor, the operands, and the same
@@ -72,7 +72,7 @@ The same CLI can be installed for multiple accounts. Service IDs use textual
 operands; file operands use `type="path"`. Read flags through `FlagView(ctx.flags, ctx.spec)`
 so a read of an undeclared option fails rather than looking like an omitted flag.
 
-## Choose the Command Shape
+## Choose the command shape
 
 | Node | Declares | Handler input |
 | --- | --- | --- |
@@ -101,7 +101,7 @@ Policy reads it as `CommandContext.write`, so one `pre_command` method can
 refuse every writing verb.
 Descriptions, options and operands supply `--help` and `man` at every level.
 
-## Register the Program
+## Register the program
 
 Installing a CLI directly is the shortest path:
 
@@ -147,7 +147,7 @@ shell `install` or `uninstall` command, so an agent can use a CLI it was given
 but cannot remove it. A deployment that must pin the head word should enforce
 that with policy; shell functions can otherwise shadow it like they do in bash.
 
-## Serve a CLI on a Mount
+## Serve a CLI on a mount
 
 Registered on a mount, a typed CLI serves its verbs there as a command
 tree. Its leaves get the mount's accessor, so the tree declares no
@@ -185,7 +185,7 @@ with `commands=[NOTES]`. Its leaves reach the backend past the dispatcher.
 Mutating leaves must declare `write=True`, run only when the mount is
 writable, and clear cached mount listings on return.
 
-## Use Workspace Files
+## Use workspace files
 
 Build the service client in the CLI's accessor (`CLI.accessor`), from the
 install's config, so one install keeps one client for every call; the
@@ -261,7 +261,7 @@ its config and service access are opaque. An install's accessor decides which
 mounts that is: override `Accessor.reaches(peer)` to answer False for a mount's
 accessor its writes cannot change. The default reaches every mount.
 
-## Snapshots and Credentials
+## Snapshots and credentials
 
 A named typed CLI is saved by spec name. Fields declared as Pydantic secrets in
 `config_model` are redacted. Loading that snapshot must provide fresh install
@@ -314,7 +314,7 @@ The sandboxed runtimes provide files plus compute, not arbitrary networking or
 third-party packages. `runtime: local` selects the host interpreter when that
 broader authority is intentional.
 
-## Authoring Reference
+## Authoring reference
 
 The public constructors document exact types and defaults:
 [`CLI` and `CLIHandler`](https://github.com/strukto-ai/mirage/blob/main/python/mirage/commands/cli/types.py),
@@ -360,7 +360,7 @@ This follows argparse's naming conventions and supports a subset of its
 features. Positional defaults and variadic options are unsupported; `append`
 collects single option values, while `extend` flattens fixed groups.
 
-### Handler Arguments and `Context`
+### Handler arguments and `Context`
 
 | Argument or field | Handler view |
 | --- | --- |
@@ -376,7 +376,7 @@ collects single option values, while `extend` flattens fixed groups.
 | `ctx.vfs`, `ctx.session` | The session's files and live session, for verbs that need them; `None` outside a workspace. |
 
 
-## Verify a Custom CLI
+## Verify a custom CLI
 
 Check help, successful execution, a refusal and isolation between two account
 installations. Exercise VFS access with path and mount policy, and verify
