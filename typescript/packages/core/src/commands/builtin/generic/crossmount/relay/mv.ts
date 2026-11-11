@@ -30,9 +30,10 @@ import type { MountView } from '../../../../../view/types.ts'
 import { linkView, mountView } from '../../../utils/links.ts'
 
 // Whether a source moves by a rename: it and its target sit on one mount once
-// the links above both are followed, that mount's store renames, and no mount
-// sits below either, which a rename (or --exchange's swap) would leave where it
-// is. Mirrors Python's _renames.
+// the links above both are followed, that mount's store renames or the source
+// is a link (which the namespace renames), and no mount sits below either,
+// which a rename (or --exchange's swap) would leave where it is. Mirrors
+// Python's _renames.
 function renames(
   reader: NamespaceReader,
   mounts: MountView,
@@ -43,7 +44,7 @@ function renames(
   const there = parentFollowed(reader, target.virtual)
   return (
     mounts.rootOf(here) === mounts.rootOf(there) &&
-    mounts.answers(here, 'rename') &&
+    (reader.isLink(here) || mounts.answers(here, 'rename')) &&
     mounts.descendants(here).length === 0 &&
     mounts.descendants(there).length === 0
   )

@@ -45,8 +45,9 @@ def _renames(
 ) -> bool:
     """Whether a source moves by a rename: it and its target sit on one
     mount once the links above both are followed, that mount's store
-    renames, and no mount sits below either, which a rename (or
-    ``--exchange``'s swap) would leave where it is.
+    renames or the source is a link (which the namespace renames), and no
+    mount sits below either, which a rename (or ``--exchange``'s swap)
+    would leave where it is.
 
     Args:
         reader (NamespaceReader): the links as the session sees them.
@@ -58,8 +59,10 @@ def _renames(
     there = parent_followed(reader, target.virtual)
     return (
         mounts.root_of(here) == mounts.root_of(there)
-        and mounts.answers is not None
-        and mounts.answers(here, "rename")
+        and (
+            reader.is_link(here)
+            or (mounts.answers is not None and mounts.answers(here, "rename"))
+        )
         and not (mounts.descendants(here) or mounts.descendants(there))
     )
 
