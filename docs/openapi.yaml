@@ -2466,13 +2466,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is what the call returns. With `explain=true`, `explanation` says what
@@ -2575,13 +2569,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
@@ -2668,13 +2656,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
@@ -2761,13 +2743,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
@@ -2859,13 +2835,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is what the call returns. With `explain=true`, `explanation` says what
@@ -2963,13 +2933,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is what the call returns. With `explain=true`, `explanation` says what
@@ -3055,13 +3019,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is what the call returns. With `explain=true`, `explanation` says what
@@ -3142,13 +3100,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is what the call returns. With `explain=true`, `explanation` says what
@@ -3229,13 +3181,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is what the call returns. With `explain=true`, `explanation` says what
@@ -3316,13 +3262,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is what the call returns. With `explain=true`, `explanation` says what
@@ -3407,13 +3347,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
@@ -3494,13 +3428,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
@@ -3581,13 +3509,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
@@ -3668,13 +3590,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
@@ -3755,13 +3671,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
@@ -3849,13 +3759,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
@@ -3941,13 +3845,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is what the call returns. With `explain=true`, `explanation` says what
@@ -4029,13 +3927,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is what the call returns. With `explain=true`, `explanation` says what
@@ -4142,13 +4034,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is what the call returns. With `explain=true`, `explanation` says what
@@ -4238,13 +4124,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is what the call returns. With `explain=true`, `explanation` says what
@@ -4331,13 +4211,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
@@ -4438,13 +4312,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
@@ -4533,13 +4401,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - $ref: '#/components/parameters/sessionId'
-        - name: explain
-          in: query
-          description: Return what the call would do without running it.
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - $ref: '#/components/parameters/explain'
       responses:
         '200':
           description: '`result` is `null` when the call succeeds. With `explain=true`, `explanation` says
@@ -8947,6 +8809,14 @@ components:
       schema:
         type: string
       example: demo
+    explain:
+      name: explain
+      in: query
+      description: Return what the call would do without running it.
+      required: false
+      schema:
+        type: boolean
+        default: false
     sessionId:
       name: session_id
       in: query
