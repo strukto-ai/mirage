@@ -92,13 +92,18 @@ describe('core/ssh/mkdir', () => {
   })
 
   it('names a refused step as EACCES when recursive', async () => {
-    const accessor = makeFakeAccessor({
-      files: new Map(),
-      dirs: new Map([
-        ['/', {}],
-        ['/locked', {}],
-      ]),
-    })
+    const accessor = makeFakeAccessor(
+      {
+        files: new Map(),
+        dirs: new Map([
+          ['/', {}],
+          ['/srv', {}],
+          ['/srv/ws', {}],
+          ['/srv/ws/locked', {}],
+        ]),
+      },
+      '/srv//ws',
+    )
     Object.assign(await accessor.sftp(), {
       mkdir(_path: string, cb: (err: Error) => void): void {
         cb(Object.assign(new Error('Permission denied'), { code: 3 }))

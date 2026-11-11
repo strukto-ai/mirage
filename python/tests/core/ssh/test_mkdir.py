@@ -75,11 +75,12 @@ async def test_parents_name_a_file_in_the_way_as_enotdir():
 @pytest.mark.asyncio
 async def test_parents_name_a_refused_step_as_eacces():
     denied = asyncssh.SFTPPermissionDenied("Permission denied")
-    sftp = _FakeSFTP({"/", "/locked"}, refusal=denied)
+    sftp = _FakeSFTP(
+        {"/", "/srv", "/srv/ws", "/srv/ws/locked"}, refusal=denied
+    )
+    accessor = _accessor(sftp, root="/srv//ws")
     with pytest.raises(OSError) as exc:
-        await mkdir(
-            _accessor(sftp), PathSpec.from_str_path("/locked/new"), True
-        )
+        await mkdir(accessor, PathSpec.from_str_path("/locked/new"), True)
     assert (exc.value.errno, exc.value.filename) == (
         errno.EACCES,
         "/locked/new",
