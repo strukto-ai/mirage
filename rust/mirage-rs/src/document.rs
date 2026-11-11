@@ -36,6 +36,10 @@ impl Doc {
         }
     }
 
+    fn has(&self, name: &str) -> bool {
+        matches!(self, Self::Map(fields) if fields.iter().any(|(key, _)| key.named(name)))
+    }
+
     fn list(&self, where_: &str, expected: &str) -> Result<&[Doc], String> {
         match self {
             Self::Null => Ok(&[]),
@@ -458,7 +462,7 @@ fn store(raw: &Doc) -> Result<(), String> {
         }
     }
     for (old, new) in [("observer", "logs"), ("workspace", "sessions")] {
-        if !matches!(raw.get(old), Doc::Null) {
+        if raw.has(old) {
             return Err(format!(
                 "config `store.{old}` is now `store.{new}`; rename the key"
             ));
@@ -491,7 +495,10 @@ fn store(raw: &Doc) -> Result<(), String> {
             ));
         }
         if group == "logs" && block.get("type").named("redis") {
-            return Err("config `store.logs` cannot be redis: history only grows; keep it on ram or disk".into());
+            return Err(
+                "config `store.logs` cannot be redis: history only grows; keep it on ram or disk"
+                    .into(),
+            );
         }
         if group == "execution" && block.get("type").named("disk") {
             return Err("config `store.execution` cannot be disk: a job's console is a stream other processes follow; keep the execution plane on ram or redis".into());
@@ -820,6 +827,11 @@ mod tests {
             )]))
             .unwrap_err()
             .contains("`store.workspace` is now `store.sessions`")
+        );
+        assert!(
+            store(&object(vec![("observer", Doc::Null)]))
+                .unwrap_err()
+                .contains("`store.observer` is now `store.logs`")
         );
         assert!(
             store(&object(vec![(

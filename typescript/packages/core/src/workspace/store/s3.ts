@@ -35,8 +35,8 @@ import {
  * compare-read's ETag, giving S3 the same generation contract as the
  * Redis Lua script; bucket versioning (when enabled) doubles as an
  * audit trail for free. This store hosts only the sessions+meta
- * group: namespace nodes and observer events are chatty per-op planes
- * that belong on RAM or Redis, so use this store as the `workspace`
+ * group: namespace nodes and command logs are chatty per-op planes
+ * that belong elsewhere, so use this store as the `sessions`
  * group override of a RAM or Redis default store. Mirrors the Python
  * S3WorkspaceStateStore.
  */

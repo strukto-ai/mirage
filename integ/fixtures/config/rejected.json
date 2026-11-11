@@ -814,6 +814,34 @@
       }
     },
     {
+      "name": "store block: observer is now logs, even when null",
+      "error": "`store.observer` is now `store.logs`",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "store": {
+          "observer": null
+        }
+      }
+    },
+    {
+      "name": "store block: workspace is now sessions, even when null",
+      "error": "`store.workspace` is now `store.sessions`",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "store": {
+          "workspace": null
+        }
+      }
+    },
+    {
       "name": "store s3 group: hosts only sessions+meta, not the execution plane",
       "config": {
         "mounts": {
