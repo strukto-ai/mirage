@@ -15,7 +15,6 @@
 import { mountedPath, rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { eacces, eexist, enoent, enotdir } from '@struktoai/mirage-core/errors/fs'
-import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { SFTPWrapper, Stats } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { isFailure, isNoSuchFile, isPermissionDenied, joinRoot, sftpCall } from './utils.ts'
@@ -63,11 +62,13 @@ export async function mkdir(accessor: SSHAccessor, p: PathSpec, recursive = fals
       throw err
     }
   }
-  const base = rstripSlash(root).length
-  let cur = remote.startsWith('/') ? '/' : ''
-  for (const part of remote.split('/').filter(Boolean)) {
-    const step = cur === '' || cur === '/' ? cur + part : `${cur}/${part}`
-    cur = step
+  const names = remote.split('/').filter(Boolean)
+  const inside = virtual.split('/').filter(Boolean)
+  const above = names.length - inside.length
+  let at = remote.startsWith('/') ? '/' : ''
+  for (const [i, name] of names.entries()) {
+    const step = at === '' || at === '/' ? at + name : `${at}/${name}`
+    at = step
     if (await isDir(step)) continue
     try {
       await sftpCall((done) => {
@@ -78,11 +79,11 @@ export async function mkdir(accessor: SSHAccessor, p: PathSpec, recursive = fals
       // The step -p tripped on, in the kernel's words: a name in the way is
       // EEXIST at the operand and ENOTDIR above it. A step at or above the
       // configured root names the mount root.
-      const named = mountedPath(p, step.slice(base) || '/')
+      const named = mountedPath(p, `/${inside.slice(0, Math.max(0, i - above + 1)).join('/')}`)
       if (isPermissionDenied(err)) throw eacces(named)
       if (isNoSuchFile(err)) throw enoent(named)
       if (isFailure(err) && (await statRemote(sftp, step)) !== null) {
-        throw step === remote ? eexist(named) : enotdir(named)
+        throw i === names.length - 1 ? eexist(named) : enotdir(named)
       }
       throw err
     }

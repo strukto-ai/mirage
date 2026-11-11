@@ -30,10 +30,12 @@ async def mkdir(
     sftp = await accessor.sftp()
     if parents:
         remote = join_root(config.root, path.mount_path)
-        base = len(config.root.rstrip("/"))
+        names = [name for name in remote.split("/") if name]
+        inside = [name for name in path.mount_path.split("/") if name]
+        above = len(names) - len(inside)
         current = "/" if remote.startswith("/") else ""
-        for part in filter(None, remote.split("/")):
-            current = posixpath.join(current, part)
+        for i, name in enumerate(names):
+            current = posixpath.join(current, name)
             if await sftp.isdir(current):
                 continue
             try:
@@ -44,7 +46,9 @@ async def mkdir(
                 # The step -p tripped on, in the kernel's words: a name in
                 # the way is EEXIST at the operand and ENOTDIR above it. A
                 # step at or above the configured root names the mount root.
-                named = mounted_path(path, current[base:] or "/")
+                named = mounted_path(
+                    path, "/" + "/".join(inside[: max(0, i - above + 1)])
+                )
                 if isinstance(exc, asyncssh.SFTPPermissionDenied):
                     raise eacces(named) from exc
                 if isinstance(exc, asyncssh.SFTPNoSuchFile):
@@ -52,7 +56,7 @@ async def mkdir(
                 if isinstance(
                     exc, asyncssh.SFTPFailure
                 ) and await sftp.lexists(current):
-                    last = current == remote
+                    last = i == len(names) - 1
                     raise (eexist if last else enotdir)(named) from exc
                 raise
     else:
