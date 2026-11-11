@@ -55,6 +55,14 @@ describe('core/ssh/mkdir', () => {
     await expect(mkdir(accessor, spec('/d'), true)).resolves.toBeUndefined()
   })
 
+  it('fails when recursive meets a file', async () => {
+    const accessor = makeFakeAccessor({
+      files: new Map([['/f', { data: new Uint8Array() }]]),
+      dirs: new Map([['/', {}]]),
+    })
+    await expect(mkdir(accessor, spec('/f/x'), true)).rejects.toThrow()
+  })
+
   it('fails when parent missing and not recursive', async () => {
     const accessor = makeFakeAccessor({
       files: new Map(),

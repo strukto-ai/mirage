@@ -57,10 +57,12 @@ export async function mkdir(accessor: SSHAccessor, p: PathSpec, recursive = fals
     const stepRemote = joinRoot(root, cur)
     const existing = await statRemote(sftp, stepRemote)
     if (existing?.isDirectory()) continue
-    await new Promise<void>((resolveFn) => {
-      sftp.mkdir(stepRemote, () => {
-        resolveFn()
+    try {
+      await sftpCall((done) => {
+        sftp.mkdir(stepRemote, done)
       })
-    })
+    } catch (err) {
+      if (!(await statRemote(sftp, stepRemote))?.isDirectory()) throw err
+    }
   }
 }
