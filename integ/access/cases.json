@@ -29,7 +29,7 @@
   "Explain a line or a VFS call": "explain",
   "Snapshots": "snapshot",
   "Asks": "ask",
-  "History": "history"
+  "Command logs": "history"
  },
  "workspace": {
   "mounts": {
