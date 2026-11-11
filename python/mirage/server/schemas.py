@@ -145,6 +145,11 @@ class LoadWorkspaceRequest(BaseModel):
     override: dict[str, Any] | None = None
 
 
+class StopWorkspaceResponse(BaseModel):
+    id: str
+    closed_at: Instant
+
+
 class CancelLinesResponse(BaseModel):
     canceled: int
 

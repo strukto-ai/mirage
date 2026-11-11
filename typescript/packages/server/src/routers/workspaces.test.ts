@@ -18,7 +18,6 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { SignJWT } from 'jose'
 import { describe, expect, it, vi } from 'vitest'
 import { DiskWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
 import { readSnapshotTar, writeSnapshotTar } from '@struktoai/mirage-core/workspace/snapshot/tar_io'
@@ -1573,13 +1572,11 @@ describe('workspace cancel, kill, stop and start', () => {
     const app = buildApp({ stateRoot: join(root, 'state') })
     try {
       expect((await post(app, '/v1/workspaces', { ...RAM, id: 'keep' })).statusCode).toBe(201)
-      const first = await post(app, '/v1/workspaces/keep/stop')
-      expect(first.statusCode).toBe(200)
-      expect(first.json()).toEqual(
-        (await app.inject({ method: 'GET', url: '/v1/workspaces/keep' })).json(),
-      )
-      expect(first.json<{ status: string }>().status).toBe('stopped')
-      expect((await post(app, '/v1/workspaces/keep/stop')).json()).toEqual(first.json())
+      for (let i = 0; i < 2; i++) {
+        const r = await post(app, '/v1/workspaces/keep/stop')
+        expect(r.statusCode).toBe(200)
+        expect(r.json<{ id: string }>().id).toBe('keep')
+      }
       const listed = await app.inject({ method: 'GET', url: '/v1/workspaces' })
       expect(listed.json()).toMatchObject({ items: [{ id: 'keep', status: 'stopped' }] })
       // State kept with no config, as a workspace created before configs
@@ -1587,68 +1584,6 @@ describe('workspace cancel, kill, stop and start', () => {
       rmSync(join(root, 'state', 'configs', 'keep.json'))
       expect((await post(app, '/v1/workspaces/keep/stop')).statusCode).toBe(200)
       expect((await post(app, '/v1/workspaces/keep/start')).statusCode).toBe(404)
-    } finally {
-      await app.close()
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-
-  it('answers a signed-in stop as GET', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'ws-stop-signed-'))
-    const secret = 's'.repeat(32)
-    const app = buildApp({
-      authConfig: {
-        mode: 'jwt',
-        jwt: {
-          algorithm: 'HS256',
-          key: secret,
-          audiences: [],
-          authorizedParties: [],
-          clockSkewSeconds: 5,
-        },
-      },
-      stateRoot: join(root, 'state'),
-    })
-    const signed = await new SignJWT({ sub: 'alice' })
-      .setProtectedHeader({ alg: 'HS256' })
-      .setExpirationTime(Math.floor(Date.now() / 1000) + 60)
-      .sign(new TextEncoder().encode(secret))
-    const headers = { authorization: `Bearer ${signed}` }
-    try {
-      const created = await app.inject({
-        method: 'POST',
-        url: '/v1/workspaces',
-        headers,
-        payload: { ...RAM, id: 'keep' },
-      })
-      expect(created.statusCode).toBe(201)
-      const stopped = await app.inject({ method: 'POST', url: '/v1/workspaces/keep/stop', headers })
-      expect(stopped.statusCode).toBe(200)
-      expect(stopped.json<{ mounts: unknown[] }>().mounts).not.toEqual([])
-      expect(stopped.json()).toEqual(
-        (await app.inject({ method: 'GET', url: '/v1/workspaces/keep', headers })).json(),
-      )
-    } finally {
-      await app.close()
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-
-  it('answers the error when a stop cannot read what it keeps', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'ws-stop-unreadable-'))
-    const app = buildApp({ stateRoot: join(root, 'state') })
-    try {
-      expect((await post(app, '/v1/workspaces', { ...RAM, id: 'keep' })).statusCode).toBe(201)
-      const read = vi
-        .spyOn(app.registry, 'savedConfig')
-        .mockRejectedValueOnce(new Error('store down'))
-      expect((await post(app, '/v1/workspaces/keep/stop')).statusCode).toBe(500)
-      expect(app.registry.has('keep')).toBe(false)
-      expect(app.registry.removing('keep')).toBe(false)
-      read.mockRestore()
-      const again = await post(app, '/v1/workspaces/keep/stop')
-      expect(again.statusCode).toBe(200)
-      expect(again.json<{ mounts: unknown[] }>().mounts).not.toEqual([])
     } finally {
       await app.close()
       rmSync(root, { recursive: true, force: true })

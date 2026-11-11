@@ -17,6 +17,7 @@ import hashlib
 import io
 import json
 import logging
+import time
 from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from typing import Any, TypeVar
@@ -88,6 +89,7 @@ from mirage.server.schemas import (
     LoadWorkspaceRequest,
     SnapshotWorkspaceRequest,
     SnapshotWorkspaceResponse,
+    StopWorkspaceResponse,
     WorkspaceDetail,
     WorkspaceList,
     check_config,
@@ -99,6 +101,7 @@ from mirage.server.summary import (
     make_stopped_detail,
 )
 from mirage.types import Ceilings, JsonValue
+from mirage.utils.dates import ms_to_rfc3339
 from mirage.utils.ids import check_name, new_workspace_id
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.snapshot.utils import is_safe_blob_path
@@ -818,12 +821,11 @@ async def delete_workspace(workspace_id: str, request: Request) -> Response:
     return Response(status_code=204)
 
 
-@router.post("/{workspace_id}/stop", response_model=WorkspaceDetail)
+@router.post("/{workspace_id}/stop", response_model=StopWorkspaceResponse)
 async def stop_workspace(
     workspace_id: str, request: Request
-) -> WorkspaceDetail:
-    """Stop the workspace and keep its state and config for ``start``,
-    answering it as ``GET`` now does.
+) -> StopWorkspaceResponse:
+    """Stop the workspace and keep its state and config for ``start``.
 
     A stopped workspace answers as it is, so a stop can be repeated.
 
@@ -833,33 +835,14 @@ async def stop_workspace(
     """
     registry = request.app.state.registry
     account = request.state.account
-    entry = registry.visible(workspace_id, account)
-    if entry is None and not await is_stopped(request, workspace_id):
+    live = registry.visible(workspace_id, account) is not None
+    if not live and not await is_stopped(request, workspace_id):
         raise HttpError(ErrorCode.NOT_FOUND, "workspace not found")
-    kept: tuple[dict[str, JsonValue], float] | None = None
-    failure: Exception | None = None
-
-    async def read_kept() -> None:
-        # The stop is shared with any delete joining it, so a failed read
-        # is carried out to this caller rather than failing the stop.
-        nonlocal kept, failure
-        try:
-            kept = await _kept(request, workspace_id)
-        except Exception as exc:
-            failure = exc
-
-    if entry is not None or registry.removing(workspace_id):
-        await registry.stop(workspace_id, read_kept)
-    else:
-        await read_kept()
-    if failure is not None:
-        raise failure
-    if kept is not None:
-        return make_stopped_detail(workspace_id, *kept)
-    # Nothing to start from: a server that keeps no state, or state kept
-    # with no config. The workspace is stopped all the same.
-    created = entry.created_at if entry is not None else 0.0
-    return make_stopped_detail(workspace_id, None, created)
+    if live or registry.removing(workspace_id):
+        await registry.stop(workspace_id)
+    return StopWorkspaceResponse(
+        id=workspace_id, closed_at=ms_to_rfc3339(time.time() * 1000)
+    )
 
 
 @router.post("/{workspace_id}/start", response_model=WorkspaceDetail)

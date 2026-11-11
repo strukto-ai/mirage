@@ -55,6 +55,11 @@ export interface WorkspaceInternals {
   in_flight_jobs: number
 }
 
+export interface StopWorkspaceResponse {
+  id: string
+  closed_at: Instant
+}
+
 export interface WorkspaceDetail {
   id: string
   status: WorkspaceStatus
