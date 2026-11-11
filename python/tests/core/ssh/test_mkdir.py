@@ -43,10 +43,18 @@ class _FakeSFTP:
         self.dirs.add(remote)
 
 
-def _accessor(sftp: _FakeSFTP) -> SSHAccessor:
-    accessor = SSHAccessor(SSHConfig(host="example.test"))
+def _accessor(sftp: _FakeSFTP, root: str = "/") -> SSHAccessor:
+    accessor = SSHAccessor(SSHConfig(host="example.test", root=root))
     accessor._sftp = sftp
     return accessor
+
+
+@pytest.mark.asyncio
+async def test_parents_make_a_missing_configured_root():
+    sftp = _FakeSFTP({"/"})
+    accessor = _accessor(sftp, root="/srv/ws")
+    await mkdir(accessor, PathSpec.from_str_path("/a"), True)
+    assert {"/srv", "/srv/ws", "/srv/ws/a"} <= sftp.dirs
 
 
 @pytest.mark.asyncio
