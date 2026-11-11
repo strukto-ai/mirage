@@ -272,10 +272,12 @@ class MachineMounts:
     started could otherwise read through. Under ``fuse`` the host serves
     nothing, and any session may run.
 
-    Each sshfs source names the workspace and machine entry serving it and
-    the serve (``mirage-<workspace id>.<machine>-<n>:<prefix>``,
+    Each sshfs source names the workspace and machine entry serving it, the
+    instance and the serve
+    (``mirage-<workspace id>.<machine>-<instance>-<n>:<prefix>``,
     ``source_name``), so an instance unmounts only its own, and kills only
-    the sshfs of a server that ended: a prefix another sshfs still serves,
+    the sshfs of a server that ended, never one a later instance serves:
+    a prefix another sshfs still serves,
     as another workspace, or another machine entry on the same machine,
     does, refuses the line (1) rather than being taken, and one whose sshfs
     has gone is unmounted and served. A prefix whose sshfs carries this
@@ -340,7 +342,9 @@ class MachineMounts:
         self._random = f"{SSHFS_SOURCE_PREFIX}{uuid.uuid4().hex}"
         self._name = self._random
         # The prefixes served so far, numbering each sshfs's source, and
-        # each source started.
+        # each source started. The instance's own token in each, so a kill
+        # an earlier instance left running reaches none of this one's.
+        self._instance = uuid.uuid4().hex[:8]
         self._serves = 0
         self._sources: set[str] = set()
 
@@ -731,7 +735,7 @@ class MachineMounts:
 
     def _ours(self, source: str, prefix: str) -> bool:
         """Whether ``source``, mounted at ``prefix``, is an sshfs this
-        workspace served: exactly ``<name>-<n>:<prefix>``.
+        workspace served: exactly ``<name>-<instance>-<n>:<prefix>``.
 
         Args:
             source (str): a mount's source.
@@ -739,7 +743,7 @@ class MachineMounts:
         """
         serve = source[len(self._name) + 1 : len(source) - len(prefix) - 1]
         return (
-            bool(re.fullmatch("[0-9]+", serve))
+            bool(re.fullmatch("[0-9a-f]{8}-[0-9]+", serve))
             and source == f"{self._name}-{serve}:{prefix}"
         )
 
@@ -796,7 +800,7 @@ class MachineMounts:
             )
         log = single_quote(f"{SSHFS_LOG_PREFIX}_{uuid.uuid4().hex}.log")
         self._serves += 1
-        source = f"{self._name}-{self._serves}:{prefix}"
+        source = f"{self._name}-{self._instance}-{self._serves}:{prefix}"
         self._sources.add(source)
         pipe = await self._open_pipe(
             f"exec sshfs -f -o {SSHFS_OPTIONS} {single_quote(source)} {path} "
@@ -870,9 +874,9 @@ class MachineMounts:
         """Kill the sshfs of a prefix whose server ended, unless a line
         dropped it already: a program blocked on the mount then gets an
         error rather than hanging. The next line unmounts it and serves the
-        prefix again, as for any server that ended; a kill that lands late
-        reaches only this serve's sshfs, never the one serving the prefix
-        again. A kill the machine does not answer is let go after
+        prefix again, as for any server that ended; a kill that lands late,
+        even after a restart, reaches only this serve's sshfs, never the one
+        serving the prefix again. A kill the machine does not answer is let go after
         ``UNMOUNT_WAIT_SECONDS``, or when the mounts close.
 
         Args:

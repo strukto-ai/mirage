@@ -252,10 +252,10 @@ interface Served {
  * otherwise read through. Under `fuse` the host serves nothing, and any
  * session may run.
  *
- * Each sshfs source names the workspace and machine entry serving it and
- * the serve (`mirage-<workspace id>.<machine>-<n>:<prefix>`, `sourceName`),
- * so an instance unmounts only its own, and kills only the sshfs of a server
- * that ended: a prefix another sshfs still serves, as another workspace, or
+ * Each sshfs source names the workspace and machine entry serving it, the
+ * instance and the serve (`mirage-<workspace id>.<machine>-<instance>-<n>:<prefix>`,
+ * `sourceName`), so an instance unmounts only its own, and kills only the
+ * sshfs of a server that ended, never one a later instance serves: a prefix another sshfs still serves, as another workspace, or
  * another machine entry on the same machine, does, refuses the line (1)
  * rather than being taken, and one whose sshfs has gone is unmounted and
  * served. A prefix whose sshfs carries this entry's own name but which this
@@ -291,6 +291,9 @@ export class MachineMounts {
   private readonly random = `${SSHFS_SOURCE_PREFIX}${crypto.randomUUID().replaceAll('-', '')}`
   private name = this.random
   // The prefixes served so far, numbering each sshfs's source, and each source started.
+  // The instance's own token in each, so a kill an earlier instance left
+  // running reaches none of this one's.
+  private readonly instance = crypto.randomUUID().replaceAll('-', '').slice(0, 8)
   private serves = 0
   private readonly sources = new Set<string>()
   // Each kill of an ended server's sshfs still running, which close stops.
@@ -649,10 +652,10 @@ export class MachineMounts {
     return null
   }
 
-  /** Whether `source`, mounted at `prefix`, is an sshfs this workspace served: exactly `<name>-<n>:<prefix>`. */
+  /** Whether `source`, mounted at `prefix`, is an sshfs this workspace served: exactly `<name>-<instance>-<n>:<prefix>`. */
   private ours(source: string, prefix: string): boolean {
     const serve = source.slice(this.name.length + 1, source.length - prefix.length - 1)
-    return /^[0-9]+$/.test(serve) && source === `${this.name}-${serve}:${prefix}`
+    return /^[0-9a-f]{8}-[0-9]+$/.test(serve) && source === `${this.name}-${serve}:${prefix}`
   }
 
   /**
@@ -704,7 +707,7 @@ export class MachineMounts {
     }
     const log = singleQuote(`${SSHFS_LOG_PREFIX}_${crypto.randomUUID().replaceAll('-', '')}.log`)
     this.serves += 1
-    const source = `${this.name}-${String(this.serves)}:${prefix}`
+    const source = `${this.name}-${this.instance}-${String(this.serves)}:${prefix}`
     this.sources.add(source)
     const pipe = await this.openPipe(
       `exec sshfs -f -o ${SSHFS_OPTIONS} ${singleQuote(source)} ${path} 2>${log}`,
@@ -773,8 +776,8 @@ export class MachineMounts {
    * Kill the sshfs of a prefix whose server ended, unless a line dropped it
    * already: a program blocked on the mount then gets an error rather than
    * hanging. The next line unmounts it and serves the prefix again, as for
-   * any server that ended; a kill that lands late reaches only this serve's
-   * sshfs, never the one serving the prefix again. A kill the machine does
+   * any server that ended; a kill that lands late, even after a restart,
+   * reaches only this serve's sshfs, never the one serving the prefix again. A kill the machine does
    * not answer is let go after `UNMOUNT_WAIT_SECONDS`, or when the mounts
    * close.
    */

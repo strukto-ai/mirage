@@ -477,9 +477,11 @@ describe('MachineMounts', () => {
     const result = await agent.shell('python3 job.py')
     expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'ran\n'])
     const name = sourceName(ws.workspaceId, 'box')
-    expect(sandbox.pipes.map((p) => p.split(' 2>')[0])).toEqual([
-      `exec sshfs -f -o ${SSHFS_OPTIONS} '${name}-1:/data' '/data'`,
-      `exec sshfs -f -o ${SSHFS_OPTIONS} '${name}-2:/my notes' '/my notes'`,
+    const pipes = sandbox.pipes.map((p) => p.split(' 2>')[0] ?? '')
+    const instance = /-([0-9a-f]{8})-1:\/data'/.exec(pipes[0] ?? '')?.[1] ?? ''
+    expect(pipes).toEqual([
+      `exec sshfs -f -o ${SSHFS_OPTIONS} '${name}-${instance}-1:/data' '/data'`,
+      `exec sshfs -f -o ${SSHFS_OPTIONS} '${name}-${instance}-2:/my notes' '/my notes'`,
     ])
     await agent.shell('python3 again.py')
     expect(sandbox.pipes).toHaveLength(2)
@@ -708,7 +710,7 @@ describe('MachineMounts', () => {
     })
     expect((await one.shell('python3 job.py')).exitCode).toBe(0)
     const stale = first.table.get('/data')?.[0] ?? ''
-    expect(stale).toBe('mirage-w_201.box-1:/data')
+    expect(stale).toMatch(/^mirage-w_201\.box-[0-9a-f]{8}-1:\/data$/)
     // The host restarted: the first instance never closes, and its sshfs runs on.
     const second = sharing(first, 'ssh')
     const ws = workspace(second, [], undefined, undefined, 'w 1')
@@ -720,13 +722,19 @@ describe('MachineMounts', () => {
       second.commands.indexOf("fusermount3 -uz '/data' || fusermount -uz '/data'"),
     )
     expect(second.served()).toEqual(['/data', '/my notes'])
+    // A kill the first instance started as it went lands late: it reaches
+    // the sshfs it named, not the one the second serves the prefix with.
+    const fresh = second.table.get('/data')?.[0] ?? ''
+    expect(fresh).not.toBe(stale)
+    await first.execLine(killLine(stale))
+    expect(second.running.has(fresh)).toBe(true)
     await ws.close()
     expect(first.table.size).toBe(0)
   })
 
   it('fails loud when the mount a restarted instance left cannot be unmounted', async () => {
     const sandbox = new FakeMachine('ssh')
-    sandbox.table.set('/data', ['mirage-w1.box-1:/data', 'fuse.sshfs'])
+    sandbox.table.set('/data', ['mirage-w1.box-0123abcd-1:/data', 'fuse.sshfs'])
     sandbox.refuseUnmount = true
     const ws = workspace(sandbox, [], undefined, undefined, 'w1')
     const result = await (await ws.session('agent', { profile: 'agent' })).shell('python3 job.py')
