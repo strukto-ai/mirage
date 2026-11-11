@@ -61,7 +61,7 @@
     "@aws-sdk/client-secrets-manager": "^3.1121.0",
     "@struktoai/mirage-core": "workspace:*",
     "dotenv": "^16.6.1",
-    "fast-xml-parser": "^5.9.0",
+    "fast-xml-parser": "^5.12.0",
     "fast-xml-validator": "^1.4.0",
     "http-proxy-agent": "^7.0.2",
     "https-proxy-agent": "^7.0.6",
