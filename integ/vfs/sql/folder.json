@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "id": "sql_folder_and_whole_database_show_one_tree",
+      "seq": 1,
+      "targets": ["sql-folder"],
+      "command": "printf hi > /work/a.txt && ls /db && cat /db/work/a.txt; echo; printf yo > /db/work/b.txt && ls /work && cat /work/b.txt; echo",
+      "expect": { "exit": 0, "stdout": "work\nhi\na.txt\nb.txt\nyo\n", "stderr": "" }
+    },
+    {
+      "id": "sql_folder_lists_only_its_own_folder",
+      "seq": 2,
+      "targets": ["sql-folder"],
+      "command": "printf k > /db/keep && printf w > /work/w && mkdir -p /db/work/sub && ls -F /work && ls -F /db",
+      "expect": { "exit": 0, "stdout": "a.txt\nb.txt\nsub/\nw\nkeep\nwork/\n", "stderr": "" }
+    }
+  ]
+}
