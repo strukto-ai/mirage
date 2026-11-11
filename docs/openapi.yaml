@@ -2802,7 +2802,7 @@ paths:
                   description: The bytes, base64-encoded.
                 offset:
                   type: integer
-                  description: Byte offset to start reading at. Defaults to `0`.
+                  description: Byte offset to start writing at.
               required:
                 - path
                 - data
