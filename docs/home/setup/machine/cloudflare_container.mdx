@@ -1,0 +1,112 @@
+---
+title: Cloudflare Container
+icon: /images/cloudflare-logo.svg
+description: Run captured programs in a Cloudflare Container owned by the workspace's Durable Object.
+---
+
+The `cloudflare_container` machine provider reaches the
+[Cloudflare Container](https://developers.cloudflare.com/containers/) a
+Durable Object owns, and the `remote` runtime runs captured programs in it.
+Give each workspace its own Durable Object and it gets a container of its
+own. Your Durable Object decides when the container starts and stops; Mirage
+asks it for a running container and runs programs there. TypeScript on
+Cloudflare Workers only.
+
+## Installation
+
+```bash
+npm install @struktoai/mirage-cloudflare @struktoai/mirage-core
+```
+
+Set the Worker up as the [Cloudflare quickstart](/typescript/cloudflare-quickstart)
+does, then give the Durable Object class a container in your wrangler config:
+
+```jsonc wrangler.jsonc
+{
+  "containers": [
+    { "class_name": "WorkspaceObject", "image": "./Dockerfile", "max_instances": 5 },
+  ],
+}
+```
+
+Start the image from a Debian or Ubuntu base, which has the shell tools
+Mirage's own lines use, and add `sshfs` and `fuse3` for `mountType: 'ssh'`:
+
+```dockerfile Dockerfile
+FROM ubuntu:24.04
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends fuse3 sshfs python3 \
+ && rm -rf /var/lib/apt/lists/*
+CMD ["sleep", "infinity"]
+```
+
+## Usage
+
+Build the handle in the Durable Object, from its own `ctx.container` and a
+function that starts the container when it is not running:
+
+```typescript src/worker.ts
+import { DurableObject } from 'cloudflare:workers'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-cloudflare'
+import { ContainerMachine } from '@struktoai/mirage-cloudflare/machine/container/handle'
+import { RemoteRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
+
+export class WorkspaceObject extends DurableObject {
+  private readonly ws = new Workspace(
+    { '/data': new RAMVFS() },
+    {
+      mode: MountMode.EXEC,
+      machines: {
+        box: new ContainerMachine('box', { mountType: 'ssh' }, this.ctx.container, async () => {
+          if (!this.ctx.container?.running) this.ctx.container?.start({ enableInternet: false })
+        }),
+      },
+      runtimes: [
+        new RemoteRuntime({ captures: ['@python', '@external'], machine: 'box' }),
+        'workspace',
+      ],
+    },
+  )
+
+  async fetch(request: Request): Promise<Response> {
+    const { command } = (await request.json()) as { command: string }
+    const result = await this.ws.shell(command)
+    return Response.json({ exit: result.exitCode, stdout: result.stdoutText })
+  }
+}
+```
+
+Mirage calls the start function the first time it reaches the machine, and
+again the first time after the container has stopped: for a line that runs
+there, and for `ps`, `kill` and the like when they ask it. An error it
+throws, such as a quota of your own, fails that line with the error's
+message.
+
+The start function decides everything about the container: its image,
+instance type and network (`enableInternet`). None of them is a config
+field, so a `machines:` entry takes only `env` and `mount_type`.
+
+A `machines:` entry in YAML or a saved workspace that names
+`provider: cloudflare_container` builds a handle with no container. Replace
+it with one built as above before creating the workspace; otherwise its
+first line fails and says how to build the handle.
+
+## Connecting the workspace
+
+Use [`mountType: 'ssh'`](/home/setup/machine/overview#connecting-the-workspace):
+Mirage serves the workspace's mounts through the container's exec pipe and
+the container mounts each with `sshfs`. No port, key or network is needed,
+so it works in a container with `enableInternet: false`.
+
+## Notes
+
+- The container's own disk is scratch: it is gone when the container stops.
+  Files a program should keep belong in a mounted folder.
+- If the container stops while a line runs, the line exits 129 and says the
+  container stopped. The next line starts it again.
+- The first line after a start waits for the container to answer, up to 10
+  seconds.
+- Output comes back as the program wrote it, binary included, with stdout
+  and stderr separate. Without piped input, stdin starts closed.
+- Closing the workspace leaves a running container running and starts no
+  stopped one. Stop it from the Durable Object.

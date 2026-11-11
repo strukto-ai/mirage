@@ -27,6 +27,7 @@ import {
   Workspace,
   type D1DatabaseLike,
 } from '../src/index.ts'
+import { knownProviders } from '@struktoai/mirage-core/machine/registry'
 import { PipeServer } from '@struktoai/mirage-core/mount/sftp'
 import type { SqlDriver } from '@struktoai/mirage-core/vfs/sql/types'
 
@@ -203,6 +204,7 @@ export default {
     const { pathname } = new URL(request.url)
     if (pathname === '/follow') return follow((await request.json()) as Follow)
     if (pathname === '/sftp') return sftpRead()
+    if (pathname === '/machines') return Response.json(knownProviders())
     if (pathname === '/sql') {
       const run = (await request.clone().json()) as SqlRun
       if (run.on === 'd1') return sqlLines(new D1SqlDriver(env.DB), run)

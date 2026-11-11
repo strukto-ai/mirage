@@ -34,10 +34,14 @@ const NODE_PROVIDERS: readonly string[] = [
   'ssh',
 ]
 
+// The providers @struktoai/mirage-cloudflare registers when it is imported.
+const CLOUDFLARE_PROVIDERS: readonly string[] = ['cloudflare_container']
+
 /**
  * Register a provider's handle class. Each provider module calls it as it
- * loads: e2b's in core, the rest in @struktoai/mirage-node. Python reaches
- * its providers by module path (`MACHINE_MODULES`) instead.
+ * loads: e2b's in core, cloudflare_container's in
+ * @struktoai/mirage-cloudflare, the rest in @struktoai/mirage-node. Python
+ * reaches its providers by module path (`MACHINE_MODULES`) instead.
  *
  * @param provider the name a `machines:` entry's `provider` spells.
  * @param cls the handle class.
@@ -61,9 +65,14 @@ export function knownProviders(): string[] {
 export function machineClass(provider: string): MachineClass {
   const cls = PROVIDERS[provider]
   if (cls !== undefined) return cls
-  if (NODE_PROVIDERS.includes(provider))
+  const home = NODE_PROVIDERS.includes(provider)
+    ? '@struktoai/mirage-node'
+    : CLOUDFLARE_PROVIDERS.includes(provider)
+      ? '@struktoai/mirage-cloudflare'
+      : null
+  if (home !== null)
     throw new Error(
-      `machine provider '${provider}' lives in @struktoai/mirage-node; import that package to register it`,
+      `machine provider '${provider}' lives in ${home}; import that package to register it`,
     )
   const known = knownProviders()
     .map((p) => `'${p}'`)
