@@ -26,6 +26,7 @@ import {
   stopLine,
 } from '@struktoai/mirage-core/machine/constants'
 import { ConnectionLostError } from '@struktoai/mirage-core/machine/errors'
+import { logger } from '@struktoai/mirage-core/machine/handle'
 import { buildMachine } from '@struktoai/mirage-core/machine/registry'
 import { OPEN } from '@struktoai/mirage-core/mount/constants'
 import '@struktoai/mirage-core/mount/sftp'
@@ -92,6 +93,11 @@ function guardedPoints(argv: readonly string[]): string[] {
 
 type Program = (proc: FakeProcess) => Promise<number> | number
 
+// What a fake's own cleanup could not do: logged, not thrown, so a test still sees it.
+function noted(error: unknown): void {
+  logger.debug?.(`fake container: ${String(error)}`)
+}
+
 /**
  * A process a fake container's exec starts: `program` scripts it over real
  * output streams. Its stdin keeps no queue of its own, so a write sent
@@ -157,8 +163,8 @@ class FakeProcess implements ExecProcess {
       this.dead.promise,
     ]).finally(() => {
       this.exited = true
-      this.out.close().catch(() => undefined)
-      this.err.close().catch(() => undefined)
+      this.out.close().catch(noted)
+      this.err.close().catch(noted)
     })
   }
 
@@ -242,7 +248,7 @@ class FakeContainer implements Container {
     this.onExit()
     const was = this.exited
     this.exited = deferred()
-    was.promise.catch(() => undefined)
+    was.promise.catch(noted)
     if (error === undefined) was.resolve(undefined)
     else was.reject(error)
   }
@@ -441,10 +447,7 @@ describe('ContainerMachine output after a line', () => {
     })
     abort.abort()
     await expect(line).rejects.toMatchObject({ name: 'AbortError' })
-    await box
-      .ran('parent')
-      .complain('after')
-      .catch(() => undefined)
+    await box.ran('parent').complain('after').catch(noted)
     await new Promise((resolve) => setTimeout(resolve, 10))
     expect(DEC.decode(concat(got))).toBe('before')
   })
