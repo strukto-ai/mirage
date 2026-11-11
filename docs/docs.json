@@ -132,8 +132,15 @@
               "home/configuration/server",
               "home/configuration/workspace",
               "home/configuration/session",
-              "home/credentials",
               "home/limits"
+            ]
+          },
+          {
+            "group": "Credentials",
+            "pages": [
+              "home/credentials",
+              "home/credentials/aws-secrets-manager",
+              "home/credentials/1password"
             ]
           },
           {
