@@ -10,7 +10,7 @@ SeaweedFS serves an S3-compatible gateway (the `weed s3` command, default port
 `8333`). Access keys are defined in the gateway's S3 config (`-s3.config`), or
 the gateway can run without authentication for local development.
 
-### 1. Get an access key
+### 1. Get an Access Key
 
 1. Start the S3 gateway, e.g. `weed server -s3` or `weed s3 -filer=localhost:8888`
 1. If you configured `-s3.config`, copy an identity's **accessKey** and **secretKey**
@@ -18,7 +18,7 @@ the gateway can run without authentication for local development.
 
 SeaweedFS uses path-style addressing, so the `endpoint_url` is required.
 
-### 2. Set environment variables
+### 2. Set Environment Variables
 
 ```bash
 # .env.development

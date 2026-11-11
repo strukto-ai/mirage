@@ -31,11 +31,11 @@ await ws.shell('echo persistent | tee /data/note.txt')
 | --- | --- | --- |
 | `root` | `''` | Subdirectory under the OPFS root. Useful to namespace multiple workspaces. |
 
-## Mount mode
+## Mount Mode
 
 `read`, `write`, `exec`.
 
-## Storage and quotas
+## Storage and Quotas
 
 The browser sets per-origin quotas (typically a fraction of free disk, single-digit GB on most setups). Hitting it raises `QuotaExceededError`.
 

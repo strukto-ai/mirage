@@ -10,7 +10,7 @@ commands work on the service. [Custom VFS](/home/setup/custom-vfs) lists every
 method, with examples for a writable VFS and for grep on the service's own
 search.
 
-## Write one
+## Write One
 
 ```ts
 import { Accessor, BaseVFS, FileStat, type PathSpec, Workspace } from '@struktoai/mirage-node'
@@ -62,7 +62,7 @@ costs one request. Use `path.vfsPath` to address the service and
 `path.virtual` for the workspace path. Set `FileStat.size` to the length of
 the bytes `read` returns, or `null` when it is unknown.
 
-## Add functions as the service grows
+## Add Functions as the Service Grows
 
 Every other function is optional. Override one, and the commands that need it
 start working; leave it out, and those commands answer
@@ -80,7 +80,7 @@ The mount mode still decides whether a write may run. `read` may return an
 async iterable of bytes for a large file, and `write` receives one when a
 program's output streams into the mount.
 
-## Plug in the service's search
+## Plug in the Service's Search
 
 `filesContaining` and `linesContaining` hand Mirage the service's own search.
 `grep` and `rg` ask them which files or lines can hold the text and read only
@@ -168,7 +168,7 @@ functions, and which built-in VFSs answer them.
 A service action that is not a file, such as a JQL search or adding a
 comment to an issue, belongs in a [CLI](/typescript/cli/custom), next to the mount.
 
-## Use it in YAML
+## Use It in YAML
 
 A workspace YAML mounts the class by its file and name:
 

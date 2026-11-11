@@ -61,7 +61,7 @@ modes are supported.
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table onedrive end */}
 
-### Naming the drive
+### Naming the Drive
 
 `drive_id`, `site_id`, `group_id` and `user_id` are four ways of saying which
 drive the mount is, so set **at most one**. Setting two raises at config time
@@ -70,7 +70,7 @@ much later as an unexplained 404. Setting none means `/me/drive`, the
 signed-in user's own drive, which requires delegated auth; app-only auth must
 set one selector and the permissions to read that target.
 
-### The service root
+### The Service Root
 
 Mounts address `https://graph.microsoft.com/v1.0` unless `graph_base_url` says
 otherwise. Set it to reach anything else: a sovereign cloud, a private
@@ -309,7 +309,7 @@ time after it lands, so a file that holds the word can be left out: an office
 file, PDF or archive, the end of a large file, or a word Graph splits
 differently (`foo.bar`).
 
-## Scoping a VFS to a folder
+## Scoping a VFS to a Folder
 
 Pass `key_prefix: str | None = None` to `OneDriveConfig` to transparently scope
 every operation to a sub-folder of the drive:

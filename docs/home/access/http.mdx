@@ -8,7 +8,7 @@ Run the Python or TypeScript server to access your Mirage workspaces over HTTP.
 This guide covers setup, authentication, limits, and server operations.
 Use the [API reference](/api/reference) for endpoint fields and responses.
 
-## Launch a server
+## Launch a Server
 
 Set a token in the server's environment before starting the process:
 
@@ -73,7 +73,7 @@ refuses a browser page served from any other origin, a page on another port of
 are on the [Python](/python/access/server) and [TypeScript](/typescript/access/server)
 server pages.
 
-## Verify the connection
+## Verify the Connection
 
 From another terminal, check that the server is running:
 
@@ -90,7 +90,7 @@ For workspace creation and command execution, see
 [Run shell command](/api/operations/shell/run-shell-command).
 Replace the example API host with your server's base URL.
 
-## Configure authentication
+## Configure Authentication
 
 `MIRAGE_AUTH_MODE` picks what the server accepts on its HTTP, MCP and RPC routes.
 
@@ -127,7 +127,7 @@ Every token needs `exp` and `sub`. A token with `aud` must name an entry in
 
 Set one of the JWKS URL or a fixed key, not both.
 
-<Accordion title="Accept both app session tokens and OAuth access tokens">
+<Accordion title="Accept Both App Session Tokens and OAuth Access Tokens">
   A token with `aud` must name an entry in `MIRAGE_JWT_AUDIENCE`. A token
   without `aud` needs an `azp` in `MIRAGE_JWT_AUTHORIZED_PARTIES` when that is
   set, and is refused when only an audience is set. So one server can accept an
@@ -154,7 +154,7 @@ workspaces it created. Another account's workspace, session or ask returns
 HTTP 404 Not Found, matching a missing resource. An [SSH key](/home/access/ssh#auth-optional)
 joins an account with its `mirage-account` option.
 
-<Accordion title="What else an account changes">
+<Accordion title="What Else an Account Changes">
   - `GET /v1/workspaces` lists only the caller's.
   - A stored workspace reopens after a restart only for its owner. One stored
     before the server used `jwt` mode has no owner, and no account can create
@@ -171,7 +171,7 @@ joins an account with its `mirage-account` option.
   `POST /v1/daemon/shutdown`.
 </Warning>
 
-## Rate limits
+## Rate Limits
 
 By default, the server allows 1000 requests per minute per client IP, counted
 before authentication so rejected tokens consume the same budget. Configured
@@ -227,7 +227,7 @@ const app = buildApp({
 ```
 </CodeGroup>
 
-## Server policies
+## Server Policies
 
 Apply server policies to every workspace the server builds. A workspace's own
 configuration cannot remove these policies. See
@@ -246,9 +246,9 @@ When you build the server in code, pass its policies through
 A workspace's [network configuration](/home/configuration#network) controls
 where its connections may go.
 
-## Monitor the server
+## Monitor the Server
 
-### Health and readiness
+### Health and Readiness
 
 Use `/v1/health` for a load balancer's liveness check. Use
 `/v1/daemon/ready` for readiness: it returns `200` while the server accepts new
@@ -261,7 +261,7 @@ Readiness and shutdown control the server process.
 The server records workspace, session, command, and refusal metrics under the
 OpenTelemetry meter `mirage.server`. Configure an SDK and exporter to collect them.
 
-<Accordion title="Configure metric collection">
+<Accordion title="Configure Metric Collection">
 
 The server records its metrics through [OpenTelemetry](https://opentelemetry.io/docs/concepts/signals/metrics/),
 under the meter `mirage.server`. Nothing is sent until the process sets up an
@@ -306,7 +306,7 @@ const app = buildApp()
 
 </Accordion>
 
-### Shut down
+### Shut Down
 
 Request a graceful shutdown of a server you operate:
 
@@ -320,7 +320,7 @@ The daemon shuts down through its exit hook. A server created in code needs an
 it keeps serving. See the [Python](/python/access/server) or
 [TypeScript](/typescript/access/server) server configuration.
 
-## Lines, jobs and processes
+## Lines, Jobs and Processes
 
 Inspect active and recently completed work with [List commands](/api/operations/lines/list-commands),
 [List jobs](/api/operations/jobs/list-jobs), and
@@ -334,8 +334,8 @@ ended records. See those endpoint pages for retention, filters, and response fie
 See [Streaming and stdin](/api/streaming) in the API reference for output
 records, cancellation, and multipart input examples.
 
-## Next steps
+## Next Steps
 
-<Card title="API reference" icon="list" href="/api/reference">
+<Card title="API Reference" icon="list" href="/api/reference">
   Look up request fields, response schemas, and endpoint examples.
 </Card>

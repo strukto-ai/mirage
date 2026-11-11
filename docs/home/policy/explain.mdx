@@ -8,7 +8,7 @@ The agent meets policy two ways: the answer it reads when an action is
 refused, and explain, which says what a line or a VFS call would do
 without running it.
 
-## What the agent reads
+## What the Agent Reads
 
 A refusal reads as a real terminal's. The reason travels beside it.
 
@@ -35,7 +35,7 @@ agent adapters serve, add one line to their text: `policy denied: <reason>`,
 or `requires approval: <reason> (ask <id>)`. A hidden path adds nothing,
 here or in explain: the agent never learns it exists.
 
-### Which tools the agent gets
+### Which Tools the Agent Gets
 
 `session.tools.names()` lists only the tools the session's profile leaves
 it: `shell` needs a command the allow list allows, `ls` and `grep`
@@ -74,7 +74,7 @@ too, through MCP, HTTP, RPC or the CLI:
 Every entry point returns the same JSON schema. Explain reads the line only, so
 stdin, `cwd`, `runtime` and a background job are refused with it.
 
-### What it evaluates
+### What It Evaluates
 
 Explain stops before anything runs, evaluating only pre-execution checks:
 
@@ -87,7 +87,7 @@ The `post_` methods need a result. A line's file calls reach `pre_vfs` only
 when the line runs; explain a specific VFS call to see its admission result
 without executing the line.
 
-### What comes back
+### What Comes Back
 
 With a profile that denies `/data/keys/*`:
 
@@ -121,7 +121,7 @@ the command line word by word as policies read it (see
 command's `runtime` names it. A program only `@external` takes (`make`, `gcc`) names the runtime
 that takes it.
 
-### A line
+### A Line
 
 `mirage shell --explain` prints the tree:
 

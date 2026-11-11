@@ -1,5 +1,5 @@
 ---
-title: linear
+title: Linear
 description: "Supported Linear commands for issues, comments, teams, projects and search."
 icon: /images/linear-logo.svg
 ---
@@ -24,7 +24,7 @@ No service mount is required. For YAML and multiple accounts, see the
 [CLI overview](/python/cli/index#register-a-cli).
 
 {/* BEGIN GENERATED CLI COMMANDS */}
-## Supported commands
+## Supported Commands
 
 Run `linear <command> --help` for the supported flags and operands.
 This list is generated from Mirage's registered command tree.
@@ -63,7 +63,7 @@ This list is generated from Mirage's registered command tree.
 | `linear search` | Search issues by text |
 {/* END GENERATED CLI COMMANDS */}
 
-## Find work
+## Find Work
 
 ```bash
 linear team list
@@ -82,7 +82,7 @@ Issues take a positional key such as `ENG-42` or a raw ID. `--team` accepts
 a team key, name or ID. Use the list commands to discover project, cycle,
 label and document IDs.
 
-## Update work
+## Update Work
 
 ```bash
 linear issue create --team ENG --title "Fix login" --description "Reproduction steps"
@@ -108,7 +108,7 @@ linear comment update --comment COMMENT_ID --body "Reviewed"
 Descriptions and comment bodies can come from stdin. Issue creation requires
 `--team` and `--title`; updates use the values explicitly supplied.
 
-## Issue relations
+## Issue Relations
 
 ```bash
 linear issue relation add ENG-42 blocks ENG-43
@@ -158,7 +158,7 @@ relation names and missing confirmation as usage errors with exit 2, and missing
 entities with exit 3. Its authentication and availability failures use exits 4
 and 5. Error wording also follows the virtual CLI rather than upstream text.
 
-## VFS and limits
+## VFS and Limits
 
 The [Linear VFS](/python/vfs/linear) lets agents browse the same service
 as files. The CLI takes service IDs and its own config; piping a mounted

@@ -20,7 +20,7 @@ A server's programs read no workspace files: at `pre_workspace` the
 workspace does not exist yet, and its `ctx` is the `config` and the
 `caller`.
 
-## A profile's policy
+## A Profile's Policy
 
 Save these files together. Install Monty as described in [Runtimes](#runtimes).
 The selected profile runs `guard.py` before each command and refuses `rm`.
@@ -84,7 +84,7 @@ profiles: {
 ```
 </CodeGroup>
 
-## The program
+## The Program
 
 A program defines a function named for its method at the top level,
 `def pre_command(ctx)` at `pre_command`, and Mirage calls it after the
@@ -141,7 +141,7 @@ A session record and a snapshot keep the pointer, never the value it read. A
 source that cannot answer refuses the action, as a failed program does.
 `MIRAGE_POLICY_CTX` cannot be set here.
 
-## Host functions
+## Host Functions
 
 A program on monty can call functions the host hands the workspace, by
 name. They are passed in code, never in a document or over the server API,
@@ -241,7 +241,7 @@ sets most of these fields;
 [what the agent controls](/home/policy/policies#what-the-agent-controls)
 says which ones a program can trust.
 
-## Files and the session
+## Files and the Session
 
 A program reads the workspace as the session it judges for:
 
@@ -327,7 +327,7 @@ $ python3 /s3/clean.py
 python3: Permission denied
 ```
 
-## When a program fails
+## When a Program Fails
 
 A program that defines no function for its method, exits non-zero, runs
 past 10 seconds, returns anything but an answer its method can give, or

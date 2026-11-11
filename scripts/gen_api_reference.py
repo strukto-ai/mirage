@@ -209,7 +209,7 @@ def render(doc: dict[str, Any]) -> str:
         doc (dict[str, Any]): the OpenAPI document.
     """
     header = """---
-title: API reference
+title: API Reference
 description: Find endpoints by resource, path, parameter, or response field.
 icon: list
 ---

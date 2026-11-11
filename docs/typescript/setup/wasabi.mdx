@@ -8,7 +8,7 @@ Wasabi uses the S3 API with AWS Signature V4 against `https://s3.<region>.wasabi
 
 Credentials (Wasabi access key pair) are created the same way in both runtimes, see [Wasabi Credentials](/home/setup/wasabi).
 
-## Node (server-side)
+## Node (Server-Side)
 
 ```bash
 pnpm add @struktoai/mirage-node
@@ -49,7 +49,7 @@ console.log(res.stdoutText)
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table wasabi end */}
 
-## Browser (presigned URLs)
+## Browser (Presigned URLs)
 
 ```bash
 pnpm add @struktoai/mirage-browser
@@ -73,7 +73,7 @@ The browser `WasabiVFS` is secret-free, your backend signs each operation using 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table browser/wasabi end */}
 
-### 1. Server: sign URLs with the Wasabi endpoint
+### 1. Server: Sign URLs with the Wasabi Endpoint
 
 ```ts
 import {
@@ -129,7 +129,7 @@ app.post('/presign/wasabi', async (req, res) => {
 For `us-east-1` the endpoint is `https://s3.wasabisys.com` (no region segment).
 </Note>
 
-### 2. Browser: wire it up
+### 2. Browser: Wire It Up
 
 ```ts
 import { MountMode, WasabiVFS, Workspace } from '@struktoai/mirage-browser'

@@ -1,5 +1,5 @@
 ---
-title: Security limits
+title: Security Limits
 description: The limits that keep one agent's lines from using up what other agents and the host share.
 icon: shield-halved
 ---
@@ -20,7 +20,7 @@ Three layers set them:
   sessions, field by field over the workspace's. It may raise a workspace's
   value as well as lower it; only a host ceiling holds it.
 
-## What each limit stops
+## What Each Limit Stops
 
 | Case | Limit | Default | What the line sees |
 | --- | --- | --- | --- |
@@ -56,7 +56,7 @@ Some bounds are fixed:
   [OpenTelemetry](/home/infrastructure/history#send-it-to-opentelemetry),
   or as many as `MIRAGE_TRACE_MAX_SPANS` says.
 
-## Set them on a workspace
+## Set Them on a Workspace
 
 ```yaml
 max_memory: 32MB
@@ -76,7 +76,7 @@ session 64 processes and 2-minute lines. See
 [configuration](/home/configuration), [profiles](/home/profiles) and
 [output limits](/home/core/output-limits).
 
-## Set the host's ceilings
+## Set the Host's Ceilings
 
 A tenant controls its own workspace's config and profiles, so a host that
 runs other people's agents holds them under ceilings. Each comes from the

@@ -29,7 +29,7 @@ No service mount is required. For YAML and multiple accounts, see the
 [CLI overview](/python/cli/index#register-a-cli).
 
 {/* BEGIN GENERATED CLI COMMANDS */}
-## Supported commands
+## Supported Commands
 
 Run `himalaya <command> --help` for the supported flags and operands.
 This list is generated from Mirage's registered command tree.
@@ -55,7 +55,7 @@ This list is generated from Mirage's registered command tree.
 | `himalaya message forward` | Forward a message. Aliases: `fwd`. |
 {/* END GENERATED CLI COMMANDS */}
 
-## Triage and read
+## Triage and Read
 
 ```bash
 himalaya envelope list -m INBOX --page 1 --page-size 10
@@ -94,7 +94,7 @@ spaces needs literal double quotes inside the shell quotes, as above.
 A malformed query exits 1 before contacting the server, and the report points
 at where it stopped.
 
-## Compose, reply and send
+## Compose, Reply and Send
 
 ```bash
 himalaya message compose --to you@example.org --subject Report --body 'See attached' --attach /work/report.pdf
@@ -117,7 +117,7 @@ Forward prefixes the subject with `Fwd:` and keeps `References`. Both accept
 `--posting-style top|bottom|none` and `--quote-headline`. There is no reply-all
 switch; supply the extra recipients through `--cc`.
 
-## Save drafts and sent copies
+## Save Drafts and Sent Copies
 
 ```bash
 himalaya message compose --to you@example.org --body Draft --save Drafts
@@ -134,7 +134,7 @@ on a composer, it saves a draft and sends nothing.
 1 and says the message was already sent, so do not retry it. Saving a draft
 without sending fails normally if IMAP refuses it.
 
-## VFS and limits
+## VFS and Limits
 
 The optional [Email VFS](/python/vfs/email) exposes the mailbox as files.
 Reading a message does not mark it seen. The CLI uses its own account config;

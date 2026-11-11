@@ -8,7 +8,7 @@ DigitalOcean Spaces uses the S3 API with AWS Signature V4 against `https://<regi
 
 Credentials (Spaces access key pair) are created the same way in both runtimes, see [DigitalOcean Credentials](/home/setup/digitalocean).
 
-## Node (server-side)
+## Node (Server-Side)
 
 ```bash
 pnpm add @struktoai/mirage-node
@@ -49,7 +49,7 @@ console.log(res.stdoutText)
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table digitalocean end */}
 
-## Browser (presigned URLs)
+## Browser (Presigned URLs)
 
 ```bash
 pnpm add @struktoai/mirage-browser
@@ -73,7 +73,7 @@ The browser `DigitalOceanVFS` is secret-free, your backend signs each operation 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table browser/digitalocean end */}
 
-### 1. Server: sign URLs with the Spaces endpoint
+### 1. Server: Sign URLs with the Spaces Endpoint
 
 ```ts
 import {
@@ -125,7 +125,7 @@ app.post('/presign/spaces', async (req, res) => {
 })
 ```
 
-### 2. Browser: wire it up
+### 2. Browser: Wire It Up
 
 ```ts
 import { DigitalOceanVFS, MountMode, Workspace } from '@struktoai/mirage-browser'

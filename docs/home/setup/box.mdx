@@ -38,7 +38,7 @@ The `BoxTokenManager` keeps the latest token in memory; pass `onRefreshTokenRota
 want to persist it across restarts (the browser example does this with `localStorage`).
 </Note>
 
-## Quick Start: Developer Token (60 minutes, no OAuth)
+## Quick Start: Developer Token (60 Minutes, No OAuth)
 
 If you just want to try the VFS against your own Box account, the developer token is the
 fastest path, no redirect URI, no client secret, no curl exchange:
@@ -56,7 +56,7 @@ fastest path, no redirect URI, no client secret, no curl exchange:
 The token expires in **60 minutes** and there is no programmatic way to renew it; you regenerate
 by hand. For long-running processes, use the OAuth flow below instead.
 
-## Setup (long-running OAuth flow)
+## Setup (Long-Running OAuth Flow)
 
 ### 1. Create a Box App
 
@@ -84,7 +84,7 @@ Open the app's **Configuration** tab:
   - **Write all files and folders stored in Box** (only if you'll mount Box in `WRITE` mode)
 - Click **Save Changes**
 
-### 3. Submit for Authorization (enterprise apps only)
+### 3. Submit for Authorization (Enterprise Apps Only)
 
 If your Box account is part of an enterprise, the **Authorization** tab requires an admin to
 approve the app before it can issue tokens. Personal/free Box accounts skip this step.
@@ -96,7 +96,7 @@ Still on **Configuration**, copy:
 - **Client ID** -> `BOX_CLIENT_ID`
 - **Client Secret** -> `BOX_CLIENT_SECRET` (skip if you only need PKCE)
 
-### 5. Get the Refresh Token (CLI flow with client secret)
+### 5. Get the Refresh Token (CLI Flow with Client Secret)
 
 **A) Open this URL in a browser** (replace `YOUR_CLIENT_ID`):
 
@@ -143,7 +143,7 @@ BOX_CLIENT_SECRET=...
 BOX_REFRESH_TOKEN=...
 ```
 
-## Alternative: PKCE Flow (browser, no client secret)
+## Alternative: PKCE Flow (Browser, No Client Secret)
 
 1. Add `http://localhost:5173/vfs/box/box_pkce.html` to **OAuth 2.0 Redirect URIs**
 1. Add `http://localhost:5173` to **Allowed Origins**

@@ -179,7 +179,7 @@ When `table` is set the table level is elided, so the mount root is that table:
         3.jpg
 ```
 
-### Row cards
+### Row Cards
 
 A `<id>.md` card renders the row's columns as readable text and points at its
 blob. The vector and blob columns are omitted from the card body.
@@ -195,7 +195,7 @@ productDisplayName: Nike Men White Running Sneakers
 blob: 3.jpg
 ```
 
-## Semantic search
+## Semantic Search
 
 Search is the [`search` CLI](/python/cli/search), not a path. Register it on the
 workspace:
@@ -236,7 +236,7 @@ What LanceDB answers through its own API, so fewer files are read. [Integration]
 | --- | --- |
 | `grep -r`, `rg` | The string columns of each row, for any text; a table with list, struct or bytes columns reads every card. It misses nothing. |
 
-## Supported commands
+## Supported Commands
 
 All commands delegate to Mirage's shared implementations.
 
@@ -261,7 +261,7 @@ a `LIKE` query answers. A text that could match a column's name, a boolean or
 `null`, or the `column: ` prefix reads every card, as does a table that renders
 a list, struct or bytes column.
 
-## Access pattern
+## Access Pattern
 
 The mount is **read-only** (`MountMode.READ`); writes are not supported. The two
 read modes are:

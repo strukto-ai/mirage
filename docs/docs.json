@@ -726,7 +726,7 @@
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "icon": "code",
         "groups": [
           {
@@ -810,7 +810,7 @@
                 ]
               },
               {
-                "group": "Approval requests",
+                "group": "Approval Requests",
                 "pages": [
                   "GET /v1/workspaces/{workspace_id}/asks",
                   "POST /v1/workspaces/{workspace_id}/asks/{ask_id}"

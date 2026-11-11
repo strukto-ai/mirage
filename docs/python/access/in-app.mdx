@@ -1,5 +1,5 @@
 ---
-title: In-app
+title: In-App
 description: The Python classes your app calls to run a workspace, each with an example.
 icon: cube
 ---
@@ -293,7 +293,7 @@ result = await session.shell("wc -l", stdin=b"a\nb\n")
 print(result.exit_code, await result.stdout_str())
 ```
 
-### Streaming execution
+### Streaming Execution
 
 `await session.shell(line, stream=True)` returns a running `ShellExecution`. `events` yields ordered `{stream, data}` events with `stream="stdout"` or `stream="stderr"` and raw `bytes`. The event iterator has one reader. A slow consumer applies backpressure: the queue defaults to 64 KiB, configurable through workspace I/O settings, with chunks no larger than 16 KiB. It runs in the calling session, so `cd`, variable updates and other session changes behave as they do in a collected call.
 

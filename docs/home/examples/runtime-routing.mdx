@@ -19,13 +19,13 @@ and
 [TypeScript](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/policy/llm_routing),
 which routes between Monty and the host's Python.
 
-## The GPU sandbox
+## The GPU Sandbox
 
 Create a GPU sandbox in Daytona from a snapshot with PyTorch and CUDA, and
 note its id. Daytona sets the GPU type on the snapshot, and a GPU sandbox is
 ephemeral. Mirage runs programs in it and leaves its lifecycle to Daytona.
 
-## The workspace
+## The Workspace
 
 Two runtimes capture `python3`: `monty` first, then `machine`, which runs it
 on the `gpu` machine, the Daytona sandbox. The route
@@ -55,7 +55,7 @@ route_policy:
   runtime: monty
 ```
 
-## Route by a fixed script
+## Route by a Fixed Script
 
 A policy script reads the line and returns where it runs. This one sends
 any line that names PyTorch or CUDA to the GPU:
@@ -185,7 +185,7 @@ preview and the run agree:
   </Tab>
 </Tabs>
 
-## Run it
+## Run It
 
 `ws.explain(line)` shows where a line will run and why, before it runs, so
 no GPU starts for a line that does not need one:

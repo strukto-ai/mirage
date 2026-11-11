@@ -23,7 +23,7 @@ curl localhost:5004/messages      # refused: no route, not allowed
 A second workspace on the same server can route `localhost:5003` to
 `127.0.0.1:61002` and allow only that, so neither reaches the other's.
 
-## How a route applies
+## How a Route Applies
 
 - Every connection in the workspace follows it: `curl`, CLIs, mounts, and
   Python or JavaScript code. HTTPS, WebSocket and database connections
@@ -37,7 +37,7 @@ A second workspace on the same server can route `localhost:5003` to
 - In a browser, a route for an `https` or `wss` address can change only
   the port.
 
-## Per session
+## Per Session
 
 A [profile](/home/profiles) can set `routes` for its sessions. They replace
 the workspace's routes for the same address, and the workspace's allowed

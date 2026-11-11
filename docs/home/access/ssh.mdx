@@ -8,10 +8,10 @@ The Mirage server can listen for SSH next to HTTP. The SSH username names the
 workspace, every line runs in Mirage's shell, and every file operation goes
 through the workspace's mounts.
 
-## Set up
+## Set Up
 
 <Steps>
-  <Step title="Install the SSH library">
+  <Step title="Install the SSH Library">
     <Tabs>
       <Tab title="Python" icon="/images/python-logo.svg">
         ```bash
@@ -25,20 +25,20 @@ through the workspace's mounts.
       </Tab>
     </Tabs>
   </Step>
-  <Step title="Pick a port">
+  <Step title="Pick a Port">
     ```bash
     mirage daemon config set ssh_port 2222
     ```
     SSH stays off until a port is set.
   </Step>
-  <Step title="Authorize your key">
+  <Step title="Authorize Your Key">
     ```bash
     mkdir -p ~/.mirage/ssh
     cat ~/.ssh/id_ed25519.pub >> ~/.mirage/ssh/authorized_keys
     ```
     Only public keys log in, and the file is read on every login.
   </Step>
-  <Step title="Restart the server">
+  <Step title="Restart the Server">
     ```bash
     mirage daemon restart
     mirage workspace create workspace.yaml --id demo
@@ -91,7 +91,7 @@ and `sshfs -o direct_io demo@mirage:/ ~/mnt/demo` all work. The CLI sends its
 token, your [`mirage login`](/home/access/cli#log-in) on a hosted server, and the
 login runs under the workspace's default profile.
 
-## Auth (optional)
+## Auth (Optional)
 
 In `local` and `token` mode, an authorized key opens every workspace under the
 workspace's default profile. Options in front of a key in `authorized_keys`
@@ -116,14 +116,14 @@ account's workspaces:
 | [Over HTTPS](#over-https) | `mirage login`, then connect through `mirage ssh-proxy`. Your JWT is the account; no key needed. |
 | SSH port | The operator adds `mirage-account="you"` to your key. A key without it opens nothing. |
 
-<Accordion title="Account rules in detail">
+<Accordion title="Account Rules in Detail">
   - The account holds for shell, exec, `sftp` and `scp` alike.
   - In `local` and `token` mode, a key without `mirage-account` opens every
     workspace.
   - An option that is empty or given twice opens nothing.
 </Accordion>
 
-<Accordion title="How sessions behave">
+<Accordion title="How Sessions Behave">
   - Each `ssh`, `sftp` or `scp` run gets a fresh session, closed when it ends.
   - The session's profile and the mount modes apply as in any shell: a
     read-only mount refuses `sftp put`.

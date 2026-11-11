@@ -59,7 +59,7 @@ that a `with` block uses first, or that a
 server runs, has a loop of its own, so your code may block there. A `with`
 block entered after async calls keeps their loop.
 
-## Per-mount backends
+## Per-Mount Backends
 
 How a mount is exposed is configured **per mount**, through one `backend`
 field:
@@ -91,7 +91,7 @@ mounts:
 
 `ws.fuse_mountpoints` returns a `{prefix: path}` map of the live mountpoints.
 
-## Mounting without the kernel extension (FSKit)
+## Mounting Without the Kernel Extension (FSKit)
 
 Apple has deprecated third-party kernel extensions: on Apple Silicon the
 macFUSE kext already needs a reduced-security boot plus admin approval, and
@@ -180,7 +180,7 @@ but it cannot create new names: `create`, `mkdir` and `rename` return
 ENOSYS there ([details](/typescript/setup/fuse#mounting-without-the-kernel-extension-fskit));
 `examples/typescript/fuse/fskit.ts` is its live end-to-end check.
 
-## Size semantics for API-backed files
+## Size Semantics for API-Backed Files
 
 Some mounts (Linear, Trello, Slack, ...) cannot report a file's size
 without fetching its content, so `stat` returns an unknown size. Over the
@@ -222,7 +222,7 @@ returning real sizes eagerly would fire one API call per file on every
 ## Symlinks and Permissions
 
 Symlinks live in Mirage's namespace, not in any backend. Links created with
-`ln -s` in the Mirage shell (or with `ln -s` inside the mountpoint) appear as
+`ln -s` in the Mirage Shell (or with `ln -s` inside the mountpoint) appear as
 real symlinks over FUSE: `ls -l` shows `lrwxrwxrwx`, `readlink` prints the
 target, and reads follow the link. Absolute targets are displayed relative to
 the link's directory so they always resolve inside the mountpoint.
@@ -234,6 +234,6 @@ mount with the `default_permissions` FUSE option. It would make the kernel
 enforce the displayed bits, and a `chmod 000` could lock Mirage out of its
 own files.
 
-Extended attributes over FUSE are the ones the Mirage shell's `getfattr`
+Extended attributes over FUSE are the ones the Mirage Shell's `getfattr`
 and `setfattr` read and write. Mirage stores them in its namespace beside
 the symlinks, so every backend takes them.

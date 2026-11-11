@@ -181,7 +181,7 @@ for a file, `EACCES` for a variable), and its reads are not judged again.
 The session's history is `/.bash_history`, which a method reads through
 `ctx.vfs` like any file.
 
-### What the agent controls
+### What the Agent Controls
 
 Most of a `ctx` comes from what the agent did, so a policy reads it as a
 claim to check, not as a credential:
@@ -535,7 +535,7 @@ A host answers through [`ws.decisions`](/python/access/in-app#ws-decisions),
 method comes after the action ran, so nothing is undone: what came back is
 held, and the approved retry runs it again.
 
-## When answers disagree
+## When Answers Disagree
 
 - Any Deny beats any Ask, so answering an ask never reopens a refusal.
 - The first Deny speaks. The built-ins come first, then the session's

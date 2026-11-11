@@ -199,7 +199,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Box mounted at `/<path>`.
 </Tabs>
 {/* generated: vfs-md box end */}
 
-## Mount a subfolder
+## Mount a Subfolder
 
 Pass `root_folder_id` to expose a single Box folder as the mount root instead
 of the whole account. Every command and FUSE/VFS op is scoped to that folder;
@@ -229,7 +229,7 @@ reads see the new state.
 A write records the `sha1` its upload reply names, so a `fresh` read
 right after a `tee` or `sed -i` downloads nothing.
 
-## Conditional writes
+## Conditional Writes
 
 A rewrite that observes a missing file requires atomic create-only support,
 which this backend does not currently enable. Appending to a missing file
@@ -248,7 +248,7 @@ which is not refused when its source changed (a `mv` to another mount is a
 copy and a conditioned delete, so there a changed source stays and `mv`
 reports the failed removal).
 
-## Reads under `fresh`
+## Reads Under `fresh`
 
 A Box mount accepts `read: fresh`. The token is the file's `sha1`, which a
 folder listing and `GET /files/{id}` both carry; a download names no version,

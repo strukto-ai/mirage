@@ -311,7 +311,7 @@ from range reads to avoid downloading entire objects.
 - **Sandboxed bucket access**: Restrict agent operations to a specific bucket and prefix
 - **FUSE mounting**: Expose HF Buckets through a virtual FUSE mount for external tools
 
-## Scoping a VFS to a key prefix
+## Scoping a VFS to a Key Prefix
 
 Pass `key_prefix: str | None = None` to `HfBucketsConfig` to transparently scope every operation to a subpath of the bucket:
 

@@ -48,7 +48,7 @@ ws = Workspace({"/s": vfs}, mode=MountMode.READ)
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table hf_spaces end */}
 
-## Reading, not writing
+## Reading, Not Writing
 
 This mount is read-only, the way a [`github`](/python/vfs/github) mount is. A Hub write is
 a **commit**, and a POSIX write cannot say where a commit ends, so `echo >`,
@@ -57,7 +57,7 @@ per file. The [`hf` CLI](/python/cli/hf) is the write half: `hf download --local
 puts a copy on a ram or disk mount, which is an ordinary writable filesystem,
 and `hf upload` sends it back as a single commit.
 
-## Listings under `fresh`
+## Listings Under `fresh`
 
 Under `read: fresh`, a cached listing is checked against the commit the
 `revision` resolves to: one small check per command

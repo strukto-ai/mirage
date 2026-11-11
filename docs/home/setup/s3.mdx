@@ -32,7 +32,7 @@ If you have `~/.aws/credentials` configured, you can use a profile name instead 
 
 For the Python VFS API, see the [S3 VFS doc](/python/vfs/s3).
 
-## Scoping a VFS to a key prefix
+## Scoping a VFS to a Key Prefix
 
 Both runtimes support a key prefix option that transparently scopes every operation to a subpath of the bucket, so agents see clean paths while the underlying S3 keys carry the full prefix.
 
@@ -58,6 +58,6 @@ S3VFS(S3Config(
 
 Leading slashes are stripped and a trailing slash is added automatically. `None` / `undefined` and empty strings both mean "no prefix." For browser security considerations, see the [TypeScript S3 setup doc](/typescript/setup/s3).
 
-## Content type of uploads
+## Content Type of Uploads
 
 A write carries no content type of its own, so the mount decides what S3 stores and serves back. Set `default_content_type` (`defaultContentType` in TypeScript) to stamp every upload with it. Unset, S3 picks its own default, and the browser's presigned PUT, which has to sign a type, sends `application/octet-stream`.

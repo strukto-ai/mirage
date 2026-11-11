@@ -62,7 +62,7 @@ optional access token. Public datasets need no token.
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table hf_datasets end */}
 
-## Reading, not writing
+## Reading, Not Writing
 
 This mount is read-only, the way a [`github`](/typescript/setup/github) mount is. A Hub write is
 a **commit**, and a POSIX write cannot say where a commit ends, so `echo >`,
@@ -71,7 +71,7 @@ per file. The [`hf` CLI](/typescript/cli/hf) is the write half: `hf download --l
 puts a copy on a ram or disk mount, which is an ordinary writable filesystem,
 and `hf upload` sends it back as a single commit.
 
-## Listings under `fresh`
+## Listings Under `fresh`
 
 Under `read: fresh`, a cached listing is checked against the commit the
 `revision` resolves to: one small check per command

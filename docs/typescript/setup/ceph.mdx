@@ -8,7 +8,7 @@ Ceph Rados Gateway (RGW) speaks the S3 API with AWS Signature V4 against your ow
 
 Credentials (RGW user access key + secret key) are created the same way in both runtimes, see [Ceph Credentials](/home/setup/ceph).
 
-## Node (server-side)
+## Node (Server-Side)
 
 ```bash
 pnpm add @struktoai/mirage-node
@@ -49,7 +49,7 @@ console.log(res.stdoutText)
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table ceph end */}
 
-## Browser (presigned URLs)
+## Browser (Presigned URLs)
 
 ```bash
 pnpm add @struktoai/mirage-browser
@@ -73,7 +73,7 @@ The browser `CephVFS` is secret-free, your backend signs each operation using yo
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table browser/ceph end */}
 
-### 1. Server: sign URLs with the RGW endpoint
+### 1. Server: Sign URLs with the RGW Endpoint
 
 ```ts
 import {
@@ -128,7 +128,7 @@ app.post('/presign/ceph', async (req, res) => {
 RGW uses **path-style** URLs (`forcePathStyle: true`), virtual-hosted style requires wildcard DNS on the gateway.
 </Warning>
 
-### 2. Browser: wire it up
+### 2. Browser: Wire It Up
 
 ```ts
 import { CephVFS, MountMode, Workspace } from '@struktoai/mirage-browser'

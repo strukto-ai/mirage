@@ -46,7 +46,7 @@ ws = Workspace({"/dbx": vfs}, mode=MountMode.READ)
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table databricks_volume end */}
 
-## Mount mode
+## Mount Mode
 
 `read`, `write` or `exec`. Use `exec` if `python3` or `js` should run scripts from the mount.
 
@@ -146,7 +146,7 @@ appears in Mirage as:
 `root_path` is normalized before use, and Mirage rejects any virtual path that
 would escape above that configured subtree.
 
-## Supported operations
+## Supported Operations
 
 Reads: `readdir`, `stat`, `exists`, `read` (streamed whole or a byte range),
 and glob resolution. Writes: `write`, `create`, `mkdir`,
@@ -205,7 +205,7 @@ or local-only utilities).
 | ------- | ----------------------- |
 | `ls`    | List directory contents |
 
-## Rotating tokens
+## Rotating Tokens
 
 Pass a callback as `token` when your application refreshes access tokens:
 
@@ -245,7 +245,7 @@ principal or permission scope changes, rebuild the workspace or invalidate its
 caches. Token rotation for the same principal and scope can keep the existing
 VFS.
 
-## Snapshot behavior
+## Snapshot Behavior
 
 Mirage redacts static tokens and token callbacks in VFS snapshots. Restore the
 mount through `mounts=` when loading the workspace.

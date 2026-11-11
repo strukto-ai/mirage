@@ -1,5 +1,5 @@
 ---
-title: trello
+title: Trello
 description: "Supported Trello commands for boards, lists, labels, cards and comments."
 icon: /images/trello-logo.svg
 ---
@@ -22,7 +22,7 @@ No service mount is required. For YAML and multiple accounts, see the
 [CLI overview](/typescript/cli/index#register-a-cli).
 
 {/* BEGIN GENERATED CLI COMMANDS */}
-## Supported commands
+## Supported Commands
 
 Run `trello <command> --help` for the supported flags and operands.
 This list is generated from Mirage's registered command tree.
@@ -47,7 +47,7 @@ This list is generated from Mirage's registered command tree.
 | `trello card comment-update` | Update an existing comment |
 {/* END GENERATED CLI COMMANDS */}
 
-## Find work
+## Find Work
 
 ```bash
 trello board list
@@ -64,7 +64,7 @@ Reads take a board, list or card ID as a positional operand. The
 [Trello VFS](/typescript/setup/trello) embeds each ID after the last `__` of
 a directory or file name.
 
-## Update cards
+## Update Cards
 
 ```bash
 trello card create --list_id lst_001 --name "Fix login" --desc "Details here"
@@ -85,7 +85,7 @@ stdin; `--desc ''` clears a description. `--closed true`, `1` or `yes`
 archives a card and any other value restores it. Each write prints the card
 or comment it changed.
 
-## Scope, VFS and limits
+## Scope, VFS and Limits
 
 The CLI uses its own account config and needs no Trello mount.
 

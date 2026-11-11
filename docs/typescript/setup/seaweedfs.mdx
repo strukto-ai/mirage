@@ -8,7 +8,7 @@ SeaweedFS speaks the S3 API with AWS Signature V4 against its S3 gateway endpoin
 
 Credentials (access key + secret key from the gateway's `-s3.config`) are created the same way in both runtimes, see [SeaweedFS Credentials](/home/setup/seaweedfs).
 
-## Node (server-side)
+## Node (Server-Side)
 
 ```bash
 pnpm add @struktoai/mirage-node
@@ -49,7 +49,7 @@ console.log(res.stdoutText)
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table seaweedfs end */}
 
-## Browser (presigned URLs)
+## Browser (Presigned URLs)
 
 ```bash
 pnpm add @struktoai/mirage-browser
@@ -73,7 +73,7 @@ The browser `SeaweedFSVFS` is secret-free, your backend signs each operation usi
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table browser/seaweedfs end */}
 
-### 1. Server: sign URLs with the SeaweedFS endpoint
+### 1. Server: Sign URLs with the SeaweedFS Endpoint
 
 ```ts
 import {
@@ -128,7 +128,7 @@ app.post('/presign/seaweedfs', async (req, res) => {
 SeaweedFS uses **path-style** URLs (`forcePathStyle: true`), virtual-hosted style requires extra DNS setup on a self-hosted gateway.
 </Warning>
 
-### 2. Browser: wire it up
+### 2. Browser: Wire It Up
 
 ```ts
 import { SeaweedFSVFS, MountMode, Workspace } from '@struktoai/mirage-browser'

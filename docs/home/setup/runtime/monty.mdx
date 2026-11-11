@@ -73,7 +73,7 @@ A run that needs more raises `MemoryError`. A run also holds no more than its
 workspace's [`max_memory`](/home/core/output-limits#limit-a-workspaces-memory)
 has left, 96 MB by default.
 
-## Python compatibility
+## Python Compatibility
 
 Support applies to both SDKs unless a row says otherwise.
 For Python syntax and standard-library coverage, see
@@ -93,7 +93,7 @@ Modes and modifiers are listed separately; for example, `rb` combines `r` and `b
 | `b` | ✓ |
 
 <AccordionGroup>
-  <Accordion title="Example: append to a workspace file" id="open-example">
+  <Accordion title="Example: Append to a Workspace File" id="open-example">
     ```python
     with open("/data/log.txt", "a") as f:
         f.write("Job completed.\n")
@@ -107,7 +107,7 @@ Modes and modifiers are listed separately; for example, `rb` combines `r` and `b
   </Accordion>
 </AccordionGroup>
 
-### File objects
+### File Objects
 
 | API | Support |
 | --- | --- |
@@ -120,7 +120,7 @@ Modes and modifiers are listed separately; for example, `rb` combines `r` and `b
 | `for line in f` | ✓ |
 
 <AccordionGroup>
-  <Accordion title="Example: write and read lines" id="file-objects-example">
+  <Accordion title="Example: Write and Read Lines" id="file-objects-example">
     ```python
     with open("/data/example.txt", "w") as f:
         f.write("first\nsecond\n")
@@ -146,7 +146,7 @@ Modes and modifiers are listed separately; for example, `rb` combines `r` and `b
 
 The working directory and environment come from the Mirage session, not the host.
 
-#### File operations
+#### File Operations
 
 | API | Support |
 | --- | --- |
@@ -155,7 +155,7 @@ The working directory and environment come from the Mirage session, not the host
 | `os.rename()` | ✓ |
 | `os.replace()` | ✓ |
 
-#### Directory operations
+#### Directory Operations
 
 | API | Support |
 | --- | --- |
@@ -166,13 +166,13 @@ The working directory and environment come from the Mirage session, not the host
 | `os.makedirs()` | ✓ |
 | `os.rmdir()` | ✓ |
 
-#### Metadata and links
+#### Metadata and Links
 
 | API | Support |
 | --- | --- |
 | `os.stat()` | ✓ |
 
-#### Environment and working directory
+#### Environment and Working Directory
 
 | API | Support |
 | --- | --- |
@@ -183,7 +183,7 @@ The working directory and environment come from the Mirage session, not the host
 | `os.urandom()` | ✓ |
 
 <AccordionGroup>
-  <Accordion title="Example: list a workspace directory" id="os-example">
+  <Accordion title="Example: List a Workspace Directory" id="os-example">
     ```python
     import os
 
@@ -226,7 +226,7 @@ The working directory and environment come from the Mirage session, not the host
 | `os.path.abspath()`, `os.path.relpath()`, `os.path.normpath()` | ✓ |
 
 <AccordionGroup>
-  <Accordion title="Example: check a workspace path" id="os-path-example">
+  <Accordion title="Example: Check a Workspace Path" id="os-path-example">
     ```python
     import os
 
@@ -269,7 +269,7 @@ The working directory and environment come from the Mirage session, not the host
 | `Path.resolve()` | ✓ |
 
 <AccordionGroup>
-  <Accordion title="Example: create and inspect a workspace file" id="pathlib-example">
+  <Accordion title="Example: Create and Inspect a Workspace File" id="pathlib-example">
     ```python
     from pathlib import Path
 
@@ -293,7 +293,7 @@ The working directory and environment come from the Mirage session, not the host
 Mirage passes command inputs through the [runtime globals](#runtime-globals).
 
 <AccordionGroup>
-  <Accordion title="Example: use Mirage command inputs" id="sys-example">
+  <Accordion title="Example: Use Mirage Command Inputs" id="sys-example">
     ```python
     print(argv[1:])
     print(stdin)
@@ -322,7 +322,7 @@ clock. `time.monotonic()` and `time.perf_counter()` measure elapsed time.
 | `datetime.date.today()` | ✓ |
 
 <AccordionGroup>
-  <Accordion title="Example: print today's date" id="time-example">
+  <Accordion title="Example: Print Today's Date" id="time-example">
     ```python
     import datetime
 
@@ -348,7 +348,7 @@ JSON parsing and serialization come from Monty; see its
 | `json.loads()` | ✓ |
 | `json.dumps()` | ✓ |
 
-<Accordion title="Example: write and read workspace JSON" id="json-example">
+<Accordion title="Example: Write and Read Workspace JSON" id="json-example">
   ```python
   import json
 
@@ -371,7 +371,7 @@ These modules read and write workspace files through `open()`.
 | `tomllib.load()` | ✓ |
 | `hashlib` | ✓ |
 
-<Accordion title="Example: read a workspace CSV" id="csv-example">
+<Accordion title="Example: Read a Workspace CSV" id="csv-example">
   ```python
   import csv
 
@@ -381,7 +381,7 @@ These modules read and write workspace files through `open()`.
   ```
 </Accordion>
 
-### Runtime globals
+### Runtime Globals
 
 | API | Support |
 | --- | --- |
@@ -393,7 +393,7 @@ These modules read and write workspace files through `open()`.
 - `stdin`: The piped input.
 - `__file__`: The script's name under the starting directory.
 
-<Accordion title="Example: read invocation inputs" id="globals-example">
+<Accordion title="Example: Read Invocation Inputs" id="globals-example">
   ```python
   print(argv)
   print(stdin)
@@ -411,7 +411,7 @@ These modules read and write workspace files through `open()`.
 - `raise SystemExit` exits successfully. `raise SystemExit("message")` exits
   with status 1 and prints the message.
 
-## Python subset
+## Python Subset
 
 Monty 1.4.0 implements a subset of Python, and Mirage never falls back to
 another interpreter.
@@ -422,7 +422,7 @@ and [language limitations](https://pydantic.dev/docs/monty/limitations/language/
 Those pages track upstream Monty; the integration tables above describe the
 version used by Mirage. Third-party imports are unavailable.
 
-## Unsupported modules
+## Unsupported Modules
 
 Common modules unavailable in Monty 1.4.0:
 

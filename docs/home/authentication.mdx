@@ -1,6 +1,6 @@
 ---
-title: Service credentials
-sidebarTitle: Service credentials
+title: Service Credentials
+sidebarTitle: Service Credentials
 description: Connect VFS, CLI and runtime credentials from the environment or a secret store.
 icon: key
 ---
@@ -9,7 +9,7 @@ Give each VFS, virtual CLI or runtime the credentials it needs to reach its serv
 These differ from the bearer tokens and JWTs protecting a Mirage server;
 see [HTTP authentication](/home/access/http#configure-authentication) for those.
 
-## Connect from the environment
+## Connect from the Environment
 
 Set the credential in the environment of the process running Mirage, including
 on the server when your CLI connects remotely:
@@ -56,7 +56,7 @@ machines:
       key: credential
 ```
 
-## Pointer fields
+## Pointer Fields
 
 | Key | Meaning |
 | --- | --- |
@@ -67,7 +67,7 @@ machines:
 The `env` source uses only `key`, with no `ref`. A source needing settings is
 declared under `secrets`, and pointers use that instance's name in `from`.
 
-## Read a dotenv file
+## Read a dotenv File
 
 Python needs the `dotenv` extra in the environment running Mirage. For the
 `uv tool` CLI, run `uv tool install 'mirage-ai[dotenv]'`. In a Python
@@ -98,7 +98,7 @@ Use this config with the same workspace creation and read commands above.
 Relative dotenv paths use the Mirage process's working directory. A pointer's
 non-empty `ref` overrides the source's configured `path`.
 
-## Other credential sources
+## Other Credential Sources
 
 | `from` | `ref` example | `key` example | Prerequisite |
 | --- | --- | --- | --- |

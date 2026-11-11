@@ -9,7 +9,7 @@ A VFS is a class that extends `BaseVFS`. Override `readdir`, `stat` and
 your service. Every other method is optional: override one, and the commands
 that need it start working, or complete with fewer requests.
 
-## The base class
+## The Base Class
 
 The methods you can override, with the arguments you normally use:
 
@@ -85,7 +85,7 @@ The methods you can override, with the arguments you normally use:
   </Tab>
 </Tabs>
 
-## How to integrate your service
+## How to Integrate Your Service
 
 ### Required
 
@@ -116,7 +116,7 @@ Writes need a writable mount: `MountMode.WRITE`, or `mode: write` in YAML.
 [VFS.md](/home/setup/vfs-md) tells the agent which of these commands work on
 each mount, from the methods its VFS overrides.
 
-### Answer commands with your service
+### Answer Commands with Your Service
 
 Override these to answer from your service's own search, query or metadata API
 instead of reading files. Each links to its guide.
@@ -145,7 +145,7 @@ Set them as class attributes. `name` and `vfs_md` can also be passed to
 To replace a built-in VFS's description, set `vfs_md` on it (`vfsMd` in
 TypeScript).
 
-## Example: a read-only VFS
+## Example: A Read-Only VFS
 
 This VFS serves pages from a dictionary:
 
@@ -258,7 +258,7 @@ the YAML file, and `config` is what its constructor gets; the TypeScript server
 takes `./notes.ts:NotesVFS`. To name it `vfs: notes` instead, register it with
 `register_vfs` in Python or `registerVfs` in TypeScript.
 
-## Example: make it writable
+## Example: Make It Writable
 
 Override `write` and `unlink`:
 
@@ -302,7 +302,7 @@ On a writable mount, `echo hi > /notes/new.txt`, `sed -i` and `rm` now work,
 and `>>` reads the page and writes it back. `mv` still answers
 `Operation not supported` until you override `rename`.
 
-## Example: let grep use your search
+## Example: Let grep Use Your Search
 
 Override `files_containing` to name the files that may contain the text
 (the TypeScript sample needs `pnpm add @struktoai/mirage-core`):
@@ -363,7 +363,7 @@ it also returns `None` for `-i`. Source:
 [Python](https://github.com/strukto-ai/mirage/blob/main/python/mirage/core/chroma/search.py),
 [TypeScript](https://github.com/strukto-ai/mirage/blob/main/typescript/packages/core/src/core/chroma/search.ts).
 
-## Example: count lines without reading
+## Example: Count Lines Without Reading
 
 Override `line_count`:
 

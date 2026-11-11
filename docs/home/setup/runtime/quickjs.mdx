@@ -92,7 +92,7 @@ A run holds no more than its workspace's
 96 MB by default. A program that needs more gets `InternalError: out of
 memory`.
 
-## JavaScript compatibility
+## JavaScript Compatibility
 
 `std` and `os` are globals, as `qjs --std` gives them. Examples assume a
 writable `/data` mount. Mount modes and permissions still apply.
@@ -105,7 +105,7 @@ writable `/data` mount. Mount modes and permissions still apply.
 combines `r` and `b`.
 
 <AccordionGroup>
-  <Accordion title="Example: append to a workspace file" id="std-open-example">
+  <Accordion title="Example: Append to a Workspace File" id="std-open-example">
     ```javascript
     const error = {};
     const file = std.open("/data/log.txt", "a", error);
@@ -127,13 +127,13 @@ combines `r` and `b`.
   </Accordion>
 </AccordionGroup>
 
-### File objects
+### File Objects
 
 `readAsString()`, `read()`, `getline()`, `seek()`, `tell()`, `tello()`,
 `eof()`, `puts()`, `write()`, `printf()`, `flush()` and `close()`.
 
 <AccordionGroup>
-  <Accordion title="Example: write, seek and read a file" id="file-objects-example">
+  <Accordion title="Example: Write, Seek and Read a File" id="file-objects-example">
     ```javascript
     const file = std.open("/data/example.txt", "w+");
     if (file === null) {
@@ -163,7 +163,7 @@ variables come from the Mirage session. `std.loadFile()` returns `null` when
 reading fails.
 
 <AccordionGroup>
-  <Accordion title="Example: read a session environment variable" id="std-example">
+  <Accordion title="Example: Read a Session Environment Variable" id="std-example">
     ```javascript
     const jobId = std.getenv("JOB_ID");
     std.printf("Job: %s\n", jobId === undefined ? "unknown" : jobId);
@@ -177,13 +177,13 @@ reading fails.
   </Accordion>
 </AccordionGroup>
 
-### Standard streams
+### Standard Streams
 
 `std.in` receives the command's piped input as it arrives, and `std.in`,
 `std.out` and `std.err` are descriptors 0 to 2.
 
 <AccordionGroup>
-  <Accordion title="Example: forward piped input" id="standard-streams-example">
+  <Accordion title="Example: Forward Piped Input" id="standard-streams-example">
     ```javascript
     const input = std.in.readAsString();
     std.out.puts(input);
@@ -204,7 +204,7 @@ reading fails.
 `sleep()`, `setTimeout()` and `platform`.
 
 <AccordionGroup>
-  <Accordion title="Example: list a workspace directory" id="os-example">
+  <Accordion title="Example: List a Workspace Directory" id="os-example">
     ```javascript
     const [names, errno] = os.readdir("/data");
     if (errno !== 0) {
@@ -243,7 +243,7 @@ the program writes are stamped from the same clock. `performance.now()` and
 | `performance.now()`, `os.now()` | ✓ |
 
 <AccordionGroup>
-  <Accordion title="Example: print the current time" id="date-example">
+  <Accordion title="Example: Print the Current Time" id="date-example">
     ```javascript
     print(new Date().toISOString());
     ```
@@ -255,7 +255,7 @@ the program writes are stamped from the same clock. `performance.now()` and
   </Accordion>
 </AccordionGroup>
 
-### `console` and printing
+### `console` and Printing
 
 `console.log()`, `console.info()` and `console.debug()` write to stdout, and
 `console.error()` and `console.warn()` to stderr. They format values as
@@ -263,7 +263,7 @@ Node's `util.inspect()` does and take `util.format()` placeholders such as
 `%s`, `%d` and `%j`. `print()` writes the engine's own way.
 
 <AccordionGroup>
-  <Accordion title="Example: print a result" id="console-example">
+  <Accordion title="Example: Print a Result" id="console-example">
     ```javascript
     console.log("Total:", 2 + 3, { items: [1, 2] });
     console.error("%d skipped", 1);
@@ -286,7 +286,7 @@ loads files by path: JavaScript as CommonJS, and JSON parsed. `process`,
 `__filename` and `__dirname` are globals.
 
 <AccordionGroup>
-  <Accordion title="Example: filter a JSON file" id="node-example">
+  <Accordion title="Example: Filter a JSON File" id="node-example">
     ```javascript
     const fs = require("fs");
     const path = require("path");
@@ -297,7 +297,7 @@ loads files by path: JavaScript as CommonJS, and JSON parsed. `process`,
     console.log(open.length, "open");
     ```
   </Accordion>
-  <Accordion title="Example: read piped input by line" id="node-stdin-example">
+  <Accordion title="Example: Read Piped Input by Line" id="node-stdin-example">
     ```javascript
     const rl = require("readline").createInterface({ input: process.stdin });
     rl.on("line", (line) => console.log(line.toUpperCase()));
@@ -330,12 +330,12 @@ loads files by path: JavaScript as CommonJS, and JSON parsed. `process`,
   </Accordion>
 </AccordionGroup>
 
-### Runtime globals
+### Runtime Globals
 
 `scriptArgs`, the invocation name and arguments, and `atob()`, `btoa()` and
 `queueMicrotask()`.
 
-<Accordion title="Example: read arguments and encode text" id="globals-example">
+<Accordion title="Example: Read Arguments and Encode Text" id="globals-example">
   ```javascript
   print(scriptArgs.slice(1));
   const encoded = btoa("hello");
@@ -344,7 +344,7 @@ loads files by path: JavaScript as CommonJS, and JSON parsed. `process`,
   ```
 </Accordion>
 
-### Unavailable host APIs
+### Unavailable Host APIs
 
 Unavailable in this runtime.
 

@@ -24,7 +24,7 @@ No service mount is required. For YAML and multiple accounts, see the
 [CLI overview](/python/cli/index#register-a-cli).
 
 {/* BEGIN GENERATED CLI COMMANDS */}
-## Supported commands
+## Supported Commands
 
 Run `ntn <command> --help` for the supported flags and operands.
 This list is generated from Mirage's registered command tree.
@@ -45,7 +45,7 @@ This list is generated from Mirage's registered command tree.
 | `ntn whoami` | Show the authenticated Notion user |
 {/* END GENERATED CLI COMMANDS */}
 
-## Read and edit pages
+## Read and Edit Pages
 
 ```bash
 ntn whoami
@@ -72,7 +72,7 @@ To update database-row properties, use the API rather than page-body editing:
 ntn api v1/pages/PAGE_ID -X PATCH -d '{"properties":{"Stage":{"select":{"name":"Draft"}}}}'
 ```
 
-## Query data sources
+## Query Data Sources
 
 ```bash
 ntn datasources resolve DATABASE_ID
@@ -109,7 +109,7 @@ printf '{"query":"Roadmap"}' | ntn api v1/search
 A body selects POST unless a method is explicit. Blocks, comments and search
 use API paths; they are not separate command groups.
 
-## VFS and limits
+## VFS and Limits
 
 The optional [Notion VFS](/python/vfs/notion) provides page and database
 files. Reuse its IDs, or obtain them through the API; no mount is required.
