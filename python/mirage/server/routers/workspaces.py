@@ -837,15 +837,23 @@ async def stop_workspace(
     if entry is None and not await is_stopped(request, workspace_id):
         raise HttpError(ErrorCode.NOT_FOUND, "workspace not found")
     kept: tuple[dict[str, JsonValue], float] | None = None
+    failure: Exception | None = None
 
     async def read_kept() -> None:
-        nonlocal kept
-        kept = await _kept(request, workspace_id)
+        # The stop is shared with any delete joining it, so a failed read
+        # is carried out to this caller rather than failing the stop.
+        nonlocal kept, failure
+        try:
+            kept = await _kept(request, workspace_id)
+        except Exception as exc:
+            failure = exc
 
     if entry is not None or registry.removing(workspace_id):
         await registry.stop(workspace_id, read_kept)
     else:
         await read_kept()
+    if failure is not None:
+        raise failure
     if kept is not None:
         return make_stopped_detail(workspace_id, *kept)
     # Nothing to start from: a server that keeps no state, or state kept

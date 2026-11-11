@@ -873,11 +873,19 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
         throw new HttpError('not_found', 'workspace not found')
       }
       let k = null as Kept | null
+      let failure = null as Error | null
+      // The stop is shared with any delete joining it, so a failed read is
+      // carried out to this caller rather than failing the stop.
       const readKept = async (): Promise<void> => {
-        k = await kept(deps, id, req.account)
+        try {
+          k = await kept(deps, id, req.account)
+        } catch (e) {
+          failure = e instanceof Error ? e : new Error(String(e))
+        }
       }
       if (entry !== null || deps.registry.removing(id)) await deps.registry.stop(id, readKept)
       else await readKept()
+      if (failure !== null) throw failure
       if (k !== null) return makeStoppedDetail(id, k.config, k.createdAt)
       // Nothing to start from: a server that keeps no state, or state kept
       // with no config. The workspace is stopped all the same.
