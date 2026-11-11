@@ -251,7 +251,7 @@ describe('WorkerProxy', () => {
     const retry = await call(`${d.url}/v1/workspaces`, 'POST', { id: kept, config: CONFIG })
     expect(retry.status).toBe(200)
     expect((await call(`${d.url}/v1/daemon/ready`, 'GET')).json).toEqual({ status: 'full' })
-    expect((await call(`${d.url}/v1/workspaces/${String(kept)}`, 'DELETE')).status).toBe(200)
+    expect((await call(`${d.url}/v1/workspaces/${String(kept)}`, 'DELETE')).status).toBe(204)
     expect((await call(`${d.url}/v1/workspaces/${String(other)}/stop`, 'POST')).status).toBe(200)
     expect((await call(`${d.url}/v1/health`, 'GET')).json).toMatchObject({ workspaces: 0 })
     expect((await call(`${d.url}/v1/daemon/ready`, 'GET')).json).toEqual({ status: 'ready' })

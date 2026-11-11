@@ -389,7 +389,7 @@ describe('workspaces router', () => {
       })
       expect(clone.statusCode).toBe(503)
       expect((await create('a')).statusCode).toBe(200)
-      expect((await app.inject({ method: 'DELETE', url: '/v1/workspaces/a' })).statusCode).toBe(200)
+      expect((await app.inject({ method: 'DELETE', url: '/v1/workspaces/a' })).statusCode).toBe(204)
       expect((await create()).statusCode).toBe(201)
     } finally {
       await app.close()
@@ -485,7 +485,7 @@ describe('workspaces router', () => {
       const ran = await post(`/v1/workspaces/${id}/shell`, { command: 'echo hi > /a; cat /a' })
       expect(ran.json<{ exit_code: number }>().exit_code).toBe(126)
       expect((await app.inject({ method: 'DELETE', url: `/v1/workspaces/${id}` })).statusCode).toBe(
-        200,
+        204,
       )
     } finally {
       await app.close()
@@ -903,7 +903,7 @@ describe('workspaces router', () => {
       },
     })
     const res = await app.inject({ method: 'DELETE', url: '/v1/workspaces/to-delete' })
-    expect(res.statusCode).toBe(200)
+    expect(res.statusCode).toBe(204)
     const detail = await app.inject({ method: 'GET', url: '/v1/workspaces/to-delete' })
     expect(detail.statusCode).toBe(404)
     await app.close()
@@ -1572,11 +1572,13 @@ describe('workspace cancel, kill, stop and start', () => {
     const app = buildApp({ stateRoot: join(root, 'state') })
     try {
       expect((await post(app, '/v1/workspaces', { ...RAM, id: 'keep' })).statusCode).toBe(201)
-      for (let i = 0; i < 2; i++) {
-        const r = await post(app, '/v1/workspaces/keep/stop')
-        expect(r.statusCode).toBe(200)
-        expect(r.json<{ id: string }>().id).toBe('keep')
-      }
+      const first = await post(app, '/v1/workspaces/keep/stop')
+      expect(first.statusCode).toBe(200)
+      expect(first.json()).toEqual(
+        (await app.inject({ method: 'GET', url: '/v1/workspaces/keep' })).json(),
+      )
+      expect(first.json<{ status: string }>().status).toBe('stopped')
+      expect((await post(app, '/v1/workspaces/keep/stop')).json()).toEqual(first.json())
       const listed = await app.inject({ method: 'GET', url: '/v1/workspaces' })
       expect(listed.json()).toMatchObject({ items: [{ id: 'keep', status: 'stopped' }] })
       // State kept with no config, as a workspace created before configs
@@ -1650,8 +1652,8 @@ describe('workspace cancel, kill, stop and start', () => {
         internals: null,
       })
       const deleted = await app.inject({ method: 'DELETE', url: '/v1/workspaces/off' })
-      expect(deleted.statusCode).toBe(200)
-      expect(deleted.json<{ id: string }>().id).toBe('off')
+      expect(deleted.statusCode).toBe(204)
+      expect(deleted.body).toBe('')
       expect((await app.inject({ method: 'GET', url: '/v1/workspaces/off' })).statusCode).toBe(404)
       expect((await post(app, '/v1/workspaces/off/start')).statusCode).toBe(404)
       expect((await app.inject({ method: 'GET', url: '/v1/workspaces' })).json()).toMatchObject({
@@ -1679,7 +1681,7 @@ describe('workspace cancel, kill, stop and start', () => {
       expect(got.json<{ created_at: string }>().created_at > '1970-01-01T00:00:00.000Z').toBe(true)
       expect(existsSync(join(own, 'workspaces', 'mine'))).toBe(true)
       const deleted = await app.inject({ method: 'DELETE', url: '/v1/workspaces/mine' })
-      expect(deleted.statusCode).toBe(200)
+      expect(deleted.statusCode).toBe(204)
       expect(existsSync(join(own, 'workspaces', 'mine'))).toBe(false)
     } finally {
       await app.close()

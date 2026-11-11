@@ -318,14 +318,14 @@ def test_create_sends_a_policy_name_as_written(fake, tmp_path):
 
 @pytest.mark.parametrize("verb", ["stop", "start"])
 def test_stop_and_start_post_to_the_workspace(fake, verb):
-    fake.answer = _FakeResponse(200, b'{"id": "w", "closed_at": 0}')
+    fake.answer = _FakeResponse(200, b'{"id": "w", "status": "stopped"}')
     result = _invoke(verb, "w")
     assert result.exit_code == 0, result.output
     assert fake.calls[0][:2] == ("POST", f"/v1/workspaces/w/{verb}")
 
 
 def test_delete_names_the_workspace_when_the_answer_has_no_body(fake):
-    # The console answers a delete with 204 and no body.
+    # A delete answers 204 with no body.
     fake.answer = _FakeResponse(204, b"")
     result = _invoke("delete", "my-ws")
     assert result.exit_code == 0, result.output

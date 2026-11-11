@@ -219,12 +219,8 @@ paths:
       parameters:
         - $ref: '#/components/parameters/workspaceId'
       responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DeleteWorkspaceResponse'
+        '204':
+          description: No content
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -335,11 +331,25 @@ paths:
         - $ref: '#/components/parameters/workspaceId'
       responses:
         '200':
-          description: OK
+          description: The stopped workspace, as `GET` returns it.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeleteWorkspaceResponse'
+                $ref: '#/components/schemas/WorkspaceDetail'
+              example:
+                id: demo
+                status: stopped
+                created_at: '2026-11-07T00:00:00.000Z'
+                system_time: null
+                sessions: []
+                mounts:
+                  - prefix: /
+                    vfs: ram
+                    mode: write
+                    description: ''
+                    backend: workspace
+                    mountpoint: null
+                internals: null
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -5959,21 +5969,6 @@ components:
       required:
         - session_id
       title: DeleteSessionResponse
-    DeleteWorkspaceResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        closed_at:
-          type: string
-          format: date-time
-          title: Closed At
-          description: When the workspace stopped or was deleted.
-      type: object
-      required:
-        - id
-        - closed_at
-      title: DeleteWorkspaceResponse
     DiskStoreBlock:
       properties:
         type:
@@ -6050,13 +6045,15 @@ components:
         workspaces:
           type: integer
           title: Workspaces
-        uptime_s:
-          type: number
-          title: Uptime S
+        uptime_ms:
+          type: integer
+          format: int64
+          title: Uptime Ms
+          description: Milliseconds since the server started.
       type: object
       required:
         - workspaces
-        - uptime_s
+        - uptime_ms
       title: HealthResponse
     HideReason:
       properties:

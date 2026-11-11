@@ -409,7 +409,7 @@ async def test_reused_workspace_name_drops_the_deleted_jobs(
             answer = await tools.shell("echo MCP-SECRET")
             assert answer.text == "MCP-SECRET\n"
             assert len(entry.runner.ws.line_table.lines()) == 2
-            assert (await alice.delete("/v1/workspaces/w")).status_code == 200
+            assert (await alice.delete("/v1/workspaces/w")).status_code == 204
             r = await successor.post(
                 "/v1/workspaces", json={**_RAM, "id": "w"}
             )
@@ -485,7 +485,7 @@ async def test_unfinished_upload_cannot_submit_after_deletion(
                 )
             )
             await asyncio.wait_for(entered.wait(), 5)
-            assert (await alice.delete("/v1/workspaces/w")).status_code == 200
+            assert (await alice.delete("/v1/workspaces/w")).status_code == 204
             assert (
                 await bob.post("/v1/workspaces", json={**_RAM, "id": "w"})
             ).status_code == 201
@@ -568,7 +568,7 @@ async def test_retained_adapter_cannot_submit_after_deletion(
                     )
                 )
                 await asyncio.wait_for(entered.wait(), 5)
-            assert (await alice.delete("/v1/workspaces/w")).status_code == 200
+            assert (await alice.delete("/v1/workspaces/w")).status_code == 204
             assert (
                 await (alice if protocol == "rpc_before_lookup" else bob).post(
                     "/v1/workspaces", json={**_RAM, "id": "w"}

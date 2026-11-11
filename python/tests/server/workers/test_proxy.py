@@ -264,7 +264,7 @@ async def test_max_workspaces_holds_across_workers_and_lets_a_retry_through():
         }
         assert (
             await d.client.delete(f"/v1/workspaces/{kept}")
-        ).status_code == 200
+        ).status_code == 204
         stopped = await d.client.post(f"/v1/workspaces/{other}/stop")
         assert stopped.status_code == 200
         assert (await d.client.get("/v1/health")).json()["workspaces"] == 0

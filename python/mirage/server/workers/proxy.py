@@ -203,7 +203,9 @@ class WorkerProxy:
                 {
                     "status": "ok",
                     "workspaces": pool.count(),
-                    "uptime_s": round(time.time() - self._started_at, 3),
+                    "uptime_ms": round(
+                        (time.time() - self._started_at) * 1000
+                    ),
                     "workers": sum(1 for w in pool.workers if not w.dead),
                 },
             )

@@ -137,8 +137,9 @@ async function run(
           : { body: JSON.stringify(payload), headers: { 'content-type': 'application/json' } }),
         signal: AbortSignal.timeout(10_000),
       })
-      const result: unknown = await response.json()
-      assert.equal(response.status, expected, `${method} ${path}: ${JSON.stringify(result)}`)
+      const text = await response.text()
+      const result: unknown = text === '' ? null : JSON.parse(text)
+      assert.equal(response.status, expected, `${method} ${path}: ${text}`)
       return normalize(result) as T
     }
 
@@ -292,7 +293,7 @@ async function run(
         )
         console.log(`ok ${host}/${wid}: result, policy outcome, observer history`)
       } finally {
-        await request('DELETE', path)
+        await request('DELETE', path, undefined, 204)
       }
     }
 
@@ -456,7 +457,7 @@ async function run(
           delay(10_000),
         ])
         if (mounted) {
-          for (const wid of [a, b]) await request('DELETE', `/v1/workspaces/${wid}`)
+          for (const wid of [a, b]) await request('DELETE', `/v1/workspaces/${wid}`, undefined, 204)
         }
       }
     }

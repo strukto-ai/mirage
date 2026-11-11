@@ -23,15 +23,15 @@ interface DaemonStatus {
   running: boolean
   pid: number | null
   url: string
-  uptime_s?: number
+  uptime_ms?: number
   workspaces?: number
 }
 
 function formatStatus(d: DaemonStatus): string {
   if (!d.running) return `Daemon not running. URL: ${d.url}`
   const parts: string[] = [`Running. PID ${d.pid !== null ? String(d.pid) : '?'}`]
-  if (d.uptime_s !== undefined) {
-    parts.push(`uptime ${formatAge(Date.now() / 1000 - d.uptime_s)}`)
+  if (d.uptime_ms !== undefined) {
+    parts.push(`uptime ${formatAge((Date.now() - d.uptime_ms) / 1000)}`)
   }
   if (d.workspaces !== undefined) {
     parts.push(`${String(d.workspaces)} workspace${d.workspaces === 1 ? '' : 's'}`)
