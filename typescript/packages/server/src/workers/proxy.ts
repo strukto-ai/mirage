@@ -142,7 +142,7 @@ export class WorkerProxy {
       sendJson(res, 200, {
         status: 'ok',
         workspaces: pool.count(),
-        uptime_s: Math.round((Date.now() / 1000 - this.startedAt) * 1000) / 1000,
+        uptime_ms: Math.round(Date.now() - this.startedAt * 1000),
         workers: pool.workers.filter((worker) => !worker.dead).length,
       })
       return

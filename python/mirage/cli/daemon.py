@@ -33,9 +33,9 @@ def _format_status(d: dict[str, Any]) -> str:
     if not d.get("running"):
         return f"Daemon not running. URL: {d['url']}"
     parts = [f"Running. PID {d.get('pid', '?')}"]
-    uptime = d.get("uptime_s")
+    uptime = d.get("uptime_ms")
     if uptime is not None:
-        parts.append(f"uptime {format_age(time.time() - uptime)}")
+        parts.append(f"uptime {format_age(time.time() - uptime / 1000)}")
     ws_count = d.get("workspaces")
     if ws_count is not None:
         parts.append(f"{ws_count} workspace{'s' if ws_count != 1 else ''}")

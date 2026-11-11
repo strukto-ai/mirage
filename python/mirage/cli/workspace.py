@@ -413,7 +413,7 @@ def delete_cmd(workspace_id: str = typer.Argument(...)) -> None:
         r = client.request(
             "DELETE", f"/v1/workspaces/{quote(workspace_id, safe='')}"
         )
-    # The hosted API answers 204 with no body, so the id is the one given.
+    # A delete answers 204 with no body, so the id is the one given.
     deleted = cast(dict[str, Any], handle_response(r))
     header(f"deleted {workspace_id}")
     emit(

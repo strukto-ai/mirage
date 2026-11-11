@@ -37,7 +37,7 @@ class SessionSummary(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "ok"
     workspaces: int
-    uptime_s: float
+    uptime_ms: int
 
 
 class WorkspaceInternals(BaseModel):
@@ -143,11 +143,6 @@ class LoadWorkspaceRequest(BaseModel):
     key: str | None = None
     id: str | None = None
     override: dict[str, Any] | None = None
-
-
-class DeleteWorkspaceResponse(BaseModel):
-    id: str
-    closed_at: Instant
 
 
 class CancelLinesResponse(BaseModel):

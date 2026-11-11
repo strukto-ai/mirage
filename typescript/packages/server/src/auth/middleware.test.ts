@@ -424,7 +424,7 @@ describe('AuthMiddleware integration', () => {
           expect(answer.content).toEqual([{ type: 'text', text: 'MCP-SECRET\n' }])
           expect(entry.runner.ws.lineTable.lines()).toHaveLength(2)
           r = await app.inject({ method: 'DELETE', url: '/v1/workspaces/w', headers: alice })
-          expect(r.statusCode, r.body).toBe(200)
+          expect(r.statusCode, r.body).toBe(204)
           r = await app.inject({
             method: 'POST',
             url: '/v1/workspaces',
@@ -493,7 +493,7 @@ describe('AuthMiddleware integration', () => {
         expect(
           (await app.inject({ method: 'DELETE', url: '/v1/workspaces/w', headers: alice }))
             .statusCode,
-        ).toBe(200)
+        ).toBe(204)
         expect(
           (
             await app.inject({
@@ -591,7 +591,7 @@ describe('AuthMiddleware integration', () => {
           expect(
             (await app.inject({ method: 'DELETE', url: '/v1/workspaces/w', headers: alice }))
               .statusCode,
-          ).toBe(200)
+          ).toBe(204)
           expect(
             (
               await app.inject({

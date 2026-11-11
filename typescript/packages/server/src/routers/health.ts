@@ -27,7 +27,7 @@ export function registerHealthRoutes(
   app.get('/v1/health', () => ({
     status: 'ok',
     workspaces: deps.registry.size(),
-    uptime_s: Math.round((Date.now() / 1000 - deps.startedAt) * 1000) / 1000,
+    uptime_ms: Math.round(Date.now() - deps.startedAt * 1000),
   }))
   // Whether the server takes new workspaces: 503 while it drains for
   // shutdown or holds maxWorkspaces, so a load balancer sends new work

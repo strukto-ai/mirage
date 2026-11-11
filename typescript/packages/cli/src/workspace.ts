@@ -461,7 +461,7 @@ export function registerWorkspaceCommands(program: Command): Command {
     .action(async (id: string) => {
       const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
-      // The hosted API answers 204 with no body, so the id is the one given.
+      // A delete answers 204 with no body, so the id is the one given.
       const deleted = (await handleResponse(
         await c.request('DELETE', `/v1/workspaces/${encodeURIComponent(id)}`),
       )) as Record<string, unknown>

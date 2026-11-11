@@ -36,7 +36,7 @@ async def health(request: Request) -> HealthResponse:
     return HealthResponse(
         status="ok",
         workspaces=len(request.app.state.registry),
-        uptime_s=round(time.time() - started_at, 3),
+        uptime_ms=round((time.time() - started_at) * 1000),
     )
 
 

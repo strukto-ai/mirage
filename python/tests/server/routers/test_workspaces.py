@@ -208,8 +208,7 @@ async def test_create_list_get_delete_round_trip():
         assert r.json()["id"] == wid
 
         r = await client.delete(f"/v1/workspaces/{wid}")
-        assert r.status_code == 200
-        assert r.json()["id"] == wid
+        assert (r.status_code, r.content) == (204, b"")
 
         r = await client.get(f"/v1/workspaces/{wid}")
         assert r.status_code == 404
@@ -239,7 +238,7 @@ async def test_delete_drops_the_workspace_state(tmp_path):
         )
         assert code == 0
         assert (state / "workspaces" / "again").is_dir()
-        assert (await client.delete("/v1/workspaces/again")).status_code == 200
+        assert (await client.delete("/v1/workspaces/again")).status_code == 204
         assert not (state / "workspaces" / "again").exists()
         assert (
             await client.post("/v1/workspaces", json=body)
@@ -361,7 +360,7 @@ async def test_a_server_at_max_workspaces_answers_503():
         )
         assert r.status_code == 200
         r = await client.delete(f"/v1/workspaces/{made[0]}")
-        assert r.status_code == 200
+        assert r.status_code == 204
         r = await client.post("/v1/workspaces", json=_minimal_config())
         assert r.status_code == 201, r.text
 
@@ -492,7 +491,7 @@ async def test_a_policy_file_answers_like_the_server_policies(tmp_path):
         )
         assert r.json()["exit_code"] == 126
         r = await client.delete(f"/v1/workspaces/{wid}")
-        assert r.status_code == 200
+        assert r.status_code == 204
 
 
 def test_a_policy_file_names_only_methods(tmp_path):
@@ -826,7 +825,7 @@ async def test_health_endpoint():
         body = r.json()
         assert body["status"] == "ok"
         assert body["workspaces"] == 0
-        assert body["uptime_s"] >= 0
+        assert body["uptime_ms"] >= 0
 
         await client.post("/v1/workspaces", json=_minimal_config())
         r = await client.get("/v1/health")
@@ -1788,10 +1787,12 @@ async def test_a_second_stop_answers_as_the_first(tmp_path):
         assert (
             await client.post("/v1/workspaces", json=body)
         ).status_code == 201
-        for _ in range(2):
-            r = await client.post("/v1/workspaces/keep/stop")
-            assert r.status_code == 200, r.text
-            assert r.json()["id"] == "keep"
+        first = await client.post("/v1/workspaces/keep/stop")
+        assert first.status_code == 200, first.text
+        assert first.json() == (await client.get("/v1/workspaces/keep")).json()
+        assert first.json()["status"] == "stopped"
+        second = await client.post("/v1/workspaces/keep/stop")
+        assert second.json() == first.json()
         listed = (await client.get("/v1/workspaces")).json()["items"]
         assert [(w["id"], w["status"]) for w in listed] == [
             ("keep", "stopped")
@@ -1865,7 +1866,7 @@ async def test_a_stopped_workspace_is_listed_shown_and_deleted(tmp_path):
             ("/", "ram", "write")
         ]
         r = await client.delete("/v1/workspaces/off")
-        assert (r.status_code, r.json()["id"]) == (200, "off")
+        assert r.status_code == 204
         assert (await client.get("/v1/workspaces/off")).status_code == 404
         r = await client.post("/v1/workspaces/off/start")
         assert r.status_code == 404
@@ -1898,7 +1899,7 @@ async def test_a_stopped_workspace_is_deleted_from_the_store_its_config_names(
         assert got["created_at"] > "1970-01-01T00:00:00.000Z"
         assert (own / "workspaces" / "mine").exists()
         r = await client.delete("/v1/workspaces/mine")
-        assert r.status_code == 200, r.text
+        assert r.status_code == 204, r.text
         assert not (own / "workspaces" / "mine").exists()
 
 
