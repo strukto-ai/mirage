@@ -104,7 +104,7 @@ def reference(cli: CLI) -> str:
     spec = cli.spec
     rows = [
         START,
-        "## Supported commands",
+        "## Supported Commands",
         "",
         (
             f"Run `{spec.name} <command> --help` for the supported flags and operands."
