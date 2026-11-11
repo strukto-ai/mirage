@@ -527,8 +527,13 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     return abortable(this.setup(line, deadline), deadline)
   }
 
+  /**
+   * Let the next run connect again, and read the machine's mounts again
+   * then: a connection that went may have taken them with it.
+   */
   protected disconnected(): void {
     this.connecting = null
+    this.mounts?.forget()
   }
 
   /**

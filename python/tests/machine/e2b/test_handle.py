@@ -629,6 +629,7 @@ class MountingE2BMachine(E2BMachine):
         self.captures = captures
         self.table: dict[str, tuple[str, str]] = {}
         self.lines: list[str] = []
+        self.pipes: list[str] = []
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
         if is_run(argv):
@@ -651,6 +652,7 @@ class MountingE2BMachine(E2BMachine):
     async def open_pipe(self, command):
         source, prefix = shlex.split(command)[5:7]
         self.table[prefix] = (source, "fuse.sshfs")
+        self.pipes.append(prefix)
         requests = asyncio.StreamReader()
 
         async def stop() -> None:
@@ -707,6 +709,20 @@ async def test_a_session_restriction_refuses_a_line_on_fuse_mounts(profile):
         b"e2b: Permission denied\n",
     )
     assert "tool run" not in runtime.lines
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_lost_sandbox_has_its_mounts_read_again():
+    runtime = MountingE2BMachine(
+        config={"sandbox_id": "sb-live", "mount_type": "ssh"}
+    )
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(runtime))
+    assert (await ws.shell("tool run")).exit_code == 0
+    assert runtime._lost(SandboxNotRunningException("was not found"))
+    runtime.table.clear()
+    assert (await ws.shell("tool run")).exit_code == 0
+    assert runtime.pipes == ["/data", "/data"]
     await ws.close()
 
 
