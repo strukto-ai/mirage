@@ -821,9 +821,6 @@ importers:
 
   packages/node:
     dependencies:
-      '@aws-sdk/client-secrets-manager':
-        specifier: ^3.1121.0
-        version: 3.1121.0
       '@struktoai/mirage-core':
         specifier: workspace:*
         version: link:../core
@@ -855,6 +852,9 @@ importers:
       '@aws-sdk/client-s3':
         specifier: ^3.1116.0
         version: 3.1147.0
+      '@aws-sdk/client-secrets-manager':
+        specifier: ^3.1121.0
+        version: 3.1121.0
       '@daytonaio/sdk':
         specifier: ^0.227.0
         version: 0.227.0
