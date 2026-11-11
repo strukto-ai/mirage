@@ -25,7 +25,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { IOResult } from '../io/types.ts'
 import { CHECK_MARK } from '../machine/constants.ts'
 import { MachineHandle } from '../machine/handle.ts'
-import { MachineRuntime } from '../runtime/machine/runtime.ts'
+import { RemoteRuntime } from '../runtime/machine/runtime.ts'
 import type { RunResult } from '../runtime/types.ts'
 import type { Policy } from '../policy/base.ts'
 import { MountMode } from '../types.ts'
@@ -786,7 +786,7 @@ it("names the machine a span's work ran on", async () => {
     {
       mode: MountMode.EXEC,
       machines: { a: new Box('a') },
-      runtimes: [new MachineRuntime({ captures: ['train'], machine: 'a' })],
+      runtimes: [new RemoteRuntime({ captures: ['train'], machine: 'a' })],
     },
   )
   try {

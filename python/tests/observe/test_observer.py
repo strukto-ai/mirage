@@ -42,7 +42,7 @@ from mirage.observe.log_entry import EVENT_COMMAND, LogEntry
 from mirage.observe.observer import Observer
 from mirage.observe.store import RAMObserverStore
 from mirage.policy import ExecuteResultContext, Policy
-from mirage.runtime.machine import MachineRuntime
+from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.types import RunResult
 from mirage.utils.clock import ManualClock
 from mirage.vfs.ram import RAMVFS
@@ -773,7 +773,7 @@ async def test_a_span_names_the_machine_its_work_ran_on(monkeypatch):
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
         machines={"a": _Box("a")},
-        runtimes=[MachineRuntime(["train"], machine="a")],
+        runtimes=[RemoteRuntime(["train"], machine="a")],
     )
     try:
         await ws.shell("train 1 & wait")
