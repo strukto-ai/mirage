@@ -17,6 +17,7 @@ import contextlib
 import errno
 import io
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -407,9 +408,13 @@ async def test_ssh_serves_every_prefix_the_session_sees():
     result = await agent.shell("python3 job.py")
     assert (result.exit_code, await result.stdout_str()) == (0, "ran\n")
     name = source_name(ws.workspace_id, "box")
-    assert [p.split(" 2>")[0] for p in sandbox.pipes] == [
-        f"exec sshfs -f -o {SSHFS_OPTIONS} '{name}-1:/data' '/data'",
-        f"exec sshfs -f -o {SSHFS_OPTIONS} '{name}-2:/my notes' '/my notes'",
+    pipes = [p.split(" 2>")[0] for p in sandbox.pipes]
+    found = re.search(r"-([0-9a-f]{8})-1:/data'", pipes[0])
+    instance = found.group(1) if found else ""
+    assert pipes == [
+        f"exec sshfs -f -o {SSHFS_OPTIONS} '{name}-{instance}-1:/data' '/data'",
+        f"exec sshfs -f -o {SSHFS_OPTIONS} "
+        f"'{name}-{instance}-2:/my notes' '/my notes'",
     ]
     await agent.shell("python3 again.py")
     assert len(sandbox.pipes) == 2
@@ -654,7 +659,7 @@ async def test_a_restarted_workspace_takes_back_the_sshfs_it_left():
     )
     assert (await one.shell("python3 job.py")).exit_code == 0
     stale = first.table["/data"][0]
-    assert stale == "mirage-w_201.box-1:/data"
+    assert re.fullmatch(r"mirage-w_201\.box-[0-9a-f]{8}-1:/data", stale)
     # The host restarted: the first instance never closes, and its sshfs runs on.
     second = sharing(first, "ssh")
     ws = workspace(second, workspace_id="w 1")
@@ -665,6 +670,12 @@ async def test_a_restarted_workspace_takes_back_the_sshfs_it_left():
         "fusermount3 -uz '/data' || fusermount -uz '/data'"
     )
     assert served(second) == ["/data", "/my notes"]
+    # A kill the first instance started as it went lands late: it reaches
+    # the sshfs it named, not the one the second serves the prefix with.
+    fresh = second.table["/data"][0]
+    assert fresh != stale
+    await first.exec_line(kill_line(stale), None, None, None)
+    assert fresh in second.running
     await ws.close()
     assert first.table == {}
 
@@ -672,7 +683,7 @@ async def test_a_restarted_workspace_takes_back_the_sshfs_it_left():
 @pytest.mark.asyncio
 async def test_a_mount_a_restarted_instance_left_that_will_not_unmount_fails():
     sandbox = FakeMachine("ssh")
-    sandbox.table["/data"] = ("mirage-w1.box-1:/data", "fuse.sshfs")
+    sandbox.table["/data"] = ("mirage-w1.box-0123abcd-1:/data", "fuse.sshfs")
     sandbox.refuse_unmount = True
     ws = workspace(sandbox, workspace_id="w1")
     result = await (await ws.session("agent", profile="agent")).shell(
