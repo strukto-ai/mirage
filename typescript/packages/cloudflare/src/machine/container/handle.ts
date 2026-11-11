@@ -114,8 +114,9 @@ export class ContainerMachine extends MachineHandle implements PipeTransport {
   readonly [PIPE_TRANSPORT] = true as const
   // Settles once the container the last connect reached has exited.
   private exited: Promise<void> | null = null
-  // What each exec still running is told when the container exits.
+  // What each exec still running is told when the container exits, and how many exits there have been.
   private readonly running = new Set<() => void>()
+  private exits = 0
   // Set while the workspace closes, when nothing starts a container.
   private closing = false
 
@@ -178,6 +179,7 @@ export class ContainerMachine extends MachineHandle implements PipeTransport {
       )
       .then(() => {
         if (this.exited !== exited) return
+        this.exits += 1
         this.disconnected()
         for (const cut of this.running) cut()
       })
@@ -201,6 +203,7 @@ export class ContainerMachine extends MachineHandle implements PipeTransport {
     signal?.throwIfAborted()
     if (this.container === undefined) throw new Error(NO_CONTAINER)
     const runner = currentCaller().process
+    const exits = this.exits
     // shortcut: env goes to exec whole, as other providers pass it (spike S4); add the image's PATH if exec's env turns out to replace the image's
     const proc = piped(
       await this.container
@@ -218,6 +221,8 @@ export class ContainerMachine extends MachineHandle implements PipeTransport {
       }
     })
     this.running.add(cut)
+    // The container may have exited while exec was starting, before this one listened.
+    if (this.exits !== exits) cut()
     try {
       signal?.throwIfAborted()
       const input = proc.stdin.getWriter()
