@@ -36,3 +36,6 @@ export const RESERVED_KWARGS: ReadonlySet<string> = new Set([
 
 /** Bodies read as sent, never as JSON: an upload, by its Content-Type. */
 export const RAW_BODIES = /^(multipart\/|application\/octet-stream)/i
+
+// The FileStat fields an answer reports as RFC 3339 instants.
+export const STAT_TIMES: ReadonlySet<string> = new Set(['modified', 'atime', 'ctime', 'birthtime'])

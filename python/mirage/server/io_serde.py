@@ -31,10 +31,11 @@ from mirage.policy.types import (
     ShellNode,
     VfsExplanation,
 )
-from mirage.server.constants import RESERVED_KWARGS
+from mirage.server.constants import RESERVED_KWARGS, STAT_TIMES
 from mirage.server.errors import ErrorCode, HttpError, param_of
 from mirage.server.vfs_calls import BYTES, Args, VfsCall, schema_of
 from mirage.types import FileStat, JsonValue, PathSpec, PolicyDecision
+from mirage.utils.dates import rfc3339_of
 from mirage.workspace.dispatcher.constants import CALLS
 from mirage.workspace.workspace.workspace import Session
 
@@ -213,7 +214,11 @@ def _to_json(value: Any) -> JsonValue:
         return base64.b64encode(value).decode()
     if isinstance(value, FileStat):
         return {
-            name: getattr(value, name)
+            name: (
+                rfc3339_of(getattr(value, name))
+                if name in STAT_TIMES
+                else getattr(value, name)
+            )
             for name in FileStat.__dataclass_fields__
             if name != "extra"
         }

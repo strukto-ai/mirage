@@ -15,7 +15,9 @@
 import type { Machine, MachineState } from '@struktoai/mirage-core/execution/machine/types'
 import { MachineId } from '@struktoai/mirage-core/execution/types'
 import type { RouteApp } from '../routes.ts'
+import { msToRfc3339 } from '@struktoai/mirage-core/utils/dates'
 import type { WorkspaceRegistry } from '../registry.ts'
+import type { Instant } from '../schemas.ts'
 import { HttpError, loaderError, WorkspaceMissing } from '../errors.ts'
 import { toResponse as processResponse, type ProcessResponse } from './processes.ts'
 
@@ -31,7 +33,7 @@ interface WsMachineParams {
 interface MachineResponse {
   id: string
   state: MachineState
-  checked_at: number
+  checked_at: Instant
 }
 
 interface MachineList {
@@ -43,7 +45,11 @@ interface MachineDetailResponse extends MachineResponse {
 }
 
 function toResponse(record: Machine): MachineResponse {
-  return { id: record.id.toString(), state: record.state, checked_at: record.checkedAt }
+  return {
+    id: record.id.toString(),
+    state: record.state,
+    checked_at: msToRfc3339(record.checkedAt * 1000),
+  }
 }
 
 export function registerMachinesRoutes(

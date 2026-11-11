@@ -19,6 +19,8 @@ from mirage.execution.job import Job, JobState
 from mirage.execution.types import JobId, LineId
 from mirage.server.errors import ErrorCode, HttpError
 from mirage.server.routers.vfs import require_entry
+from mirage.server.schemas import Instant
+from mirage.utils.dates import ms_to_rfc3339
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}/jobs")
 
@@ -33,8 +35,8 @@ class JobResponse(BaseModel):
     group: int | None
     pid: int | None
     state: str
-    started_at: float
-    ended_at: float | None
+    started_at: Instant
+    ended_at: Instant | None
     exit: int | None
     signal: int | None
 
@@ -58,8 +60,12 @@ def _to_response(record: Job) -> JobResponse:
         group=record.group,
         pid=record.pid,
         state=record.state.value,
-        started_at=record.started_at,
-        ended_at=record.ended_at,
+        started_at=ms_to_rfc3339(record.started_at * 1000),
+        ended_at=(
+            None
+            if record.ended_at is None
+            else ms_to_rfc3339(record.ended_at * 1000)
+        ),
         exit=record.exit,
         signal=record.signal,
     )

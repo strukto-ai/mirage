@@ -37,6 +37,56 @@ export function nowIso(): string {
   return toIsoZ(systemDate())
 }
 
+// An ISO 8601 date-time as backends spell one: a date, an optional time
+// with optional seconds and fraction, and an optional offset.
+const DATE_TIME =
+  /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?)?(Z|[+-]\d{2}:?\d{2})?$/
+
+/**
+ * An instant as RFC 3339 text in UTC to the millisecond, as the HTTP API
+ * reports every time: `2026-11-11T07:24:14.062Z`. Rounds as Python's
+ * `ms_to_rfc3339` does, so both hosts spell it alike.
+ */
+export function msToRfc3339(ms: number): string {
+  return new Date(Math.floor(ms + 0.5)).toISOString()
+}
+
+/**
+ * A backend's date-time text as RFC 3339 in UTC to the millisecond, or null
+ * when it is not an ISO 8601 date-time. A time with no offset is read as
+ * UTC, digits past the millisecond are dropped, and only this one grammar is
+ * read, so both hosts agree on every input. Mirrors Python's `rfc3339_of`.
+ */
+export function rfc3339Of(text: string | null | undefined): string | null {
+  if (text === null || text === undefined || text === '') return null
+  const m = DATE_TIME.exec(text)
+  if (m === null) return null
+  const field = (i: number): number => Number(m[i] ?? 0)
+  const fields = [field(1), field(2), field(3), field(4), field(5), field(6)] as const
+  const whole = Date.UTC(fields[0], fields[1] - 1, fields[2], fields[3], fields[4], fields[5])
+  const back = new Date(whole)
+  // Date.UTC rolls an out-of-range field over; Python's datetime refuses it.
+  if (
+    fields[0] < 1000 ||
+    back.getUTCFullYear() !== fields[0] ||
+    back.getUTCMonth() !== fields[1] - 1 ||
+    back.getUTCDate() !== fields[2] ||
+    back.getUTCHours() !== fields[3] ||
+    back.getUTCMinutes() !== fields[4] ||
+    back.getUTCSeconds() !== fields[5]
+  ) {
+    return null
+  }
+  let ms = whole + Number((m[7] ?? '').slice(0, 3).padEnd(3, '0'))
+  const offset = m[8]
+  if (offset !== undefined && offset !== 'Z') {
+    const sign = offset.startsWith('-') ? -1 : 1
+    const digits = offset.slice(1).replace(':', '')
+    ms -= sign * (Number(digits.slice(0, 2)) * 60 + Number(digits.slice(2))) * 60_000
+  }
+  return msToRfc3339(ms)
+}
+
 // Truncated to whole seconds, matching Python epoch_to_iso.
 export function epochToIso(seconds: number): string {
   return new Date(Math.floor(seconds) * 1000).toISOString().replace('.000Z', 'Z')

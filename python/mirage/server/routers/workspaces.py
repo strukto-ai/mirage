@@ -101,6 +101,7 @@ from mirage.server.summary import (
     make_stopped_detail,
 )
 from mirage.types import Ceilings, JsonValue
+from mirage.utils.dates import ms_to_rfc3339
 from mirage.utils.ids import check_name, new_workspace_id
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.snapshot.utils import is_safe_blob_path
@@ -813,13 +814,17 @@ async def delete_workspace(
                 ErrorCode.WORKSPACE_BUSY,
                 "workspace is starting or stopping; try again",
             )
-        return DeleteWorkspaceResponse(id=workspace_id, closed_at=time.time())
+        return DeleteWorkspaceResponse(
+            id=workspace_id, closed_at=ms_to_rfc3339(time.time() * 1000)
+        )
     try:
         await registry.remove(workspace_id)
     except Exception as exc:
         logger.error("mirage: workspace delete failed", exc_info=exc)
         raise HttpError(ErrorCode.INTERNAL, INTERNAL_MESSAGE) from exc
-    return DeleteWorkspaceResponse(id=workspace_id, closed_at=time.time())
+    return DeleteWorkspaceResponse(
+        id=workspace_id, closed_at=ms_to_rfc3339(time.time() * 1000)
+    )
 
 
 @router.post("/{workspace_id}/stop", response_model=DeleteWorkspaceResponse)
@@ -841,7 +846,9 @@ async def stop_workspace(
         raise HttpError(ErrorCode.NOT_FOUND, "workspace not found")
     if live or registry.removing(workspace_id):
         await registry.stop(workspace_id)
-    return DeleteWorkspaceResponse(id=workspace_id, closed_at=time.time())
+    return DeleteWorkspaceResponse(
+        id=workspace_id, closed_at=ms_to_rfc3339(time.time() * 1000)
+    )
 
 
 @router.post("/{workspace_id}/start", response_model=WorkspaceDetail)

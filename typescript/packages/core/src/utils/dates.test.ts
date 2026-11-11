@@ -17,9 +17,11 @@ import {
   epochToIso,
   inMtimeWindow,
   isoToEpoch,
+  msToRfc3339,
   parseDateExpr,
   parseDateExprAsync,
   parsePosixTimeAsync,
+  rfc3339Of,
   toIsoZ,
   utcDateFolder,
 } from './dates.ts'
@@ -596,4 +598,43 @@ it('can cancel a long date expression between shared-core steps', async () => {
 
 it('refuses invalid raw UTF-8 as a date', () => {
   expect(parseDateExpr('\udcff', UTC_ZONE, new Date(Date.UTC(2026, 7, 16)))).toBeNull()
+})
+
+// The same table runs in Python's test_dates.py: both hosts must spell
+// every time alike.
+describe('msToRfc3339', () => {
+  it.each([
+    [1794381854062, '2026-11-11T07:24:14.062Z'],
+    [1794381854061.9998, '2026-11-11T07:24:14.062Z'],
+    [1794381854062.5, '2026-11-11T07:24:14.063Z'],
+    [0, '1970-01-01T00:00:00.000Z'],
+    [-1.5, '1969-12-31T23:59:59.999Z'],
+  ] as const)('spells %s as %s', (ms, want) => {
+    expect(msToRfc3339(ms)).toBe(want)
+  })
+})
+
+describe('rfc3339Of', () => {
+  it.each([
+    ['2026-11-11T07:24:14.062Z', '2026-11-11T07:24:14.062Z'],
+    ['2026-11-11T07:24:14Z', '2026-11-11T07:24:14.000Z'],
+    ['2026-11-11T07:24:14.062345Z', '2026-11-11T07:24:14.062Z'],
+    ['2026-11-11T07:24:14.0629+00:00', '2026-11-11T07:24:14.062Z'],
+    ['2026-11-11T15:24:14+08:00', '2026-11-11T07:24:14.000Z'],
+    ['2026-11-11T02:24:14-0500', '2026-11-11T07:24:14.000Z'],
+    ['2026-11-11 07:24:14', '2026-11-11T07:24:14.000Z'],
+    ['2026-11-11T07:24', '2026-11-11T07:24:00.000Z'],
+    ['2026-11-11', '2026-11-11T00:00:00.000Z'],
+    ['1969-12-31T23:59:59.5Z', '1969-12-31T23:59:59.500Z'],
+    ['2026-02-30T00:00:00Z', null],
+    ['2026-11-11T24:00:00Z', null],
+    ['2026-11-11T07:24:60Z', null],
+    ['0050-01-01T00:00:00Z', null],
+    ['Wed, 21 Oct 2015 07:28:00 GMT', null],
+    ['1794381854', null],
+    ['', null],
+    [null, null],
+  ] as const)('reads %s as %s', (text, want) => {
+    expect(rfc3339Of(text)).toBe(want)
+  })
 })

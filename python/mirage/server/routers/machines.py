@@ -20,6 +20,8 @@ from mirage.execution.types import MachineId
 from mirage.server.errors import ErrorCode, HttpError, loader_error
 from mirage.server.routers.processes import ProcessResponse, to_response
 from mirage.server.routers.vfs import require_entry
+from mirage.server.schemas import Instant
+from mirage.utils.dates import ms_to_rfc3339
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}/machines")
 
@@ -27,7 +29,7 @@ router = APIRouter(prefix="/v1/workspaces/{workspace_id}/machines")
 class MachineResponse(BaseModel):
     id: str
     state: MachineState
-    checked_at: float
+    checked_at: Instant
 
 
 class MachineList(BaseModel):
@@ -40,7 +42,9 @@ class MachineDetailResponse(MachineResponse):
 
 def _to_response(record: Machine) -> MachineResponse:
     return MachineResponse(
-        id=str(record.id), state=record.state, checked_at=record.checked_at
+        id=str(record.id),
+        state=record.state,
+        checked_at=ms_to_rfc3339(record.checked_at * 1000),
     )
 
 

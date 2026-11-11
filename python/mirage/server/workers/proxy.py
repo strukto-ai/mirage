@@ -429,7 +429,7 @@ class WorkerProxy:
             by_id.values(),
             key=lambda item: (
                 item.get("status") != "running",
-                float(item.get("created_at") or 0),
+                str(item.get("created_at") or ""),
             ),
         )
         await send_json(send, 200, {"items": items})

@@ -60,8 +60,8 @@ def test_equal_timestamps_and_unfinished_commands():
     logs = completed_logs(records)
     first = log_page(logs, "1", None)
     assert [item.id for item in first.items] == ["b"]
-    assert first.items[0].started_at == 1000
-    assert first.items[0].mounts[0].started_at == 1005
+    assert first.items[0].started_at == "1970-01-01T00:00:01.000Z"
+    assert first.items[0].mounts[0].started_at == "1970-01-01T00:00:01.005Z"
     assert first.next is not None
     second = log_page(logs, "1", first.next)
     assert [item.id for item in second.items] == ["a"]
@@ -70,6 +70,9 @@ def test_equal_timestamps_and_unfinished_commands():
     assert [
         event["id"] for event in exported if event["type"] == "command"
     ] == ["a", "b"]
+    assert {event["timestamp"] for event in exported} >= {
+        "1970-01-01T00:00:01.000Z"
+    }
 
 
 @pytest.mark.parametrize(

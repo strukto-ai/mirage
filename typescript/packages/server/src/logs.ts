@@ -16,6 +16,7 @@ import { Buffer } from 'node:buffer'
 import { yieldBytes } from '@struktoai/mirage-core/io/stream'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { JsonObject } from '@struktoai/mirage-core/types'
+import { msToRfc3339 } from '@struktoai/mirage-core/utils/dates'
 import { checkName } from '@struktoai/mirage-core/utils/ids'
 
 const common = z.object({ session: z.string(), timestamp: z.number(), cwd: z.string().optional() })
@@ -92,7 +93,7 @@ export function completedLogs(records: JsonObject[]) {
             id: command.id,
             command: command.command,
             cwd: command.cwd ?? null,
-            started_at: command.timestamp,
+            started_at: msToRfc3339(command.timestamp),
             duration_ms: result.duration_ms,
             exit_code: result.exit_code,
             stdout: result.stdout,
@@ -104,7 +105,7 @@ export function completedLogs(records: JsonObject[]) {
               path: e.path,
               source: e.source,
               bytes: e.bytes,
-              started_at: e.timestamp - e.duration_ms,
+              started_at: msToRfc3339(e.timestamp - e.duration_ms),
               duration_ms: e.duration_ms,
             })),
           },
@@ -149,7 +150,9 @@ export function logPage(logs: LoggedCommand[], limit = '50', after?: string) {
 export async function* logLines(logs: LoggedCommand[]) {
   const encoder = new TextEncoder()
   for (const log of [...logs].reverse()) {
-    for (const record of log.records)
-      yield* yieldBytes(encoder.encode(`${JSON.stringify(record)}\n`))
+    for (const record of log.records) {
+      const shown = { ...record, timestamp: msToRfc3339(record.timestamp) }
+      yield* yieldBytes(encoder.encode(`${JSON.stringify(shown)}\n`))
+    }
   }
 }

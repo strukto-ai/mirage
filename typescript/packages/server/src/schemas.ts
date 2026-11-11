@@ -30,10 +30,13 @@ export interface MountSummary {
 /** Running while the server holds it in memory; stopped while only its config and state are kept. */
 type WorkspaceStatus = 'running' | 'stopped'
 
+/** An instant as the API reports every time: RFC 3339 in UTC to the millisecond, from `msToRfc3339`. */
+export type Instant = string
+
 export interface WorkspaceBrief {
   id: string
   status: WorkspaceStatus
-  created_at: number
+  created_at: Instant
 }
 
 export interface WorkspaceList {
@@ -55,7 +58,7 @@ export interface WorkspaceInternals {
 export interface WorkspaceDetail {
   id: string
   status: WorkspaceStatus
-  created_at: number
+  created_at: Instant
   system_time: string | null
   sessions: SessionSummary[]
   mounts: MountSummary[]

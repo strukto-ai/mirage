@@ -27,6 +27,7 @@ from mirage.server.schemas import (
 )
 from mirage.shell.constants import BIN_PREFIX
 from mirage.types import JsonValue, MountBackend, parse_mount_mode
+from mirage.utils.dates import ms_to_rfc3339
 from mirage.utils.path import norm_dir
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.history import HISTORY_PREFIX
@@ -70,7 +71,9 @@ async def _build_internals(ws: Workspace) -> WorkspaceInternals:
 
 def make_brief(entry: WorkspaceEntry) -> WorkspaceBrief:
     return WorkspaceBrief(
-        id=entry.id, status="running", created_at=entry.created_at
+        id=entry.id,
+        status="running",
+        created_at=ms_to_rfc3339(entry.created_at * 1000),
     )
 
 
@@ -111,7 +114,7 @@ async def make_detail(
         return WorkspaceDetail(
             id=entry.id,
             status="running",
-            created_at=entry.created_at,
+            created_at=ms_to_rfc3339(entry.created_at * 1000),
             system_time=ws.system_time,
             mounts=mounts,
             sessions=sessions,
@@ -202,10 +205,12 @@ def make_stopped_brief(workspace_id: str, created_at: float) -> WorkspaceBrief:
 
     Args:
         workspace_id (str): the workspace.
-        created_at (float): when it was first created.
+        created_at (float): when it was first created, in epoch seconds.
     """
     return WorkspaceBrief(
-        id=workspace_id, status="stopped", created_at=created_at
+        id=workspace_id,
+        status="stopped",
+        created_at=ms_to_rfc3339(created_at * 1000),
     )
 
 
@@ -220,11 +225,11 @@ def make_stopped_detail(
         workspace_id (str): the workspace.
         config (dict[str, JsonValue] | None): the config it starts from,
             None when it kept none.
-        created_at (float): when it was first created.
+        created_at (float): when it was first created, in epoch seconds.
     """
     return WorkspaceDetail(
         id=workspace_id,
         status="stopped",
-        created_at=created_at,
+        created_at=ms_to_rfc3339(created_at * 1000),
         mounts=_config_mounts(config),
     )

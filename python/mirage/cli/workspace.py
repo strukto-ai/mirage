@@ -15,7 +15,7 @@
 import codecs
 import json
 import os
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import quote
@@ -128,10 +128,11 @@ def _format_workspace_list(items: list[dict[str, Any]]) -> str:
 
 
 def _format_workspace_detail(detail: dict[str, Any]) -> str:
+    created = datetime.fromisoformat(detail["created_at"]).timestamp()
     lines = [
         f"ID:        {detail['id']}",
         f"Status:    {detail['status']}",
-        f"Created:   {format_age(detail['created_at'])} ago",
+        f"Created:   {format_age(created)} ago",
     ]
     mounts = detail.get("mounts") or []
     if mounts:
@@ -186,9 +187,7 @@ def _format_logs(page: dict[str, Any]) -> str:
         return "No logs."
     rows = [
         [
-            datetime.fromtimestamp(item["started_at"] / 1000, UTC).strftime(
-                "%Y-%m-%d %H:%M:%S"
-            ),
+            item["started_at"][:19].replace("T", " "),
             str(item["exit_code"]) if item["exit_code"] is not None else "",
             item["command"].replace("\n", "\\n"),
         ]

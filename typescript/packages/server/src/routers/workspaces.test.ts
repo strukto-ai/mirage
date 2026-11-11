@@ -156,7 +156,7 @@ describe('workspaces router', () => {
       interface Item {
         id: string
         command: string
-        started_at: number
+        started_at: string
         exit_code: number
         mounts: { op: string }[]
         user_id: null
@@ -185,8 +185,7 @@ describe('workspaces router', () => {
             'mounts',
           ].sort(),
         )
-        expect(item.started_at).toBeLessThan(10_000_000_000_000)
-        expect(item.started_at).toBeGreaterThan(1_000_000_000_000)
+        expect(item.started_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
         expect(item.mounts).toHaveLength(1)
         expect(item.exit_code).toBe(0)
         expect(item.user_id).toBeNull()
@@ -206,13 +205,13 @@ describe('workspaces router', () => {
         .split('\n')
         .map(
           (line) =>
-            JSON.parse(line) as { type: string; id?: string; timestamp: number; session: string },
+            JSON.parse(line) as { type: string; id?: string; timestamp: string; session: string },
         )
       const commands = lines.filter((line) => line.type === 'command')
       expect(commands.map((line) => line.id)).toEqual(
         [...all.items].reverse().map((item) => item.id),
       )
-      expect(commands[0]?.timestamp ?? 0).toBe(all.items.at(-1)?.started_at)
+      expect(commands[0]?.timestamp ?? '').toBe(all.items.at(-1)?.started_at)
       expect((await read(`?session=${commands[0]?.session ?? ''}`)).json()).toEqual(all)
       expect((await read('?session=missing')).json()).toEqual({ items: [], next: null })
       for (const query of ['?limit=0', '?limit=201', '?session=bad%0Asession', '?after=bad'])
@@ -1600,7 +1599,7 @@ describe('workspace cancel, kill, stop and start', () => {
       const first = await post(app, '/v1/workspaces/keep/start')
       const second = await post(app, '/v1/workspaces/keep/start')
       expect([first.statusCode, second.statusCode]).toEqual([200, 200])
-      const createdAt = (r: typeof first) => r.json<{ created_at: number }>().created_at
+      const createdAt = (r: typeof first) => r.json<{ created_at: string }>().created_at
       expect(createdAt(second)).toBe(createdAt(first))
       expect(app.registry.size()).toBe(1)
     } finally {
@@ -1635,13 +1634,13 @@ describe('workspace cancel, kill, stop and start', () => {
       }
       await post(app, '/v1/workspaces/off/stop')
       const listed = (await app.inject({ method: 'GET', url: '/v1/workspaces' })).json<{
-        items: { id: string; status: string; created_at: number }[]
+        items: { id: string; status: string; created_at: string }[]
       }>().items
       expect(listed.map((w) => [w.id, w.status])).toEqual([
         ['on', 'running'],
         ['off', 'stopped'],
       ])
-      expect(listed[1]?.created_at).toBeGreaterThan(0)
+      expect((listed[1]?.created_at ?? '') > '1970-01-01T00:00:00.000Z').toBe(true)
       const got = await app.inject({ method: 'GET', url: '/v1/workspaces/off' })
       expect(got.json()).toMatchObject({
         id: 'off',
@@ -1677,7 +1676,7 @@ describe('workspace cancel, kill, stop and start', () => {
       await post(app, '/v1/workspaces/mine/stop')
       const got = await app.inject({ method: 'GET', url: '/v1/workspaces/mine' })
       expect(got.json()).toMatchObject({ status: 'stopped' })
-      expect(got.json<{ created_at: number }>().created_at).toBeGreaterThan(0)
+      expect(got.json<{ created_at: string }>().created_at > '1970-01-01T00:00:00.000Z').toBe(true)
       expect(existsSync(join(own, 'workspaces', 'mine'))).toBe(true)
       const deleted = await app.inject({ method: 'DELETE', url: '/v1/workspaces/mine' })
       expect(deleted.statusCode).toBe(200)
@@ -1731,7 +1730,11 @@ describe('workspace cancel, kill, stop and start', () => {
       expect(listed.json()).toEqual({
         items: [
           expect.objectContaining({ id: 'on', status: 'running' }),
-          expect.objectContaining({ id: 'mine', status: 'stopped', created_at: 0 }),
+          expect.objectContaining({
+            id: 'mine',
+            status: 'stopped',
+            created_at: '1970-01-01T00:00:00.000Z',
+          }),
         ],
       })
     } finally {

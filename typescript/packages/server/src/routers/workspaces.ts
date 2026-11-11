@@ -22,6 +22,7 @@ import { ResourceError } from '@struktoai/mirage-core/resources/errors'
 import { secretRefs } from '@struktoai/mirage-core/resources/refs'
 import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
 import type { JsonValue } from '@struktoai/mirage-core/types'
+import { msToRfc3339 } from '@struktoai/mirage-core/utils/dates'
 import { checkName, newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
@@ -847,7 +848,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       } finally {
         await store.close()
       }
-      return { id, closed_at: Date.now() / 1000 }
+      return { id, closed_at: msToRfc3339(Date.now()) }
     }
     try {
       await deps.registry.remove(id)
@@ -855,7 +856,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       console.error('mirage: workspace delete failed', err)
       throw new HttpError('internal', INTERNAL_MESSAGE, { cause: err })
     }
-    return { id, closed_at: Date.now() / 1000 }
+    return { id, closed_at: msToRfc3339(Date.now()) }
   })
 
   /**
@@ -869,7 +870,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       throw new HttpError('not_found', 'workspace not found')
     }
     if (live || deps.registry.removing(id)) await deps.registry.stop(id)
-    return { id, closed_at: Date.now() / 1000 }
+    return { id, closed_at: msToRfc3339(Date.now()) }
   })
 
   /**
