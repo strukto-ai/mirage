@@ -159,10 +159,20 @@ argument, as each store's page shows.
   </Tab>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
-    from mirage import Workspace
-    from mirage.config import load_config
+    import asyncio
 
-    ws = Workspace(**load_config("workspace.yaml").to_workspace_kwargs())
+    from mirage import Workspace
+    from mirage.config import build_mcp_clis, load_config, resolve_secrets
+
+
+    async def main():
+        # resolve_secrets fetches credential pointers, such as `from: env`.
+        # build_mcp_clis connects any `cli: mcp` entries.
+        config = await resolve_secrets(load_config("workspace.yaml"))
+        ws = Workspace(**config.to_workspace_kwargs(mcp_clis=await build_mcp_clis(config)))
+
+
+    asyncio.run(main())
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
