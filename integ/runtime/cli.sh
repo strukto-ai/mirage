@@ -311,10 +311,12 @@ run_case() {
   local cli="$1" host="$2" suite="$3" case_json="$4" work="$5"
   local case_id wsid world_json session_id
   case_id="$suite/$(jq -r '.id' <<<"$case_json")"
-  # The suite is part of the id: two suites may share a case id. A
+  # The suite is part of the id: two suites may share a case id. So is
+  # the host: a machine run's tag carries the workspace id, and the two
+  # hosts run the same case in the one container at the same time. A
   # workspace id takes letters, digits, dots and dashes, so the suite's
   # folders, a mode's `+` and a variant's `@runtime` are spelled out.
-  wsid=$(printf 'rt-%s-%s' "$suite" "$(jq -r '.id' <<<"$case_json")" \
+  wsid=$(printf 'rt-%s-%s-%s' "$host" "$suite" "$(jq -r '.id' <<<"$case_json")" \
     | sed 's/+/plus/g' | tr '/_@' '---')
   world_json=$(jq -c '.world // {}' <<<"$case_json")
   write_world_yaml "$world_json" "$work"
@@ -498,6 +500,14 @@ run_host() {
       fi
       continue
     fi
+    # sandbox/mounts serves fixed prefixes over sshfs in the one container,
+    # and a machine refuses a second workspace serving a prefix, so the
+    # hosts take turns at that suite.
+    local mounts_lock=""
+    if [ "$suite" = sandbox/mounts ]; then
+      mounts_lock="$RESULT_DIR/claims/sandbox-mounts-lock"
+      until mkdir "$mounts_lock" 2>/dev/null; do sleep 1; done
+    fi
     # The per-host logs print only after both hosts finish, so a suite's
     # cost is not otherwise recoverable from the run.
     local suite_t0=$SECONDS
@@ -539,6 +549,7 @@ run_host() {
         fi
       done < <(runtime_variants "$listed" "$host")
     done < <(jq -c '.cases[]' <<<"$suite_json")
+    [ -z "$mounts_lock" ] || rmdir "$mounts_lock"
     echo "suite $host/$suite $((SECONDS - suite_t0))s"
   done 3< <(cd "$SUITE_DIR" && find . -name '*.json' | sed 's|^\./||' | sort)
 
@@ -556,9 +567,9 @@ run_host() {
 
 # Every lane is independent: its own daemon port and MIRAGE_HOME, and only
 # ram mounts reach the CLI (see cli_expressible), so no two share a store.
-# The docker suite is the one thing the hosts do share, and its cases are
-# stateless execs (echo, exit, wc, uname) rather than writes, so two
-# `docker exec` sessions in the one container cannot collide. Two lanes per
+# The docker container is the one thing the hosts do share: each host's
+# workspace ids are its own, so their runs' processes stay apart, and the
+# hosts take turns at sandbox/mounts. Two lanes per
 # host keep a 4-core runner busy, where one host's suites in a row left the
 # longest step of the integ workflow waiting on a single process.
 RESULT_DIR="$(mktemp -d "/tmp/rt-cli-results.XXXXXX")"
