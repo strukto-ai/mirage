@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import './secrets.ts'
+
 import {
   configToWorkspaceArgs,
   loadProfilePolicy,
