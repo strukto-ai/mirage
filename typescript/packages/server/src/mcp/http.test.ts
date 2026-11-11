@@ -164,7 +164,7 @@ describe('the MCP endpoint over HTTP', () => {
     const text = (result: typeof read): string =>
       (result.content as { text: string }[])[0]?.text ?? ''
     expect(names).toHaveLength(30)
-    expect(JSON.parse(text(read))).toEqual({ result: 'aGk=' })
+    expect(JSON.parse(text(read))).toEqual({ data: 'aGk=' })
     expect(JSON.parse(text(said))).toMatchObject({ outcome: 'allow' })
     expect(refused.status).toBe(400)
     expect(await refused.json()).toEqual({

@@ -239,7 +239,7 @@ describe('createMirageMcpServer', () => {
     const read = await call('vfs_read', { path: '/a' })
     const missing = await call('vfs_read', { path: '/nope' })
     const line = await call('shell', { command: 'rm /a', explain: true })
-    expect(JSON.parse(firstText(read.content))).toEqual({ result: 'aGk=' })
+    expect(JSON.parse(firstText(read.content))).toEqual({ data: 'aGk=' })
     expect(missing.isError).toBe(true)
     expect(JSON.parse(firstText(missing.content))).toMatchObject({ errno: 'ENOENT' })
     expect(JSON.parse(firstText(line.content))).toMatchObject({ outcome: 'allow' })

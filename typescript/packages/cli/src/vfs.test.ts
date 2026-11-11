@@ -55,13 +55,13 @@ async function run(
           return
         }
         res.writeHead(200, { 'content-type': 'application/json' })
-        res.end(JSON.stringify({ result: Buffer.concat(BINARY).toString('base64') }))
+        res.end(JSON.stringify({ data: Buffer.concat(BINARY).toString('base64') }))
         return
       }
       if (req.url?.startsWith('/v1/workspaces/demo/vfs/') === true) {
         posted.push(JSON.parse(Buffer.concat(chunks).toString('utf-8')))
         res.writeHead(200, { 'content-type': 'application/json' })
-        res.end(JSON.stringify({ result: ['/a.py'] }))
+        res.end(JSON.stringify({ data: ['/a.py'] }))
         return
       }
       res.writeHead(200, { 'content-type': 'application/json' })
@@ -115,7 +115,7 @@ describe('mirage workspace vfs <call>', () => {
     const { code, stdout, posted } = await run(['/data', '-w', 'demo'], 'readdir')
     expect(code).toBe(0)
     expect(stdout.toString('utf-8')).toContain('/a.py')
-    expect(stdout.toString('utf-8')).not.toContain('result')
+    expect(stdout.toString('utf-8')).not.toContain('"data"')
     expect(posted).toEqual([{ path: '/data' }])
   }, 60_000)
 })

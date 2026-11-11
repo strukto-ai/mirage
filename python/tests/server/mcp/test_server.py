@@ -247,7 +247,7 @@ async def test_all_calls_serves_the_vfs_calls_and_explain(workspace):
     unlink = await call_tool(
         server, "vfs_unlink", {"path": "/a", "explain": True}
     )
-    assert json.loads(read.content[0].text) == {"result": "aGk="}
+    assert json.loads(read.content[0].text) == {"data": "aGk="}
     assert (
         json.loads(unlink.content[0].text)["explanation"]["call"] == "unlink"
     )

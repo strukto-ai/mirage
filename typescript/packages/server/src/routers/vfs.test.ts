@@ -84,7 +84,7 @@ describe('vfs request refusals', () => {
 })
 
 describe('vfs answers', () => {
-  it('answers one object: a result, an explanation, or the raw bytes', async () => {
+  it('answers one object: data, an explanation, or the raw bytes', async () => {
     const app = buildApp()
     try {
       const created = await app.inject({
@@ -96,10 +96,10 @@ describe('vfs answers', () => {
       const post = (url: string, payload: unknown) =>
         app.inject({ method: 'POST', url: base + url, payload: payload as object })
       expect((await post('/write', { path: '/a', data: 'aGkK' })).json()).toEqual({
-        result: null,
+        data: null,
       })
-      const listed = (await post('/list_files', { path: '/' })).json<{ result: string[] }>()
-      expect(listed.result).toContain('a')
+      const listed = (await post('/list_files', { path: '/' })).json<{ data: string[] }>()
+      expect(listed.data).toContain('a')
       const said = (await post('/unlink?explain=true', { path: '/a' })).json<{
         explanation: { call: string; outcome: string }
       }>()
@@ -217,7 +217,7 @@ it('keeps the session gate for custom functions and streamed reads', async () =>
       payload: { path: '/data/visible' },
     })
     expect(reply.statusCode, reply.body).toBe(200)
-    expect(reply.json()).toEqual({ result: '/data/visible' })
+    expect(reply.json()).toEqual({ data: '/data/visible' })
     reply = await app.inject({
       method: 'POST',
       url: base + '/peek?session_id=agent',
@@ -231,7 +231,7 @@ it('keeps the session gate for custom functions and streamed reads', async () =>
       payload: { path: '/data/visible' },
     })
     expect(reply.statusCode, reply.body).toBe(200)
-    expect(reply.json()).toEqual({ result: null })
+    expect(reply.json()).toEqual({ data: null })
     expect(backend.calls).toBe(2)
     for (const reserved of ['session_id', 'report', 'admit_only', 'retained', 'stream']) {
       reply = await app.inject({

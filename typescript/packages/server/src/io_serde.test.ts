@@ -162,8 +162,8 @@ describe('checked and answered', () => {
   })
 
   it('answers a call as one object', () => {
-    expect(bodyOf(null)).toEqual({ result: null })
-    expect(bodyOf(['/a'])).toEqual({ result: ['/a'] })
+    expect(bodyOf(null)).toEqual({ data: null })
+    expect(bodyOf(['/a'])).toEqual({ data: ['/a'] })
     expect(bodyOf({ outcome: 'allow' }, true)).toEqual({ explanation: { outcome: 'allow' } })
   })
 })
