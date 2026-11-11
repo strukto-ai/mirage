@@ -17,6 +17,7 @@ import {
   clearSignals,
   createPyodideInterrupter,
   guestSignals,
+  holdGuest,
   INTERRUPT_BYTES,
   sendSignal,
   signalled,
@@ -45,6 +46,37 @@ it('reasserts consumed deadline and abort signals until the run disarms', async 
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(Atomics.load(interrupter.view, 0)).toBe(0)
     expect(fresh.disarm()).toBe(null)
+  } finally {
+    interrupter.close()
+  }
+})
+
+it('rings the carrier again while a sent signal or a hold waits to be taken', async () => {
+  const interrupter = await createPyodideInterrupter()
+  if (interrupter === null) throw new Error('test requires a worker watchdog')
+  const cells = interrupter.view
+  try {
+    const armed = interrupter.arm(null)
+    for (const send of [
+      () => {
+        sendSignal(cells, 15)
+      },
+      () => {
+        holdGuest(cells, true)
+      },
+    ]) {
+      send()
+      // CPython's check read 0 just before the carrier landed, then stored 0.
+      Atomics.store(cells, 0, 0)
+      await vi.waitFor(() => {
+        expect(Atomics.load(cells, 0)).toBe(64)
+      })
+      clearSignals(cells)
+      Atomics.store(cells, 0, 0)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(Atomics.load(cells, 0)).toBe(0)
+    expect(armed.disarm()).toBe(null)
   } finally {
     interrupter.close()
   }
