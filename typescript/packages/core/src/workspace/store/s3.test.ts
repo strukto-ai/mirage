@@ -98,9 +98,9 @@ describe('S3WorkspaceStateStore', () => {
     await store.close()
   })
 
-  it('serves the workspace group override of a RAM default store', async () => {
+  it('serves the sessions group override of a RAM default store', async () => {
     const s3Store = new S3WorkspaceStateStore(config())
-    const store = new RAMWorkspaceStateStore({ workspace: s3Store })
+    const store = new RAMWorkspaceStateStore({ sessions: s3Store })
     store.namespace('ws1')
     store.observer('ws1')
     await store.sessions('ws1').set('main', { session_id: 'main' })
@@ -111,7 +111,7 @@ describe('S3WorkspaceStateStore', () => {
   })
 
   it('drops the sessions and meta objects of a workspace', async () => {
-    const store = new RAMWorkspaceStateStore({ workspace: new S3WorkspaceStateStore(config()) })
+    const store = new RAMWorkspaceStateStore({ sessions: new S3WorkspaceStateStore(config()) })
     await store.sessions('ws1').set('main', { session_id: 'main' })
     await store.casSetMeta('ws1', { workspace_id: 'ws1' }, 0)
     await store.drop('ws1')

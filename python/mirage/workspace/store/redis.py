@@ -64,7 +64,7 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
     config alone gets identical overlays, sessions, and grants, and sees
     the jobs every other one runs. History only grows, so it stays out
     of Redis: on this machine's disk, in a folder of this store's own
-    under ``root``, unless ``observer`` names another store.
+    under ``root``, unless ``logs`` names another store.
     """
 
     def __init__(
@@ -74,18 +74,18 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
         *,
         root: str = DEFAULT_STATE_ROOT,
         namespace: WorkspaceStateStore | None = None,
-        observer: WorkspaceStateStore | None = None,
-        workspace: WorkspaceStateStore | None = None,
+        logs: WorkspaceStateStore | None = None,
+        sessions: WorkspaceStateStore | None = None,
         execution: WorkspaceStateStore | None = None,
     ) -> None:
         super().__init__(
             namespace=namespace,
-            observer=observer
-            if observer is not None
+            logs=logs
+            if logs is not None
             else DiskWorkspaceStateStore(
                 root=_history_root(root, url, key_prefix)
             ),
-            workspace=workspace,
+            sessions=sessions,
             execution=execution,
         )
         self._url = url
@@ -109,7 +109,7 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
 
     def _make_observer(self, workspace_id: str) -> ObserverStore:
         raise RuntimeError(
-            "The redis store keeps no history; it goes to the observer "
+            "The redis store keeps no history; it goes to the logs "
             "override, disk by default"
         )
 

@@ -300,7 +300,7 @@
         },
         "store": {
           "type": "ram",
-          "observer": {
+          "logs": {
             "type": "redis",
             "urlz": "redis://x"
           }
@@ -458,7 +458,7 @@
       }
     },
     {
-      "name": "store block: s3 hosts only the workspace group, never the default",
+      "name": "store block: s3 hosts only the sessions group, never the default",
       "config": {
         "mounts": {
           "/d": {
@@ -739,7 +739,7 @@
         },
         "store": {
           "type": "ram",
-          "workspace": {
+          "sessions": {
             "type": "s3",
             "bucket": "b",
             "endpoint_urll": "http://x"
@@ -765,7 +765,7 @@
       }
     },
     {
-      "name": "store s3 group: hosts only sessions+meta, not the observer plane",
+      "name": "store s3 group: hosts only sessions+meta, not the logs plane",
       "config": {
         "mounts": {
           "/d": {
@@ -774,9 +774,41 @@
         },
         "store": {
           "type": "ram",
-          "observer": {
+          "logs": {
             "type": "s3",
             "bucket": "b"
+          }
+        }
+      }
+    },
+    {
+      "name": "store block: observer is now logs",
+      "error": "`store.observer` is now `store.logs`",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "store": {
+          "observer": {
+            "type": "disk"
+          }
+        }
+      }
+    },
+    {
+      "name": "store block: workspace is now sessions",
+      "error": "`store.workspace` is now `store.sessions`",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "store": {
+          "workspace": {
+            "type": "disk"
           }
         }
       }

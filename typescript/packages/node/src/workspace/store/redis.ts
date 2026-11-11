@@ -79,8 +79,8 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
     const prefix = keyPrefix ?? 'mirage:'
     super({
       ...overrides,
-      observer:
-        overrides.observer ??
+      logs:
+        overrides.logs ??
         new DiskWorkspaceStateStore({
           root: historyRoot(root ?? DEFAULT_STATE_ROOT, at, prefix),
         }),
@@ -105,7 +105,7 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
 
   protected makeObserver(_workspaceId: string): ObserverStore {
     throw new Error(
-      'The redis store keeps no history; it goes to the observer override, disk by default',
+      'The redis store keeps no history; it goes to the logs override, disk by default',
     )
   }
 

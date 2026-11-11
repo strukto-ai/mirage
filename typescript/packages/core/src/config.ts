@@ -429,7 +429,7 @@ export function normalizeConfigKeys(raw: Record<string, unknown>): Record<string
   }
   if (isPlainObject(out.store)) {
     const store = camelizeKeys(out.store)
-    for (const group of ['namespace', 'observer', 'workspace', 'execution'] as const) {
+    for (const group of ['namespace', 'logs', 'sessions', 'execution'] as const) {
       const block = store[group]
       if (!isPlainObject(block)) continue
       // An s3 group carries its backend's own spellings (`aws_access_key_id`
@@ -626,10 +626,10 @@ export type StoreGroupBlock = RamStoreBlock | DiskStoreBlock | RedisStoreBlock |
 /**
  * The workspace state store: one block, five planes. The top-level
  * type/url/keyPrefix pick the default backend for every control-plane
- * group (namespace nodes, observer events, sessions + workspace
+ * group (namespace nodes, command logs, sessions + workspace
  * metadata, execution); the optional per-group overrides redirect one
  * group to a different backend. Sessions and workspace metadata move
- * together by design, so there is one `workspace` override, not two. A
+ * together by design, so there is one `sessions` override, not two. A
  * disk store keeps the execution plane in memory, since a job's console
  * is a stream other processes follow, so the `execution` group (job
  * lists, consoles, the workspace's lease, process records) is ram or
@@ -641,8 +641,8 @@ export interface StoreBlock {
   keyPrefix?: string
   root?: string
   namespace?: StoreGroupBlock | null
-  observer?: StoreGroupBlock | null
-  workspace?: StoreGroupBlock | null
+  logs?: StoreGroupBlock | null
+  sessions?: StoreGroupBlock | null
   execution?: StoreGroupBlock | null
 }
 

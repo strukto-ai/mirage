@@ -133,12 +133,12 @@ reaches the logs.
 
 A workspace you build in code keeps its logs in memory. A workspace the server
 builds keeps them on disk under `~/.mirage/state`. Logs grow with every
-command, so `store.observer` moves them without moving the rest of the
+command, so `store.logs` moves them without moving the rest of the
 workspace state.
 
 ```mermaid
 flowchart TD
-    Set{"store.observer set?"} -- yes --> Chosen["That backend:<br/>ram or disk"]
+    Set{"store.logs set?"} -- yes --> Chosen["That backend:<br/>ram or disk"]
     Set -- no --> Type{"store.type"}
     Type -- "ram or disk" --> Same["The same backend"]
     Type -- redis --> RedisDisk["disk, under the store's root"]
@@ -152,7 +152,7 @@ flowchart TD
 | `disk` | Files under `root`. | `root`, default `~/.mirage/state` |
 
 Redis does not hold logs. With `store.type: redis`, Mirage writes the logs to
-disk under the store's `root`, unless `store.observer` names another backend.
+disk under the store's `root`, unless `store.logs` names another backend.
 To collect logs from several machines in one place, export them as
 [traces](/home/infrastructure/tracing).
 
@@ -166,7 +166,7 @@ local disk.
     store:
       type: redis
       url: redis://redis.internal:6379/0
-      observer:
+      logs:
         type: disk
         root: /var/lib/mirage
     ```
@@ -178,7 +178,7 @@ local disk.
 
     store = RedisWorkspaceStateStore(
         url="redis://redis.internal:6379/0",
-        observer=DiskWorkspaceStateStore(root="/var/lib/mirage"),
+        logs=DiskWorkspaceStateStore(root="/var/lib/mirage"),
     )
     ws = Workspace(mounts, workspace_id="agent", store=store, owns_store=True)
     ```
@@ -189,7 +189,7 @@ local disk.
 
     const store = new RedisWorkspaceStateStore({
       url: 'redis://redis.internal:6379/0',
-      observer: new DiskWorkspaceStateStore({ root: '/var/lib/mirage' }),
+      logs: new DiskWorkspaceStateStore({ root: '/var/lib/mirage' }),
     })
     const ws = new Workspace(mounts, { workspaceId: 'agent', store, ownsStore: true })
     ```

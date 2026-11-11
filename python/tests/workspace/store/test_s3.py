@@ -113,7 +113,7 @@ async def test_workspace_group_override_routes_to_s3():
     client = FakeConditionalS3Client()
     with patch_record_s3(client):
         s3_store = S3WorkspaceStateStore(_config())
-        store = RAMWorkspaceStateStore(workspace=s3_store)
+        store = RAMWorkspaceStateStore(sessions=s3_store)
         store.namespace("ws1")
         store.observer("ws1")
         await store.sessions("ws1").set("main", {"session_id": "main"})
@@ -128,7 +128,7 @@ async def test_drop_deletes_the_sessions_and_meta_objects():
     client = FakeConditionalS3Client()
     with patch_record_s3(client):
         store = RAMWorkspaceStateStore(
-            workspace=S3WorkspaceStateStore(_config())
+            sessions=S3WorkspaceStateStore(_config())
         )
         await store.sessions("ws1").set("main", {"session_id": "main"})
         await store.cas_set_meta("ws1", {"workspace_id": "ws1"}, 0)

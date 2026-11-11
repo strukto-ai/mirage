@@ -32,14 +32,14 @@ class RAMWorkspaceStateStore(WorkspaceStateStore):
         self,
         *,
         namespace: WorkspaceStateStore | None = None,
-        observer: WorkspaceStateStore | None = None,
-        workspace: WorkspaceStateStore | None = None,
+        logs: WorkspaceStateStore | None = None,
+        sessions: WorkspaceStateStore | None = None,
         execution: WorkspaceStateStore | None = None,
     ) -> None:
         super().__init__(
             namespace=namespace,
-            observer=observer,
-            workspace=workspace,
+            logs=logs,
+            sessions=sessions,
             execution=execution,
         )
         self._namespaces: dict[str, RAMNamespaceStore] = {}

@@ -22,7 +22,7 @@ them, and every instance of the workspace on the same store shares them.
 | `redis` | On Redis, under `key_prefix` and the workspace id | `url`, `key_prefix`, default `mirage:` |
 | `s3` | In a bucket, under `key_prefix` and the workspace id | The [S3 config fields](/home/setup/s3), `key_prefix`, default `mirage/` |
 
-The group key is `store.workspace`. It is the only store that takes `s3`, so
+The group key is `store.sessions`. It is the only store that takes `s3`, so
 `s3` goes on this key, never on `store.type`.
 
 Set `store.type` as well. A `store` block without it keeps the other
@@ -38,7 +38,7 @@ when the config has no `store` block. The examples below set
     workspace_id: agent
     store:
       type: disk
-      workspace:
+      sessions:
         type: disk
         root: /var/lib/mirage
     ```
@@ -49,7 +49,7 @@ when the config has no `store` block. The examples below set
     from mirage.workspace.store import DiskWorkspaceStateStore
 
     store = DiskWorkspaceStateStore(
-        workspace=DiskWorkspaceStateStore(root="/var/lib/mirage"),
+        sessions=DiskWorkspaceStateStore(root="/var/lib/mirage"),
     )
     ws = Workspace(mounts, workspace_id="agent", store=store, owns_store=True)
     ```
@@ -59,7 +59,7 @@ when the config has no `store` block. The examples below set
     import { DiskWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
 
     const store = new DiskWorkspaceStateStore({
-      workspace: new DiskWorkspaceStateStore({ root: '/var/lib/mirage' }),
+      sessions: new DiskWorkspaceStateStore({ root: '/var/lib/mirage' }),
     })
     const ws = new Workspace(mounts, { workspaceId: 'agent', store, ownsStore: true })
     ```
@@ -74,7 +74,7 @@ when the config has no `store` block. The examples below set
     workspace_id: agent
     store:
       type: disk
-      workspace:
+      sessions:
         type: redis
         url: redis://redis.internal:6379/0
     ```
@@ -85,7 +85,7 @@ when the config has no `store` block. The examples below set
     from mirage.workspace.store import DiskWorkspaceStateStore, RedisWorkspaceStateStore
 
     store = DiskWorkspaceStateStore(
-        workspace=RedisWorkspaceStateStore(url="redis://redis.internal:6379/0"),
+        sessions=RedisWorkspaceStateStore(url="redis://redis.internal:6379/0"),
     )
     ws = Workspace(mounts, workspace_id="agent", store=store, owns_store=True)
     ```
@@ -95,7 +95,7 @@ when the config has no `store` block. The examples below set
     import { DiskWorkspaceStateStore, RedisWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
 
     const store = new DiskWorkspaceStateStore({
-      workspace: new RedisWorkspaceStateStore({ url: 'redis://redis.internal:6379/0' }),
+      sessions: new RedisWorkspaceStateStore({ url: 'redis://redis.internal:6379/0' }),
     })
     const ws = new Workspace(mounts, { workspaceId: 'agent', store, ownsStore: true })
     ```
@@ -113,7 +113,7 @@ credentials and an `endpoint_url` for an S3-compatible store go here too.
     workspace_id: agent
     store:
       type: disk
-      workspace:
+      sessions:
         type: s3
         bucket: agent-state
         region: us-east-1
@@ -126,7 +126,7 @@ credentials and an `endpoint_url` for an S3-compatible store go here too.
     from mirage.workspace.store import DiskWorkspaceStateStore, S3WorkspaceStateStore
 
     store = DiskWorkspaceStateStore(
-        workspace=S3WorkspaceStateStore(S3Config(bucket="agent-state", region="us-east-1")),
+        sessions=S3WorkspaceStateStore(S3Config(bucket="agent-state", region="us-east-1")),
     )
     ws = Workspace(mounts, workspace_id="agent", store=store, owns_store=True)
     ```
@@ -136,7 +136,7 @@ credentials and an `endpoint_url` for an S3-compatible store go here too.
     import { DiskWorkspaceStateStore, S3WorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
 
     const store = new DiskWorkspaceStateStore({
-      workspace: new S3WorkspaceStateStore({ bucket: 'agent-state', region: 'us-east-1' }),
+      sessions: new S3WorkspaceStateStore({ bucket: 'agent-state', region: 'us-east-1' }),
     })
     const ws = new Workspace(mounts, { workspaceId: 'agent', store, ownsStore: true })
     ```

@@ -7416,7 +7416,7 @@ components:
                   s3: '#/components/schemas/S3StoreBlock'
             - type: 'null'
           title: Namespace
-        observer:
+        logs:
           anyOf:
             - oneOf:
                 - $ref: '#/components/schemas/RamStoreBlock'
@@ -7431,8 +7431,8 @@ components:
                   redis: '#/components/schemas/RedisStoreBlock'
                   s3: '#/components/schemas/S3StoreBlock'
             - type: 'null'
-          title: Observer
-        workspace:
+          title: Logs
+        sessions:
           anyOf:
             - oneOf:
                 - $ref: '#/components/schemas/RamStoreBlock'
@@ -7447,7 +7447,7 @@ components:
                   redis: '#/components/schemas/RedisStoreBlock'
                   s3: '#/components/schemas/S3StoreBlock'
             - type: 'null'
-          title: Workspace
+          title: Sessions
         execution:
           anyOf:
             - oneOf:
@@ -7470,7 +7470,7 @@ components:
       description: |-
         Storage settings for workspace metadata, sessions, filesystem records, logs, and execution records. Top-level settings select the default backend; per-group settings override it.
 
-        S3 is supported only for the `workspace` group. Disk storage uses `root` and keeps jobs in memory. The `execution` group supports RAM or Redis.
+        S3 is supported only for the `sessions` group. Disk storage uses `root` and keeps jobs in memory. The `logs` group supports RAM or disk, and the `execution` group RAM or Redis.
     TemplateResponse:
       properties:
         name:

@@ -295,11 +295,11 @@
           "namespace": {
             "type": "ram"
           },
-          "observer": {
+          "logs": {
             "type": "disk",
-            "root": "/tmp/observer"
+            "root": "/tmp/logs"
           },
-          "workspace": {
+          "sessions": {
             "type": "s3",
             "bucket": "b",
             "region": "us-east-1",

@@ -102,22 +102,22 @@ describe('RAMWorkspaceStateStore', () => {
 describe('WorkspaceStateStore group overrides', () => {
   it('routes only the overridden plane', () => {
     const observerHome = new RAMWorkspaceStateStore()
-    const base = new RAMWorkspaceStateStore({ observer: observerHome })
+    const base = new RAMWorkspaceStateStore({ logs: observerHome })
     expect(base.observer('ws')).toBe(observerHome.observer('ws'))
     expect(base.namespace('ws')).not.toBe(observerHome.namespace('ws'))
     expect(base.sessions('ws')).not.toBe(observerHome.sessions('ws'))
   })
 
-  it('workspace override carries sessions and meta together', async () => {
+  it('sessions override carries sessions and meta together', async () => {
     const control = new RAMWorkspaceStateStore()
-    const base = new RAMWorkspaceStateStore({ workspace: control })
+    const base = new RAMWorkspaceStateStore({ sessions: control })
     expect(base.sessions('ws')).toBe(control.sessions('ws'))
     await base.casSetMeta('ws', { workspace_id: 'ws', created_at: 1 }, 0)
     expect(await control.loadMeta('ws')).toEqual({ workspace_id: 'ws', created_at: 1 })
   })
 
   it('drops one workspace from every plane and provider', async () => {
-    const store = new RAMWorkspaceStateStore({ observer: new RAMWorkspaceStateStore() })
+    const store = new RAMWorkspaceStateStore({ logs: new RAMWorkspaceStateStore() })
     const fill = async (id: string): Promise<void> => {
       await store.namespace(id).set('/a', { mode: 0o600 })
       await store.observer(id).append('d/s1.jsonl', new TextEncoder().encode('{}\n'))
