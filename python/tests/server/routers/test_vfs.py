@@ -142,7 +142,7 @@ async def test_custom_functions_and_streams_keep_the_session_gate():
                 base + "/peek?session_id=agent", json={"path": "/data/visible"}
             )
             assert reply.status_code == 200, reply.text
-            assert reply.json() == {"result": "/data/visible"}
+            assert reply.json() == {"data": "/data/visible"}
             reply = await client.post(
                 base + "/peek?session_id=agent", json={"path": "/data/secret"}
             )
@@ -202,11 +202,11 @@ async def test_calls_answer_one_object_and_name_the_field_at_fault():
             written = await client.post(
                 base + "/write", json={"path": "/a", "data": "aGkK"}
             )
-            assert written.json() == {"result": None}
+            assert written.json() == {"data": None}
             listed = await client.post(
                 base + "/list_files", json={"path": "/"}
             )
-            assert "a" in listed.json()["result"]
+            assert "a" in listed.json()["data"]
             explained = await client.post(
                 base + "/unlink?explain=true", json={"path": "/a"}
             )

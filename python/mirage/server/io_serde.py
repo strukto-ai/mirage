@@ -277,14 +277,14 @@ async def answered(
 
 def body_of(value: JsonValue, explain: bool = False) -> dict[str, JsonValue]:
     """A VFS call's answer as the HTTP routes and the MCP tools carry it:
-    one object, whose ``result`` is what the call returned, or whose
+    one object, whose ``data`` is what the call returned, or whose
     ``explanation`` is what it would do.
 
     Args:
         value (JsonValue): the call's answer, as :func:`answered` gives it.
         explain (bool): the answer is an explanation.
     """
-    return {"explanation" if explain else "result": value}
+    return {"explanation" if explain else "data": value}
 
 
 def custom_args(

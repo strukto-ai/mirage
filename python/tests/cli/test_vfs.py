@@ -22,10 +22,10 @@ from mirage.cli.env import ENV_WORKSPACE
 
 class _FakeResponse:
     status_code = 200
-    content = b'{"result": ["/a.py"]}'
+    content = b'{"data": ["/a.py"]}'
 
     def json(self) -> dict[str, list[str]]:
-        return {"result": ["/a.py"]}
+        return {"data": ["/a.py"]}
 
 
 class _FakeClient:
@@ -81,7 +81,7 @@ def test_a_call_runs_under_workspace_vfs(fake):
         main_cli.app, ["workspace", "vfs", "readdir", "/data", "-w", "demo"]
     )
     assert result.exit_code == 0, result.output
-    assert "/a.py" in result.stdout and "result" not in result.stdout
+    assert "/a.py" in result.stdout and '"data"' not in result.stdout
     assert fake.calls == [
         ("POST", "/v1/workspaces/demo/vfs/readdir", {"path": "/data"})
     ]

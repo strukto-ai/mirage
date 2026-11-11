@@ -131,8 +131,8 @@ def test_arguments_outside_the_schema_are_refused():
 
 
 def test_a_call_answers_one_object():
-    assert body_of(None) == {"result": None}
-    assert body_of(["/a"]) == {"result": ["/a"]}
+    assert body_of(None) == {"data": None}
+    assert body_of(["/a"]) == {"data": ["/a"]}
     assert body_of({"outcome": "allow"}, explain=True) == {
         "explanation": {"outcome": "allow"}
     }
