@@ -159,6 +159,9 @@ interface WatchdogPort {
 // without its reason (it would report a timeout as a plain failure).
 // Reassert until disarmed: Pyodide can consume SIGINT without unwinding
 // the running WASM call, leaving a one-shot deadline permanently lost.
+// The carrier is rung again while a signal or a hold waits to be taken:
+// CPython's Emscripten check reads the interrupt cell and then stores 0,
+// two steps, so a carrier written between them is gone with nothing taken.
 const WATCHDOG_BODY = `
 let timer = null;
 function onMessage(msg) {
@@ -174,6 +177,12 @@ function onMessage(msg) {
     if (reason !== 0) {
       Atomics.store(cells, 1, reason);
       Atomics.store(cells, 0, 2);
+    } else if (
+      Atomics.load(cells, ${String(PENDING)}) !== 0 ||
+      Atomics.load(cells, ${String(PENDING_HIGH)}) !== 0 ||
+      Atomics.load(cells, ${String(HELD)}) === 1
+    ) {
+      Atomics.compareExchange(cells, 0, 0, ${String(SIGNAL_CARRIER)});
     }
     timer = setTimeout(tick, 10);
   }
