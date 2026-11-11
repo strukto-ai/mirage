@@ -31,6 +31,39 @@
         "stdout": "copied 'f' -> '/data2/r16xv-f'\nremoved 'f'\ncreated directory '/data2/r16xv-m'\ncreated directory '/data2/r16xv-m/sub'\ncopied 'm/sub/g' -> '/data2/r16xv-m/sub/g'\nremoved 'm/sub/g'\nremoved directory 'm/sub'\nremoved directory 'm'\nrc=0\nrc=1\n/data2/r16xv-m\n/data2/r16xv-m/sub\n/data2/r16xv-m/sub/g\n",
         "stderr": "mv: cannot move 'h' to '/data2/r16xv-nodir/h': No such file or directory\n"
       }
+    },
+    {
+      "id": "xm_mv_v_renames_what_stays_on_its_mount",
+      "seq": 15601015,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo p > /data/xm_vp && mkdir /data/xm_vd && echo q > /data2/xm_vq && mv -v /data/xm_vp /data2/xm_vq /data/xm_vd; echo rc=$?; ls /data/xm_vd; rm -r /data/xm_vd",
+      "expect": {
+        "exit": 0,
+        "stdout": "renamed '/data/xm_vp' -> '/data/xm_vd/xm_vp'\ncopied '/data2/xm_vq' -> '/data/xm_vd/xm_vq'\nremoved '/data2/xm_vq'\nrc=0\nxm_vp\nxm_vq\n",
+        "stderr": ""
+      },
+      "note": "coreutils 9.7 over tmpfs mounts: a source that stays on its mount is renamed, and only the other is copied and removed."
     }
   ]
 }

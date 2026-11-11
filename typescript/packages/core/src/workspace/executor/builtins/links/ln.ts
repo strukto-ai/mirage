@@ -846,11 +846,14 @@ async function attemptLink(
     return
   }
   if (crossing) {
-    // link(2) meets an occupied name before the other filesystem, and -f and
-    // -b get as far as the link, which leaves the name as it was (coreutils
-    // 9.7 over a tmpfs).
+    // link(2) meets the name's parent and an occupied name before the other
+    // filesystem, and -f and -b get as far as the link, which leaves the name
+    // as it was (coreutils 9.7 over a tmpfs).
+    const why = await absentDestError(dispatchStat(dispatch), linkSpec)
     errors.push(
-      `ln: failed to create ${kind} '${typed}' => '${targetTyped}': ${posixPhrase('EXDEV')}\n`,
+      why !== null
+        ? refused(flags, typed, targetTyped, why)
+        : `ln: failed to create ${kind} '${typed}' => '${targetTyped}': ${posixPhrase('EXDEV')}\n`,
     )
     return
   }

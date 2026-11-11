@@ -15,6 +15,7 @@ import logging
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.links import mounts_of
+from mirage.commands.builtin.utils.paths import absent_dest_error
 from mirage.commands.config import Context, command
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
@@ -49,8 +50,8 @@ async def link(
 ) -> tuple[ByteSource | None, IOResult]:
     """A hard link is a byte copy here, as ``ln``'s is, through the
     session's files, and like a real one it cannot leave its source's
-    mount: link(2) answers EXDEV after EEXIST and before a directory's
-    EPERM. Pinned against coreutils 9.7.
+    mount: link(2) answers EXDEV after the name's parent and EEXIST, and
+    before a directory's EPERM. Pinned against coreutils 9.7.
     """
     if not paths:
         raise missing_operand_error("link", None)
@@ -75,7 +76,10 @@ async def link(
     if mounts is not None and mounts.root_of(source.virtual) != mounts.root_of(
         target.virtual
     ):
-        return None, _refused(source, target, posix_phrase(FsCondition.EXDEV))
+        why = await absent_dest_error(ctx.vfs.stat, target)
+        return None, _refused(
+            source, target, posix_phrase(why or FsCondition.EXDEV)
+        )
     if row.type == FileType.DIRECTORY:
         return None, _refused(source, target, "Operation not permitted")
     try:

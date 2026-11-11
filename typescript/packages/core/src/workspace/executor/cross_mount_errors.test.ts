@@ -17,6 +17,8 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { stderrStr, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
+import type { Policy } from '../../policy/base.ts'
+import type { ExecuteResultContext } from '../../policy/types.ts'
 
 // Direct port of tests/workspace/test_cross_mount_errors.py.
 // Exercises error paths for cross-mount head/tail — cross_mount.test.ts
@@ -148,5 +150,28 @@ describe('cross-mount relay glob expansion', () => {
     )
     const r = await runCmd(ws, 'jq -s . /a/x.json /b/y.json')
     expect([r.code, r.err]).toEqual([1, 'jq: memory exhausted\n'])
+  })
+
+  // cmp -l streams across mounts and finds its difference as it drains; the
+  // command's record, which postExecute reads, says so too.
+  it('a streamed status reaches the command record', async () => {
+    const codes: number[] = []
+    const seen: Policy = {
+      postExecute(ctx: ExecuteResultContext) {
+        codes.push(ctx.results.exitCode as number)
+        return null
+      },
+    }
+    const ram1 = new RAMVFS()
+    const ram2 = new RAMVFS()
+    ram1.store.files.set('/x', ENC.encode('abc'))
+    ram2.store.files.set('/y', ENC.encode('abd'))
+    const ws = new Workspace(
+      { '/a': ram1, '/b': ram2 },
+      { mode: MountMode.WRITE, policies: [seen] },
+    )
+    const r = await runCmd(ws, 'cmp -l /a/x /b/y')
+    expect([r.code, r.out, codes]).toEqual([1, '3 143 144\n', [1]])
+    await ws.close()
   })
 })

@@ -21,6 +21,7 @@ import { FileType } from '../../../types.ts'
 import { fsStrerror, isEnotdir, isFsError, isMissingPath } from '../../../errors/fs.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 import { mountsOf } from '../utils/links.ts'
+import { absentDestError } from '../utils/paths.ts'
 import { quoteText } from '../../quote.ts'
 import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
 
@@ -33,8 +34,8 @@ function refused(source: PathSpec, target: PathSpec, why: string): IOResult {
 
 // A hard link is a byte copy here, as ln's is, through the session's files,
 // and like a real one it cannot leave its source's mount: link(2) answers
-// EXDEV after EEXIST and before a directory's EPERM. Pinned against
-// coreutils 9.7.
+// EXDEV after the name's parent and EEXIST, and before a directory's EPERM.
+// Pinned against coreutils 9.7.
 async function link(
   _accessor: Accessor,
   paths: PathSpec[],
@@ -62,8 +63,11 @@ async function link(
   }
   if (taken) return [null, refused(source, target, 'File exists')]
   const mounts = mountsOf(ctx)
-  if (mounts !== undefined && mounts.rootOf(source.virtual) !== mounts.rootOf(target.virtual))
-    return [null, refused(source, target, posixPhrase('EXDEV'))]
+  if (mounts !== undefined && mounts.rootOf(source.virtual) !== mounts.rootOf(target.virtual)) {
+    const vfs = ctx.vfs
+    const why = await absentDestError((p) => vfs.stat(p), target)
+    return [null, refused(source, target, posixPhrase(why ?? 'EXDEV'))]
+  }
   if (row.type === FileType.DIRECTORY)
     return [null, refused(source, target, 'Operation not permitted')]
   try {

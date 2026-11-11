@@ -63,6 +63,39 @@
         "stdout": "'r10xq' -> '/data2/r10xq'\n'r10xq/s' -> '/data2/r10xq/s'\n'r10xq/s/t' -> '/data2/r10xq/s/t'\n'r10xq/s/t/f' -> '/data2/r10xq/s/t/f'\nrc=0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "xm_cp_rl_refuses_the_links_in_a_tree",
+      "seq": 15601018,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "mkdir /data/xm_hd && ln -s /data/a.txt /data/xm_hd/l && cp -rl /data/xm_hd /data2/xm_ho1; echo rc=$?; cp -rlL /data/xm_hd /data2/xm_ho2; echo rc=$?; test -L /data2/xm_ho1/l || test -e /data2/xm_ho2/l || echo none; rm -rf /data/xm_hd /data2/xm_ho1 /data2/xm_ho2",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nnone\n",
+        "stderr": "cp: cannot create hard link '/data2/xm_ho1/l' to '/data/xm_hd/l': Invalid cross-device link\ncp: cannot create hard link '/data2/xm_ho2/l' to '/data/xm_hd/l': Invalid cross-device link\n"
+      },
+      "note": "coreutils 9.7 over tmpfs mounts: a hard link to a link in the tree, or under -L to what it leads to, cannot leave its mount either. Both copied the link and exited 0."
     }
   ]
 }

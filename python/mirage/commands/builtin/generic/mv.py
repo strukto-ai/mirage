@@ -33,6 +33,7 @@ from mirage.commands.builtin.generic.cp import (
     overwrite_type_error,
     prompter,
     rename_link,
+    renamed,
     same_file_error,
     slash_refuses_file,
     source_kind,
@@ -428,6 +429,7 @@ async def mv_generic(
     stdin: ByteSource | None = None,
     mount_root: MountIsRoot | None = None,
     dispatch: DispatchFn | None = None,
+    renames: Callable[[PathSpec, PathSpec], bool] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Move sources to a destination, fanning out into a directory.
 
@@ -469,6 +471,9 @@ async def mv_generic(
         dispatch (DispatchFn | None): the command's dispatcher, which
             lets a source's mount refuse a tree copied across mounts;
             None outside a workspace.
+        renames (Callable | None): whether a source can be renamed to its
+            target, which ``PrimitiveMove`` then does through
+            ``dispatch`` instead of copying it; None copies every source.
 
     Returns:
         tuple[ByteSource | None, IOResult]: Verbose output, with
@@ -535,9 +540,19 @@ async def mv_generic(
         if key_of(src) == key_of(target):
             errors.append(same_file_error("mv", src, target))
             continue
+        # A line that crosses mounts copies only the sources that must:
+        # one that stays on its mount, with no mount below it, renames.
+        move: MoveStrategy = (
+            NativeMove(rename=partial(renamed, dispatch))
+            if isinstance(strategy, PrimitiveMove)
+            and renames is not None
+            and dispatch is not None
+            and renames(src, target)
+            else strategy
+        )
         if flags.exchange:
             await _exchange_pair(
-                strategy,
+                move,
                 stat,
                 src,
                 target,
@@ -638,7 +653,7 @@ async def mv_generic(
             else:
                 errors.append(_replace_error(src, target, busy_phrase, True))
             continue
-        across = isinstance(strategy, PrimitiveMove)
+        across = isinstance(move, PrimitiveMove)
         # GNU refuses to replace a non-empty directory whether the target
         # was named outright (-T) or mapped under an existing destination
         # directory, so this cannot be gated on no_target_dir. It runs
@@ -684,7 +699,7 @@ async def mv_generic(
         backup_strategy = (
             NativeMove(rename=partial(rename_link, copies))
             if copies is not None
-            else strategy
+            else move
         )
         if across and flags.no_copy:
             # GNU renames the target aside before its rename meets the
@@ -710,20 +725,16 @@ async def mv_generic(
         )
         # Refuse an undeletable source before a backup moves the target aside.
         if (
-            isinstance(strategy, PrimitiveMove)
-            and strategy.check_unlink is not None
+            isinstance(move, PrimitiveMove)
+            and move.check_unlink is not None
             and not source_link
         ):
             try:
-                strategy.check_unlink(src)
+                move.check_unlink(src)
             except FS_ERRORS as exc:
                 errors.append(_move_error(src, target, strerror_of(exc)))
                 continue
-        if (
-            isinstance(strategy, PrimitiveMove)
-            and src_is_dir
-            and not source_link
-        ):
+        if isinstance(move, PrimitiveMove) and src_is_dir and not source_link:
             # Across mounts the tree is copied file by file, so the
             # source's mount is asked before a backup or a removal
             # touches the destination.
@@ -762,7 +773,7 @@ async def mv_generic(
             except FS_ERRORS as exc:
                 errors.append(_move_error(src, target, strerror_of(exc)))
                 continue
-        elif isinstance(strategy, PrimitiveMove):
+        elif isinstance(move, PrimitiveMove):
             if target_err is FsCondition.ENOENT:
                 # GNU's rename meets the absent parent before it falls
                 # back to a copy across devices.
@@ -775,7 +786,7 @@ async def mv_generic(
                 # so an empty directory there is made anew (-v: `created
                 # directory`).
                 try:
-                    await strategy.rmdir(target)
+                    await move.rmdir(target)
                 except FS_ERRORS as exc:
                     errors.append(
                         _replace_error(src, target, strerror_of(exc), across)
@@ -784,10 +795,10 @@ async def mv_generic(
             # Across mounts GNU copies and then removes, and -v says so
             # entry by entry instead of `renamed` (coreutils 9.7).
             verbose = lines if flags.verbose else None
-            entries = await walk(strategy.readdir, stat, src)
+            entries = await walk(move.readdir, stat, src)
             copied_all = await copy_entries(
                 "mv",
-                strategy,
+                move,
                 stat,
                 src,
                 target,
@@ -802,7 +813,7 @@ async def mv_generic(
                 # the destination keeps the entries that landed.
                 continue
             removed_all = await _remove_entries(
-                strategy, stat, entries, errors, verbose, mount_root
+                move, stat, entries, errors, verbose, mount_root
             )
             if not removed_all:
                 # GNU leaves the copied destination in place and reports
@@ -813,7 +824,7 @@ async def mv_generic(
             continue
         else:
             try:
-                await strategy.rename(src, target)
+                await move.rename(src, target)
             except Exception as exc:
                 # A walk that moved what it listed found the source holding
                 # a child written since: as in GNU's move across devices,

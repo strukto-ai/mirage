@@ -536,7 +536,7 @@ async function unlinked(dispatch: DispatchFn, path: PathSpec): Promise<void> {
 }
 
 // Rename one path through the dispatcher, a link itself.
-async function renamed(dispatch: DispatchFn, src: PathSpec, dst: PathSpec): Promise<void> {
+export async function renamed(dispatch: DispatchFn, src: PathSpec, dst: PathSpec): Promise<void> {
   await dispatch('rename', src, [dst])
 }
 
@@ -850,6 +850,9 @@ export async function makeLink(
   policy: TransferPolicy,
   errors: string[],
   lines: string[] | undefined,
+  // Refuses a -l link of the symlink itself that would leave its mount,
+  // once the overwrite gates let it through.
+  refuseLink: ((src: PathSpec, dst: PathSpec) => Promise<boolean>) | null = null,
 ): Promise<boolean> {
   const stat: StatFn = (path) => linkStat(copies, path)
   const targetLink = copies.links.statAt(target.virtual)
@@ -861,6 +864,7 @@ export async function makeLink(
     return false
   }
   if (!(await overwriteGate(policy, stat, src, target, errors))) return false
+  if (refuseLink !== null && (await refuseLink(src, target))) return false
   const made = await makeBackup(
     policy,
     targetLink === null ? copies.relay : { rename: (a, b) => renameLink(copies, a, b) },
@@ -894,7 +898,8 @@ export async function makeLink(
  * one that leads nowhere or loops (coreutils 9.7). A link that leads back into
  * a tree being copied is refused as GNU names it, `cannot copy cyclic symbolic
  * link`, rather than copied until the name is too long, which is where GNU
- * stops. Mirrors Python's copy_tree_links.
+ * stops. `refuseLink` refuses a -l link, of a link or of what it leads to,
+ * that would leave its mount. Mirrors Python's copy_tree_links.
  */
 export async function copyTreeLinks(
   copies: TransferLinks,
@@ -906,6 +911,7 @@ export async function copyTreeLinks(
   policy: TransferPolicy,
   seen: readonly string[] = [],
   blocked: readonly string[] = [],
+  refuseLink: ((src: PathSpec, dst: PathSpec) => Promise<boolean>) | null = null,
 ): Promise<void> {
   const base = rstripSlash(src.virtual) || '/'
   const dstBase = rstripSlash(target.virtual)
@@ -935,6 +941,7 @@ export async function copyTreeLinks(
         policy,
         errors,
         lines,
+        refuseLink,
       )
       continue
     }
@@ -962,7 +969,7 @@ export async function copyTreeLinks(
         placed,
         [{ path: entry.virtual, kind: leads.type }],
         errors,
-        { policy, lines, copies, ...(aside === null ? {} : { aside }) },
+        { policy, lines, copies, ...(aside === null ? {} : { aside }), refuseLink },
       )
       continue
     }
@@ -995,6 +1002,7 @@ export async function copyTreeLinks(
         copies,
         blocked: roots,
         ...(aside === null ? {} : { aside }),
+        refuseLink,
       },
     )
     await copyTreeLinks(
@@ -1007,6 +1015,7 @@ export async function copyTreeLinks(
       policy,
       [...seen, base],
       roots,
+      refuseLink,
     )
   }
 }
@@ -1844,6 +1853,7 @@ export async function copyEntries(
         entryPolicy,
         errors,
         opts.lines,
+        opts.refuseLink ?? null,
       )
       if (errors.length > errorCount) copiedAll = false
       continue
@@ -2172,6 +2182,7 @@ export async function cpGeneric(
         policy,
         errors,
         flags.verbose ? lines : undefined,
+        refuseLink,
       )
       if (made) created.add(keyOf(target))
       continue
@@ -2380,6 +2391,7 @@ export async function cpGeneric(
             policy,
             [],
             leftOut,
+            refuseLink,
           )
         }
         continue
@@ -2418,6 +2430,9 @@ export async function cpGeneric(
               errors,
               flags.verbose ? lines : undefined,
               policy,
+              [],
+              [],
+              refuseLink,
             )
           }
           continue
@@ -2506,6 +2521,7 @@ export async function cpGeneric(
           policy,
           [],
           mirrored.blocked.map((root) => PathSpec.fromStrPath(root).virtual),
+          refuseLink,
         )
       }
       continue
@@ -2528,7 +2544,6 @@ export async function cpGeneric(
       errors.push(refusal)
       continue
     }
-    if (refuseLink !== null && (await refuseLink(src, target))) continue
     let copier: CopyStrategy = strategy
     let mover: CopyStrategy | NativeMove = aside ?? strategy
     // A backup moves, and --remove-destination removes, a link standing at the
@@ -2543,6 +2558,7 @@ export async function cpGeneric(
         }
       }
     }
+    if (refuseLink !== null && (await refuseLink(src, target))) continue
     const made = await makeBackup(policy, mover, stat, versionReaddir, target, errors, copies, src)
     if (!made.ok) continue
     if (

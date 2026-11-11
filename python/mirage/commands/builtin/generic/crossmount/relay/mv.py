@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
+import logging
 from typing import Callable
 
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
@@ -34,7 +35,36 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.types import CheckFn, PathSpec, PrimitiveMove
-from mirage.workspace.files import Files
+from mirage.utils.path import CycleError
+from mirage.view.types import MountView
+from mirage.workspace.dispatcher.reader import NamespaceReader
+from mirage.workspace.files import Files, reader_of
+
+logger = logging.getLogger(__name__)
+
+
+def _renames(
+    reader: NamespaceReader, mounts: MountView, src: PathSpec, target: PathSpec
+) -> bool:
+    """Whether a source moves by a rename: it and its target sit on one
+    mount once the links above both are followed, and no mount sits
+    below it, which a rename would leave where it is.
+
+    Args:
+        reader (NamespaceReader): the links as the session sees them.
+        mounts (MountView): the mount boundaries.
+        src (PathSpec): the source.
+        target (PathSpec): where it goes.
+    """
+    try:
+        here = reader.follow_parent(src.virtual)
+        there = reader.follow_parent(target.virtual)
+    except CycleError as exc:
+        logger.debug("mv: no rename past a loop at %s: %s", src.virtual, exc)
+        return False
+    return mounts.root_of(here) == mounts.root_of(there) and not (
+        mounts.descendants(here)
+    )
 
 
 async def run_mv(
@@ -48,8 +78,9 @@ async def run_mv(
 ) -> CrossResult:
     """Move operands that span mounts via the shared generic mv.
 
-    Pure wiring: copy through the transfer primitives, then unlink the
-    source on its own mount.
+    Pure wiring: a source that stays on its mount renames there; any
+    other is copied through the transfer primitives, then unlinked on its
+    own mount.
 
     Args:
         scopes (list[PathSpec]): Path operands in command-line order.
@@ -93,4 +124,9 @@ async def run_mv(
         stdin=stdin,
         mount_root=(mounts.is_root if mounts is not None else None),
         dispatch=dispatch,
+        renames=(
+            functools.partial(_renames, reader_of(vfs), mounts)
+            if vfs is not None and mounts is not None
+            else None
+        ),
     )
