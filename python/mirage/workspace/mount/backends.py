@@ -22,7 +22,7 @@ from mirage.vfs.base import BaseVFS
 # ``COMMANDS``), by the class's module path, so a class of the same name
 # defined elsewhere is not taken for the builtin. Imported on first mount,
 # so a workspace loads only the backends it mounts.
-_MODULES: dict[str, str] = {
+_BACKENDS: dict[str, str] = {
     "mirage.vfs.dev.dev.DevVFS": "mirage.commands.builtin.dev",
 }
 
@@ -42,7 +42,7 @@ def backend_commands(vfs: BaseVFS) -> list[Command]:
     """
     found: list[Command] = []
     for klass in type(vfs).__mro__:
-        module = _MODULES.get(f"{klass.__module__}.{klass.__qualname__}")
+        module = _BACKENDS.get(f"{klass.__module__}.{klass.__qualname__}")
         if module is None:
             continue
         family = klass.__dict__.get("name", vfs.name)

@@ -400,7 +400,7 @@ async def walk_find(
             )
 
 
-def depth_first_key(path: str) -> tuple[tuple[str, int], ...]:
+def depth_first_order(path: str) -> tuple[tuple[str, int], ...]:
     """The sort key for GNU's ``-depth`` order over sorted siblings.
 
     A directory's contents, each sorted, then the directory: the final

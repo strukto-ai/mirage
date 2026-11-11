@@ -945,8 +945,18 @@ class WorkspaceConfig(BaseModel):
             kwargs["network"] = self.network
         if self.system_time is not None:
             kwargs["system_time"] = self.system_time
-        if self.cache is not None:
-            kwargs["cache"] = _build_cache_config(self.cache)
+        if isinstance(self.cache, RedisCacheBlock):
+            kwargs["cache"] = RedisCacheConfig(
+                limit=self.cache.limit,
+                max_drain_bytes=self.cache.max_drain_bytes,
+                url=self.cache.url,
+                key_prefix=self.cache.key_prefix,
+            )
+        elif self.cache is not None:
+            kwargs["cache"] = CacheConfig(
+                limit=self.cache.limit,
+                max_drain_bytes=self.cache.max_drain_bytes,
+            )
         if self.index is not None:
             kwargs["index"] = _build_index_config(self.index)
         if self.workspace_id is not None:
@@ -1021,20 +1031,6 @@ class WorkspaceConfig(BaseModel):
             for prefix, block in self.mounts.items()
             if block.backend in KERNEL_BACKENDS
         }
-
-
-def _build_cache_config(block: RamCacheBlock | RedisCacheBlock) -> CacheConfig:
-    if isinstance(block, RedisCacheBlock):
-        return RedisCacheConfig(
-            limit=block.limit,
-            max_drain_bytes=block.max_drain_bytes,
-            url=block.url,
-            key_prefix=block.key_prefix,
-        )
-    return CacheConfig(
-        limit=block.limit,
-        max_drain_bytes=block.max_drain_bytes,
-    )
 
 
 def _build_index_config(block: RamIndexBlock | RedisIndexBlock) -> IndexConfig:

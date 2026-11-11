@@ -26,7 +26,6 @@ from mirage.commands.cli.builtin.git.errors import (
 )
 from mirage.commands.cli.builtin.git.format import abbrev_width
 from mirage.commands.cli.builtin.git.history import (
-    LogFlags,
     in_print_order,
     parse_flags,
     ref_commits,
@@ -653,39 +652,6 @@ def _show_ref_lines(
     return lines
 
 
-def _show_ref_names(
-    repo: BaseRepo, patterns: tuple[str, ...], fl: FlagView
-) -> list[str]:
-    """The refs a listing names: under ``refs/``, in sorted order.
-
-    Args:
-        repo (BaseRepo): the opened repository.
-        patterns (tuple[str, ...]): whole names or trailing components.
-        fl (FlagView): parsed flags.
-    """
-    table = ref_table(repo)
-    heads = fl.as_bool("heads") or fl.as_bool("branches")
-    tags = fl.as_bool("tags")
-    names = [
-        name
-        for name in sorted(table)
-        if name.startswith("refs/")
-        and (
-            not (heads or tags)
-            or (heads and name.startswith("refs/heads/"))
-            or (tags and name.startswith("refs/tags/"))
-        )
-        and (
-            not patterns
-            or any(name == p or name.endswith("/" + p) for p in patterns)
-        )
-        and resolve_ref(table, name)[0] is not None
-    ]
-    if fl.as_bool("head") and resolve_ref(table, HEAD)[0] is not None:
-        names.insert(0, HEAD)
-    return names
-
-
 async def show_ref(
     accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
@@ -724,39 +690,30 @@ async def show_ref(
                 raise GitError(f"'{name}' - not a valid ref")
             names.append(name)
     else:
-        names = await asyncio.to_thread(
-            _show_ref_names, repo, tuple(texts), fl
-        )
+        # A listing names the refs under ``refs/``, in sorted order.
+        heads = fl.as_bool("heads") or fl.as_bool("branches")
+        tags = fl.as_bool("tags")
+        names = [
+            name
+            for name in sorted(table)
+            if name.startswith("refs/")
+            and (
+                not (heads or tags)
+                or (heads and name.startswith("refs/heads/"))
+                or (tags and name.startswith("refs/tags/"))
+            )
+            and (
+                not texts
+                or any(name == p or name.endswith("/" + p) for p in texts)
+            )
+            and resolve_ref(table, name)[0] is not None
+        ]
+        if fl.as_bool("head") and resolve_ref(table, HEAD)[0] is not None:
+            names.insert(0, HEAD)
     if quiet:
         return None, IOResult(exit_code=0 if names else 1)
     lines = await asyncio.to_thread(_show_ref_lines, repo, names, fl)
     return "".join(lines).encode(), IOResult(exit_code=0 if names else 1)
-
-
-def _revisions(
-    repo: BaseRepo,
-    revisions: tuple[str, ...],
-    flags: LogFlags,
-    dashed: bool = False,
-) -> list[bytes]:
-    """The lines rev-list prints for its commits: an id each, with
-    ``-`` in front of a ``--boundary`` one (git 2.47.3).
-
-    Args:
-        repo (BaseRepo): the opened repository.
-        revisions (tuple[str, ...]): the revision operands.
-        flags (LogFlags): the parsed invocation.
-        dashed (bool): whether ``--`` is on the line.
-    """
-    starts, hidden = walk_ends(repo, revisions, dashed)
-    if flags.all_refs:
-        starts[:0] = ref_commits(repo)
-    walk = walked(repo, starts, flags, tuple(hidden))
-    boundary = {commit.id for commit in walk.boundary}
-    return [
-        (b"-" if commit.id in boundary else b"") + commit.id
-        for commit in in_print_order(walk, flags)
-    ]
 
 
 async def rev_list(
@@ -773,13 +730,22 @@ async def rev_list(
     # A line naming only paths has no revision either (git 2.47.3).
     if not revisions and not flags.all_refs:
         raise UsageError("", verb_usage(ctx))
-    commits = await asyncio.to_thread(
-        _revisions,
-        repo,
-        revisions,
-        replace(flags, pathspecs=patterns),
-        dashed,
-    )
+    walking = replace(flags, pathspecs=patterns)
+
+    def listed() -> list[bytes]:
+        # An id per commit, with ``-`` in front of a ``--boundary`` one
+        # (git 2.47.3), walked on a worker thread.
+        starts, hidden = walk_ends(repo, revisions, dashed)
+        if walking.all_refs:
+            starts[:0] = ref_commits(repo)
+        walk = walked(repo, starts, walking, tuple(hidden))
+        boundary = {commit.id for commit in walk.boundary}
+        return [
+            (b"-" if commit.id in boundary else b"") + commit.id
+            for commit in in_print_order(walk, walking)
+        ]
+
+    commits = await asyncio.to_thread(listed)
     return (
         f"{len(commits)}\n".encode()
         if fl.as_bool("count")

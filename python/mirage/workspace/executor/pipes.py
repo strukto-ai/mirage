@@ -19,7 +19,7 @@ from typing import Any
 
 from mirage.context import (
     current_caller,
-    reset_current_session,
+    reset_caller,
     set_current_evaluation,
     while_paused,
 )
@@ -237,7 +237,7 @@ async def handle_pipe(
             io.stderr = await output.snapshot(Channel.STDERR)
             ios[i] = io
             child_nodes[i] = child_exec
-            reset_current_session(token)
+            reset_caller(token)
             await child.close_inputs()
         return io.exit_code
 

@@ -29,8 +29,7 @@ from mirage.context import (
     hidden_refusal,
     is_program_invocation,
     readonly_below,
-    reset_current_session,
-    reset_program_invocation,
+    reset_caller,
     session_visibility,
     set_current_evaluation,
     set_current_session,
@@ -42,7 +41,6 @@ from mirage.context.session_context import (
     bind_caller,
     current_caller,
     in_landing,
-    reset_caller,
     run_landing,
     session_voice,
     with_caller,
@@ -72,7 +70,7 @@ def bound_session():
     )
     token = set_current_session(sess)
     yield sess
-    reset_current_session(token)
+    reset_caller(token)
 
 
 def test_a_changed_caller_keeps_the_rest_and_refuses_a_stranger():
@@ -122,7 +120,7 @@ def test_unrestricted_session_keeps_mount_mode():
     try:
         assert effective_mount_mode("/s3", MountMode.EXEC) == MountMode.EXEC
     finally:
-        reset_current_session(token)
+        reset_caller(token)
 
 
 def test_a_role_narrows_the_mount_mode(bound_session):
@@ -159,7 +157,7 @@ def test_ownership_gates_the_binding():
         assert get_current_session_for(theirs) is None
         assert get_current_session() is sess
     finally:
-        reset_current_session(token)
+        reset_caller(token)
 
 
 def test_a_nested_binding_keeps_the_owner():
@@ -172,8 +170,8 @@ def test_a_nested_binding_keeps_the_owner():
     try:
         assert get_current_session_for(mine) is inner
     finally:
-        reset_current_session(inner_token)
-        reset_current_session(outer_token)
+        reset_caller(inner_token)
+        reset_caller(outer_token)
 
 
 def test_an_unowned_binding_answers_nobody():
@@ -182,7 +180,7 @@ def test_an_unowned_binding_answers_nobody():
     try:
         assert get_current_session_for(SessionManager("default")) is None
     finally:
-        reset_current_session(token)
+        reset_caller(token)
 
 
 def test_the_boundary_reads_the_bound_sessions_visibility():
@@ -208,7 +206,7 @@ def test_the_boundary_reads_the_bound_sessions_visibility():
         assert path_visible(vis, "/repo/README")
         assert path_visible(vis, "/shared/public")
     finally:
-        reset_current_session(token)
+        reset_caller(token)
 
 
 class _Gate:
@@ -227,7 +225,7 @@ class _Gate:
 def test_the_admission_binding_is_scoped_to_one_command():
     from mirage.context import (
         get_admission,
-        reset_admission,
+        reset_caller,
         set_admission,
     )
 
@@ -242,10 +240,10 @@ def test_the_admission_binding_is_scoped_to_one_command():
         try:
             assert get_admission() is inner
         finally:
-            reset_admission(inner_token)
+            reset_caller(inner_token)
         assert get_admission() is outer
     finally:
-        reset_admission(token)
+        reset_caller(token)
     assert get_admission() is None
 
 
@@ -284,7 +282,7 @@ def test_effective_path_mode_is_the_anchor_depth_rule():
             == MountMode.READ
         )
     finally:
-        reset_current_session(token)
+        reset_caller(token)
 
 
 def test_effective_path_mode_without_a_session_is_the_mounts_own():
@@ -308,7 +306,7 @@ def test_an_equal_depth_pair_takes_the_weaker():
             == MountMode.READ
         )
     finally:
-        reset_current_session(token)
+        reset_caller(token)
 
 
 def test_strongest_mode_under_counts_a_show_grant():
@@ -330,7 +328,7 @@ def test_strongest_mode_under_counts_a_show_grant():
         assert strongest_mode_under("/repo", MountMode.READ) == MountMode.READ
         assert strongest_mode_under("/other", MountMode.READ) == MountMode.READ
     finally:
-        reset_current_session(token)
+        reset_caller(token)
 
 
 def test_readonly_below_blames_the_carved_anchor():
@@ -365,7 +363,7 @@ def test_readonly_below_blames_the_carved_anchor():
         )
         assert readonly_below("/repo/other", "/repo", MountMode.WRITE) is None
     finally:
-        reset_current_session(token)
+        reset_caller(token)
     assert readonly_below("/repo/tree", "/repo", MountMode.WRITE) is None
 
 
@@ -388,7 +386,7 @@ def test_readonly_below_blames_the_operand_for_a_pattern():
         )
         assert readonly_below("/other/tree", "/repo", MountMode.WRITE) is None
     finally:
-        reset_current_session(token)
+        reset_caller(token)
 
 
 def test_hidden_under_is_per_operand():
@@ -402,7 +400,7 @@ def test_hidden_under_is_per_operand():
         assert hidden_under(session_visibility(), "/repo/.env")
         assert not hidden_under(session_visibility(), "/s3")
     finally:
-        reset_current_session(token)
+        reset_caller(token)
     assert not hidden_under(session_visibility(), "/repo")
 
 
@@ -458,13 +456,13 @@ def test_an_entry_point_keeps_any_bind_but_another_owners():
     try:
         assert get_current_session_unless_foreign(mine) is sess
     finally:
-        reset_current_session(token)
+        reset_caller(token)
     token = set_current_session(sess, mine)
     try:
         assert get_current_session_unless_foreign(mine) is sess
         assert get_current_session_unless_foreign(theirs) is None
     finally:
-        reset_current_session(token)
+        reset_caller(token)
 
 
 def test_a_program_run_covers_the_child_evaluations_under_it():
@@ -480,10 +478,10 @@ def test_a_program_run_covers_the_child_evaluations_under_it():
             assert is_program_invocation(child)
             assert not is_program_invocation(other)
         finally:
-            reset_current_session(token)
+            reset_caller(token)
         assert not is_program_invocation(child)
     finally:
-        reset_program_invocation(mark)
+        reset_caller(mark)
     assert not is_program_invocation(parent)
 
 
@@ -499,9 +497,9 @@ def test_an_evaluation_binds_with_its_own_session_only():
             try:
                 assert get_current_evaluation() is expected
             finally:
-                reset_current_session(inner)
+                reset_caller(inner)
     finally:
-        reset_current_session(token)
+        reset_caller(token)
     assert get_current_evaluation() is None
 
 

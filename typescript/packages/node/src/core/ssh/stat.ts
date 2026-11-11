@@ -146,8 +146,19 @@ export async function tree(
       return null
     }
     start = end + 1
-    const attrs = findAttrs(fields)
-    if (attrs === null) return null
+    const [kind = '', mode = '', size = '', mtime = '', atime = '', uid = '', gid = ''] = fields
+    const type = FIND_TYPES[kind]
+    if (type === undefined || fields.length < 8 || !/^[0-7]+$/.test(mode)) return null
+    if (![size, uid, gid].every((n) => /^\d+$/.test(n))) return null
+    if (![mtime, atime].every((t) => /^-?\d+(\.\d*)?$/.test(t))) return null
+    const attrs: SshAttrs = {
+      mode: type | Number.parseInt(mode, 8),
+      size: Number(size),
+      mtime: Number(mtime.split('.')[0]),
+      atime: Number(atime.split('.')[0]),
+      uid: Number(uid),
+      gid: Number(gid),
+    }
     const rel = fields.slice(7).join(' ')
     if (rel === '') {
       top = isDirectoryAttrs(attrs)
@@ -156,22 +167,4 @@ export async function tree(
     rows.set(rel, attrsToFileStat(rel.split('/').pop() ?? rel, attrs))
   }
   return top ? rows : null
-}
-
-// One find record's fields as SFTP attributes, or null for a record that is
-// not a directory or a regular file, or that does not parse.
-function findAttrs(fields: readonly string[]): SshAttrs | null {
-  const [kind = '', mode = '', size = '', mtime = '', atime = '', uid = '', gid = ''] = fields
-  const type = FIND_TYPES[kind]
-  if (type === undefined || fields.length < 8 || !/^[0-7]+$/.test(mode)) return null
-  if (![size, uid, gid].every((n) => /^\d+$/.test(n))) return null
-  if (![mtime, atime].every((t) => /^-?\d+(\.\d*)?$/.test(t))) return null
-  return {
-    mode: type | Number.parseInt(mode, 8),
-    size: Number(size),
-    mtime: Number(mtime.split('.')[0]),
-    atime: Number(atime.split('.')[0]),
-    uid: Number(uid),
-    gid: Number(gid),
-  }
 }

@@ -40,49 +40,6 @@ async function hasSession(
 }
 
 /**
- * Serve a workspace's MCP tools over stdio. The tools are the daemon's:
- * this relays stdio to the workspace's `/v1/workspaces/:id/mcp`
- * endpoint, starting the daemon when it is not running. A config with no
- * `workspace_id` makes a workspace that lives as long as this process, as
- * a stdio server's state does. A workspace with a name, the config's
- * `workspace_id` or `--workspace`, outlives it. The daemon answers a
- * config's name with the live workspace created from that same config,
- * and refuses it when the live one came from another. `--session` serves
- * the tools as that session, under its profile, as it does for
- * `mirage shell`. `--all-calls` also serves each VFS call as a
- * `vfs_<call>` tool, and `explain` on `shell` and on each of them.
- */
-async function runMcp(
-  config: string | undefined,
-  options: {
-    workspace?: string
-    session?: string
-    allCalls?: boolean
-  },
-): Promise<void> {
-  if (options.workspace !== undefined && config !== undefined) {
-    fail('pass a config or --workspace, not both', 2)
-  }
-  let path: string | undefined
-  if (options.workspace === undefined) {
-    try {
-      path = resolveWorkspaceConfig(config, { envNames: MCP_ENV_NAMES })
-    } catch (error) {
-      fail(error instanceof Error ? error.message : String(error), 2)
-    }
-  }
-  const { relayStdio } = await import('@struktoai/mirage-server/mcp')
-  await relayWorkspace(
-    path,
-    options.workspace,
-    options.session,
-    'mcp',
-    relayStdio,
-    options.allCalls === true,
-  )
-}
-
-/**
  * Delete a relay's temporary workspace on the relay's own server. Sends the
  * token the relay last used, so it works after the login ended or changed
  * and without a refresh; only when the server refuses that token does it
@@ -169,6 +126,19 @@ export async function relayWorkspace(
   if (refusal !== undefined) fail(refusal, 2)
 }
 
+/**
+ * Serve a workspace's MCP tools over stdio. The tools are the daemon's:
+ * this relays stdio to the workspace's `/v1/workspaces/:id/mcp`
+ * endpoint, starting the daemon when it is not running. A config with no
+ * `workspace_id` makes a workspace that lives as long as this process, as
+ * a stdio server's state does. A workspace with a name, the config's
+ * `workspace_id` or `--workspace`, outlives it. The daemon answers a
+ * config's name with the live workspace created from that same config,
+ * and refuses it when the live one came from another. `--session` serves
+ * the tools as that session, under its profile, as it does for
+ * `mirage shell`. `--all-calls` also serves each VFS call as a
+ * `vfs_<call>` tool, and `explain` on `shell` and on each of them.
+ */
 export function registerMcpCommand(program: Command): void {
   program
     .command('mcp')
@@ -177,5 +147,31 @@ export function registerMcpCommand(program: Command): void {
     .option('-s, --session <id>', "Session the tools act as; the workspace's default when absent")
     .option('--all-calls', 'Also serve each VFS call as a tool, and explain')
     .description("Serve a Mirage workspace's MCP tools over stdio.")
-    .action(runMcp)
+    .action(
+      async (
+        config: string | undefined,
+        options: { workspace?: string; session?: string; allCalls?: boolean },
+      ) => {
+        if (options.workspace !== undefined && config !== undefined) {
+          fail('pass a config or --workspace, not both', 2)
+        }
+        let path: string | undefined
+        if (options.workspace === undefined) {
+          try {
+            path = resolveWorkspaceConfig(config, { envNames: MCP_ENV_NAMES })
+          } catch (error) {
+            fail(error instanceof Error ? error.message : String(error), 2)
+          }
+        }
+        const { relayStdio } = await import('@struktoai/mirage-server/mcp')
+        await relayWorkspace(
+          path,
+          options.workspace,
+          options.session,
+          'mcp',
+          relayStdio,
+          options.allCalls === true,
+        )
+      },
+    )
 }

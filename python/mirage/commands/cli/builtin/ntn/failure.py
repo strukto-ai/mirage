@@ -20,11 +20,6 @@ from mirage.core.notion.client import NotionAPIError
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
-VerbFn = Callable[
-    [NotionAccessor, list[PathSpec], list[str], Context],
-    Awaitable[tuple[ByteSource | None, IOResult]],
-]
-
 FAILED = "error: Public API request failed"
 # 401 is the one status upstream does not itemize: it drops the
 # parenthesis entirely and answers with an actionable hint and its own
@@ -114,7 +109,10 @@ def api_failure(exc: NotionAPIError) -> tuple[str, int]:
 
 
 async def guarded(
-    fn: VerbFn,
+    fn: Callable[
+        [NotionAccessor, list[PathSpec], list[str], Context],
+        Awaitable[tuple[ByteSource | None, IOResult]],
+    ],
     accessor: NotionAccessor,
     paths: list[PathSpec],
     texts: list[str],
@@ -130,7 +128,7 @@ async def guarded(
     fails if a leaf is left unwrapped.
 
     Args:
-        fn (VerbFn): the leaf handler being guarded.
+        fn (Callable): the leaf handler being guarded.
         accessor (NotionAccessor): the install's accessor.
         paths (list[PathSpec]): the leaf's path operands.
         texts (list[str]): the leaf's text operands.

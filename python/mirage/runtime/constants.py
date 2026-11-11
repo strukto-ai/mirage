@@ -89,10 +89,10 @@ ABSENT_PATH: Final = (FileNotFoundError, NotADirectoryError)
 # is a second name for one inode, and nothing above a mount holds that.
 HARD_LINK_REFUSAL: Final = FsCondition.EPERM
 
-# How long one policy program (a profile's ``policy:`` or the
-# ``route_policy``) may run before the action it judges is refused or
+# How long, in seconds, one policy program (a profile's ``policy:`` or
+# the ``route_policy``) may run before the action it judges is refused or
 # the route it decides fails. One bound for every stage.
-SCRIPT_EVAL_TIMEOUT_SECONDS = 10.0
+SCRIPT_EVAL_TIMEOUT = 10.0
 
 # The config fields that hold a runtime's credential: a saved runtime keeps
 # them sealed, as a mount keeps a SecretStr field.

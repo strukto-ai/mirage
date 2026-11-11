@@ -14,6 +14,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
+import { currentCaller, runWithCaller } from '../context/session_context.ts'
 import { PathSpec } from '../types.ts'
 import {
   activeCacheManager,
@@ -21,7 +22,6 @@ import {
   deleteCondition,
   publishRead,
   nativeCondition,
-  runWithCacheManager,
   runWithWriteContext,
   settleAfter,
   writeCondition,
@@ -52,7 +52,7 @@ class FakeManager {
 describe('cache context', () => {
   it('scopes the manager to the run', async () => {
     const manager = new FakeManager()
-    await runWithCacheManager(manager, async () => {
+    await runWithCaller({ ...currentCaller(), cache: { manager } }, async () => {
       expect(activeCacheManager()).toBe(manager)
       await Promise.resolve()
     })
@@ -62,8 +62,8 @@ describe('cache context', () => {
   it('nested runs restore the outer manager', async () => {
     const outer = new FakeManager()
     const inner = new FakeManager()
-    await runWithCacheManager(outer, async () => {
-      await runWithCacheManager(inner, async () => {
+    await runWithCaller({ ...currentCaller(), cache: { manager: outer } }, async () => {
+      await runWithCaller({ ...currentCaller(), cache: { manager: inner } }, async () => {
         expect(activeCacheManager()).toBe(inner)
         await Promise.resolve()
       })

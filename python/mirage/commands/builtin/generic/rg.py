@@ -56,8 +56,6 @@ from mirage.commands.builtin.utils.links import (
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import is_stdin, stdin_stream
 from mirage.commands.builtin.utils.wrap import (
-    call_readdir,
-    call_stat,
     mount_parent_readdir,
     mount_parent_stat,
     to_pathspec,
@@ -596,9 +594,9 @@ async def rg_generic(
 
     mounts = mounts_of(ctx)
     rd = mount_parent_readdir(
-        partial(call_readdir, readdir), mounts, mount_root(ctx)
+        lambda path: readdir(to_pathspec(path)), mounts, mount_root(ctx)
     )
-    st = mount_parent_stat(partial(call_stat, stat), mounts)
+    st = mount_parent_stat(lambda path: stat(to_pathspec(path)), mounts)
 
     if (
         pat is not None

@@ -74,14 +74,16 @@ const MACHINE_PROVIDERS: readonly string[] = [
   'ssh',
 ]
 
-const NODE_HINT =
-  'lives in @struktoai/mirage-node; import that package to register it. Browser ' +
-  "worlds support 'monty' (sandboxed), 'pyodide' (WASM CPython), and " +
-  "'quickjs' (sandboxed JavaScript)"
-
 /** Why a name a config may carry is not registered here, and where it lives. */
 const RUNTIME_HINTS: Record<string, string> = {
-  ...Object.fromEntries(NODE_RUNTIMES.map((name) => [name, `runtime '${name}' ${NODE_HINT}`])),
+  ...Object.fromEntries(
+    NODE_RUNTIMES.map((name) => [
+      name,
+      `runtime '${name}' lives in @struktoai/mirage-node; import that package to register ` +
+        "it. Browser worlds support 'monty' (sandboxed), 'pyodide' (WASM CPython), and " +
+        "'quickjs' (sandboxed JavaScript)",
+    ]),
+  ),
   wasi:
     "runtime 'wasi' is Python-only (a CPython WASI build); TypeScript " +
     "supports 'monty' (sandboxed), 'pyodide' (WASM CPython), " +

@@ -21,8 +21,6 @@ import {
 import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { secretSchema, z } from '@struktoai/mirage-core/vfs/secrets'
 
-type HeaderProvider = () => Promise<Record<string, string>> | Record<string, string>
-
 export const DiscordConfig = z
   .object({
     ...timeoutShape,
@@ -32,7 +30,11 @@ export const DiscordConfig = z
       .describe(
         "URL of your backend proxy, which forwards to `https://discord.com/api/v10` and attaches the bot token. A path resolves against the page's origin; no query string or fragment.",
       ),
-    getHeaders: secretSchema(z.custom<HeaderProvider>((value) => typeof value === 'function'))
+    getHeaders: secretSchema(
+      z.custom<() => Promise<Record<string, string>> | Record<string, string>>(
+        (value) => typeof value === 'function',
+      ),
+    )
       .optional()
       .describe(
         'Function returning extra headers sent with every request to the proxy, such as your own session credential.',

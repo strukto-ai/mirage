@@ -27,7 +27,7 @@ from mirage.context.session_context import (
     Caller,
     CallerToken,
     current_caller,
-    reset_explaining,
+    reset_caller,
     set_explaining,
 )
 from mirage.errors.fs import eacces, erofs
@@ -275,7 +275,7 @@ async def _file_type(
         )
         return None
     finally:
-        reset_explaining(token)
+        reset_caller(token)
     return found.type
 
 
@@ -438,7 +438,7 @@ async def pre_vfs_gate(
         try:
             noted = await _apart(_explained_op(policies, ctx, decisions, line))
         finally:
-            reset_explaining(token)
+            reset_caller(token)
         trace.append(noted)
         if final or noted.error:
             raise Explained()
@@ -1098,7 +1098,7 @@ class Policies:
             return result
         finally:
             if token is not None:
-                reset_explaining(token)
+                reset_caller(token)
             if composition is not None:
                 composition.close()
 

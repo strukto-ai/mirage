@@ -95,12 +95,3 @@ def posix_phrase(condition: FsCondition) -> str:
         condition (FsCondition): the named condition.
     """
     return POSIX[condition].phrase
-
-
-def linux_errno(condition: FsCondition) -> int:
-    """The number Linux gives a condition, whatever the host.
-
-    Args:
-        condition (FsCondition): the named condition.
-    """
-    return LINUX_ERRNO[condition]

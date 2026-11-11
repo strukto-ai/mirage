@@ -33,7 +33,7 @@ from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import Context, command
 from mirage.commands.spec.types import CommandSpec
 from mirage.config import load_config
-from mirage.context import reset_current_session, set_current_session
+from mirage.context import reset_caller, set_current_session
 from mirage.errors import classify
 from mirage.execution.process.types import SpawnRequest
 from mirage.io.cooperative import chunks
@@ -420,7 +420,7 @@ async def action(
                 held,
             )
         finally:
-            reset_current_session(token)
+            reset_caller(token)
     if op == "mount":
         vfs = build_vfs(step["vfs"], step.get("config", {}))
         try:

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import base64
 import json
 from collections.abc import AsyncGenerator
 from typing import Any, cast
@@ -351,6 +352,13 @@ def blob_path(owner: str, repo: str, sha: str) -> str:
         sha (str): the blob's sha.
     """
     return f"/repos/{owner}/{repo}/git/blobs/{sha}"
+
+
+async def fetch_blob(
+    account: GitHubAccount, owner: str, repo: str, sha: str
+) -> bytes:
+    data = await github_get(account, blob_path(owner, repo, sha))
+    return base64.b64decode(data["content"])
 
 
 def stream_blob(

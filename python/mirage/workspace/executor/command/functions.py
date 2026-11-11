@@ -18,7 +18,7 @@ from typing import Any
 
 from mirage.context import (
     clear_program_invocation,
-    reset_program_invocation,
+    reset_caller,
     session_voice,
 )
 from mirage.execution.job import JobTable
@@ -250,7 +250,7 @@ async def run_shell_function(
         if nested is not None and decisions is not None:
             decisions.hand_up(session.session_id, nested)
         scope.release()
-        reset_program_invocation(marked)
+        reset_caller(marked)
         cs.pop()
         if session.function_names is not None:
             session.function_names = outer_names

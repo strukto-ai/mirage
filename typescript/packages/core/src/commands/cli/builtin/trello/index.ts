@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { TrelloAccessor } from '../../../../accessor/trello.ts'
+import { HttpTrelloTransport } from '../../../../core/trello/client.ts'
 import { TrelloConfig } from '../../../../core/trello/config.ts'
 import { Argument, CommandSpec } from '../../../spec/types.ts'
 import { CLI, CLIHandler } from '../../types.ts'
@@ -24,7 +26,6 @@ import { move } from './card/move.ts'
 import { unlabel } from './card/unlabel.ts'
 import { update } from './card/update.ts'
 import * as reads from './reads.ts'
-import { trelloAccessor } from './util.ts'
 
 const ARG = new Argument('texts', { metavar: '', nargs: '*' })
 
@@ -170,5 +171,18 @@ export const TRELLO = new CLI({
     'card comment-update': new CLIHandler({ fn: commentUpdate, write: true }),
   },
   configModel: TrelloConfig,
-  accessor: trelloAccessor,
+  // The install's accessor, built once from its validated config.
+  accessor: (config) => {
+    const cfg = config as TrelloConfig
+    const transport = new HttpTrelloTransport({
+      apiKey: cfg.apiKey,
+      apiToken: cfg.apiToken,
+      ...(cfg.baseUrl !== undefined ? { baseUrl: cfg.baseUrl } : {}),
+      ...(cfg.timeout !== undefined ? { timeout: cfg.timeout } : {}),
+    })
+    return new TrelloAccessor(transport, {
+      ...(cfg.workspaceId !== undefined ? { workspaceId: cfg.workspaceId } : {}),
+      ...(cfg.boardIds !== undefined ? { boardIds: cfg.boardIds } : {}),
+    })
+  },
 })

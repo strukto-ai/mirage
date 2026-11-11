@@ -12,22 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
-
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.stat import key_stat
 from mirage.errors.fs import readdir_error
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import norm
-from mirage.vfs.ram.store import RAMStore
-
-
-async def _is_file(store: RAMStore, key: str) -> bool:
-    return key in store.files
-
-
-async def _is_dir(store: RAMStore, key: str) -> bool:
-    return key in store.dirs
 
 
 async def child_keys(accessor: RAMAccessor, path: PathSpec) -> list[str]:
@@ -41,9 +30,14 @@ async def child_keys(accessor: RAMAccessor, path: PathSpec) -> list[str]:
     store = accessor.store
     p = norm(target.vfs_path)
     if p not in store.dirs:
-        raise await readdir_error(
-            path, p, partial(_is_file, store), partial(_is_dir, store)
-        )
+
+        async def is_file(key: str) -> bool:
+            return key in store.files
+
+        async def is_dir(key: str) -> bool:
+            return key in store.dirs
+
+        raise await readdir_error(path, p, is_file, is_dir)
     dir_prefix = p.rstrip("/") + "/"
     seen: set[str] = set()
     for key in list(store.files) + list(store.dirs):

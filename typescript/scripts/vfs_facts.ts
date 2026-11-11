@@ -915,7 +915,7 @@ function shapeOf(
       return shapeOf(callee.expression, source, env, packagesRoot, label)
     }
     if (ts.isIdentifier(callee)) {
-      // A schema-building helper such as `browserAliasSchema(extra)`: its
+      // A schema-building helper such as `aliasSchema(extra)`: its
       // return expression, with its parameters bound to this call's
       // arguments.
       const fn = resolveFunction(callee.text, source, packagesRoot)

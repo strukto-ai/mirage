@@ -25,8 +25,6 @@ import {
 } from './constants.ts'
 import { SSHConfigError } from './errors.ts'
 
-export type SSHSettingKey = keyof typeof SSH_ENV_KEYS
-
 /**
  * Where the daemon's SSH endpoint listens and whom it lets in.
  *
@@ -49,7 +47,7 @@ export function defaultSSHDir(home?: string): string {
 }
 
 function setting(
-  key: SSHSettingKey,
+  key: keyof typeof SSH_ENV_KEYS,
   env: Record<string, string | undefined>,
   table: Record<string, string>,
 ): string {

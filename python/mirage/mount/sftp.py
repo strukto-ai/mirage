@@ -204,19 +204,6 @@ async def set_attrs(
         await core.getattr(path, follow=follow)
 
 
-async def rename_new(core: MountCore, old: str, new: str) -> None:
-    """SFTP v3 rename, which refuses to replace an existing target.
-
-    Args:
-        core (MountCore): the mount core.
-        old (str): the current path.
-        new (str): the new path.
-    """
-    if await exists(core, new):
-        raise eexist(new)
-    await core.rename(old, new)
-
-
 async def vfs_attrs(core: MountCore) -> asyncssh.SFTPVFSAttrs:
     st = core.statfs()
     return asyncssh.SFTPVFSAttrs(
@@ -249,6 +236,17 @@ def as_os_error(err: Exception) -> OSError:
         # would send EROFS as write-protect, which a v3 client cannot read.
         return OSError(errno.EACCES, os.strerror(code))
     return OSError(code, os.strerror(code))
+
+
+def workspace_path(path: bytes) -> str:
+    """A client path as a workspace path: absolute, normalized, never
+    above ``/``.
+
+    Args:
+        path (bytes): the path as the client sent it.
+    """
+    text = path.decode(ENCODING, ERRORS)
+    return posixpath.normpath("/" + text.lstrip("/"))
 
 
 class MirageSFTPServer(asyncssh.SFTPServer):
@@ -314,10 +312,6 @@ class MirageSFTPServer(asyncssh.SFTPServer):
             except Exception as err:
                 raise as_os_error(err) from err
 
-    def _path(self, path: bytes) -> str:
-        text = path.decode(ENCODING, ERRORS)
-        return posixpath.normpath("/" + text.lstrip("/"))
-
     def _encode(self, path: str) -> bytes:
         return path.encode(ENCODING, ERRORS)
 
@@ -328,16 +322,16 @@ class MirageSFTPServer(asyncssh.SFTPServer):
         raise asyncssh.SFTPOpUnsupported("host paths are not served")
 
     async def realpath(self, path: bytes) -> bytes:
-        return self._encode(self._path(path))
+        return self._encode(workspace_path(path))
 
     async def stat(self, path: bytes) -> asyncssh.SFTPAttrs:
-        p = self._path(path)
+        p = workspace_path(path)
         return to_attrs(
             await self._call(lambda core: core.getattr(p, follow=True))
         )
 
     async def lstat(self, path: bytes) -> asyncssh.SFTPAttrs:
-        p = self._path(path)
+        p = workspace_path(path)
         return to_attrs(await self._call(lambda core: core.getattr(p)))
 
     async def fstat(self, file_obj: Any) -> asyncssh.SFTPAttrs:
@@ -347,11 +341,11 @@ class MirageSFTPServer(asyncssh.SFTPServer):
         )
 
     async def setstat(self, path: bytes, attrs: asyncssh.SFTPAttrs) -> None:
-        p = self._path(path)
+        p = workspace_path(path)
         await self._call(lambda core: set_attrs(core, p, attrs, True))
 
     async def lsetstat(self, path: bytes, attrs: asyncssh.SFTPAttrs) -> None:
-        p = self._path(path)
+        p = workspace_path(path)
         await self._call(lambda core: set_attrs(core, p, attrs, False))
 
     async def fsetstat(self, file_obj: Any, attrs: asyncssh.SFTPAttrs) -> None:
@@ -369,14 +363,14 @@ class MirageSFTPServer(asyncssh.SFTPServer):
         await self._call(resize)
 
     async def scandir(self, path: bytes) -> AsyncIterator[asyncssh.SFTPName]:
-        p = self._path(path)
+        p = workspace_path(path)
         for name, st in await self._call(lambda core: core.listing(p)):
             yield asyncssh.SFTPName(self._encode(name), attrs=to_attrs(st))
 
     async def open(
         self, path: bytes, pflags: int, attrs: asyncssh.SFTPAttrs
     ) -> OpenFile:
-        p = self._path(path)
+        p = workspace_path(path)
         return await self._call(
             lambda core: open_file(core, p, pflags, attrs.permissions)
         )
@@ -421,34 +415,40 @@ class MirageSFTPServer(asyncssh.SFTPServer):
         await self._call(release)
 
     async def remove(self, path: bytes) -> None:
-        p = self._path(path)
+        p = workspace_path(path)
         await self._call(lambda core: core.unlink(p))
 
     async def mkdir(self, path: bytes, attrs: asyncssh.SFTPAttrs) -> None:
-        p = self._path(path)
+        p = workspace_path(path)
         await self._call(lambda core: core.mkdir(p, attrs.permissions))
 
     async def rmdir(self, path: bytes) -> None:
-        p = self._path(path)
+        p = workspace_path(path)
         await self._call(lambda core: core.rmdir(p))
 
     async def rename(self, oldpath: bytes, newpath: bytes) -> None:
-        old, new = self._path(oldpath), self._path(newpath)
-        await self._call(lambda core: rename_new(core, old, new))
+        old, new = workspace_path(oldpath), workspace_path(newpath)
+
+        async def rename_new(core: MountCore) -> None:
+            if await exists(core, new):
+                raise eexist(new)
+            await core.rename(old, new)
+
+        await self._call(rename_new)
 
     async def posix_rename(self, oldpath: bytes, newpath: bytes) -> None:
-        old, new = self._path(oldpath), self._path(newpath)
+        old, new = workspace_path(oldpath), workspace_path(newpath)
         await self._call(lambda core: core.rename(old, new))
 
     async def readlink(self, path: bytes) -> bytes:
-        p = self._path(path)
+        p = workspace_path(path)
         return self._encode(await self._call(lambda core: core.readlink(p)))
 
     async def symlink(self, oldpath: bytes, newpath: bytes) -> None:
         if self._passive_sshfs:
             oldpath, newpath = newpath, oldpath
         target = oldpath.decode(ENCODING, ERRORS)
-        link = self._path(newpath)
+        link = workspace_path(newpath)
         await self._call(lambda core: core.symlink(link, target))
 
     async def link(self, oldpath: bytes, newpath: bytes) -> None:

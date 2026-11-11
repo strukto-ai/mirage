@@ -62,26 +62,6 @@ export interface TailCounts {
 }
 
 /**
- * Fill in whatever a caller left off a `TailCounts`.
- *
- * The struct is a plain object, so a caller that omits a field — or a
- * JavaScript one that passes something else entirely — supplies undefined,
- * and a bare `!== null` test waves that straight into the first branch,
- * where `slice(NaN)` quietly returns the whole input. Python's twin is a
- * dataclass whose four fields all default to None and has no such hole;
- * reading every field through `?? null` gives this side the same floor.
- */
-export function normalizeCounts(counts: TailCounts): TailCounts {
-  return {
-    lines: counts.lines ?? null,
-    fromLine: counts.fromLine ?? null,
-    byteCount: counts.byteCount ?? null,
-    fromByte: counts.fromByte ?? null,
-    terminator: counts.terminator ?? 10,
-  }
-}
-
-/**
  * -f/--follow[=HOW], -F, --retry, -s and --pid as tail reads them: a follow
  * ends once `pid`'s process is gone, and 0 names none.
  */
@@ -340,7 +320,19 @@ async function* counted(
 }
 
 async function* tail(source: ByteSource, rawCounts: TailCounts): AsyncIterable<Uint8Array> {
-  const counts = normalizeCounts(rawCounts)
+  // The struct is a plain object, so a caller that omits a field — or a
+  // JavaScript one that passes something else entirely — supplies undefined,
+  // and a bare `!== null` test waves that straight into the first branch,
+  // where `slice(NaN)` quietly returns the whole input. Python's twin is a
+  // dataclass whose four fields all default to None and has no such hole;
+  // reading every field through `?? null` gives this side the same floor.
+  const counts: TailCounts = {
+    lines: rawCounts.lines ?? null,
+    fromLine: rawCounts.fromLine ?? null,
+    byteCount: rawCounts.byteCount ?? null,
+    fromByte: rawCounts.fromByte ?? null,
+    terminator: rawCounts.terminator ?? 10,
+  }
   const forward = counts.fromByte !== null || counts.fromLine !== null
   const byteMode =
     counts.fromByte !== null || (counts.fromLine === null && counts.byteCount !== null)

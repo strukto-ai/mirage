@@ -53,12 +53,6 @@ export interface MCPNotionTransportOptions {
   serverUrl?: string
 }
 
-interface ToolResult {
-  content?: unknown
-  isError?: boolean
-  structuredContent?: unknown
-}
-
 function firstTextContent(content: unknown): string | null {
   if (!Array.isArray(content) || content.length === 0) return null
   const first: unknown = content[0]
@@ -100,7 +94,10 @@ export class MCPNotionTransport implements NotionTransport {
   async callTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
     const client = await this.ensureConnected()
     const callable = client as unknown as {
-      callTool(p: { name: string; arguments: Record<string, unknown> }): Promise<ToolResult>
+      callTool(p: {
+        name: string
+        arguments: Record<string, unknown>
+      }): Promise<{ content?: unknown; isError?: boolean; structuredContent?: unknown }>
     }
     const result = await callable.callTool({ name, arguments: args })
     if (result.isError === true) {
@@ -128,26 +125,23 @@ export class MCPNotionTransport implements NotionTransport {
   }
 }
 
-export interface MemoryOAuthClientProviderOptions {
-  clientMetadata: OAuthClientMetadata
-  redirect: (url: URL) => void | Promise<void>
-  redirectUrl?: string | URL
-}
-
 /**
  * An `OAuthClientProvider` that holds the client registration, tokens and
  * PKCE verifier in memory, for an `MCPNotionTransport` whose session ends
  * with the page.
  */
 export class MemoryOAuthClientProvider implements OAuthClientProvider {
-  private readonly opts: MemoryOAuthClientProviderOptions
   private _clientInformation: OAuthClientInformationMixed | undefined
   private _tokens: OAuthTokens | undefined
   private _codeVerifier: string | undefined
 
-  constructor(opts: MemoryOAuthClientProviderOptions) {
-    this.opts = opts
-  }
+  constructor(
+    private readonly opts: {
+      clientMetadata: OAuthClientMetadata
+      redirect: (url: URL) => void | Promise<void>
+      redirectUrl?: string | URL
+    },
+  ) {}
 
   get redirectUrl(): string | URL | undefined {
     return this.opts.redirectUrl

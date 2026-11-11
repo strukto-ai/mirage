@@ -21,7 +21,7 @@ from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec import CommandSpec
 from mirage.io.types import IOResult
 from mirage.shell.console import Channel, JobConsole
-from mirage.utils.abort import MirageAbortError, cancellable_sleep
+from mirage.utils.abort import MirageAbortError, sleep
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.executor.builtins.sleep.sleep import handle_sleep
 
@@ -431,13 +431,11 @@ async def test_cancel_inside_command_substitution(monkeypatch):
     async def tracked_sleep(seconds, event):
         entered.set()
         try:
-            await cancellable_sleep(seconds, event)
+            await sleep(seconds, event)
         finally:
             exited.set()
 
-    monkeypatch.setitem(
-        handle_sleep.__globals__, "cancellable_sleep", tracked_sleep
-    )
+    monkeypatch.setitem(handle_sleep.__globals__, "sleep", tracked_sleep)
     task = asyncio.create_task(ws.shell('echo "$(sleep 3600)"', cancel=cancel))
     try:
         # Synchronize on the inner command, not parsing/runner wall time.

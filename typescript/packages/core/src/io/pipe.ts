@@ -13,15 +13,13 @@ export const CAPACITY = 4 * CHUNK_SIZE
  */
 export const SEALED = new WeakSet<ArrayBufferLike>()
 
-const POLL_MS = 10
-
 /** One reader and bounded asynchronous writes. Closing either endpoint wakes writers. */
 export class BytePipe {
   /**
    * @param capacity The most bytes held before a write waits.
    * @param polled The two ends sit in different requests on an edge runtime,
    * where a wake from one request would run the waiter inside it, so a waiter
-   * looks for a change on its own timer instead.
+   * looks for a change on its own timer instead, every 10 ms.
    */
   constructor(
     private readonly capacity = CAPACITY,
@@ -68,7 +66,7 @@ export class BytePipe {
         signal?.removeEventListener('abort', aborted)
         reject(makeAbortError(signal))
       }
-      if (this.polled) timer = setTimeout(changed, POLL_MS)
+      if (this.polled) timer = setTimeout(changed, 10)
       else this.wake.push(changed)
       signal?.addEventListener('abort', aborted, { once: true })
     })

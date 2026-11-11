@@ -16,8 +16,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mirage.context import (
-    reset_current_session,
-    reset_program_invocation,
+    reset_caller,
     set_current_evaluation,
     set_program_invocation,
 )
@@ -198,8 +197,8 @@ async def handle_exec_path(
                 stdin,
             )
         finally:
-            reset_program_invocation(token)
-            reset_current_session(child_token)
+            reset_caller(token)
+            reset_caller(child_token)
     words = shebang_words(script)
     interp = words[0] if words else "sh"
     if interp in ("sh", "bash"):

@@ -19,12 +19,13 @@ import pytest
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
 from mirage.commands.spec import Argument, CommandSpec
+from mirage.context import reset_caller
 from mirage.errors.types import ReadOnlyError
 from mirage.io.types import IOResult
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
-from mirage.workspace.session import reset_current_session, set_current_session
+from mirage.workspace.session import set_current_session
 
 
 def _seed(name: str, body: bytes) -> RAMVFS:
@@ -183,7 +184,7 @@ def test_ops_blocks_a_programmatic_read_of_a_hidden_mount():
             with pytest.raises(FileNotFoundError):
                 await ws.vfs.read("/b/secret.txt")
         finally:
-            reset_current_session(token)
+            reset_caller(token)
 
     asyncio.run(run())
 
@@ -513,7 +514,7 @@ def test_ops_facade_respects_read_grant():
             with pytest.raises(ReadOnlyError, match="Read-only"):
                 await ws.vfs.rename("/a/x.txt", "/a/z.txt")
         finally:
-            reset_current_session(token)
+            reset_caller(token)
 
     asyncio.run(run())
 

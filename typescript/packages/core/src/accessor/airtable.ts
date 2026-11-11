@@ -14,11 +14,6 @@
 
 import { Accessor } from './base.ts'
 import type { AirtableConfig } from '../core/airtable/config.ts'
-import {
-  DEFAULT_BASE_URL,
-  DEFAULT_MAX_READ_RECORDS,
-  DEFAULT_REQUESTS_PER_SECOND,
-} from '../core/airtable/constants.ts'
 import { RateLimiter } from '../core/api/rate_limit.ts'
 import type { Clock } from '../utils/clock.ts'
 
@@ -37,10 +32,10 @@ export class AirtableAccessor extends Accessor {
   constructor(config: AirtableConfig, options: { fetchFn?: typeof fetch } = {}) {
     super()
     this.config = config
-    this.baseUrl = config.baseUrl ?? DEFAULT_BASE_URL
+    this.baseUrl = config.baseUrl ?? 'https://api.airtable.com/v0'
     this.baseIds = config.baseIds ?? null
-    this.maxReadRecords = config.maxReadRecords ?? DEFAULT_MAX_READ_RECORDS
-    this.limiter = new RateLimiter(config.requestsPerSecond ?? DEFAULT_REQUESTS_PER_SECOND)
+    this.maxReadRecords = config.maxReadRecords ?? 10_000
+    this.limiter = new RateLimiter(config.requestsPerSecond ?? 5)
     this.fetchFn = options.fetchFn
   }
 

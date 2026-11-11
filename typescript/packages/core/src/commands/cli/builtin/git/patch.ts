@@ -137,7 +137,10 @@ function hunks(
     for (let k = start - 1; k > searched; k--) {
       const line = old[k] ?? ''
       if (FUNCNAME_START.test(line)) {
-        context = trimmed(encodeText(line).subarray(0, FUNCNAME_BYTES))
+        const bytes = encodeText(line).subarray(0, FUNCNAME_BYTES)
+        let end = bytes.length
+        while (end > 0 && GIT_SPACE.has(bytes[end - 1] ?? 0)) end--
+        context = decodeText(bytes.subarray(0, end))
         break
       }
     }
@@ -158,12 +161,6 @@ function hunks(
     }
   }
   return out.join('')
-}
-
-function trimmed(bytes: Uint8Array): string {
-  let end = bytes.length
-  while (end > 0 && GIT_SPACE.has(bytes[end - 1] ?? 0)) end--
-  return decodeText(bytes.subarray(0, end))
 }
 
 function span(start: number, stop: number): string {

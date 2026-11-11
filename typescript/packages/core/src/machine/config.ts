@@ -37,10 +37,6 @@ export interface MachineConfig extends RuntimeConfig {
   mountType?: MountType
 }
 
-/** A provider config with the shared collection fields always present. */
-export type NormalizedMachineConfig<C extends MachineConfig = MachineConfig> = C &
-  Required<Pick<MachineConfig, 'env'>>
-
 export const BASE_CONFIG_FIELDS: ConfigFields = {
   env: { type: 'map' },
   mountType: { type: 'string', options: MOUNT_TYPES },

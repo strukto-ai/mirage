@@ -30,12 +30,6 @@ export async function buildDatabaseJson(accessor: MongoDBAccessor, database: str
   return { database, collections, views }
 }
 
-interface CollectionSchemaIndex {
-  name: string | undefined
-  keys: Record<string, unknown>
-  type: string
-}
-
 export async function buildCollectionSchemaJson(
   accessor: MongoDBAccessor,
   database: string,
@@ -45,15 +39,13 @@ export async function buildCollectionSchemaJson(
   const view = await isView(accessor, database, collection)
   const validator = await getValidator(accessor, database, collection)
   const fields = await sampleFieldTypes(accessor, database, collection, sampleSize)
-  let enrichedIndexes: CollectionSchemaIndex[] = []
-  if (!view) {
-    const indexes = await getIndexes(accessor, database, collection)
-    enrichedIndexes = indexes.map((idx) => ({
-      name: idx.name as string | undefined,
-      keys: (idx.key as Record<string, unknown> | undefined) ?? {},
-      type: indexType(idx),
-    }))
-  }
+  const enrichedIndexes = view
+    ? []
+    : (await getIndexes(accessor, database, collection)).map((idx) => ({
+        name: idx.name as string | undefined,
+        keys: (idx.key as Record<string, unknown> | undefined) ?? {},
+        type: indexType(idx),
+      }))
   return {
     database,
     name: collection,

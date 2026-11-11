@@ -29,7 +29,6 @@ import {
   TREE_PAGE_SIZE_EXPANDED,
 } from './constants.ts'
 import type { TreeEntry } from './tree_entry.ts'
-import { isDirEntry } from './tree_entry.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
@@ -275,7 +274,7 @@ export async function fetchTree(
  */
 export function rowOf(entry: TreeEntry, name: string): FileStat {
   const modified = entry.lastModified === '' ? null : entry.lastModified
-  if (isDirEntry(entry)) return new FileStat({ name, type: FileType.DIRECTORY, modified })
+  if (entry.type === 'directory') return new FileStat({ name, type: FileType.DIRECTORY, modified })
   const extra: Record<string, unknown> = { oid: entry.oid }
   if (entry.lastCommit !== '') extra.last_commit = entry.lastCommit
   if (entry.lfsOid !== '') extra.lfs_oid = entry.lfsOid
@@ -316,7 +315,7 @@ export function treeRows(tree: ReadonlyMap<string, TreeEntry>): Map<string, File
     let parent = cut === -1 ? '' : path.slice(0, cut)
     const name = path.slice(cut + 1)
     rowsAt(parent).set(name, rowOf(entry, name))
-    if (isDirEntry(entry)) rowsAt(path)
+    if (entry.type === 'directory') rowsAt(path)
     while (parent !== '') {
       const up = parent.lastIndexOf('/')
       const above = up === -1 ? '' : parent.slice(0, up)
@@ -355,7 +354,7 @@ export function treeListing(
     const parts = rel.split('/')
     for (let depth = parts.length; depth > 0; depth--) {
       const found = tree.get(parts.slice(0, depth).join('/'))
-      if (found !== undefined && !isDirEntry(found)) throw enotdir(virtual)
+      if (found !== undefined && found.type !== 'directory') throw enotdir(virtual)
     }
     throw enoent(virtual)
   }
@@ -370,7 +369,7 @@ export function treeListing(
 /** The file paths of a tree, sorted, its directories left out. */
 export function repoFiles(tree: Map<string, TreeEntry>): string[] {
   return [...tree.entries()]
-    .filter(([, entry]) => !isDirEntry(entry))
+    .filter(([, entry]) => entry.type !== 'directory')
     .map(([path]) => path)
     .sort(compareCodePoints)
 }

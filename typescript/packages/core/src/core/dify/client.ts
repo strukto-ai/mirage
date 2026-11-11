@@ -43,23 +43,6 @@ function retryDelayMs(error: unknown, attempt: number, maxDelay: number): number
   return Math.min(maxDelay, 2 ** (attempt - 1)) * 1000
 }
 
-async function requestOnce(
-  accessor: DifyAccessor,
-  method: string,
-  endpoint: string,
-  options: DifyRequestOptions,
-): Promise<Record<string, unknown>> {
-  const response = await accessor.request(method, endpoint, options)
-  if (!response.ok) {
-    throw new DifyHttpError(response.status, response.headers.get('Retry-After'))
-  }
-  const payload: unknown = await response.json()
-  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
-    throw new Error('Dify response must be a JSON object')
-  }
-  return payload as Record<string, unknown>
-}
-
 async function difyRequest(
   accessor: DifyAccessor,
   method: string,
@@ -70,7 +53,15 @@ async function difyRequest(
   let lastError: unknown
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
-      return await requestOnce(accessor, method, endpoint, options)
+      const response = await accessor.request(method, endpoint, options)
+      if (!response.ok) {
+        throw new DifyHttpError(response.status, response.headers.get('Retry-After'))
+      }
+      const payload: unknown = await response.json()
+      if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+        throw new Error('Dify response must be a JSON object')
+      }
+      return payload as Record<string, unknown>
     } catch (err) {
       lastError = err
       if (attempt >= attempts || !isRetryable(err)) throw err

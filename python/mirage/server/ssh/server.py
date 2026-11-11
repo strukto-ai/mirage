@@ -32,7 +32,7 @@ from mirage.server.ssh.constants import (
 from mirage.server.ssh.keys import load_host_key
 from mirage.server.ssh.session import TunnelSSHServer, handle_channel
 from mirage.server.ssh.sftp import serve_sftp
-from mirage.server.ssh.stream import ENCODING, ERRORS, MAX_TERMINAL_LINE
+from mirage.server.ssh.stream import MAX_TERMINAL_LINE
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +99,11 @@ async def _server_options(
 ) -> dict[str, Any]:
     """What every SSH connection the daemon serves runs with.
 
+    asyncssh runs its line editor only on a text channel, and
+    surrogateescape is the one error policy under which every byte
+    survives the str round trip, so binary input and output cross a
+    text channel unchanged.
+
     Args:
         registry (WorkspaceRegistry): the daemon's workspaces.
         config (SSHConfig): where the host key is kept.
@@ -113,8 +118,8 @@ async def _server_options(
         "max_line_length": MAX_TERMINAL_LINE,
         "agent_forwarding": False,
         "gss_host": None,
-        "encoding": ENCODING,
-        "errors": ERRORS,
+        "encoding": "utf-8",
+        "errors": "surrogateescape",
     }
 
 

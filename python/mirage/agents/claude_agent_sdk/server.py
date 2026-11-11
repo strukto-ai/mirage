@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
 from typing import Any
 
 try:
@@ -39,70 +40,8 @@ from mirage.workspace.tools.tool_descriptions import (
     WRITE_DESCRIPTION,
     WRITE_INPUT,
 )
-from mirage.workspace.tools.tool_operations import (
-    MirageToolOperations,
-    ToolResult,
-)
+from mirage.workspace.tools.tool_operations import MirageToolOperations
 from mirage.workspace.workspace import Session, Workspace
-
-
-def _to_sdk(result: ToolResult) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "content": [{"type": "text", "text": result.text}]
-    }
-    if result.is_error:
-        payload["is_error"] = True
-    return payload
-
-
-class _MirageTools:
-    """Unpacks the SDK's argument dicts onto the shared operations.
-
-    Args:
-        workspace (Workspace): The workspace to serve.
-        stale_write_protection (bool): False lets an agent overwrite a
-            file that changed since it read it.
-        session_id (str | None): The session the tools act as; None is
-            the workspace's default session.
-    """
-
-    def __init__(
-        self,
-        workspace: Workspace,
-        stale_write_protection: bool = True,
-        session_id: str | None = None,
-    ) -> None:
-        session = Session(workspace, session_id)
-        self._ops = (
-            session.tools
-            if stale_write_protection
-            else MirageToolOperations(session, stale_write_protection=False)
-        )
-
-    def names(self) -> tuple[str, ...]:
-        """The tools the session's profile leaves it."""
-        return self._ops.names()
-
-    async def shell(self, args: dict[str, Any]) -> dict[str, Any]:
-        return _to_sdk(await self._ops.call("shell", args))
-
-    async def read(self, args: dict[str, Any]) -> dict[str, Any]:
-        return _to_sdk(await self._ops.call("read", args))
-
-    async def write(self, args: dict[str, Any]) -> dict[str, Any]:
-        return _to_sdk(await self._ops.call("write", args))
-
-    async def edit(self, args: dict[str, Any]) -> dict[str, Any]:
-        return _to_sdk(await self._ops.call("edit", args))
-
-    async def ls(self, args: dict[str, Any]) -> dict[str, Any]:
-        return _to_sdk(await self._ops.call("ls", args))
-
-    async def grep(self, args: dict[str, Any]) -> dict[str, Any]:
-        return _to_sdk(await self._ops.call("grep", args))
-
-    async def glob(self, args: dict[str, Any]) -> dict[str, Any]:
-        return _to_sdk(await self._ops.call("glob", args))
 
 
 def MirageServer(
@@ -124,46 +63,40 @@ def MirageServer(
         Any: An SDK server object to pass to
             ClaudeAgentOptions(mcp_servers=...).
     """
-    tools_impl = _MirageTools(workspace, stale_write_protection, session_id)
-    names = tools_impl.names()
+    session = Session(workspace, session_id)
+    ops = (
+        session.tools
+        if stale_write_protection
+        else MirageToolOperations(session, stale_write_protection=False)
+    )
+
+    async def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
+        result = await ops.call(name, args)
+        payload: dict[str, Any] = {
+            "content": [{"type": "text", "text": result.text}]
+        }
+        if result.is_error:
+            payload["is_error"] = True
+        return payload
+
+    read_only = ToolAnnotations(read_only_hint=True)
+    names = ops.names()
     return create_sdk_mcp_server(
         name="mirage",
         version=__version__,
         tools=[
-            entry
-            for entry in (
-                tool("shell", SHELL_DESCRIPTION, SHELL_INPUT)(
-                    tools_impl.shell
-                ),
-                tool(
-                    "read",
-                    READ_DESCRIPTION,
-                    READ_INPUT,
-                    annotations=ToolAnnotations(read_only_hint=True),
-                )(tools_impl.read),
-                tool("write", WRITE_DESCRIPTION, WRITE_INPUT)(
-                    tools_impl.write
-                ),
-                tool("edit", EDIT_DESCRIPTION, EDIT_INPUT)(tools_impl.edit),
-                tool(
-                    "ls",
-                    LS_DESCRIPTION,
-                    LS_INPUT,
-                    annotations=ToolAnnotations(read_only_hint=True),
-                )(tools_impl.ls),
-                tool(
-                    "grep",
-                    GREP_DESCRIPTION,
-                    GREP_INPUT,
-                    annotations=ToolAnnotations(read_only_hint=True),
-                )(tools_impl.grep),
-                tool(
-                    "glob",
-                    GLOB_DESCRIPTION,
-                    GLOB_INPUT,
-                    annotations=ToolAnnotations(read_only_hint=True),
-                )(tools_impl.glob),
+            tool(name, description, schema, annotations=hint)(
+                partial(call, name)
             )
-            if entry.name in names
+            for name, description, schema, hint in (
+                ("shell", SHELL_DESCRIPTION, SHELL_INPUT, None),
+                ("read", READ_DESCRIPTION, READ_INPUT, read_only),
+                ("write", WRITE_DESCRIPTION, WRITE_INPUT, None),
+                ("edit", EDIT_DESCRIPTION, EDIT_INPUT, None),
+                ("ls", LS_DESCRIPTION, LS_INPUT, read_only),
+                ("grep", GREP_DESCRIPTION, GREP_INPUT, read_only),
+                ("glob", GLOB_DESCRIPTION, GLOB_INPUT, read_only),
+            )
+            if name in names
         ],
     )

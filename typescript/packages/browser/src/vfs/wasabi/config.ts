@@ -14,10 +14,10 @@
 
 import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
-import { browserAliasSchema, makeBrowserS3Alias } from '../s3_alias.ts'
+import { aliasSchema, makeS3Alias } from '../s3_alias.ts'
 
-export const WasabiConfig = makeBrowserS3Alias({
-  schema: browserAliasSchema({
+export const WasabiConfig = makeS3Alias({
+  schema: aliasSchema({
     region: z.string().optional().meta({
       description:
         'Region of the bucket. It builds the endpoint `https://s3.<region>.wasabisys.com` (`https://s3.wasabisys.com` for `us-east-1`) unless `endpoint` is set.',

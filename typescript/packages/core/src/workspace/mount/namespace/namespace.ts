@@ -95,14 +95,6 @@ function linkStat(name: string, meta: NodeMeta): FileStat {
   })
 }
 
-export interface SetAttrsFields {
-  mode?: number
-  uid?: number | string
-  gid?: number | string
-  atime?: string
-  mtime?: number
-}
-
 export function metaToFields(meta: NodeMeta): NodeFields {
   const out: NodeFields = {}
   if (meta.target !== undefined) out.target = meta.target
@@ -239,7 +231,10 @@ export class Namespace {
   // Write overlay attributes for a path (setattr fallback). Used for
   // symlinks (which have no backend inode) and for backends without a
   // native metadata slot. Only present fields are written.
-  async setAttrs(path: string, fields: SetAttrsFields): Promise<void> {
+  async setAttrs(
+    path: string,
+    fields: Pick<NodeMeta, 'mode' | 'uid' | 'gid' | 'atime' | 'mtime'>,
+  ): Promise<void> {
     const meta = this.nodeTable.get(path) ?? {}
     if (fields.mode !== undefined) meta.mode = fields.mode
     if (fields.uid !== undefined) meta.uid = fields.uid

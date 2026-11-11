@@ -22,8 +22,6 @@ import { fieldValue } from './payload.ts'
 import { renderJson, renderText } from './render.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
-type Readdir = (accessor: QdrantAccessor, path: PathSpec) => Promise<FileStat[] | DirListing>
-
 /**
  * A ranked point's path below its collection, and its body: the source text
  * when the point has one, its `.json` otherwise.
@@ -57,7 +55,7 @@ export function hit(accessor: QdrantAccessor, row: Row): [string[], Uint8Array] 
  * `files_containing`.
  */
 export async function filesContaining(
-  readdir: Readdir,
+  readdir: (accessor: QdrantAccessor, path: PathSpec) => Promise<FileStat[] | DirListing>,
   accessor: QdrantAccessor,
   text: string,
   under: readonly PathSpec[],
@@ -81,7 +79,7 @@ export async function filesContaining(
 }
 
 async function found(
-  readdir: Readdir,
+  readdir: (accessor: QdrantAccessor, path: PathSpec) => Promise<FileStat[] | DirListing>,
   accessor: QdrantAccessor,
   needle: string,
   under: readonly PathSpec[],

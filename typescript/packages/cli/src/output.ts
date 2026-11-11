@@ -16,9 +16,7 @@ import { debuglog } from 'node:util'
 
 const logger = { debug: debuglog('mirage') }
 
-export type Formatter<T = unknown> = (obj: T) => string
-
-export function emit<T = unknown>(obj: T, human?: Formatter<T>): void {
+export function emit<T = unknown>(obj: T, human?: (obj: T) => string): void {
   if (human !== undefined && process.stdout.isTTY) {
     process.stdout.write(human(obj) + '\n')
     return
@@ -42,7 +40,7 @@ export function outputOf(value: string): Output {
 export async function show<T>(
   obj: T,
   output: Output | undefined,
-  human: Formatter<T>,
+  human: (obj: T) => string,
 ): Promise<void> {
   if (output === 'yaml') {
     const { dumpYaml } = await import('@struktoai/mirage-node/utils/yaml')

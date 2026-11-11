@@ -30,10 +30,10 @@ from tests.fixtures.vfs_io import vfs_over
 
 @pytest.fixture(autouse=True)
 def _patch_read(monkeypatch):
-    async def _read_bytes(config, owner, repo, sha):
+    async def _fetch_blob(config, owner, repo, sha):
         return MOCK_BLOBS[sha]
 
-    monkeypatch.setattr("mirage.core.github.read.read_bytes", _read_bytes)
+    monkeypatch.setattr("mirage.core.github.read.fetch_blob", _fetch_blob)
 
 
 def _scope(path: str) -> PathSpec:

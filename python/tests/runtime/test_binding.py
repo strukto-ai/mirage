@@ -32,7 +32,7 @@ from mirage.commands.config import Context
 from mirage.context import (
     get_current_session,
     get_current_session_for,
-    reset_current_session,
+    reset_caller,
     set_current_session,
 )
 from mirage.context.session_context import awaits_as, calls_as
@@ -357,7 +357,7 @@ async def test_a_file_adapter_replays_the_launch_session_and_recorder():
     try:
         vfs = RuntimeFiles.of(capture_binding(binding).ctx, binding)
     finally:
-        reset_current_session(token)
+        reset_caller(token)
     try:
         await vfs_read_on_a_bare_thread(vfs)
     finally:

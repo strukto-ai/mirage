@@ -17,7 +17,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from mirage.context import reset_explaining, set_explaining
+from mirage.context import reset_caller, set_explaining
 from mirage.policy import ShellExplanation, VfsExplanation
 from mirage.policy.errors import Explained
 from mirage.workspace.files import Files
@@ -432,7 +432,7 @@ async def _dry(
     else:
         raise RuntimeError(f"{call} ran past its gate in a dry run")
     finally:
-        reset_explaining(token)
+        reset_caller(token)
     if not trace:
         return VfsExplanation(call=call, paths=paths)
     shown = next((e for e in trace if e.error), trace[-1])

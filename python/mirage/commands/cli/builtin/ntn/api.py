@@ -73,13 +73,12 @@ EMPTY_METHOD = (
 # write verbs are ever called through it: the GET branch calls
 # `notion_get` by name, and this mapping also answers "is that a method
 # at all".
-NotionCall = Callable[..., Awaitable[dict[str, Any]]]
-
+#
 # DELETE is here because `DELETE /v1/blocks/{id}` is the only delete verb the
 # public API has, so without it the one way to remove anything is unreachable
 # from this CLI. It takes no body, which is why it is reached through `-X`
 # rather than by a body source inferring it.
-METHODS: dict[str, NotionCall] = {
+METHODS: dict[str, Callable[..., Awaitable[dict[str, Any]]]] = {
     "GET": notion_get,
     "POST": notion_post,
     "PATCH": notion_patch,

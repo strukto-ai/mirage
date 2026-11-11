@@ -108,31 +108,18 @@ interface WorkspaceBrief {
   status: string
 }
 
-interface MountSummary {
-  prefix: string
-  vfs: string
-  mode: string
-}
-
-interface SessionSummary {
-  session_id: string
-  cwd: string
-}
-
-interface Internals {
-  cache_bytes: number | null
-  cache_entries: number | null
-  history_length: number
-  in_flight_jobs: number
-}
-
 interface WorkspaceDetail {
   id: string
   status: string
   created_at: string
-  mounts?: MountSummary[]
-  sessions?: SessionSummary[]
-  internals?: Internals | null
+  mounts?: { prefix: string; vfs: string; mode: string }[]
+  sessions?: { session_id: string; cwd: string }[]
+  internals?: {
+    cache_bytes: number | null
+    cache_entries: number | null
+    history_length: number
+    in_flight_jobs: number
+  } | null
 }
 
 /** What the server's policies make of a config: the verdict, then each policy's answer. */

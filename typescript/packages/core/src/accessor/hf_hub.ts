@@ -16,8 +16,8 @@ import { Accessor } from './index.ts'
 import { VFSName } from '../types.ts'
 import * as kp from '../utils/key_prefix.ts'
 import { HF_ENDPOINT, type HfBucketsConfig, type HfRepoConfig } from '../vfs/hf_buckets/config.ts'
-import { hfEndpoint, type HfConfig } from '../core/hf_hub/config.ts'
-import { DEFAULT_REVISION } from '../core/hf_hub/constants.ts'
+import type { HfConfig } from '../core/hf_hub/config.ts'
+import { API_BASE, DEFAULT_REVISION } from '../core/hf_hub/constants.ts'
 import { rstripSlash, stripSlash } from '../utils/slash.ts'
 
 /**
@@ -35,7 +35,7 @@ export class HfAccountAccessor extends Accessor {
   }
 
   get endpoint(): string {
-    return hfEndpoint(this.config)
+    return this.config.endpoint === '' ? API_BASE : this.config.endpoint
   }
 }
 

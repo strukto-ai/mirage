@@ -23,14 +23,8 @@ import {
   records,
 } from '../../utils/records.ts'
 
-interface NormalizedTeamState {
-  state_id: string | null
-  state_name: string | null
-  type: string | null
-}
-
 export function normalizeTeam(team: JsonObject) {
-  const states: NormalizedTeamState[] = []
+  const states: { state_id: string | null; state_name: string | null; type: string | null }[] = []
   for (const state of records(asObject(team.states).nodes)) {
     states.push({
       state_id: pickString(state, 'id'),
@@ -117,14 +111,15 @@ export function normalizeComment(comment: JsonObject, issueId: string, issueKey:
   }
 }
 
-export interface NormalizeProjectContext {
-  teamId: string
-  teamKey: string | null
-  teamName: string | null
-  issues: ReturnType<typeof projectIssueRows>
-}
-
-export function normalizeProject(project: JsonObject, ctx: NormalizeProjectContext) {
+export function normalizeProject(
+  project: JsonObject,
+  ctx: {
+    teamId: string
+    teamKey: string | null
+    teamName: string | null
+    issues: ReturnType<typeof projectIssueRows>
+  },
+) {
   const lead = asObject(project.lead)
   return {
     project_id: pickString(project, 'id'),

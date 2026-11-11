@@ -33,8 +33,8 @@ from mirage.cache.index.view import IndexView
 from mirage.cache.manager import CacheManager
 from mirage.observe.context import (
     RecordingScope,
-    active_recorder,
     active_records,
+    recording_active,
 )
 from mirage.observe.record import OpRecord, RecordIndex
 from mirage.types import (
@@ -1006,7 +1006,7 @@ async def test_fill_keeps_exact_read_fact_without_observing(fingerprint):
     data = b"payload"
 
     async def fetch():
-        assert active_recorder() is None
+        assert not recording_active()
         publish_read("/s3/a.txt", data, fingerprint)
         publish_read("/s3/a.txt", b"foreign", "wrong")
         return data
@@ -1019,7 +1019,7 @@ async def test_fill_keeps_exact_read_fact_without_observing(fingerprint):
         fingerprint is not None
     )
     assert not await cache.is_fresh("/s3/a.txt", "wrong")
-    assert active_recorder() is None
+    assert not recording_active()
 
 
 @pytest.mark.asyncio

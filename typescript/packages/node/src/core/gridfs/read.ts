@@ -39,20 +39,6 @@ export async function resolveFileId(
   return doc._id
 }
 
-// The window the driver will accept for a file of `length` bytes, or null
-// when it is empty. The node driver validates a window against the stored
-// length and refuses every POSIX-shaped answer: a start past the end, an end
-// past the end, and even an omitted end, which it defaults to 0 and then
-// reads as ending before the start. A POSIX read does none of that, it just
-// comes back short, so the window is clamped to the file here. Python needs
-// no equivalent: its driver reads through a file object that seeks and stops
-// at EOF like any file.
-function clampWindow(length: number, options: ReadRange): { start: number; end: number } | null {
-  const start = Math.min(options.offset ?? 0, length)
-  const end = options.size === undefined ? length : Math.min(start + options.size, length)
-  return start >= end ? null : { start, end }
-}
-
 async function downloadBytes(
   accessor: GridFSAccessor,
   path: PathSpec,
@@ -65,9 +51,17 @@ async function downloadBytes(
   if (windowed) {
     const doc = await fileById(accessor, fileId)
     if (doc === null) throw enoent(path)
-    const window = clampWindow(doc.length, options)
-    if (window === null) return new Uint8Array(0)
-    streamOptions = window
+    // The node driver validates a window against the stored length and
+    // refuses every POSIX-shaped answer: a start past the end, an end past
+    // the end, and even an omitted end, which it defaults to 0 and then reads
+    // as ending before the start. A POSIX read does none of that, it just
+    // comes back short, so the window is clamped to the file here. Python
+    // needs no equivalent: its driver reads through a file object that seeks
+    // and stops at EOF like any file.
+    const start = Math.min(options.offset ?? 0, doc.length)
+    const end = options.size === undefined ? doc.length : Math.min(start + options.size, doc.length)
+    if (start >= end) return new Uint8Array(0)
+    streamOptions = { start, end }
   }
   const readable = b.openDownloadStream(fileId, streamOptions)
   const chunks: Uint8Array[] = []

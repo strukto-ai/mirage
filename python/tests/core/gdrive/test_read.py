@@ -27,7 +27,7 @@ from mirage.core.gdrive.readdir import stat_from_item
 from mirage.core.gdrive.stat import stat
 from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
-from mirage.observe.context import RecordingScope, active_recorder
+from mirage.observe.context import RecordingScope, recording_active
 from mirage.types import FileStat, FileType, JsonValue, MountMode, PathSpec
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
@@ -504,7 +504,7 @@ async def read_unrecorded(
         monkeypatch,
         StubDrive(download_file=download, capture_file_metadata=captured),
     )
-    assert active_recorder() is None
+    assert not recording_active()
     spec = PathSpec(virtual="/gd/a.txt", directory="/gd/", vfs_path="a.txt")
     await read(
         accessor, spec, offset=offset, size=size, entry=unrecorded_row(extra)

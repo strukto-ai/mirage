@@ -15,7 +15,6 @@
 import { z } from 'zod'
 import { timeoutShape } from '../../core/api/config.ts'
 import * as kp from '../../utils/key_prefix.ts'
-import type { FieldNormalizer } from '../../utils/normalize.ts'
 import { secretSchema, secretStr } from '../secrets.ts'
 
 export type S3BrowserOperation = 'GET' | 'PUT' | 'HEAD' | 'DELETE' | 'LIST' | 'COPY'
@@ -39,14 +38,6 @@ export interface S3HttpAgents {
   httpAgent: unknown
   httpsAgent: unknown
 }
-
-/**
- * Runtime-supplied transport agents (Node proxy support). Called once per
- * client so each client owns its own agents: every S3 op destroys its client
- * when it finishes, and a shared agent pair would tear down sockets that
- * concurrent ops are still using.
- */
-export type S3HttpAgentProvider = () => S3HttpAgents
 
 export const S3Config = z.object({
   bucket: z.string().describe('Name of the bucket to mount.'),
@@ -86,7 +77,7 @@ export const S3Config = z.object({
       'Function `(path, operation, options)` that returns a signed URL for each S3 operation. When set, the mount fetches those URLs and needs no credentials.',
     ),
   httpAgentProvider: secretSchema(
-    z.custom<S3HttpAgentProvider>((value) => typeof value === 'function'),
+    z.custom<() => S3HttpAgents>((value) => typeof value === 'function'),
   )
     .optional()
     .describe(
@@ -117,7 +108,13 @@ export interface S3Config {
   forcePathStyle?: boolean
   timeout?: number
   presignedUrlProvider?: S3BrowserPresignedUrlProvider
-  httpAgentProvider?: S3HttpAgentProvider
+  /**
+   * Runtime-supplied transport agents (Node proxy support). Called once per
+   * client so each client owns its own agents: every S3 op destroys its
+   * client when it finishes, and a shared agent pair would tear down sockets
+   * that concurrent ops are still using.
+   */
+  httpAgentProvider?: () => S3HttpAgents
   defaultContentType?: string
   keyPrefix?: string
 }
@@ -134,5 +131,3 @@ export const S3_FAMILY_RENAME: Record<string, string> = {
   endpoint_url: 'endpoint',
   path_style: 'forcePathStyle',
 }
-
-export const S3_FAMILY_NORMALIZER: FieldNormalizer = { rename: S3_FAMILY_RENAME }

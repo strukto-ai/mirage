@@ -61,9 +61,6 @@ export enum OrderCheck {
   OFF = 'off',
 }
 
-/** A -o item: a file number and a field counted from 0; file 0 is the join field. */
-export type Column = readonly [number, number]
-
 /**
  * join's options as one line set them; every byte string is a byte view, one
  * character per byte. Mirrors JoinFlags in join.py.
@@ -77,8 +74,8 @@ export interface JoinFlags {
   readonly paired: boolean
   /** The -e text for an empty field. */
   readonly filler: string | null
-  /** The -o list. */
-  readonly columns: readonly Column[]
+  /** The -o list: each a file number and a field counted from 0; file 0 is the join field. */
+  readonly columns: readonly (readonly [number, number])[]
   /** -o auto. */
   readonly autoColumns: boolean
   /** The -t byte; null parts fields at runs of blanks, WHOLE_RECORD keeps each record whole. */
@@ -168,19 +165,20 @@ export async function parseFlags(
   }
 }
 
-export interface JoinIO {
-  read: (p: PathSpec) => AsyncIterable<Uint8Array>
-  stdin: ByteSource | null
-  flags: JoinFlags
-  engine?: OpenStream
-}
-
 /**
  * GNU `join` of two files over already-parsed options: `paths` are the
  * operands, of which `flags.files` names the two files. Mirrors join in
  * join.py.
  */
-export function join(paths: PathSpec[], io: JoinIO): [ByteSource | null, IOResult] {
+export function join(
+  paths: PathSpec[],
+  io: {
+    read: (p: PathSpec) => AsyncIterable<Uint8Array>
+    stdin: ByteSource | null
+    flags: JoinFlags
+    engine?: OpenStream
+  },
+): [ByteSource | null, IOResult] {
   const p1 = paths[io.flags.files[0]]
   const p2 = paths[io.flags.files[1]]
   if (p1 === undefined || p2 === undefined) {

@@ -2,7 +2,7 @@ import { apiRequest, stallTimeout } from '../api/client.ts'
 import { eacces, enoent } from '../../errors/fs.ts'
 import { WandbAPIError } from './errors.ts'
 import type { WandbConfig } from './config.ts'
-import type { Connection, Named, Run, RunFile, FileMetadata, RunVariables } from './types.ts'
+import type { Named, Run, RunFile, FileMetadata, RunVariables } from './types.ts'
 import { PROJECTS, RUNS, RUN, FILE, FILES, HISTORY, HISTORY_KEYS } from './queries.ts'
 
 function responseError(response: Response): Error {
@@ -51,7 +51,10 @@ export class WandbClient {
         data = (data as Record<string, unknown>)[key]
         if (data === null) throw enoent('W&B object not found')
       }
-      const connection = data as Connection<T>
+      const connection = data as {
+        edges: { node: T }[]
+        pageInfo: { endCursor: string | null; hasNextPage: boolean }
+      }
       for (const item of connection.edges.map((edge) => edge.node)) rows.push(item)
       if (!connection.pageInfo.hasNextPage) return rows
       if (limit !== undefined && rows.length >= limit) return rows

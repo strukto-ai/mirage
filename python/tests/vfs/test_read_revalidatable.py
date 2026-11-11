@@ -58,7 +58,7 @@ from mirage.core.gdrive.readdir import readdir as gdrive_readdir
 from mirage.core.github.readdir import readdir as github_readdir
 from mirage.core.hf_hub.client import etag_value
 from mirage.core.hf_hub.readdir import readdir as hf_readdir
-from mirage.observe.context import OpTimer, active_recorder
+from mirage.observe.context import OpTimer, recording_active
 from mirage.observe.record import OpRecord
 from mirage.types import FileStat, MountMode, PathSpec, ReadPolicy, ReadSpec
 from mirage.utils.filetype import get_extension
@@ -1113,7 +1113,7 @@ def test_an_unrecorded_read_stamps_the_stat_token(
         accessor = fake.vfs.accessor
 
         async def run():
-            unrecorded = active_recorder() is None
+            unrecorded = not recording_active()
             try:
                 data = b"".join([c async for c in fake.read_stream(spec)])
                 stat = await fake.stat(spec)

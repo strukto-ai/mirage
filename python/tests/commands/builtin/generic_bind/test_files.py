@@ -30,7 +30,7 @@ from mirage.commands.builtin.generic_bind.files import (
     with_reading,
 )
 from mirage.commands.config import Context
-from mirage.context import reset_mount_gate, set_mount_gate
+from mirage.context import reset_caller, set_mount_gate
 from mirage.context import session_context as caller
 from mirage.errors.types import GlobLimitError
 from mirage.io import IOResult
@@ -132,7 +132,7 @@ def _on_mount(prefix: str = "/") -> Iterator[None]:
     try:
         yield
     finally:
-        reset_mount_gate(token)
+        reset_caller(token)
 
 
 def _files(ctx: Context) -> CommandFiles:

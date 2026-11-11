@@ -47,7 +47,6 @@ import {
   isDirectory,
   pathExists,
   typedName,
-  type BackendKeyFn,
 } from '../utils/copy.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 import {
@@ -1532,7 +1531,7 @@ function repeatedSource(
   target: PathSpec,
   srcIsDir: boolean,
   flags: CpFlags,
-  keyOf: BackendKeyFn,
+  keyOf: (path: PathSpec) => string,
 ): [string, boolean] | null {
   if (earlier === undefined) return null
   if (keyOf(earlier) === keyOf(target)) {
@@ -2007,7 +2006,7 @@ export async function cpGeneric(
   stat: StatFn,
   strategy: CopyStrategy,
   flags: CpFlags,
-  backendKey?: BackendKeyFn,
+  backendKey?: (path: PathSpec) => string,
   readdir?: ReaddirFn,
   // The link standing at the name a destination was typed as, its own row,
   // null where none stands (the router has followed the operand by the time

@@ -30,8 +30,6 @@ import { respelled } from '../../../utils/key_prefix.ts'
 import { parent } from '../../../utils/path.ts'
 import type { FsCondition } from '../../../errors/types.ts'
 
-export type BackendKeyFn = (path: PathSpec) => string
-
 export function backendKeyDefault(path: PathSpec): string {
   return rstripSlash(path.virtual)
 }

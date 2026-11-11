@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { WorkspaceConfigRaw } from '@struktoai/mirage-core/config'
+import type { WorkspaceConfig } from '@struktoai/mirage-core/config'
 import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
 import { ENTRY_KINDS, STRUKTO } from '@struktoai/mirage-core/resources/constants'
 import { ResourceError } from '@struktoai/mirage-core/resources/errors'
@@ -69,7 +69,7 @@ export async function withEntries(
   store: ResourceStore,
   written: Record<string, JsonValue>,
   refs: readonly string[],
-): Promise<WorkspaceConfigRaw> {
+): Promise<WorkspaceConfig> {
   const kinds = new Map<string, EntryKind>()
   for (const kind of ENTRY_KINDS) {
     for (const entry of await store.listEntries(kind)) kinds.set(entry.name, kind)
@@ -86,7 +86,7 @@ export async function withEntries(
     const every = { ...entry.fields, ...entry.sealed }
     opened[ref] = Object.fromEntries(Object.entries(every).map(([k, v]) => [k, flat(v)]))
   }
-  let cfg: WorkspaceConfigRaw
+  let cfg: WorkspaceConfig
   try {
     cfg = checkConfig(inline(written, plain))
   } catch (e) {

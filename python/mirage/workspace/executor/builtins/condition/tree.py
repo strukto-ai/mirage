@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.context import reset_admission, set_admission
+from mirage.context import reset_caller, set_admission
 from mirage.policy.errors import PolicyDenied
 from mirage.rs.errors import RegexError
 from mirage.rs.regex import posix_regex
@@ -78,7 +78,7 @@ async def eval_cond(ctx: CondContext, node: CondNode) -> int:
     try:
         return await _eval_leaf(ctx, node)
     finally:
-        reset_admission(token)
+        reset_caller(token)
 
 
 def _leaf_words(node: CondUnary | CondBinary | CondWord) -> list[str]:

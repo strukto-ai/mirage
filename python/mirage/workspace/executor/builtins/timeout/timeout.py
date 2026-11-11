@@ -35,8 +35,7 @@ from mirage.commands.spec.usage import (
     usage_hint,
 )
 from mirage.context import (
-    reset_current_session,
-    reset_program_invocation,
+    reset_caller,
     set_current_evaluation,
     set_program_invocation,
 )
@@ -420,8 +419,8 @@ async def _supervise(
                 )
             )
         finally:
-            reset_program_invocation(program)
-            reset_current_session(token)
+            reset_caller(program)
+            reset_caller(token)
             await child.session.close_inputs()
         return ran[0][1].exit_code
 

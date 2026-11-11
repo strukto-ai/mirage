@@ -4,6 +4,7 @@ import tracemalloc
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.context import reset_caller
 from mirage.io import IOResult
 from mirage.io.pipe import CAPACITY
 from mirage.io.stream import materialize
@@ -15,7 +16,6 @@ from mirage.workspace.executor.builtins.xargs import (
 from mirage.workspace.executor.builtins.xargs import xargs as xargs_module
 from mirage.workspace.session import (
     get_current_session,
-    reset_current_session,
     set_current_session,
 )
 from mirage.workspace.session.session import SessionState, vars_from_env
@@ -958,7 +958,7 @@ async def test_parallel_mode_forks_even_a_single_invocation(procs, data):
         assert seen == ["outer"] * len(words)
         assert parent.env["X"] == "outer"
     finally:
-        reset_current_session(token)
+        reset_caller(token)
 
 
 @pytest.mark.asyncio
@@ -981,7 +981,7 @@ async def test_parallel_mode_restores_parent_after_single_invocation_raises():
         assert get_current_session() is parent
         assert parent.env["X"] == "outer"
     finally:
-        reset_current_session(token)
+        reset_caller(token)
 
 
 @pytest.mark.asyncio

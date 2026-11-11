@@ -18,7 +18,7 @@ import errno
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.context import reset_current_session, set_current_session
+from mirage.context import reset_caller, set_current_session
 from mirage.policy import Action, Policy
 from mirage.policy.types import VfsContext
 from mirage.types import (
@@ -229,7 +229,7 @@ async def test_a_writing_function_answers_to_the_read_only_paths():
         assert refused.value.errno == errno.EROFS
         assert shelf.files["a.txt"] == b"old\n"
     finally:
-        reset_current_session(token)
+        reset_caller(token)
         await ws.close()
 
 
@@ -296,7 +296,7 @@ async def test_a_second_path_passes_the_dispatcher():
                 await compare(elsewhere)
             assert refused.value.errno == errno.EXDEV
     finally:
-        reset_current_session(token)
+        reset_caller(token)
         await ws.close()
 
 
@@ -371,7 +371,7 @@ async def test_a_custom_answer_loses_what_the_session_hides():
         await ws.dispatch("shelve", PathSpec.from_str_path("/shelf/a.txt"))
         assert finder.files["a.txt"] == b"new\n"
     finally:
-        reset_current_session(token)
+        reset_caller(token)
     try:
         found, _ = await ws.dispatch("search_abc", root, query="x")
         assert found == ["/shelf/: x"]

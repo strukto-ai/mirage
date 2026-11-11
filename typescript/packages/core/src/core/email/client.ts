@@ -22,13 +22,10 @@ function internalDateOf(value: Date | string | undefined): string {
   return value.toISOString()
 }
 
-export interface FolderEntry {
-  name: string
-  /** Its LIST attributes as the server sent them. */
-  attributes: string[]
-}
-
-export async function listFolderEntries(accessor: EmailAccessor): Promise<FolderEntry[]> {
+/** Each folder's name and its LIST attributes as the server sent them. */
+export async function listFolderEntries(
+  accessor: EmailAccessor,
+): Promise<{ name: string; attributes: string[] }[]> {
   const imap = await accessor.getImap()
   // Without listOnly imapflow re-sorts the list and guesses special-use from
   // names, where a server's own order and attributes are what callers need.
@@ -153,20 +150,6 @@ const DATE_KEYS: Record<string, 'on' | 'since' | 'before' | 'sentOn' | 'sentSinc
     SENTBEFORE: 'sentBefore',
   }
 
-/**
- * ANDs two search objects.
- *
- * imapflow ANDs the keys of one object, so a plain merge works until the
- * same key appears twice (`SUBJECT a SUBJECT b`). De Morgan expresses
- * that case without dropping either half, which a merge would do
- * silently.
- */
-function andQueries(left: SearchQuery, right: SearchQuery): SearchQuery {
-  const collides = Object.keys(right).some((key) => key in left)
-  if (!collides) return { ...left, ...right }
-  return { not: { or: [{ not: left }, { not: right }] } }
-}
-
 class CriteriaParser {
   private index = 0
 
@@ -187,13 +170,27 @@ class CriteriaParser {
     return this.index >= this.tokens.length
   }
 
-  /** One or more keys juxtaposed, which IMAP reads as AND. */
+  /**
+   * One or more keys juxtaposed, which IMAP reads as AND.
+   *
+   * imapflow ANDs the keys of one object, so a plain merge works until the
+   * same key appears twice (`SUBJECT a SUBJECT b`). De Morgan expresses
+   * that case without dropping either half, which a merge would do
+   * silently.
+   */
   parseSequence(stopAtParen = false): SearchQuery {
     let query: SearchQuery | null = null
     while (!this.atEnd()) {
       if (stopAtParen && this.peek() === ')') break
       const next = this.parseKey()
-      query = query === null ? next : andQueries(query, next)
+      if (query === null) {
+        query = next
+        continue
+      }
+      const left: SearchQuery = query
+      query = Object.keys(next).some((key) => key in left)
+        ? { not: { or: [{ not: left }, { not: next }] } }
+        : { ...left, ...next }
     }
     return query ?? { all: true }
   }

@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import functools
 from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
 
@@ -37,56 +36,6 @@ from mirage.io.cooperative import chunks
 from mirage.io.types import IOResult
 from mirage.types import LineFacts, PathSpec
 
-
-async def _run_builder(
-    builder: GenericCommand,
-    reading: Reading,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    texts: list[str],
-    ctx: Context,
-) -> CommandFnResult:
-    """Run a builder on the mount it runs on, its files read as
-    ``reading`` says.
-
-    A run with no files has no workspace to reach and is refused. Every
-    call the builder makes through its files is the dispatcher's, which
-    judges each itself.
-
-    Args:
-        builder (GenericCommand): the builder.
-        reading (Reading): how its files read.
-        accessor (Accessor): the mount's accessor.
-        paths (list[PathSpec]): the command's path operands.
-        texts (list[str]): the command's text arguments.
-        ctx (Context): the per-invocation option bag.
-    """
-    if ctx.vfs is None:
-        return None, IOResult(
-            exit_code=1,
-            stderr=f"{builder.name}: no workspace files\n".encode(),
-        )
-    # A builder that gives back what it leaves of a shared input cuts it
-    # itself, so what it hands back takes the rest of the chunk it stopped
-    # in.
-    if (
-        reading.split
-        and ctx.stdin is not None
-        and not (builder.gives_back and isinstance(ctx.stdin, SharedInput))
-    ):
-        # A RAM or cache read arrives as one whole chunk, over which a
-        # scan that splits its buffer per line is quadratic and cannot be
-        # cancelled until it ends; stdin is cut into pieces with a yield
-        # between them, as each operand read is and as TypeScript's
-        # guardInput. A pass-through builder (cat, head) keeps the
-        # producer's chunks: it writes a pipe in the writes the producer
-        # made, so a write the reader's close cuts short is its SIGPIPE,
-        # and a scan inside it splits its own input.
-        ctx = replace(ctx, stdin=chunks(ctx.stdin))
-    with with_reading(ctx, reading) as run:
-        return await builder.fn(accessor, paths, texts, run)
-
-
 _BY_NAME = {b.name: b for b in BUILDERS}
 
 
@@ -98,7 +47,42 @@ def _bind(
     # What the builder reads is cut into pieces unless it passes its input
     # through.
     reading = Reading(split=not builder.pass_through, stream=stream)
-    bound = functools.partial(_run_builder, builder, reading)
+
+    async def bound(
+        accessor: Accessor,
+        paths: list[PathSpec],
+        texts: list[str],
+        ctx: Context,
+    ) -> CommandFnResult:
+        # The builder runs on the mount it runs on, its files read as
+        # `reading` says. A run with no files has no workspace to reach and
+        # is refused. Every call the builder makes through its files is the
+        # dispatcher's, which judges each itself.
+        if ctx.vfs is None:
+            return None, IOResult(
+                exit_code=1,
+                stderr=f"{builder.name}: no workspace files\n".encode(),
+            )
+        # A builder that gives back what it leaves of a shared input cuts
+        # it itself, so what it hands back takes the rest of the chunk it
+        # stopped in.
+        if (
+            reading.split
+            and ctx.stdin is not None
+            and not (builder.gives_back and isinstance(ctx.stdin, SharedInput))
+        ):
+            # A RAM or cache read arrives as one whole chunk, over which a
+            # scan that splits its buffer per line is quadratic and cannot
+            # be cancelled until it ends; stdin is cut into pieces with a
+            # yield between them, as each operand read is and as
+            # TypeScript's guardInput. A pass-through builder (cat, head)
+            # keeps the producer's chunks: it writes a pipe in the writes
+            # the producer made, so a write the reader's close cuts short
+            # is its SIGPIPE, and a scan inside it splits its own input.
+            ctx = replace(ctx, stdin=chunks(ctx.stdin))
+        with with_reading(ctx, reading) as run:
+            return await builder.fn(accessor, paths, texts, run)
+
     (registered,) = registered_commands(
         [
             command(

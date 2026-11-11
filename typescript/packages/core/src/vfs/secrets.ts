@@ -71,7 +71,14 @@ export function parseConfigWithSchema<T extends ZodRawShape>(
   input: Record<string, unknown>,
 ): ConfigOf<ZodObject<T>> {
   const normalizer = FIELD_NORMALIZERS.get(schema) ?? {}
-  if (refusesExtraKeys(schema)) refuseUnknownKeys(input, Object.keys(schema.shape), normalizer)
+  // A schema that declares its own policy for extra keys keeps it: a loose
+  // one passes them through the way pydantic's `extra="allow"` does. A strict
+  // one refuses them in parse as well, but after the renames, so zod would
+  // name the camelCase spelling; it is checked up front like the default.
+  const catchall = schema.def.catchall
+  if (catchall === undefined || catchall instanceof z.ZodNever) {
+    refuseUnknownKeys(input, Object.keys(schema.shape), normalizer)
+  }
   return schema.parse(normalizeFields(input, normalizer)) as ConfigOf<ZodObject<T>>
 }
 
@@ -148,15 +155,6 @@ export function normalizeNonEmpty(value: string, field: string): string {
   return normalized
 }
 
-// A schema that declares its own policy for extra keys keeps it: a loose
-// one passes them through the way pydantic's `extra="allow"` does. A strict
-// one refuses them in parse as well, but after the renames, so zod would
-// name the camelCase spelling; it is checked up front like the default.
-function refusesExtraKeys(schema: ZodObject<ZodRawShape>): boolean {
-  const catchall = schema.def.catchall
-  return catchall === undefined || catchall instanceof z.ZodNever
-}
-
 export function redactConfigWithSchema<S extends ZodObject>(
   schema: S,
   config: unknown,
@@ -201,7 +199,11 @@ function redactValueWithSchema(schema: SchemaType, value: unknown): unknown {
 
   const unwrapped = unwrapSchema(schema)
   if (unwrapped instanceof z.ZodObject && isRecord(value)) {
-    return redactObjectWithSchema(unwrapped, value)
+    const out: Record<string, unknown> = { ...value }
+    for (const [key, child] of Object.entries(unwrapped.shape as Record<string, SchemaType>)) {
+      if (key in out) out[key] = redactValueWithSchema(child, out[key])
+    }
+    return out
   }
   if (unwrapped instanceof z.ZodArray && Array.isArray(value)) {
     return value.map((item) => redactValueWithSchema(unwrapped.element, item))
@@ -209,23 +211,11 @@ function redactValueWithSchema(schema: SchemaType, value: unknown): unknown {
   return value
 }
 
-function redactObjectWithSchema(
-  schema: ZodObject<ZodRawShape>,
-  value: Record<string, unknown>,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...value }
-  const shape = schema.shape as Record<string, SchemaType>
-  for (const [key, childSchema] of Object.entries(shape)) {
-    if (!(key in out)) continue
-    out[key] = redactValueWithSchema(childSchema, out[key])
-  }
-  return out
-}
-
 // A record of secrets is one secret field, as Python's dict[str, SecretStr] is.
 function isSecretSchema(schema: SchemaType): boolean {
   const unwrapped = unwrapSchema(schema)
-  if (schemaMeta(unwrapped)?.[SECRET_META_KEY] === true) return true
+  const meta = (unwrapped as { meta?: () => Record<string, unknown> | undefined }).meta?.()
+  if (meta?.[SECRET_META_KEY] === true) return true
   return unwrapped instanceof z.ZodRecord && isSecretSchema(unwrapped.valueType as SchemaType)
 }
 
@@ -236,26 +226,17 @@ function unwrapSchema(schema: SchemaType): SchemaType {
       current = current.unwrap()
       continue
     }
-    const def = schemaDef(current)
-    if (def.innerType !== undefined) {
-      current = def.innerType
+    const candidate = current as {
+      def?: { innerType?: SchemaType }
+      _zod?: { def?: { innerType?: SchemaType } }
+    }
+    const inner = (candidate.def ?? candidate._zod?.def)?.innerType
+    if (inner !== undefined) {
+      current = inner
       continue
     }
     return current
   }
-}
-
-function schemaMeta(schema: SchemaType): Record<string, unknown> | undefined {
-  const maybeMeta = (schema as { meta?: () => Record<string, unknown> | undefined }).meta
-  return maybeMeta?.()
-}
-
-function schemaDef(schema: SchemaType): SchemaDef {
-  const candidate = schema as {
-    def?: SchemaDef
-    _zod?: { def?: SchemaDef }
-  }
-  return candidate.def ?? candidate._zod?.def ?? {}
 }
 
 declare const SECRET_SCHEMA: unique symbol
@@ -322,7 +303,3 @@ export type ConfigOf<S extends z.ZodType> = {
 }
 
 export type SchemaType = z.core.SomeType
-
-export interface SchemaDef {
-  innerType?: SchemaType
-}

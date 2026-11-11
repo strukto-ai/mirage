@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     from mirage.context import (
         get_current_session,
         get_current_session_for,
-        reset_current_session,
         set_current_session,
     )
     from mirage.workspace.session.manager import SessionManager
@@ -37,7 +36,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.context": (
         "get_current_session",
         "get_current_session_for",
-        "reset_current_session",
         "set_current_session",
     ),
     "mirage.workspace.session.manager": ("SessionManager",),
@@ -58,7 +56,6 @@ __all__ = [
     "env_snapshot",
     "get_current_session",
     "get_current_session_for",
-    "reset_current_session",
     "session_view",
     "set_current_session",
     "visible_arrays",

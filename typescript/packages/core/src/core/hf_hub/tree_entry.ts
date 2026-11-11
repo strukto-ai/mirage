@@ -41,7 +41,3 @@ export interface TreeEntry {
   /** The Xet content hash, '' when the file is not Xet-backed. */
   xetHash: string
 }
-
-export function isDirEntry(entry: TreeEntry): boolean {
-  return entry.type === 'directory'
-}

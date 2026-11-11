@@ -21,13 +21,12 @@ from enum import Enum, auto
 from functools import partial
 
 from mirage.commands.builtin.utils.paths import walk_spelling
-from mirage.context import reset_redirect_paths, set_redirect_paths
+from mirage.context import reset_caller, set_redirect_paths
 from mirage.context.session_context import (
     RedirectGuard,
     RedirectResult,
     bind_caller,
     current_caller,
-    reset_caller,
     run_landing,
 )
 from mirage.errors.constants import FS_ERRORS
@@ -1290,7 +1289,7 @@ async def _open_output(
             return await opened.failed(_redirect_failure(scope, exc))
         finally:
             if token is not None:
-                reset_redirect_paths(token)
+                reset_caller(token)
         file = FileDescription(
             pipe or scope,
             append=r.append or pipe is not None,
@@ -1467,7 +1466,7 @@ async def _land_output(
                     await discard_streams(data)
         finally:
             if write_token is not None:
-                reset_redirect_paths(write_token)
+                reset_caller(write_token)
         stdout = await _deliver_routed(routed, opened.sink, io)
     finally:
         await route.release()
@@ -1666,7 +1665,7 @@ async def _handle_redirect(
             file.emit = None
         session.terminal_output = terminal_output
         if token is not None:
-            reset_redirect_paths(token)
+            reset_caller(token)
         for fd in claimed:
             if fd in saved:
                 session.descriptors[fd] = saved[fd]

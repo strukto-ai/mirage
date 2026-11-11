@@ -17,12 +17,6 @@ import { DevVFS } from '../../vfs/dev/dev.ts'
 import { Command } from '../../commands/config.ts'
 import { DEV_COMMANDS } from '../../commands/builtin/dev/index.ts'
 
-// A VFS class, whatever its constructor's visibility (one may build
-// through a factory).
-interface VFSClass {
-  readonly prototype: BaseVFS
-}
-
 // The shell commands of each builtin VFS class, kept on the class itself:
 // keyed by the class, not its name, so a minified bundle still finds them,
 // and under a global symbol, so a VFS extending a class from another copy
@@ -30,32 +24,6 @@ interface VFSClass {
 // package registers the backends it ships, as core does below. Python finds
 // the same tables by class path and imports them on first mount.
 const BACKENDS = Symbol.for('mirage.backendCommands')
-
-/** Serve `commands` on every mount of `cls` and its subclasses. */
-export function registerBackendCommands(cls: VFSClass, commands: () => readonly Command[]): void {
-  Object.defineProperty(cls, BACKENDS, { value: commands, configurable: true })
-}
-
-// The one VFS name a backend's commands were registered under, or null for
-// a set that spans several (the Hugging Face repo kinds share one table).
-function familyOf(commands: readonly Command[]): string | null {
-  const names = new Set(commands.flatMap((cmd) => (cmd.vfs === null ? [] : [cmd.vfs])))
-  const [only] = names
-  return names.size === 1 && only !== undefined ? only : null
-}
-
-function renamed(cmd: Command, vfs: string): Command {
-  return new Command({
-    name: cmd.name,
-    spec: cmd.spec,
-    vfs,
-    filetype: cmd.filetype,
-    fn: cmd.fn,
-    aggregate: cmd.aggregate,
-    write: cmd.write,
-    limit: cmd.limit,
-  })
-}
 
 /**
  * The shell commands a builtin backend serves on a mount of `vfs`: mirage's
@@ -75,9 +43,23 @@ export function backendCommands(vfs: BaseVFS): Command[] {
       : undefined
     const commands = typeof own === 'function' ? (own as () => readonly Command[])() : undefined
     if (commands !== undefined) {
-      const family = familyOf(commands)
+      // The one VFS name the commands were registered under; a set that
+      // spans several (the Hugging Face repo kinds share one table) has none.
+      const families = new Set(commands.flatMap((cmd) => (cmd.vfs === null ? [] : [cmd.vfs])))
+      const [family] = families
       return commands.map((cmd) =>
-        family !== null && cmd.vfs === family && family !== vfs.name ? renamed(cmd, vfs.name) : cmd,
+        families.size === 1 && cmd.vfs === family && family !== vfs.name
+          ? new Command({
+              name: cmd.name,
+              spec: cmd.spec,
+              vfs: vfs.name,
+              filetype: cmd.filetype,
+              fn: cmd.fn,
+              aggregate: cmd.aggregate,
+              write: cmd.write,
+              limit: cmd.limit,
+            })
+          : cmd,
       )
     }
     cls = Object.getPrototypeOf(cls)
@@ -85,4 +67,4 @@ export function backendCommands(vfs: BaseVFS): Command[] {
   return []
 }
 
-registerBackendCommands(DevVFS, () => DEV_COMMANDS)
+Object.defineProperty(DevVFS, BACKENDS, { value: () => DEV_COMMANDS, configurable: true })

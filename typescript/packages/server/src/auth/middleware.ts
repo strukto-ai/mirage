@@ -41,13 +41,6 @@ export const PUBLIC_PATHS: ReadonlySet<string> = new Set([
 ])
 const JWT_SHAPE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/
 
-function constantTimeEqual(a: string, b: string): boolean {
-  const ab = Buffer.from(a)
-  const bb = Buffer.from(b)
-  if (ab.length !== bb.length) return false
-  return timingSafeEqual(ab, bb)
-}
-
 function extractBearer(raw: string | undefined): string | undefined {
   if (typeof raw !== 'string' || !raw.startsWith(BEARER_PREFIX)) return undefined
   const value = raw.slice(BEARER_PREFIX.length).trim()
@@ -83,7 +76,10 @@ export function authenticator(
       }
     }
     const expected = config.mode === AuthMode.Local ? config.localToken : config.bearerToken
-    if (expected === undefined || !constantTimeEqual(token, expected)) return 'bearer mismatch'
+    const given = Buffer.from(token)
+    const wanted = Buffer.from(expected ?? '')
+    if (expected === undefined || given.length !== wanted.length) return 'bearer mismatch'
+    if (!timingSafeEqual(given, wanted)) return 'bearer mismatch'
     return { account: null }
   }
 }

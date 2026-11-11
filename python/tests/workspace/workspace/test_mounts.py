@@ -36,7 +36,6 @@ from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.workspace.mounts import (
     install_mounts,
-    kernel_targets,
     normalize_mounts,
 )
 
@@ -129,20 +128,6 @@ def test_a_mount_carries_no_permissions():
 def test_wrong_length_tuple_is_rejected():
     with pytest.raises(TypeError):
         normalize_mounts({"/a": (RAMVFS(),)}, MountMode.READ, ReadSpec())
-
-
-def test_kernel_targets_selects_only_real_mountpoints():
-    specs = normalize_mounts(
-        {
-            "/vfs": RAMVFS(),
-            "/fuse": Mount(
-                vfs=RAMVFS(), backend=MountBackend.FUSE, mountpoint="/tmp/mp"
-            ),
-        },
-        MountMode.WRITE,
-        ReadSpec(),
-    )
-    assert kernel_targets(specs) == [("/fuse", MountBackend.FUSE, "/tmp/mp")]
 
 
 def test_limits_are_copied_not_aliased():

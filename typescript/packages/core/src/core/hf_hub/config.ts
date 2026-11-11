@@ -33,8 +33,3 @@ export const HfConfig = z.object({
 })
 
 export type HfConfig = ConfigOf<typeof HfConfig>
-
-export function hfEndpoint(config: HfConfig): string {
-  const endpoint = config.endpoint
-  return endpoint === '' ? API_BASE : endpoint
-}

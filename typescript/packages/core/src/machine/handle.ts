@@ -29,12 +29,7 @@ import { abortable, hasAborted, mergeSignals, settledWithin, sleep } from '../ut
 import { concat } from '../utils/bytes.ts'
 import { boundSystemClock } from '../utils/clock.ts'
 import { rstripSlash } from '../utils/slash.ts'
-import {
-  BASE_CONFIG_FIELDS,
-  checkMountType,
-  type MachineConfig,
-  type NormalizedMachineConfig,
-} from './config.ts'
+import { BASE_CONFIG_FIELDS, checkMountType, type MachineConfig } from './config.ts'
 import {
   CHECK_LINE,
   CHECK_MARK,
@@ -94,7 +89,8 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   get provider(): string {
     return (this.constructor as typeof MachineHandle).provider
   }
-  readonly config: NormalizedMachineConfig<C>
+  /** The provider config with the shared collection fields always present. */
+  readonly config: C & Required<Pick<MachineConfig, 'env'>>
   // Connect-once latch: the first run connects; later runs just execute.
   // Single-flight so concurrent first runs share one connect, and a failed
   // connect clears the slot so the next run retries.

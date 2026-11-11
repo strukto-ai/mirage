@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { loadWorkspaceConfig, type WorkspaceConfigRaw } from '@struktoai/mirage-core/config'
+import { loadWorkspaceConfig, type WorkspaceConfig } from '@struktoai/mirage-core/config'
 import { validateDocument } from '@struktoai/mirage-core/rs/document'
 import { parseSystemTime } from '@struktoai/mirage-core/utils/clock'
 import type { JsonValue, MountBackend } from '@struktoai/mirage-core/types'
@@ -87,7 +87,7 @@ export type CreateWorkspaceRequest = z.infer<typeof CreateWorkspaceRequest>
  * then the first unknown key; any other refusal throws an Error naming what
  * is wrong. Mirrors Python's `check_config`.
  */
-export function checkConfig(config: unknown): WorkspaceConfigRaw {
+export function checkConfig(config: unknown): WorkspaceConfig {
   const shape = z.looseObject({
     mounts: z.record(z.string(), z.unknown()),
     system_time: z

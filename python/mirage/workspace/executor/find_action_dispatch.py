@@ -31,12 +31,12 @@ from mirage.commands.builtin.utils.links import link_view
 from mirage.context import (
     current_caller,
     get_current_session,
-    reset_program_invocation,
+    reset_caller,
     set_program_invocation,
 )
 from mirage.core.generic import find_eval
 from mirage.core.generic import types as find_types
-from mirage.core.generic.find import depth_first_key
+from mirage.core.generic.find import depth_first_order
 from mirage.errors.classify import is_entry_error
 from mirage.errors.fs import ebusy, enoent, enotempty, strerror_of
 from mirage.errors.posix import posix_phrase
@@ -229,7 +229,7 @@ async def _run_exec(
         )
     finally:
         if token is not None:
-            reset_program_invocation(token)
+            reset_caller(token)
     if io.stdout is not None:
         data = await materialize(io.stdout)
         if data:
@@ -747,7 +747,7 @@ async def _apply_find_actions(
                 records,
                 key=lambda r: (
                     r.run,
-                    depth_first_key(r.path.raw_path or r.path.virtual),
+                    depth_first_order(r.path.raw_path or r.path.virtual),
                 ),
             )
             if reorders

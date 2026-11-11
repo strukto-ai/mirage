@@ -57,12 +57,6 @@ export const MIME_TO_EXT: Readonly<Record<string, string>> = Object.freeze({
   'application/vnd.google-apps.presentation': GoogleFileSuffix.GSLIDE,
 })
 
-interface DriveOwner {
-  me?: boolean
-  displayName?: string
-  emailAddress?: string
-}
-
 export interface DriveFile {
   id: string
   name: string
@@ -77,7 +71,7 @@ export interface DriveFile {
   sha256Checksum?: string
   headRevisionId?: string
   trashed?: boolean
-  owners?: DriveOwner[]
+  owners?: { me?: boolean; displayName?: string; emailAddress?: string }[]
   capabilities?: { canEdit?: boolean }
   parents?: string[]
 }

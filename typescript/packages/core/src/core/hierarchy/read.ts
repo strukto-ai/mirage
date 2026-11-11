@@ -41,26 +41,6 @@ export type WindowedReader<A extends Accessor> = (
   window: ReadWindow,
 ) => Promise<Uint8Array>
 
-export interface HierarchyReadOptions<A extends Accessor> {
-  /**
-   * Readers for kinds whose content is windowed at the source (postgres rows
-   * take a row limit/offset the backend pushes into the query); they receive
-   * the caller's window, which every plain reader ignores, matching a
-   * filesystem read that has no row notion.
-   */
-  windowed?: Readonly<Record<string, WindowedReader<A>>>
-  /**
-   * Every read first proves the file's parent directory exists, by the row
-   * its listing names, so a container the listing refuses reads as absent
-   * exactly as `ls` and `stat` report it. A backend whose readers address the
-   * API by the ids in the path asks for it: without it, `cat` of a board
-   * outside `boardIds` fetched that board by its id. The file itself stays
-   * the reader's to prove, since a bounded listing need not name every file
-   * that exists.
-   */
-  parented?: boolean
-}
-
 /** Proves the matched entity exists before its answer runs. */
 export type Guard<A extends Accessor> = (
   accessor: A,
@@ -108,7 +88,25 @@ export function perKind<A extends Accessor, Args extends unknown[], T>(
 export function makeRead<A extends Accessor>(
   detect: DetectFn,
   readers: Readonly<Record<string, Reader<A>>>,
-  options: HierarchyReadOptions<A> = {},
+  options: {
+    /**
+     * Readers for kinds whose content is windowed at the source (postgres rows
+     * take a row limit/offset the backend pushes into the query); they receive
+     * the caller's window, which every plain reader ignores, matching a
+     * filesystem read that has no row notion.
+     */
+    windowed?: Readonly<Record<string, WindowedReader<A>>>
+    /**
+     * Every read first proves the file's parent directory exists, by the row
+     * its listing names, so a container the listing refuses reads as absent
+     * exactly as `ls` and `stat` report it. A backend whose readers address the
+     * API by the ids in the path asks for it: without it, `cat` of a board
+     * outside `boardIds` fetched that board by its id. The file itself stays
+     * the reader's to prove, since a bounded listing need not name every file
+     * that exists.
+     */
+    parented?: boolean
+  } = {},
 ): (
   accessor: A,
   path: PathSpec,

@@ -145,8 +145,6 @@ export interface WorkspaceLike {
   processes(): Promise<Process[]>
 }
 
-const VALID_MODES: readonly string[] = [MountMode.READ, MountMode.WRITE, MountMode.EXEC]
-
 export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict> {
   const skip = new Set(['/dev/', normDir(HISTORY_PREFIX), normDir(BIN_PREFIX)])
   const mounted = [...ws.registry.allMounts()]
@@ -425,7 +423,7 @@ export function buildMountArgs(
   const mountArgs: Record<string, Mount> = {}
   let anchored = false
   for (const m of state.mounts) {
-    if (!VALID_MODES.includes(m.mode)) {
+    if (!Object.values<string>(MountMode).includes(m.mode)) {
       throw new Error(`Workspace.fromState: mount '${m.prefix}' has invalid mode '${m.mode}'`)
     }
     const override = normalized[normDir(m.prefix)]
@@ -500,10 +498,10 @@ export function buildMountArgs(
     const capacity = typeof saved?.capacity === 'number' ? saved.capacity : null
     const [vfs, vfsRef]: [BaseVFS, string | null] =
       override === undefined
-        ? [new RAMVFS({ capacity }), savedRef(m)]
+        ? [new RAMVFS({ capacity }), m.vfs_ref ?? null]
         : userPrefixes.has(normDir(m.prefix)) || override instanceof Mount
           ? placedVfs(override, m)
-          : [override, savedRef(m)]
+          : [override, m.vfs_ref ?? null]
     const index = restoreIndexConfig(m.index_config, placed?.options.index, m.prefix)
     mountArgs[m.prefix] = new Mount(vfs, {
       mode: m.mode as MountMode,
@@ -578,16 +576,7 @@ export function buildMountArgs(
  */
 function placedVfs(override: BaseVFS | Mount, entry: MountSnapshot): [BaseVFS, string | null] {
   if (override instanceof Mount) return [override.vfs, override.options.vfsRef ?? null]
-  return [override, override.name === entry.vfs_class ? savedRef(entry) : null]
-}
-
-/**
- * The `vfs_ref` a saved mount was built from, or null: for one
- * constructed in code, and for a v3 snapshot written before the key
- * existed, which carries none (the format version did not move).
- */
-function savedRef(entry: MountSnapshot): string | null {
-  return (entry.vfs_ref as string | null | undefined) ?? null
+  return [override, override.name === entry.vfs_class ? (entry.vfs_ref ?? null) : null]
 }
 
 /**
@@ -603,7 +592,7 @@ function savedRef(entry: MountSnapshot): string | null {
 export function restoresAsFreshRAM(entry: MountSnapshot): boolean {
   const type = entry.vfs_state.type
   if (type === 'disk') return true
-  const ref = savedRef(entry)
+  const ref = entry.vfs_ref ?? null
   return type === 'ram' && (ref === null || ref === type)
 }
 
@@ -626,7 +615,7 @@ export function savedVfsBuild(
 ): { name: string; config: Record<string, unknown> } | null {
   if (restoresAsFreshRAM(entry)) return null
   const type = entry.vfs_state.type
-  const ref = savedRef(entry)
+  const ref = entry.vfs_ref ?? null
   const name =
     ref !== null ? (known(ref) || ref.includes(':') ? ref : null) : known(type) ? type : null
   if (name === null) return null

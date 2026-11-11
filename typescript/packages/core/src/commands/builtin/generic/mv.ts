@@ -38,7 +38,6 @@ import {
   copyTargets,
   pathExists,
   typedName,
-  type BackendKeyFn,
 } from '../utils/copy.ts'
 import {
   errorVirtualPath,
@@ -357,7 +356,7 @@ export async function mvGeneric(
   stat: StatFn,
   strategy: MoveStrategy,
   flags: MvFlags,
-  backendKey?: BackendKeyFn,
+  backendKey?: (path: PathSpec) => string,
   readdir?: ReaddirFn,
   // Judges one (source, target) pair before the move touches anything,
   // the backup included, throwing to refuse it; the adapter wires the

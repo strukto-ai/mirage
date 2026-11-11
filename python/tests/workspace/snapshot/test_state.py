@@ -54,7 +54,7 @@ from mirage.types import (
     WritePolicy,
 )
 from mirage.utils.clock import ManualClock
-from mirage.utils.loader import SCRIPT_MODULE_NAME, load_backend_class
+from mirage.utils.loader import SCRIPT_MODULE_NAME, load_attr
 from mirage.utils.ranges import slice_window
 from mirage.vfs import registry as vfs_registry
 from mirage.vfs.disk import DiskVFS
@@ -444,8 +444,8 @@ async def test_a_script_class_with_no_reference_asks_for_an_override(
 ):
     module = tmp_path / "tagged_backend.py"
     module.write_text(TAGGED_MODULE)
-    cls = load_backend_class(f"{module}:Tagged")
-    config_cls = load_backend_class(f"{module}:ZetaConfig")
+    cls = load_attr(f"{module}:Tagged")
+    config_cls = load_attr(f"{module}:ZetaConfig")
     # Constructed directly from the loaded class: no registry, no ref.
     ws = Workspace({"/t/": cls(config_cls(label="x"))}, mode=MountMode.READ)
     try:

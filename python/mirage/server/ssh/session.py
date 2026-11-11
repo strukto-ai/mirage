@@ -25,6 +25,7 @@ import asyncssh
 from asyncssh.connection import SSHConnection
 
 from mirage import Workspace
+from mirage.concurrency.limiter import on_loop
 from mirage.server.metrics import refused
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.server.ssh.constants import ACCOUNT_OPTION, PROFILE_OPTION
@@ -32,13 +33,10 @@ from mirage.server.ssh.stream import (
     ChannelInput,
     ChannelOutput,
     Mark,
-    Send,
-    decode,
     deliver,
-    encode,
-    loop_sender,
 )
 from mirage.server.stdin import LoopStdin
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.constants import INTERRUPTED_STATUS
 from mirage.utils.abort import MirageAbortError
 from mirage.workspace.executor.statement import record_status
@@ -255,38 +253,6 @@ async def open_session(
         raise
 
 
-async def run_line(
-    ws: Workspace, session_id: str, line: str, stdin: LoopStdin, send: Send
-) -> int:
-    """Run one line as the session and stream its output back as the
-    line produces it.
-
-    Runs on the workspace's loop. The status is read once the output
-    has ended, because a streaming command settles it only then.
-
-    Args:
-        ws (Workspace): the workspace.
-        session_id (str): the session the line runs as.
-        line (str): the shell line.
-        stdin (LoopStdin): the channel's input.
-        send (Send): where output goes.
-
-    Returns:
-        int: the line's exit status.
-    """
-    try:
-        async with await ws.shell(
-            line,
-            session_id=session_id,
-            stdin=stdin,
-            stream=True,
-        ) as execution:
-            io = await deliver(execution, send)
-    except MirageAbortError:
-        return INTERRUPTED_STATUS
-    return io.exit_code
-
-
 async def stamp_interrupt(ws: Workspace, session_id: str) -> None:
     """Leave ``$?`` at 130 after a Ctrl-C, as an interactive bash does.
 
@@ -399,6 +365,10 @@ class ShellChannel:
         """Run one line on the workspace's loop, streaming its output.
 
         Ctrl-C and a dropped connection cancel the line where it is.
+        Each write waits for the channel to drain, so a fast producer
+        is paced by the client instead of buffered without bound. The
+        status is read once the output has ended, because a streaming
+        command settles it only then.
 
         Args:
             line (str): the shell line.
@@ -413,17 +383,25 @@ class ShellChannel:
             return 1
         runner = self._entry.runner
         loop = asyncio.get_running_loop()
-        self._running = asyncio.run_coroutine_threadsafe(
-            self._held(
-                lambda: run_line(
-                    runner.ws,
-                    self._session_id,
+
+        async def send(data: bytes, stderr: bool) -> None:
+            await on_loop(self._output.write(data, stderr), loop)
+
+        async def run_line() -> int:
+            try:
+                async with await runner.ws.shell(
                     line,
-                    LoopStdin(self._input, loop),
-                    loop_sender(self._output, loop),
-                )
-            ),
-            runner.loop,
+                    session_id=self._session_id,
+                    stdin=LoopStdin(self._input, loop),
+                    stream=True,
+                ) as execution:
+                    io = await deliver(execution, send)
+            except MirageAbortError:
+                return INTERRUPTED_STATUS
+            return io.exit_code
+
+        self._running = asyncio.run_coroutine_threadsafe(
+            self._held(run_line), runner.loop
         )
         self._input.on_interrupt(self._interrupt)
         try:
@@ -444,7 +422,9 @@ class ShellChannel:
                 logger.debug("ssh: line ended with the connection: %r", exc)
                 return 1
             logger.warning("ssh: line failed on %s: %r", self._entry.id, exc)
-            await self._output.write(encode(f"mirage: {exc}\n"), stderr=True)
+            await self._output.write(
+                encode_text(f"mirage: {exc}\n"), stderr=True
+            )
             return 1
         finally:
             self._input.on_interrupt(None)
@@ -459,7 +439,7 @@ class ShellChannel:
         status = 0
         while not self._lost:
             if self._tty:
-                await self._output.write(encode(self._prompt()))
+                await self._output.write(encode_text(self._prompt()))
             item = await self._input.readline()
             if item is Mark.LIMIT:
                 await self._output.write(
@@ -480,7 +460,7 @@ class ShellChannel:
                         stamp_interrupt(runner.ws, self._session_id)
                     )
                 continue
-            line = decode(item).rstrip("\r\n")
+            line = decode_text(item).rstrip("\r\n")
             if not line.strip():
                 continue
             status = await self.run(line)

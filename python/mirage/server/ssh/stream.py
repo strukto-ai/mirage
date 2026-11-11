@@ -21,21 +21,14 @@ from enum import Enum
 import asyncssh
 from asyncssh.editor import SSHLineEditorChannel
 
-from mirage.concurrency.limiter import on_loop
 from mirage.io.types import IOResult
-from mirage.shell.bytes import encode_text
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.console.types import Channel
 from mirage.workspace.shell_execution import ShellExecution
 from mirage.workspace.tools.io_text import decision_line
 
 logger = logging.getLogger(__name__)
 
-ENCODING = "utf-8"
-# asyncssh runs its line editor only on a text channel, and
-# surrogateescape is the one error policy under which every byte
-# survives the str round trip, so binary input and output cross a text
-# channel unchanged.
-ERRORS = "surrogateescape"
 # How far the client may type or pipe ahead of whoever reads it before
 # the channel stops being read and SSH flow control pushes back.
 MAX_BUFFERED = 1024 * 1024
@@ -195,14 +188,6 @@ class LineDiscipline:
             self._escape = _EscapeState.NONE
 
 
-def encode(text: str) -> bytes:
-    return text.encode(ENCODING, ERRORS)
-
-
-def decode(data: bytes) -> str:
-    return data.decode(ENCODING, ERRORS)
-
-
 class ChannelInput:
     """Everything the client sends on one channel, read once, in order.
 
@@ -286,10 +271,10 @@ class ChannelInput:
                 logger.debug("ssh: channel input ended: %r", exc)
                 break
             if data and self._discipline is not None:
-                self._discipline.feed(encode(data))
+                self._discipline.feed(encode_text(data))
                 await self._process.stdout.drain()
             elif data:
-                self._push(encode(data))
+                self._push(encode_text(data))
             elif stdin.at_eof():
                 break
             else:
@@ -298,7 +283,7 @@ class ChannelInput:
         self._changed.set()
 
     def _echo(self, data: bytes) -> None:
-        self._process.stdout.write(decode(data))
+        self._process.stdout.write(decode_text(data))
 
     def _interrupted(self) -> None:
         if self._interrupt is not None:
@@ -415,30 +400,8 @@ class ChannelOutput:
         )
         if self._crlf:
             data = data.replace(b"\n", b"\r\n")
-        stream.write(decode(data))
+        stream.write(decode_text(data))
         await stream.drain()
-
-
-def loop_sender(
-    output: ChannelOutput, loop: asyncio.AbstractEventLoop
-) -> Send:
-    """A writer the workspace loop can await, landing on the channel's loop.
-
-    Awaiting it waits for the channel to drain, so a fast producer is
-    paced by the client instead of buffered without bound.
-
-    Args:
-        output (ChannelOutput): the channel's output.
-        loop (asyncio.AbstractEventLoop): the loop the channel lives on.
-
-    Returns:
-        Send: ``send(data, stderr)``.
-    """
-
-    async def send(data: bytes, stderr: bool) -> None:
-        await on_loop(output.write(data, stderr), loop)
-
-    return send
 
 
 async def deliver(execution: ShellExecution, send: Send) -> IOResult:

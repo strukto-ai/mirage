@@ -19,7 +19,6 @@ import pytest
 from mirage.errors.posix import (
     LINUX_ERRNO,
     POSIX,
-    linux_errno,
     posix_errno,
     posix_phrase,
 )
@@ -101,8 +100,8 @@ def test_linux_errno_numbers_every_condition_as_linux_does():
     # `(os error 40)` for a loop), which the host table does not give on
     # macOS, where ELOOP is 62.
     assert set(LINUX_ERRNO) == set(FsCondition)
-    assert linux_errno(FsCondition.ENOENT) == 2
-    assert linux_errno(FsCondition.EACCES) == 13
-    assert linux_errno(FsCondition.ENOTDIR) == 20
-    assert linux_errno(FsCondition.ELOOP) == 40
-    assert linux_errno(FsCondition.EDQUOT) == 122
+    assert LINUX_ERRNO[FsCondition.ENOENT] == 2
+    assert LINUX_ERRNO[FsCondition.EACCES] == 13
+    assert LINUX_ERRNO[FsCondition.ENOTDIR] == 20
+    assert LINUX_ERRNO[FsCondition.ELOOP] == 40
+    assert LINUX_ERRNO[FsCondition.EDQUOT] == 122

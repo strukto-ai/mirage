@@ -38,7 +38,7 @@ import { SSHConfigError } from './errors.ts'
 import { loadHostKey } from './keys.ts'
 import {
   handleChannel,
-  refuseSubsystem,
+  refuse,
   type ChannelRequest,
   type Endpoint,
   type ShellChannel,
@@ -279,7 +279,7 @@ function serveConnection(
       session.on('subsystem', (acceptSubsystem, _reject, info) => {
         const channel = acceptSubsystem()
         if (info.name !== CODEX_SUBSYSTEM) {
-          refuseSubsystem(channel, info.name)
+          refuse(channel, `unsupported subsystem: ${info.name}`)
           return
         }
         const request: ChannelRequest = {

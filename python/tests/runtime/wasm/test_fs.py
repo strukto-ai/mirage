@@ -25,7 +25,7 @@ pytest.importorskip("wasmtime")
 import wasmtime
 
 from mirage import MountMode, Workspace
-from mirage.context import reset_current_session, set_current_session
+from mirage.context import reset_caller, set_current_session
 from mirage.policy import Deny, Policy
 from mirage.runtime.files import Descriptor, RuntimeFiles
 from mirage.runtime.handles.mode import OpenMode
@@ -351,6 +351,6 @@ def test_wasi_open_wires_retained_read_checks(
         assert wasi.fd_close(None, fd) == 0
     finally:
         wasi.close_all()
-        reset_current_session(token)
+        reset_caller(token)
         loop.run_until_complete(ws.close())
         loop.close()

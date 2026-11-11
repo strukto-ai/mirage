@@ -73,13 +73,12 @@ def _list_file() -> None:
     emit(table, human=_human_table)
 
 
-_RESOLVED_OPTION = typer.Option(
-    False, "--resolved", help="show effective values and their origins"
-)
-
-
 @app.command("list")
-def list_cmd(resolved: bool = _RESOLVED_OPTION) -> None:
+def list_cmd(
+    resolved: bool = typer.Option(
+        False, "--resolved", help="show effective values and their origins"
+    ),
+) -> None:
     """Print every key in the config.toml [daemon] table.
 
     With --resolved, print the effective value of every key after

@@ -17,7 +17,7 @@ import pytest
 from mirage.accessor import NOOPAccessor
 from mirage.commands.builtin.generic_bind.factory import GENERIC_COMMANDS
 from mirage.commands.config import Context
-from mirage.context import reset_mount_gate, set_mount_gate
+from mirage.context import reset_caller, set_mount_gate
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
@@ -46,7 +46,7 @@ def _on_root_mount():
     # Each command here runs on the mount at /, as a line's would.
     token = set_mount_gate("/", MountMode.WRITE)
     yield
-    reset_mount_gate(token)
+    reset_caller(token)
 
 
 def _files(vfs: BaseVFS) -> Files:

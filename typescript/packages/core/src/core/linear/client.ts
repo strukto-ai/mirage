@@ -117,30 +117,6 @@ export class HttpLinearTransport implements LinearTransport {
   }
 }
 
-interface PageInfo {
-  hasNextPage: boolean
-  endCursor: string | null
-}
-
-interface Connection {
-  nodes: Record<string, unknown>[]
-  pageInfo: PageInfo
-}
-
-function navigate(root: Record<string, unknown>, path: readonly string[]): Connection {
-  let cursor: unknown = root
-  for (const key of path) {
-    if (cursor === null || typeof cursor !== 'object') {
-      throw new LinearApiError(`unexpected GraphQL shape at ${path.join('.')}`)
-    }
-    cursor = (cursor as Record<string, unknown>)[key]
-  }
-  if (cursor === null || typeof cursor !== 'object') {
-    throw new LinearApiError(`unexpected GraphQL shape at ${path.join('.')}`)
-  }
-  return cursor as unknown as Connection
-}
-
 async function paginateConnection(
   transport: LinearTransport,
   query: string,
@@ -151,8 +127,18 @@ async function paginateConnection(
   const merged: Record<string, unknown> = { first: 50, after: null, ...variables }
   const nodes: Record<string, unknown>[] = []
   for (;;) {
-    const data = await transport.graphql(query, merged)
-    const conn = navigate(data, path)
+    let cursor: unknown = await transport.graphql(query, merged)
+    for (const key of path) {
+      if (cursor === null || typeof cursor !== 'object') break
+      cursor = (cursor as Record<string, unknown>)[key]
+    }
+    if (cursor === null || typeof cursor !== 'object') {
+      throw new LinearApiError(`unexpected GraphQL shape at ${path.join('.')}`)
+    }
+    const conn = cursor as {
+      nodes: Record<string, unknown>[]
+      pageInfo: { hasNextPage: boolean; endCursor: string | null }
+    }
     for (const item of conn.nodes) nodes.push(item)
     if (!conn.pageInfo.hasNextPage) return nodes
     if (limit !== undefined && nodes.length >= limit) return nodes

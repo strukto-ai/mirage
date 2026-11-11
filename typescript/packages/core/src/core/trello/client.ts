@@ -196,15 +196,9 @@ export async function listCardComments(
   return asArray(result) as Record<string, unknown>[]
 }
 
-export interface CardCreateInput {
-  listId: string
-  name: string
-  desc?: string | null
-}
-
 export async function cardCreate(
   transport: TrelloTransport,
-  input: CardCreateInput,
+  input: { listId: string; name: string; desc?: string | null },
 ): Promise<Record<string, unknown>> {
   const params: Record<string, string> = { idList: input.listId, name: input.name }
   if (input.desc !== undefined && input.desc !== null && input.desc !== '') {
@@ -217,18 +211,16 @@ export async function cardCreate(
   return getCard(transport, id)
 }
 
-export interface CardUpdateInput {
-  cardId: string
-  name?: string | null
-  desc?: string | null
-  closed?: boolean | null
-  due?: string | null
-  dueComplete?: boolean | null
-}
-
 export async function cardUpdate(
   transport: TrelloTransport,
-  input: CardUpdateInput,
+  input: {
+    cardId: string
+    name?: string | null
+    desc?: string | null
+    closed?: boolean | null
+    due?: string | null
+    dueComplete?: boolean | null
+  },
 ): Promise<Record<string, unknown>> {
   const params: Record<string, string> = {}
   if (input.name !== undefined && input.name !== null) params.name = input.name

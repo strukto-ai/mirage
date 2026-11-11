@@ -38,8 +38,6 @@ from mirage.context import (
     redirect_paths_for,
     redirect_runner_for,
     reset_caller,
-    reset_program_invocation,
-    reset_redirect_paths,
     set_program_invocation,
     set_redirect_paths,
 )
@@ -364,7 +362,7 @@ async def _run_alias(
                         sink=sink,
                     )
                 finally:
-                    reset_redirect_paths(token)
+                    reset_caller(token)
                     session._alias_expansion = previous
                     if expansion is not None:
                         registry.decisions.hand_up(
@@ -1185,7 +1183,7 @@ def _run_program(
                     await output(chunk)
             said = await ran.materialize_stderr()
         finally:
-            reset_program_invocation(token)
+            reset_caller(token)
         node.exit_code = ran.exit_code
         return RunResult(
             stdout=b"", stderr=said or None, exit_code=ran.exit_code

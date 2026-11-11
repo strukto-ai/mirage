@@ -27,17 +27,12 @@ import type {
 } from '@struktoai/mirage-core/workspace/store/base'
 import { RAMExecutionStore } from '@struktoai/mirage-core/execution/ram'
 import type { ExecutionStore } from '@struktoai/mirage-core/execution/base'
+import { expandTilde } from '@struktoai/mirage-core/utils/path'
 import { DiskObserverStore } from '../../observe/disk_store.ts'
 import { DiskNamespaceStore } from '../mount/namespace/disk.ts'
 import { DiskRecordClient, quoteName } from '../record/disk.ts'
 
 export const DEFAULT_STATE_ROOT = '~/.mirage/state'
-
-function expandHome(p: string): string {
-  if (p === '~') return homedir()
-  if (p.startsWith('~/')) return path.join(homedir(), p.slice(2))
-  return p
-}
 
 // The workspace ids that would name the state root or its `workspaces`
 // directory rather than one workspace's own.
@@ -82,7 +77,7 @@ export class DiskWorkspaceStateStore extends WorkspaceStateStore {
   constructor(options: DiskWorkspaceStateStoreOptions = {}) {
     const { root, ...overrides } = options
     super(overrides)
-    this.root = expandHome(root ?? DEFAULT_STATE_ROOT)
+    this.root = expandTilde(root ?? DEFAULT_STATE_ROOT, homedir())
   }
 
   private wsRoot(workspaceId: string): string {

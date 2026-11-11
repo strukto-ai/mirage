@@ -18,7 +18,7 @@ import pytest
 
 from mirage.core.ram.read import read
 from mirage.types import PathSpec
-from mirage.utils.loader import load_backend_class
+from mirage.utils.loader import load_attr
 from tests.fixtures.driver_ops import ops
 
 _ps = PathSpec.from_str_path
@@ -32,7 +32,7 @@ def _cat_sync(backend, path):
 
 
 def test_load_from_module():
-    cls = load_backend_class("mirage.vfs.ram.ram:RAMVFS")
+    cls = load_attr("mirage.vfs.ram.ram:RAMVFS")
     from mirage.vfs.ram import RAMVFS
 
     assert cls is RAMVFS
@@ -45,7 +45,7 @@ def test_load_from_script_file(tmp_path):
         "class CustomBackend(RAMVFS):\n"
         "    pass\n"
     )
-    cls = load_backend_class(f"{script}:CustomBackend")
+    cls = load_attr(f"{script}:CustomBackend")
     assert cls.__name__ == "CustomBackend"
     instance = cls()
     asyncio.run(ops(instance).write(_ps("/test.txt"), b"hello"))
@@ -54,14 +54,14 @@ def test_load_from_script_file(tmp_path):
 
 def test_load_invalid_spec_no_colon():
     with pytest.raises(ValueError, match="invalid backend spec"):
-        load_backend_class("mirage.vfs.ram")
+        load_attr("mirage.vfs.ram")
 
 
 def test_load_missing_file():
     with pytest.raises(ValueError, match="cannot load script"):
-        load_backend_class("/nonexistent/path.py:Cls")
+        load_attr("/nonexistent/path.py:Cls")
 
 
 def test_load_missing_class():
     with pytest.raises(ValueError, match="not found"):
-        load_backend_class("mirage.vfs.ram.ram:DoesNotExist")
+        load_attr("mirage.vfs.ram.ram:DoesNotExist")

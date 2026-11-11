@@ -17,16 +17,6 @@ import { fileIdName } from '../../utils/naming.ts'
 import { windowFor } from '../../utils/ranges.ts'
 import { ApiError } from '../api/errors.ts'
 
-export interface DiscordAttachment {
-  id: string
-  filename?: string
-  title?: string
-  url?: string
-  proxy_url?: string
-  content_type?: string
-  size?: number
-}
-
 /**
  * Whether a day's `files` directory lists an attachment.
  *
@@ -45,7 +35,7 @@ export function isListed<T extends Record<string, unknown>>(
  * `<stem>__<att-id>.<ext>`, named after `filename` and else `title` (see
  * `fileIdName`).
  */
-export function fileBlobName(att: DiscordAttachment): string {
+export function fileBlobName(att: { id: string; filename?: string; title?: string }): string {
   return fileIdName(att.id, att.filename, att.title)
 }
 

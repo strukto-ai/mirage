@@ -13,10 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
-import { browserAliasSchema, derivedEndpoint, makeBrowserS3Alias } from '../s3_alias.ts'
+import { aliasSchema, derivedEndpoint, makeS3Alias } from '../s3_alias.ts'
 
-export const BackblazeConfig = makeBrowserS3Alias({
-  schema: browserAliasSchema({}),
+export const BackblazeConfig = makeS3Alias({
+  schema: aliasSchema({}),
   endpointFor: derivedEndpoint('region', (region) => `https://s3.${region}.backblazeb2.com`),
 })
 

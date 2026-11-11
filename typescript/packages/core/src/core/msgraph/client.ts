@@ -47,16 +47,6 @@ export class GraphError extends ApiError {
   }
 }
 
-interface RequestOptions {
-  params?: Record<string, string | number | boolean>
-  json?: Record<string, unknown>
-  data?: Uint8Array
-  headers?: Record<string, string>
-  auth?: boolean
-  read?: 'json' | 'bytes' | 'none' | 'location'
-  window?: ByteWindow | undefined
-}
-
 async function tokenOf(config: ReturnType<typeof resolveMsGraphConfig>): Promise<string> {
   return typeof config.accessToken === 'function' ? await config.accessToken() : config.accessToken
 }
@@ -107,7 +97,15 @@ async function graphRequest(
   config: ReturnType<typeof resolveMsGraphConfig>,
   method: string,
   rawUrl: string,
-  options: RequestOptions = {},
+  options: {
+    params?: Record<string, string | number | boolean>
+    json?: Record<string, unknown>
+    data?: Uint8Array
+    headers?: Record<string, string>
+    auth?: boolean
+    read?: 'json' | 'bytes' | 'none' | 'location'
+    window?: ByteWindow | undefined
+  } = {},
 ): Promise<unknown> {
   const target = new URL(rawUrl)
   for (const [name, value] of Object.entries(options.params ?? {})) {

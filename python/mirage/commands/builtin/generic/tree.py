@@ -3,7 +3,6 @@ import logging
 import posixpath
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from functools import partial
 from typing import Literal
 
 from mirage.commands.builtin.generic.ls import sort_by_version
@@ -155,21 +154,6 @@ class TreeFlags:
     identity: Identity | None = None
 
 
-async def _cross_readdir(
-    readdir_path: ReaddirPath, path: PathSpec, limit: int | None = None
-) -> list[str]:
-    """List a directory that belongs to another mount, which indexes its
-    own listing inside the dispatched op; the listing is whole, whatever
-    the walk's ``limit``.
-
-    Args:
-        readdir_path (ReaddirPath): dispatcher-backed readdir.
-        path (PathSpec): the directory to list.
-        limit (int | None): the walk's limit, which a whole listing meets.
-    """
-    return await readdir_path(path.virtual)
-
-
 async def _not_crossed(path: PathSpec, limit: int | None = None) -> list[str]:
     """List a mount point ``-x`` keeps the walk out of: empty, the way
     GNU tree draws a directory on another filesystem.
@@ -179,33 +163,6 @@ async def _not_crossed(path: PathSpec, limit: int | None = None) -> list[str]:
         limit (int | None): the walk's limit, which an empty listing meets.
     """
     return []
-
-
-async def _cross_stat(
-    stat_path: StatPath, links: LinkView | None, path: PathSpec
-) -> FileStat:
-    """Stat an entry that belongs to another mount, a link as itself.
-
-    The dispatcher's stat follows a link, so a link is answered from the
-    namespace, as this mount's own stat answers it: drawn as
-    ``name -> target`` and gone through only under ``-l``. The namespace
-    keeps a link under the directory it stands in, so one reached
-    through a linked directory is looked up where that directory leads.
-
-    Args:
-        stat_path (StatPath): dispatcher-backed stat.
-        links (LinkView | None): the namespace's symlink facts.
-        path (PathSpec): the entry to stat.
-    """
-    if links is not None:
-        parent, name = posixpath.split(path.virtual)
-        own = links.stat_at(posixpath.join(links.resolve(parent), name))
-        if own is not None:
-            return own
-    stat = await stat_path(path)
-    if stat is None:
-        raise enoent(path.virtual)
-    return stat
 
 
 async def _mount_row(
@@ -1292,19 +1249,56 @@ async def _rendered(
         links (LinkView | None): the namespace's symlink facts.
         io (IOResult): the result the status and stderr settle into.
     """
-    cross_readdir: ReaddirFn | None = (
-        partial(_cross_readdir, readdir_path)
-        if readdir_path is not None
-        else None
-    )
+    cross_readdir: ReaddirFn | None = None
+    cross_stat: StatFn | None = None
+    if readdir_path is not None:
+
+        async def listed(
+            path: PathSpec, limit: int | None = None
+        ) -> list[str]:
+            """List a directory that belongs to another mount, which
+            indexes its own listing inside the dispatched op; the listing
+            is whole, whatever the walk's ``limit``.
+
+            Args:
+                path (PathSpec): the directory to list.
+                limit (int | None): the walk's limit, which a whole
+                    listing meets.
+            """
+            return await readdir_path(path.virtual)
+
+        cross_readdir = listed
     link_readdir = cross_readdir
     if cross_readdir is not None and flags.one_file_system:
         cross_readdir = _not_crossed
-    cross_stat = (
-        partial(_cross_stat, stat_path, links)
-        if stat_path is not None
-        else None
-    )
+    if stat_path is not None:
+
+        async def statted(path: PathSpec) -> FileStat:
+            """Stat an entry that belongs to another mount, a link as itself.
+
+            The dispatcher's stat follows a link, so a link is answered
+            from the namespace, as this mount's own stat answers it: drawn
+            as ``name -> target`` and gone through only under ``-l``. The
+            namespace keeps a link under the directory it stands in, so
+            one reached through a linked directory is looked up where
+            that directory leads.
+
+            Args:
+                path (PathSpec): the entry to stat.
+            """
+            if links is not None:
+                parent, name = posixpath.split(path.virtual)
+                own = links.stat_at(
+                    posixpath.join(links.resolve(parent), name)
+                )
+                if own is not None:
+                    return own
+            stat = await stat_path(path)
+            if stat is None:
+                raise enoent(path.virtual)
+            return stat
+
+        cross_stat = statted
     live = not (flags.json or flags.prune or flags.du)
     roots: list[_TreeNode] = []
     stopped: list[str] = []

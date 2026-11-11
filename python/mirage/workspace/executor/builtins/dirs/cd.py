@@ -26,10 +26,14 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.shell.voice import shell_voice
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.path import CycleError, dotted_spelling, resolve_path
+from mirage.utils.path import (
+    CycleError,
+    dotted_spelling,
+    posix_normpath,
+    resolve_path,
+)
 from mirage.workspace.executor.builtins.dirs.dirs import (
     join_raw,
-    norm,
     resolve_target,
     split_mode_options,
     typed_path,
@@ -196,7 +200,7 @@ async def handle_cd(
         # The logical name is the candidate with `..` simplified textually
         # and links left alone; the physical one follows them. `-P`
         # collapses the pair, which is why `cd -P .` re-spells the cwd.
-        spelled = norm(candidate)
+        spelled = posix_normpath(candidate)
         logical = spelled
         if follow is not None:
             try:

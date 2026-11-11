@@ -29,8 +29,6 @@ import { eventsNow, eventsSince, type BoxEvent, type BoxItem, type BoxSearchItem
 import { EVENT_REPLAY_DAYS, EVENT_STREAM, PLACE_EVENTS, TRASH_EVENTS } from './constants.ts'
 import { mountRelativeKey } from './resolve.ts'
 
-const DAY_MS = 24 * 60 * 60 * 1000
-
 type BoxSource = BoxItem & Pick<BoxSearchItem, 'path_collection'>
 
 /**
@@ -121,7 +119,7 @@ export class BoxDeltaHook implements DeltaHook {
       const position = await eventsNow(tm, EVENT_STREAM)
       return new Delta({ changes: [], checkpoint: encode(position, observed, {}) })
     }
-    if (observed.getTime() - state.read.getTime() > EVENT_REPLAY_DAYS * DAY_MS) {
+    if (observed.getTime() - state.read.getTime() > EVENT_REPLAY_DAYS * 86_400_000) {
       const fresh = await eventsNow(tm, EVENT_STREAM)
       return new Delta({
         changes: [lostAt(root, observed)],

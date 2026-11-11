@@ -65,12 +65,6 @@ export interface GlobOptions {
   extglob: boolean
 }
 
-/** Whether a mount command's glob must expand here rather than push
- * down: the backend knows none of these. */
-export function globNeedsShell(opts: GlobOptions): boolean {
-  return opts.nullglob || opts.failglob || opts.globstar || opts.extglob
-}
-
 export function globOptions(session: SessionState): GlobOptions {
   return {
     access: sessionAccess(session),

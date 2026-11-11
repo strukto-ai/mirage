@@ -31,7 +31,7 @@ import {
   type ConfigHost,
   type StoreBlock,
   type StoreGroupBlock,
-  type WorkspaceConfigRaw,
+  type WorkspaceConfig,
 } from '@struktoai/mirage-core/config'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { snakeToCamel } from '@struktoai/mirage-core/utils/normalize'
@@ -61,7 +61,7 @@ export {
   loadWorkspaceConfig,
   readProcessEnv,
   type MountBlock,
-  type WorkspaceConfigRaw,
+  type WorkspaceConfig,
 } from '@struktoai/mirage-core/config'
 
 /**
@@ -85,7 +85,7 @@ export function loadProfilePolicy(profile: SessionProfile): SessionProfile {
 
 /** The mounts and options a config names, built on Node. */
 export async function configToWorkspaceArgs(
-  cfg: WorkspaceConfigRaw,
+  cfg: WorkspaceConfig,
 ): ReturnType<typeof configToWorkspaceArgsFor> {
   return configToWorkspaceArgsFor(cfg, HOST)
 }
@@ -236,8 +236,8 @@ export function checkWorkspaceConfigFile(
 export function loadWorkspaceConfigFile(
   path: string,
   env?: Record<string, string>,
-): WorkspaceConfigRaw {
-  return normalizeConfigKeys(checkWorkspaceConfigFile(path, env)) as unknown as WorkspaceConfigRaw
+): WorkspaceConfig {
+  return normalizeConfigKeys(checkWorkspaceConfigFile(path, env)) as unknown as WorkspaceConfig
 }
 
 function buildStoreGroup(block: StoreGroupBlock): WorkspaceStateStore {
@@ -267,7 +267,7 @@ function buildStoreGroup(block: StoreGroupBlock): WorkspaceStateStore {
 }
 
 /** The store a config's `store:` block names; undefined when it names none. */
-export function configStateStore(cfg: WorkspaceConfigRaw): WorkspaceStateStore | undefined {
+export function configStateStore(cfg: WorkspaceConfig): WorkspaceStateStore | undefined {
   return buildStateStore(cfg.store)
 }
 

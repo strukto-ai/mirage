@@ -12,15 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { LinearAccessor } from '../../../../accessor/linear.ts'
+import type { LinearAccessor } from '../../../../accessor/linear.ts'
 import {
-  HttpLinearTransport,
   resolveIssueId,
   listTeams,
   listTeamLabels,
   listTeamProjects,
 } from '../../../../core/linear/client.ts'
-import type { LinearConfig } from '../../../../core/linear/config.ts'
 import { getIssue } from '../../../../core/linear/client.ts'
 import { materialize, type ByteSource } from '../../../../io/types.ts'
 import type { FlagView } from '../../../spec/flag_view.ts'
@@ -29,19 +27,6 @@ import { enoent } from '../../../../errors/fs.ts'
 
 const ISSUE_KEY_RE = /^[A-Za-z][A-Za-z0-9]*-\d+$/
 const DEC = new TextDecoder()
-
-// The install's accessor: one transport every leaf rides, and `team list`'s team filter.
-export function linearAccessor(config: unknown): LinearAccessor {
-  const cfg = config as LinearConfig
-  const transport = new HttpLinearTransport({
-    apiKey: cfg.apiKey,
-    ...(cfg.baseUrl !== undefined && cfg.baseUrl !== '' ? { baseUrl: cfg.baseUrl } : {}),
-    ...(cfg.timeout !== undefined ? { timeout: cfg.timeout } : {}),
-  })
-  return new LinearAccessor(transport, {
-    ...(cfg.teamIds !== undefined ? { teamIds: cfg.teamIds } : {}),
-  })
-}
 
 export async function resolveIssue(accessor: LinearAccessor, token: string): Promise<string> {
   if (ISSUE_KEY_RE.test(token)) return resolveIssueId(accessor.transport, null, token)

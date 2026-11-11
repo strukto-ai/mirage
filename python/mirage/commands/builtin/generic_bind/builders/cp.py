@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable
 from functools import partial
 
 from mirage.accessor.base import Accessor
@@ -21,10 +20,7 @@ from mirage.commands.builtin.generic.cp import facts, parse_flags
 from mirage.commands.builtin.generic.crossmount.utils import transfer_links_of
 from mirage.commands.builtin.generic.find import parse_find_args
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
-from mirage.commands.builtin.generic_bind.files import (
-    CommandFiles,
-    command_files,
-)
+from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.utils.links import (
     dispatch_of,
     links_of,
@@ -41,52 +37,8 @@ from mirage.context import session_umask
 from mirage.core.generic.find import walk_find
 from mirage.errors.fs import enotsup
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import (
-    NativeCopy,
-    PathSpec,
-    PrimitiveCopy,
-    ReaddirFn,
-    StatFn,
-)
+from mirage.types import NativeCopy, PathSpec, PrimitiveCopy
 from mirage.view.namespace_view import paths_scoped
-
-
-async def _walk_find(
-    readdir: ReaddirFn,
-    stat: StatFn,
-    src: PathSpec,
-    type: str | None = None,
-    unreadable: list[str] | None = None,
-) -> list[str]:
-    refused: list[str] | None = None if unreadable is None else []
-    rows = walk_find(
-        src,
-        readdir=readdir,
-        stat=stat,
-        args=parse_find_args((), type=type),
-        unreadable=refused,
-    )
-    results = sorted([row async for row in rows])
-    if unreadable is not None and refused is not None:
-        unreadable.extend("/" + path.strip("/") for path in refused)
-    return ["/" + path.strip("/") for path in results]
-
-
-def _make_find(files: CommandFiles) -> Callable[..., Awaitable[list[str]]]:
-    """The tree to copy, walked from the mount's ``read_tree`` where it
-    answers, so stat classifies entries from the listing instead of
-    re-fetching, matching find.
-
-    Args:
-        files (CommandFiles): the command's files.
-    """
-    readdir, stat = tree_walk(
-        files.read_tree,
-        files.readdir,
-        files.stat,
-        files.answers("read_tree"),
-    )
-    return partial(_walk_find, readdir, stat)
 
 
 async def cp(
@@ -123,6 +75,31 @@ async def cp(
         else None
     )
     resolved = await files.resolve_glob(paths)
+    # The tree to copy, walked from the mount's read_tree where it
+    # answers, so stat classifies entries from the listing instead of
+    # re-fetching, matching find.
+    walk_readdir, walk_stat = tree_walk(
+        files.read_tree, files.readdir, files.stat, files.answers("read_tree")
+    )
+
+    async def find(
+        src: PathSpec,
+        type: str | None = None,
+        unreadable: list[str] | None = None,
+    ) -> list[str]:
+        refused: list[str] | None = None if unreadable is None else []
+        rows = walk_find(
+            src,
+            readdir=walk_readdir,
+            stat=walk_stat,
+            args=parse_find_args((), type=type),
+            unreadable=refused,
+        )
+        results = sorted([row async for row in rows])
+        if unreadable is not None and refused is not None:
+            unreadable.extend("/" + path.strip("/") for path in refused)
+        return ["/" + path.strip("/") for path in results]
+
     strategy: NativeCopy | PrimitiveCopy
     if copy is None and write is not None:
         # A native copy moves a tree in one backend call and read_tree
@@ -142,7 +119,7 @@ async def cp(
     else:
         strategy = NativeCopy(
             copy=files.copy,
-            find=_make_find(files),
+            find=find,
             dir_copy=(
                 files.dir_copy
                 if native and files.answers("dir_copy")

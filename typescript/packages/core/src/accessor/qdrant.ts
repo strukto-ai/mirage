@@ -19,15 +19,6 @@ import type { resolveQdrantConfig } from '../vfs/qdrant/config.ts'
 import { Accessor } from './base.ts'
 import { ResponseCache } from './responses.ts'
 
-type QdrantClientCtor = new (opts: {
-  url?: string
-  host?: string
-  port?: number
-  https?: boolean
-  apiKey?: string
-  timeout?: number
-}) => QdrantClient
-
 export class QdrantAccessor extends Accessor {
   readonly config: ReturnType<typeof resolveQdrantConfig>
   readonly indexesEnsured = new Set<string>()
@@ -46,9 +37,9 @@ export class QdrantAccessor extends Accessor {
   /** The mount's client, opened on first use. */
   async client(): Promise<QdrantClient> {
     if (this.opened === null) {
-      const mod = (await import(/* @vite-ignore */ '@qdrant/js-client-rest').catch(
+      const mod = await import(/* @vite-ignore */ '@qdrant/js-client-rest').catch(
         missingPeer({ feature: 'QdrantVFS', packageName: '@qdrant/js-client-rest' }),
-      )) as { QdrantClient: QdrantClientCtor }
+      )
       const common = {
         timeout: this.config.timeout * 1000,
         ...(this.config.apiKey !== null ? { apiKey: this.config.apiKey } : {}),

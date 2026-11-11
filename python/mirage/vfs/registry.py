@@ -21,7 +21,7 @@ from typing import Any, NamedTuple, cast
 from pydantic import ValidationError
 
 from mirage.secrets.summary import error_summary
-from mirage.utils.loader import load_backend_class
+from mirage.utils.loader import load_attr
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.errors import VFSConfigError
 
@@ -252,12 +252,12 @@ def known_vfs_names() -> list[str]:
 
 def resolve_class(ref: str | type) -> type:
     """Resolve a registry class reference: a class passes through, a
-    loader spec string loads via :func:`load_backend_class`.
+    loader spec string loads via :func:`load_attr`.
 
     Args:
         ref (str | type): class object or ``"source:ClassName"`` spec.
     """
-    return ref if isinstance(ref, type) else load_backend_class(ref)
+    return ref if isinstance(ref, type) else load_attr(ref)
 
 
 def resolve_entry(name: str) -> VFSEntry | None:

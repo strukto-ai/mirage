@@ -109,8 +109,8 @@ from mirage.io.stream import OutputStream, close_quietly, rechunk
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.observe.context import (
     RecordingScope,
-    active_recorder,
     command_records,
+    recording_active,
     with_mount_context,
 )
 from mirage.observe.record import OpRecord
@@ -492,7 +492,7 @@ async def _recorded(
     """
     held = current_caller().command_sink
     outer = held[1] if held is not None and held[1] is not held[0] else None
-    scope = RecordingScope(active=active_recorder() is None, clock=clock)
+    scope = RecordingScope(active=not recording_active(), clock=clock)
     try:
         with command_records() as records:
             try:

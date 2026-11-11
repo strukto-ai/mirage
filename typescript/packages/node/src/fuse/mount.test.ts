@@ -19,7 +19,6 @@ import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  appendDirectIO,
   appendMountOptions,
   canonicalMountpoint,
   driverHint,
@@ -58,34 +57,20 @@ function fakeFuse(serialize?: () => string) {
   }
 }
 
-describe('appendDirectIO', () => {
+describe('appendMountOptions', () => {
   it('appends direct_io to a non-empty option string', () => {
     const fuse = fakeFuse(() => '-oforce,attr_timeout=0')
-    appendDirectIO(fuse)
+    appendMountOptions(fuse, ['direct_io'])
     expect(fuse._fuseOptions?.()).toBe('-oforce,attr_timeout=0,direct_io')
-  })
-
-  it('emits -odirect_io when no other option serializes', () => {
-    const fuse = fakeFuse(() => '')
-    appendDirectIO(fuse)
-    expect(fuse._fuseOptions?.()).toBe('-odirect_io')
-  })
-
-  it('does not double-append when direct_io is already present', () => {
-    const fuse = fakeFuse(() => '-odirect_io,attr_timeout=0')
-    appendDirectIO(fuse)
-    expect(fuse._fuseOptions?.()).toBe('-odirect_io,attr_timeout=0')
   })
 
   it('throws when the serializer hook is gone (fork version drift)', () => {
     const fuse = fakeFuse()
     expect(() => {
-      appendDirectIO(fuse)
+      appendMountOptions(fuse, ['direct_io'])
     }).toThrow('_fuseOptions')
   })
-})
 
-describe('appendMountOptions', () => {
   it('appends the fskit recipe: backend=fskit + volname, no direct_io', () => {
     // Issue #82's verified mount options, exactly what mount() appends for
     // an fskit mount. Verified live; see examples/typescript/fuse/fskit.ts.

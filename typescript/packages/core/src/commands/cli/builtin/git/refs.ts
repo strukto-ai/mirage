@@ -167,27 +167,6 @@ export async function detachHead(vfs: Files, gitdir: PathSpec, sha: string): Pro
 }
 
 /**
- * Read `packed-refs`, discarding the peeled lines.
- *
- * `packed-refs` records an annotated tag twice: the tag object's own id, then a
- * `^` line holding the commit it points at. The peeled id is a lookup shortcut,
- * not a separate ref, so it is read and discarded; resolving a tag loads the tag
- * object and follows it. A reader that treats a peeled line as a ref would
- * publish a second entry under the same name.
- */
-function parsePackedRefs(data: Uint8Array): Map<string, string> {
-  const refs = new Map<string, string>()
-  for (const line of DEC.decode(data).split('\n')) {
-    const text = line.trim()
-    if (text === '' || text.startsWith('#') || text.startsWith('^')) continue
-    const space = text.indexOf(' ')
-    if (space === -1) continue
-    refs.set(text.slice(space + 1).trim(), text.slice(0, space))
-  }
-  return refs
-}
-
-/**
  * Read every ref a repository publishes, packed and loose.
  *
  * Both sources are needed and neither is optional: a freshly cloned repository
@@ -213,8 +192,15 @@ export async function loadRefs(
   const shared = commondir ?? gitdir
   const refs = new Map<string, string>()
   const packed = await readOptional(vfs, shared.join(PACKED_REFS))
-  if (packed !== null) {
-    for (const [name, sha] of parsePackedRefs(packed)) refs.set(name, sha)
+  // `packed-refs` records an annotated tag twice: the tag object's own id,
+  // then a `^` line holding the commit it points at. The peeled id is a lookup
+  // shortcut, not a separate ref, so it is read and discarded; resolving a tag
+  // loads the tag object and follows it.
+  for (const line of packed === null ? [] : DEC.decode(packed).split('\n')) {
+    const text = line.trim()
+    if (text === '' || text.startsWith('#') || text.startsWith('^')) continue
+    const space = text.indexOf(' ')
+    if (space !== -1) refs.set(text.slice(space + 1).trim(), text.slice(0, space))
   }
   await walkLooseRefs(vfs, shared.join(REFS_DIR), REFS_DIR, refs)
   if (gitdir.virtual !== shared.virtual) {

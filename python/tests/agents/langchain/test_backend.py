@@ -37,7 +37,7 @@ from mirage.commands.cli.builtin.git import GIT
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import CommandSpec
 from mirage.concurrency.limiter import run_blocking
-from mirage.context import reset_current_session, set_current_session
+from mirage.context import set_current_session, reset_caller
 from mirage.fuse.fs import MirageFS
 from mirage.io import IOResult
 
@@ -72,7 +72,7 @@ async def main():
                 text = result.output if kind == "langchain" else result
                 assert text.strip() == "nested", text
             finally:
-                reset_current_session(token)
+                reset_caller(token)
         else:
             worker = asyncio.create_task(asyncio.to_thread(sync, "echo hi"))
             while not lock._waiters:

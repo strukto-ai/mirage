@@ -23,10 +23,6 @@ export class MontyUnavailableError extends Error {
   }
 }
 
-export interface MontyDisplayableError extends Error {
-  display?: (format?: string) => string
-}
-
 /**
  * The error as guest CPython raises it for one condition: the builtin
  * exception a guest should be able to `except`, with CPython-on-Linux
@@ -61,7 +57,7 @@ export function cpythonError(condition: FsCondition): CPythonError {
 
 /** The traceback monty renders for one of its own errors. */
 export function displayError(err: unknown): string {
-  const e = err as MontyDisplayableError
+  const e = err as { display?: (format?: string) => string }
   if (typeof e.display === 'function') return e.display('traceback')
   return e instanceof Error ? e.message : String(err)
 }

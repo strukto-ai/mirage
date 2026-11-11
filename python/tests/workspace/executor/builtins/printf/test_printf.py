@@ -1,7 +1,7 @@
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
-from mirage.context import reset_program_invocation, set_program_invocation
+from mirage.context import reset_caller, set_program_invocation
 from mirage.io.stream import materialize
 from mirage.shell.array import ShellArray, make_array
 from mirage.shell.variable import VarAttr
@@ -262,7 +262,7 @@ async def program_printf(args: list[str]) -> tuple[bytes | None, bytes, int]:
     try:
         out, io, node = await printed(args, session)
     finally:
-        reset_program_invocation(token)
+        reset_caller(token)
     assert io.exit_code == node.exit_code
     return (
         out if isinstance(out, bytes) else None,

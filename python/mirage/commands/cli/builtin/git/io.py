@@ -237,16 +237,6 @@ async def read_range(
     return data if isinstance(data, bytes) else bytes(data)
 
 
-async def file_size(vfs: Files, path: PathSpec) -> int | None:
-    """A path's byte length, or None when the backend does not know it.
-
-    Args:
-        vfs (Files): the session's files.
-        path (PathSpec): absolute virtual path.
-    """
-    return (await vfs.stat(path)).size
-
-
 async def read_optional(vfs: Files, path: PathSpec) -> bytes | None:
     """Read a path that a repository may legitimately not have.
 
