@@ -61,7 +61,7 @@ function historyRoot(root: string, url: string, keyPrefix: string): string {
  * config alone gets identical overlays, sessions, and grants, and sees
  * the jobs every other one runs. History only grows, so it stays out of
  * Redis: on this machine's disk, in a folder of this store's own under
- * `root`, unless `observer` names another store.
+ * `root`, unless `logs` names another store.
  * Mirrors the Python RedisWorkspaceStateStore.
  */
 export class RedisWorkspaceStateStore extends WorkspaceStateStore {

@@ -65,9 +65,9 @@ class SqlWorkspaceStateStore(WorkspaceStateStore):
             a passed driver is borrowed by default.
         namespace (WorkspaceStateStore | None): serves the namespace
             plane instead.
-        observer (WorkspaceStateStore | None): serves the observer plane
+        logs (WorkspaceStateStore | None): serves the command logs
             instead.
-        workspace (WorkspaceStateStore | None): serves the metadata and
+        sessions (WorkspaceStateStore | None): serves the metadata and
             sessions instead.
         execution (WorkspaceStateStore | None): serves the execution
             plane instead.
