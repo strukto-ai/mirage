@@ -558,7 +558,7 @@ async def test_a_folder_of_the_database_is_made_and_the_whole_shows_it():
 
 
 @pytest.mark.asyncio
-async def test_a_folder_a_file_stands_at_or_gone_since_is_refused():
+async def test_a_gone_folder_is_made_again_and_a_file_at_it_refused():
     driver = SqliteDriver()
     whole_db = SqlVFS(driver=driver)
     await whole_db.write(at("/f"), b"x")
@@ -567,34 +567,57 @@ async def test_a_folder_a_file_stands_at_or_gone_since_is_refused():
     folder = SqlVFS(driver=driver, root="/d")
     await folder.write(at("/a"), b"x")
     await whole_db.rm_r(at("/d"))
-    with pytest.raises(FileNotFoundError):
-        await folder.write(at("/b"), b"x")
-    with pytest.raises(FileNotFoundError):
-        await folder.readdir(at("/"))
-    # A snapshot reports the folder gone and leaves it gone.
-    with pytest.raises(FileNotFoundError):
-        folder.get_state()
-    assert await names(whole_db) == ["f"]
+    assert await names(folder) == []
+    assert folder.get_state()["files"] == {}
+    await folder.write(at("/b"), b"y")
+    assert await whole(whole_db, "/d/b") == b"y"
     driver.close()
 
 
 @pytest.mark.asyncio
-async def test_a_file_standing_at_the_folder_since_is_no_directory():
+async def test_a_file_at_the_folder_is_no_directory_nor_written_beside():
     driver = SqliteDriver()
     whole_db = SqlVFS(driver=driver)
     folder = SqlVFS(driver=driver, root="/d")
     await folder.write(at("/a"), b"x")
     await whole_db.rm_r(at("/d"))
     await whole_db.write(at("/d"), b"file")
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(NotADirectoryError):
         await folder.stat(at("/"))
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(NotADirectoryError):
+        await folder.mkdir(at("/"))
+    with pytest.raises(NotADirectoryError):
         await folder.mkdir(at("/x/y"), parents=True)
+    with pytest.raises(NotADirectoryError):
+        await folder.write(at("/"), b"z")
+    assert driver.query("SELECT name FROM fs_dentry WHERE name = ''") == []
     under = driver.query(
         "SELECT name FROM fs_dentry WHERE parent_ino ="
         " (SELECT ino FROM fs_dentry WHERE parent_ino = 1 AND name = 'd')"
     )
     assert under == []
+    driver.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first", ["whole", "folder"])
+async def test_both_snapshots_restore_in_either_order(first: str):
+    driver = SqliteDriver()
+    whole_db = SqlVFS(driver=driver)
+    folder = SqlVFS(driver=driver, root="/w")
+    await whole_db.write(at("/keep"), b"k")
+    # The whole database's snapshot comes first, before the folder's
+    # first op made the folder.
+    whole_state = whole_db.get_state()
+    own = folder.get_state()
+    await folder.write(at("/later"), b"l")
+    if first == "folder":
+        folder.load_state(own)
+    whole_db.load_state(whole_state)
+    if first == "whole":
+        folder.load_state(own)
+    assert await names(folder) == []
+    assert await whole(whole_db, "/keep") == b"k"
     driver.close()
 
 

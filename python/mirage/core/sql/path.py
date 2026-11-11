@@ -16,6 +16,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from mirage.accessor.sql import SqlAccessor
+from mirage.concurrency.limiter import run_blocking
 from mirage.core.sql.constants import (
     INODE_COLUMNS,
     MAX_COLUMNS,
@@ -97,20 +98,37 @@ async def walk(accessor: SqlAccessor, path: PathSpec | str) -> Walk:
     p = norm(path if isinstance(path, str) else path.mount_path)
     names = names_of(p)
     every = (*accessor.root_names, *names)
-    chain = await _walk_from(accessor, ROOT_INO, every[:_NAMES_PER_QUERY])
-    for at in range(_NAMES_PER_QUERY, len(every), _NAMES_PER_QUERY):
-        part = every[at : at + _NAMES_PER_QUERY]
+    skip = len(accessor.root_names)
+    start = (await _walk_all(accessor, every))[skip:]
+    # The mount's folder always stands: one gone since is made again, as
+    # the first op made it, and a file standing at it is ENOTDIR.
+    if not _standing(start):
+        await run_blocking(accessor.root_ino)
+        start = (await _walk_all(accessor, every))[skip:]
+    # Gone again since it was made: every name misses.
+    if not _standing(start):
+        return Walk(p, names, tuple(None for _ in start))
+    return Walk(p, names, tuple(start))
+
+
+def _standing(chain: list[Inode | None]) -> bool:
+    # Whether the walk found the mount's folder a directory.
+    return chain[0] is not None and is_dir(chain[0])
+
+
+async def _walk_all(
+    accessor: SqlAccessor, names: Sequence[str]
+) -> list[Inode | None]:
+    # The inode each of ``names`` reaches from the database's root.
+    chain = await _walk_from(accessor, ROOT_INO, names[:_NAMES_PER_QUERY])
+    for at in range(_NAMES_PER_QUERY, len(names), _NAMES_PER_QUERY):
+        part = names[at : at + _NAMES_PER_QUERY]
         last = chain[-1]
         if last is None:
             chain += [None] * len(part)
         else:
             chain += (await _walk_from(accessor, last.ino, part))[1:]
-    start = chain[len(accessor.root_names) :]
-    # A folder a file stands at since reads as gone, so no op takes the
-    # file for a directory.
-    if start[0] is not None and not is_dir(start[0]):
-        return Walk(p, names, tuple(None for _ in start))
-    return Walk(p, names, tuple(start))
+    return chain
 
 
 def target(w: Walk) -> Inode | None:
@@ -139,8 +157,11 @@ def _broken_parent(w: Walk, spec: PathSpec) -> OSError | None:
     # The first error resolving the path's parents meets: a name the
     # tree does not hold is ENOENT, a plain file where a directory has
     # to be ENOTDIR, at any depth, as open(2) and rename(2) resolve a
-    # path. The mount's folder gone is ENOENT too.
-    for i in range(len(w.names)):
+    # path. The mount's folder gone is ENOENT whatever the path, ``/``
+    # included, so no entry lands outside it.
+    if w.chain[0] is None:
+        return enoent(spec)
+    for i in range(1, len(w.names)):
         node = w.chain[i]
         if node is None:
             return enoent(spec)
