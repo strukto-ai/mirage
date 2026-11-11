@@ -2475,15 +2475,31 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: What the call returns. With `explain=true`, its explanation; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: string
+                    title: Result
                     description: The bytes, base64.
                   - $ref: '#/components/schemas/VfsExplanation'
-              example: aGVsbG8K
+              examples:
+                result:
+                  summary: '200'
+                  value: aGVsbG8K
+                explain:
+                  summary: Explain
+                  value:
+                    call: read
+                    paths:
+                      - /hello.txt
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
             application/octet-stream:
               schema:
                 type: string
@@ -2496,6 +2512,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -2517,17 +2535,23 @@ paths:
                   type: string
                 offset:
                   type: integer
+                  description: Byte offset to start reading at. Defaults to `0`.
                 size:
                   type:
                     - integer
                     - 'null'
+                  description: Number of bytes to read. `null` or omitted reads to the end.
                 raw:
                   type: boolean
+                  description: Read the stored bytes, skipping any rendering the mount registers for
+                    the file type. Use it to read a file you will write back.
                 stream:
                   type: boolean
-                  description: Answer the bytes themselves as application/octet-stream.
+                  description: Answer the bytes themselves as
+                    application/octet-stream. Ignored with `explain=true`.
               required:
                 - path
+              additionalProperties: false
             example:
               path: /hello.txt
       description: Read file bytes, optionally starting at an offset. Set `stream=true` to receive raw
@@ -2551,13 +2575,31 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: On success the body is `null`. With `explain=true`, its explanation; nothing
+            runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: 'null'
+                    title: Result
                   - $ref: '#/components/schemas/VfsExplanation'
+              examples:
+                result:
+                  summary: '200'
+                  value: null
+                explain:
+                  summary: Explain
+                  value:
+                    call: write
+                    paths:
+                      - /hello.txt
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -2566,6 +2608,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -2592,6 +2636,7 @@ paths:
               required:
                 - path
                 - data
+              additionalProperties: false
             example:
               path: /hello.txt
               data: aGVsbG8K
@@ -2615,13 +2660,31 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: On success the body is `null`. With `explain=true`, its explanation; nothing
+            runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: 'null'
+                    title: Result
                   - $ref: '#/components/schemas/VfsExplanation'
+              examples:
+                result:
+                  summary: '200'
+                  value: null
+                explain:
+                  summary: Explain
+                  value:
+                    call: append
+                    paths:
+                      - /hello.txt
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -2630,6 +2693,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -2656,6 +2721,7 @@ paths:
               required:
                 - path
                 - data
+              additionalProperties: false
             example:
               path: /hello.txt
               data: aGVsbG8K
@@ -2679,13 +2745,31 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: On success the body is `null`. With `explain=true`, its explanation; nothing
+            runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: 'null'
+                    title: Result
                   - $ref: '#/components/schemas/VfsExplanation'
+              examples:
+                result:
+                  summary: '200'
+                  value: null
+                explain:
+                  summary: Explain
+                  value:
+                    call: pwrite
+                    paths:
+                      - /hello.txt
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -2694,6 +2778,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -2719,10 +2805,12 @@ paths:
                   description: The bytes, base64-encoded.
                 offset:
                   type: integer
+                  description: Byte offset to start reading at. Defaults to `0`.
               required:
                 - path
                 - data
                 - offset
+              additionalProperties: false
             example:
               path: /hello.txt
               data: aGVsbG8K
@@ -2747,14 +2835,43 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: What the call returns. With `explain=true`, its explanation; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
-                  - type: object
-                    description: A FileStat.
+                  - $ref: '#/components/schemas/FileStat'
                   - $ref: '#/components/schemas/VfsExplanation'
+              examples:
+                result:
+                  summary: '200'
+                  value:
+                    name: hello.txt
+                    size: 6
+                    modified: '2026-11-11T06:10:55.182632Z'
+                    fingerprint: null
+                    revision: null
+                    type: file
+                    content: text
+                    mode: null
+                    uid: null
+                    gid: null
+                    atime: null
+                    ctime: null
+                    birthtime: null
+                    dev: 192842459547137
+                explain:
+                  summary: Explain
+                  value:
+                    call: stat
+                    paths:
+                      - /hello.txt
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -2763,6 +2880,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -2784,8 +2903,10 @@ paths:
                   type: string
                 nofollow:
                   type: boolean
+                  description: Act on a symbolic link itself rather than its target.
               required:
                 - path
+              additionalProperties: false
             example:
               path: /hello.txt
       description: Get metadata for a file or directory.
@@ -2808,16 +2929,35 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: What the call returns. With `explain=true`, its explanation; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: array
+                    title: Result
                     items:
                       type: string
                     description: Full paths.
                   - $ref: '#/components/schemas/VfsExplanation'
+              examples:
+                result:
+                  summary: '200'
+                  value:
+                    - /hello.txt
+                    - /notes
+                explain:
+                  summary: Explain
+                  value:
+                    call: readdir
+                    paths:
+                      - /
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -2826,6 +2966,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -2847,6 +2989,7 @@ paths:
                   type: string
               required:
                 - path
+              additionalProperties: false
             example:
               path: /
       description: List entries in a directory.
@@ -2869,13 +3012,30 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: What the call returns. With `explain=true`, its explanation; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: boolean
+                    title: Result
                   - $ref: '#/components/schemas/VfsExplanation'
+              examples:
+                result:
+                  summary: '200'
+                  value: true
+                explain:
+                  summary: Explain
+                  value:
+                    call: exists
+                    paths:
+                      - /hello.txt
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -2884,6 +3044,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -2905,6 +3067,7 @@ paths:
                   type: string
               required:
                 - path
+              additionalProperties: false
             example:
               path: /hello.txt
       description: Check whether a file or directory exists at the path.
@@ -2927,13 +3090,30 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: What the call returns. With `explain=true`, its explanation; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: boolean
+                    title: Result
                   - $ref: '#/components/schemas/VfsExplanation'
+              examples:
+                result:
+                  summary: '200'
+                  value: true
+                explain:
+                  summary: Explain
+                  value:
+                    call: is_dir
+                    paths:
+                      - /
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -2942,6 +3122,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -2963,6 +3145,7 @@ paths:
                   type: string
               required:
                 - path
+              additionalProperties: false
             example:
               path: /
       description: Check whether the path identifies a directory.
@@ -2985,13 +3168,30 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: What the call returns. With `explain=true`, its explanation; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: boolean
+                    title: Result
                   - $ref: '#/components/schemas/VfsExplanation'
+              examples:
+                result:
+                  summary: '200'
+                  value: true
+                explain:
+                  summary: Explain
+                  value:
+                    call: is_file
+                    paths:
+                      - /hello.txt
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3000,6 +3200,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -3021,6 +3223,7 @@ paths:
                   type: string
               required:
                 - path
+              additionalProperties: false
             example:
               path: /hello.txt
       description: Check whether the path identifies a file.
@@ -3043,16 +3246,34 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: What the call returns. With `explain=true`, its explanation; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: array
+                    title: Result
                     items:
                       type: string
                     description: File names only.
                   - $ref: '#/components/schemas/VfsExplanation'
+              examples:
+                result:
+                  summary: '200'
+                  value:
+                    - hello.txt
+                explain:
+                  summary: Explain
+                  value:
+                    call: list_files
+                    paths:
+                      - /
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3061,6 +3282,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -3082,6 +3305,7 @@ paths:
                   type: string
               required:
                 - path
+              additionalProperties: false
             example:
               path: /
       description: List file names in a directory.
@@ -3104,13 +3328,31 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: On success the body is `null`. With `explain=true`, its explanation; nothing
+            runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: 'null'
+                    title: Result
                   - $ref: '#/components/schemas/VfsExplanation'
+              examples:
+                result:
+                  summary: '200'
+                  value: null
+                explain:
+                  summary: Explain
+                  value:
+                    call: mkdir
+                    paths:
+                      - /notes
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3119,6 +3361,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -3140,6 +3384,7 @@ paths:
                   type: string
               required:
                 - path
+              additionalProperties: false
             example:
               path: /notes
       description: Create a directory at the path.
@@ -3162,13 +3407,31 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: On success the body is `null`. With `explain=true`, its explanation; nothing
+            runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: 'null'
+                    title: Result
                   - $ref: '#/components/schemas/VfsExplanation'
+              examples:
+                result:
+                  summary: '200'
+                  value: null
+                explain:
+                  summary: Explain
+                  value:
+                    call: rmdir
+                    paths:
+                      - /notes
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3177,6 +3440,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -3198,6 +3463,7 @@ paths:
                   type: string
               required:
                 - path
+              additionalProperties: false
             example:
               path: /notes
       description: Delete an empty directory.
@@ -3220,13 +3486,31 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: On success the body is `null`. With `explain=true`, its explanation; nothing
+            runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: 'null'
+                    title: Result
                   - $ref: '#/components/schemas/VfsExplanation'
+              examples:
+                result:
+                  summary: '200'
+                  value: null
+                explain:
+                  summary: Explain
+                  value:
+                    call: unlink
+                    paths:
+                      - /hello.txt
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3235,6 +3519,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -3256,6 +3542,7 @@ paths:
                   type: string
               required:
                 - path
+              additionalProperties: false
             example:
               path: /hello.txt
       description: Delete a file at the path.
@@ -3278,13 +3565,31 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: On success the body is `null`. With `explain=true`, its explanation; nothing
+            runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: 'null'
+                    title: Result
                   - $ref: '#/components/schemas/VfsExplanation'
+              examples:
+                result:
+                  summary: '200'
+                  value: null
+                explain:
+                  summary: Explain
+                  value:
+                    call: create
+                    paths:
+                      - /hello.txt
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3293,6 +3598,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -3314,6 +3621,7 @@ paths:
                   type: string
               required:
                 - path
+              additionalProperties: false
             example:
               path: /hello.txt
       description: Create an empty file at the path.
@@ -3336,13 +3644,32 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: On success the body is `null`. With `explain=true`, its explanation; nothing
+            runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: 'null'
+                    title: Result
                   - $ref: '#/components/schemas/VfsExplanation'
+              examples:
+                result:
+                  summary: '200'
+                  value: null
+                explain:
+                  summary: Explain
+                  value:
+                    call: rename
+                    paths:
+                      - /hello.txt
+                      - /goodbye.txt
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3351,6 +3678,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -3370,11 +3699,14 @@ paths:
               properties:
                 src:
                   type: string
+                  description: Path to rename.
                 dst:
                   type: string
+                  description: New path, on the same mount.
               required:
                 - src
                 - dst
+              additionalProperties: false
             example:
               src: /hello.txt
               dst: /goodbye.txt
@@ -3398,13 +3730,31 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: On success the body is `null`. With `explain=true`, its explanation; nothing
+            runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: 'null'
+                    title: Result
                   - $ref: '#/components/schemas/VfsExplanation'
+              examples:
+                result:
+                  summary: '200'
+                  value: null
+                explain:
+                  summary: Explain
+                  value:
+                    call: symlink
+                    paths:
+                      - /hello-link.txt
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3413,6 +3763,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -3434,9 +3786,11 @@ paths:
                   type: string
                 target:
                   type: string
+                  description: Path the link points to, stored as given.
               required:
                 - path
                 - target
+              additionalProperties: false
             example:
               path: /hello-link.txt
               target: /hello.txt
@@ -3460,14 +3814,31 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: What the call returns. With `explain=true`, its explanation; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: string
+                    title: Result
                     description: The link's target.
                   - $ref: '#/components/schemas/VfsExplanation'
+              examples:
+                result:
+                  summary: '200'
+                  value: /hello.txt
+                explain:
+                  summary: Explain
+                  value:
+                    call: readlink
+                    paths:
+                      - /hello-link.txt
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3476,6 +3847,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -3497,6 +3870,7 @@ paths:
                   type: string
               required:
                 - path
+              additionalProperties: false
             example:
               path: /hello-link.txt
       description: Read the target path of a symbolic link.
@@ -3519,14 +3893,35 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: What the call returns. With `explain=true`, its explanation; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: object
+                    title: Result
                     description: The fields the backend could not keep, which Mirage stores instead.
+                    additionalProperties:
+                      type:
+                        - integer
+                        - string
                   - $ref: '#/components/schemas/VfsExplanation'
+              examples:
+                result:
+                  summary: '200'
+                  value: {}
+                explain:
+                  summary: Explain
+                  value:
+                    call: setattr
+                    paths:
+                      - /hello.txt
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3535,6 +3930,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -3556,20 +3953,27 @@ paths:
                   type: string
                 mode:
                   type: integer
+                  description: Permission bits, as a decimal integer (`420` is `0644`).
                 uid:
                   type: &id001
                     - integer
                     - string
+                  description: Owner, as a number or a name.
                 gid:
                   type: *id001
+                  description: Group, as a number or a name.
                 atime:
                   type: string
+                  description: Access time, ISO 8601, such as `2026-11-11T10:00:00Z`.
                 mtime:
                   type: string
+                  description: Modification time, ISO 8601, such as `2026-11-11T10:00:00Z`.
                 nofollow:
                   type: boolean
+                  description: Act on a symbolic link itself rather than its target.
               required:
                 - path
+              additionalProperties: false
             example:
               path: /hello.txt
               mode: 420
@@ -3593,14 +3997,31 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: What the call returns. With `explain=true`, its explanation; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: string
+                    title: Result
                     description: The bytes, base64.
                   - $ref: '#/components/schemas/VfsExplanation'
+              examples:
+                result:
+                  summary: '200'
+                  value: aGVsbG8K
+                explain:
+                  summary: Explain
+                  value:
+                    call: getxattr
+                    paths:
+                      - /hello.txt
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3609,6 +4030,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -3630,11 +4053,14 @@ paths:
                   type: string
                 name:
                   type: string
+                  description: Attribute name, such as `user.note`.
                 nofollow:
                   type: boolean
+                  description: Act on a symbolic link itself rather than its target.
               required:
                 - path
                 - name
+              additionalProperties: false
             example:
               path: /hello.txt
               name: user.note
@@ -3658,15 +4084,33 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: What the call returns. With `explain=true`, its explanation; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: array
+                    title: Result
                     items:
                       type: string
                   - $ref: '#/components/schemas/VfsExplanation'
+              examples:
+                result:
+                  summary: '200'
+                  value:
+                    - user.note
+                explain:
+                  summary: Explain
+                  value:
+                    call: listxattr
+                    paths:
+                      - /hello.txt
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3675,6 +4119,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -3696,8 +4142,10 @@ paths:
                   type: string
                 nofollow:
                   type: boolean
+                  description: Act on a symbolic link itself rather than its target.
               required:
                 - path
+              additionalProperties: false
             example:
               path: /hello.txt
       description: List extended attribute names for a path.
@@ -3720,13 +4168,31 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: On success the body is `null`. With `explain=true`, its explanation; nothing
+            runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: 'null'
+                    title: Result
                   - $ref: '#/components/schemas/VfsExplanation'
+              examples:
+                result:
+                  summary: '200'
+                  value: null
+                explain:
+                  summary: Explain
+                  value:
+                    call: setxattr
+                    paths:
+                      - /hello.txt
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3735,6 +4201,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -3756,20 +4224,25 @@ paths:
                   type: string
                 name:
                   type: string
+                  description: Attribute name, such as `user.note`.
                 value:
                   type: string
                   contentEncoding: base64
                   description: The bytes, base64-encoded.
                 create:
                   type: boolean
+                  description: Fail with `409` if the attribute already exists.
                 replace:
                   type: boolean
+                  description: Fail with `404` if the attribute does not exist.
                 nofollow:
                   type: boolean
+                  description: Act on a symbolic link itself rather than its target.
               required:
                 - path
                 - name
                 - value
+              additionalProperties: false
             example:
               path: /hello.txt
               name: user.note
@@ -3794,13 +4267,31 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: On success the body is `null`. With `explain=true`, its explanation; nothing
+            runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: 'null'
+                    title: Result
                   - $ref: '#/components/schemas/VfsExplanation'
+              examples:
+                result:
+                  summary: '200'
+                  value: null
+                explain:
+                  summary: Explain
+                  value:
+                    call: removexattr
+                    paths:
+                      - /hello.txt
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3809,6 +4300,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -3830,11 +4323,14 @@ paths:
                   type: string
                 name:
                   type: string
+                  description: Attribute name, such as `user.note`.
                 nofollow:
                   type: boolean
+                  description: Act on a symbolic link itself rather than its target.
               required:
                 - path
                 - name
+              additionalProperties: false
             example:
               path: /hello.txt
               name: user.note
@@ -3858,13 +4354,31 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns; with explain=true, its explanation
+          description: On success the body is `null`. With `explain=true`, its explanation; nothing
+            runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: 'null'
+                    title: Result
                   - $ref: '#/components/schemas/VfsExplanation'
+              examples:
+                result:
+                  summary: '200'
+                  value: null
+                explain:
+                  summary: Explain
+                  value:
+                    call: truncate
+                    paths:
+                      - /hello.txt
+                    outcome: allow
+                    reason: ''
+                    source: ''
+                    decision: null
+                    answers: []
+                    error: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -3873,6 +4387,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -3894,9 +4410,11 @@ paths:
                   type: string
                 length:
                   type: integer
+                  description: New size in bytes. A longer length pads the file with zero bytes.
               required:
                 - path
                 - length
+              additionalProperties: false
             example:
               path: /hello.txt
               length: 0
@@ -3930,6 +4448,8 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
         '413':
@@ -3938,6 +4458,8 @@ paths:
           $ref: '#/components/responses/500'
       description: Call a VFS function by name using the selected session and its permissions. Request
         arguments and the JSON response depend on the function. The response example shows headers only.
+        A name no mount declares answers `400` with `errno` `ENOTSUP`. A name Mirage defines
+        itself, such as `copy`, answers `400` without an `errno`.
       tags:
         - VFS
       x-hosts:
@@ -3954,9 +4476,10 @@ paths:
                   description: The path the function acts on.
                 kwargs:
                   type: object
-                  description: The function's keyword arguments, Python only.
+                  description: The function's keyword arguments.
               required:
                 - path
+              additionalProperties: false
             example:
               path: /hello.txt
               kwargs: {}
@@ -7437,32 +7960,69 @@ components:
       type: object
       description: Policy evaluation for a request without executing it. Returned when `explain=true`.
       properties:
-        type:
-          type: string
-          description: line, command or vfs.
         outcome:
           type: string
           enum:
             - allow
             - deny
             - ask
+          description: '`ask` stays `ask` when an approval already covers the request; then
+            `decision` is `null`.'
         reason:
           type: string
-          description: Reason returned by the policy that determined the outcome.
+          description: Reason returned by the policy that determined the outcome. Empty when
+            nothing refuses or asks.
         source:
           type: string
-          description: Where in the profile the deciding rule is written.
+          description: Where in the profile the deciding rule is written, such as `top`,
+            `mounts./runbook` or `commands.allow`. Empty when no rule decided.
         answers:
           type: array
           items:
-            type: object
-          description: Evaluation results from each policy.
+            $ref: '#/components/schemas/PolicyAnswer'
+          description: Every policy's answer, in the order the policies are asked.
         decision:
           anyOf:
             - $ref: '#/components/schemas/PolicyDecision'
             - type: 'null'
+          description: The record a refused request carries. `null` when it would run.
       required:
         - outcome
+        - reason
+        - source
+        - answers
+        - decision
+    PolicyAnswer:
+      type: object
+      description: One policy's answer to a request.
+      properties:
+        kind:
+          type: string
+          enum:
+            - deny
+            - ask
+            - route
+        reason:
+          type: string
+          description: Reason the policy gave.
+        policy:
+          type: string
+          description: Name of the policy. Rules written in the profile answer as
+            `PermissionsPolicy`.
+        runtime:
+          anyOf:
+            - type: string
+            - type: 'null'
+          description: Runtime the request is routed to. Only for `route`.
+        machine:
+          anyOf:
+            - type: string
+            - type: 'null'
+          description: Machine the request is routed to. Only for `route`.
+      required:
+        - kind
+        - reason
+        - policy
     ShellExplanation:
       allOf:
         - $ref: '#/components/schemas/Explanation'
@@ -7486,14 +8046,121 @@ components:
           properties:
             call:
               type: string
+              description: The VFS call explained, such as `write`.
             paths:
               type: array
               items:
                 type: string
+              description: The call's path arguments, as given. `rename` has two.
             error:
               type: string
-              description: The errno name the call would raise, empty when it runs.
-      title: VFS explanation
+              description: The errno name the call would raise, such as `EACCES`. Empty when
+                it runs.
+          required:
+            - call
+            - paths
+            - error
+      title: Explanation (explain=true)
+    FileStat:
+      type: object
+      title: FileStat
+      description: Metadata for one path. A field the backend does not know is `null`.
+      properties:
+        name:
+          type: string
+          description: The last component of the path.
+        size:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          description: Bytes a read returns. `null` when unknown without reading the file.
+        modified:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+          description: Last modification time, an RFC 3339 string in UTC.
+        fingerprint:
+          anyOf:
+            - type: string
+            - type: 'null'
+          description: The backend's content hash or ETag.
+        revision:
+          anyOf:
+            - type: string
+            - type: 'null'
+          description: The backend's version ID.
+        type:
+          type: string
+          enum:
+            - file
+            - directory
+            - symlink
+            - char_device
+            - block_device
+            - fifo
+            - socket
+        content:
+          anyOf:
+            - type: string
+            - type: 'null'
+          description: How a file's bytes render, such as `text`, `json`, `csv` or
+            `image/png`. `null` for a directory or symlink, or when unknown.
+        mode:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          description: Permission bits, as a decimal integer (`420` is `0644`).
+        uid:
+          type:
+            - integer
+            - string
+            - 'null'
+          description: Owner, as a number or a name.
+        gid:
+          type:
+            - integer
+            - string
+            - 'null'
+          description: Group, as a number or a name.
+        atime:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+          description: Last access time, an RFC 3339 string in UTC.
+        ctime:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+          description: Last metadata change time, an RFC 3339 string in UTC.
+        birthtime:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+          description: Creation time, an RFC 3339 string in UTC.
+        dev:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          description: ID of the mount the path is on.
+      required:
+        - name
+        - size
+        - modified
+        - fingerprint
+        - revision
+        - type
+        - content
+        - mode
+        - uid
+        - gid
+        - atime
+        - ctime
+        - birthtime
+        - dev
     SecretPointer:
       type: object
       properties:
@@ -7966,8 +8633,10 @@ components:
               code: canceled
               message: job canceled
     '500':
-      description: The server failed internally (`internal`). The message is always `internal server
-        error` and the cause goes to the server log. Check for side effects before retrying.
+      description: The server failed internally (`internal`). The message is `internal server error`
+        and the cause goes to the server log. A file call that fails with an I/O error (`EIO`,
+        `EPIPE`, `EBADF`) carries its `errno` and the POSIX message instead. Check for side effects
+        before retrying.
       content:
         application/json:
           schema:
