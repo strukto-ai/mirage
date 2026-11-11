@@ -41,6 +41,7 @@ import {
   mountTable,
   registerPipeServer,
   runningLine,
+  servedPrefixes,
   topPrefixes,
   type PipeServer,
 } from './mounts.ts'
@@ -434,6 +435,13 @@ describe('topPrefixes', () => {
   })
 })
 
+describe('servedPrefixes', () => {
+  it('leaves out /tmp, and serves a mount under it at its own path', () => {
+    const prefixes = ['/', '/dev/', '/tmp/', '/tmp/cache/', '/data/', '/data/sub/']
+    expect(servedPrefixes(prefixes)).toEqual(['/data', '/tmp/cache'])
+  })
+})
+
 function lost(prefix: string): string {
   return `fake: ${prefix} is no longer mounted in the machine (did it restart?); the line did not run\n`
 }
@@ -455,6 +463,41 @@ describe('MachineMounts', () => {
     expect(sandbox.pipes).toHaveLength(2)
     await ws.close()
     expect(sandbox.table.size).toBe(0)
+  })
+
+  it('leaves the machine its own /tmp, and refuses a line from the workspace /tmp', async () => {
+    const sandbox = new FakeMachine('ssh')
+    const ws = new Workspace(
+      { '/': new RAMVFS(), '/data': new RAMVFS(), '/tmp': new RAMVFS() },
+      { mode: MountMode.WRITE, ...on(sandbox, 'workspace') },
+    )
+    expect((await ws.shell('python3 job.py')).exitCode).toBe(0)
+    expect(sandbox.pipes.map((p) => words(p)[6])).toEqual(['/data'])
+    const fromTmp = await ws.shell('cd /tmp && python3 job.py')
+    expect([fromTmp.exitCode, DEC.decode(fromTmp.stderr)]).toEqual([
+      126,
+      'fake: the machine cannot see the working directory /tmp; cd into a mount first\n',
+    ])
+    await ws.close()
+  })
+
+  it('refuses a line while the session restricts /tmp', async () => {
+    const sandbox = new FakeMachine('ssh')
+    const ws = new Workspace(
+      { '/': new RAMVFS(), '/data': new RAMVFS(), '/tmp': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        profiles: { agent: { paths: { hide: ['/tmp/secret'] } } },
+        ...on(sandbox, 'workspace'),
+      },
+    )
+    const agent = await ws.session('agent', { profile: 'agent' })
+    const result = await agent.shell('python3 job.py')
+    expect(result.exitCode).toBe(126)
+    expect(result.decision?.reason).toBe(
+      'a mount this session restricts is not served through the dispatcher',
+    )
+    await ws.close()
   })
 
   it.each([
@@ -1211,6 +1254,23 @@ describe('MachineMounts', () => {
       expect((await agent.shell('python3 back.py')).exitCode).toBe(0)
       expect(sandbox.commands).toContain('python3 back.py')
       expect(sandbox.pipes).toEqual(pipes)
+      await ws.close()
+    },
+  )
+
+  it.each(['fuse', 'both'] as const)(
+    'refuses a line once its own /tmp mount is gone (%s)',
+    async (mountType) => {
+      const sandbox = new FakeMachine(mountType, ['/tmp'])
+      const ws = new Workspace(
+        { '/': new RAMVFS(), '/data': new RAMVFS(), '/tmp': new RAMVFS() },
+        { mode: MountMode.WRITE, ...on(sandbox, 'workspace') },
+      )
+      expect((await ws.shell('python3 job.py')).exitCode).toBe(0)
+      sandbox.table.delete('/tmp')
+      const result = await ws.shell('python3 lost.py')
+      expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([126, lost('/tmp')])
+      expect(sandbox.commands).not.toContain('python3 lost.py')
       await ws.close()
     },
   )

@@ -72,10 +72,15 @@ or put the files there yourself. Once connected, run the shared
   looks done to the program, but its command fails when the program ends:
   stderr names the file, as `docker: /data/big.bin: Disk quota exceeded`,
   and a command that would exit 0 exits 1.
-- The root mount and `/dev` are not served.
+- The root mount, `/dev` and `/tmp` are not served: they are the
+  machine's own. Programs keep temporary files and sockets in `/tmp`, and
+  sshfs cannot make a socket; Mirage keeps its own run state there too. A
+  file a program writes to `/tmp` stays on the machine, and a line run from
+  the workspace's `/tmp` exits 126. Pass files between Mirage and a program
+  through a mounted folder.
 
 Mirage refuses to run a program when it cannot enforce the session's file
-rules: restrictions on `/` or `/dev`, hiding a mount when that would expose
+rules: restrictions on `/`, `/dev` or `/tmp`, hiding a mount when that would expose
 the machine's own files underneath, restrictions on mounts a Mirage on the
 machine serves, and rules that depend on which program opens a file.
 
