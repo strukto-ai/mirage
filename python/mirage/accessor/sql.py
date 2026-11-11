@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from collections.abc import Sequence
 
 from mirage.accessor.base import Accessor
@@ -29,6 +30,8 @@ from mirage.types import PathSpec
 from mirage.utils.clock import system_date
 from mirage.utils.path import norm
 from mirage.vfs.sql.types import SqlDriver, SqlRow, SqlStatement, SqlValue
+
+logger = logging.getLogger(__name__)
 
 
 class SqlAccessor(Accessor):
@@ -71,26 +74,27 @@ class SqlAccessor(Accessor):
             )
             rows = self.driver.query(SQL["chunk_size"])
             value = rows[0]["value"] if rows else None
-            self._folder()
+            self._folder(make=True)
             self._chunk_size = int(value or 0) or DEFAULT_CHUNK_SIZE
         return self._chunk_size
 
     def root_ino(self) -> int:
-        """The inode of the mount's folder, made with its parents when
-        gone. Blocks: for a caller off the loop."""
+        """The inode of the mount's folder. Only the first open makes it:
+        a folder gone since is ENOENT, and a file standing at it ENOTDIR.
+        Blocks: for a caller off the loop."""
         self.ready()
-        return self._folder()
+        return self._folder(make=False)
 
-    def _folder(self) -> int:
+    def _folder(self, *, make: bool) -> int:
         # Each name of the folder in turn, made where the database has
-        # none, as the root is: a directory inode and the entry naming
-        # it, its parent named through its inode. A writer that makes one
-        # first holds its entry, so this one's insert fails and it reads
-        # the entry instead.
+        # none when ``make``, as the root is: a directory inode and the
+        # entry naming it, its parent named through its inode. A writer
+        # that makes one first holds its entry, so this one's insert fails
+        # and it reads the entry instead.
         ino = ROOT_INO
         for name in self.root_names:
             rows = self.driver.query(SQL["entry"], (ino, name))
-            if not rows:
+            if not rows and make:
                 now = int(system_date().timestamp())
                 try:
                     self.driver.batch(
@@ -105,9 +109,14 @@ class SqlAccessor(Accessor):
                             ),
                         ]
                     )
-                except Exception:
+                except Exception as exc:
                     if not self.driver.query(SQL["entry"], (ino, name)):
                         raise
+                    logger.debug(
+                        "sql: %s was made by another writer first: %s",
+                        self.root,
+                        exc,
+                    )
                 rows = self.driver.query(SQL["entry"], (ino, name))
             if not rows:
                 raise enoent(PathSpec.from_str_path(self.root))

@@ -100,7 +100,12 @@ export async function walk(accessor: SqlAccessor, path: PathSpec | string): Prom
     if (last === null) chain.push(...part.map(() => null))
     else chain.push(...(await walkFrom(accessor, last.ino, part)).slice(1))
   }
-  return { p, names, chain: chain.slice(accessor.rootNames.length) }
+  const from = chain.slice(accessor.rootNames.length)
+  // A folder a file stands at since reads as gone, so no op takes the file
+  // for a directory.
+  const top = from[0] ?? null
+  if (top !== null && !isDir(top)) return { p, names, chain: from.map(() => null) }
+  return { p, names, chain: from }
 }
 
 /** The inode the whole path reaches, or null. */

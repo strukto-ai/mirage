@@ -32,11 +32,12 @@ import { write as sqlWrite } from '../../core/sql/write.ts'
 import type { ByteSource } from '../../io/types.ts'
 import {
   CapacityState,
+  PathSpec,
   VFSName,
   type CapacityResult,
   type FileStat,
-  type PathSpec,
 } from '../../types.ts'
+import { stripSlash } from '../../utils/slash.ts'
 import { BaseVFS } from '../base.ts'
 import { charge, storageUsage, type Charge, type StorageUsage } from '../capacity.ts'
 import type { Handed, VFSStateBase } from '../types.ts'
@@ -111,11 +112,24 @@ export class SqlVFS extends BaseVFS<SqlAccessor> {
     this.ownsDriver = options.ownsDriver ?? false
   }
 
+  // The usage tells writes on one file apart by path, and mounts on one
+  // driver share it, so its key names the file from the database's root:
+  // `/w/f` through `/` and `/f` through a mount on `/w` are one file. The
+  // ops and the error still take the mount's own path.
   private charge<T>(path: PathSpec, write: (held: Charge) => Promise<T>): Promise<T> {
+    const { root } = this.accessor
+    const key =
+      root === '/'
+        ? path
+        : new PathSpec({
+            virtual: path.virtual,
+            directory: path.directory,
+            vfsPath: stripSlash(`${root}/${path.vfsPath}`),
+          })
     return charge(
       this.usage,
-      path,
-      (p) => sqlSizeOf(this.accessor, p),
+      key,
+      () => sqlSizeOf(this.accessor, path),
       () => sqlCount(this.accessor),
       write,
     )

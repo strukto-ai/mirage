@@ -126,12 +126,26 @@ class SqlVFS(BaseVFS):
         self.usage = _shared_usage(self.name, opened, capacity)
 
     def _charge(self, path: PathSpec) -> AbstractAsyncContextManager[Charge]:
-        return charge(
-            self.usage,
-            path,
-            partial(_size_of, self.accessor),
-            partial(_count, self.accessor),
+        # The usage tells writes on one file apart by path, and mounts on
+        # one driver share it, so its key names the file from the
+        # database's root: ``/w/f`` through ``/`` and ``/f`` through a
+        # mount on ``/w`` are one file. The ops and the error still take
+        # the mount's own path.
+        root = self.accessor.root
+        key = (
+            path
+            if root == "/"
+            else PathSpec(
+                virtual=path.virtual,
+                directory=path.directory,
+                vfs_path=f"{root}/{path.vfs_path}".strip("/"),
+            )
         )
+
+        async def size_of(_: PathSpec) -> int:
+            return await _size_of(self.accessor, path)
+
+        return charge(self.usage, key, size_of, partial(_count, self.accessor))
 
     def storage_location(self) -> str:
         # The folder joins the location, so a file reads as one key

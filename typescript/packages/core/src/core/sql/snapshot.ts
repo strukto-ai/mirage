@@ -27,7 +27,7 @@ import {
   SQL,
 } from './constants.ts'
 import { placeBytes, readBytes } from './data.ts'
-import { byIno, inodeOf, isDir, isFile, isoOf, nowStamp, stampOf, type InoRef } from './inode.ts'
+import { inodeOf, isDir, isFile, isoOf, nowStamp, stampOf, type InoRef } from './inode.ts'
 
 /**
  * What a snapshot keeps of a sql mount: each file's bytes and each
@@ -77,7 +77,11 @@ export async function restore(accessor: SqlAccessor, state: SqlSnapshot): Promis
     { sql: SQL.setBase },
     ...(root === ROOT_INO ? CLEAR : clearUnder(root)).map((sql) => ({ sql })),
   ]
-  const dirs = new Map<string, InoRef>([['/', byIno(root)]])
+  // The folder through its inode, so one removed before the batch leaves
+  // the top entries no parent, which their column refuses, and the restore
+  // fails whole rather than strand them.
+  const top: InoRef = { sql: `(SELECT ino FROM fs_inode WHERE ino = ${String(root)})`, params: [] }
+  const dirs = new Map<string, InoRef>([['/', top]])
   let made = 0
   const place = async (p: string, mode: number, data: Uint8Array | null): Promise<void> => {
     const up = dirs.get(parent(p))

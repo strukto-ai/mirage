@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import contextlib
 import errno
 import sqlite3
@@ -20,7 +21,12 @@ from collections.abc import AsyncIterator, Sequence
 import pytest
 import pytest_asyncio
 
-from mirage.core.sql.constants import DEFAULT_CHUNK_SIZE, DIR, FILE
+from mirage.core.sql.constants import (
+    DEFAULT_CHUNK_SIZE,
+    DIR,
+    FILE,
+    clear_under,
+)
 from mirage.io.stream import materialize
 from mirage.observe.context import RecordingScope
 from mirage.types import CapacityState, FileType, MountMode, PathSpec
@@ -565,7 +571,81 @@ async def test_a_folder_a_file_stands_at_or_gone_since_is_refused():
         await folder.write(at("/b"), b"x")
     with pytest.raises(FileNotFoundError):
         await folder.readdir(at("/"))
+    # A snapshot reports the folder gone and leaves it gone.
+    with pytest.raises(FileNotFoundError):
+        folder.get_state()
     assert await names(whole_db) == ["f"]
+    driver.close()
+
+
+@pytest.mark.asyncio
+async def test_a_file_standing_at_the_folder_since_is_no_directory():
+    driver = SqliteDriver()
+    whole_db = SqlVFS(driver=driver)
+    folder = SqlVFS(driver=driver, root="/d")
+    await folder.write(at("/a"), b"x")
+    await whole_db.rm_r(at("/d"))
+    await whole_db.write(at("/d"), b"file")
+    with pytest.raises(FileNotFoundError):
+        await folder.stat(at("/"))
+    with pytest.raises(FileNotFoundError):
+        await folder.mkdir(at("/x/y"), parents=True)
+    under = driver.query(
+        "SELECT name FROM fs_dentry WHERE parent_ino ="
+        " (SELECT ino FROM fs_dentry WHERE parent_ino = 1 AND name = 'd')"
+    )
+    assert under == []
+    driver.close()
+
+
+@pytest.mark.asyncio
+async def test_a_restore_whose_folder_went_before_its_batch_strands_nothing():
+    driver = SqliteDriver()
+    whole_db = SqlVFS(driver=driver)
+    folder = SqlVFS(driver=driver, root="/d")
+    await folder.write(at("/a"), b"x")
+    state = folder.get_state()
+    top = folder.accessor.root_ino()
+    racing(
+        folder,
+        [
+            *clear_under(top),
+            "DELETE FROM fs_dentry WHERE parent_ino = 1 AND name = 'd'",
+            f"DELETE FROM fs_inode WHERE ino = {top}",
+        ],
+    )
+    with pytest.raises(Exception):
+        folder.load_state(state)
+    assert await names(whole_db) == []
+    assert driver.query("SELECT COUNT(*) AS n FROM fs_inode")[0]["n"] == 1
+    driver.close()
+
+
+@pytest.mark.asyncio
+async def test_two_writes_on_one_file_through_two_mounts_overlap():
+    driver = SqliteDriver()
+    whole_db = SqlVFS(driver=driver, capacity=100)
+    folder = SqlVFS(driver=driver, root="/w", capacity=100)
+    usage = whole_db.usage
+    assert usage is not None
+    await whole_db.mkdir(at("/w"))
+    gate = asyncio.Event()
+
+    async def slow() -> AsyncIterator[bytes]:
+        yield b"ab"
+        await gate.wait()
+        yield b"cd"
+
+    first = asyncio.create_task(folder.write(at("/f"), slow()))
+    while len(usage.active) < 1:
+        await asyncio.sleep(0.01)
+    # The second lands while the first is open, and marks the count for
+    # a recount, as two writes on one file through one mount do.
+    assert not usage.dirty
+    await whole_db.write(at("/w/f"), b"xyz")
+    assert usage.dirty
+    gate.set()
+    await first
     driver.close()
 
 
