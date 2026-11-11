@@ -40,7 +40,7 @@ function makeStateStore(prefix: string): RedisWorkspaceStateStore {
       forcePathStyle: true,
       keyPrefix: prefix,
     })
-    return new RedisWorkspaceStateStore({ url: REDIS_URL, keyPrefix: prefix, workspace: s3 })
+    return new RedisWorkspaceStateStore({ url: REDIS_URL, keyPrefix: prefix, sessions: s3 })
   }
   return new RedisWorkspaceStateStore({ url: REDIS_URL, keyPrefix: prefix })
 }

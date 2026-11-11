@@ -62,7 +62,7 @@ def make_state_store(prefix: str) -> RedisWorkspaceStateStore:
             )
         )
         return RedisWorkspaceStateStore(
-            url=REDIS_URL, key_prefix=prefix, workspace=s3
+            url=REDIS_URL, key_prefix=prefix, sessions=s3
         )
     return RedisWorkspaceStateStore(url=REDIS_URL, key_prefix=prefix)
 
