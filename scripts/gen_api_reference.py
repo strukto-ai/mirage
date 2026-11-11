@@ -273,6 +273,15 @@ def response_content(doc: dict[str, Any], op: dict[str, Any]) -> str:
         longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
         fence = "`" * max(3, longest + 1)
         example = [f"{fence}markdown 200", text, fence]
+    elif "examples" in generic:
+        for named in generic["examples"].values():
+            example += [
+                f"```json {named['summary']}",
+                json.dumps(named["value"], indent=2),
+                "```",
+                "",
+            ]
+        example.pop()
     elif generic.get("schema") == {} and "example" not in generic:
         example = [
             "```http 200 Headers only",
@@ -590,6 +599,28 @@ def selftest() -> None:
             }
         },
     )
+    named_response = response_content(
+        doc,
+        {
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "examples": {
+                                "result": {"summary": "200", "value": None},
+                                "explain": {
+                                    "summary": "Explain",
+                                    "value": {"outcome": "allow"},
+                                },
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    )
+    assert "```json 200\nnull\n```" in named_response
+    assert "```json Explain\n{" in named_response
     assert streamed_response.count("```json 200") == 1
     assert '```json 200\n{\n  "id": "demo"\n}\n```' in streamed_response
     for content in (

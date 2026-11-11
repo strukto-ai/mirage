@@ -48,7 +48,7 @@ success body can carry an `error` field of its own, such as a finished line's
 | `426` | `upgrade_required` | WebSocket routes only: a plain request reached a route that needs a WebSocket upgrade. | Open the route as a WebSocket. |
 | `429` | `rate_limited`, `session_limit` | A rate limit or the workspace's session limit was reached. | Wait for `Retry-After` on `rate_limited`; close unused sessions on `session_limit`. |
 | `499` | `canceled` | A running shell job was canceled. | Check its output and any side effects before rerunning it. |
-| `500` | `internal` | The server failed. The message is always `internal server error`; the cause is in the server log. | Check the server log and for side effects before retrying. |
+| `500` | `internal` | The server failed. The message is `internal server error` and the cause is in the server log; a file call that fails with an I/O error (`EIO`, `EPIPE`, `EBADF`) carries its `errno` and the POSIX message instead. | Check the server log and for side effects before retrying. |
 | `501` | `not_supported` | The server does not support the call, such as saved configs on a server with accounts. | Check the deployment's saved-configuration support. |
 | `503` | `unavailable`, `server_full`, `shutting_down` | The server is at its workspace limit, shutting down, or cannot reach a worker. | Retry after capacity or availability recovers. |
 
