@@ -17,7 +17,6 @@ import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import {
   CHECK_LINE,
   CHECK_MARK,
-  CHECK_WAIT_SECONDS,
   EXEC_PRELUDE,
   MOUNT_GUARD,
   PIPE_DIAGNOSTIC_BYTES,
@@ -37,7 +36,7 @@ import { concat } from '@struktoai/mirage-core/utils/bytes'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { NOT_ANSWERING, STOPPED } from './constants.ts'
+import { NOT_ANSWERING, START_WAIT_SECONDS, STOPPED } from './constants.ts'
 import { ContainerMachine } from './handle.ts'
 import type { Container, ExecOptions, ExecProcess } from './types.ts'
 
@@ -218,6 +217,8 @@ class FakeContainer implements Container {
   onExit: () => void = () => undefined
   // The next exec's container exits as the exec starts, before its caller hears back.
   exitsOnExec = false
+  // Until an exec answers, the container is still starting and monitor() refuses, as Cloudflare's does.
+  starting = false
   asked = 0
   private exited = deferred<undefined>()
 
@@ -238,6 +239,7 @@ class FakeContainer implements Container {
         : (this.programs[line.split(' ')[0] ?? ''] ?? (() => 0))
     const proc = new FakeProcess(line, program, this.log)
     this.execs.push({ argv, options, proc })
+    this.starting = false
     if (this.exitsOnExec) {
       this.exitsOnExec = false
       this.exit()
@@ -247,6 +249,7 @@ class FakeContainer implements Container {
   }
 
   monitor(): Promise<void> {
+    if (this.starting) return Promise.reject(new Error('The container has not been started'))
     return this.exited.promise
   }
 
@@ -553,6 +556,14 @@ describe('ContainerMachine connection', () => {
     expect(box.log).toEqual([`exec ${CHECK_LINE}`, 'exec true', 'exec true'])
   })
 
+  it('watches for the exit only once the started container answers', async () => {
+    const { box, start, machine } = boxed()
+    box.starting = true
+    expect((await run(machine, ['true'])).exitCode).toBe(0)
+    expect((await run(machine, ['true'])).exitCode).toBe(0)
+    expect(start).toHaveBeenCalledTimes(1)
+  })
+
   it('waits for a starting container to answer the check line', async () => {
     const { box, start, machine } = boxed()
     box.refusals.push(new Error('container is not running'))
@@ -565,9 +576,9 @@ describe('ContainerMachine connection', () => {
     const { box, machine } = boxed()
     box.down = new Error('container is not running')
     const failed = expect(machine.connect()).rejects.toThrow(
-      `cloudflare_container: the container did not answer within ${String(CHECK_WAIT_SECONDS)}s of starting`,
+      `cloudflare_container: the container did not answer within ${String(START_WAIT_SECONDS)}s of starting`,
     )
-    await vi.advanceTimersByTimeAsync((CHECK_WAIT_SECONDS + 1) * 1000)
+    await vi.advanceTimersByTimeAsync((START_WAIT_SECONDS + 1) * 1000)
     await failed
   })
 

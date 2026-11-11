@@ -17,7 +17,6 @@ import { feed } from '@struktoai/mirage-core/io/stream'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import {
   CHECK_LINE,
-  CHECK_WAIT_SECONDS,
   EXEC_PRELUDE,
   PIPE_DIAGNOSTIC_BYTES,
   PIPE_DIAGNOSTIC_WAIT_SECONDS,
@@ -36,7 +35,14 @@ import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { abortable, makeAbortError, settledWithin, sleep } from '@struktoai/mirage-core/utils/abort'
 import { concat } from '@struktoai/mirage-core/utils/bytes'
 import type { ContainerConfig } from './config.ts'
-import { CHECK_POLL_SECONDS, CLOSING, NO_CONTAINER, NOT_ANSWERING, STOPPED } from './constants.ts'
+import {
+  CHECK_POLL_SECONDS,
+  CLOSING,
+  NO_CONTAINER,
+  NOT_ANSWERING,
+  START_WAIT_SECONDS,
+  STOPPED,
+} from './constants.ts'
 import type { Container, ExecProcess } from './types.ts'
 
 const ENC = new TextEncoder()
@@ -58,7 +64,7 @@ function piped(proc: ExecProcess): Piped {
 
 /** The lost connection a container that stopped under a line is. */
 function stopped(error: unknown): ConnectionLostError {
-  // shortcut: any exec rejection, and monitor() settling, counts as the container having stopped (spike S7); narrow it to what real Cloudflare reports
+  // shortcut: any exec rejection counts as the container having stopped, which Cloudflare's "not running" does; other rejections are untested
   logger.debug?.(`cloudflare_container: the container stopped: ${String(error)}`)
   const lost = new ConnectionLostError(
     STOPPED,
@@ -139,12 +145,12 @@ export class ContainerMachine extends MachineHandle implements PipeTransport {
     if (this.container === undefined) throw new Error(NO_CONTAINER)
     if (this.closing) throw new Error(`cloudflare_container: ${CLOSING}`)
     await this.start?.()
-    this.watchExit(this.container)
-    const deadline = AbortSignal.timeout(CHECK_WAIT_SECONDS * 1000)
+    // shortcut: a start that never comes up fails this line after the wait and the next line starts again; whether starting again at once recovers is untested
+    const deadline = AbortSignal.timeout(START_WAIT_SECONDS * 1000)
     let last: unknown = null
     for (
       let waited = 0;
-      waited < CHECK_WAIT_SECONDS && !deadline.aborted;
+      waited < START_WAIT_SECONDS && !deadline.aborted;
       waited += CHECK_POLL_SECONDS
     ) {
       try {
@@ -158,6 +164,8 @@ export class ContainerMachine extends MachineHandle implements PipeTransport {
           deadline,
         )
         await abortable(check, deadline)
+        // Only now: a container still starting refuses its calls, monitor() among them.
+        this.watchExit(this.container)
         return
       } catch (error) {
         last = error
@@ -204,7 +212,7 @@ export class ContainerMachine extends MachineHandle implements PipeTransport {
     if (this.container === undefined) throw new Error(NO_CONTAINER)
     const runner = currentCaller().process
     const exits = this.exits
-    // shortcut: env goes to exec whole, as other providers pass it (spike S4); add the image's PATH if exec's env turns out to replace the image's
+    // exec starts from Cloudflare's own PATH and HOME and merges env on top; the image's ENV never reaches it.
     const proc = piped(
       await this.container
         .exec(['/bin/sh', '-c', EXEC_PRELUDE, 'sh', cwd, ...argv], { env, ...PIPES })
