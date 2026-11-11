@@ -502,11 +502,21 @@ run_host() {
     fi
     # sandbox/mounts serves fixed prefixes over sshfs in the one container,
     # and a machine refuses a second workspace serving a prefix, so the
-    # hosts take turns at that suite.
-    local mounts_lock=""
+    # hosts take turns at that suite. A lane that exits holding the turn
+    # gives it back, and a turn that never comes fails the suite.
+    local mounts_lock="" waited=0
     if [ "$suite" = sandbox/mounts ]; then
       mounts_lock="$RESULT_DIR/claims/sandbox-mounts-lock"
-      until mkdir "$mounts_lock" 2>/dev/null; do sleep 1; done
+      until mkdir "$mounts_lock" 2>/dev/null; do
+        if [ ! -d "$mounts_lock" ] || [ "$waited" -ge 300 ]; then
+          failures+=("$host/$suite: never got its turn at the container's mounts")
+          fail=$((fail + 1))
+          continue 2
+        fi
+        sleep 1
+        waited=$((waited + 1))
+      done
+      trap "rmdir '$mounts_lock' 2>/dev/null" EXIT
     fi
     # The per-host logs print only after both hosts finish, so a suite's
     # cost is not otherwise recoverable from the run.
@@ -549,7 +559,10 @@ run_host() {
         fi
       done < <(runtime_variants "$listed" "$host")
     done < <(jq -c '.cases[]' <<<"$suite_json")
-    [ -z "$mounts_lock" ] || rmdir "$mounts_lock"
+    if [ -n "$mounts_lock" ]; then
+      rmdir "$mounts_lock"
+      trap - EXIT
+    fi
     echo "suite $host/$suite $((SECONDS - suite_t0))s"
   done 3< <(cd "$SUITE_DIR" && find . -name '*.json' | sed 's|^\./||' | sort)
 
