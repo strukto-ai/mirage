@@ -35,6 +35,7 @@ import { decodeText, encodeText, utf8Locale } from '../../../shell/bytes.ts'
 import { charWidth } from '../../../io/async_line_iterator.ts'
 import { groupName, identityOf, ownerName, type Identity } from '../utils/identity.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
+import { parent, posixNormpath } from '../../../utils/path.ts'
 import { formatRecords } from '../utils/output.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { linksOf, mountsOf } from '../utils/links.ts'
@@ -1335,9 +1336,15 @@ export async function treeGeneric(
         : async (p: PathSpec) => {
             // The dispatcher's stat follows a link, so a link is answered
             // from the namespace, as this mount's own stat answers it:
-            // drawn as `name -> target`, gone through only under -l.
-            const own = links?.statAt(p.virtual) ?? null
-            if (own !== null) return own
+            // drawn as `name -> target`, gone through only under -l. The
+            // namespace keeps a link under the directory it stands in, so
+            // one reached through a linked directory is looked up where
+            // that directory leads.
+            if (links !== undefined) {
+              const name = p.virtual.slice(p.virtual.lastIndexOf('/') + 1)
+              const own = links.statAt(posixNormpath(`${links.resolve(parent(p.virtual))}/${name}`))
+              if (own !== null) return own
+            }
             const s = await statPath(p)
             // Stamped, not a bare Error: `isWalkError` keys on the code,
             // so an unstamped throw escapes the walk's catch and rejects

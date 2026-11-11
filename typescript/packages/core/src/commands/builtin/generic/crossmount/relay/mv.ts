@@ -24,12 +24,37 @@ import { flatScopes, readdirOp, relayCopy, relayWrite, statOp } from '../utils.t
 import type { FlagValue } from '../../../../spec/types.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { specOf } from '../../../../spec/builtins.ts'
-import type { Files } from '../../../../../workspace/files.ts'
+import { readerOf, type Files } from '../../../../../workspace/files.ts'
+import type { NamespaceReader } from '../../../../../workspace/dispatcher/reader.ts'
+import type { MountView } from '../../../../../view/types.ts'
+import { CycleError } from '../../../../../utils/path.ts'
 import { linkView, mountView } from '../../../utils/links.ts'
 
-// Move operands that span mounts via the shared generic mv. Pure wiring:
-// copy through the transfer primitives, then unlink the source on its own
-// mount.
+// Whether a source moves by a rename: it and its target sit on one mount once
+// the links above both are followed, and no mount sits below it, which a
+// rename would leave where it is. Mirrors Python's _renames.
+function renames(
+  reader: NamespaceReader,
+  mounts: MountView,
+  src: PathSpec,
+  target: PathSpec,
+): boolean {
+  let here: string
+  let there: string
+  try {
+    here = reader.followParent(src.virtual)
+    there = reader.followParent(target.virtual)
+  } catch (err) {
+    if (!(err instanceof CycleError)) throw err
+    console.debug(`mv: no rename past a loop at ${src.virtual}: ${String(err)}`)
+    return false
+  }
+  return mounts.rootOf(here) === mounts.rootOf(there) && mounts.descendants(here).length === 0
+}
+
+// Move operands that span mounts via the shared generic mv. Pure wiring: a
+// source that stays on its mount renames there; any other is copied through
+// the transfer primitives, then unlinked on its own mount.
 export async function runMv(
   scopes: PathSpec[],
   flagKwargs: Record<string, FlagValue>,
@@ -80,5 +105,8 @@ export async function runMv(
     stdin,
     mounts === undefined ? undefined : (p: string) => mounts.isRoot(p),
     dispatch,
+    vfs === undefined || mounts === undefined
+      ? undefined
+      : (src: PathSpec, target: PathSpec) => renames(readerOf(vfs), mounts, src, target),
   )
 }

@@ -763,6 +763,7 @@ async def make_link(
     policy: TransferPolicy,
     errors: list[str],
     lines: list[str] | None,
+    refuse_link: Callable[[PathSpec, PathSpec], Awaitable[bool]] | None = None,
 ) -> bool:
     """Copy a symlink through the shared overwrite and backup policy.
 
@@ -774,6 +775,9 @@ async def make_link(
         policy (TransferPolicy): Per-entry overwrite policy.
         errors (list[str]): Per-entry errors.
         lines (list[str] | None): Optional verbose output.
+        refuse_link (Callable | None): refuses a ``-l`` link of the
+            symlink itself that would leave its mount, once the
+            overwrite gates let it through.
 
     Returns:
         bool: Whether the link was created; False on a skip or error.
@@ -788,6 +792,8 @@ async def make_link(
         )
         return False
     if not await overwrite_gate(policy, stat, src, target, errors):
+        return False
+    if refuse_link is not None and await refuse_link(src, target):
         return False
     backup, ok = await make_backup(
         policy,
@@ -830,6 +836,7 @@ async def copy_tree_links(
     policy: TransferPolicy,
     seen: tuple[str, ...] = (),
     blocked: Sequence[str] = (),
+    refuse_link: Callable[[PathSpec, PathSpec], Awaitable[bool]] | None = None,
 ) -> None:
     """Recreate the links below a copied directory, which its copy could
     not see.
@@ -854,6 +861,8 @@ async def copy_tree_links(
             one, which a followed link must not lead back into.
         blocked (Sequence[str]): source directories whose trees the copy
             left out, so their links are left out too.
+        refuse_link (Callable | None): refuses a ``-l`` link, of a link
+            or of what it leads to, that would leave its mount.
     """
     base = src.virtual.rstrip("/") or "/"
     dst_base = target.virtual.rstrip("/")
@@ -886,6 +895,7 @@ async def copy_tree_links(
                 policy,
                 errors,
                 lines,
+                refuse_link,
             )
             continue
         try:
@@ -919,6 +929,7 @@ async def copy_tree_links(
                 lines=lines,
                 copies=copies,
                 aside=aside,
+                refuse_link=refuse_link,
             )
             continue
         inside = resolved.rstrip("/") or "/"
@@ -951,6 +962,7 @@ async def copy_tree_links(
             copies=copies,
             blocked=roots,
             aside=aside,
+            refuse_link=refuse_link,
         )
         await copy_tree_links(
             copies,
@@ -962,6 +974,7 @@ async def copy_tree_links(
             policy,
             (*seen, base),
             roots,
+            refuse_link,
         )
 
 
@@ -2577,6 +2590,7 @@ async def copy_entries(
                 policy or TransferPolicy(cmd_name=cmd_name),
                 errors,
                 lines,
+                refuse_link,
             )
             if len(errors) > error_count:
                 copied_all = False
@@ -2860,6 +2874,7 @@ async def cp_generic(
                 policy,
                 errors,
                 lines if flags.verbose else None,
+                refuse_link,
             ):
                 created.add(key_of(target))
             continue
@@ -3114,6 +3129,7 @@ async def cp_generic(
                         lines if flags.verbose else None,
                         policy,
                         blocked=left_out,
+                        refuse_link=refuse_link,
                     )
                 continue
             # A whole-tree copy cannot honor a merge's per-entry rules (a
@@ -3154,6 +3170,7 @@ async def cp_generic(
                             errors,
                             lines if flags.verbose else None,
                             policy,
+                            refuse_link=refuse_link,
                         )
                     continue
             # Per-entry policy forfeits dir_copy, as does a tree copy the
@@ -3254,6 +3271,7 @@ async def cp_generic(
                         PathSpec.from_str_path(root).virtual
                         for root in blocked
                     ],
+                    refuse_link=refuse_link,
                 )
             continue
         if guards_created and key_of(target) in created:
@@ -3278,8 +3296,6 @@ async def cp_generic(
                 lines.append(transfer_line(src, target, None))
             errors.append(refusal)
             continue
-        if refuse_link is not None and await refuse_link(src, target):
-            continue
         copier: CopyStrategy = strategy
         mover: CopyStrategy | NativeMove = aside or strategy
         # A backup moves, and --remove-destination removes, a link
@@ -3293,6 +3309,8 @@ async def cp_generic(
                 mover = NativeMove(rename=partial(rename_link, copies))
                 if copies.owns is not None and not copies.owns(target.virtual):
                     copier = copies.content or copies.relay
+        if refuse_link is not None and await refuse_link(src, target):
+            continue
         backup, ok = await make_backup(
             policy, mover, stat, readdir, target, errors, copies, src
         )

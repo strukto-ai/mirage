@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.policy import Policy
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -185,3 +186,27 @@ async def test_cross_mount_relay_out_of_memory_speaks_as_the_command():
     )
     code, _, err = await run_text(ws, "jq -s . /a/x.json /b/y.json")
     assert (code, err) == (1, "jq: memory exhausted\n")
+
+
+class _SeesResults(Policy):
+    def __init__(self) -> None:
+        self.codes: list[int] = []
+
+    async def post_execute(self, ctx):
+        self.codes.append(ctx.results["exit_code"])
+        return None
+
+
+async def test_cross_mount_streamed_status_reaches_the_command_record():
+    # cmp -l streams across mounts and finds its difference as it drains;
+    # the command's record, which post_execute reads, says so too.
+    seen = _SeesResults()
+    ram1, ram2 = RAMVFS(), RAMVFS()
+    ram1._store.files["/x"] = b"abc"
+    ram2._store.files["/y"] = b"abd"
+    ws = Workspace(
+        {"/a/": (ram1, MountMode.WRITE), "/b/": (ram2, MountMode.WRITE)},
+        policies=[seen],
+    )
+    code, out, _ = await run_text(ws, "cmp -l /a/x /b/y")
+    assert (code, out, seen.codes) == (1, "3 143 144\n", [1])

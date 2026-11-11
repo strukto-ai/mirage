@@ -188,16 +188,20 @@ async def _cross_stat(
 
     The dispatcher's stat follows a link, so a link is answered from the
     namespace, as this mount's own stat answers it: drawn as
-    ``name -> target`` and gone through only under ``-l``.
+    ``name -> target`` and gone through only under ``-l``. The namespace
+    keeps a link under the directory it stands in, so one reached
+    through a linked directory is looked up where that directory leads.
 
     Args:
         stat_path (StatPath): dispatcher-backed stat.
         links (LinkView | None): the namespace's symlink facts.
         path (PathSpec): the entry to stat.
     """
-    own = links.stat_at(path.virtual) if links is not None else None
-    if own is not None:
-        return own
+    if links is not None:
+        parent, name = posixpath.split(path.virtual)
+        own = links.stat_at(posixpath.join(links.resolve(parent), name))
+        if own is not None:
+            return own
     stat = await stat_path(path)
     if stat is None:
         raise enoent(path.virtual)

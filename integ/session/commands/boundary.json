@@ -263,6 +263,20 @@
         "stdout": "  adding: vault/d/\n  adding: vault/d/sub/\n  adding: vault/d/sub/top.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "boundary_mv_no_copy_renames_beside_a_mount_holder",
+      "seq": 923207,
+      "targets": [
+        "ram-commands"
+      ],
+      "command": "echo p > /vault/xm_p && mkdir /vault/xm_dst && mv --no-copy /vault/xm_p /vault/d /vault/xm_dst; echo rc=$?; ls /vault/xm_dst /vault/d; rm -r /vault/xm_dst",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n/vault/d:\ninner\nsub\n\n/vault/xm_dst:\nxm_p\n",
+        "stderr": "mv: cannot move '/vault/d' to '/vault/xm_dst/d': Invalid cross-device link\n"
+      },
+      "note": "Divergence: GNU renames /vault/d and its mount moves with it; a rename cannot carry a mirage mount, so the move is a copy, which --no-copy refuses. The file beside it still renames; it was refused too."
     }
   ]
 }

@@ -985,12 +985,17 @@ async def _attempt_link(
         errors.append(refusal)
         return
     if crossing:
-        # link(2) meets an occupied name before the other filesystem, and
-        # -f and -b get as far as the link, which leaves the name as it
-        # was (coreutils 9.7 over a tmpfs).
+        # link(2) meets the name's parent and an occupied name before the
+        # other filesystem, and -f and -b get as far as the link, which
+        # leaves the name as it was (coreutils 9.7 over a tmpfs).
+        why = await absent_dest_error(
+            partial(dispatch_stat, dispatch), link_spec
+        )
         errors.append(
-            f"ln: failed to create {kind} '{typed}' => '{target_typed}': "
-            f"{posix_phrase(FsCondition.EXDEV)}\n"
+            _refused(flags, typed, target_typed, why)
+            if why is not None
+            else f"ln: failed to create {kind} '{typed}' => "
+            f"'{target_typed}': {posix_phrase(FsCondition.EXDEV)}\n"
         )
         return
     if occupied and backs:

@@ -68,6 +68,7 @@ import {
   overwriteGate,
   overwriteTypeError,
   prompter,
+  renamed,
   slashRefusesFile,
   splitOperands,
   stderrOf,
@@ -375,6 +376,10 @@ export async function mvGeneric(
   // The command's dispatcher, which lets a source's mount refuse a tree
   // copied across mounts; undefined outside a workspace.
   dispatch?: DispatchFn,
+  // Whether a source can be renamed to its target, which a PrimitiveMove
+  // then does through `dispatch` instead of copying it; undefined copies
+  // every source.
+  renames?: (src: PathSpec, target: PathSpec) => boolean,
 ): Promise<[ByteSource | null, IOResult]> {
   if (copies !== undefined) stat = (path) => linkStat(copies, path)
   const keyOf = backendKey ?? backendKeyDefault
@@ -436,8 +441,17 @@ export async function mvGeneric(
       errors.push(sameFileError('mv', src, target))
       continue
     }
+    // A line that crosses mounts copies only the sources that must: one that
+    // stays on its mount, with no mount below it, renames.
+    const move: MoveStrategy =
+      isPrimitiveMove(strategy) &&
+      renames !== undefined &&
+      dispatch !== undefined &&
+      renames(src, target)
+        ? { rename: (a: PathSpec, b: PathSpec) => renamed(dispatch, a, b) }
+        : strategy
     if (flags.exchange) {
-      await exchangePair(strategy, stat, src, target, errors, flags.verbose ? lines : undefined)
+      await exchangePair(move, stat, src, target, errors, flags.verbose ? lines : undefined)
       continue
     }
     // A source typed as `.` or `..` names no entry a rename can take, so
@@ -509,7 +523,7 @@ export async function mvGeneric(
       }
       continue
     }
-    const across = isPrimitiveMove(strategy)
+    const across = isPrimitiveMove(move)
     // GNU refuses to replace a non-empty directory whether the target was
     // named outright (-T) or mapped under an existing destination
     // directory, so this cannot be gated on noTargetDir. It runs after the
@@ -554,7 +568,7 @@ export async function mvGeneric(
     const backupStrategy =
       copies !== undefined
         ? { rename: (a: PathSpec, b: PathSpec) => renameLink(copies, a, b) }
-        : strategy
+        : move
     if (across && flags.noCopy) {
       // GNU renames the target aside before its rename meets the other
       // device, and leaves it there (coreutils 9.7).
@@ -573,9 +587,9 @@ export async function mvGeneric(
     }
     const sourceLink = copies !== undefined && copies.links.statAt(src.virtual) !== null
     // Refuse an undeletable source before a backup moves the target aside.
-    if (isPrimitiveMove(strategy) && !sourceLink) {
+    if (isPrimitiveMove(move) && !sourceLink) {
       try {
-        strategy.checkUnlink?.(src)
+        move.checkUnlink?.(src)
       } catch (err) {
         if (!isFsError(err)) throw err
         errors.push(moveError(src, target, strerrorOf(err)))
@@ -584,7 +598,7 @@ export async function mvGeneric(
     }
     // Across mounts the tree is copied file by file, so the source's mount is
     // asked before a backup or a removal touches the destination.
-    if (isPrimitiveMove(strategy) && srcIsDir && !sourceLink) {
+    if (isPrimitiveMove(move) && srcIsDir && !sourceLink) {
       await beforeFullWalk(dispatch, src, 'mv')
     }
     // A cross-mount move removes the target first, and a pipe cannot be
@@ -618,7 +632,7 @@ export async function mvGeneric(
         errors.push(moveError(src, target, strerrorOf(err)))
         continue
       }
-    } else if (isPrimitiveMove(strategy)) {
+    } else if (isPrimitiveMove(move)) {
       if (targetErr === 'ENOENT') {
         // GNU's rename meets the absent parent before it falls back to a
         // copy across devices.
@@ -629,7 +643,7 @@ export async function mvGeneric(
         // GNU removes the target before it copies across devices, so an
         // empty directory there is made anew (-v: `created directory`).
         try {
-          await strategy.rmdir(target)
+          await move.rmdir(target)
         } catch (err) {
           if (!isFsError(err)) throw err
           errors.push(replaceError(src, target, strerrorOf(err), across))
@@ -639,8 +653,8 @@ export async function mvGeneric(
       // Across mounts GNU copies and then removes, and -v says so entry by
       // entry instead of `renamed` (coreutils 9.7).
       const verbose = flags.verbose ? lines : undefined
-      const entries = await walk(strategy.readdir, stat, src)
-      const copiedAll = await copyEntries('mv', strategy, stat, src, target, entries, errors, {
+      const entries = await walk(move.readdir, stat, src)
+      const copiedAll = await copyEntries('mv', move, stat, src, target, entries, errors, {
         copies,
         lines: verbose,
         rootBackup: made.backup,
@@ -648,15 +662,7 @@ export async function mvGeneric(
       // GNU keeps the whole source tree when any copy failed; the
       // destination keeps the entries that landed.
       if (!copiedAll) continue
-      const removedAll = await removeEntries(
-        strategy,
-        stat,
-        src,
-        entries,
-        errors,
-        verbose,
-        mountRoot,
-      )
+      const removedAll = await removeEntries(move, stat, src, entries, errors, verbose, mountRoot)
       // GNU leaves the copied destination in place and reports the source
       // entries it could not remove.
       if (!removedAll) continue
@@ -664,7 +670,7 @@ export async function mvGeneric(
       continue
     } else {
       try {
-        await strategy.rename(src, target)
+        await move.rename(src, target)
       } catch (err) {
         // A walk that moved what it listed found the source holding a child
         // written since: as in GNU's move across devices, the source is

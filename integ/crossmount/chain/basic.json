@@ -82,6 +82,20 @@
         "stderr": "ln: failed to create hard link '/workspace/workspace2/hl' => '/workspace/a.txt': Invalid cross-device link\ncp: cannot create hard link '/workspace/workspace2/cl' to '/workspace/a.txt': Invalid cross-device link\ncp: cannot create hard link '/another/sub/b.txt' to '/workspace/sub/b.txt': Invalid cross-device link\n"
       },
       "note": "coreutils 9.7 over tmpfs mounts: a hard link cannot leave its source's filesystem, and a nested mount is one. Within a mount the link is still the byte copy mirage makes for one."
+    },
+    {
+      "id": "chain_tree_l_draws_a_link_inside_an_aliased_directory",
+      "seq": 15601006,
+      "targets": [
+        "ram-chain"
+      ],
+      "command": "ln -s /another /workspace/workspace2/an && ln -s e.txt /another/le && tree -l /workspace; rm /workspace/workspace2/an /another/le",
+      "expect": {
+        "exit": 0,
+        "stdout": "/workspace\n|-- a.txt\n|-- sub\n|   `-- b.txt\n`-- workspace2\n    |-- an -> /another\n    |   |-- e.txt\n    |   |-- le -> e.txt\n    |   `-- sub\n    |       `-- f.txt\n    |-- c.txt\n    `-- deep\n        `-- d.txt\n\n6 directories, 7 files\n",
+        "stderr": ""
+      },
+      "note": "tree 2.2.1 over tmpfs mounts. A link reached through a linked directory below a crossed mount was drawn as what it leads to, `e.txt`."
     }
   ]
 }
