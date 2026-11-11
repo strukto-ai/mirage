@@ -132,13 +132,21 @@ Keep the base image's user, which has `sudo` for mountpoints such as
 
 ## The sandbox's lifetime
 
-The timeout you give the sandbox at creation, one hour above, is your
-deadline. Mirage never makes a sandbox, kills one or sets its timeout. Reaching a sandbox resumes it if it is paused and
-keeps it alive at least 5 more minutes, as any E2B connect does. Stopping or
-closing the workspace leaves the sandbox running.
+The timeout you give the sandbox at creation, one hour above, sets when it
+ends. Mirage never makes a sandbox, kills one or sets its timeout. Reaching a
+sandbox resumes it if it is paused and keeps it alive at least 5 more
+minutes, as any E2B connect does, so reaching it near the end moves the end
+back. Stopping or closing the workspace leaves the sandbox running.
 
-When the sandbox ends, create a new one from the same template, set the
-machine's `sandbox_id` to its ID, and create the workspace again.
+Once the sandbox has ended, a line exits 1, and its error names the fix:
+
+```text
+sandbox sb-123 is not running: it was killed or reached its timeout; create a new sandbox and set the machine's sandbox_id to it
+```
+
+A line that is running when the sandbox ends exits 129. Create a new sandbox
+from the same template, set the machine's `sandbox_id` to its ID, and create
+the workspace again.
 
 ## Notes
 
