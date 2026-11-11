@@ -723,25 +723,43 @@ export class WorkspaceRegistry {
    * owner and config stay, so the owner starting the same id later picks
    * them up. No new request reaches the stopping runner, and the id stays
    * reserved until it has stopped, so a start never loads state the old
-   * runner is still writing.
+   * runner is still writing. `then` runs once the runner has stopped, while
+   * the id is still reserved, so what it reads is never a start that landed
+   * after; a stop that joins one already in flight runs it once that ends.
    */
-  async stop(id: string): Promise<WorkspaceEntry> {
-    let removal = this.removals.get(id)
-    if (removal === undefined) {
-      const entry = this.entries.get(id)
-      if (entry === undefined) throw new Error(`workspace not found: ${id}`)
-      entry.acceptingJobs = false
-      this.entries.delete(id)
-      removal = this.shut(entry)
-      this.removals.set(id, removal)
+  async stop(id: string, then?: () => Promise<void>): Promise<WorkspaceEntry> {
+    const removal = this.removals.get(id)
+    if (removal !== undefined) {
+      const entry = await removal
+      if (then !== undefined) await then()
+      return entry
     }
-    return removal
+    const entry = this.entries.get(id)
+    if (entry === undefined) throw new Error(`workspace not found: ${id}`)
+    entry.acceptingJobs = false
+    this.entries.delete(id)
+    const shutting = this.shut(entry, then)
+    this.removals.set(id, shutting)
+    return shutting
   }
 
-  /** Run one stop, releasing the id once the runner has stopped. */
-  private async shut(entry: WorkspaceEntry): Promise<WorkspaceEntry> {
+  /**
+   * Run one stop, releasing the id once the runner has stopped and `then`
+   * has read what it needs. A `then` that fails is logged, so a delete
+   * joining this stop still sees it succeed.
+   */
+  private async shut(entry: WorkspaceEntry, then?: () => Promise<void>): Promise<WorkspaceEntry> {
     try {
       await stop(entry)
+      if (then !== undefined) {
+        try {
+          await then()
+        } catch (e) {
+          console.warn(
+            `mirage: workspace ${entry.id} stopped, but its stop could not read what it keeps: ${(e as Error).message}`,
+          )
+        }
+      }
     } finally {
       this.removals.delete(entry.id)
       if (this.entries.size === 0) this.startIdleTimer()

@@ -312,6 +312,53 @@ describe('WorkspaceRegistry accounts', () => {
     await r.closeAll()
   })
 
+  it('reads after the runner stops and before the id is released', async () => {
+    const r = new WorkspaceRegistry()
+    const entry = r.add(ram(), 'w')
+    let stopped = false
+    const stop = entry.runner.stop.bind(entry.runner)
+    vi.spyOn(entry.runner, 'stop').mockImplementation(async (options) => {
+      await stop(options)
+      stopped = true
+    })
+    let reading = (): void => undefined
+    const started = new Promise<void>((resolve) => {
+      reading = resolve
+    })
+    let read = (): void => undefined
+    const done = new Promise<void>((resolve) => {
+      read = resolve
+    })
+    const seen: boolean[] = []
+    const stopping = r.stop('w', async () => {
+      seen.push(stopped, r.removing('w'))
+      reading()
+      await done
+    })
+    await started
+    expect(seen).toEqual([true, true])
+    expect(() => r.add(ram(), 'w')).toThrow(/already exists/)
+    read()
+    expect(await stopping).toBe(entry)
+    expect(r.removing('w')).toBe(false)
+    await r.closeAll()
+  })
+
+  it('releases the id when the stop read fails', async () => {
+    const r = new WorkspaceRegistry()
+    const entry = r.add(ram(), 'w')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      expect(await r.stop('w', () => Promise.reject(new Error('store down')))).toBe(entry)
+      expect(r.removing('w')).toBe(false)
+      expect(warn).toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
+    r.add(ram(), 'w')
+    await r.closeAll()
+  })
+
   it('answers a live workspace only for records made since its creation', async () => {
     // A workspace created under a deleted one's id must not read the jobs
     // the deleted one left.
