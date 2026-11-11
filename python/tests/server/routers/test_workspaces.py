@@ -1791,6 +1791,7 @@ async def test_a_second_stop_answers_as_the_first(tmp_path):
             r = await client.post("/v1/workspaces/keep/stop")
             assert r.status_code == 200, r.text
             assert r.json()["id"] == "keep"
+            assert r.json()["stopped_at"].endswith("Z")
         listed = (await client.get("/v1/workspaces")).json()["items"]
         assert [(w["id"], w["status"]) for w in listed] == [
             ("keep", "stopped")

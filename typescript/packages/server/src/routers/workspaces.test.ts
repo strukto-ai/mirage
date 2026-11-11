@@ -1576,6 +1576,7 @@ describe('workspace cancel, kill, stop and start', () => {
         const r = await post(app, '/v1/workspaces/keep/stop')
         expect(r.statusCode).toBe(200)
         expect(r.json<{ id: string }>().id).toBe('keep')
+        expect(r.json<{ stopped_at: string }>().stopped_at).toMatch(/Z$/)
       }
       const listed = await app.inject({ method: 'GET', url: '/v1/workspaces' })
       expect(listed.json()).toMatchObject({ items: [{ id: 'keep', status: 'stopped' }] })

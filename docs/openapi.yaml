@@ -338,7 +338,7 @@ paths:
                 $ref: '#/components/schemas/StopWorkspaceResponse'
               example:
                 id: demo
-                closed_at: '2026-11-11T07:24:14.062Z'
+                stopped_at: '2026-11-11T07:24:14.062Z'
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -6825,15 +6825,15 @@ components:
         id:
           type: string
           title: Id
-        closed_at:
+        stopped_at:
           type: string
           format: date-time
-          title: Closed At
+          title: Stopped At
           description: When the workspace stopped.
       type: object
       required:
         - id
-        - closed_at
+        - stopped_at
       title: StopWorkspaceResponse
     StoreBlock:
       properties:

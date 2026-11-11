@@ -57,7 +57,7 @@ export interface WorkspaceInternals {
 
 export interface StopWorkspaceResponse {
   id: string
-  closed_at: Instant
+  stopped_at: Instant
 }
 
 export interface WorkspaceDetail {

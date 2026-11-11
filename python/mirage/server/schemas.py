@@ -147,7 +147,7 @@ class LoadWorkspaceRequest(BaseModel):
 
 class StopWorkspaceResponse(BaseModel):
     id: str
-    closed_at: Instant
+    stopped_at: Instant
 
 
 class CancelLinesResponse(BaseModel):
