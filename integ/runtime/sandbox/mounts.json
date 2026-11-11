@@ -35,6 +35,7 @@
     },
     {
       "id": "mount_type_ssh_leaves_the_box_its_own_tmp",
+      "sdk_only": "The case serves /served into the one shared docker box over sshfs; the CLI lanes of both hosts run beside the SDK drivers on that box, so it runs on the SDK pass only, serialized like the rest of sandbox/mounts.",
       "note": "/tmp is the box's own, as / and /dev are: a workspace /tmp is not served over it, a file a program writes there stays on the box, and a line run from the workspace's /tmp exits 126.",
       "runtimes": ["docker", "e2b", "microsandbox"],
       "requires": ["env:MIRAGE_INTEG_BOX_MOUNTS"],
