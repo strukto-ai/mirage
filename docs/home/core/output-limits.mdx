@@ -10,7 +10,7 @@ and `tail` return at most 2,000 lines by default, a line stops after 600
 seconds, a workspace holds at most 96 MB in memory, and a walk stops at its
 mount's `walk_limit`.
 
-## Set Limits
+## Set limits
 
 Set a workspace default for every session, a mount override for commands that
 run on that mount, or a profile override for sessions created with that profile.
@@ -70,7 +70,7 @@ captures use for theirs: `@all`, every command, and `@line`, the whole line. A
 YAML key that starts with `@` is quoted (`"@all":`). Any other `@` key, or `*`,
 is refused when the table is built.
 
-## Choose Which Limit Applies
+## Choose which limit applies
 
 Each field comes from the most specific entry that sets it: the session profile,
 the mount, then the workspace (each looked up by the command's name, then under
@@ -78,7 +78,7 @@ the mount, then the workspace (each looked up by the command's name, then under
 built-in default; a walk's `walk_limit` ends at the mount backend's default. An
 entry that sets one field inherits the rest.
 
-## Limit a Line's Time
+## Limit a line's time
 
 A line has one time limit: the `@line` entry's `timeout_seconds`, on the
 workspace or a profile (the profile's over the workspace's). It bounds the whole
@@ -100,7 +100,7 @@ workspace, mount or profile is built. To bound one command inside a line, use
 For commands spanning multiple mounts, Mirage applies the tightest resolved
 limit from those mounts.
 
-## Limit a Workspace's Memory
+## Limit a workspace's memory
 
 A workspace's `max_memory`, a [size](/home/configuration#sizes), bounds what it
 holds in memory: the files in its RAM mounts, and each object a command builds
@@ -131,7 +131,7 @@ when a capture or a `read` passes it, the line ends with `line: memory
 exhausted` and exit 1. A `python3` run raises `MemoryError`, and a `node` run
 gets `InternalError: out of memory`.
 
-## Handle a Reached Limit
+## Handle a reached limit
 
 - `max_lines` and `max_bytes` cap output. Use `None` in Python or `null` in
   TypeScript for no cap.

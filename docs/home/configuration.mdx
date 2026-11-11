@@ -64,6 +64,7 @@ not change it. See [From a template](/home/access/cli#from-a-template).
 | `system_time` | Start the workspace's clock at a set time, described [below](#system-time). |
 | `env` | Seed literal or managed environment variables, described below. |
 | `secrets` | Declare named [credential sources](/home/authentication). |
+| `machines` | Name the [machines](/home/setup/machine/overview) programs can run on. |
 | `cache`, `index` | Configure cached file content and directory/stat metadata, described [below](#cache-index-and-store). |
 | `store` | Configure workspace state, background jobs included, described [below](#cache-index-and-store). |
 | `io` | Set byte-queue capacity with `buffer_bytes`. |
@@ -314,18 +315,22 @@ moves one part to a backend of its own.
 
 | Key | Default | Purpose |
 | --- | --- | --- |
-| `root` | `~/.mirage/state` | Disk only. The state directory. |
+| `root` | `~/.mirage/state` | The state directory for `disk`. With `redis`, command logs are written here. |
 | `url`, `key_prefix` | `mirage:` | Redis only. |
 | `namespace` | unset | A separate store block for symlinks and file attributes. |
 | `observer` | unset | A separate store block for [command logs](/home/infrastructure/command-logs). |
 | `workspace` | unset | A separate store block for sessions and workspace metadata. |
 | `execution` | unset | A separate store block for background jobs: each session's job list and each job's output, the processes the workspace runs and which instance runs them. |
 
-A group block takes the same keys with `type` `ram`, `disk` or `redis`. Only
-`workspace` also accepts `s3`, which takes the [S3 config fields](/home/setup/s3)
-with `key_prefix` defaulting to `mirage/`. `execution` takes `ram` or `redis` only,
-and a `disk` store keeps its jobs in memory. Redis keeps a job's output for a
-day after its last write.
+A group block takes the same keys as `store`, and each group takes only the
+types that can hold it:
+
+- `namespace`: `ram`, `disk` or `redis`.
+- `workspace`: `ram`, `disk`, `redis` or `s3`. `s3` takes the
+  [S3 config fields](/home/setup/s3), with `key_prefix` defaulting to `mirage/`.
+- `observer`: `ram` or `disk`.
+- `execution`: `ram` or `redis`. A `disk` store keeps its jobs in memory, and
+  Redis keeps a job's output for a day after its last write.
 
 Processes that build one workspace on a shared store are instances of it,
 and one of them runs its lines at a time, as described in

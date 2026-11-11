@@ -51,7 +51,7 @@ Some bounds are fixed:
   control characters.
 - A command log read returns the newest 10,000 entries, and `/.bash_history` the
   newest 10,000 commands. A workspace that keeps its command logs in memory holds
-  at most 8 MB of it, and drops the oldest entries first.
+  at most 8 MB of logs, and drops the oldest entries first.
 - A line sends at most 1000 `vfs.<call>` spans to
   [OpenTelemetry](/home/infrastructure/tracing),
   or as many as `MIRAGE_TRACE_MAX_SPANS` says.
