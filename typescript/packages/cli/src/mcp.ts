@@ -35,10 +35,8 @@ async function hasSession(
     throw new Error(`error ${String(r.status)}: ${errorMessage(await r.text())}`)
   }
   const rows = ((await r.json()) as { items?: unknown } | null)?.items
-  return (
-    Array.isArray(rows) &&
-    rows.some((row) => (row as { session_id?: unknown }).session_id === sessionId)
-  )
+  if (!Array.isArray(rows)) throw new Error('the server answered no list')
+  return rows.some((row) => (row as { session_id?: unknown }).session_id === sessionId)
 }
 
 /**

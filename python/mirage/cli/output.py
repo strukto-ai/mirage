@@ -142,7 +142,7 @@ def handle_list(r: httpx.Response) -> list[Any]:
     if not isinstance(answer, dict) or not isinstance(
         answer.get("items"), list
     ):
-        fail("the server answered no list", 1)
+        fail("the server answered no list", 2)
     return cast(list[Any], answer["items"])
 
 

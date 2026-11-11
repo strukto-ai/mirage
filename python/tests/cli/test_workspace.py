@@ -446,7 +446,7 @@ def test_a_list_prints_the_items_it_was_answered(fake, args):
 def test_a_list_answered_without_items_fails(fake):
     fake.answer = _FakeResponse(200, b"[]")
     result = _invoke("list-lines", "-w", "w")
-    assert result.exit_code == 1
+    assert result.exit_code == 2
     assert "the server answered no list" in result.output
 
 

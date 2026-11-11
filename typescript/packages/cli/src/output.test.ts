@@ -12,8 +12,29 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { exitCodeFromResponse } from './output.ts'
+import { describe, expect, it, vi } from 'vitest'
+import { exitCodeFromResponse, handleList } from './output.ts'
+
+describe('handleList', () => {
+  it('reads the items of a list answer', async () => {
+    const r = new Response(JSON.stringify({ items: [{ id: 'a' }] }), { status: 200 })
+    expect(await handleList(r)).toEqual([{ id: 'a' }])
+  })
+
+  it('exits 2 on an answer without items', async () => {
+    const exit = vi.spyOn(process, 'exit').mockImplementation((code) => {
+      throw new Error(`exit ${String(code)}`)
+    })
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    try {
+      await expect(handleList(new Response('[]', { status: 200 }))).rejects.toThrow('exit 2')
+      expect(stderr).toHaveBeenCalledWith('the server answered no list\n')
+    } finally {
+      exit.mockRestore()
+      stderr.mockRestore()
+    }
+  })
+})
 
 describe('exitCodeFromResponse', () => {
   it.each([

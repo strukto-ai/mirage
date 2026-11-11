@@ -100,6 +100,34 @@ describe('mirage mcp over stdio', () => {
     }
   }, 60_000)
 
+  it('fails a session list without items and deletes its workspace', async () => {
+    const calls: string[] = []
+    const stub = createHttpServer((req, res) => {
+      calls.push(`${req.method ?? ''} ${req.url ?? ''}`)
+      const listed = req.method === 'GET' && req.url?.endsWith('/sessions') === true
+      res.writeHead(req.method === 'POST' ? 201 : 200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(listed ? [{ session_id: 'agent', cwd: '/' }] : { id: 'minted' }))
+    })
+    await new Promise<void>((resolve) => stub.listen(0, '127.0.0.1', resolve))
+    try {
+      const { port } = stub.address() as AddressInfo
+      const child = spawn(process.execPath, [BIN, 'mcp', writeConfig(), '-s', 'agent'], {
+        env: daemonEnv(port),
+      })
+      let stderr = ''
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderr += chunk.toString()
+      })
+      child.stdin.end()
+      const code = await new Promise<number | null>((resolve) => child.on('close', resolve))
+      expect(code).toBe(2)
+      expect(stderr).toBe('the server answered no list\n')
+      expect(calls).toContain('DELETE /v1/workspaces/minted')
+    } finally {
+      await new Promise((resolve) => stub.close(resolve))
+    }
+  }, 60_000)
+
   it('finds its session in the listed items and relays', async () => {
     const calls: string[] = []
     const stub = createHttpServer((req, res) => {
