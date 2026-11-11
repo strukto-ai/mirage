@@ -25,6 +25,7 @@ import { VERSION } from '../version.ts'
 // The ref grammar and the item reads are core's, shared with the
 // Worker's source; this half loads the SDK from the node install.
 export {
+  INTEGRATION_NAME,
   NOTES_KEY,
   OP_SCHEME,
   TOKEN_VAR,
