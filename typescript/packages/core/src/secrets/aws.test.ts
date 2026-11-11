@@ -14,7 +14,8 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { AWSSMConfig, fetchAwsSmSigned, sigv4 } from './aws.ts'
+import { fetchAwsSmSigned, sigv4 } from './aws.ts'
+import { AWSSMConfig } from './config.ts'
 import { SecretsError } from './errors.ts'
 
 // AWS's Signature Version 4 test suite: its example credentials, and the

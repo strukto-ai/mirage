@@ -12,15 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { z } from 'zod'
-
+import type { OnePasswordConfig } from './config.ts'
 import { SecretsError } from './errors.ts'
 import type { ResolvedSecret } from './types.ts'
 
-// The `1password` source's runtime-free half: its config, its ref
-// grammar and how an item becomes fields. Each runtime that can load
-// 1Password's SDK (node's own install, a Worker's bundled core) hands
-// in the client and reads through here.
+// The `1password` source's runtime-free half: its ref grammar, its
+// token and how an item becomes fields (its config is in config.ts, as
+// Python's is). Each runtime that can load 1Password's SDK (node's own
+// install, a Worker's bundled core) hands in the client and reads
+// through here.
 
 export const OP_SCHEME = 'op://'
 export const TOKEN_VAR = 'OP_SERVICE_ACCOUNT_TOKEN'
@@ -30,20 +30,6 @@ export const INTEGRATION_NAME = 'mirage'
 // an `ItemField`, so it is folded in under the name the ref grammar
 // gives it rather than being invisible to a `key`.
 export const NOTES_KEY = 'notesPlain'
-
-/**
- * 1Password source config: the service account token.
- *
- * Absent, the token falls back to `OP_SERVICE_ACCOUNT_TOKEN` in the
- * host process env, the variable 1Password's own CLI and SDKs read, so
- * a deployment with one account needs no config at all -- the same
- * shape `aws-sm` has, where an empty config reads the ambient AWS
- * settings.
- */
-export const OnePasswordConfig = z.strictObject({
-  token: z.string().optional(),
-})
-export type OnePasswordConfig = z.infer<typeof OnePasswordConfig>
 
 /** The item shape this source reads, as 1Password's SDK answers one. */
 export interface OnePasswordItem {
