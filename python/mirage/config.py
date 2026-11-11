@@ -267,15 +267,15 @@ class StoreBlock(BaseModel):
     """The workspace state store: one block, five planes.
 
     The top-level type/url/key_prefix pick the default backend for
-    every control-plane group (namespace nodes, observer events,
+    every control-plane group (namespace nodes, command logs,
     sessions + workspace metadata, execution). The optional per-group
     overrides redirect one group to a different backend, e.g. large
-    observer logs to a separate server. Sessions and workspace metadata
-    move together by design (the default-session pointer must live
-    beside the session table it points into), so there is one
-    `workspace` override, not two. An ``s3`` group hosts only the
+    command logs to a separate server (``logs``). Sessions and workspace
+    metadata move together by design (the default-session pointer must
+    live beside the session table it points into), so there is one
+    ``sessions`` override, not two. An ``s3`` group hosts only the
     sessions+meta group (conditional-PUT CAS), so it is valid as the
-    ``workspace`` override, never as the top-level default. A ``disk``
+    ``sessions`` override, never as the top-level default. A ``disk``
     store hosts the other planes under ``root`` (lockfile CAS,
     machine-local) and keeps jobs in memory, since a job's console is a
     stream other processes follow; ``root`` is only read when a disk
@@ -290,22 +290,42 @@ class StoreBlock(BaseModel):
     key_prefix: str = "mirage:"
     root: str = DEFAULT_STATE_ROOT
     namespace: StoreGroupBlock | None = None
-    observer: StoreGroupBlock | None = None
-    workspace: StoreGroupBlock | None = None
+    logs: StoreGroupBlock | None = None
+    sessions: StoreGroupBlock | None = None
     execution: StoreGroupBlock | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _renamed_groups(cls, data: Any) -> Any:
+        """Name the new key for a group block under its old name.
+
+        ``extra="forbid"`` would refuse ``observer`` and ``workspace`` as
+        unknown keys; the shared document check says what they became.
+
+        Args:
+            data (Any): the raw store block.
+
+        Raises:
+            ValueError: the block uses ``observer`` or ``workspace``.
+        """
+        if isinstance(data, dict) and (
+            "observer" in data or "workspace" in data
+        ):
+            validate_document("config", data, "store", names="store")
+        return data
+
     @model_validator(mode="after")
-    def _s3_hosts_only_the_workspace_group(self) -> "StoreBlock":
+    def _s3_hosts_only_the_sessions_group(self) -> "StoreBlock":
         """Refuse an override on a plane its store cannot host.
 
         The type alone permits it on any group, but ``S3WorkspaceStateStore``
-        raises when asked to build a namespace or observer plane, so
+        raises when asked to build a namespace or logs plane, so
         without this the config loads and the workspace fails to
         construct. History stays off Redis, and execution off disk.
 
         Raises:
-            ValueError: an s3 group was given for namespace, observer or
-                execution, redis for observer, or disk for execution.
+            ValueError: an s3 group was given for namespace, logs or
+                execution, redis for logs, or disk for execution.
         """
         validate_document("config", self.model_dump(), "store", names="store")
         return self
@@ -1085,14 +1105,10 @@ def _build_state_store(block: StoreBlock) -> WorkspaceStateStore:
         if block.namespace is not None
         else None
     )
-    observer = (
-        _build_store_group(block.observer)
-        if block.observer is not None
-        else None
-    )
-    workspace = (
-        _build_store_group(block.workspace)
-        if block.workspace is not None
+    logs = _build_store_group(block.logs) if block.logs is not None else None
+    sessions = (
+        _build_store_group(block.sessions)
+        if block.sessions is not None
         else None
     )
     execution = (
@@ -1106,22 +1122,22 @@ def _build_state_store(block: StoreBlock) -> WorkspaceStateStore:
             key_prefix=block.key_prefix,
             root=block.root,
             namespace=namespace,
-            observer=observer,
-            workspace=workspace,
+            logs=logs,
+            sessions=sessions,
             execution=execution,
         )
     if block.type == "disk":
         return DiskWorkspaceStateStore(
             root=block.root,
             namespace=namespace,
-            observer=observer,
-            workspace=workspace,
+            logs=logs,
+            sessions=sessions,
             execution=execution,
         )
     return RAMWorkspaceStateStore(
         namespace=namespace,
-        observer=observer,
-        workspace=workspace,
+        logs=logs,
+        sessions=sessions,
         execution=execution,
     )
 

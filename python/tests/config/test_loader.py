@@ -380,7 +380,7 @@ async def test_store_disk_group_override(tmp_path):
         {
             "store": {
                 "type": "ram",
-                "workspace": {
+                "sessions": {
                     "type": "disk",
                     "root": str(tmp_path),
                 },
@@ -388,7 +388,7 @@ async def test_store_disk_group_override(tmp_path):
             "mounts": {"/": {"vfs": "ram"}},
         }
     )
-    assert isinstance(cfg.store.workspace, DiskStoreBlock)
+    assert isinstance(cfg.store.sessions, DiskStoreBlock)
     store = cfg.to_workspace_kwargs()["store"]
     assert isinstance(store, RAMWorkspaceStateStore)
     assert isinstance(store.sessions("ws1"), RecordNamespaceStore)
@@ -400,7 +400,7 @@ async def test_store_group_override_redirects_one_plane(tmp_path):
         {
             "store": {
                 "type": "ram",
-                "observer": {"type": "disk", "root": str(tmp_path)},
+                "logs": {"type": "disk", "root": str(tmp_path)},
             },
             "mounts": {"/": {"vfs": "ram"}},
         }
@@ -412,10 +412,10 @@ async def test_store_group_override_redirects_one_plane(tmp_path):
 
 
 def test_history_is_never_on_redis():
-    with pytest.raises(ValueError, match="store.observer` cannot be redis"):
+    with pytest.raises(ValueError, match="store.logs` cannot be redis"):
         load_config(
             {
-                "store": {"type": "ram", "observer": {"type": "redis"}},
+                "store": {"type": "ram", "logs": {"type": "redis"}},
                 "mounts": {"/": {"vfs": "ram"}},
             }
         )
@@ -452,12 +452,12 @@ async def test_a_redis_store_keeps_history_on_disk_under_its_root(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_store_s3_workspace_group_builds_s3_provider():
+async def test_store_s3_sessions_group_builds_s3_provider():
     cfg = load_config(
         {
             "store": {
                 "type": "ram",
-                "workspace": {
+                "sessions": {
                     "type": "s3",
                     "bucket": "state-bucket",
                     "region": "us-east-1",
@@ -467,7 +467,7 @@ async def test_store_s3_workspace_group_builds_s3_provider():
             "mounts": {"/": {"vfs": "ram"}},
         }
     )
-    assert isinstance(cfg.store.workspace, S3StoreBlock)
+    assert isinstance(cfg.store.sessions, S3StoreBlock)
     store = cfg.to_workspace_kwargs()["store"]
     assert isinstance(store, RAMWorkspaceStateStore)
     assert isinstance(store.namespace("ws1"), RAMNamespaceStore)

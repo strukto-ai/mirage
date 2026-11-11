@@ -165,7 +165,7 @@
       },
       "value": {
         "namespace": {},
-        "workspace": {
+        "sessions": {
           "type": "s3",
           "bucket": "state",
           "default_content_type": "application/octet-stream"
@@ -174,14 +174,14 @@
       "expect": null
     },
     {
-      "id": "observer_cannot_use_redis",
+      "id": "logs_cannot_use_redis",
       "op": "config",
       "where": "store",
       "options": {
         "names": "store"
       },
       "value": {
-        "observer": {
+        "logs": {
           "type": "redis"
         }
       },
@@ -202,7 +202,7 @@
       "error": "cannot be disk"
     },
     {
-      "id": "s3_only_hosts_workspace",
+      "id": "s3_only_hosts_sessions",
       "op": "config",
       "where": "store",
       "options": {

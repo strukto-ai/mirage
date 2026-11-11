@@ -19,7 +19,7 @@ from mirage.workspace.store.ram import RAMWorkspaceStateStore
 
 def test_group_overrides_route_only_their_plane():
     observer_home = RAMWorkspaceStateStore()
-    base = RAMWorkspaceStateStore(observer=observer_home)
+    base = RAMWorkspaceStateStore(logs=observer_home)
     assert base.observer("ws") is observer_home.observer("ws")
     assert base.namespace("ws") is not observer_home.namespace("ws")
     assert base.sessions("ws") is not observer_home.sessions("ws")
@@ -27,14 +27,14 @@ def test_group_overrides_route_only_their_plane():
 
 def test_workspace_override_carries_sessions_and_meta_together():
     control = RAMWorkspaceStateStore()
-    base = RAMWorkspaceStateStore(workspace=control)
+    base = RAMWorkspaceStateStore(sessions=control)
     assert base.sessions("ws") is control.sessions("ws")
 
 
 @pytest.mark.asyncio
 async def test_workspace_override_meta_lands_on_override():
     control = RAMWorkspaceStateStore()
-    base = RAMWorkspaceStateStore(workspace=control)
+    base = RAMWorkspaceStateStore(sessions=control)
     await base.cas_set_meta("ws", {"workspace_id": "ws", "created_at": 1.0}, 0)
     assert await control.load_meta("ws") == {
         "workspace_id": "ws",
@@ -51,7 +51,7 @@ async def test_close_closes_overrides_too():
         async def _close(self) -> None:
             closed.append("probe")
 
-    base = RAMWorkspaceStateStore(observer=_Probe())
+    base = RAMWorkspaceStateStore(logs=_Probe())
     await base.close()
     assert closed == ["probe"]
 
@@ -65,7 +65,7 @@ async def test_close_is_idempotent_and_deduplicates_overrides():
             closed.append("probe")
 
     probe = _Probe()
-    base = RAMWorkspaceStateStore(namespace=probe, observer=probe)
+    base = RAMWorkspaceStateStore(namespace=probe, logs=probe)
     await base.close()
     await base.close()
     assert closed == ["probe"]
@@ -90,7 +90,7 @@ async def _held(store, workspace_id):
 
 @pytest.mark.asyncio
 async def test_drop_deletes_one_workspace_from_every_plane_and_provider():
-    store = RAMWorkspaceStateStore(observer=RAMWorkspaceStateStore())
+    store = RAMWorkspaceStateStore(logs=RAMWorkspaceStateStore())
     await _fill(store, "ws1")
     await _fill(store, "ws2")
     await store.drop("ws1")

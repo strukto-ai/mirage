@@ -275,8 +275,8 @@ function buildStateStore(block: StoreBlock | null | undefined): WorkspaceStateSt
   if (block === null || block === undefined) return undefined
   const overrides = {
     ...(block.namespace != null ? { namespace: buildStoreGroup(block.namespace) } : {}),
-    ...(block.observer != null ? { observer: buildStoreGroup(block.observer) } : {}),
-    ...(block.workspace != null ? { workspace: buildStoreGroup(block.workspace) } : {}),
+    ...(block.logs != null ? { logs: buildStoreGroup(block.logs) } : {}),
+    ...(block.sessions != null ? { sessions: buildStoreGroup(block.sessions) } : {}),
     ...(block.execution != null ? { execution: buildStoreGroup(block.execution) } : {}),
   }
   if (block.type === 'redis') {

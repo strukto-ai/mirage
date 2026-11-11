@@ -385,7 +385,7 @@ fn typed_fields(raw: &Doc, kind: &str, at: &str) -> Result<(), String> {
     }
     raw.mapping(&format!("config `{at}`"))?;
     let known: &[&str] = match (kind, at) {
-        ("store_group", "store.workspace") => &["ram", "disk", "redis", "s3"],
+        ("store_group", "store.sessions") => &["ram", "disk", "redis", "s3"],
         ("store_group", _) => &["ram", "disk", "redis"],
         _ => &["ram", "redis"],
     };
@@ -457,6 +457,13 @@ fn store(raw: &Doc) -> Result<(), String> {
             ));
         }
     }
+    for (old, new) in [("observer", "logs"), ("workspace", "sessions")] {
+        if !matches!(raw.get(old), Doc::Null) {
+            return Err(format!(
+                "config `store.{old}` is now `store.{new}`; rename the key"
+            ));
+        }
+    }
     config_fields(
         raw,
         &[
@@ -465,26 +472,26 @@ fn store(raw: &Doc) -> Result<(), String> {
             "key_prefix",
             "root",
             "namespace",
-            "observer",
-            "workspace",
+            "logs",
+            "sessions",
             "execution",
         ],
         "store",
     )?;
-    for group in ["namespace", "observer", "workspace", "execution"] {
+    for group in ["namespace", "logs", "sessions", "execution"] {
         let block = raw.get(group);
         if matches!(block, Doc::Null) {
             continue;
         }
         let at = format!("store.{group}");
         block.mapping(&format!("config `{at}`"))?;
-        if block.get("type").named("s3") && group != "workspace" {
+        if block.get("type").named("s3") && group != "sessions" {
             return Err(format!(
-                "config `{at}` cannot be s3: the s3 store hosts only the sessions+meta group; keep the {group} plane on ram or redis and pass the s3 store as the 'workspace' group override"
+                "config `{at}` cannot be s3: the s3 store hosts only the sessions group; keep the {group} plane on another store and put the s3 store under `store.sessions`"
             ));
         }
-        if group == "observer" && block.get("type").named("redis") {
-            return Err("config `store.observer` cannot be redis: history only grows; keep it on ram or disk".into());
+        if group == "logs" && block.get("type").named("redis") {
+            return Err("config `store.logs` cannot be redis: history only grows; keep it on ram or disk".into());
         }
         if group == "execution" && block.get("type").named("disk") {
             return Err("config `store.execution` cannot be disk: a job's console is a stream other processes follow; keep the execution plane on ram or redis".into());
@@ -776,7 +783,7 @@ mod tests {
             ("type", Doc::text("s3")),
             ("bucket", Doc::text("state")),
         ]);
-        assert!(store(&object(vec![("workspace", s3.clone())])).is_ok());
+        assert!(store(&object(vec![("sessions", s3.clone())])).is_ok());
         assert!(
             store(&object(vec![("namespace", s3)]))
                 .unwrap_err()
@@ -792,11 +799,27 @@ mod tests {
         );
         assert!(
             store(&object(vec![(
-                "observer",
+                "logs",
                 object(vec![("type", Doc::text("redis"))])
             )]))
             .unwrap_err()
             .contains("cannot be redis")
+        );
+        assert!(
+            store(&object(vec![(
+                "observer",
+                object(vec![("type", Doc::text("disk"))])
+            )]))
+            .unwrap_err()
+            .contains("`store.observer` is now `store.logs`")
+        );
+        assert!(
+            store(&object(vec![(
+                "workspace",
+                object(vec![("type", Doc::text("disk"))])
+            )]))
+            .unwrap_err()
+            .contains("`store.workspace` is now `store.sessions`")
         );
         assert!(
             store(&object(vec![(

@@ -120,7 +120,7 @@ export class Workspace extends CoreWorkspace {
 /** A workspace's state lives in memory: the host has no disk and no store client. */
 function buildStateStore(block: StoreBlock | null | undefined): WorkspaceStateStore | undefined {
   if (block === null || block === undefined) return undefined
-  const groups = [block.namespace, block.observer, block.workspace, block.execution]
+  const groups = [block.namespace, block.logs, block.sessions, block.execution]
   if ((block.type ?? 'ram') !== 'ram' || groups.some((g) => g != null && g.type !== 'ram')) {
     throw new VFSConfigError('an edge host keeps workspace state in memory; store.type must be ram')
   }

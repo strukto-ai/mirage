@@ -318,17 +318,17 @@ moves one part to a backend of its own.
 | `root` | `~/.mirage/state` | The state directory for `disk`. With `redis`, command logs are written here. |
 | `url`, `key_prefix` | `mirage:` | Redis only. |
 | `namespace` | unset | A separate store block for symlinks and file attributes. |
-| `observer` | unset | A separate store block for [command logs](/home/infrastructure/command-logs). |
-| `workspace` | unset | A separate store block for sessions and workspace metadata. |
+| `logs` | unset | A separate store block for [command logs](/home/infrastructure/command-logs). |
+| `sessions` | unset | A separate store block for sessions and workspace metadata. |
 | `execution` | unset | A separate store block for background jobs: each session's job list and each job's output, the processes the workspace runs and which instance runs them. |
 
 A group block takes the same keys as `store`, and each group takes only the
 types that can hold it:
 
 - `namespace`: `ram`, `disk` or `redis`.
-- `workspace`: `ram`, `disk`, `redis` or `s3`. `s3` takes the
+- `sessions`: `ram`, `disk`, `redis` or `s3`. `s3` takes the
   [S3 config fields](/home/setup/s3), with `key_prefix` defaulting to `mirage/`.
-- `observer`: `ram` or `disk`.
+- `logs`: `ram` or `disk`.
 - `execution`: `ram` or `redis`. A `disk` store keeps its jobs in memory, and
   Redis keeps a job's output for a day after its last write.
 
@@ -342,7 +342,7 @@ TypeScript.
 store:
   type: redis
   url: redis://localhost:6379/0
-  workspace:
+  sessions:
     type: s3
     bucket: my-mirage-state
 ```

@@ -26,10 +26,10 @@ const REDIS_URL = process.env.REDIS_URL
 const skip = REDIS_URL === undefined
 
 function makeStore(prefix: string): RedisWorkspaceStateStore {
-  const observer = new RAMWorkspaceStateStore()
+  const logs = new RAMWorkspaceStateStore()
   return REDIS_URL !== undefined
-    ? new RedisWorkspaceStateStore({ url: REDIS_URL, keyPrefix: prefix, observer })
-    : new RedisWorkspaceStateStore({ keyPrefix: prefix, observer })
+    ? new RedisWorkspaceStateStore({ url: REDIS_URL, keyPrefix: prefix, logs })
+    : new RedisWorkspaceStateStore({ keyPrefix: prefix, logs })
 }
 
 function testPrefix(): string {

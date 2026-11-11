@@ -56,21 +56,21 @@ export class S3WorkspaceStateStore extends WorkspaceStateStore {
   protected makeNamespace(_workspaceId: string): NamespaceStore {
     throw new Error(
       'The s3 store hosts only the sessions+meta group; keep the namespace ' +
-        "plane on RAM or Redis and pass the s3 store as the 'workspace' group override.",
+        "plane on RAM or Redis and pass the s3 store as the 'sessions' group override.",
     )
   }
 
   protected makeObserver(_workspaceId: string): ObserverStore {
     throw new Error(
-      'The s3 store hosts only the sessions+meta group; keep the observer ' +
-        "plane on RAM or Redis and pass the s3 store as the 'workspace' group override.",
+      'The s3 store hosts only the sessions+meta group; keep the logs ' +
+        "plane on RAM or disk and pass the s3 store as the 'sessions' group override.",
     )
   }
 
   protected makeExecution(_workspaceId: string): ExecutionStore {
     throw new Error(
       'The s3 store hosts only the sessions+meta group; keep the execution ' +
-        "plane on RAM or Redis and pass the s3 store as the 'workspace' group override.",
+        "plane on RAM or Redis and pass the s3 store as the 'sessions' group override.",
     )
   }
 
