@@ -20,31 +20,40 @@ import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 
 const LIMIT = 64 * 1024 * 1024
+const WRANGLER = fileURLToPath(new URL('../node_modules/.bin/wrangler', import.meta.url))
+const path = (relative: string) => fileURLToPath(new URL(relative, import.meta.url))
 let outdir: string
 let files: Map<string, number>
 
-beforeAll(() => {
-  outdir = mkdtempSync(join(tmpdir(), 'mirage-cloudflare-bundle-'))
-  const wrangler = fileURLToPath(new URL('../node_modules/.bin/wrangler', import.meta.url))
+/** Each file a dry run of `config` would upload, by size, given extra `args`. */
+function dryRun(into: string, config: string, args: readonly string[]): Map<string, number> {
   execFileSync(
-    wrangler,
+    WRANGLER,
     [
       'deploy',
       '--dry-run',
       '--outdir',
-      outdir,
+      into,
       '--config',
-      fileURLToPath(new URL('./wrangler.toml', import.meta.url)),
+      path(config),
       '--alias',
-      `cpu-features:${fileURLToPath(new URL('../src/cpu_features.ts', import.meta.url))}`,
+      `cpu-features:${path('../src/cpu_features.ts')}`,
+      ...args,
     ],
     { stdio: 'pipe', env: { ...process.env, WRANGLER_SEND_METRICS: 'false' } },
   )
-  files = new Map(
-    readdirSync(outdir)
+  return new Map(
+    readdirSync(into)
       .filter((name) => !name.endsWith('.map'))
-      .map((name) => [name, statSync(join(outdir, name)).size]),
+      .map((name) => [name, statSync(join(into, name)).size]),
   )
+}
+
+const total = (sizes: Map<string, number>) => [...sizes.values()].reduce((sum, n) => sum + n, 0)
+
+beforeAll(() => {
+  outdir = mkdtempSync(join(tmpdir(), 'mirage-cloudflare-bundle-'))
+  files = dryRun(outdir, './wrangler.toml', [])
 }, 120_000)
 
 afterAll(() => {
@@ -52,9 +61,25 @@ afterAll(() => {
 })
 
 it('fits the upload limit', () => {
-  const total = [...files.values()].reduce((sum, size) => sum + size, 0)
-  expect(total).toBeLessThan(LIMIT)
+  expect(total(files)).toBeLessThan(LIMIT)
 })
+
+// The `1password` source's core takes a Worker that also carries the
+// rest past the limit unminified, so the quickstart sets `minify`.
+it('fits the upload limit with the 1password source, minified', () => {
+  const into = mkdtempSync(join(tmpdir(), 'mirage-cloudflare-bundle-1password-'))
+  try {
+    const sizes = dryRun(into, './bundle_onepassword.toml', [
+      '--minify',
+      '--alias',
+      `@1password/sdk-core:${path('../src/generated/onepassword_core.js')}`,
+    ])
+    expect([...sizes.keys()].some((name) => name.endsWith('onepassword_core.wasm'))).toBe(true)
+    expect(total(sizes)).toBeLessThan(LIMIT)
+  } finally {
+    rmSync(into, { recursive: true, force: true })
+  }
+}, 180_000)
 
 it('loads the Rust modules as .wasm files, with no base64 copy in the script', () => {
   for (const module of ['mirage_rs.wasm', 'mirage_shell.wasm', 'mirage_gh.wasm']) {

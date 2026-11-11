@@ -67,13 +67,17 @@ A [pointer](/home/authentication) reads `aws-sm` in a Worker as it does on the s
 
 `aws-sm` is registered when the package loads. The Worker signs each `GetSecretValue` itself, and has no AWS credentials file or default chain to fall back on, so the source's config gives `region`, `aws_access_key_id` and `aws_secret_access_key`, with `aws_session_token` for temporary keys. `aws_profile` is refused.
 
-`1password` runs 1Password's SDK, whose core is about 13 MiB of WebAssembly, so it is its own import. Install the SDK version the package is built against, and alias its core to the package's build of it, which loads the WebAssembly as a module:
+There is no `env` source in a Worker: the Worker's environment holds its own secrets, which any workspace config naming `env` could read. Give a source's keys from your Worker's code, which reads them from its bindings.
+
+`1password` runs 1Password's SDK, whose core is about 13 MiB of WebAssembly, so it is its own import. Install the SDK version the package is built against, and alias its core to the package's build of it, which loads the WebAssembly as a module. With the core, the Worker is past Cloudflare's 64 MiB limit unless it is minified:
 
 ```bash
 npm install @1password/sdk@0.5.0
 ```
 
 ```toml wrangler.toml
+minify = true
+
 [alias]
 "cpu-features" = "@struktoai/mirage-cloudflare/cpu_features"
 "@1password/sdk-core" = "@struktoai/mirage-cloudflare/onepassword_core"

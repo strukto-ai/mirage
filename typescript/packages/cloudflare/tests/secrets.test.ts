@@ -78,6 +78,7 @@ it.skipIf(AWS_SECRET === undefined || process.env.AWS_ACCESS_KEY_ID === undefine
         region: process.env.AWS_DEFAULT_REGION ?? process.env.AWS_REGION,
         aws_access_key_id: process.env.AWS_ACCESS_KEY_ID,
         aws_secret_access_key: process.env.AWS_SECRET_ACCESS_KEY,
+        aws_session_token: process.env.AWS_SESSION_TOKEN,
       },
       AWS_SECRET ?? '',
     )
