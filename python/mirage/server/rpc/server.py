@@ -32,6 +32,7 @@ from mirage.server.inflight import InFlight
 from mirage.server.io_serde import (
     CallArgsError,
     answered,
+    body_of,
     checked,
     explanation_to_dict,
     io_result_to_dict,
@@ -446,7 +447,11 @@ class MirageRpcServer:
             )
         except CallArgsError as exc:
             raise RpcError(RPC_INVALID_PARAMS, str(exc)) from exc
-        return await self.hop(answered(self._session, call, args, explain))
+        return body_of(
+            call,
+            await self.hop(answered(self._session, call, args, explain)),
+            explain,
+        )
 
     async def _tool(self, name: str, params: Params) -> JsonValue:
         return await self._tools_call(

@@ -95,11 +95,9 @@ describe('vfs answers', () => {
       const base = `/v1/workspaces/${created.json<{ id: string }>().id}/vfs`
       const post = (url: string, payload: unknown) =>
         app.inject({ method: 'POST', url: base + url, payload: payload as object })
-      expect((await post('/write', { path: '/a', data: 'aGkK' })).json()).toEqual({
-        data: null,
-      })
-      const listed = (await post('/list_files', { path: '/' })).json<{ data: string[] }>()
-      expect(listed.data).toContain('a')
+      expect((await post('/write', { path: '/a', data: 'aGkK' })).json()).toEqual({})
+      const listed = (await post('/list_files', { path: '/' })).json<{ items: string[] }>()
+      expect(listed.items).toContain('a')
       const said = (await post('/unlink?explain=true', { path: '/a' })).json<{
         explanation: { call: string; outcome: string }
       }>()
@@ -217,7 +215,7 @@ it('keeps the session gate for custom functions and streamed reads', async () =>
       payload: { path: '/data/visible' },
     })
     expect(reply.statusCode, reply.body).toBe(200)
-    expect(reply.json()).toEqual({ data: '/data/visible' })
+    expect(reply.json()).toEqual({ value: '/data/visible' })
     reply = await app.inject({
       method: 'POST',
       url: base + '/peek?session_id=agent',
@@ -231,7 +229,7 @@ it('keeps the session gate for custom functions and streamed reads', async () =>
       payload: { path: '/data/visible' },
     })
     expect(reply.statusCode, reply.body).toBe(200)
-    expect(reply.json()).toEqual({ data: null })
+    expect(reply.json()).toEqual({ value: null })
     expect(backend.calls).toBe(2)
     for (const reserved of ['session_id', 'report', 'admit_only', 'retained', 'stream']) {
       reply = await app.inject({

@@ -250,12 +250,21 @@ export async function answered(
 }
 
 /**
- * A VFS call's answer as the HTTP routes and the MCP tools carry it: one
- * object, whose `data` is what the call returned, or whose `explanation`
- * is what it would do. Mirrors Python's `body_of`.
+ * A VFS call's answer as every entry point carries it: one object. An
+ * explanation travels under `explanation`, a call's answer under its `key`,
+ * a call with no key answers `{}`, and a custom function's answer travels
+ * under `value`. `call` is undefined for a custom function. Mirrors
+ * Python's `body_of`.
  */
-export function bodyOf(value: JsonValue, explain = false): Record<string, JsonValue> {
-  return explain ? { explanation: value } : { data: value }
+export function bodyOf(
+  call: VfsCall | undefined,
+  value: JsonValue,
+  explain = false,
+): Record<string, JsonValue> {
+  if (explain) return { explanation: value }
+  if (call === undefined) return { value }
+  if (call.key === undefined) return {}
+  return { [call.key]: value }
 }
 
 /** Validate a remote function call without accepting host context overrides. */

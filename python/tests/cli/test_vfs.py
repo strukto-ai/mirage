@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
+
 import pytest
 from typer.testing import CliRunner
 
@@ -22,10 +24,13 @@ from mirage.cli.env import ENV_WORKSPACE
 
 class _FakeResponse:
     status_code = 200
-    content = b'{"data": ["/a.py"]}'
 
-    def json(self) -> dict[str, list[str]]:
-        return {"data": ["/a.py"]}
+    def __init__(self, body: dict[str, str | list[str]]) -> None:
+        self.body = body
+        self.content = json.dumps(body).encode()
+
+    def json(self) -> dict[str, str | list[str]]:
+        return self.body
 
 
 class _FakeClient:
@@ -43,7 +48,9 @@ class _FakeClient:
 
     def request(self, method, path, json=None, params=None):
         self.calls.append((method, path, json))
-        return _FakeResponse()
+        if path.endswith("/vfs/read"):
+            return _FakeResponse({"data": "aGkK"})
+        return _FakeResponse({"items": ["/a.py"]})
 
     def stream(self, method, path, json=None, params=None):
         self.calls.append((method, path, json))
@@ -81,7 +88,7 @@ def test_a_call_runs_under_workspace_vfs(fake):
         main_cli.app, ["workspace", "vfs", "readdir", "/data", "-w", "demo"]
     )
     assert result.exit_code == 0, result.output
-    assert "/a.py" in result.stdout and '"data"' not in result.stdout
+    assert "/a.py" in result.stdout and '"items"' not in result.stdout
     assert fake.calls == [
         ("POST", "/v1/workspaces/demo/vfs/readdir", {"path": "/data"})
     ]

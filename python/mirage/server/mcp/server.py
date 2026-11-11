@@ -294,6 +294,7 @@ class MirageMcpServer:
                 call = VFS_TOOLS[params.name][1]
                 return _json(
                     body_of(
+                        call,
                         await self.hop(
                             answered(
                                 self._session,

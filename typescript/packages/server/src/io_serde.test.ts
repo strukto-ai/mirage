@@ -162,8 +162,13 @@ describe('checked and answered', () => {
   })
 
   it('answers a call as one object', () => {
-    expect(bodyOf(null)).toEqual({ data: null })
-    expect(bodyOf(['/a'])).toEqual({ data: ['/a'] })
-    expect(bodyOf({ outcome: 'allow' }, true)).toEqual({ explanation: { outcome: 'allow' } })
+    expect(bodyOf(byName('write'), null)).toEqual({})
+    expect(bodyOf(byName('list_files'), ['a'])).toEqual({ items: ['a'] })
+    expect(bodyOf(byName('stat'), { name: 'a' })).toEqual({ entry: { name: 'a' } })
+    expect(bodyOf(byName('exists'), false)).toEqual({ exists: false })
+    expect(bodyOf(undefined, '/a')).toEqual({ value: '/a' })
+    expect(bodyOf(byName('write'), { outcome: 'allow' }, true)).toEqual({
+      explanation: { outcome: 'allow' },
+    })
   })
 })

@@ -275,16 +275,26 @@ async def answered(
     return _to_json(result)
 
 
-def body_of(value: JsonValue, explain: bool = False) -> dict[str, JsonValue]:
-    """A VFS call's answer as the HTTP routes and the MCP tools carry it:
-    one object, whose ``data`` is what the call returned, or whose
-    ``explanation`` is what it would do.
+def body_of(
+    call: VfsCall | None, value: JsonValue, explain: bool = False
+) -> dict[str, JsonValue]:
+    """A VFS call's answer as every entry point carries it: one object.
+    An explanation travels under ``explanation``, a call's answer under
+    its ``key``, a call with no key answers ``{}``, and a custom
+    function's answer travels under ``value``.
 
     Args:
+        call (VfsCall | None): the call; None for a custom function.
         value (JsonValue): the call's answer, as :func:`answered` gives it.
         explain (bool): the answer is an explanation.
     """
-    return {"explanation" if explain else "data": value}
+    if explain:
+        return {"explanation": value}
+    if call is None:
+        return {"value": value}
+    if call.key is None:
+        return {}
+    return {call.key: value}
 
 
 def custom_args(

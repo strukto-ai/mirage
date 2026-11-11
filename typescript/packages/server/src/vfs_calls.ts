@@ -45,6 +45,8 @@ export interface VfsCall {
   readonly required: readonly string[]
   /** The call on `session.vfs`, or on `session.explain.vfs`. */
   readonly run: (target: Files | VfsExplainer, a: Args) => Promise<unknown>
+  /** The key its answer travels under, as `{key: value}`; none when it answers nothing, as `{}`. */
+  readonly key?: string
 }
 
 function row(
@@ -53,8 +55,11 @@ function row(
   params: Readonly<Record<string, Schema>>,
   required: readonly string[],
   run: VfsCall['run'],
+  key?: string,
 ): VfsCall {
-  return { name, description, params, required, run }
+  return key === undefined
+    ? { name, description, params, required, run }
+    : { name, description, params, required, run, key }
 }
 
 const str = (a: Args, key: string): string => a[key] as string
@@ -91,6 +96,7 @@ export const VFS_CALLS: readonly VfsCall[] = [
         size: (a.size as number | null | undefined) ?? null,
         raw: a.raw === true,
       }),
+    'data',
   ),
   row(
     'write',
@@ -109,23 +115,56 @@ export const VFS_CALLS: readonly VfsCall[] = [
     ['path', 'data', 'offset'],
     (t, a) => t.pwrite(str(a, 'path'), bin(a, 'data'), int(a, 'offset')),
   ),
-  row('stat', "A path's metadata.", { path: PATH, nofollow: FLAG }, ['path'], (t, a) =>
-    'sessionId' in t
-      ? t.stat(str(a, 'path'), undefined, nofollow(a))
-      : t.stat(str(a, 'path'), nofollow(a)),
+  row(
+    'stat',
+    "A path's metadata.",
+    { path: PATH, nofollow: FLAG },
+    ['path'],
+    (t, a) =>
+      'sessionId' in t
+        ? t.stat(str(a, 'path'), undefined, nofollow(a))
+        : t.stat(str(a, 'path'), nofollow(a)),
+    'entry',
   ),
-  row('readdir', "A directory's entries.", PATH_ONLY, ['path'], (t, a) =>
-    t.readdir(str(a, 'path')),
+  row(
+    'readdir',
+    "A directory's entries.",
+    PATH_ONLY,
+    ['path'],
+    (t, a) => t.readdir(str(a, 'path')),
+    'items',
   ),
-  row('exists', 'Whether a path exists.', PATH_ONLY, ['path'], (t, a) => t.exists(str(a, 'path'))),
-  row('is_dir', 'Whether a path is a directory.', PATH_ONLY, ['path'], (t, a) =>
-    t.isDir(str(a, 'path')),
+  row(
+    'exists',
+    'Whether a path exists.',
+    PATH_ONLY,
+    ['path'],
+    (t, a) => t.exists(str(a, 'path')),
+    'exists',
   ),
-  row('is_file', 'Whether a path is a file.', PATH_ONLY, ['path'], (t, a) =>
-    t.isFile(str(a, 'path')),
+  row(
+    'is_dir',
+    'Whether a path is a directory.',
+    PATH_ONLY,
+    ['path'],
+    (t, a) => t.isDir(str(a, 'path')),
+    'is_dir',
   ),
-  row('list_files', "The names of a directory's files.", PATH_ONLY, ['path'], (t, a) =>
-    t.listFiles(str(a, 'path')),
+  row(
+    'is_file',
+    'Whether a path is a file.',
+    PATH_ONLY,
+    ['path'],
+    (t, a) => t.isFile(str(a, 'path')),
+    'is_file',
+  ),
+  row(
+    'list_files',
+    "The names of a directory's files.",
+    PATH_ONLY,
+    ['path'],
+    (t, a) => t.listFiles(str(a, 'path')),
+    'items',
   ),
   row('mkdir', 'Make a directory.', PATH_ONLY, ['path'], (t, a) => t.mkdir(str(a, 'path'))),
   row('rmdir', 'Remove an empty directory.', PATH_ONLY, ['path'], (t, a) =>
@@ -147,8 +186,13 @@ export const VFS_CALLS: readonly VfsCall[] = [
     ['path', 'target'],
     (t, a) => t.symlink(str(a, 'path'), str(a, 'target')),
   ),
-  row('readlink', 'Where a symbolic link points.', PATH_ONLY, ['path'], (t, a) =>
-    t.readlink(str(a, 'path')),
+  row(
+    'readlink',
+    'Where a symbolic link points.',
+    PATH_ONLY,
+    ['path'],
+    (t, a) => t.readlink(str(a, 'path')),
+    'target',
   ),
   row(
     'setattr',
@@ -156,6 +200,7 @@ export const VFS_CALLS: readonly VfsCall[] = [
     { path: PATH, mode: INTEGER, uid: OWNER, gid: OWNER, atime: TEXT, mtime: TEXT, nofollow: FLAG },
     ['path'],
     (t, a) => t.setattr(str(a, 'path'), attrs(a)),
+    'stored',
   ),
   row(
     'getxattr',
@@ -163,6 +208,7 @@ export const VFS_CALLS: readonly VfsCall[] = [
     { path: PATH, name: TEXT, nofollow: FLAG },
     ['path', 'name'],
     (t, a) => t.getxattr(str(a, 'path'), str(a, 'name'), nofollow(a)),
+    'data',
   ),
   row(
     'listxattr',
@@ -170,6 +216,7 @@ export const VFS_CALLS: readonly VfsCall[] = [
     { path: PATH, nofollow: FLAG },
     ['path'],
     (t, a) => t.listxattr(str(a, 'path'), nofollow(a)),
+    'items',
   ),
   row(
     'setxattr',

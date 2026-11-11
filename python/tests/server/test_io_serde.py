@@ -131,8 +131,12 @@ def test_arguments_outside_the_schema_are_refused():
 
 
 def test_a_call_answers_one_object():
-    assert body_of(None) == {"data": None}
-    assert body_of(["/a"]) == {"data": ["/a"]}
-    assert body_of({"outcome": "allow"}, explain=True) == {
+    calls = VFS_CALL_BY_NAME
+    assert body_of(calls["write"], None) == {}
+    assert body_of(calls["list_files"], ["a"]) == {"items": ["a"]}
+    assert body_of(calls["stat"], {"name": "a"}) == {"entry": {"name": "a"}}
+    assert body_of(calls["exists"], False) == {"exists": False}
+    assert body_of(None, "/a") == {"value": "/a"}
+    assert body_of(calls["write"], {"outcome": "allow"}, explain=True) == {
         "explanation": {"outcome": "allow"}
     }

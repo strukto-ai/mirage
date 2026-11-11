@@ -44,12 +44,15 @@ class VfsCall:
         params (Mapping[str, Schema]): each argument's JSON schema, in
             the order the call takes them.
         required (tuple[str, ...]): the arguments it cannot do without.
+        key (str | None): the key its answer travels under, as
+            ``{key: value}``; None when it answers nothing, as ``{}``.
     """
 
     name: str
     description: str
     params: Mapping[str, Schema]
     required: tuple[str, ...]
+    key: str | None = None
 
 
 VFS_CALLS: tuple[VfsCall, ...] = (
@@ -58,6 +61,7 @@ VFS_CALLS: tuple[VfsCall, ...] = (
         "Read a file's bytes, from an offset.",
         {"path": PATH, "offset": INTEGER, "size": SIZE, "raw": FLAG},
         ("path",),
+        key="data",
     ),
     VfsCall(
         "write",
@@ -82,31 +86,42 @@ VFS_CALLS: tuple[VfsCall, ...] = (
         "A path's metadata.",
         {"path": PATH, "nofollow": FLAG},
         ("path",),
+        key="entry",
     ),
     VfsCall(
         "readdir",
         "A directory's entries.",
         PATH_ONLY,
         ("path",),
+        key="items",
     ),
-    VfsCall("exists", "Whether a path exists.", PATH_ONLY, ("path",)),
+    VfsCall(
+        "exists",
+        "Whether a path exists.",
+        PATH_ONLY,
+        ("path",),
+        key="exists",
+    ),
     VfsCall(
         "is_dir",
         "Whether a path is a directory.",
         PATH_ONLY,
         ("path",),
+        key="is_dir",
     ),
     VfsCall(
         "is_file",
         "Whether a path is a file.",
         PATH_ONLY,
         ("path",),
+        key="is_file",
     ),
     VfsCall(
         "list_files",
         "The names of a directory's files.",
         PATH_ONLY,
         ("path",),
+        key="items",
     ),
     VfsCall("mkdir", "Make a directory.", PATH_ONLY, ("path",)),
     VfsCall("rmdir", "Remove an empty directory.", PATH_ONLY, ("path",)),
@@ -129,6 +144,7 @@ VFS_CALLS: tuple[VfsCall, ...] = (
         "Where a symbolic link points.",
         PATH_ONLY,
         ("path",),
+        key="target",
     ),
     VfsCall(
         "setattr",
@@ -143,18 +159,21 @@ VFS_CALLS: tuple[VfsCall, ...] = (
             "nofollow": FLAG,
         },
         ("path",),
+        key="stored",
     ),
     VfsCall(
         "getxattr",
         "One extended attribute's value.",
         {"path": PATH, "name": TEXT, "nofollow": FLAG},
         ("path", "name"),
+        key="data",
     ),
     VfsCall(
         "listxattr",
         "A path's extended attribute names.",
         {"path": PATH, "nofollow": FLAG},
         ("path",),
+        key="items",
     ),
     VfsCall(
         "setxattr",

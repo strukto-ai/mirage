@@ -25,7 +25,14 @@ import type { JsonValue } from '@struktoai/mirage-core/types'
 import { VERSION } from '@struktoai/mirage-core/version'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { CallArgsError, answered, checked, explanationToDict, ioResultToDict } from '../io_serde.ts'
+import {
+  CallArgsError,
+  answered,
+  bodyOf,
+  checked,
+  explanationToDict,
+  ioResultToDict,
+} from '../io_serde.ts'
 import { fsError } from '../errors.ts'
 import { InFlight } from '../inflight.ts'
 import { TOOLS } from '../mcp/server.ts'
@@ -353,7 +360,7 @@ export class MirageRpcServer {
       if (err instanceof CallArgsError) throw new RpcError(RPC_INVALID_PARAMS, err.message)
       throw err
     }
-    return answered(this.session, call, args, explain)
+    return bodyOf(call, await answered(this.session, call, args, explain), explain)
   }
 
   private async toolsCall(params: Params, signal?: AbortSignal): Promise<JsonValue> {

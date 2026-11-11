@@ -225,7 +225,8 @@ def command(call: VfsCall) -> Callable[..., None]:
         said = answer(
             post(workspace_id, f"vfs/{call.name}", body, session_id, explain)
         )
-        result = said["explanation" if explain else "data"]
+        key = "explanation" if explain else call.key
+        result = None if key is None else said[key]
         if result is not None:
             emit(result, human=_explained if explain else HUMAN.get(call.name))
 
