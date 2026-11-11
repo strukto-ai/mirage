@@ -313,10 +313,12 @@ run_case() {
   case_id="$suite/$(jq -r '.id' <<<"$case_json")"
   # The suite is part of the id: two suites may share a case id. So is
   # the host: a machine run's tag carries the workspace id, and the two
-  # hosts run the same case in the one container at the same time. A
-  # workspace id takes letters, digits, dots and dashes, so the suite's
-  # folders, a mode's `+` and a variant's `@runtime` are spelled out.
-  wsid=$(printf 'rt-%s-%s-%s' "$host" "$suite" "$(jq -r '.id' <<<"$case_json")" \
+  # hosts run the same case in the one container at the same time. The
+  # TypeScript server routes no path parameter past 100 characters, so the
+  # host is a two-letter head (py, ty) in place of a prefix. A workspace id
+  # takes letters, digits, dots and dashes, so the suite's folders, a mode's
+  # `+` and a variant's `@runtime` are spelled out.
+  wsid=$(printf '%s-%s-%s' "${host:0:2}" "$suite" "$(jq -r '.id' <<<"$case_json")" \
     | sed 's/+/plus/g' | tr '/_@' '---')
   world_json=$(jq -c '.world // {}' <<<"$case_json")
   write_world_yaml "$world_json" "$work"
