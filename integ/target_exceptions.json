@@ -1409,6 +1409,14 @@
       "sharepoint-prefix": "This 600,000-record array on stdin grows the shared Rust stream instance past the size TypeScript retires it at, so the sort after it runs on a fresh one. It is backend-independent work, so the ram target covers both hosts.",
       "ssh": "This 600,000-record array on stdin grows the shared Rust stream instance past the size TypeScript retires it at, so the sort after it runs on a fresh one. It is backend-independent work, so the ram target covers both hosts.",
       "tidb-filesystem": "This 600,000-record array on stdin grows the shared Rust stream instance past the size TypeScript retires it at, so the sort after it runs on a fresh one. It is backend-independent work, so the ram target covers both hosts."
+    },
+    "integ/crossmount/mv/no_copy.json :: xm_mv_no_copy_renames_what_stays_on_its_mount": {
+      "hf": "Hugging Face buckets have no rename, so a source that stays on its mount is copied and removed there, and refused under --no-copy, as one across mounts is. The case pins the rename a store that has one takes.",
+      "hf-prefix": "Hugging Face buckets have no rename, so a source that stays on its mount is copied and removed there, and refused under --no-copy, as one across mounts is. The case pins the rename a store that has one takes."
+    },
+    "integ/crossmount/mv/v.json :: xm_mv_v_renames_what_stays_on_its_mount": {
+      "hf": "Hugging Face buckets have no rename, so a source that stays on its mount is copied and removed there, and refused under --no-copy, as one across mounts is. The case pins the rename a store that has one takes.",
+      "hf-prefix": "Hugging Face buckets have no rename, so a source that stays on its mount is copied and removed there, and refused under --no-copy, as one across mounts is. The case pins the rename a store that has one takes."
     }
   }
 }
