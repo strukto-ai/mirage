@@ -213,10 +213,6 @@ function camelizeKeys(obj: Record<string, unknown>): Record<string, unknown> {
   return out
 }
 
-const STORE_GROUPS = ['namespace', 'observer', 'workspace', 'execution'] as const
-
-const CLI_KEYS: readonly string[] = ['cli', 'script', 'runtime', 'config']
-
 // Python's index block models refuse a ttl that is not a number
 // (StrictFloat) and a non-string url or key_prefix at load. This stops at
 // the first bad value, so it checks them in the models' field order.
@@ -443,7 +439,7 @@ export function normalizeConfigKeys(raw: Record<string, unknown>): Record<string
   }
   if (isPlainObject(out.store)) {
     const store = camelizeKeys(out.store)
-    for (const group of STORE_GROUPS) {
+    for (const group of ['namespace', 'observer', 'workspace', 'execution'] as const) {
       const block = store[group]
       if (!isPlainObject(block)) continue
       // An s3 group carries its backend's own spellings (`aws_access_key_id`
@@ -1031,7 +1027,9 @@ async function buildCliEntries(
     if (!isPlainObject(block)) {
       throw new Error(`clis entry '${name}' must be a mapping`)
     }
-    const unknown = Object.keys(block).filter((k) => !CLI_KEYS.includes(k))
+    const unknown = Object.keys(block).filter(
+      (k) => !['cli', 'script', 'runtime', 'config'].includes(k),
+    )
     if (unknown.length > 0) {
       throw new Error(
         `clis entry '${name}': unknown keys: ${unknown.sort(compareCodePoints).join(', ')}`,

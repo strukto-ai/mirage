@@ -36,7 +36,6 @@ ENCODING = "utf-8"
 # survives the str round trip, so binary input and output cross a text
 # channel unchanged.
 ERRORS = "surrogateescape"
-READ_SIZE = 64 * 1024
 # How far the client may type or pipe ahead of whoever reads it before
 # the channel stops being read and SSH flow control pushes back.
 MAX_BUFFERED = 1024 * 1024
@@ -277,7 +276,7 @@ class ChannelInput:
         while True:
             await self._room.wait()
             try:
-                data = await stdin.read(READ_SIZE)
+                data = await stdin.read(64 * 1024)
             except (asyncssh.BreakReceived, asyncssh.SignalReceived):
                 self._interrupted()
                 continue

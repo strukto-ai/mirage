@@ -25,7 +25,6 @@ from mirage.core.email._parse import parse_rfc822, parse_with_payloads
 logger = logging.getLogger(__name__)
 
 INTERNAL_DATE_KEY = "internal_date"
-INTERNAL_DATE_RE = re.compile(r'INTERNALDATE "([^"]*)"')
 # Metadata is asked for ahead of the body: a server may answer the items
 # in the order they were requested, and anything after BODY[] lands on
 # the line *behind* the literal, where the parsers below never look.
@@ -586,7 +585,7 @@ def _parse_multi_fetch(
 
 
 def _internal_date_from_line(line: str) -> str:
-    match = INTERNAL_DATE_RE.search(line)
+    match = re.search(r'INTERNALDATE "([^"]*)"', line)
     return match.group(1) if match else ""
 
 

@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # A .lock older than this is presumed abandoned by a crashed writer and
 # reclaimed (loudly). Live CAS critical sections are milliseconds.
 LOCK_STALE_SECONDS = 10.0
-LOCK_RETRY_SLEEP = 0.005
+LOCK_RETRY_SLEEP_SECONDS = 0.005
 LOCK_RETRY_LIMIT = 2000
 
 _tmp_counter = count()
@@ -218,7 +218,7 @@ class DiskRecordClient:
                 return fd
             if await asyncio.to_thread(_reclaim_stale_lock, lock_path):
                 continue
-            await asyncio.sleep(LOCK_RETRY_SLEEP)
+            await asyncio.sleep(LOCK_RETRY_SLEEP_SECONDS)
         raise RuntimeError(f"could not acquire lock {lock_path}")
 
     async def unlock(self, name: str, fd: int) -> None:

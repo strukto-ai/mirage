@@ -101,11 +101,9 @@ export function pointToRow(point: QdrantPoint, idField: string): QdrantRow {
   return { ...point.payload, [idField]: point.id }
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
 export function candidateIds(rowId: string): (string | number)[] {
   if (/^-?\d+$/.test(rowId)) return [Number.parseInt(rowId, 10)]
-  if (UUID_RE.test(rowId)) return [rowId]
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rowId)) return [rowId]
   return []
 }
 

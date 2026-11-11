@@ -257,24 +257,6 @@ export interface CompiledProfile {
   readonly profile: string | null
 }
 
-const VARS_FIELDS = ['hide'] as const
-const COMMANDS_FIELDS = ['allow', 'ask', 'deny'] as const
-const MOUNT_COMMANDS_FIELDS = ['ask', 'deny'] as const
-const PROFILE_MOUNT_FIELDS = ['mode', 'commands', 'paths'] as const
-const PROFILE_FIELDS = [
-  'cwd',
-  'env',
-  'mounts',
-  'paths',
-  'vars',
-  'commands',
-  'policy',
-  'command_limits',
-  'processes',
-  'network',
-] as const
-const PROGRAM_FIELDS = ['script', 'runtime', 'env'] as const
-
 function rejectUnknownKeys(
   block: Record<string, unknown>,
   allowed: readonly string[],
@@ -359,13 +341,13 @@ export function PathsBlock(raw: unknown, where = 'paths'): PathsBlock {
 
 export function VarsBlock(raw: unknown, where = 'vars'): VarsBlock {
   const obj = asObject(raw, where)
-  rejectUnknownKeys(obj, VARS_FIELDS, where)
+  rejectUnknownKeys(obj, ['hide'], where)
   return { hide: stringList(obj.hide, `${where}.hide`) }
 }
 
 export function CommandsBlock(raw: unknown, where = 'commands'): CommandsBlock {
   const obj = asObject(raw, where)
-  rejectUnknownKeys(obj, COMMANDS_FIELDS, where)
+  rejectUnknownKeys(obj, ['allow', 'ask', 'deny'], where)
   const ask = rules(obj.ask, where, 'ask')
   const deny = rules(obj.deny, where, 'deny')
   // This block is the profile's own, never a mount section's, so a rule's
@@ -378,7 +360,7 @@ export function CommandsBlock(raw: unknown, where = 'commands'): CommandsBlock {
 /** Validate a mount section's `commands:` block (`ask` and `deny` only). */
 export function MountCommandsBlock(raw: unknown, where = 'commands'): MountCommandsBlock {
   const obj = asObject(raw, where)
-  rejectUnknownKeys(obj, MOUNT_COMMANDS_FIELDS, where)
+  rejectUnknownKeys(obj, ['ask', 'deny'], where)
   return { ask: rules(obj.ask, where, 'ask'), deny: rules(obj.deny, where, 'deny') }
 }
 
@@ -386,7 +368,7 @@ export function MountCommandsBlock(raw: unknown, where = 'commands'): MountComma
 export function ProfileMount(raw: unknown, root: string, where: string): ProfileMount {
   // A bare mode string is sugar for the section that carries only a mode.
   const obj = typeof raw === 'string' ? { mode: raw } : asObject(raw, where)
-  rejectUnknownKeys(obj, PROFILE_MOUNT_FIELDS, where)
+  rejectUnknownKeys(obj, ['mode', 'commands', 'paths'], where)
   const out: { mode?: MountMode | null; commands?: MountCommandsBlock; paths?: PathsBlock } = {}
   if (obj.mode !== undefined && obj.mode !== null) {
     if (typeof obj.mode !== 'string') throw new Error(`${where}.mode must be a mode name or alias`)
@@ -484,7 +466,7 @@ export function parseProfilePolicy(raw: unknown, where: string, code = false): P
  */
 export function parseProgram(raw: unknown, at: string, code = false): ProfilePolicySpec {
   const program = asObject(raw, at)
-  rejectUnknownKeys(program, PROGRAM_FIELDS, at)
+  rejectUnknownKeys(program, ['script', 'runtime', 'env'], at)
   const given = program.script
   if (given === undefined || given === null) {
     throw new Error(`${at}.script names the policy's program, and is required`)
@@ -592,7 +574,22 @@ export function SessionProfile(raw: unknown, where = 'profile'): SessionProfile 
         `policy: {pre_command: [{script: <file>, runtime: <runtime>}]}`,
     )
   }
-  rejectUnknownKeys(obj, PROFILE_FIELDS, where)
+  rejectUnknownKeys(
+    obj,
+    [
+      'cwd',
+      'env',
+      'mounts',
+      'paths',
+      'vars',
+      'commands',
+      'policy',
+      'command_limits',
+      'processes',
+      'network',
+    ],
+    where,
+  )
   const out: {
     cwd?: string | null
     env?: Readonly<EnvEntries> | null

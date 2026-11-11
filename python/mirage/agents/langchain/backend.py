@@ -88,8 +88,6 @@ BINARY_EXTENSIONS = frozenset(
         ".wmv",
     }
 )
-COMMAND_SUCCESS_EXIT_CODES = frozenset({0})
-GREP_SUCCESS_EXIT_CODES = frozenset({0, 1})
 
 
 def _is_binary(file_path: str, data: bytes) -> bool:
@@ -132,7 +130,7 @@ async def _capped(io: IOResult) -> bool:
 
 async def _command_error(
     io: IOResult,
-    success_exit_codes: frozenset[int] = COMMAND_SUCCESS_EXIT_CODES,
+    success_exit_codes: frozenset[int] = frozenset({0}),
 ) -> str | None:
     if io.exit_code in success_exit_codes:
         return None
@@ -369,7 +367,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
         parts.append(shlex.quote(root))
         io = await self._exec(" ".join(parts))
         await io.materialize_stdout()
-        error = await _command_error(io, GREP_SUCCESS_EXIT_CODES)
+        error = await _command_error(io, frozenset({0, 1}))
         if error:
             return GrepResult(error=error)
         matches = io_to_grep_matches(io)

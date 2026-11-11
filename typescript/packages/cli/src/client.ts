@@ -29,7 +29,6 @@ import { isLocalUrl, loadDaemonSettings, type DaemonSettings } from './settings.
 
 const requireFromHere = createRequire(import.meta.url)
 
-const DEFAULT_REQUEST_TIMEOUT_MS = 60_000
 const REMOTE_PROBE_TIMEOUT_SECONDS = 10
 
 /** The daemon is down and may not be spawned, or a spawned one never answered. */
@@ -94,7 +93,7 @@ export class DaemonClient {
     path: string,
     init: RequestInit & { timeoutMs?: number | null } = {},
   ): Promise<Response> {
-    const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, ...rest } = init
+    const { timeoutMs = 60_000, ...rest } = init
     const headers: Record<string, string> = {
       ...(await this.headers()),
       ...((rest.headers ?? {}) as Record<string, string>),

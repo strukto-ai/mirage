@@ -47,8 +47,6 @@ from mirage.io.types import ByteSource
 from mirage.types import PathSpec
 from mirage.utils.dates import to_iso_z
 
-_COPY_CHUNK = 1024 * 1024
-
 logger = logging.getLogger(__name__)
 
 
@@ -253,7 +251,7 @@ async def _copy_file(conn: GridFSAccessor, src_key: str, dst_key: str) -> bool:
     out = await bucket(conn).open_download_stream(doc["_id"])
 
     async def source() -> AsyncIterator[bytes]:
-        while chunk := await out.read(_COPY_CHUNK):
+        while chunk := await out.read(1024 * 1024):
             yield chunk
 
     try:

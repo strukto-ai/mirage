@@ -51,7 +51,6 @@ export interface HttpResponse {
 // A chain past this many hops reads as a loop. undici's own limit, and the
 // connect failure is what its native following reported at it.
 const MAX_REDIRECTS = 20
-const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
 
 // The Fetch standard's rule, which curl shares by default: 303 answers with
 // a GET for anything but HEAD, 301 and 302 turn a POST into a GET, and 307
@@ -263,7 +262,7 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
       }
       const location = resp.headers.get('location')
       const next =
-        follow && REDIRECT_STATUSES.has(resp.status) && location !== null
+        follow && [301, 302, 303, 307, 308].includes(resp.status) && location !== null
           ? nextHop(location, current)
           : null
       if (next === null && options.stream === true) {

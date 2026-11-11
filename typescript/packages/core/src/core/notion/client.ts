@@ -33,10 +33,6 @@ const RATE_LIMIT_RETRY: RetryPolicy = {
   delaySource: 'header',
 }
 
-const DEFAULT_SERVER_URL = 'https://mcp.notion.com/mcp'
-const CLIENT_NAME = 'mirage-notion'
-const CLIENT_VERSION = '0.0.0'
-
 export interface NotionTransport {
   callTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>>
 }
@@ -80,12 +76,12 @@ export class MCPNotionTransport implements NotionTransport {
 
   constructor(opts: MCPNotionTransportOptions) {
     this.authProvider = opts.authProvider
-    this.serverUrl = opts.serverUrl ?? DEFAULT_SERVER_URL
+    this.serverUrl = opts.serverUrl ?? 'https://mcp.notion.com/mcp'
   }
 
   private async ensureConnected(): Promise<Client> {
     if (this.connectPromise === null) {
-      this.client ??= new Client({ name: CLIENT_NAME, version: CLIENT_VERSION })
+      this.client ??= new Client({ name: 'mirage-notion', version: '0.0.0' })
       const client = this.client
       const transport = new StreamableHTTPClientTransport(new URL(this.serverUrl), {
         authProvider: this.authProvider,
