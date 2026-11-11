@@ -29,7 +29,6 @@ from mirage.core.sql.constants import (
 from mirage.core.sql.data import fill_bytes
 from mirage.core.sql.inode import (
     InoRef,
-    by_ino,
     inode_of,
     insert_rows,
     is_dir,
@@ -108,7 +107,12 @@ def restore(
             for sql in (CLEAR if root == ROOT_INO else clear_under(root))
         ),
     ]
-    made: dict[str, InoRef] = {"/": by_ino(root)}
+    # The folder through its inode, so one removed before the batch leaves
+    # the top entries no parent, which their column refuses, and the
+    # restore fails whole rather than strand them.
+    made: dict[str, InoRef] = {
+        "/": InoRef(f"(SELECT ino FROM fs_inode WHERE ino = {root})")
+    }
     numbers = itertools.count(1)
 
     def place(p: str, mode: int, data: bytes | None) -> None:

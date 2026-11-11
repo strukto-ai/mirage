@@ -346,7 +346,60 @@ describe('SqlVFS folders', () => {
       code: 'ENOENT',
     })
     await expect(ops(folder).readdir(at('/'))).rejects.toMatchObject({ code: 'ENOENT' })
+    // A snapshot reports the folder gone and leaves it gone.
+    await expect(folder.getState()).rejects.toMatchObject({ code: 'ENOENT' })
     expect(await ops(all).readdir(at('/'))).toEqual(['/f'])
+  })
+
+  it('take no file standing at the folder since for a directory', async () => {
+    const all = new SqlVFS({ driver })
+    const folder = new SqlVFS({ driver, root: '/d' })
+    await ops(folder).write(at('/a'), enc.encode('x'))
+    await all.rmR(at('/d'))
+    await ops(all).write(at('/d'), enc.encode('file'))
+    await expect(ops(folder).stat(at('/'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(folder.mkdir(at('/x/y'), true)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(
+      await driver.query(
+        "SELECT name FROM fs_dentry WHERE parent_ino = (SELECT ino FROM fs_dentry WHERE parent_ino = 1 AND name = 'd')",
+      ),
+    ).toEqual([])
+  })
+
+  it('fail a restore whose folder went before its batch, stranding nothing', async () => {
+    const all = new SqlVFS({ driver })
+    const folder = new SqlVFS({ driver, root: '/d' })
+    await ops(folder).write(at('/a'), enc.encode('x'))
+    const state = await folder.getState()
+    racing(driver, () => all.rmR(at('/d')))
+    await expect(folder.loadState(state)).rejects.toThrow()
+    expect(await ops(all).readdir(at('/'))).toEqual([])
+    const [inodes] = await driver.query('SELECT COUNT(*) AS n FROM fs_inode')
+    expect(Number(inodes?.n)).toBe(1)
+  })
+
+  it('mark two writes on one file through two mounts as overlapping', async () => {
+    const all = new SqlVFS({ driver, capacity: 100 })
+    const folder = new SqlVFS({ driver, root: '/w', capacity: 100 })
+    await ops(all).mkdir(at('/w'))
+    let release = (): void => undefined
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    async function* slow(): AsyncIterable<Uint8Array> {
+      yield enc.encode('ab')
+      await gate
+      yield enc.encode('cd')
+    }
+    const first = folder.write(at('/f'), slow())
+    await vi.waitFor(() => {
+      expect(all.usage?.active.length).toBe(1)
+    })
+    // The second lands while the first is open, and marks the count for a
+    // recount, as two writes on one file through one mount do.
+    expect(all.usage?.dirty).toBe(false)
+    await ops(all).write(at('/w/f'), enc.encode('xyz'))
+    expect(all.usage?.dirty).toBe(true)
+    release()
+    await first
   })
 
   it('count every file of the database against one capacity on one driver', async () => {

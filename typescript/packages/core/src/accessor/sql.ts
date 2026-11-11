@@ -62,26 +62,29 @@ export class SqlAccessor extends Accessor {
       { sql: SQL.seedRoot, params: [now] },
     ])
     const row = (await this.driver.query(SQL.chunkSize))[0]
-    await this.folder()
+    await this.folder(true)
     return Number(row?.value) || DEFAULT_CHUNK_SIZE
   }
 
-  /** The inode of the mount's folder, made with its parents when gone. */
+  /**
+   * The inode of the mount's folder. Only the first open makes it: a folder
+   * gone since is ENOENT, and a file standing at it ENOTDIR.
+   */
   async rootIno(): Promise<number> {
     await this.chunkSize()
-    return this.folder()
+    return this.folder(false)
   }
 
-  // Each name of the folder in turn, made where the database has none, as
-  // the root is: a directory inode and the entry naming it, its parent named
-  // through its inode. A writer that makes one first holds its entry, so
-  // this one's insert fails and it reads the entry instead.
-  private async folder(): Promise<number> {
+  // Each name of the folder in turn, made where the database has none when
+  // `make`, as the root is: a directory inode and the entry naming it, its
+  // parent named through its inode. A writer that makes one first holds its
+  // entry, so this one's insert fails and it reads the entry instead.
+  private async folder(make: boolean): Promise<number> {
     let ino = ROOT_INO
     for (const name of this.rootNames) {
       const entry = (): Promise<SqlRow[]> => this.driver.query(SQL.entry, [ino, name])
       let row = (await entry())[0]
-      if (row === undefined) {
+      if (row === undefined && make) {
         const now = Math.floor(systemDate().getTime() / 1000)
         try {
           await this.driver.batch([
@@ -94,6 +97,7 @@ export class SqlAccessor extends Accessor {
           ])
         } catch (err) {
           if ((await entry())[0] === undefined) throw err
+          console.debug(`sql: ${this.root} was made by another writer first`, err)
         }
         row = (await entry())[0]
       }

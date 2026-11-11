@@ -105,7 +105,12 @@ async def walk(accessor: SqlAccessor, path: PathSpec | str) -> Walk:
             chain += [None] * len(part)
         else:
             chain += (await _walk_from(accessor, last.ino, part))[1:]
-    return Walk(p, names, tuple(chain[len(accessor.root_names) :]))
+    start = chain[len(accessor.root_names) :]
+    # A folder a file stands at since reads as gone, so no op takes the
+    # file for a directory.
+    if start[0] is not None and not is_dir(start[0]):
+        return Walk(p, names, tuple(None for _ in start))
+    return Walk(p, names, tuple(start))
 
 
 def target(w: Walk) -> Inode | None:
