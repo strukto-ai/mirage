@@ -504,12 +504,12 @@ run_host() {
     # and a machine refuses a second workspace serving a prefix, so the
     # hosts take turns at that suite. A lane that exits holding the turn
     # gives it back, and a turn that never comes fails the suite.
-    local mounts_lock="" waited=0
+    local mounts_lock="" waited=0 lock_err
     if [ "$suite" = sandbox/mounts ]; then
       mounts_lock="$RESULT_DIR/claims/sandbox-mounts-lock"
-      until mkdir "$mounts_lock" 2>/dev/null; do
-        if [ ! -d "$mounts_lock" ] || [ "$waited" -ge 300 ]; then
-          failures+=("$host/$suite: never got its turn at the container's mounts")
+      until lock_err=$(LC_ALL=C mkdir "$mounts_lock" 2>&1); do
+        if [[ "$lock_err" != *"File exists"* ]] || [ "$waited" -ge 300 ]; then
+          failures+=("$host/$suite: never got its turn at the container's mounts: $lock_err")
           fail=$((fail + 1))
           continue 2
         fi
