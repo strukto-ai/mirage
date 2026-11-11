@@ -152,7 +152,7 @@ describe('hf auth whoami', () => {
   })
 
   it('reads the endpoint the way the request did', async () => {
-    // An empty endpoint IS the public Hub -- hfEndpoint substitutes API_BASE
+    // An empty endpoint IS the public Hub -- the account substitutes API_BASE
     // and that is where whoami authenticated. Compared raw, the line would
     // announce a private endpoint with nothing after it for a request that
     // went to huggingface.co.

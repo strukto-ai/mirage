@@ -79,29 +79,6 @@ def _source_of(value: JsonValue) -> dict[str, Any] | None:
     return value
 
 
-def _created(event: dict[str, Any]) -> datetime | None:
-    """When an event happened, or None when it carries no readable stamp.
-
-    Args:
-        event (dict[str, Any]): One ``/events`` entry.
-    """
-    value = text_field(event, "created_at")
-    if value is None:
-        return None
-    try:
-        stamp = datetime.fromisoformat(value)
-    except ValueError:
-        logger.debug(
-            "box event %s: unreadable created_at %r",
-            event.get("event_id"),
-            value,
-        )
-        return None
-    if stamp.tzinfo is None:
-        return stamp.replace(tzinfo=timezone.utc)
-    return stamp
-
-
 def _ordered(events: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     """Each event once, in the order it happened.
 
@@ -123,7 +100,16 @@ def _ordered(events: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
             if event_id in seen:
                 continue
             seen.add(event_id)
-        stamp = _created(event) or stamp
+        value = text_field(event, "created_at")
+        try:
+            if value is not None:
+                stamp = datetime.fromisoformat(value)
+                if stamp.tzinfo is None:
+                    stamp = stamp.replace(tzinfo=timezone.utc)
+        except ValueError:
+            logger.debug(
+                "box event %s: unreadable created_at %r", event_id, value
+            )
         stamped.append((stamp, event))
     stamped.sort(key=lambda pair: pair[0])
     return [event for _, event in stamped]

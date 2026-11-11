@@ -45,7 +45,6 @@ from mirage.types import (
     PathSpec,
 )
 from mirage.utils.path import respell_one, respell_raw
-from mirage.view.types import LinkView, StatPath
 
 
 def parse_find_args(
@@ -135,69 +134,10 @@ def _matched_path(row: str, search: PathSpec) -> PathSpec:
     )
 
 
-def missing_start_line(
-    search_path: PathSpec, detail: str = posix_phrase(FsCondition.ENOENT)
-) -> str:
-    """GNU's stderr line for a start point find will not walk.
-
-    The detail is the strerror: a start point that is not there, or one
-    typed with a trailing slash that did not name a directory.
-
-    Args:
-        search_path (PathSpec): the start point, as the operand named it.
-        detail (str): the strerror to report.
-    """
-    return f"find: '{search_path.raw_path}': {detail}"
-
-
-def is_link(links: LinkView | None, search: PathSpec) -> bool:
-    """Whether a start point is itself a namespace symlink.
-
-    Args:
-        links (LinkView | None): the namespace's symlink facts.
-        search (PathSpec): the start point.
-    """
-    return links is not None and links.stat_at(search.virtual) is not None
-
-
-@dataclass(frozen=True, slots=True)
-class StartPoint:
-    """What a start point makes ``find`` do with one operand.
-
-    One of three things: the subtree is walked, these rows are the whole
-    answer, or nothing is there and GNU's diagnostic is. ``stat`` carries
-    the start point's own stat when a directory was walked, which is what
-    lets the caller report the root itself without statting it twice.
-    """
-
-    walk: bool
-    results: list[str]
-    missing: bool = False
-    stat: FileStat | None = None
-    # A -quit was reached on the start point itself, which ends the line.
-    quit: bool = False
-    # The strerror the diagnostic carries when `missing` is set. A start
-    # point that is simply absent keeps GNU's default wording; one under a
-    # plain file, or typed with a trailing slash that resolved to a
-    # non-directory, reports ENOTDIR instead (`find flink/` -> "Not a
-    # directory").
-    detail: str = posix_phrase(FsCondition.ENOENT)
-
-
-WALK_START = StartPoint(walk=True, results=[])
-MISSING_START = StartPoint(walk=False, results=[], missing=True)
-NOT_DIR_START = StartPoint(
-    walk=False,
-    results=[],
-    missing=True,
-    detail=posix_phrase(FsCondition.ENOTDIR),
-)
-
-
 async def _missing_start_detail(
-    search: PathSpec, stat: Callable[[PathSpec], Awaitable[FileStat]] | None
-) -> StartPoint:
-    """The start point ``stat_path`` found nothing at, with GNU's errno.
+    search: PathSpec, stat: Callable[[PathSpec], Awaitable[FileStat]]
+) -> str:
+    """The strerror of a start point ``stat_path`` found nothing at.
 
     ``stat_path`` answers None for both ways a lookup fails, because every
     other caller of it treats them alike, while GNU names the one its stat
@@ -206,115 +146,15 @@ async def _missing_start_detail(
 
     Args:
         search (PathSpec): the start point, as the operand named it.
-        stat (Callable[[PathSpec], Awaitable[FileStat]] | None):
-            the mount's stat, None when the caller has
-            none to offer.
+        stat (Callable[[PathSpec], Awaitable[FileStat]]): the mount's stat.
     """
-    if stat is None:
-        return MISSING_START
     try:
         await stat(search)
     except NotADirectoryError:
-        return NOT_DIR_START
+        return posix_phrase(FsCondition.ENOTDIR)
     except MISS_ERRORS:
-        return MISSING_START
-    return MISSING_START
-
-
-async def resolve_start(
-    search: PathSpec,
-    args: find_types.FindArgs,
-    stat_path: StatPath | None,
-    *,
-    is_link: bool = False,
-    stat: Callable[[PathSpec], Awaitable[FileStat]] | None = None,
-    follow: Callable[[str], str] | None = None,
-) -> StartPoint:
-    """Decide what one start point contributes, before any walk.
-
-    GNU stats every start point: only a directory has a subtree,
-    anything else is reported as itself, and nothing at all is a
-    diagnostic.
-
-    ``stat_path`` asks both channels a backend can answer on, so a
-    directory that exists only as its children still reports as one and
-    None means nothing is there (see ``resolve_path_stat``). That is what
-    makes the missing case answerable above every backend rather than
-    only where one wires a stat.
-
-    A symlink start point is walked as itself.
-
-    Args:
-        search (PathSpec): the start point, as the operand named it.
-        args (FindArgs): parsed find expression.
-        stat_path (StatPath | None): dispatcher-backed stat, None when the
-            command runs outside a workspace (the walk then decides).
-        is_link (bool): whether the start point is itself a namespace link.
-        stat (Callable[[PathSpec], Awaitable[FileStat]] | None):
-            the mount's stat, asked only to name the
-            errno of a start point ``stat_path`` found nothing at.
-        follow (Callable[[str], str] | None): the namespace's link
-            resolution, which the start point may already have been
-            taken through.
-    """
-    if search.walk_error is not None:
-        # The walk refused the start point before find ran (the empty
-        # name, a link loop), and every probe below goes by the path it
-        # simplifies to.
-        return StartPoint(
-            walk=False,
-            results=[],
-            missing=True,
-            detail=fs_strerror(walk_refusal(search))
-            or posix_phrase(FsCondition.ENOENT),
-        )
-    if stat_path is None:
-        return WALK_START
-    # A start point's own `.` and `..` resolve first, link or not: the
-    # lookup below asks about the path they simplify to.
-    refusal = await dot_refusal(
-        partial(stat_or_enoent, stat_path), search, follow
-    )
-    if refusal is not None:
-        return StartPoint(
-            walk=False,
-            results=[],
-            missing=True,
-            detail=fs_strerror(refusal) or posix_phrase(FsCondition.ENOENT),
-        )
-    if is_link:
-        return WALK_START
-    try:
-        start = await stat_path(search)
-    except OSError as exc:
-        # A start point the dispatcher refuses to stat is GNU's own
-        # diagnostic for it, quoted like a missing one
-        # (`find: 'P': Permission denied`), not an escaped error.
-        detail = fs_strerror(exc)
-        if detail is None:
-            raise
-        return StartPoint(walk=False, results=[], missing=True, detail=detail)
-    if start is None:
-        return await _missing_start_detail(search, stat)
-    if start.type == FileType.DIRECTORY:
-        return StartPoint(walk=True, results=[], stat=start)
-    # POSIX reads `x/` as `x/.`, so an operand typed with a trailing
-    # slash has to name a directory; GNU refuses the rest with ENOTDIR
-    # rather than reporting the entry itself.
-    if search.raw_path.endswith("/"):
-        return NOT_DIR_START
-    # `-path` matches the row as printed, so Path nodes carry the
-    # operand's spelling; the walk stamps its own tree inside walk_find.
-    tree = find_eval.bind_tree(
-        find_eval.args_to_tree(args), "", search.virtual, search.raw_path
-    )
-    await find_eval.prime_regexes(tree, ["/" + search.virtual.strip("/")])
-    rows = start_point_results(search, start, args, tree)
-    return StartPoint(
-        walk=False,
-        results=respell_raw(rows, search.virtual, search.raw_path),
-        quit=find_eval.quit_fired(tree),
-    )
+        return posix_phrase(FsCondition.ENOENT)
+    return posix_phrase(FsCondition.ENOENT)
 
 
 def start_point_results(
@@ -475,82 +315,152 @@ async def find_generic(
         for run, search in enumerate(searches):
             if stopped:
                 break
-            start = await resolve_start(
-                search,
-                args,
-                stat_path,
-                stat=stat,
-                is_link=is_link(links, search),
-                follow=link_follow(links),
-            )
-            if start.missing:
-                missing.append(missing_start_line(search, start.detail))
-                continue
-            if not start.walk:
-                for row in start.results:
-                    yield (row + "\n").encode()
-                    records.append(PathRecord(_matched_path(row, search), run))
-                if start.quit:
-                    stopped.append(search.virtual)
-            else:
-                unreadable: list[str] = []
-                unstatted: dict[str, Exception] = {}
-                loops: list[tuple[str, str]] = []
-                home = (
-                    landing_root(mounts, links, search.virtual)
-                    if bounded and mounts is not None
-                    else None
-                )
-
-                def stays(virtual: str) -> bool:
-                    return (
-                        mounts is None
-                        or landing_root(mounts, links, virtual) == home
+            label = f"find: '{search.raw_path}': "
+            if search.walk_error is not None:
+                # The walk refused the start point before find ran (the
+                # empty name, a link loop), and every probe below goes by
+                # the path it simplifies to.
+                missing.append(
+                    label
+                    + (
+                        fs_strerror(walk_refusal(search))
+                        or posix_phrase(FsCondition.ENOENT)
                     )
-
-                budget = WalkBudget(search, mounts)
-                walked = walk_find(
-                    search,
-                    readdir=readdir,
-                    stat=stat,
-                    args=args,
-                    follow=links if parsed.follow else None,
-                    unreadable=unreadable,
-                    unstatted=unstatted,
-                    root=start.stat,
-                    loops=loops,
-                    enters=stays if home is not None else None,
-                    listing=budget.listing,
-                    links=links,
-                    stopped=stopped,
                 )
-                async with aclosing(walked) as rows:
-                    async for key in rows:
-                        row = respell_one(key, search.virtual, search.raw_path)
+                continue
+            # GNU stats every start point: only a directory has a subtree,
+            # anything else is reported as itself, and nothing at all is a
+            # diagnostic. stat_path asks both channels a backend can answer
+            # on, so a directory that exists only as its children still
+            # reports as one and None means nothing is there; without one
+            # (outside a workspace) the walk decides.
+            start: FileStat | None = None
+            if stat_path is not None:
+                # A start point's own `.` and `..` resolve first, link or
+                # not: the lookup below asks about the path they simplify to.
+                refusal = await dot_refusal(
+                    partial(stat_or_enoent, stat_path),
+                    search,
+                    link_follow(links),
+                )
+                if refusal is not None:
+                    missing.append(
+                        label
+                        + (
+                            fs_strerror(refusal)
+                            or posix_phrase(FsCondition.ENOENT)
+                        )
+                    )
+                    continue
+            # A symlink start point is walked as itself.
+            if stat_path is not None and (
+                links is None or links.stat_at(search.virtual) is None
+            ):
+                try:
+                    start = await stat_path(search)
+                except OSError as err:
+                    # A start point the dispatcher refuses to stat is GNU's
+                    # own diagnostic for it, quoted like a missing one
+                    # (`find: 'P': Permission denied`), not an escaped error.
+                    detail = fs_strerror(err)
+                    if detail is None:
+                        raise
+                    missing.append(label + detail)
+                    continue
+                if start is None:
+                    missing.append(
+                        label + await _missing_start_detail(search, stat)
+                    )
+                    continue
+                if start.type != FileType.DIRECTORY:
+                    # POSIX reads `x/` as `x/.`, so an operand typed with a
+                    # trailing slash has to name a directory; GNU refuses
+                    # the rest with ENOTDIR rather than reporting the entry.
+                    if search.raw_path.endswith("/"):
+                        missing.append(
+                            label + posix_phrase(FsCondition.ENOTDIR)
+                        )
+                        continue
+                    # `-path` matches the row as printed, so Path nodes
+                    # carry the operand's spelling; the walk stamps its own
+                    # tree inside walk_find.
+                    tree = find_eval.bind_tree(
+                        find_eval.args_to_tree(args),
+                        "",
+                        search.virtual,
+                        search.raw_path,
+                    )
+                    await find_eval.prime_regexes(
+                        tree, ["/" + search.virtual.strip("/")]
+                    )
+                    for row in respell_raw(
+                        start_point_results(search, start, args, tree),
+                        search.virtual,
+                        search.raw_path,
+                    ):
                         yield (row + "\n").encode()
                         records.append(
                             PathRecord(_matched_path(row, search), run)
                         )
-                # GNU names a directory it may not open in the walk's own
-                # order, lists the directory itself, and exits 1 like a
-                # start point it could not read.
-                missing.extend(
-                    f"find: '{shown}': Permission denied"
-                    for shown in respell_raw(
-                        unreadable, search.virtual, search.raw_path
-                    )
+                    if find_eval.quit_fired(tree):
+                        stopped.append(search.virtual)
+                    continue
+            unreadable: list[str] = []
+            unstatted: dict[str, Exception] = {}
+            loops: list[tuple[str, str]] = []
+            home = (
+                landing_root(mounts, links, search.virtual)
+                if bounded and mounts is not None
+                else None
+            )
+
+            def stays(virtual: str) -> bool:
+                return (
+                    mounts is None
+                    or landing_root(mounts, links, virtual) == home
                 )
-                for path, exc in unstatted.items():
-                    shown = respell_one(path, search.virtual, search.raw_path)
-                    missing.append(f"find: '{shown}': {strerror_of(exc)}")
-                for path, above in loops:
-                    missing.append(
-                        "find: File system loop detected; "
-                        f"'{respell_one(path, search.virtual, search.raw_path)}'"
-                        " is part of the same file system loop as "
-                        f"'{respell_one(above, search.virtual, search.raw_path)}'."
-                    )
-                missing.extend(f"find: {line}" for line in budget.stopped)
+
+            budget = WalkBudget(search, mounts)
+            walked = walk_find(
+                search,
+                readdir=readdir,
+                stat=stat,
+                args=args,
+                follow=links if parsed.follow else None,
+                unreadable=unreadable,
+                unstatted=unstatted,
+                root=start,
+                loops=loops,
+                enters=stays if home is not None else None,
+                listing=budget.listing,
+                links=links,
+                stopped=stopped,
+            )
+            async with aclosing(walked) as rows:
+                async for key in rows:
+                    row = respell_one(key, search.virtual, search.raw_path)
+                    yield (row + "\n").encode()
+                    records.append(PathRecord(_matched_path(row, search), run))
+            # GNU names a directory it may not open in the walk's own
+            # order, lists the directory itself, and exits 1 like a
+            # start point it could not read.
+            missing.extend(
+                f"find: '{shown}': Permission denied"
+                for shown in respell_raw(
+                    unreadable, search.virtual, search.raw_path
+                )
+            )
+            for path, exc in unstatted.items():
+                shown = respell_one(path, search.virtual, search.raw_path)
+                missing.append(f"find: '{shown}': {strerror_of(exc)}")
+            for path, above in loops:
+                missing.append(
+                    "find: File system loop detected; "
+                    f"'{respell_one(path, search.virtual, search.raw_path)}'"
+                    " is part of the same file system loop as "
+                    f"'{respell_one(above, search.virtual, search.raw_path)}'."
+                )
+            missing.extend(f"find: {line}" for line in budget.stopped)
         if missing:
             io.stderr = ("\n".join(missing) + "\n").encode()
             io.exit_code = 1

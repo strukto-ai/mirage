@@ -35,7 +35,7 @@ import {
 import { mirageProgramAt, routedConsumer } from '../lookup/lookup.ts'
 
 import { classifyParts } from './classify/index.ts'
-import { globNeedsShell, globOptions, resolveGlobs } from './globs.ts'
+import { globOptions, resolveGlobs } from './globs.ts'
 import type { ExecuteFn } from './types.ts'
 import { expandWords } from './parts.ts'
 import { type CommandSpec, type ValueType } from '../../commands/spec/types.ts'
@@ -242,7 +242,8 @@ export async function expandArgv(
   // A glob word is resolved by whoever consumes it, exactly once:
   // WordPolicy.SHELL words get matches here; mount commands keep
   // patterns for backend pushdown; unknown names fail without
-  // touching backends.
+  // touching backends. A backend speaks bash's defaults only, so a session
+  // that turned on nullglob, failglob, globstar or extglob has them here.
   // So does a command a path-scoped rule names: the admission gate reads
   // the words before the backend would resolve them, and a pattern that
   // only later matches under the rule's path would pass a gate its
@@ -252,7 +253,10 @@ export async function expandArgv(
     !refused &&
     (policy === WordPolicy.SHELL ||
       tree ||
-      globNeedsShell(globOpts) ||
+      globOpts.nullglob ||
+      globOpts.failglob ||
+      globOpts.globstar ||
+      globOpts.extglob ||
       scopesPaths(session.commands, name) ||
       classified.some((w) => w instanceof PathSpec && w.pattern !== null && w.dotted !== null))
       ? await resolveGlobs(classified, registry, false, links, globOpts)

@@ -20,7 +20,7 @@ from mirage import Mount, Workspace
 from mirage.cache.index import IndexConfig
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import CommandSpec
-from mirage.context import reset_current_session, set_current_session
+from mirage.context import reset_caller, set_current_session
 from mirage.core.dev.pipe import DevicePipe
 from mirage.io.types import IOResult
 from mirage.vfs.dev.dev import DevVFS
@@ -167,7 +167,7 @@ def test_stale_allocation_cannot_release_reused_input():
         assert path[4:] not in dev._store.modified
         assert path[4:] not in dev._store.attrs
     finally:
-        reset_current_session(token)
+        reset_caller(token)
 
 
 @pytest.mark.asyncio
@@ -190,7 +190,7 @@ async def test_alternate_dev_mount_does_not_cache_session_descriptors(
     try:
         dev.allocate_input(DevicePipe(True))
     finally:
-        reset_current_session(token)
+        reset_caller(token)
     try:
         result = await ws.shell("ls /devices/fd", session_id="owner")
         assert result.exit_code == 0

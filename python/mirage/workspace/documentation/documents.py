@@ -18,7 +18,7 @@ from typing import Literal
 
 from mirage.cache.index import NULL_INDEX
 from mirage.context import (
-    reset_current_session,
+    reset_caller,
     set_current_session,
 )
 from mirage.errors.fs import eexist, enoent, enotdir
@@ -147,7 +147,7 @@ class Documents:
                     )
             return self.render(kind)
         finally:
-            reset_current_session(token)
+            reset_caller(token)
 
     async def expose(
         self,
@@ -175,7 +175,7 @@ class Documents:
                 else:
                     raise eexist(path)
             finally:
-                reset_current_session(token)
+                reset_caller(token)
             view = DocumentVFS(
                 path.rsplit("/", 1)[-1], lambda: self.render(kind), kind
             )

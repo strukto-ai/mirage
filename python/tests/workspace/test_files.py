@@ -24,7 +24,7 @@ import pytest
 from mirage import Workspace
 from mirage.commands.config import command
 from mirage.commands.spec.types import CommandSpec
-from mirage.context import reset_current_session, set_current_session
+from mirage.context import reset_caller, set_current_session
 from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.policy import (
@@ -485,7 +485,7 @@ class TestFreshStat:
                             "/data/secret.txt", fresh=True, session_id="seeing"
                         )
                     finally:
-                        reset_current_session(token)
+                        reset_caller(token)
             assert (
                 await ws.vfs.stat("/data/secret.txt", fresh=True)
             ).size == 10
@@ -597,7 +597,7 @@ def deep_only_session():
     )
     token = set_current_session(session)
     yield session
-    reset_current_session(token)
+    reset_caller(token)
 
 
 @pytest.mark.asyncio
@@ -839,7 +839,7 @@ def deep_scoped_session():
     )
     token = set_current_session(session)
     yield session
-    reset_current_session(token)
+    reset_caller(token)
 
 
 class TestStructureOnlyParent:
@@ -1082,7 +1082,7 @@ class TestPerCallSession:
                 is False
             )
         finally:
-            reset_current_session(token)
+            reset_caller(token)
             run(ws.close())
 
     def test_no_session_named_is_the_facade_s_own(self):

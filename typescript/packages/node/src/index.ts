@@ -191,7 +191,7 @@ export {
   loadWorkspaceConfig,
   loadWorkspaceConfigFile,
   type MountBlock,
-  type WorkspaceConfigRaw,
+  type WorkspaceConfig,
 } from './config.ts'
 export { LocalRuntime } from './runtime/python/local/runtime.ts'
 export type { AppleContainerConfig } from './machine/apple_container/config.ts'

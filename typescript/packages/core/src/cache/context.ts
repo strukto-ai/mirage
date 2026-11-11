@@ -34,18 +34,6 @@ import {
 } from './types.ts'
 
 /**
- * Run `fn` with `manager` active for the current async context.
- * Mirrors `runWithRevisions`: the mount entry point wraps command
- * dispatch.
- */
-export function runWithCacheManager<T>(
-  manager: CacheInvalidator | null,
-  fn: () => Promise<T>,
-): Promise<T> {
-  return runWithCaller({ ...currentCaller(), cache: { manager } }, fn)
-}
-
-/**
  * Return the active cache manager for the current async context.
  *
  * Serves the read-through paths, so a wrong manager is worse than

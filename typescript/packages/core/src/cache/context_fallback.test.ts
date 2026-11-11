@@ -25,7 +25,6 @@ import {
   activeCacheManager,
   captureRead,
   publishRead,
-  runWithCacheManager,
   runWithWriteContext,
   writeCondition,
   writesConditioned,
@@ -97,15 +96,15 @@ describe('the active cache manager on the fallback storage', () => {
     const [hold, release] = gate()
     let besideOther: CacheInvalidator | null = managerB
     let afterOtherSettled: CacheInvalidator | null = null
-    const first = runWithCacheManager(managerB, async () => {
+    const first = runWithCaller({ ...currentCaller(), cache: { manager: managerB } }, async () => {
       await hold
     })
-    const second = runWithCacheManager(managerA, async () => {
+    const second = runWithCaller({ ...currentCaller(), cache: { manager: managerA } }, async () => {
       besideOther = activeCacheManager()
       release()
       await first
       afterOtherSettled = activeCacheManager()
-      await runWithCacheManager(managerA, () => {
+      await runWithCaller({ ...currentCaller(), cache: { manager: managerA } }, () => {
         expect(activeCacheManager()).toBe(managerA)
         return Promise.resolve()
       })

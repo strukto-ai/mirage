@@ -21,15 +21,9 @@ export interface GmailHeader {
   value?: string
 }
 
-interface GmailBody {
-  data?: string
-  size?: number
-  attachmentId?: string
-}
-
 export interface GmailPayload {
   mimeType?: string
-  body?: GmailBody
+  body?: { data?: string; size?: number; attachmentId?: string }
   headers?: GmailHeader[]
   filename?: string
   parts?: GmailPayload[]
@@ -48,13 +42,6 @@ export interface GmailMessageRaw {
 export interface GmailMessageStub {
   id: string
   threadId?: string
-}
-
-export interface GmailAttachmentInfo {
-  filename: string
-  attachmentId: string
-  size: number
-  mimeType: string
 }
 
 export interface ListMessagesOptions {
@@ -164,9 +151,10 @@ export async function getAttachment(
   return base64UrlDecodeToBytes(raw)
 }
 
-export function extractAttachments(payload: GmailPayload | undefined): GmailAttachmentInfo[] {
+export function extractAttachments(payload: GmailPayload | undefined) {
   if (payload === undefined) return []
-  const attachments: GmailAttachmentInfo[] = []
+  const attachments: { filename: string; attachmentId: string; size: number; mimeType: string }[] =
+    []
   const parts = payload.parts ?? []
   for (const part of parts) {
     const filename = part.filename ?? ''

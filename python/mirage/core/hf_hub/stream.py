@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator, Mapping
 
 from mirage.accessor.hf_hub import HfHubAccessor
 from mirage.core.hf_hub.client import hub_stream, resolve_url
-from mirage.core.hf_hub.constants import DEFAULT_CHUNK_SIZE, REFUSED_STATUSES
+from mirage.core.hf_hub.constants import REFUSED_STATUSES
 from mirage.core.hf_hub.lookup import refusals_denied
 from mirage.core.hf_hub.read import row_token
 from mirage.core.hierarchy.probe import file_entry
@@ -28,7 +28,7 @@ async def read_stream(
     accessor: HfHubAccessor,
     path: PathSpec,
     entry: FileStat | None = None,
-    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    chunk_size: int = 1024 * 1024,
 ) -> AsyncIterator[bytes]:
     """Stream a file's content.
 

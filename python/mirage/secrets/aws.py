@@ -16,15 +16,10 @@ import json
 from typing import Any
 
 import aioboto3
-from pydantic import SecretStr
 
 from mirage.secrets.config import AWSSMConfig
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.types import ResolvedSecret
-
-
-def _reveal(value: SecretStr | None) -> str | None:
-    return value.get_secret_value() if value is not None else None
 
 
 def aws_session(config: AWSSMConfig) -> aioboto3.Session:
@@ -37,21 +32,6 @@ def aws_session(config: AWSSMConfig) -> aioboto3.Session:
         config (AWSSMConfig): the source's auth settings.
     """
     return aioboto3.Session(profile_name=config.aws_profile or None)
-
-
-def _client_kwargs(config: AWSSMConfig) -> dict[str, Any]:
-    kwargs: dict[str, Any] = {"service_name": "secretsmanager"}
-    if config.region:
-        kwargs["region_name"] = config.region
-    access_key_id = _reveal(config.aws_access_key_id)
-    secret_access_key = _reveal(config.aws_secret_access_key)
-    session_token = _reveal(config.aws_session_token)
-    if access_key_id and secret_access_key:
-        kwargs["aws_access_key_id"] = access_key_id
-        kwargs["aws_secret_access_key"] = secret_access_key
-    if session_token:
-        kwargs["aws_session_token"] = session_token
-    return kwargs
 
 
 def fields_from_secret_string(text: str) -> dict[str, str]:
@@ -97,8 +77,19 @@ async def fetch_aws_sm(config: AWSSMConfig, ref: str) -> ResolvedSecret:
         raise SecretsError(
             "the 'aws-sm' source needs a ref: the SecretId (name or ARN)"
         )
+    kwargs: dict[str, Any] = {"service_name": "secretsmanager"}
+    if config.region:
+        kwargs["region_name"] = config.region
+    key_id, secret_key = config.aws_access_key_id, config.aws_secret_access_key
+    if key_id and secret_key:
+        kwargs["aws_access_key_id"] = key_id.get_secret_value()
+        kwargs["aws_secret_access_key"] = secret_key.get_secret_value()
+    if config.aws_session_token:
+        kwargs["aws_session_token"] = (
+            config.aws_session_token.get_secret_value()
+        )
     session = aws_session(config)
-    async with session.client(**_client_kwargs(config)) as client:
+    async with session.client(**kwargs) as client:
         response = await client.get_secret_value(SecretId=ref)
     text = response.get("SecretString")
     if text is None:

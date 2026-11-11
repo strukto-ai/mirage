@@ -29,17 +29,6 @@ import { scopePath } from '../scope.ts'
 import { fail, parseLine, result } from '../shared.ts'
 import { operandAbs } from './ln.ts'
 
-// Any filesystem answer other than a target: a refusal (session view or
-// policy), EINVAL (not a link), ENOENT (absent, which is what a hidden
-// path answers). All of them land on GNU readlink's silent exit 1, so
-// this matches python's `except OSError` rather than naming errnos one
-// at a time — a list would silently print a raw path the first time a
-// dispatcher answered with an errno nobody had added yet.
-function readlinkRefused(err: unknown): boolean {
-  if (err instanceof PolicyDenied) return true
-  return typeof (err as { code?: unknown }).code === 'string'
-}
-
 // The last canonicalizing flag decides how much of the path must exist, in
 // the mode letters canonicalize takes ('' is -f). Mirrors Python's
 // CANONICAL_MODES.
@@ -130,11 +119,14 @@ export async function handleReadlink(
       const [found] = await dispatch('readlink', PathSpec.fromStrPath(absOp))
       lines.push(found as string)
     } catch (err) {
-      if (!readlinkRefused(err)) throw err
+      // Any filesystem answer other than a target (a refusal, EINVAL, ENOENT)
+      // is GNU readlink's silent exit 1, as python's `except OSError`: a list
+      // of errnos would print a raw path for the first one nobody added.
+      const code = (err as { code?: unknown }).code
+      if (!(err instanceof PolicyDenied) && typeof code !== 'string') throw err
       exitCode = 1
       if (verbose) {
         const line = fsErrorLine('readlink', spec.rawPath, err)
-        const code = (err as { code?: unknown }).code
         errors.push(
           fsStrerror(err) === null && code === 'EINVAL'
             ? `${line.trimEnd()}: ${posixPhrase('EINVAL')}\n`

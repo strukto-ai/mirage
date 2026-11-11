@@ -125,8 +125,3 @@ export function guardDispatch(
     })
   }
 }
-
-/** A fresh line identity. */
-export function newStatusWriter(): StatusWriter {
-  return Symbol('line')
-}

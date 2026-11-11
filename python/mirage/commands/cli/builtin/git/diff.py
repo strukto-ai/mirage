@@ -158,46 +158,6 @@ def _sides(
     )
 
 
-def _base(repo: BaseRepo, texts: tuple[str, ...]) -> Tree:
-    """The tree ``--cached`` compares the index with, synchronously.
-
-    The named revision, HEAD by default, or the empty tree on an unborn
-    branch.
-
-    Args:
-        repo (BaseRepo): repository to read.
-        texts (tuple[str, ...]): optional base revision.
-    """
-    if len(texts) > 1:
-        raise GitError("--cached accepts at most one revision")
-    if texts:
-        return shown_entries(
-            repo, tree_entries(repo, resolve_commit(repo, texts[0]).tree)
-        )
-    return shown_entries(repo, head_entries(repo) or {})
-
-
-def _output(
-    repo: BaseRepo, before: Tree, after: Tree, flags: DiffFlags
-) -> tuple[bytes, bool]:
-    """Render what changed from one side's entries to the other's.
-
-    Returns the output and whether anything differs, which ``--exit-code``
-    answers with.
-
-    Args:
-        repo (BaseRepo): repository to read.
-        before (Tree): the old side, path to (mode, id).
-        after (Tree): the new side.
-        flags (DiffFlags): output options.
-    """
-    rows = compare(repo, before, after, flags.renames)
-    return (
-        render_changes(repo, rows, flags),
-        bool(filtered(with_unmerged(rows, flags), flags)),
-    )
-
-
 async def diff(
     accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
@@ -244,7 +204,18 @@ async def diff(
     if cached:
         state = await read_index(vfs, location.gitdir)
         refuse_unresolved(state)
-        before = await asyncio.to_thread(_base, repo, revisions)
+        if len(revisions) > 1:
+            raise GitError("--cached accepts at most one revision")
+
+        def base() -> Tree:
+            # The named revision, HEAD by default, or the empty tree on an
+            # unborn branch, read on a worker thread.
+            if revisions:
+                commit = resolve_commit(repo, revisions[0])
+                return shown_entries(repo, tree_entries(repo, commit.tree))
+            return shown_entries(repo, head_entries(repo) or {})
+
+        before = await asyncio.to_thread(base)
         after = shown_entries(repo, staged_entries(state))
     else:
         old, new, warning = await asyncio.to_thread(_sides, repo, revisions)
@@ -312,9 +283,17 @@ def _compared(
 
     async def render(shown: list[Delta]) -> ByteSource | None:
         [(old_side, new_side)] = shown_sides(shown, 1)
-        body, differs = await asyncio.to_thread(
-            _output, repo, old_side, new_side, parsed
-        )
+
+        def output() -> tuple[bytes, bool]:
+            # The changes rendered, and whether anything differs, which
+            # --exit-code answers with.
+            rows = compare(repo, old_side, new_side, parsed.renames)
+            return (
+                render_changes(repo, rows, parsed),
+                bool(filtered(with_unmerged(rows, parsed), parsed)),
+            )
+
+        body, differs = await asyncio.to_thread(output)
         if report and differs:
             io.exit_code = 1
         return None if quiet else body or None

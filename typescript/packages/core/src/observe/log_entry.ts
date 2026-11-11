@@ -21,10 +21,8 @@ export const EVENT_CLEAR = 'clear'
 export const EVENT_DELETE = 'delete'
 export const STDOUT_TRUNCATE = 4096
 
-export type EventType = 'vfs' | 'command' | 'result' | 'clear' | 'delete'
-
 export interface LogEntryInit {
-  type: EventType
+  type: 'vfs' | 'command' | 'result' | 'clear' | 'delete'
   session: string
   timestamp: number
   cwd?: string
@@ -51,7 +49,7 @@ export interface LogEntryInit {
  * `parent`. Mirrors Python's `LogEntry`.
  */
 export class LogEntry {
-  readonly type: EventType
+  readonly type: LogEntryInit['type']
   readonly session: string
   readonly timestamp: number
   readonly cwd: string | undefined

@@ -16,8 +16,6 @@ import { rmdirSync } from 'node:fs'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { forceUnmount, mount, type FuseHandle, type MountOptions } from '../fuse/mount.ts'
 
-const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const
-type Signal = (typeof SIGNALS)[number]
 export interface CleanupEntry {
   mountpoint: string
   // Cleanup owns only generated temp directories, never explicit mountpoints.
@@ -65,14 +63,12 @@ class FuseCleanupRegistry {
   private install(): void {
     if (this.installed) return
     this.installed = true
-    for (const sig of SIGNALS) {
-      process.on(sig, this.onSignal)
-    }
+    for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(sig, this.onSignal)
     process.on('beforeExit', this.onExit)
     process.on('exit', this.onExit)
   }
 
-  private readonly onSignal = (sig: Signal): void => {
+  private readonly onSignal = (sig: NodeJS.Signals): void => {
     if (this.exiting) return
     this.exiting = true
     this.drainSync()

@@ -17,7 +17,6 @@ import { describe, expect, it } from 'vitest'
 
 import { IOResult } from '../../io/types.ts'
 import { SessionState } from '../session/session.ts'
-import { newStatusWriter } from '../abort.ts'
 import {
   assignmentStatus,
   errexitActs,
@@ -96,8 +95,8 @@ describe('snapshotStatus / restoreStatus', () => {
   // Putting it back would resurrect a value the shell moved past.
   it('declines to restore over a status another line stamped', () => {
     const session = new SessionState({ sessionId: 't' })
-    const mine = newStatusWriter()
-    const theirs = newStatusWriter()
+    const mine = Symbol('line')
+    const theirs = Symbol('line')
     session.lastExitCode = 1
     const before = snapshotStatus(session)
 

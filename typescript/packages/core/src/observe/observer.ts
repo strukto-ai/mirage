@@ -244,10 +244,6 @@ function parseFiles(files: Map<string, Uint8Array>): JsonObject[] {
   return out
 }
 
-function eventTimestamp(e: JsonObject): number {
-  return typeof e.timestamp === 'number' ? e.timestamp : 0
-}
-
 /** The latest timestamp among `events`, null when none carries one. */
 function newestStamp(events: readonly JsonObject[]): number | null {
   return events.reduce<number | null>(
@@ -576,7 +572,11 @@ export class Observer {
         ? this._store.readAll()
         : this._store.readMatching(`/${await sessionFile(session)}`)),
     )
-    out.sort((a, b) => eventTimestamp(a) - eventTimestamp(b))
+    out.sort(
+      (a, b) =>
+        (typeof a.timestamp === 'number' ? a.timestamp : 0) -
+        (typeof b.timestamp === 'number' ? b.timestamp : 0),
+    )
     return out
   }
 

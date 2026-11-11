@@ -232,21 +232,6 @@ async function graphed(
   return out
 }
 
-/**
- * The commits a log walks from and the commits it hides: the revisions and
- * ranges given, HEAD when there are none, plus every ref for --all.
- */
-async function startingPoints(
-  repo: Repo,
-  revisions: readonly string[],
-  flags: LogFlags,
-  dashed: boolean,
-): Promise<[CommitFacts[], CommitFacts[]]> {
-  const [starts, hidden] = await walkEnds(repo, revisions.length ? revisions : [HEAD], dashed)
-  if (flags.allRefs) for (const item of await refCommits(repo)) starts.push(item)
-  return [starts, hidden]
-}
-
 /** Show commit logs. */
 export async function log(
   _accessor: NOOPAccessor,
@@ -261,7 +246,10 @@ export async function log(
   const [revisions, pathspecs, dashed] = await walkOperands(ctx, fl, repo, texts)
   const [mailmap, mapped, decorate] = await displayed(repo, fl, flags.pretty)
   const parsed = { ...flags, mailmap, useMailmap: mapped, decorate, pathspecs }
-  const [starts, hidden] = await startingPoints(repo, revisions, parsed, dashed)
+  // The commits a log walks from and the commits it hides: the revisions and
+  // ranges given, HEAD when there are none, plus every ref for --all.
+  const [starts, hidden] = await walkEnds(repo, revisions.length ? revisions : [HEAD], dashed)
+  if (parsed.allRefs) for (const item of await refCommits(repo)) starts.push(item)
   const decor = await decorations(repo, parsed.decorate)
   let diffFlags = parseDiffFlags(fl, false)
   // The pickaxe searches the diff, renames paired, whether or not any of it is

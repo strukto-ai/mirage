@@ -22,21 +22,11 @@ import {
 
 import type { JWTConfig } from './config.ts'
 
-type VerifyKey = Awaited<ReturnType<typeof importSPKI>> | Uint8Array
-
 export class JWTVerificationError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'JWTVerificationError'
   }
-}
-
-async function loadKey(cfg: JWTConfig): Promise<VerifyKey> {
-  if (cfg.key === undefined) throw new JWTVerificationError('no JWT key configured')
-  if (cfg.algorithm.startsWith('HS')) {
-    return new TextEncoder().encode(cfg.key)
-  }
-  return importSPKI(cfg.key, cfg.algorithm)
 }
 
 /**
@@ -77,11 +67,15 @@ export async function verifyJwt(
       clockTolerance: cfg.clockSkewSeconds,
     }
     if (cfg.issuer !== undefined) verifyOpts.issuer = cfg.issuer
-    const result =
-      keySet !== undefined
-        ? await jwtVerify(token, keySet, verifyOpts)
-        : await jwtVerify(token, await loadKey(cfg), verifyOpts)
-    payload = result.payload
+    if (keySet !== undefined) {
+      payload = (await jwtVerify(token, keySet, verifyOpts)).payload
+    } else {
+      if (cfg.key === undefined) throw new JWTVerificationError('no JWT key configured')
+      const key = cfg.algorithm.startsWith('HS')
+        ? new TextEncoder().encode(cfg.key)
+        : await importSPKI(cfg.key, cfg.algorithm)
+      payload = (await jwtVerify(token, key, verifyOpts)).payload
+    }
   } catch (e) {
     if (e instanceof JWTVerificationError) throw e
     throw new JWTVerificationError(`JWT rejected: ${String(e)}`)

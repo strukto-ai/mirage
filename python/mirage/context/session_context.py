@@ -506,11 +506,6 @@ def set_current_session(
     return _bind(session=session, owner=owner, evaluation=evaluation)
 
 
-def reset_current_session(token: CallerToken) -> None:
-    """Restore the previous session binding."""
-    reset_caller(token)
-
-
 def get_current_session() -> SessionState | None:
     """Return the session bound to the current async context, if any."""
     return _caller.get().session
@@ -520,7 +515,7 @@ def set_current_evaluation(
     context: EvaluationContext, owner: SessionOwner | None = None
 ) -> CallerToken:
     """Bind an evaluation with its session, as one binding; undone by
-    :func:`reset_current_session`.
+    :func:`reset_caller`.
 
     Args:
         context (EvaluationContext): the evaluator entering this task.
@@ -749,11 +744,6 @@ def set_admission(gate: EntryGate) -> CallerToken:
     return _bind(gate=gate)
 
 
-def reset_admission(token: CallerToken) -> None:
-    """Restore the previous admission binding."""
-    reset_caller(token)
-
-
 def get_admission() -> EntryGate | None:
     """The entry gate of the command running in this context, None
     when no admitted command is bound (a command constructed outside
@@ -775,11 +765,6 @@ def set_mount_gate(prefix: str, mode: MountMode) -> CallerToken:
     return _bind(mount=(prefix, mode))
 
 
-def reset_mount_gate(token: CallerToken) -> None:
-    """Restore the previous mount binding."""
-    reset_caller(token)
-
-
 def set_decision_sink(sink: DecisionSink) -> CallerToken:
     """Bind where the entry points note a policy's refusal, for one line's run.
 
@@ -794,11 +779,6 @@ def set_decision_sink(sink: DecisionSink) -> CallerToken:
         sink (DecisionSink): takes each record as an entry point raises it.
     """
     return _bind(refusals=sink)
-
-
-def reset_decision_sink(token: CallerToken) -> None:
-    """Restore the previous refusal-sink binding."""
-    reset_caller(token)
 
 
 def line_running() -> bool:
@@ -822,11 +802,6 @@ def set_explaining(
             run.
     """
     return _bind(explaining=trace)
-
-
-def reset_explaining(token: CallerToken) -> None:
-    """Restore the previous dry-run binding."""
-    reset_caller(token)
 
 
 def explaining() -> list[VfsExplanation] | DryRun | None:
@@ -881,11 +856,6 @@ def set_redirect_paths(
         syntax (tuple[Redirect, ...]): pending redirects to carry through a rewrite.
     """
     return _bind(redirects=(node_id, paths, runner, syntax))
-
-
-def reset_redirect_paths(token: CallerToken) -> None:
-    """Restore the previous redirect-target binding."""
-    reset_caller(token)
 
 
 def redirect_paths_for(node_id: int) -> tuple[PathSpec, ...]:
@@ -945,11 +915,6 @@ def clear_program_invocation() -> CallerToken:
     (``-exec sh -c ...``) is a program, and the builtins it runs are its
     builtins, ``printf -v`` included."""
     return _bind(program=None)
-
-
-def reset_program_invocation(token: CallerToken) -> None:
-    """Restore the previous program-run marking."""
-    reset_caller(token)
 
 
 def is_program_invocation(session: SessionState) -> bool:

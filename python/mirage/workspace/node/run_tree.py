@@ -18,7 +18,7 @@ from functools import partial
 from typing import Any, Callable
 
 from mirage.commands.builtin.utils.limit import guard_output
-from mirage.context import reset_admission, set_admission
+from mirage.context import reset_caller, set_admission
 from mirage.execution.context import new_line_id
 from mirage.execution.job import JobTable
 from mirage.execution.line.handle import LineHandle
@@ -185,7 +185,7 @@ async def run_command_tree(
                     capture_input=True,
                 )
             finally:
-                reset_admission(token)
+                reset_caller(token)
     stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
     # A line written to a terminal (a typed line's, a substitution's)
     # is bounded as what reached it, its jobs' output included, and

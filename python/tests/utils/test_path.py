@@ -26,6 +26,7 @@ from mirage.utils.path import (
     norm_dir,
     owner_prefix,
     parent,
+    posix_normpath,
     resolve_path,
     resolve_symlinks,
     respell_one,
@@ -155,6 +156,10 @@ def test_resolve_absolute_ignores_cwd():
 
 def test_resolve_current_dir_segment():
     assert resolve_path("./x", "/a/b") == "/a/b/x"
+
+
+def test_posix_normpath_folds_a_double_leading_slash():
+    assert posix_normpath("//a/./b/../c") == "/a/c"
 
 
 def test_expand_tilde_alone():

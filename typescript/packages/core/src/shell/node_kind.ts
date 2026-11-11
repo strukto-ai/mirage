@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { REDIRECT_NODE_TYPES } from './helpers.ts'
-import { NodeType as NT } from './types.ts'
+import { NodeType as NT, type TSNodeLike } from './types.ts'
 
 /**
  * Statement kinds the executor dispatches on.
@@ -73,12 +73,6 @@ const SIMPLE_KINDS: Readonly<Record<string, NodeKind>> = Object.freeze({
   [NT.C_STYLE_FOR_STATEMENT]: NodeKind.CFOR,
 })
 
-interface KindNodeLike {
-  type: string
-  children?: readonly { type: string }[] | { type: string }[]
-  namedChildren?: readonly KindNodeLike[] | KindNodeLike[]
-}
-
 // Statement kinds that are not pipelines of their own: they run other
 // statements and report the last one's status, so `${PIPESTATUS[@]}`
 // after them is whatever the last pipeline inside them left (bash:
@@ -109,7 +103,7 @@ const PIPELINE_TRANSPARENT_KINDS: ReadonlySet<NodeKind> = new Set([
  * Whether a statement leaves `PIPESTATUS` to the pipelines inside it
  * rather than stamping its own exit status.
  */
-export function pipelineTransparent(node: KindNodeLike): boolean {
+export function pipelineTransparent(node: TSNodeLike): boolean {
   const kind = nodeKind(node)
   if (kind === NodeKind.REDIRECT) {
     // A redirected statement is as transparent as what it redirects:
@@ -117,7 +111,7 @@ export function pipelineTransparent(node: KindNodeLike): boolean {
     // and `cat </missing` are a simple command's own one-segment status
     // whether or not the redirect opened. A bare redirect (`>f`) runs
     // the empty command, one segment too.
-    const inner = node.namedChildren?.find((child) => !REDIRECT_NODE_TYPES.has(child.type))
+    const inner = node.namedChildren.find((child) => !REDIRECT_NODE_TYPES.has(child.type))
     return inner !== undefined && pipelineTransparent(inner)
   }
   return PIPELINE_TRANSPARENT_KINDS.has(kind)
@@ -139,10 +133,10 @@ const SIMPLE_COMMAND_KINDS: ReadonlySet<NodeKind> = new Set([
  * a compound command forked the same way reports a subshell's
  * (`{ : ${U?}; } &` is 1).
  */
-export function simpleCommand(node: KindNodeLike): boolean {
+export function simpleCommand(node: TSNodeLike): boolean {
   const kind = nodeKind(node)
   if (kind === NodeKind.REDIRECT) {
-    const inner = node.namedChildren?.find((child) => !REDIRECT_NODE_TYPES.has(child.type))
+    const inner = node.namedChildren.find((child) => !REDIRECT_NODE_TYPES.has(child.type))
     return inner === undefined || simpleCommand(inner)
   }
   return SIMPLE_COMMAND_KINDS.has(kind)
@@ -153,19 +147,19 @@ export function simpleCommand(node: KindNodeLike): boolean {
  * UNSUPPORTED for node types neither walker implements (future grammar
  * additions).
  */
-export function nodeKind(node: KindNodeLike): NodeKind {
+export function nodeKind(node: TSNodeLike): NodeKind {
   const ntype = node.type
   const simple = SIMPLE_KINDS[ntype]
-  if (simple === NodeKind.COMPOUND && node.children?.[0]?.type === NT.ARITH_OPEN) {
+  if (simple === NodeKind.COMPOUND && node.children[0]?.type === NT.ARITH_OPEN) {
     return NodeKind.ARITH
   }
   if (simple !== undefined) return simple
   if (ntype === NT.FOR_STATEMENT) {
-    if (node.children?.[0]?.type === NT.SELECT) return NodeKind.SELECT
+    if (node.children[0]?.type === NT.SELECT) return NodeKind.SELECT
     return NodeKind.FOR
   }
   if (ntype === NT.WHILE_STATEMENT) {
-    if (node.children?.[0]?.type === NT.UNTIL) return NodeKind.UNTIL
+    if (node.children[0]?.type === NT.UNTIL) return NodeKind.UNTIL
     return NodeKind.WHILE
   }
   return NodeKind.UNSUPPORTED

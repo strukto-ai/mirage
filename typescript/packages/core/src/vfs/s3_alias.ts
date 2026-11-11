@@ -17,7 +17,7 @@ import type { ConfigOf, RedactedSchema } from './secrets.ts'
 import { FIELD_NORMALIZERS, redactConfigWithSchema, secretStr, z } from './secrets.ts'
 import type { ConfigState } from './types.ts'
 import type { S3Config } from './direct/s3.ts'
-import { S3_FAMILY_NORMALIZER } from './s3/config.ts'
+import { S3_FAMILY_RENAME } from './s3/config.ts'
 import { S3VFS } from './direct/s3.ts'
 
 /**
@@ -88,20 +88,20 @@ export const ALIAS_SHAPE = {
 
 /**
  * The shared fields plus whatever one provider's endpoint rule needs, under
- * the S3 family's python spellings. The node twin of the browser's
- * `browserAliasSchema`.
+ * the S3 family's python spellings. The browser's twin has the same name.
  */
 export function aliasSchema<E extends z.ZodRawShape>(
   extra: E,
 ): z.ZodObject<typeof ALIAS_SHAPE & E> {
-  return z.object({ ...ALIAS_SHAPE, ...extra }).register(FIELD_NORMALIZERS, S3_FAMILY_NORMALIZER)
+  return z
+    .object({ ...ALIAS_SHAPE, ...extra })
+    .register(FIELD_NORMALIZERS, { rename: S3_FAMILY_RENAME })
 }
 
-// What a caller may write, split the way python splits
-// `RegionEndpointConfig` from `FixedEndpointConfig`: a regional provider
-// must name its region and may override the endpoint; a self-hosted
-// gateway must name its endpoint and may name a region.
-export const REGION_ALIAS_SCHEMA = aliasSchema({
+// What a caller may write, split as python splits its two models: a
+// regional provider must name its region and may override the endpoint; a
+// self-hosted gateway must name its endpoint and may name a region.
+export const RegionEndpointConfig = aliasSchema({
   region: z
     .string()
     .describe(
@@ -113,7 +113,7 @@ export const REGION_ALIAS_SCHEMA = aliasSchema({
     .describe('Endpoint URL that replaces the one the provider derives.'),
 })
 
-export const FIXED_ALIAS_SCHEMA = aliasSchema({
+export const FixedEndpointConfig = aliasSchema({
   forcePathStyle: z.boolean().optional().meta({ default: true }),
   region: z.string().optional().meta({
     description: "Region requests are signed for; the gateway's endpoint does not depend on it.",
@@ -129,14 +129,6 @@ export interface Alias<C extends S3AliasConfig, R> {
   toS3Config: (config: C) => S3Config
   redact: (config: C) => R
 }
-
-const optional = (config: S3AliasConfig): Partial<S3Config> => ({
-  ...(config.sessionToken !== undefined ? { sessionToken: config.sessionToken } : {}),
-  ...(config.profile !== undefined ? { profile: config.profile } : {}),
-  ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
-  ...(config.timeout !== undefined ? { timeout: config.timeout } : {}),
-  ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
-})
 
 /**
  * Build one provider's config helpers from its endpoint rule.
@@ -177,7 +169,11 @@ export function makeS3Alias<S extends z.ZodObject>(options: {
       ...resolved(config),
       ...(config.accessKeyId !== undefined ? { accessKeyId: config.accessKeyId } : {}),
       ...(config.secretAccessKey !== undefined ? { secretAccessKey: config.secretAccessKey } : {}),
-      ...optional(config),
+      ...(config.sessionToken !== undefined ? { sessionToken: config.sessionToken } : {}),
+      ...(config.profile !== undefined ? { profile: config.profile } : {}),
+      ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
+      ...(config.timeout !== undefined ? { timeout: config.timeout } : {}),
+      ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
     }),
     redact: (config) => redactConfigWithSchema(schema, { ...config, ...resolved(config) }),
   }

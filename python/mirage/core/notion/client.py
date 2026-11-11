@@ -14,7 +14,6 @@
 
 import json
 from collections.abc import Mapping
-from functools import partial
 from typing import Any
 
 import aiohttp
@@ -193,27 +192,21 @@ async def notion_delete(
     return data
 
 
-async def _list_page(
-    accessor: NotionAccessor,
-    path: str,
-    params: dict[str, Any],
-    cursor: str | None,
-) -> dict[str, Any]:
-    merged = dict(params)
-    if cursor is not None:
-        merged["start_cursor"] = cursor
-    return await notion_get(accessor, path, params=merged)
-
-
 async def paginate_list(
     accessor: NotionAccessor,
     path: str,
     params: dict[str, Any] | None = None,
     page_size: int = 100,
 ) -> list[dict[str, Any]]:
-    merged = dict(params or {})
-    merged["page_size"] = page_size
-    return await cursor_items(partial(_list_page, accessor, path, merged))
+    merged = {**(params or {}), "page_size": page_size}
+
+    async def page(cursor: str | None) -> dict[str, Any]:
+        args = dict(merged)
+        if cursor is not None:
+            args["start_cursor"] = cursor
+        return await notion_get(accessor, path, params=args)
+
+    return await cursor_items(page)
 
 
 def complete_page(page: dict[str, Any]) -> dict[str, Any]:
@@ -235,18 +228,6 @@ def complete_page(page: dict[str, Any]) -> dict[str, Any]:
     return page
 
 
-async def _post_page(
-    accessor: NotionAccessor,
-    path: str,
-    body: dict[str, Any],
-    cursor: str | None,
-) -> dict[str, Any]:
-    merged = dict(body)
-    if cursor is not None:
-        merged["start_cursor"] = cursor
-    return complete_page(await notion_post(accessor, path, merged))
-
-
 async def paginate_post(
     accessor: NotionAccessor,
     path: str,
@@ -254,8 +235,12 @@ async def paginate_post(
     page_size: int = 100,
     max_results: int | None = None,
 ) -> list[dict[str, Any]]:
-    merged = dict(body or {})
-    merged["page_size"] = min(page_size, MAX_PAGE_SIZE)
-    return await cursor_items(
-        partial(_post_page, accessor, path, merged), max_results
-    )
+    merged = {**(body or {}), "page_size": min(page_size, MAX_PAGE_SIZE)}
+
+    async def page(cursor: str | None) -> dict[str, Any]:
+        args = dict(merged)
+        if cursor is not None:
+            args["start_cursor"] = cursor
+        return complete_page(await notion_post(accessor, path, args))
+
+    return await cursor_items(page, max_results)

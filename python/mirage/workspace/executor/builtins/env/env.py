@@ -17,7 +17,7 @@ from typing import Any
 
 from mirage.context import (
     is_program_invocation,
-    reset_program_invocation,
+    reset_caller,
     set_program_invocation,
 )
 from mirage.io.types import ByteSource
@@ -199,7 +199,7 @@ async def handle_env(
             shell_join(command), session_id=session.session_id, stdin=stdin
         )
     finally:
-        reset_program_invocation(token)
+        reset_caller(token)
         session.vars = saved
         session.exported_functions = exported
     return io.stdout, io, ExecutionNode(command="env", exit_code=io.exit_code)

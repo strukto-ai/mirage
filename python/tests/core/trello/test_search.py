@@ -101,7 +101,7 @@ async def _ask(
             AsyncMock(return_value=[{"id": "l1", "name": "Doing"}]),
         ),
         patch(f"{readdir}.list_list_cards", AsyncMock(return_value=listed)),
-        patch("mirage.core.trello.client._get", found),
+        patch("mirage.core.trello.client._request", found),
     ):
         out = await files_containing(accessor, text, under or [_scope()])
     return out, [

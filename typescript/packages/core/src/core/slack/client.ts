@@ -239,3 +239,16 @@ export class NodeSlackTransport extends HttpSlackTransport {
     return new NodeSlackTransport(this.searchToken, undefined, this.baseUrlOverride, this.timeout)
   }
 }
+
+/** A Slack-hosted file's bytes, or `size` of them from `offset`. Mirrors Python's `download_file`. */
+export async function downloadFile(
+  transport: SlackTransport,
+  url: string,
+  offset = 0,
+  size: number | null = null,
+): Promise<Uint8Array> {
+  if (transport.downloadFile === undefined) {
+    throw new Error('slack transport does not support file downloads')
+  }
+  return transport.downloadFile(url, offset, size)
+}

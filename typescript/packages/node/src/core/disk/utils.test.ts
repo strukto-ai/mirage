@@ -18,7 +18,7 @@ import { join, resolve, sep } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { spec, tmpRoot } from '../../../tests/test-utils.ts'
 import { gnuBasename as basename, norm, parent } from '@struktoai/mirage-core/utils/path'
-import { resolveInside, resolveSafe } from './utils.ts'
+import { resolveInside } from './utils.ts'
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof fs>()
@@ -30,28 +30,6 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     open: vi.fn(actual.open),
     lstat: vi.fn(actual.lstat),
   }
-})
-
-describe('resolveSafe', () => {
-  it('joins root with virtual path', () => {
-    expect(resolveSafe('/tmp/r', '/a/b.txt')).toBe(resolve('/tmp/r', 'a/b.txt'))
-  })
-  it('strips leading slash from virtual', () => {
-    expect(resolveSafe('/tmp/r', '/x')).toBe(resolve('/tmp/r', 'x'))
-  })
-  it('returns root when virtual is empty/slash', () => {
-    expect(resolveSafe('/tmp/r', '/')).toBe(resolve('/tmp/r'))
-  })
-  it('throws when virtual escapes the root via ..', () => {
-    expect(() => resolveSafe('/tmp/r', '/../escaped')).toThrow(/escapes root/)
-  })
-  it('allows nested paths within root', () => {
-    expect(resolveSafe('/tmp/r', '/a/b/c')).toBe(resolve('/tmp/r', 'a/b/c'))
-  })
-  it('uses platform separator', () => {
-    const res = resolveSafe('/tmp/r', '/a/b')
-    expect(res.endsWith(`a${sep}b`)).toBe(true)
-  })
 })
 
 describe('norm', () => {

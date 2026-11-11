@@ -423,24 +423,6 @@ export function headRef(table: ReadonlyMap<string, string>): string | null {
 
 const FANOUT_LEN = 2
 
-/** Where `oid` sorts among sorted ids: the first index not below it. */
-function bisectLeft(ids: readonly string[], oid: string): number {
-  let low = 0
-  let high = ids.length
-  while (low < high) {
-    const mid = (low + high) >> 1
-    if (compareCodePoints(ids[mid] ?? '', oid) < 0) low = mid + 1
-    else high = mid
-  }
-  return low
-}
-
-function sharedLength(a: string, b: string): number {
-  let shared = 0
-  while (shared < a.length && a[shared] === b[shared]) shared += 1
-  return shared
-}
-
 /**
  * The shortest prefix of `oid` no other id shares, no shorter than `width`, the
  * length git abbreviates it to. In sorted ids the longest prefix
@@ -451,11 +433,20 @@ function sharedLength(a: string, b: string): number {
  * @param ids every id sharing its fanout byte, sorted
  */
 export function uniqueWidth(oid: string, width: number, ids: readonly string[]): number {
-  const at = bisectLeft(ids, oid)
+  // Where `oid` sorts among the ids: the first index not below it.
+  let at = 0
+  for (let high = ids.length; at < high;) {
+    const mid = (at + high) >> 1
+    if (compareCodePoints(ids[mid] ?? '', oid) < 0) at = mid + 1
+    else high = mid
+  }
   const after = ids[at] === oid ? at + 1 : at
   let widest = width
-  for (const other of [...ids.slice(Math.max(at - 1, 0), at), ...ids.slice(after, after + 1)])
-    widest = Math.max(widest, sharedLength(oid, other) + 1)
+  for (const other of [...ids.slice(Math.max(at - 1, 0), at), ...ids.slice(after, after + 1)]) {
+    let shared = 0
+    while (shared < oid.length && oid[shared] === other[shared]) shared += 1
+    widest = Math.max(widest, shared + 1)
+  }
   return Math.min(widest, oid.length)
 }
 

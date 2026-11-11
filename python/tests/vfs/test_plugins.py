@@ -31,7 +31,7 @@ from mirage.commands.builtin.generic_bind.files import (
     command_files as files_of,
 )
 from mirage.commands.config import Context
-from mirage.context import reset_mount_gate, set_mount_gate
+from mirage.context import reset_caller, set_mount_gate
 from mirage.core.ram.read import read as ram_read
 from mirage.core.ram.readdir import readdir as ram_readdir
 from mirage.core.ram.stat import stat as ram_stat
@@ -178,7 +178,7 @@ async def test_existence_falls_back_to_stat_only_for_absence(accessor):
         try:
             exists = files_of(Context(vfs=command_files(ws))).exists
         finally:
-            reset_mount_gate(token)
+            reset_caller(token)
         assert await exists(PATH)
         missing = PathSpec.from_str_path("/nested/data/missing")
         assert not await exists(missing)

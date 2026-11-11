@@ -12,30 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { TrelloAccessor } from '../../../../accessor/trello.ts'
-import { HttpTrelloTransport } from '../../../../core/trello/client.ts'
-import type { TrelloConfig } from '../../../../core/trello/config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { readStdinAsync } from '../../../builtin/utils/stream.ts'
 import type { Context } from '../../../config.ts'
 import type { FlagView } from '../../../spec/flag_view.ts'
 
 const DEC = new TextDecoder('utf-8', { fatal: false })
-
-/** The install's accessor, built once from its validated config. */
-export function trelloAccessor(config: unknown): TrelloAccessor {
-  const cfg = config as TrelloConfig
-  const transport = new HttpTrelloTransport({
-    apiKey: cfg.apiKey,
-    apiToken: cfg.apiToken,
-    ...(cfg.baseUrl !== undefined ? { baseUrl: cfg.baseUrl } : {}),
-    ...(cfg.timeout !== undefined ? { timeout: cfg.timeout } : {}),
-  })
-  return new TrelloAccessor(transport, {
-    ...(cfg.workspaceId !== undefined ? { workspaceId: cfg.workspaceId } : {}),
-    ...(cfg.boardIds !== undefined ? { boardIds: cfg.boardIds } : {}),
-  })
-}
 
 /** The path a `--*_file` flag names, or null when absent. */
 export function fileOperand(fl: FlagView, name: string): PathSpec | null {

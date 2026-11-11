@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import pytest
 
-from mirage.context.session_context import reset_explaining, set_explaining
+from mirage.context.session_context import reset_caller, set_explaining
 from mirage.policy.types import DryRun
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -34,7 +34,7 @@ async def _run_deciding(ws: Workspace, cmd: str) -> tuple[str, str, int]:
     try:
         return await _run(ws, cmd)
     finally:
-        reset_explaining(token)
+        reset_caller(token)
 
 
 @pytest.mark.asyncio

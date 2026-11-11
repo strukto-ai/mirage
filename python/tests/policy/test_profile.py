@@ -22,7 +22,7 @@ from pydantic import ValidationError
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.config import Context, command
 from mirage.commands.spec.types import Argument, CommandSpec
-from mirage.context import reset_current_session, set_current_session
+from mirage.context import reset_caller, set_current_session
 from mirage.execution.process.config import ProcessPermissions
 from mirage.io.types import IOResult
 from mirage.policy import (
@@ -3071,7 +3071,7 @@ async def test_the_dispatcher_stats_a_refused_entry_and_withholds_its_content():
             with pytest.raises(FileNotFoundError):
                 await ws.vfs.stat("/data/t/ghost/g")
         finally:
-            reset_current_session(token)
+            reset_caller(token)
     finally:
         await ws.close()
 

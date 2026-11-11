@@ -50,16 +50,26 @@ export interface MontyFsBits {
   ) => object
 }
 
-/** A worker-death error, the one shape run() maps to an exit code. */
-export interface MontyCrashedLike extends Error {
-  timedOut: boolean
-}
-
 export interface MontyModuleLike extends MontyFsBits {
   Monty: { create(options?: Record<string, unknown>): Promise<MontyPoolLike> }
   MontySyntaxError: new (...args: never[]) => Error
   MontyRuntimeError: new (...args: never[]) => Error
-  MontyCrashedError: new (...args: never[]) => MontyCrashedLike
+  /** A worker-death error, the one shape run() maps to an exit code. */
+  MontyCrashedError: new (...args: never[]) => Error & { timedOut: boolean }
+}
+
+/**
+ * The path a callback argument names: a string, or a path object carrying
+ * one; null for anything else. Python's engine exports this as
+ * `pydantic_monty.os_access.path_from_arg`; the JS package does not.
+ */
+export function pathFromArg(value: unknown): string | null {
+  if (typeof value === 'string') return value
+  if (value !== null && typeof value === 'object' && 'path' in value) {
+    const p = (value as { path: unknown }).path
+    return typeof p === 'string' ? p : null
+  }
+  return null
 }
 
 let provided: (() => Promise<MontyModuleLike>) | undefined

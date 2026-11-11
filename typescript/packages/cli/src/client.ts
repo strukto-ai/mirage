@@ -27,8 +27,6 @@ import { ENV_AUTH_MODE, ENV_AUTH_TOKEN, ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS 
 import { LoginError, freshToken, loginCommand, loginPath, readLogin } from './credentials.ts'
 import { isLocalUrl, loadDaemonSettings, type DaemonSettings } from './settings.ts'
 
-const requireFromHere = createRequire(import.meta.url)
-
 const REMOTE_PROBE_TIMEOUT_SECONDS = 10
 
 /** The daemon is down and may not be spawned, or a spawned one never answered. */
@@ -259,7 +257,9 @@ export class DaemonClient {
     const logDir = mirageHome()
     mkdirSync(logDir, { recursive: true })
     const out = openSync(join(logDir, 'daemon.log'), 'a')
-    const daemonEntry = requireFromHere.resolve('@struktoai/mirage-server/bin/daemon')
+    const daemonEntry = createRequire(import.meta.url).resolve(
+      '@struktoai/mirage-server/bin/daemon',
+    )
     if (!existsSync(daemonEntry)) {
       throw new Error(
         `daemon binary not found at ${daemonEntry}; reinstall @struktoai/mirage-server`,

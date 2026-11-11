@@ -31,17 +31,6 @@ import { detectScope, TOP_LEVEL_DIRS } from './scope.ts'
 // Mirrors LangfuseConfig.default_trace_limit in python.
 const DEFAULT_TRACE_LIMIT = 100
 
-function promptVersions(record: Record<string, unknown>): string[] {
-  const value = record.versions
-  if (!Array.isArray(value)) return []
-  const numbers: number[] = []
-  for (const entry of value) {
-    const parsed = typeof entry === 'number' ? entry : Number(entry)
-    if (Number.isFinite(parsed)) numbers.push(parsed)
-  }
-  return numbers.sort((a, b) => a - b).map(String)
-}
-
 function sessionExtra(match: ScopeMatch): Record<string, string> {
   return { session_id: match.slots.session_id ?? '' }
 }
@@ -129,8 +118,9 @@ async function listPromptVersions(
     if (pickString(p, 'name') !== promptName) continue
     // The list endpoint returns PromptMeta, which carries every version of a
     // prompt in a `versions` array; there is no scalar `version`.
-    for (const version of promptVersions(p)) {
-      rows.push(new FileStat({ name: `${version}.json`, type: FileType.FILE }))
+    const versions = Array.isArray(p.versions) ? p.versions.map((entry) => Number(entry)) : []
+    for (const version of versions.filter((n) => Number.isFinite(n)).sort((a, b) => a - b)) {
+      rows.push(new FileStat({ name: `${String(version)}.json`, type: FileType.FILE }))
     }
   }
   return rows

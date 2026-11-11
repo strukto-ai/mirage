@@ -17,7 +17,7 @@ import errno
 
 import pytest
 
-from mirage.context import reset_current_session, set_current_session
+from mirage.context import reset_caller, set_current_session
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Session, Workspace
@@ -203,7 +203,7 @@ def test_the_dispatcher_runs_as_the_default_session():
         try:
             assert await ws.vfs.read("/data/vault/secret") == b"top\n"
         finally:
-            reset_current_session(token)
+            reset_caller(token)
 
     asyncio.run(run())
 
@@ -239,12 +239,12 @@ def test_the_dispatcher_does_not_adopt_another_workspaces_session():
                 await ws.vfs.read("/data/vault/secret")
             assert await files.read("/data/vault/secret") == b"top\n"
         finally:
-            reset_current_session(token)
+            reset_caller(token)
         token = set_current_session(wide)
         try:
             assert await ws.vfs.read("/data/vault/secret") == b"top\n"
         finally:
-            reset_current_session(token)
+            reset_caller(token)
 
     asyncio.run(run())
 
@@ -714,7 +714,7 @@ def test_ops_rmdir_keeps_the_refusal_when_a_mounted_child_remains():
     try:
         refused = asyncio.run(probe())
     finally:
-        reset_current_session(token)
+        reset_caller(token)
     assert refused is not None
     assert refused.errno in (errno.ENOTEMPTY, errno.EEXIST)
     kept = _host(ws, "cat /a/d/sec/k")

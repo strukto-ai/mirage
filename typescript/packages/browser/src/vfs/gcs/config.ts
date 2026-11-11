@@ -14,10 +14,10 @@
 
 import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
-import { browserAliasSchema, makeBrowserS3Alias } from '../s3_alias.ts'
+import { aliasSchema, makeS3Alias } from '../s3_alias.ts'
 
-export const GCSConfig = makeBrowserS3Alias({
-  schema: browserAliasSchema({
+export const GCSConfig = makeS3Alias({
+  schema: aliasSchema({
     region: z.string().optional().meta({
       description: 'Region the presigned URLs are signed for; GCS accepts `auto`.',
       default: 'auto',

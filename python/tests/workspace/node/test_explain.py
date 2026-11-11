@@ -22,8 +22,7 @@ from pydantic import BaseModel, ConfigDict
 
 from mirage import Session, Workspace
 from mirage.context.session_context import (
-    reset_decision_sink,
-    reset_explaining,
+    reset_caller,
     set_decision_sink,
     set_explaining,
 )
@@ -79,8 +78,8 @@ async def _judged(
             is not None,
         )
     finally:
-        reset_explaining(token)
-        reset_decision_sink(sink_token)
+        reset_caller(token)
+        reset_caller(sink_token)
     return [one.judgment for one in judged]
 
 

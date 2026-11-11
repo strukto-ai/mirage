@@ -54,9 +54,9 @@ export const BUILDER: GenericCommand = {
     const mkdir =
       !copies && !writes ? refused('mkdir') : files.answers('mkdir') ? files.mkdir : undefined
     const resolved = await files.resolveGlob(paths)
-    // The tree to copy, walked from the mount's readTree where it answers
-    // (mirrors Python's _make_find), so stat classifies entries from the
-    // listing instead of re-fetching, matching find.
+    // The tree to copy, walked from the mount's readTree where it answers,
+    // so stat classifies entries from the listing instead of re-fetching,
+    // matching find.
     const [readdir, stat] = treeWalk<string[], FileStat>(
       files.readTree,
       (p) => files.readdir(p),

@@ -14,10 +14,10 @@
 
 import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
-import { browserAliasSchema, derivedEndpoint, makeBrowserS3Alias } from '../s3_alias.ts'
+import { aliasSchema, derivedEndpoint, makeS3Alias } from '../s3_alias.ts'
 
-export const R2Config = makeBrowserS3Alias({
-  schema: browserAliasSchema({
+export const R2Config = makeS3Alias({
+  schema: aliasSchema({
     region: z.string().optional().meta({
       description: 'Region of the bucket; R2 addresses a bucket by account, not by region.',
       default: 'auto',

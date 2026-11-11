@@ -1021,7 +1021,11 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
     # setting is not known until it is read.
     rule = registry.rule_for()
     async with _building(request, wid):
-        secrets = _build_load_secrets(req.override)
+        # A snapshot never carries the `secrets:` block, the deployment's
+        # credentials, so a restored pointer at a declared instance needs
+        # it named here. It passes through as it arrived, even when it is
+        # not a mapping: the constructor is the one place that judges it.
+        secrets = req.override.get("secrets") if req.override else None
         try:
             # An override mount's credential may be a pointer at one of
             # these declarations; a container the constructor will reject
@@ -1181,21 +1185,3 @@ async def _read_load_body(
         )
     tar.seek(0)
     return req, tar
-
-
-def _build_load_secrets(
-    override: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    """The `secrets:` declarations a load override supplies.
-
-    A snapshot never carries the block, because it is the deployment's
-    credentials, so a restored pointer at a declared instance needs it
-    named here -- the same reason a redacted mount needs `mounts`.
-    """
-    if not override:
-        return None
-    # Passed through as it arrived, even when it is not a mapping: the
-    # constructor is the one place that judges the container, and
-    # filtering here turned a bad override into a successful load whose
-    # every restored pointer was unresolvable.
-    return override.get("secrets")

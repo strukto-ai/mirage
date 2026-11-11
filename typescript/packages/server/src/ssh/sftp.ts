@@ -21,20 +21,6 @@ import type { SFTPWrapper } from 'ssh2'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import { keyProfile, loginEntry, newSessionId, openSession } from './session.ts'
 
-// ssh2 ends an SFTP channel with no exit status, which OpenSSH's ssh
-// reports as 255 and scp (in its default SFTP mode) as a failed copy.
-// sshd's internal-sftp reports 0; this sends it the way ssh2's own
-// Channel.exit does for a session channel.
-interface SFTPChannelInternals {
-  _protocol: { exitStatus(id: number, status: number): void }
-  outgoing: { id: number; state: string }
-}
-
-function exitZero(sftp: SFTPWrapper): void {
-  const chan = sftp as unknown as SFTPChannelInternals
-  if (chan.outgoing.state === 'open') chan._protocol.exitStatus(chan.outgoing.id, 0)
-}
-
 /**
  * Serve SFTP (and so modern scp) for one channel onto its workspace, as a
  * session of its own under the login key's profile, opened on the first
@@ -65,7 +51,15 @@ export function serveSFTP(
         await entry.runner.ws.closeSession(sessionId)
       }
     } finally {
-      exitZero(sftp)
+      // ssh2 ends an SFTP channel with no exit status, which OpenSSH's ssh
+      // reports as 255 and scp (in its default SFTP mode) as a failed copy.
+      // sshd's internal-sftp reports 0; this sends it the way ssh2's own
+      // Channel.exit does for a session channel.
+      const chan = sftp as unknown as {
+        _protocol: { exitStatus(id: number, status: number): void }
+        outgoing: { id: number; state: string }
+      }
+      if (chan.outgoing.state === 'open') chan._protocol.exitStatus(chan.outgoing.id, 0)
     }
   }
   new MirageSFTPServer(sftp, makeCore, onExit).attach().catch((err: unknown) => {

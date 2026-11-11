@@ -37,7 +37,6 @@ export const AuthMode = {
 } as const
 export type AuthMode = (typeof AuthMode)[keyof typeof AuthMode]
 
-const VALID_MODES: readonly AuthMode[] = Object.values(AuthMode)
 const DEFAULT_CLOCK_SKEW_SECONDS = 5
 export const PROTECTED_RESOURCE_PATH = '/.well-known/oauth-protected-resource'
 export const AUTHORIZATION_SERVER_PATH = '/.well-known/oauth-authorization-server'
@@ -100,19 +99,8 @@ function mergeConfigTable(
   return merged
 }
 
-function pickEnv(opts: ResolveOptions | undefined): Record<string, string | undefined> {
-  if (opts?.env !== undefined) return opts.env
-  return process.env
-}
-
-function pickTable(opts: ResolveOptions | undefined): Record<string, string> {
-  if (opts?.table !== undefined) return opts.table
-  if (opts?.env !== undefined) return {}
-  return readDaemonTable(mirageHome())
-}
-
 export function resolveLocalToken(opts?: ResolveOptions): string | undefined {
-  const env = pickEnv(opts)
+  const env = opts?.env ?? process.env
   const fromEnv = (env[ENV_AUTH_TOKEN] ?? '').trim()
   if (fromEnv.length > 0) return fromEnv
   return readTokenFile(opts?.tokenFile ?? defaultTokenFile())
@@ -133,19 +121,19 @@ function parseCsv(value: string): string[] {
     .filter((s) => s.length > 0)
 }
 
-function isAuthMode(value: string): value is AuthMode {
-  return (VALID_MODES as readonly string[]).includes(value)
-}
-
 export function resolveAuthConfig(opts?: ResolveOptions): AuthConfig {
-  const env = mergeConfigTable(pickEnv(opts), pickTable(opts))
+  const env = mergeConfigTable(
+    opts?.env ?? process.env,
+    opts?.table ?? (opts?.env !== undefined ? {} : readDaemonTable(mirageHome())),
+  )
   const raw = (env[ENV_AUTH_MODE] ?? AuthMode.Local).trim().toLowerCase() || AuthMode.Local
-  if (!isAuthMode(raw)) {
+  const modes: readonly string[] = Object.values(AuthMode)
+  if (!modes.includes(raw)) {
     throw new Error(
-      `${ENV_AUTH_MODE} must be one of ${VALID_MODES.join('|')}, got ${JSON.stringify(raw)}`,
+      `${ENV_AUTH_MODE} must be one of ${modes.join('|')}, got ${JSON.stringify(raw)}`,
     )
   }
-  const mode: AuthMode = raw
+  const mode = raw as AuthMode
   const loginClientId = (env[ENV_LOGIN_CLIENT_ID] ?? '').trim() || undefined
   if (loginClientId !== undefined && mode !== AuthMode.Jwt) {
     throw new Error(`${ENV_LOGIN_CLIENT_ID} requires mode=jwt`)

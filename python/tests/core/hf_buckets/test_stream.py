@@ -16,7 +16,7 @@ import pytest
 
 from mirage.core.hf_buckets.stream import read_stream
 from mirage.core.hf_hub.client import HfHubError
-from mirage.observe.context import RecordingScope, active_recorder
+from mirage.observe.context import RecordingScope, recording_active
 from mirage.types import PathSpec
 from tests.fixtures.hf_hub_api import NO_ETAG, xet_hash
 
@@ -96,7 +96,7 @@ async def test_an_empty_stream_is_still_stamped(make_acc):
 @pytest.mark.asyncio
 async def test_a_stream_with_no_recorder_does_not_crash(make_acc):
     acc = make_acc({"x": b"abc"})
-    assert active_recorder() is None
+    assert not recording_active()
     assert (
         b"".join(
             [c async for c in read_stream(acc, PathSpec.from_str_path("/x"))]

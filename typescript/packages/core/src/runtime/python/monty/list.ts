@@ -14,13 +14,6 @@
 
 import { compareComponents } from '../../../utils/sort.ts'
 
-/** A full entry path under `dir`, whatever shape the listing spelled. */
-function joinEntry(dir: string, name: string): string {
-  const clean = name.endsWith('/') ? name.slice(0, -1) : name
-  if (clean.startsWith('/')) return clean
-  return dir === '/' ? '/' + clean : dir + '/' + clean
-}
-
 /**
  * A listing's entries as the guest's paths, sorted as pathlib sorts: by
  * parts, each by code point. Backends spell entries differently (bare names, slash-marked
@@ -28,5 +21,10 @@ function joinEntry(dir: string, name: string): string {
  * three to one path.
  */
 export function childPaths(path: string, names: string[]): string[] {
-  return [...new Set(names.map((name) => joinEntry(path, name)))].sort(compareComponents)
+  const joined = names.map((name) => {
+    const clean = name.endsWith('/') ? name.slice(0, -1) : name
+    if (clean.startsWith('/')) return clean
+    return path === '/' ? '/' + clean : path + '/' + clean
+  })
+  return [...new Set(joined)].sort(compareComponents)
 }

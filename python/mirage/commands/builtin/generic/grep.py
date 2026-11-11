@@ -46,10 +46,9 @@ from mirage.commands.builtin.utils.stream import (
     stdin_stream,
 )
 from mirage.commands.builtin.utils.wrap import (
-    call_readdir,
-    call_stat,
     mount_parent_readdir,
     mount_parent_stat,
+    to_pathspec,
 )
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
@@ -376,9 +375,9 @@ async def grep_generic(
 
     mounts = mounts_of(ctx)
     rd = mount_parent_readdir(
-        partial(call_readdir, readdir), mounts, mount_root(ctx)
+        lambda path: readdir(to_pathspec(path)), mounts, mount_root(ctx)
     )
-    st = mount_parent_stat(partial(call_stat, stat), mounts)
+    st = mount_parent_stat(lambda path: stat(to_pathspec(path)), mounts)
     links = links_of(ctx)
     # The walk meets links as entries: -r leaves them, -R reads what each
     # one leads to, and a directory it reaches again is a loop.

@@ -17,7 +17,7 @@ import asyncio
 import pytest
 
 from mirage.context.session_context import (
-    reset_current_session,
+    reset_caller,
     set_current_session,
 )
 from mirage.policy import PolicyDenied
@@ -520,7 +520,7 @@ async def test_a_frame_voices_its_own_session_while_another_runs():
     try:
         await set_var(session, "r", make_array(["x"]), diagnostics=notes)
     finally:
-        reset_current_session(token)
+        reset_caller(token)
     held.release()
     assert [
         note if isinstance(note, str) else note.decode() for note in notes

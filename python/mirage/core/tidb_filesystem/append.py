@@ -27,16 +27,6 @@ from mirage.observe.context import record, start_op
 from mirage.types import FileStat, PathSpec
 
 
-async def _replace(
-    accessor: TiDBFilesystemAccessor, request: ReplaceRequest
-) -> FileStat | None:
-    require_supported(
-        {}, "tidb_filesystem", request.path, "put", request.condition
-    )
-    await write(accessor, request.path, request.body)
-    return None
-
-
 async def append(
     accessor: TiDBFilesystemAccessor, path: PathSpec, data: ByteSource
 ) -> None:
@@ -61,9 +51,17 @@ async def append(
                 "append", path.virtual, "tidb_filesystem", spool.size, timer
             )
             return
+
+        async def replace(request: ReplaceRequest) -> FileStat | None:
+            require_supported(
+                {}, "tidb_filesystem", request.path, "put", request.condition
+            )
+            await write(accessor, request.path, request.body)
+            return None
+
         await append_by_streamed_rewrite(
             lambda p, remember: read_stream(accessor, p),
-            lambda request: _replace(accessor, request),
+            replace,
             lambda p: stat(accessor, p),
             path,
             spool.stream(),

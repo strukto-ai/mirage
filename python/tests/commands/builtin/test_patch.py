@@ -18,7 +18,7 @@ import pytest
 
 from mirage.commands.builtin.generic.patch import patch_generic
 from mirage.commands.config import Context
-from mirage.context import reset_mount_gate, set_mount_gate
+from mirage.context import reset_caller, set_mount_gate
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.workspace.files import Files
 from mirage.workspace.types import MountRow
@@ -85,7 +85,7 @@ async def test_patch_preserves_virtual_paths_for_mounted_io(prefix, source):
             operands, [], ctx, read, write, stat, {}, AsyncMock()
         )
     finally:
-        reset_mount_gate(token)
+        reset_caller(token)
     assert "hello.txt" in seen
     assert files["hello.txt"] == b"hello\nuniverse\n"
 

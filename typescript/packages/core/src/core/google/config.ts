@@ -17,27 +17,8 @@ import type { ConfigOf } from '../../vfs/secrets.ts'
 import { secretSchema, secretStr } from '../../vfs/secrets.ts'
 import { timeoutShape } from '../api/config.ts'
 
-// A pre-minted token read on every request. This is how a caller that
-// already owns the OAuth dance (a service account, a host application's
-// token source) plugs in: it caches and refreshes on its own, so mirage
-// holds no long-lived credential and never contacts the token endpoint.
-// Mirrors python's `access_token: SecretStr | Callable[[], str | SecretStr]`.
-export type GoogleAccessTokenProvider = () => string | Promise<string>
-
 export const GOOGLE_CREDENTIAL_ERROR =
   'GoogleConfig needs either accessToken (a token or a provider callable) or both clientId and refreshToken'
-
-// Both grants stand alone, so this is what keeps a mount from being built
-// with no credential at all and failing on the first read instead. Mirrors
-// python's `_one_credential` model validator.
-function hasGoogleCredential(config: {
-  accessToken?: string | GoogleAccessTokenProvider | undefined
-  clientId?: string | undefined
-  refreshToken?: string | undefined
-}): boolean {
-  if (config.accessToken !== undefined) return true
-  return config.clientId !== undefined && config.refreshToken !== undefined
-}
 
 export const GoogleConfig = z
   .object({
@@ -45,10 +26,16 @@ export const GoogleConfig = z
     // Two ways to authenticate, the same two MsGraphConfig offers: a token
     // (or provider) supplied by the caller, or the refresh-token grant where
     // mirage mints and renews the access token itself through TokenManager.
+    // A provider is a pre-minted token read on every request. This is how a
+    // caller that already owns the OAuth dance (a service account, a host
+    // application's token source) plugs in: it caches and refreshes on its
+    // own, so mirage holds no long-lived credential and never contacts the
+    // token endpoint. Mirrors python's
+    // `access_token: SecretStr | Callable[[], str | SecretStr]`.
     accessToken: secretSchema(
       z.union([
         z.string(),
-        z.custom<GoogleAccessTokenProvider>((value) => typeof value === 'function'),
+        z.custom<() => string | Promise<string>>((value) => typeof value === 'function'),
       ]),
     )
       .optional()
@@ -102,7 +89,15 @@ export const GoogleConfig = z
         'Drive folder ID the `gdrive` mount uses as its root instead of My Drive; it may be a folder in a Shared Drive. Other Google mounts ignore it.',
       ),
   })
-  .refine(hasGoogleCredential, { message: GOOGLE_CREDENTIAL_ERROR })
+  // Both grants stand alone, so this is what keeps a mount from being built
+  // with no credential at all and failing on the first read instead. Mirrors
+  // python's `_one_credential` model validator.
+  .refine(
+    (config) =>
+      config.accessToken !== undefined ||
+      (config.clientId !== undefined && config.refreshToken !== undefined),
+    { message: GOOGLE_CREDENTIAL_ERROR },
+  )
 
 // Derived, not declared twice: the schema validates every install and
 // carries the secret markers redaction reads, so a hand-written twin only

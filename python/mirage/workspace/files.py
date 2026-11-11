@@ -31,7 +31,6 @@ from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource
 from mirage.observe.context import (
     OpTimer,
-    active_recorder,
     command_records,
     fresh_recorder,
     record,
@@ -380,7 +379,7 @@ class Files:
         # Only a line this workspace runs is joined: another workspace's
         # line, or another call's own recorder seen through a shared
         # browser stack, would take this workspace's records.
-        line = active_recorder()
+        line = current_caller().recorder
         own = (
             None
             if line is not None and line.ledger is self._records

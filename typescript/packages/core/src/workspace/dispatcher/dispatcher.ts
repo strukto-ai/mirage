@@ -304,24 +304,6 @@ function sessionId(): string {
   return getCurrentSession()?.sessionId ?? ''
 }
 
-/**
- * The `issuer` kwarg lifted off an op, with the kwargs it leaves behind.
- *
- * A caller that stamps its ops (a profile policy's bridge) does so as
- * an argument, and the dispatcher consumes it here: it reaches every gate the
- * dispatch clears as `VfsContext.issuer`, probes and cascades included,
- * and is never forwarded to a backend, which has no such argument.
- */
-function takeIssuer(
-  kwargs: Record<string, unknown> | undefined,
-): [symbol | undefined, Record<string, unknown> | undefined] {
-  const issuer = kwargs?.issuer
-  if (typeof issuer !== 'symbol') return [undefined, kwargs]
-  const rest = { ...kwargs }
-  delete rest.issuer
-  return [issuer, rest]
-}
-
 /** The cache facts of the mount that owns a path, uncacheable without one. */
 function factsOf(mount: MountEntry | null): CacheFacts {
   if (mount === null || mount.retiring || !mount.vfs.cachesReads) {
@@ -978,10 +960,15 @@ export class Dispatcher {
   private dispatchAdmitted: DispatchFn = async (name, path, args, kwargs, report) => {
     const egressOwner = liveEgress().at(-1) ?? null
     const caller = this.readCaller()
-    // The caller's own mark on the op, lifted before any gate fires so
-    // each one is told whose op it judges.
-    const [issuer, stripped] = takeIssuer(kwargs)
-    kwargs = stripped
+    // The caller's own mark on the op (a profile policy's bridge stamps
+    // its ops), lifted before any gate fires so each one is told whose op
+    // it judges, and never forwarded to a backend.
+    const stamp = kwargs?.issuer
+    const issuer = typeof stamp === 'symbol' ? stamp : undefined
+    if (issuer !== undefined) {
+      kwargs = { ...kwargs }
+      delete kwargs.issuer
+    }
     // The dispatcher's own keywords: a read answered as it is pulled, a read of
     // what the backend holds now, past the file cache, a read of what the file
     // cache alone holds, and a stat of what the backend holds now, past the

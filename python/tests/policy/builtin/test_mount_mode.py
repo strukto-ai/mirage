@@ -16,7 +16,7 @@ import errno
 
 import pytest
 
-from mirage.context import reset_current_session, set_current_session
+from mirage.context import reset_caller, set_current_session
 from mirage.errors.types import ReadOnlyError
 from mirage.policy import Policies
 from mirage.policy.boundary import Boundary
@@ -71,7 +71,7 @@ async def test_a_session_grant_narrows_an_owned_path():
         with pytest.raises(ReadOnlyError):
             await _admit(entry, _path("/extra/lk"))
     finally:
-        reset_current_session(token)
+        reset_caller(token)
     await _admit(entry, _path("/extra/lk"))
 
 
@@ -87,4 +87,4 @@ async def test_a_root_statement_governs_an_unowned_path():
             await _admit(None, _path("/toplink"))
         assert exc.value.errno == errno.EROFS
     finally:
-        reset_current_session(token)
+        reset_caller(token)

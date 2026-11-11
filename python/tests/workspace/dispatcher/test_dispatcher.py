@@ -32,7 +32,7 @@ from mirage.commands.spec.types import CommandSpec
 from mirage.context import (
     Caller,
     current_caller,
-    reset_current_session,
+    reset_caller,
     set_current_session,
 )
 from mirage.core.api.client import api_request, status_error
@@ -331,7 +331,7 @@ def scoped_session():
     )
     token = set_current_session(session)
     yield session
-    reset_current_session(token)
+    reset_caller(token)
 
 
 @pytest.mark.asyncio
@@ -707,7 +707,7 @@ async def test_a_read_grant_refuses_link_writes_like_file_writes():
                     await coro
                 assert exc.value.errno == errno.EROFS
         finally:
-            reset_current_session(token)
+            reset_caller(token)
         assert ws._namespace.readlink("/extra/lk") == "plain.txt"
         assert not ws._namespace.is_link("/extra/lk2")
 
@@ -838,7 +838,7 @@ async def test_a_rename_destination_is_judged_on_its_own_turf():
                 )
             assert exc.value.filename == "/ro/lk"
         finally:
-            reset_current_session(token)
+            reset_caller(token)
         assert ws._namespace.is_link("/rw/lk")
 
 
@@ -1031,7 +1031,7 @@ async def test_ops_rmdir_cascade_invalidates_each_remnant(monkeypatch):
     try:
         await ws.vfs.rmdir("/a/d")
     finally:
-        reset_current_session(token)
+        reset_caller(token)
     assert "/a/d/sec/k" in recorded
     assert "/a/d/sec" in recorded
     assert "/a/d" in recorded
@@ -1057,7 +1057,7 @@ async def test_a_policy_denied_remnant_keeps_the_refusal():
         with pytest.raises(OSError) as exc:
             await ws.vfs.rmdir("/a/d")
     finally:
-        reset_current_session(token)
+        reset_caller(token)
     assert exc.value.errno in (errno.ENOTEMPTY, errno.EEXIST)
     kept = await ws.shell("cat /a/d/sec/k")
     assert (kept.stdout or b"") == b"k\n"
@@ -1082,7 +1082,7 @@ async def test_a_remnant_cascade_failing_any_other_way_keeps_the_refusal(
         with pytest.raises(OSError) as exc:
             await ws.vfs.rmdir("/a/d")
     finally:
-        reset_current_session(token)
+        reset_caller(token)
     assert exc.value.errno in (errno.ENOTEMPTY, errno.EEXIST)
 
 
@@ -1101,7 +1101,7 @@ async def test_a_post_vfs_deny_does_not_strand_the_cascade():
     try:
         await ws.vfs.rmdir("/a/d")
     finally:
-        reset_current_session(token)
+        reset_caller(token)
     gone = await ws.shell("test -e /a/d")
     assert gone.exit_code == 1
 
@@ -1124,7 +1124,7 @@ async def test_ops_rmdir_takes_hidden_namespace_links_with_it():
     try:
         await ws.vfs.rmdir("/a/d")
     finally:
-        reset_current_session(token)
+        reset_caller(token)
     # No session, no hides: the tree must be gone, link included.
     linkless = await ws.shell("readlink /a/d/lnk")
     assert linkless.exit_code != 0
@@ -1149,7 +1149,7 @@ async def test_a_visible_link_below_keeps_the_rmdir_refusal():
         with pytest.raises(OSError) as exc:
             await ws.vfs.rmdir("/a/d")
     finally:
-        reset_current_session(token)
+        reset_caller(token)
     assert exc.value.errno in (errno.ENOTEMPTY, errno.EEXIST)
     kept = await ws.shell("cat /a/d/sec/k")
     assert (kept.stdout or b"") == b"k\n"
@@ -1179,7 +1179,7 @@ async def test_a_non_oserror_cascade_failure_keeps_the_refusal(monkeypatch):
         with pytest.raises(OSError) as exc:
             await ws.vfs.rmdir("/a/d")
     finally:
-        reset_current_session(token)
+        reset_caller(token)
     assert exc.value.errno in (errno.ENOTEMPTY, errno.EEXIST)
     kept = await ws.shell("cat /a/d/sec/k")
     assert (kept.stdout or b"") == b"k\n"
@@ -1431,7 +1431,7 @@ async def test_rmdir_accounts_for_a_directory_containing_only_a_link(hidden):
                     await ws.vfs.rmdir("/data/d")
                 assert exc.value.errno == errno.ENOTEMPTY
         finally:
-            reset_current_session(token)
+            reset_caller(token)
         assert ws.namespace.is_link("/data/d/link") is not hidden
 
 
@@ -1508,7 +1508,7 @@ async def test_rmdir_takes_a_link_into_hidden_space_with_the_directory():
         try:
             await ws.vfs.rmdir("/data/d")
         finally:
-            reset_current_session(token)
+            reset_caller(token)
         assert not ws.namespace.is_link("/data/d/l")
         listed = await ws.shell("ls /data")
         assert await listed.stdout_str() == "secret\n"
@@ -1538,7 +1538,7 @@ async def test_rmdir_keeps_a_link_created_while_the_backend_removes():
         try:
             await ws.vfs.rmdir("/data/d")
         finally:
-            reset_current_session(token)
+            reset_caller(token)
         assert not ws.namespace.is_link("/data/d/old")
         assert ws.namespace.readlink("/data/d/late") == "nowhere"
 
@@ -2261,7 +2261,7 @@ async def test_hidden_space_answers_a_commands_op_before_any_rule():
                 )
         assert gate.asked == []
     finally:
-        reset_current_session(token)
+        reset_caller(token)
         await ws.close()
 
 
@@ -2752,7 +2752,7 @@ def secret_hidden():
     )
     token = set_current_session(session)
     yield session
-    reset_current_session(token)
+    reset_caller(token)
 
 
 def _searched() -> SearchedRAM:
@@ -2853,7 +2853,7 @@ async def test_a_hide_drops_a_hit_whose_name_reads_like_a_score():
                 "search", _path("/ram/d"), query=SearchQuery("n")
             )
     finally:
-        reset_current_session(token)
+        reset_caller(token)
     assert "/ram/d/n:12" not in [hit for hit, _ in records]
 
 
@@ -2874,7 +2874,7 @@ async def test_a_read_ahead_keeps_what_one_batch_answers():
             )
             data, _ = await ws.dispatch("read", _path("/r/b"))
     finally:
-        reset_current_session(token)
+        reset_caller(token)
     assert vfs.batches == [["/r/a", "/r/b"]]
     assert (data, vfs.reads) == (b"b\n", [])
 
@@ -3509,7 +3509,7 @@ async def test_a_hide_below_a_listing_drops_the_walks_limit():
         try:
             listed, _ = await ws.dispatch("readdir", _path("/ram/d"), limit=2)
         finally:
-            reset_current_session(token)
+            reset_caller(token)
     assert vfs.asked == [None]
     assert listed == ["/ram/d/a", "/ram/d/b"]
 
@@ -3941,7 +3941,7 @@ async def test_hidden_retained_read_is_refused_before_policy_and_restored(
         assert ws.vfs.records == []
         call.assert_not_awaited()
     finally:
-        reset_current_session(token)
+        reset_caller(token)
         await ws.close()
 
 
@@ -4128,7 +4128,7 @@ async def test_retained_stat_runs_current_policy_without_backend(
         ] == row
         call.assert_not_awaited()
     finally:
-        reset_current_session(token)
+        reset_caller(token)
         await ws.close()
 
 

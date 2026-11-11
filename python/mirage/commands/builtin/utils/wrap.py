@@ -140,17 +140,3 @@ def mount_parent_stat(
 
 # The call_* helpers adapt a bound op (accessor and index already bound,
 # called as ``op(path)``) so grep/rg can walk with plain string keys.
-
-
-async def call_readdir(
-    readdir_fn: Callable[[PathSpec], Awaitable[list[str]]],
-    path: str | PathSpec,
-) -> list[str]:
-    return await readdir_fn(to_pathspec(path))
-
-
-async def call_stat(
-    stat_fn: Callable[[PathSpec], Awaitable[FileStat]],
-    path: str | PathSpec,
-) -> FileStat:
-    return await stat_fn(to_pathspec(path))

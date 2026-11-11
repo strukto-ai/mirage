@@ -17,7 +17,7 @@ from datetime import date
 
 import pytest
 
-from mirage.context import reset_current_session, set_current_session
+from mirage.context import reset_caller, set_current_session
 from mirage.errors.types import GlobLimitError
 from mirage.shell.escapes import unescape_unquoted
 from mirage.types import FileStat, FileType, HiddenPaths, PathSpec, Visibility
@@ -398,7 +398,7 @@ async def test_resolve_glob_with_drops_hidden_matches():
         spec = glob_spec("/notion/pages/Demo_page__uuid1/page.*", "/notion")
         result = await resolve_glob_with(fake_readdir, [spec])
     finally:
-        reset_current_session(token)
+        reset_caller(token)
     assert [r.virtual for r in result] == [
         "/notion/pages/Demo_page__uuid1/page.md"
     ]
@@ -415,7 +415,7 @@ async def test_resolve_glob_with_all_hidden_falls_back_to_literal():
         spec = glob_spec("/notion/pages/Roadmap__uuid2/page.*", "/notion")
         result = await resolve_glob_with(fake_readdir, [spec])
     finally:
-        reset_current_session(token)
+        reset_caller(token)
     assert len(result) == 1
     assert result[0].resolved
     assert result[0].pattern is None

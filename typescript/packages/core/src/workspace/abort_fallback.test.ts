@@ -17,7 +17,6 @@ import type * as asyncContextModule from '../utils/async_context.ts'
 import { runWithLineAbort } from './abort.ts'
 import { recordStatus } from './executor/statement.ts'
 import { SessionState } from './session/session.ts'
-import { newStatusWriter } from './abort.ts'
 import {
   callerSignal,
   currentCaller,
@@ -60,7 +59,7 @@ describe('the status write on the fallback storage', () => {
     // line would read as two and its reads lose the signal.
     const a = new SessionState({ sessionId: 'a', cwd: '/' })
     const abort = new AbortController()
-    const seen = await runWithLineAbort(abort.signal, [a], newStatusWriter(), () =>
+    const seen = await runWithLineAbort(abort.signal, [a], Symbol('line'), () =>
       runWithCaller({ ...currentCaller(), writeHeld: true }, () => Promise.resolve(lineSignal(a))),
     )
     expect(seen).toBe(abort.signal)
@@ -75,17 +74,12 @@ describe('the status write on the fallback storage', () => {
     const [holdA, releaseA] = gate()
     const [holdB, releaseB] = gate()
     let refusedB: unknown = null
-    const lineA = runWithLineAbort(
-      new AbortController().signal,
-      [a],
-      newStatusWriter(),
-      async () => {
-        await holdA
-        recordStatus(a, 3)
-        releaseB()
-      },
-    )
-    const lineB = runWithLineAbort(abortB.signal, [b], newStatusWriter(), async () => {
+    const lineA = runWithLineAbort(new AbortController().signal, [a], Symbol('line'), async () => {
+      await holdA
+      recordStatus(a, 3)
+      releaseB()
+    })
+    const lineB = runWithLineAbort(abortB.signal, [b], Symbol('line'), async () => {
       abortB.abort()
       releaseA()
       await holdB
@@ -168,9 +162,9 @@ describe('a job on the fallback storage', () => {
     const evaluation = new EvaluationContext(line)
     const jobEvaluation = new EvaluationContext(job)
     jobEvaluation.frame.abortSignal = jobAbort.signal
-    await runWithLineAbort(lineAbort.signal, [line], newStatusWriter(), () =>
+    await runWithLineAbort(lineAbort.signal, [line], Symbol('line'), () =>
       runWithEvaluation(evaluation, () =>
-        runWithLineAbort(jobAbort.signal, [job], newStatusWriter(), () =>
+        runWithLineAbort(jobAbort.signal, [job], Symbol('line'), () =>
           runWithEvaluation(jobEvaluation, () => {
             expect(callerSignal()).toBeUndefined()
             expect(callerSignal(evaluation)).toBe(lineAbort.signal)

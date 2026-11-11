@@ -24,8 +24,6 @@ from mirage.cache.index.store import IndexCacheStore
 from mirage.policy.builtin.output_cap import check_command_limits
 from mirage.shell.constants import BIN_PREFIX
 from mirage.types import (
-    KERNEL_BACKENDS,
-    MountBackend,
     MountMode,
     ReadSpec,
     WritePolicy,
@@ -179,21 +177,6 @@ def normalize_mounts(
             caching and spec.vfs.caches_reads,
         )
     return specs
-
-
-def kernel_targets(
-    specs: list[MountSpec],
-) -> list[tuple[str, MountBackend, str | None]]:
-    """Entries that also want a real mountpoint, in declaration order.
-
-    Args:
-        specs (list[MountSpec]): the normalized mount specs.
-    """
-    return [
-        (s.prefix, s.backend, s.mountpoint)
-        for s in specs
-        if s.backend in KERNEL_BACKENDS
-    ]
 
 
 def install_mounts(
@@ -350,7 +333,14 @@ async def unmount_prefix(
         registry.retired_mounts[identity] = removed.vfs
     closing = asyncio.create_task(_close_vfs(registry, removed, shared))
     registry.retiring_mounts[identity] = closing
-    closing.add_done_callback(partial(_release_vfs, registry, identity))
+
+    def release(task: asyncio.Task[None]) -> None:
+        registry.retiring_mounts.pop(identity, None)
+        # The caller may have been cancelled while shield kept cleanup alive.
+        if not task.cancelled():
+            task.exception()
+
+    closing.add_done_callback(release)
     await asyncio.shield(closing)
 
 
@@ -366,12 +356,3 @@ async def _close_vfs(
             await entry.index_store.close()
     finally:
         registry.release_clock(entry.vfs)
-
-
-def _release_vfs(
-    registry: MountRegistry, identity: int, closing: asyncio.Task[None]
-) -> None:
-    registry.retiring_mounts.pop(identity, None)
-    # The caller may have been cancelled while shield kept cleanup alive.
-    if not closing.cancelled():
-        closing.exception()

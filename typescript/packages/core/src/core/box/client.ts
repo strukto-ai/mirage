@@ -26,33 +26,7 @@ import { DEFAULT_TIMEOUT } from '../api/constants.ts'
 import { TokenManager as OAuthTokenManager } from '../api/oauth.ts'
 import { BOX_API_BASE, BOX_TOKEN_URL, BOX_UPLOAD_BASE, TOKEN_BUFFER_SECONDS } from './constants.ts'
 import { ApiError } from '../api/errors.ts'
-
-export interface BoxConfig {
-  timeout?: number
-  // API origin override (e.g. an integ fake: http://127.0.0.1:5096). Token,
-  // API and upload URLs derive from it; defaults to the real Box hosts.
-  endpoint?: string
-  clientId?: string
-  clientSecret?: string
-  refreshToken?: string
-  // Box enterprise ID for the client-credentials grant (server auth apps).
-  // With clientId + clientSecret + enterpriseId set, tokens are minted for the
-  // app's service account directly; no refresh token is involved and expired
-  // tokens are simply re-fetched.
-  enterpriseId?: string
-  // Pre-fetched access token (e.g. Box developer token from the app console).
-  // Lasts ~60 minutes, can't be refreshed programmatically. When set, the
-  // TokenManager skips the refresh flow entirely and uses this token directly.
-  accessToken?: string
-  refreshFn?: (
-    refreshToken: string,
-  ) => Promise<{ accessToken: string; refreshToken: string; expiresIn: number }>
-  // Box rotates the refresh token on each refresh. Set onRefreshTokenRotated to
-  // persist the new token (e.g. write to disk / localStorage / a vault) so that
-  // the next process restart starts from the latest token rather than the
-  // original one (which is invalid after first use).
-  onRefreshTokenRotated?: (newRefreshToken: string) => void | Promise<void>
-}
+import type { BoxConfig } from '../../vfs/box/config.ts'
 
 function tokenUrlOf(config: BoxConfig): string {
   return config.endpoint !== undefined && config.endpoint !== ''
@@ -243,13 +217,6 @@ async function boxAuthHeaders(tm: BoxTokenManager): Promise<Record<string, strin
   return { Authorization: `Bearer ${token}` }
 }
 
-function buildUrl(url: string, params?: Record<string, string | number>): string {
-  if (params === undefined) return url
-  const u = new URL(url)
-  for (const [k, v] of Object.entries(params)) u.searchParams.set(k, String(v))
-  return u.toString()
-}
-
 export async function boxGet(
   tm: BoxTokenManager,
   url: string,
@@ -294,7 +261,13 @@ export async function* boxGetStream(
   params?: Record<string, string | number>,
 ): AsyncIterable<Uint8Array> {
   const headers = await boxAuthHeaders(tm)
-  const r = await stallTimeout(tm.timeout)(buildUrl(url, params), { headers, redirect: 'follow' })
+  let target = url
+  if (params !== undefined) {
+    const u = new URL(url)
+    for (const [k, v] of Object.entries(params)) u.searchParams.set(k, String(v))
+    target = u.toString()
+  }
+  const r = await stallTimeout(tm.timeout)(target, { headers, redirect: 'follow' })
   if (!r.ok) {
     const text = await r.text().catch(() => '')
     throw new BoxApiError(`Box GET ${url} → ${String(r.status)} ${text}`, r.status)

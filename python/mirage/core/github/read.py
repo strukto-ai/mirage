@@ -12,14 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import base64
 import hashlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import aclosing
 
-from mirage.accessor.github import GitHubAccessor, GitHubAccount
-from mirage.core.github.client import blob_path, github_get, stream_blob
+from mirage.accessor.github import GitHubAccessor
+from mirage.core.github.client import fetch_blob, stream_blob
 from mirage.core.github.constants import BLOB_TEXT
 from mirage.core.github.repo import graphql_data
 from mirage.errors.fs import eisdir, enoent
@@ -27,13 +26,6 @@ from mirage.observe.context import record, record_stream, start_op
 from mirage.types import FileStat, FileType, PathSpec, VFSName
 
 logger = logging.getLogger(__name__)
-
-
-async def read_bytes(
-    account: GitHubAccount, owner: str, repo: str, sha: str
-) -> bytes:
-    data = await github_get(account, blob_path(owner, repo, sha))
-    return base64.b64decode(data["content"])
 
 
 async def read(
@@ -64,7 +56,7 @@ async def read(
     """
     sha = _blob_sha(path_spec, entry)
     timer = start_op()
-    data = await read_bytes(
+    data = await fetch_blob(
         accessor.account, accessor.owner, accessor.repo, sha
     )
     record(

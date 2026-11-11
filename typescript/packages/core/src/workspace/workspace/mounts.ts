@@ -136,18 +136,17 @@ export function prepareAddedMount(
   entry.beforeUse = () => clearMountCache(registry.fileCache, entry.prefix, indices)
 }
 
-export interface UnmountDeps {
-  registry: MountRegistry
-  sharedMounts: Set<BaseVFS>
-  isShuttingDown: () => boolean
-}
-
 /**
  * Remove one mount, closing its owned VFS. The virtual root, the device
  * mount, and the history view are permanent. Mirrors the Python `unmount` in
  * `workspace/mounts.py`.
  */
-export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<void> {
+export async function unmountPrefix(
+  registry: MountRegistry,
+  prefix: string,
+  isShuttingDown: () => boolean,
+  sharedMounts: Set<BaseVFS>,
+): Promise<void> {
   const norm = normDir(prefix)
   if (norm === '/') {
     throw new Error(`cannot unmount root: ${prefix}`)
@@ -161,45 +160,48 @@ export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<
   if (norm === BIN_PREFIX + '/') {
     throw new Error(`cannot unmount program view: ${BIN_PREFIX}`)
   }
-  const entry = deps.registry.tryMountForPrefix(prefix, true)
+  const entry = registry.tryMountForPrefix(prefix, true)
   if (entry === null) throw new Error(`no mount at prefix: ${norm}`)
   if (entry.retiring) throw new Error(`mount is being unmounted: ${norm}`)
   entry.retiring = true
   try {
-    await clearMountCache(deps.registry.fileCache, norm, [entry.indexStore])
-    if (deps.isShuttingDown()) throw new Error('Workspace is closed')
-    if (deps.registry.tryMountForPrefix(prefix, true) !== entry) {
+    await clearMountCache(registry.fileCache, norm, [entry.indexStore])
+    if (isShuttingDown()) throw new Error('Workspace is closed')
+    if (registry.tryMountForPrefix(prefix, true) !== entry) {
       throw new Error(`mount changed while unmounting: ${prefix}`)
     }
-    deps.registry.unmount(prefix)
+    registry.unmount(prefix)
   } catch (error) {
     entry.retiring = false
     throw error
   }
   const vfs = entry.vfs
-  const closing = closeVfs(deps, entry)
-  deps.registry.retiringMounts.set(vfs, closing)
+  const closing = closeVfs(registry, entry, sharedMounts.has(vfs))
+  registry.retiringMounts.set(vfs, closing)
   try {
     await closing
   } finally {
-    deps.registry.retiringMounts.delete(vfs)
+    registry.retiringMounts.delete(vfs)
   }
 }
 
-async function closeVfs(deps: UnmountDeps, entry: MountEntry): Promise<void> {
+async function closeVfs(
+  registry: MountRegistry,
+  entry: MountEntry,
+  shared: boolean,
+): Promise<void> {
   const vfs = entry.vfs
-  const shared = deps.sharedMounts.has(vfs)
   try {
     await entry.activity.wait()
     try {
       if (!shared) {
-        deps.registry.retiredMounts.add(vfs)
+        registry.retiredMounts.add(vfs)
         await vfs.close()
       }
     } finally {
       await entry.indexStore.close()
     }
   } finally {
-    deps.registry.releaseClock(vfs)
+    registry.releaseClock(vfs)
   }
 }

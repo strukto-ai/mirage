@@ -34,8 +34,6 @@ export const Mark = {
 } as const
 export type Mark = (typeof Mark)[keyof typeof Mark]
 
-type Item = Uint8Array | Mark
-
 const TAB = 0x09
 const LF = 0x0a
 const CR = 0x0d
@@ -165,7 +163,7 @@ export class LineDiscipline {
  * terminal's does; the channel's own EOF ends it for good.
  */
 export class ChannelInput {
-  private readonly items: Item[] = []
+  private readonly items: (Uint8Array | Mark)[] = []
   private buffered = 0
   private closed = false
   private paused = false
@@ -258,7 +256,7 @@ export class ChannelInput {
     this.push(Mark.INTERRUPT)
   }
 
-  private push(item: Item): void {
+  private push(item: Uint8Array | Mark): void {
     this.items.push(item)
     this.buffered += typeof item === 'string' ? 1 : item.byteLength
     if (this.buffered >= MAX_BUFFERED) this.pause()
@@ -358,31 +356,6 @@ export class ChannelInput {
   }
 }
 
-function crlf(data: Uint8Array): Uint8Array {
-  let lfs = 0
-  for (const b of data) if (b === LF) lfs++
-  if (lfs === 0) return data
-  const out = new Uint8Array(data.byteLength + lfs)
-  let i = 0
-  for (const b of data) {
-    if (b === LF) out[i++] = CR
-    out[i++] = b
-  }
-  return out
-}
-
-function drained(stream: Writable): Promise<void> {
-  return new Promise((resolve) => {
-    const done = (): void => {
-      stream.off('drain', done)
-      stream.off('close', done)
-      resolve()
-    }
-    stream.once('drain', done)
-    stream.once('close', done)
-  })
-}
-
 /**
  * Writes a line's output back to the client. On a terminal stderr folds
  * into stdout, as a pty points both descriptors at one device, and each
@@ -399,7 +372,26 @@ export class ChannelOutput {
     if (data.byteLength === 0) return
     const stream: Writable = stderr && !this.tty ? this.channel.stderr : this.channel
     if (!stream.writable) return
-    if (!stream.write(this.tty ? crlf(data) : data)) await drained(stream)
+    let out = data
+    const lfs = this.tty ? data.reduce((n, b) => (b === LF ? n + 1 : n), 0) : 0
+    if (lfs > 0) {
+      out = new Uint8Array(data.byteLength + lfs)
+      let i = 0
+      for (const b of data) {
+        if (b === LF) out[i++] = CR
+        out[i++] = b
+      }
+    }
+    if (stream.write(out)) return
+    await new Promise<void>((resolve) => {
+      const done = (): void => {
+        stream.off('drain', done)
+        stream.off('close', done)
+        resolve()
+      }
+      stream.once('drain', done)
+      stream.once('close', done)
+    })
   }
 }
 

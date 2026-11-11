@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { LinearAccessor } from '../../../../accessor/linear.ts'
+import { HttpLinearTransport } from '../../../../core/linear/client.ts'
 import { LinearConfig } from '../../../../core/linear/config.ts'
 import { Argument, CommandSpec } from '../../../spec/types.ts'
 import { CLI, CLIHandler } from '../../types.ts'
@@ -27,7 +29,6 @@ import { transition } from './issue/transition.ts'
 import { update } from './issue/update.ts'
 import * as reads from './reads.ts'
 import * as relation from './issue/relation.ts'
-import { linearAccessor } from './util.ts'
 
 const TEAM_OPTION = new Argument('--team', { required: true, help: 'Team key, name, or ID' })
 
@@ -314,5 +315,16 @@ export const LINEAR = new CLI({
     search: new CLIHandler({ fn: reads.search }),
   },
   configModel: LinearConfig,
-  accessor: linearAccessor,
+  // The install's accessor: one transport every leaf rides, and `team list`'s team filter.
+  accessor: (config) => {
+    const cfg = config as LinearConfig
+    const transport = new HttpLinearTransport({
+      apiKey: cfg.apiKey,
+      ...(cfg.baseUrl !== undefined && cfg.baseUrl !== '' ? { baseUrl: cfg.baseUrl } : {}),
+      ...(cfg.timeout !== undefined ? { timeout: cfg.timeout } : {}),
+    })
+    return new LinearAccessor(transport, {
+      ...(cfg.teamIds !== undefined ? { teamIds: cfg.teamIds } : {}),
+    })
+  },
 })

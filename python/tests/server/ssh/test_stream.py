@@ -20,6 +20,7 @@ from typing import Any
 import asyncssh
 import pytest
 
+from mirage.concurrency.limiter import on_loop
 from mirage.execution.line.handle import LineHandle
 from mirage.execution.types import LineId
 from mirage.io.types import IOResult
@@ -29,10 +30,7 @@ from mirage.server.ssh.stream import (
     ChannelOutput,
     LineDiscipline,
     Mark,
-    decode,
     deliver,
-    encode,
-    loop_sender,
 )
 from mirage.server.stdin import LoopStdin
 from mirage.shell.console import JobConsole
@@ -99,11 +97,6 @@ async def _started(
     source = ChannelInput(FakeProcess(steps), max_line=max_line)
     source.start()
     return source
-
-
-def test_every_byte_survives_the_text_round_trip():
-    data = bytes(range(256))
-    assert encode(decode(data)) == data
 
 
 @pytest.mark.asyncio
@@ -398,7 +391,7 @@ async def test_loop_stdin_and_sender_cross_to_the_channel_loop():
 
     async def on_workspace_loop() -> list[bytes]:
         got = [chunk async for chunk in LoopStdin(source, home)]
-        await loop_sender(output, home)(b"done", False)
+        await on_loop(output.write(b"done", False), home)
         return got
 
     got = await asyncio.to_thread(_run_other_loop, on_workspace_loop)

@@ -23,11 +23,10 @@ from mirage.context import session_context as caller
 from mirage.observe import context as observe_context
 from mirage.observe.context import (
     RecordingScope,
-    active_recorder,
     push_mount_context,
     record,
     record_stream,
-    reset_active_recorder,
+    recording_active,
     revision_for,
     start_op,
     with_mount_context,
@@ -105,7 +104,7 @@ def test_push_mount_context_carries_mount_id():
         record("read", "/s3/a", "s3", 1, start_op())
         record_stream("read", "/s3/b", "s3")
     finally:
-        reset_active_recorder(token)
+        caller.reset_caller(token)
     record("read", "/s3/c", "s3", 1, start_op())
     scope.close()
     assert [(r.path, r.mount_id) for r in scope.records] == [
@@ -118,11 +117,11 @@ def test_push_mount_context_carries_mount_id():
 def test_push_mount_context_no_recorder_is_noop():
     token = push_mount_context("mount-a")
     try:
-        assert active_recorder() is None
+        assert not recording_active()
         record("read", "/s3/a", "s3", 1, start_op())
         assert record_stream("read", "/s3/a", "s3") is None
     finally:
-        reset_active_recorder(token)
+        caller.reset_caller(token)
 
 
 async def _record_under_mount(
@@ -135,7 +134,7 @@ async def _record_under_mount(
             await asyncio.sleep(0)
         record("read", path, "s3", 1, start_op())
     finally:
-        reset_active_recorder(token)
+        caller.reset_caller(token)
 
 
 @pytest.mark.asyncio
@@ -187,7 +186,7 @@ async def test_with_mount_context_keeps_mount_id_across_steps():
         chunks = [chunk async for chunk in wrapped]
         record("read", "/r/x", "ram", 1, start_op())
     finally:
-        reset_active_recorder(outer)
+        caller.reset_caller(outer)
     scope.close()
     assert chunks == [b"chunk", b"chunk"]
     assert [(r.path, r.mount_id) for r in scope.records] == [
@@ -205,7 +204,7 @@ async def test_with_mount_context_without_id_inherits_the_frame():
     try:
         _ = [chunk async for chunk in wrapped]
     finally:
-        reset_active_recorder(outer)
+        caller.reset_caller(outer)
     scope.close()
     assert [r.mount_id for r in scope.records] == ["mount-b"]
 
@@ -299,7 +298,7 @@ def test_a_recorded_op_is_timed_and_stamped_on_the_line_clock():
         clock.advance(1)
         stream = record_stream("read", "/s3/b", "s3")
     finally:
-        reset_active_recorder(token)
+        caller.reset_caller(token)
     scope.close()
     assert stream is not None
     assert [(r.timestamp, r.duration_ms) for r in scope.records] == [

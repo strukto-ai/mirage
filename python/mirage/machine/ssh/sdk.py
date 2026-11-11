@@ -14,10 +14,6 @@
 
 from typing import Any
 
-from mirage.runtime.constants import sdk_install_hint
-
-ASYNCSSH_HINT = sdk_install_hint("ssh", "asyncssh")
-
 connect: Any
 DisconnectError: Any
 try:

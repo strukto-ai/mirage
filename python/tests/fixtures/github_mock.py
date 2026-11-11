@@ -239,7 +239,7 @@ class FakeGitHubApi:
                         )
         return results, False
 
-    async def read_bytes(
+    async def fetch_blob(
         self, account: Any, owner: str, repo: str, sha: str
     ) -> bytes:
         return self.blobs[sha]
@@ -309,7 +309,7 @@ def mock_github_api(monkeypatch: pytest.MonkeyPatch) -> FakeGitHubApi:
         "mirage.core.github.tree.fetch_dir_page",
         api.fetch_dir_page,
     )
-    monkeypatch.setattr("mirage.core.github.read.read_bytes", api.read_bytes)
+    monkeypatch.setattr("mirage.core.github.read.fetch_blob", api.fetch_blob)
     monkeypatch.setattr(
         "mirage.core.github.search.search_code", api.search_code
     )

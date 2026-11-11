@@ -19,7 +19,6 @@ from mirage.commands.builtin.generic_bind.builders import BUILDERS
 from mirage.commands.builtin.generic_bind.factory import (
     GENERIC_COMMANDS,
     _bind,
-    _run_builder,
     generic,
     generic_reading,
 )
@@ -29,7 +28,7 @@ from mirage.commands.builtin.generic_bind.files import (
     command_files,
 )
 from mirage.commands.config import Context
-from mirage.context import reset_mount_gate, set_mount_gate
+from mirage.context import reset_caller, set_mount_gate
 from mirage.io import IOResult
 from mirage.types import MountMode, PathSpec
 from mirage.workspace.files import Files
@@ -80,13 +79,8 @@ def test_a_name_no_builder_has_is_refused():
 
 @pytest.mark.asyncio
 async def test_a_builder_with_no_workspace_files_is_refused():
-    stdout, io = await _run_builder(
-        GenericCommand("cat", _never),
-        Reading(split=False),
-        None,
-        [],
-        [],
-        Context(),
+    stdout, io = await _bind(GenericCommand("cat", _never), None, None).fn(
+        None, [], [], Context()
     )
     assert stdout is None
     assert (io.exit_code, io.stderr) == (1, b"cat: no workspace files\n")
@@ -137,14 +131,12 @@ async def test_a_stream_hook_changes_only_the_streamed_read():
     run = GenericCommand("cat", capture, read=True, pass_through=True)
     token = set_mount_gate("/", MountMode.WRITE)
     try:
-        await _run_builder(
-            run,
-            Reading(split=False, stream=_hook),
+        await _bind(run, "ram", _hook).fn(
             None,
             [PathSpec.from_str_path("/f")],
             [],
             Context(vfs=Files(_nothing, ledger=False)),
         )
     finally:
-        reset_mount_gate(token)
+        reset_caller(token)
     assert read == [b"hooked:/f"]

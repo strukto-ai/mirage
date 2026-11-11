@@ -16,7 +16,6 @@ import { missingPeer } from '../../utils/optional_peer.ts'
 import type {
   AddressObject,
   EmailAddress as MailparserEmailAddress,
-  ParsedMail,
   simpleParser,
 } from 'mailparser'
 
@@ -47,13 +46,6 @@ function parseAddressList(
 
 // The rendered date must be the raw Date header text (python serves the
 // header untouched); mailparser's parsed.date would re-format it.
-function rawDateHeader(parsed: ParsedMail): string {
-  const found = parsed.headerLines.find((h) => h.key === 'date')
-  if (found === undefined) return ''
-  const colon = found.line.indexOf(':')
-  return colon === -1 ? '' : found.line.slice(colon + 1).trim()
-}
-
 export async function parseRfc822(raw: Uint8Array, headersOnly = false) {
   const parser = await getParser()
   const parsed = await parser(Buffer.from(raw), { skipHtmlToText: false })
@@ -66,6 +58,8 @@ export async function parseRfc822(raw: Uint8Array, headersOnly = false) {
         content_type: a.contentType,
         size: a.size,
       }))
+  const dateLine = parsed.headerLines.find((h) => h.key === 'date')?.line ?? ''
+  const colon = dateLine.indexOf(':')
   const refsRaw = parsed.references
   const references =
     typeof refsRaw === 'string' ? refsRaw.split(/\s+/).filter((s) => s !== '') : (refsRaw ?? [])
@@ -75,7 +69,7 @@ export async function parseRfc822(raw: Uint8Array, headersOnly = false) {
     to: parseAddressList(parsed.to),
     cc: parseAddressList(parsed.cc),
     subject: parsed.subject ?? '',
-    date: rawDateHeader(parsed),
+    date: colon === -1 ? '' : dateLine.slice(colon + 1).trim(),
     body_text: text,
     body_html: html,
     snippet: text.slice(0, 100),

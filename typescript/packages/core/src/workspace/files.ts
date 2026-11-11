@@ -34,9 +34,6 @@ import {
 import type { FollowOperands, OpKwargs, SessionAccess, SessionBind } from '../view/types.ts'
 import { NamespaceReader } from './dispatcher/reader.ts'
 
-/** Receives each record with the id of the session the op ran as. */
-export type OpSink = (rec: OpRecord, sessionId: string) => Promise<void>
-
 /** What a derived facade carries over and a constructor may set. */
 export interface FilesOptions {
   bind?: SessionBind | null
@@ -157,7 +154,7 @@ export class Files {
 
   private readonly dispatchFn: CallerDispatchFn
   private readonly namespace: ((sessionId: string | null) => NamespaceReader) | null
-  private readonly sink: OpSink | null
+  private readonly sink: ((rec: OpRecord, sessionId: string) => Promise<void>) | null
   private readonly bind: SessionBind | null
   private readonly dispatchAs: ((owner: SessionAccess) => CallerDispatchFn) | null
   private readonly caller: Partial<Caller> | null
@@ -188,7 +185,7 @@ export class Files {
   constructor(
     dispatch: CallerDispatchFn,
     namespace: ((sessionId: string | null) => NamespaceReader) | null = null,
-    sink: OpSink | null = null,
+    sink: ((rec: OpRecord, sessionId: string) => Promise<void>) | null = null,
     options: FilesOptions = {},
   ) {
     this.dispatchFn = dispatch

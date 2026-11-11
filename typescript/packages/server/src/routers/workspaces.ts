@@ -32,7 +32,7 @@ import { SharedStorageError, WritePolicyError } from '@struktoai/mirage-core/wor
 import type { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { isSafeBlobPath } from '@struktoai/mirage-core/workspace/snapshot/utils'
 import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import type { WorkspaceConfigRaw } from '@struktoai/mirage-core/config'
+import type { WorkspaceConfig } from '@struktoai/mirage-core/config'
 import type { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import {
@@ -87,10 +87,10 @@ export interface WorkspaceRoutesDeps {
  */
 async function configOf(
   body: CreateWorkspaceRequest,
-  cfg: WorkspaceConfigRaw | undefined,
+  cfg: WorkspaceConfig | undefined,
   resources: ResourceStore | undefined,
   registry: WorkspaceRegistry,
-): Promise<{ cfg: WorkspaceConfigRaw; written: Record<string, JsonValue> }> {
+): Promise<{ cfg: WorkspaceConfig; written: Record<string, JsonValue> }> {
   const given = body.config ?? undefined
   const template = body.template ?? undefined
   if (template === undefined) {
@@ -112,7 +112,7 @@ async function configOf(
     if (e instanceof ResourceError) throw storeRefusal(e)
     throw e
   }
-  let checked: WorkspaceConfigRaw
+  let checked: WorkspaceConfig
   try {
     checked = checkConfig(written)
   } catch (e) {
@@ -129,7 +129,7 @@ async function configOf(
  */
 function createRequest(body: unknown): {
   req: CreateWorkspaceRequest
-  cfg: WorkspaceConfigRaw | undefined
+  cfg: WorkspaceConfig | undefined
 } {
   const parsed = CreateWorkspaceRequest.safeParse(body)
   const first = parsed.error?.issues.find((issue) => issue.code !== 'unrecognized_keys')
@@ -137,7 +137,7 @@ function createRequest(body: unknown): {
     throw validationError(parsed.error as z.ZodError, body)
   }
   const config = (body as { config?: unknown }).config
-  let cfg: WorkspaceConfigRaw | undefined
+  let cfg: WorkspaceConfig | undefined
   if (config !== undefined && config !== null) {
     try {
       cfg = checkConfig(config)
@@ -500,8 +500,8 @@ function configDigest(config: unknown): string {
 async function withSaved(
   deps: WorkspaceRoutesDeps,
   written: Record<string, JsonValue>,
-  cfg: WorkspaceConfigRaw,
-): Promise<WorkspaceConfigRaw> {
+  cfg: WorkspaceConfig,
+): Promise<WorkspaceConfig> {
   const refs = secretRefs(written)
   const shared = deps.registry.accountsRequired
   try {
@@ -537,7 +537,7 @@ function openWorkspace(
   req: RouteRequest,
   reply: RouteReply,
   wid: string,
-  cfg: WorkspaceConfigRaw,
+  cfg: WorkspaceConfig,
   config: Record<string, JsonValue>,
   status: number,
 ): Promise<unknown> {
@@ -889,7 +889,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
     if (held !== null && !deps.registry.removing(id)) return await makeDetail(held)
     const config = await deps.registry.savedConfig(id, req.account)
     if (config === null) throw new HttpError('not_found', 'workspace not found')
-    let cfg: WorkspaceConfigRaw
+    let cfg: WorkspaceConfig
     try {
       cfg = checkConfig(config)
     } catch (e) {

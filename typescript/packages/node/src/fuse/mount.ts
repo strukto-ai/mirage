@@ -59,7 +59,7 @@ export interface MountOptions {
   /**
    * Extra options forwarded verbatim to `@zkochan/fuse-native`.
    * `directIO: false` additionally skips the `direct_io` mount option that
-   * Mirage appends by default (see appendDirectIO).
+   * Mirage appends by default (see mount).
    */
   fuseOptions?: Record<string, unknown>
   /**
@@ -109,16 +109,6 @@ export function appendMountOptions(fuse: FuseInstance, extras: string[]): void {
     if (serialized === '') return `-o${missing.join(',')}`
     return `${serialized},${missing.join(',')}`
   }
-}
-
-/**
- * Append libfuse's `direct_io`. Load-bearing for size-unknown API files:
- * getattr reports 0 pre-open and the kernel must read to EOF regardless
- * (verified on the macOS kext: without it, `cat` reads 0 bytes; see the
- * CLAUDE.md FUSE section).
- */
-export function appendDirectIO(fuse: FuseInstance): void {
-  appendMountOptions(fuse, ['direct_io'])
 }
 
 /**
@@ -349,7 +339,7 @@ export async function mount(ws: Workspace, options: MountOptions = {}): Promise<
     // which checkSizes guarantees is exact). Mirrors Python's _run_fuse.
     appendMountOptions(fuse, ['backend=fskit', `volname=${basename(mountpoint)}`])
   } else if (fuseOpts.directIO !== false) {
-    appendDirectIO(fuse)
+    appendMountOptions(fuse, ['direct_io'])
   }
   await new Promise<void>((resolve, reject) => {
     fuse.mount((err) => {

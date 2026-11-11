@@ -18,7 +18,7 @@ from itertools import groupby
 from operator import itemgetter
 from typing import Any
 
-from mirage.context import reset_program_invocation, set_program_invocation
+from mirage.context import reset_caller, set_program_invocation
 from mirage.errors.fs import is_aborting, strerror_of
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import PipeInput, SharedInput, share
@@ -157,7 +157,7 @@ async def handle_exec_command(
             stdin=stdin,
         )
     finally:
-        reset_program_invocation(token)
+        reset_caller(token)
     stdout = await materialize(io.stdout)
     stderr = await materialize(io.stderr)
     replaced = ExitSignal(io.exit_code, stderr=stderr, stdout=stdout)

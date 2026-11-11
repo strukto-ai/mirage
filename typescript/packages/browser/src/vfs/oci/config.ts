@@ -14,10 +14,10 @@
 
 import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
-import { browserAliasSchema, makeBrowserS3Alias } from '../s3_alias.ts'
+import { aliasSchema, makeS3Alias } from '../s3_alias.ts'
 
-export const OCIConfig = makeBrowserS3Alias({
-  schema: browserAliasSchema({
+export const OCIConfig = makeS3Alias({
+  schema: aliasSchema({
     namespace: z
       .string()
       .optional()

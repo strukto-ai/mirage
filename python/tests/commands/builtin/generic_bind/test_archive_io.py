@@ -19,7 +19,7 @@ import pytest
 from mirage.commands.builtin.generic_bind.archive_io import is_dir_of
 from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.config import Context
-from mirage.context import reset_mount_gate, set_mount_gate
+from mirage.context import reset_caller, set_mount_gate
 from mirage.io import IOResult
 from mirage.types import MountMode, PathSpec
 from mirage.workspace.files import Files
@@ -41,7 +41,7 @@ def _probe(stat_error: type[OSError], listed: bool) -> Any:
             command_files(Context(vfs=Files(dispatch, ledger=False)))
         )
     finally:
-        reset_mount_gate(token)
+        reset_caller(token)
 
 
 @pytest.mark.asyncio

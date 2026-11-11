@@ -19,8 +19,8 @@ import { CommandTimeoutError } from './types.ts'
 import type {
   DotWalkError,
   FsError,
-  MissingOpError,
   NoMountError,
+  OperationNotSupportedError,
   StaleWriteError,
   WalkDeclinedError,
 } from './types.ts'
@@ -322,7 +322,7 @@ export function enotsup(
   vfs: string,
   op: string,
   path: string | { virtual: string; rawPath?: string },
-): MissingOpError {
+): OperationNotSupportedError {
   return Object.assign(fsError(path, 'ENOTSUP', `no op registered: ${op} for VFS ${vfs}`), {
     op,
   })

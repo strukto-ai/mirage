@@ -27,7 +27,7 @@ import pytest
 from mirage.cache.index import IndexConfig
 from mirage.cache.index.config import LookupStatus
 from mirage.commands.cli.builtin.gws import GWS
-from mirage.context import reset_current_session, set_current_session
+from mirage.context import reset_caller, set_current_session
 from mirage.execution.job import JobState
 from mirage.execution.line.types import Line, LineState
 from mirage.execution.process.types import Process, ProcessState
@@ -187,7 +187,7 @@ async def test_a_handle_forwards_per_call_options():
                 == b"PRIVATE\n"
             )
         finally:
-            reset_current_session(token)
+            reset_caller(token)
     finally:
         await ws.close()
 

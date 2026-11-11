@@ -483,16 +483,13 @@ export class Limit {
     const present = [...limits].filter((s): s is Limit => s !== null)
     if (present.length === 0) return null
     const init: NonNullable<ConstructorParameters<typeof Limit>[0]> = {}
-    for (const key of Object.keys(LIMIT_AGGR) as LimitAggrField[]) {
+    for (const key of Object.keys(LIMIT_AGGR) as (keyof typeof LIMIT_AGGR)[]) {
       if (present.some((s) => s.fieldsSet.has(key)))
         Object.assign(init, { [key]: LIMIT_AGGR[key](present) })
     }
     return new Limit(init)
   }
 }
-
-/** Every Limit field that composes; `kind` is the wire discriminant, not a bound. */
-type LimitAggrField = Exclude<keyof Limit, 'kind' | 'fieldsSet'>
 
 const LIMIT_FIELDS: readonly (keyof NonNullable<ConstructorParameters<typeof Limit>[0]>)[] = [
   'maxBytes',
@@ -503,13 +500,16 @@ const LIMIT_FIELDS: readonly (keyof NonNullable<ConstructorParameters<typeof Lim
 ]
 
 /**
- * Each bound's composition law, keyed by field.
+ * Each bound's composition law, keyed by every Limit field that composes
+ * (`kind` is the wire discriminant, not a bound).
  *
  * The mapped type is what makes this a table rather than a second copy of the
  * field list: declaring a new bound on Limit without adding its rule here is a
  * compile error, where the old inline literal would have silently dropped it.
  */
-const LIMIT_AGGR: { [K in LimitAggrField]: (present: readonly Limit[]) => Limit[K] } = {
+const LIMIT_AGGR: {
+  [K in Exclude<keyof Limit, 'kind' | 'fieldsSet'>]: (present: readonly Limit[]) => Limit[K]
+} = {
   maxBytes: (present) => minBound(present.map((s) => s.maxBytes)),
   maxLines: (present) => minBound(present.map((s) => s.maxLines)),
   timeoutSeconds: (present) => minPositive(present.map((s) => s.timeoutSeconds)),

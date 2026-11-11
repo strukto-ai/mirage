@@ -59,16 +59,16 @@ export function fieldSummary(fields: Readonly<Record<string, string>>, source: s
  * harder job: pydantic's rendering quotes the input outright.
  */
 export function errorSummary(error: z.ZodError): string {
-  return error.issues.map(issueDetail).join('; ')
-}
-
-function issueDetail(issue: z.core.$ZodIssue): string {
-  const path = issue.path.map(String).join('.')
-  // A model-level refinement (one credential of two, one drive target of
-  // four) carries no path; python's `error_summary` reports it as `config`.
-  const where =
-    path !== '' ? path : issue.code === 'unrecognized_keys' ? issue.keys.join(', ') : 'config'
-  return `${where}: ${issue.code}`
+  return error.issues
+    .map((issue) => {
+      const path = issue.path.map(String).join('.')
+      // A model-level refinement (one credential of two, one drive target of
+      // four) carries no path; python's `error_summary` reports it as `config`.
+      const where =
+        path !== '' ? path : issue.code === 'unrecognized_keys' ? issue.keys.join(', ') : 'config'
+      return `${where}: ${issue.code}`
+    })
+    .join('; ')
 }
 
 /**

@@ -26,7 +26,6 @@ import aiohttp
 from mirage.accessor.linear import LinearAccessor
 from mirage.core.api.client import api_request
 from mirage.core.api.errors import ApiError
-from mirage.core.linear.config import LinearConfig
 from mirage.core.linear.queries import (
     COMMENT_CREATE_MUTATION,
     COMMENT_UPDATE_MUTATION,
@@ -69,13 +68,6 @@ class LinearAPIError(ApiError):
         self.errors = errors if errors is not None else []
 
 
-def linear_headers(config: LinearConfig) -> dict[str, str]:
-    return {
-        "Authorization": reveal_secret(config.api_key),
-        "Content-Type": "application/json",
-    }
-
-
 def _error_of(resp: aiohttp.ClientResponse, text: str) -> Exception:
     try:
         data = json.loads(text)
@@ -99,7 +91,10 @@ async def graphql_request(
         "POST",
         accessor.config.base_url,
         error_of=_error_of,
-        headers=linear_headers(accessor.config),
+        headers={
+            "Authorization": reveal_secret(accessor.config.api_key),
+            "Content-Type": "application/json",
+        },
         json_body=payload,
         session=accessor.pool,
     )

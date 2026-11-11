@@ -26,7 +26,7 @@ import {
   streamMessagesForDay,
   type SlackMessage,
 } from './history.ts'
-import { refusalsDenied } from './client.ts'
+import { downloadFile, refusalsDenied } from './client.ts'
 import { getUserProfile, userJsonBytes } from './users.ts'
 import { detectScope } from './scope.ts'
 
@@ -66,25 +66,13 @@ async function blobUrl(
   return url
 }
 
-async function downloadBlob(
-  accessor: SlackAccessor,
-  url: string,
-  offset: number,
-  size: number | null,
-): Promise<Uint8Array> {
-  if (accessor.transport.downloadFile === undefined) {
-    throw new Error('slack transport does not support file downloads')
-  }
-  return accessor.transport.downloadFile(url, offset, size)
-}
-
 async function readBlob(
   accessor: SlackAccessor,
   _match: ScopeMatch,
   path: PathSpec,
   entry: FileStat | null,
 ): Promise<Uint8Array> {
-  return downloadBlob(accessor, await blobUrl(accessor, path, entry), 0, null)
+  return downloadFile(accessor.transport, await blobUrl(accessor, path, entry))
 }
 
 async function readBlobRange(
@@ -96,7 +84,7 @@ async function readBlobRange(
   offset: number,
   size: number | null,
 ): Promise<Uint8Array> {
-  return downloadBlob(accessor, await blobUrl(accessor, path, entry), offset, size)
+  return downloadFile(accessor.transport, await blobUrl(accessor, path, entry), offset, size)
 }
 
 export const read = makeRead<SlackAccessor>(detectScope, {
@@ -124,7 +112,7 @@ export async function* readStream(
     const url = await blobUrl(accessor, path, entry)
     const source =
       accessor.transport.downloadFileStream === undefined
-        ? await downloadBlob(accessor, url, 0, null)
+        ? await downloadFile(accessor.transport, url)
         : accessor.transport.downloadFileStream(url, signal)
     yield* chunks(source, signal)
   } else {

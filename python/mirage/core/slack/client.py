@@ -43,15 +43,6 @@ REFUSED_ERRORS = frozenset(
 )
 
 
-def _auth_token(config: SlackConfig, method: str) -> str:
-    if method.startswith("search."):
-        search_token: str = reveal_secret(config.search_token)
-        if search_token:
-            return search_token
-    token: str = reveal_secret(config.token)
-    return token
-
-
 def slack_search_available(config: SlackConfig) -> bool:
     if reveal_secret(config.search_token):
         return True
@@ -60,9 +51,11 @@ def slack_search_available(config: SlackConfig) -> bool:
 
 
 def slack_headers(config: SlackConfig, method: str) -> dict[str, str]:
-    auth_token = _auth_token(config, method)
+    token: str = reveal_secret(config.token)
+    if method.startswith("search."):
+        token = reveal_secret(config.search_token) or token
     return {
-        "Authorization": f"Bearer {auth_token}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json; charset=utf-8",
     }
 

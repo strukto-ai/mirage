@@ -214,16 +214,12 @@ const isDir = (mode: number): boolean => (mode & S_IFMT) === S_IFDIR
 const isFile = (mode: number): boolean => (mode & S_IFMT) === S_IFREG
 const isLink = (mode: number): boolean => (mode & S_IFMT) === S_IFLNK
 
-function missing(err: unknown): boolean {
-  const condition = classify(err)
-  return condition === 'ENOENT' || condition === 'ENOTDIR'
-}
-
 async function lookup(core: MountCore, path: string): Promise<MountAttrs | null> {
   try {
     return await core.getattr(path)
   } catch (err) {
-    if (missing(err)) return null
+    const condition = classify(err)
+    if (condition === 'ENOENT' || condition === 'ENOTDIR') return null
     throw err
   }
 }

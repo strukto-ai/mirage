@@ -41,14 +41,6 @@ export enum VarAttr {
   Upper = 'u',
 }
 
-// `declare -p` print order, derived from the enum rather than restated:
-// a string enum has no reverse mapping, so `Object.values` is its
-// declaration order exactly. Python reads the same order off `VarAttr`
-// itself, so an attribute added to one enum cannot print in a different
-// place from the other, and cannot be silently dropped by a hand-written
-// list nobody remembered to extend.
-const ATTR_ORDER: VarAttr[] = Object.values(VarAttr)
-
 /** What a variable's value is, derived from the value itself. */
 export enum VarKind {
   Scalar = 'scalar',
@@ -155,7 +147,12 @@ export function withValue(v: ShellVar, value: ShellValue | null): ShellVar {
  * `attrLetters` itself.
  */
 export function storedAttrs(v: ShellVar): string {
-  return ATTR_ORDER.filter((a) => v.attrs.has(a)).join('')
+  // `declare -p` print order is the enum's own: a string enum has no
+  // reverse mapping, so `Object.values` is its declaration order, as
+  // Python reads it off `VarAttr`.
+  return Object.values(VarAttr)
+    .filter((a) => v.attrs.has(a))
+    .join('')
 }
 
 /**
@@ -167,7 +164,7 @@ export function storedAttrs(v: ShellVar): string {
  * the letter.
  */
 export function attrsFromLetters(letters: string): ReadonlySet<VarAttr> {
-  const known = new Set<string>(ATTR_ORDER)
+  const known = new Set<string>(Object.values(VarAttr))
   const out = new Set<VarAttr>()
   for (const c of letters.split('')) {
     if (known.has(c)) out.add(c as VarAttr)

@@ -42,7 +42,7 @@ import { S3VFS } from './s3/s3.ts'
  * region — because a presigned URL already names its host, so an alias
  * that can derive neither simply leaves both off the S3Config.
  */
-export interface S3BrowserAliasConfig {
+export interface S3AliasConfig {
   bucket: string
   presignedUrlProvider: S3BrowserPresignedUrlProvider
   region?: string
@@ -52,7 +52,7 @@ export interface S3BrowserAliasConfig {
   timeout?: number
 }
 
-export const BROWSER_ALIAS_FIELDS = {
+export const ALIAS_SHAPE = {
   bucket: z.string().describe('Name of the bucket to mount.'),
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),
@@ -92,11 +92,11 @@ export const BROWSER_ALIAS_FIELDS = {
  * hand-written schema happened to put them. That is only visible in the
  * key order of a redacted config, which nothing pins.
  */
-export function browserAliasSchema<E extends z.ZodRawShape>(
+export function aliasSchema<E extends z.ZodRawShape>(
   extra: E,
-): z.ZodObject<typeof BROWSER_ALIAS_FIELDS & E> {
+): z.ZodObject<typeof ALIAS_SHAPE & E> {
   return z
-    .object({ ...BROWSER_ALIAS_FIELDS, ...extra })
+    .object({ ...ALIAS_SHAPE, ...extra })
     .register(FIELD_NORMALIZERS, { rename: S3_BROWSER_RENAME })
 }
 
@@ -108,7 +108,7 @@ export function browserAliasSchema<E extends z.ZodRawShape>(
  * than a URL with a hole in it. oci needs two fields, and gcs and wasabi
  * always resolve, so those three pass their own `endpointFor`.
  */
-export function derivedEndpoint<C extends S3BrowserAliasConfig>(
+export function derivedEndpoint<C extends S3AliasConfig>(
   key: keyof C & string,
   template: (value: string) => string,
 ): (config: C) => string | undefined {
@@ -118,7 +118,7 @@ export function derivedEndpoint<C extends S3BrowserAliasConfig>(
   }
 }
 
-export interface BrowserAlias<C, R, E extends string | undefined> {
+export interface Alias<C, R, E extends string | undefined> {
   resolvedEndpoint: (config: C) => string | E
   toS3Config: (config: C) => S3Config
   redact: (config: C) => R
@@ -134,21 +134,21 @@ export interface BrowserAlias<C, R, E extends string | undefined> {
  * always has (gcs and r2 report `auto`), and `forcePathStyle` is set
  * only by supabase, whose gateway does not serve virtual-hosted style.
  */
-export function makeBrowserS3Alias<
+export function makeS3Alias<
   S extends z.ZodObject,
   E extends string | undefined = string | undefined,
 >(options: {
   schema: S
-  endpointFor?: (config: ConfigOf<S> & S3BrowserAliasConfig) => E
+  endpointFor?: (config: ConfigOf<S> & S3AliasConfig) => E
   regionDefault?: string
   forcePathStyle?: boolean
-}): S & BrowserAlias<ConfigOf<S> & S3BrowserAliasConfig, RedactedSchema<S>, E> {
+}): S & Alias<ConfigOf<S> & S3AliasConfig, RedactedSchema<S>, E> {
   const { schema, endpointFor, regionDefault, forcePathStyle } = options
-  const resolvedEndpoint = (config: ConfigOf<S> & S3BrowserAliasConfig): string | E => {
+  const resolvedEndpoint = (config: ConfigOf<S> & S3AliasConfig): string | E => {
     if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint
     return endpointFor === undefined ? (undefined as E) : endpointFor(config)
   }
-  const alias: BrowserAlias<ConfigOf<S> & S3BrowserAliasConfig, RedactedSchema<S>, E> = {
+  const alias: Alias<ConfigOf<S> & S3AliasConfig, RedactedSchema<S>, E> = {
     resolvedEndpoint,
     toS3Config: (config) => {
       const endpoint = resolvedEndpoint(config)
@@ -175,7 +175,7 @@ export function makeBrowserS3Alias<
  * The shared body of every S3-compatible provider VFS (MinIO, Ceph,
  * R2, Wasabi, ...). Each is an {@link S3VFS} reached through a
  * provider-shaped config, so all it owns is its `name`, that config and the
- * {@link BrowserAlias} that converts and redacts it; the mount serves S3's
+ * {@link Alias} that converts and redacts it; the mount serves S3's
  * commands under the name. A subclass supplies its prompt as a plain field
  * and hands the varying pieces to `super`. Mirrors python `S3AliasVFS` in
  * `mirage/vfs/s3_alias.py`.
@@ -191,7 +191,7 @@ export abstract class S3AliasVFS<
   protected constructor(
     name: string,
     config: TConfig,
-    alias: Pick<BrowserAlias<TConfig, TRedacted, string | undefined>, 'toS3Config' | 'redact'>,
+    alias: Pick<Alias<TConfig, TRedacted, string | undefined>, 'toS3Config' | 'redact'>,
   ) {
     super(alias.toS3Config(config))
     this.name = name

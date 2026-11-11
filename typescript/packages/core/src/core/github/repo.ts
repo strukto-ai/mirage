@@ -24,6 +24,15 @@ export interface RepoRef {
   repo: string
 }
 
+export async function fetchDefaultBranch(
+  transport: GitHubTransport,
+  owner: string,
+  repo: string,
+): Promise<string> {
+  const data = (await transport.get(`/repos/${owner}/${repo}`)) as { default_branch: string }
+  return data.default_branch
+}
+
 // go-gh's IsURL: a word that starts `git@` or with a scheme a git remote uses
 // names a repository by URL rather than as `[HOST/]OWNER/REPO`.
 const URL_PREFIXES = ['git@', 'ssh:', 'git+ssh:', 'git:', 'http:', 'git+https:', 'https:']

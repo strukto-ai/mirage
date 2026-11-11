@@ -206,7 +206,9 @@ export async function fetchTree(
     },
   )) as { tree?: GitHubTreeItem[]; truncated?: boolean; sha?: unknown }
   return {
-    tree: dropSubmodules(data.tree ?? []),
+    // Submodule gitlinks (type "commit") have no size and no blob to read;
+    // exclude them from the tree entirely.
+    tree: (data.tree ?? []).filter((item) => item.type !== 'commit'),
     truncated: data.truncated === true,
     sha: headOf(data),
   }
@@ -234,12 +236,6 @@ export async function fetchHead(
 
 export function headOf(data: { sha?: unknown }): string | null {
   return typeof data.sha === 'string' && data.sha !== '' ? data.sha : null
-}
-
-// Submodule gitlinks (type "commit") have no size and no blob to read;
-// exclude them from the tree entirely.
-export function dropSubmodules(tree: GitHubTreeItem[]): GitHubTreeItem[] {
-  return tree.filter((item) => item.type !== 'commit')
 }
 
 /**
@@ -274,7 +270,10 @@ export async function fetchDirPage(
       0,
     )
   }
-  return { tree: dropSubmodules(data.tree), truncated: data.truncated === true }
+  return {
+    tree: data.tree.filter((item) => item.type !== 'commit'),
+    truncated: data.truncated === true,
+  }
 }
 
 /**

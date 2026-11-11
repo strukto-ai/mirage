@@ -41,8 +41,7 @@ from mirage.commands.spec.usage import (
 from mirage.concurrency.limiter import bounded_map_stream
 from mirage.context import (
     current_caller,
-    reset_current_session,
-    reset_program_invocation,
+    reset_caller,
     set_current_evaluation,
     set_program_invocation,
 )
@@ -1044,7 +1043,7 @@ async def _run_lines(
             try:
                 await _drain_child(execute_fn(line, **extra), output, pipe)
             finally:
-                reset_program_invocation(marked)
+                reset_caller(marked)
             return
         slot = next(n for n in range(len(taken) + 1) if n not in taken)
         taken.add(slot)
@@ -1059,8 +1058,8 @@ async def _run_lines(
         try:
             await _drain_child(execute_fn(line, **extra), output, pipe)
         finally:
-            reset_program_invocation(marked)
-            reset_current_session(token)
+            reset_caller(marked)
+            reset_caller(token)
             taken.discard(slot)
 
     async def invoke(

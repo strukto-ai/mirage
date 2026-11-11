@@ -492,15 +492,6 @@ async function dispatchedExists(dispatch: DispatchFn, path: PathSpec): Promise<b
   return true
 }
 
-/** `fn`, refused with the line's abort instead of started once `signal` has fired. */
-function refusedAfterAbort<T extends unknown[], R>(
-  signal: AbortSignal | undefined,
-  fn: (...args: T) => Promise<R>,
-): (...args: T) => Promise<R> {
-  if (signal === undefined) return fn
-  return (...args) => (hasAborted(signal) ? Promise.reject(makeAbortError(signal)) : fn(...args))
-}
-
 // Whether a path no backend knows is a directory the namespace owns: the
 // third way a read operand can be a directory, after the explicit stat row
 // and the implicit keyed-backend prefix. A directory that exists only
@@ -677,8 +668,13 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
     args: readonly unknown[] = [],
     kwargs: Record<string, unknown> = {},
   ): Promise<unknown> => dispatchedCall(dispatch, name, path, args, kwargs)
-  const guard = <T extends unknown[], R>(fn: (...args: T) => Promise<R>) =>
-    refusedAfterAbort(signal, fn)
+  // `fn`, refused with the line's abort instead of started once `signal` has fired.
+  const guard = <T extends unknown[], R>(
+    fn: (...args: T) => Promise<R>,
+  ): ((...args: T) => Promise<R>) =>
+    signal === undefined
+      ? fn
+      : (...args) => (hasAborted(signal) ? Promise.reject(makeAbortError(signal)) : fn(...args))
 
   let rawStat: (path: PathSpec) => Promise<FileStat>
   let rawReaddir: (path: PathSpec, nofollow?: boolean, limit?: number) => Promise<string[]>

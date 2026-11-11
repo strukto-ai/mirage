@@ -61,18 +61,6 @@ interface Relationship {
   relationship_columns: { left_column: string; right_column: string }[]
 }
 
-export interface EntitySemanticJson {
-  name: string
-  schema: string
-  kind: string
-  description?: string
-  primary_key?: string[]
-  dimensions?: ColumnEntry[]
-  time_dimensions?: ColumnEntry[]
-  facts?: ColumnEntry[]
-  relationships?: Relationship[]
-}
-
 // Assign a column its semantic role. Mirrors the dimension / time_dimension /
 // fact split of the Snowflake semantic view vocabulary. Keys stay dimensions
 // even when numeric: an id is something you group or join by, never sum.
@@ -146,7 +134,7 @@ export async function buildEntitySemanticJson(
   schema: string,
   name: string,
   kind: string,
-): Promise<EntitySemanticJson> {
+) {
   const columns = await fetchColumns(accessor, schema, name)
   const pk = await fetchPrimaryKey(accessor, schema, name)
   const fks = await fetchForeignKeys(accessor, schema, name)
@@ -175,7 +163,17 @@ export async function buildEntitySemanticJson(
     )
   }
 
-  const doc: EntitySemanticJson = { name, schema, kind }
+  const doc: {
+    name: string
+    schema: string
+    kind: string
+    description?: string
+    primary_key?: string[]
+    dimensions?: ColumnEntry[]
+    time_dimensions?: ColumnEntry[]
+    facts?: ColumnEntry[]
+    relationships?: Relationship[]
+  } = { name, schema, kind }
   if (tableComment) doc.description = tableComment
   if (pk.length > 0) doc.primary_key = pk
   if (buckets.dimensions.length > 0) doc.dimensions = buckets.dimensions

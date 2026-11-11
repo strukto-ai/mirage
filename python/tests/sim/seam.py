@@ -103,7 +103,7 @@ GITHUB_OPS = frozenset(
         "fetch_tree",
         "fetch_head",
         "fetch_dir_page",
-        "read_bytes",
+        "fetch_blob",
         "search_code",
         "graphql_data",
     }
@@ -838,14 +838,14 @@ class _GitHubConnection:
             perform,
         )
 
-    async def read_bytes(
+    async def fetch_blob(
         self, account: Any, owner: str, repo: str, sha: str
     ) -> bytes:
         async def perform() -> bytes:
-            return await self._fake.read_bytes(account, owner, repo, sha)
+            return await self._fake.fetch_blob(account, owner, repo, sha)
 
         return await self._network.request(
-            "read_bytes",
+            "fetch_blob",
             {"owner": owner, "repo": repo, "sha": sha},
             perform,
         )
@@ -853,7 +853,7 @@ class _GitHubConnection:
     async def stream_blob(
         self, account: Any, owner: str, repo: str, sha: str
     ) -> AsyncIterator[bytes]:
-        data = await self.read_bytes(account, owner, repo, sha)
+        data = await self.fetch_blob(account, owner, repo, sha)
         yield data
 
     async def graphql_data(
@@ -961,8 +961,8 @@ def route_github(
         )
         stack.enter_context(
             patch(
-                "mirage.core.github.read.read_bytes",
-                new=conn.read_bytes,
+                "mirage.core.github.read.fetch_blob",
+                new=conn.fetch_blob,
             )
         )
         stack.enter_context(
