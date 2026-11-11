@@ -119,6 +119,7 @@ from mirage.vfs.scaleway import ScalewayConfig, ScalewayVFS
 from mirage.vfs.seaweedfs import SeaweedFSConfig, SeaweedFSVFS
 from mirage.vfs.sharepoint.sharepoint import SharePointVFS
 from mirage.vfs.slack import SlackConfig, SlackVFS
+from mirage.vfs.sql import SqlVFS
 from mirage.vfs.ssh import SSHVFS, SSHConfig
 from mirage.vfs.supabase import SupabaseConfig, SupabaseVFS
 from mirage.vfs.tencent import TencentConfig, TencentVFS
@@ -2777,6 +2778,25 @@ def build_disk(
     ), cleanup
 
 
+def build_sql(
+    mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    # Named by the run and the database, not minted, so mounts naming one
+    # database share its file, and the second build of one run (a
+    # consistency case's shadow) opens the file the first one made; each
+    # case opens with its own run id, so nothing carries over between
+    # cases.
+    database = mount.get("database", "default")
+    path = Path(tempfile.gettempdir()) / (
+        f"mirage-integ-sql-py-{run_id}-{database}.db"
+    )
+
+    async def cleanup() -> None:
+        path.unlink(missing_ok=True)
+
+    return SqlVFS(str(path), root=mount.get("root", "/")), cleanup
+
+
 def seed_host_fixture(root: Path, fixture_name: str) -> list[Path]:
     """Lay a host fixture's files, folders and symlinks out under root.
 
@@ -3144,6 +3164,7 @@ def build_arg_error(
 BUILDERS = {
     "ram": build_ram,
     "disk": build_disk,
+    "sql": build_sql,
     "redis": build_redis,
     "s3": build_s3,
     "aliyun": build_s3,

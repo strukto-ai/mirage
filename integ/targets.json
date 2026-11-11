@@ -3178,6 +3178,28 @@
       ]
     },
     {
+      "id": "sql-folder",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/db",
+          "vfs": "sql",
+          "backend": "sqlite",
+          "database": "shared"
+        },
+        {
+          "path": "/work",
+          "vfs": "sql",
+          "backend": "sqlite",
+          "database": "shared",
+          "root": "/work"
+        }
+      ]
+    },
+    {
       "id": "git-disk",
       "hosts": [
         "python",

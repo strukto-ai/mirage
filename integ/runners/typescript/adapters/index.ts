@@ -101,6 +101,7 @@ import {
   SharePointVFS,
   SLACK,
   SlackVFS,
+  SqlVFS,
   SSHVFS,
   SupabaseVFS,
   TencentVFS,
@@ -504,6 +505,40 @@ async function openDisk(target: Target, options?: OpenOptions): Promise<Open> {
   const cleanup = async (): Promise<void> => {
     await opened.closeAll()
     removeRoots()
+  }
+  return { ws: opened.ws, shadow: opened.shadow, cleanup }
+}
+
+async function openSql(target: Target, options?: OpenOptions): Promise<Open> {
+  // One SQLite file a database name, made once per open: mounts naming one
+  // database share its file, and a consistency case's shadow opens the files
+  // the read workspace mounts. Each case opens with its own folder.
+  const dir = mkdtempSync(join(tmpdir(), 'mirage-integ-sql-'))
+  const build = (): Record<string, SqlVFS | [SqlVFS, MountMode]> => {
+    const mounts: Record<string, SqlVFS | [SqlVFS, MountMode]> = {}
+    for (const m of target.mounts) {
+      const path = join(dir, `${m.database ?? 'default'}.db`)
+      const vfs = new SqlVFS({ path, root: m.root ?? '/' })
+      mounts[m.path] = m.mode === 'read' ? [vfs, MountMode.READ] : vfs
+    }
+    return mounts
+  }
+  const removeDir = (): void => {
+    rmSync(dir, { recursive: true, force: true })
+  }
+  if (options === undefined) {
+    const ws = new Workspace(build(), { ...WORKSPACE_OPTIONS, ...permissionOptions(target) })
+    installLocalClis(ws, target)
+    const cleanup = async (): Promise<void> => {
+      await ws.close()
+      removeDir()
+    }
+    return { ws: ws as unknown as ExecWorkspace, cleanup }
+  }
+  const opened = openWorkspaces(build, options)
+  const cleanup = async (): Promise<void> => {
+    await opened.closeAll()
+    removeDir()
   }
   return { ws: opened.ws, shadow: opened.shadow, cleanup }
 }
@@ -2434,6 +2469,7 @@ async function openArgError(target: Target): Promise<Open> {
 export const ADAPTERS: Record<string, (target: Target, options?: OpenOptions) => Promise<Open>> = {
   ram: openRam,
   disk: openDisk,
+  sql: openSql,
   redis: openRedis,
   opfs: openOpfs,
   s3: openS3,

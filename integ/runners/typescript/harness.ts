@@ -56,6 +56,8 @@ export interface Mount {
   volume?: string
   prefix?: string
   root?: string
+  // The database a sql mount opens, by name: mounts naming one share its file.
+  database?: string
   // The bases an airtable mount is scoped to (AirtableConfig.base_ids).
   base_ids?: string[]
   drive?: string
