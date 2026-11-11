@@ -64,7 +64,7 @@ Still on **Settings**, copy:
 - **App secret**, click **Show** -> copy. This is your `DROPBOX_APP_SECRET`. **Skip if you
   only need the PKCE flow.**
 
-### 5. Get the Refresh Token (CLI flow with client secret)
+### 5. Get the Refresh Token (CLI Flow with Client Secret)
 
 This mirrors the Google flow, easiest path for Node/server use.
 
@@ -116,7 +116,7 @@ DROPBOX_APP_SECRET=def456app4secret
 DROPBOX_REFRESH_TOKEN=ghi789refresh4token
 ```
 
-## Alternative: PKCE Flow (browser, no client secret)
+## Alternative: PKCE Flow (Browser, No Client Secret)
 
 If you're mounting Dropbox from a browser SPA and don't want to ship a client secret, use the
 PKCE flow. The bundled example does the dance end-to-end.

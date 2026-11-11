@@ -1,5 +1,5 @@
 ---
-title: Custom runtime
+title: Custom Runtime
 description: Run programs somewhere Mirage does not ship, such as your own execution service, by writing a runtime in Python or TypeScript and naming it from YAML.
 icon: code
 ---
@@ -36,7 +36,7 @@ this command do". To give the agent one command with a known interface, such as
 `deploy` or `tickets`, write a CLI. To choose where `python3`, `node` or any
 other program runs, write a runtime.
 
-## Choose an entry point
+## Choose an Entry Point
 
 | Implement | Receives | For |
 | --- | --- | --- |
@@ -51,7 +51,7 @@ capture the ones you want by name or by group (`@python`, `@js`). Only a line ex
 executor can take `@external`. A `LanguageRuntime` that is neither runs only its own
 language's names; naming another is refused when the workspace is built.
 
-## Reach files through `ctx.vfs`
+## Reach Files Through `ctx.vfs`
 
 The machine your runtime sends a program to cannot see a mount. Read and write
 workspace files through `ctx.vfs`, the session's files. Each call goes through
@@ -62,7 +62,7 @@ of them.
 Read with `raw` when you copy a file out to write it back: it returns the
 stored bytes, not a form a `filetype` registration renders.
 
-## Example: an execution service
+## Example: An Execution Service
 
 This runtime sends each program to an HTTP execution service with a copy of the
 session's working directory, then writes back the files the program created or
@@ -239,7 +239,7 @@ The stand-in service accepts work only with the token it was started with, and
 your real service should authenticate callers too: it runs whatever program it
 is sent.
 
-## Stop when the run stops
+## Stop When the Run Stops
 
 `timeout`, a closed session or a reader that stops early cancels the run. In
 Python the cancellation arrives as `asyncio.CancelledError` in your coroutine;
@@ -256,7 +256,7 @@ the program, and make sure that stops it:
   the child's `stdin` an `error` listener that treats `EPIPE` as that, not as a
   failure; without one, the stream error stops the host.
 
-## What the copy holds
+## What the Copy Holds
 
 The example sends the working directory's own mount, never a mount below it,
 so a run from `/` does not try to copy `/dev` or every other mount. It sends

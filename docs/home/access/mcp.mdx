@@ -120,7 +120,7 @@ allows: `shell` needs a command the allow list allows, `ls` and `grep` need
 those commands, and `write` and `edit` need a mount the session may write. A
 tool it does not see answers `not found`.
 
-### shell
+### Shell
 
 Runs a shell line in the session's working directory. A `cd` or `export` holds
 for the next call.
@@ -136,7 +136,7 @@ print(x)
 ls: cannot access '/nope': No such file or directory
 ```
 
-### read
+### Read
 
 Reads a file as numbered lines.
 
@@ -149,7 +149,7 @@ Reads a file as numbered lines.
      2	print(x)
 ```
 
-### write
+### Write
 
 Writes a file, creating missing parent directories. To replace a file that
 exists, `read` all of it first; the write fails if it changed since. Use
@@ -162,7 +162,7 @@ exists, `read` all of it first; the write fails if it changed since. Use
 Written: /data/a.py
 ```
 
-### edit
+### Edit
 
 Replaces a string in a file. Fails if the file changed since it was read, or if
 `old_string` is missing or appears more than once without `replace_all`.
@@ -220,7 +220,7 @@ names the limit.
 /data/a.py
 ```
 
-## Output progress
+## Output Progress
 
 A `shell` call can send output previews while it runs. Pass a progress token in
 the request's `_meta`:
@@ -242,7 +242,7 @@ Mirage then sends `notifications/progress` messages that start with `[stdout]`
 or `[stderr]`, over HTTP and `mirage mcp` alike. Previews are trimmed and
 batched, so take the full output from the final result.
 
-## VFS calls
+## VFS Calls
 
 Add `?calls=all` to the URL, or `--all-calls` to `mirage mcp`, for 23 more
 tools: `vfs_read`, `vfs_is_dir` and the rest, one per

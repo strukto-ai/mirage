@@ -8,7 +8,7 @@ MinIO speaks the S3 API with AWS Signature V4 against your own server endpoint (
 
 Credentials (access key + secret key from the MinIO Console) are created the same way in both runtimes, see [MinIO Credentials](/home/setup/minio).
 
-## Node (server-side)
+## Node (Server-Side)
 
 ```bash
 pnpm add @struktoai/mirage-node
@@ -49,7 +49,7 @@ console.log(res.stdoutText)
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table minio end */}
 
-## Browser (presigned URLs)
+## Browser (Presigned URLs)
 
 ```bash
 pnpm add @struktoai/mirage-browser
@@ -73,7 +73,7 @@ The browser `MinIOVFS` is secret-free, your backend signs each operation using y
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table browser/minio end */}
 
-### 1. Server: sign URLs with the MinIO endpoint
+### 1. Server: Sign URLs with the MinIO Endpoint
 
 ```ts
 import {
@@ -128,7 +128,7 @@ app.post('/presign/minio', async (req, res) => {
 MinIO uses **path-style** URLs (`forcePathStyle: true`), virtual-hosted style requires extra DNS setup on a self-hosted server.
 </Warning>
 
-### 2. Browser: wire it up
+### 2. Browser: Wire It Up
 
 ```ts
 import { MinIOVFS, MountMode, Workspace } from '@struktoai/mirage-browser'

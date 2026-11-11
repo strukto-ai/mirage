@@ -1,5 +1,5 @@
 ---
-title: discord
+title: Discord
 description: "Supported Discord commands for messages, threads, polls and guild information."
 icon: /images/discord-logo.svg
 ---
@@ -22,7 +22,7 @@ No service mount is required. For YAML and multiple accounts, see the
 [CLI overview](/typescript/cli/index#register-a-cli).
 
 {/* BEGIN GENERATED CLI COMMANDS */}
-## Supported commands
+## Supported Commands
 
 Run `discord <command> --help` for the supported flags and operands.
 This list is generated from Mirage's registered command tree.
@@ -60,7 +60,7 @@ discord delete --channel 1256522563555819574 --message 1489887688978075769
 arguments are Discord snowflake IDs; `send --file` reads a workspace path and
 attaches it.
 
-## Threads, polls and search
+## Threads, Polls and Search
 
 ```bash
 discord react --channel 1256522563555819574 --message 1489887688978075769 --emoji "👍"
@@ -79,7 +79,7 @@ Omit `--message` on `thread-create` to create a standalone thread. Repeat
 `--answer` for each poll option; `--multiselect` allows multiple choices.
 Responses are JSON.
 
-## VFS and limits
+## VFS and Limits
 
 The optional [Discord VFS](/typescript/setup/discord) exposes the guild's
 channels and messages as files. Use the IDs in its `name__id` path segments

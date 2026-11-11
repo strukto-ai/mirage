@@ -18,7 +18,7 @@ workspace one coded policy, and walks through what the agent sees.
 | Coded policy | Any action, in code | Writes only under `/data/out`, from a command or from Python |
 | `on_ask` | Who answers an ask | The host approves |
 
-## The policy script
+## The Policy Script
 
 The script's `pre_command` takes the command, opens the files it names
 through the workspace, and refuses a Python script whose code deletes files:
@@ -42,7 +42,7 @@ Python can delete a file. A rule that must always hold belongs in a coded
 policy, which judges each file call itself, as `WritesOnlyToOut` below does
 for writes.
 
-## The workspace
+## The Workspace
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -149,7 +149,7 @@ for writes.
   </Tab>
 </Tabs>
 
-## What the agent sees
+## What the Agent Sees
 
 ```console
 $ ls
@@ -206,7 +206,7 @@ The profile applies only to sessions under `analyst`. The coded policy
 applies to every session of the workspace, so the host's own writes outside
 `/data/out` are refused as well.
 
-## Learn more
+## Learn More
 
 - [Agent profiles](/home/profiles): every profile key and how rules match.
 - [Policies](/home/policy/policies): the eight methods and their answers.

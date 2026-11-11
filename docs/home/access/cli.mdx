@@ -55,7 +55,7 @@ This prints `1:hello mirage`. Keep `demo` for the [MCP](/home/access/mcp) or
 [RPC](/home/access/rpc) examples, then remove it with `mirage workspace delete demo`.
 See [Workspace configuration](/home/configuration) for YAML settings and defaults.
 
-## Write a config
+## Write a Config
 
 A config is a YAML file listing what the workspace mounts. Each key under
 `mounts` is a path in the workspace: `vfs` names the backend, and `config`
@@ -100,7 +100,7 @@ mirage shell -w work -c 'ls /repo && echo draft > /scratch/notes.txt'
 `clis`, `runtimes`, `profiles` and the other top-level keys are in
 [Workspace configuration](/home/configuration).
 
-## Exit codes
+## Exit Codes
 
 | Code | Means |
 | --- | --- |
@@ -111,7 +111,7 @@ mirage shell -w work -c 'ls /repo && echo draft > /scratch/notes.txt'
 | `141` | `shell` output went to a pipe that closed, as with `\| head`. |
 | `N` | `shell` exits with the line's own status. |
 
-## Run lines, VFS calls and tools
+## Run Lines, VFS Calls and Tools
 
 | Command | Does |
 | --- | --- |
@@ -224,7 +224,7 @@ a `workspace_id`.
 | `mirage workspace vfs-md ID [--session S] [--path PATH] [--profile P]` | Print the VFS.md, or expose it as a live file at `PATH`. |
 | `mirage workspace skill-md ID [--session S] [--path PATH] [--profile P]` | The same for SKILL.md. |
 
-### From a template
+### From a Template
 
 A template is a saved workspace config. `-f` takes a workspace config, or a
 file with `name`, an optional `description`, and `config`, as
@@ -253,7 +253,7 @@ not both. The local daemon keeps templates under `~/.mirage/resources`, as
 its name: a name is unique, so it works as an ID. On the local daemon a
 template's ID is its name.
 
-### Saved policies
+### Saved Policies
 
 `mirage policy` keeps Python programs by name on the daemon, or on the
 hosted API, through the [`/v1/policies`](/api/operations/policies/list-policies)
@@ -288,7 +288,7 @@ name the daemon has no saved policy for is read as a file too.
 | `mirage workspace allow ID ASK [--scope once\|session]` | Allow one. |
 | `mirage workspace deny ID ASK` | Deny one. |
 
-### Lines, jobs and processes
+### Lines, Jobs and Processes
 
 | Command | Does |
 | --- | --- |
@@ -300,7 +300,7 @@ name the daemon has no saved policy for is read as a file too.
 Each takes `-w ID`, else the current workspace, as `shell` and `vfs` do.
 `-s` keeps only that session's records.
 
-## Saved connections
+## Saved Connections
 
 `mirage vfs`, `mirage cli`, `mirage runtime` and `mirage machine` keep
 connections on the server: a type, its settings and its credentials, saved
@@ -364,7 +364,7 @@ uses the entry. The local
 daemon keeps entries under `~/.mirage/resources`, their secrets in a separate
 file only you can read.
 
-### Use a saved connection
+### Use a Saved Connection
 
 A workspace config or a template names a saved field with
 `{from: strukto, ref: NAME, key: FIELD}`, where it would write the value:
@@ -407,7 +407,7 @@ The server the CLI starts. It exits 30 seconds after its last running workspace 
 | `mirage daemon restart [--eager]` | Stop it; the next command, or `--eager`, starts a new one. Its workspaces stay stopped until `mirage workspace start`. |
 | `mirage daemon kill` | Kill it. A last resort. |
 
-## Log in
+## Log In
 
 A context is a server the CLI talks to, with its login, team and current
 workspace. `local` is the daemon on this machine, which needs no login and
@@ -435,7 +435,7 @@ On a terminal, a command that changes something names its context first, as
 `strukto · team acme · created demo`.
 
 <AccordionGroup>
-  <Accordion title="How login works">
+  <Accordion title="How Login Works">
     - `mirage login` asks the server where to sign in, opens your browser there,
       and waits. If you are already signed in, the browser comes straight back.
     - The CLI keeps each context in `~/.mirage/contexts/NAME.json`, its
@@ -452,7 +452,7 @@ On a terminal, a command that changes something names its context first, as
     - A server that publishes no login, such as the one the CLI starts on your
       machine, needs none, and `mirage login` says so.
   </Accordion>
-  <Accordion title="Set up login on a server">
+  <Accordion title="Set Up Login on a Server">
     A server publishes a login when it runs in [`jwt` mode](/home/access/http#jwt)
     with an issuer and `MIRAGE_LOGIN_CLIENT_ID` set to an OAuth client that
     `MIRAGE_JWT_AUDIENCE` lists:
@@ -474,7 +474,7 @@ On a terminal, a command that changes something names its context first, as
   </Accordion>
 </AccordionGroup>
 
-## Call any route
+## Call Any Route
 
 `mirage api` calls a route of the current context's server with the CLI's login
 or token, as `gh api` does, so a script needs no token of its own:
@@ -502,7 +502,7 @@ string of a GET. The answer prints as JSON, a 204 prints nothing, and an error
 exits 2 with its detail. `api` takes only a route, never a URL, so the token
 goes nowhere but its own server.
 
-## Daemon config
+## Daemon Config
 
 `mirage daemon config set|get|unset|list` edits `~/.mirage/config.toml`. An
 environment variable wins over the file. Changes apply on the next start.

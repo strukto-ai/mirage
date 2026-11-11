@@ -36,7 +36,7 @@ decoded strings.
 
 ## Pyodide
 
-### Scripts and flags
+### Scripts and Flags
 
 - Each command and one-shot evaluation starts a fresh interpreter, so imports
   do not carry over; files on the mounts do. A console session keeps its own
@@ -71,7 +71,7 @@ decoded strings.
 - Mount files under a prefix such as `/data`: a mount at `/` cannot replace
   Pyodide's own filesystem, which holds its standard library.
 
-### Worker and browser setup
+### Worker and Browser Setup
 
 Pyodide runs in a worker, which Node needs no setup for. In a browser, the
 page needs one of two things:
@@ -112,7 +112,7 @@ Content-Security-Policy needs `blob:` in `worker-src`, and
 `https://cdn.jsdelivr.net` in `script-src` and `connect-src` while Pyodide
 loads from the CDN.
 
-### Concurrency and timeouts
+### Concurrency and Timeouts
 
 - `max_concurrency` (default 1) bounds active top-level commands, one-shot
   evaluations and inputs to distinct consoles; extra calls wait. Calls in one
@@ -168,7 +168,7 @@ JavaScript safe: Pyodide exposes mutable interpreter internals, and a worker
 thread shares the host process. For hostile code, use a
 [machine](/home/setup/machine/overview) with a process and kernel boundary.
 
-### Child processes
+### Child Processes
 
 `subprocess` runs Mirage commands:
 
@@ -210,7 +210,7 @@ the worker. It has host privileges, so keep it in deployment config:
 `POST /v1/workspaces` rejects it, and setting it gives the runtime host
 access. Only an in-process shutdown calls its cleanup.
 
-## E2B in browsers
+## E2B in Browsers
 
 Import the E2B machine from core (`pnpm add @struktoai/mirage-core`), which
 also registers the `e2b` provider for `machines:`, and pass `apiKey`:
@@ -223,7 +223,7 @@ Keep account keys out of shared frontend bundles; have your backend
 authenticate the app. `mountType` `ssh` and `both` need Node, so a browser
 uses `fuse` or none.
 
-## Managing runtimes in code
+## Managing Runtimes in Code
 
 `new Workspace(mounts, { runtimes: [...] })` takes names and runtime objects,
 and adds `workspace` when the list leaves it out. On a live workspace,
@@ -251,7 +251,7 @@ import type { DaytonaSdk } from '@struktoai/mirage-node/machine/daytona/sdk'
 import type { Ssh2Sdk } from '@struktoai/mirage-node/machine/ssh/sdk'
 ```
 
-## Child processes
+## Child Processes
 
 A host application starts a program through the same admitted entry point
 as the shell.

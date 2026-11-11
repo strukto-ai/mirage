@@ -26,20 +26,20 @@ A browser cannot mount a folder; use Mirage's shell and file APIs there.
 | A file whose size is unknown | Reads in full | Reads in full | Size fetched when opened |
 | Mountpoint folder | Created if missing | Created if missing | Must not exist; created for you |
 
-## Set up
+## Set Up
 
 <Steps>
-  <Step title="Install FUSE for your OS">
+  <Step title="Install FUSE for Your OS">
     Follow the [Linux](/home/setup/linux), [macOS](/home/setup/macos) or
     [Windows](/home/setup/windows) guide.
   </Step>
-  <Step title="Install your SDK's FUSE binding">
+  <Step title="Install Your SDK's FUSE Binding">
     Follow the [Python](/python/setup/fuse#install-mirage-with-the-fuse-extra)
     or [TypeScript](/typescript/setup/fuse) guide.
   </Step>
 </Steps>
 
-## Try it with the CLI
+## Try It with the CLI
 
 Set `backend: fuse` and a local folder on a mount:
 

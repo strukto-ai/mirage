@@ -4,7 +4,7 @@ description: Fix installation, connection and file-access problems.
 icon: life-ring
 ---
 
-## Python import errors
+## Python Import Errors
 
 Run your script in the environment where Mirage is installed. For a uv
 project, use `uv run python your_script.py`.
@@ -29,7 +29,7 @@ uv add "mirage-ai[quickjs]"  # node and js on the QuickJS runtime
 QuickJS also needs a `qjs-wasi.wasm` module; see
 [QuickJS installation](/home/setup/runtime/quickjs#installation).
 
-## TypeScript import errors
+## TypeScript Import Errors
 
 Use the package for your environment:
 
@@ -46,13 +46,13 @@ If a browser build complains about Node built-ins, check for imports from
 For missing optional dependencies such as `redis` or `pg`, follow
 [TypeScript installation](/typescript/install#optional-peer-dependencies).
 
-## Credentials or connection errors
+## Credentials or Connection Errors
 
 - Set credentials in the environment of the process running Mirage.
 - Check the service URL, account permissions and required token scopes.
 - Follow the setup guide for your [VFS](/home/setup/vfs#supported-vfs).
 
-## Missing files or empty output
+## Missing Files or Empty Output
 
 Inspect paths inside Mirage. Replace `YOUR_WORKSPACE_ID` with your workspace ID:
 
@@ -67,13 +67,13 @@ Use the exact path shown by the listing. Confirm that the connected account
 can access the file. In SDK code, inspect the command's exit code and stderr
 as well as stdout.
 
-## Writes are refused
+## Writes Are Refused
 
 Check that the VFS supports the operation and that the mount has `write` or
 `exec` mode. A read-only backend stays read-only even on a writable mount.
 Session [policies](/home/policy/overview) can also restrict access.
 
-## FUSE does not mount
+## FUSE Does Not Mount
 
 FUSE is optional; `ws.shell(...)` works without an OS mount. If you need a
 mounted folder, follow the [macOS](/home/setup/macos) or
@@ -83,7 +83,7 @@ mounted folder, follow the [macOS](/home/setup/macos) or
 - TypeScript: follow the [FUSE setup](/typescript/setup/fuse), including its
   native dependency installation steps.
 
-## Still stuck?
+## Still Stuck?
 
 [Open an issue](https://github.com/strukto-ai/mirage/issues) with your Mirage
 version, operating system, SDK, error message and a minimal example. Remove

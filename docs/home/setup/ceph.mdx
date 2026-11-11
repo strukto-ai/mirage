@@ -6,7 +6,7 @@ description: Set up Ceph Rados Gateway (RGW) credentials for the Ceph VFS.
 
 ## Credentials
 
-### 1. Create an RGW user
+### 1. Create an RGW User
 
 On a host with `radosgw-admin` access:
 
@@ -20,7 +20,7 @@ gateway **endpoint** (e.g. `https://ceph.example.com`) and the **bucket** name.
 Ceph RGW is self-hosted, so there is no region-derived endpoint, the
 `endpoint_url` is required and RGW uses path-style addressing.
 
-### 2. Set environment variables
+### 2. Set Environment Variables
 
 ```bash
 # .env.development

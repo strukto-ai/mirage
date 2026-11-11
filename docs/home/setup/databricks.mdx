@@ -15,7 +15,7 @@ Obtain a workspace access token. For local testing, you can create a personal
 access token under **Settings → Developer → Access tokens**. Scoped tokens
 need the [`files` API scope](https://docs.databricks.com/api/files/v2/file).
 
-### Set the workspace host
+### Set the Workspace Host
 
 Use your workspace origin, such as
 `https://dbc-xxxxxxxx-xxxx.cloud.databricks.com` on AWS or
@@ -23,7 +23,7 @@ Use your workspace origin, such as
 The host accepts HTTP or HTTPS and rejects a path, query, fragment, or userinfo.
 A trailing slash is allowed.
 
-### Find a readable volume
+### Find a Readable Volume
 
 Choose a volume in Catalog Explorer. Its
 `/Volumes/<catalog>/<schema>/<volume>/...` path supplies the three config
@@ -31,7 +31,7 @@ fields. The principal needs `USE CATALOG`, `USE SCHEMA`, and `READ VOLUME`; a
 write mount also needs `WRITE VOLUME`. See [volume
 permissions](https://docs.databricks.com/aws/en/volumes/utility-commands).
 
-### Supply a token
+### Supply a Token
 
 Pass your token and host to the VFS configuration. For example, your application
 can read them from environment variables:

@@ -42,7 +42,7 @@ programs on this Linux host, confined.
 
 To try one, start with [Docker](/home/setup/machine/docker).
 
-## Connecting the workspace
+## Connecting the Workspace
 
 A program on a machine opens workspace files at the same paths as in Mirage,
 so the machine must see the mounts. `mount_type` picks how:
@@ -103,7 +103,7 @@ mounts:
 - Keep the machine's paths in step with the host's mounts yourself.
   `sandbox.yaml` can differ where it should, such as narrower credentials.
 
-## What a program sees
+## What a Program Sees
 
 | | On the machine |
 | --- | --- |
@@ -113,7 +113,7 @@ mounts:
 | Working directory | The shell's, unchanged; one the machine lacks exits 126 |
 | Disk, network, language modules | The machine's own |
 
-## Processes and jobs
+## Processes and Jobs
 
 One session can run jobs on several machines at once. `jobs`, `wait`, `kill`
 and `ps` ask the machines what is running, so they answer with what is true
@@ -147,7 +147,7 @@ grants.
 `pgrep`, `pkill`, `pidof` and `killall` search the processes `ps` shows, so they
 reach every machine at once and do not see processes Mirage did not start.
 
-## Reading machines
+## Reading Machines
 
 `hostname`, `nproc`, `lscpu` and `free` answer for the workspace, as `mirage`,
 and for each machine. `uptime` and `top -b` answer for the machines. One answer
@@ -203,7 +203,7 @@ in a workspace that runs programs on a machine or the host; there `top` needs
 `ps --machine cloud` narrows it to one machine. `top` reads each
 machine's processors twice a second apart, so it takes about a second.
 
-## Machine states
+## Machine States
 
 | State | Means |
 | --- | --- |
@@ -221,7 +221,7 @@ processes. `{machine}` is the id `ps` shows, `provider:name` such as
 `docker:box`; a bare name answers 400. `mirage workspace list-machines -w ID`
 prints each machine and its state.
 
-## The machine image
+## The Machine Image
 
 Every machine needs a POSIX shell at `/bin/sh` and `grep`. E2B and Daytona
 also need `dd` and `base64`, which carry a program's output back. With

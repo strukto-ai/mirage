@@ -44,7 +44,7 @@ store keeps it on the machine's disk, under the store's `root`, unless
 `observer` says otherwise. To see it across machines, send it to
 [OpenTelemetry](#send-it-to-opentelemetry).
 
-## On disk
+## On Disk
 
 <Tabs>
   <Tab title="YAML" icon="file-code">
@@ -86,7 +86,7 @@ store keeps it on the machine's disk, under the store's `root`, unless
 Here the rest of the state is on Redis and only the history stays on the
 machine's disk.
 
-## Send it to OpenTelemetry
+## Send It to OpenTelemetry
 
 Every line that ends is also a trace span: `command`, from its start to its
 end, and under it a `vfs.<call>` span for each call it made to a mount. Each

@@ -48,7 +48,7 @@ Without it, `WasiRuntime(...)` raises `ImportError`.
 - The first run compiles `python.wasm` and caches `python.cwasm` beside it;
   later runs start in milliseconds. A timeout stops the run.
 
-## Managing runtimes in code
+## Managing Runtimes in Code
 
 `Workspace(runtimes=[...])` takes names and runtime objects, and adds
 `workspace` when the list leaves it out. On a live workspace, `add_runtime`
@@ -68,7 +68,7 @@ its removed runtime closes, a removed instance cannot be added again, and
 `workspace` cannot be removed. `register_runtime(name, cls)` makes your own
 runtime class available by name in YAML.
 
-## Child processes
+## Child Processes
 
 A host application starts a program through the same admitted entry point
 as the shell.

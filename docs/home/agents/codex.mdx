@@ -103,7 +103,7 @@ cd /tmp/mirage-demo && codex
 
 File operations inside `/tmp/mirage-demo` go through Mirage, with Codex's own tools. The mount does not restrict the agent's access to other host paths. In the Codex app, open the mountpoint as the project folder. `mirage workspace delete demo-fuse` unmounts it. On macOS the daemon holds one FUSE mount at a time.
 
-## Exec-server forward
+## Exec-Server Forward
 
 `codex exec-server forward` carries the tool calls of a remote harness, such as an OpenAI Agents API session ([Python](/python/agents/openai-agents-api), [TypeScript](/typescript/agents/openai-agents-api)), to an exec server. `mirage codex-exec` makes the workspace that exec server: it listens on a local port and relays each connection to the server's codex-exec route with the CLI's token, which forward cannot send itself.
 

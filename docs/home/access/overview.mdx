@@ -22,7 +22,7 @@ icon: cube
 
 HTTP, MCP, RPC, CLI and SSH connections go through the Mirage server, a FastAPI app in [Python](/python/access/server) and a Fastify app in [TypeScript](/typescript/access/server) that speak the same protocol. It serves HTTP, and SSH on its own port when `ssh_port` is set or over HTTP through `mirage ssh-proxy`. The CLI starts the server on your machine when it needs one. In-app access reaches the workspace directly.
 
-## What each one exposes
+## What Each One Exposes
 
 Each way in exposes what its own protocol defines. A dash means the protocol has no such operation.
 

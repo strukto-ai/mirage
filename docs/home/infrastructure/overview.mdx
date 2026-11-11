@@ -24,7 +24,7 @@ programs inside Mirage, on the host or on a
 and [credentials](/home/authentication) come from the environment, a dotenv
 file, AWS Secrets Manager or 1Password.
 
-## One store or several
+## One Store or Several
 
 `store.type` places the namespace, sessions, history and jobs together. A
 group key (`namespace`, `workspace`, `observer`, `execution`) moves one of them to
@@ -118,7 +118,7 @@ A workspace built in code keeps its state in memory. One the server builds,
 through `mirage workspace create` or `POST /v1/workspaces`, keeps it on disk
 under `~/.mirage/state`. A `store` block replaces either default.
 
-## Where you set it
+## Where You Set It
 
 One config describes a workspace, the same [YAML](/home/configuration) on
 every surface. Python and TypeScript also take each store as a constructor

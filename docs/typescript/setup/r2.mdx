@@ -8,7 +8,7 @@ R2 uses the S3 API with AWS Signature V4 against `https://<account-id>.r2.cloudf
 
 Credentials (R2 API token with object read/write scopes) are created the same way in both runtimes, see [R2 Credentials](/home/setup/r2).
 
-## Node (server-side)
+## Node (Server-Side)
 
 ```bash
 pnpm add @struktoai/mirage-node
@@ -50,7 +50,7 @@ console.log(res.stdoutText)
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table r2 end */}
 
-## Browser (presigned URLs)
+## Browser (Presigned URLs)
 
 ```bash
 pnpm add @struktoai/mirage-browser
@@ -75,7 +75,7 @@ The browser `R2VFS` is secret-free, your backend signs each operation using your
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table browser/r2 end */}
 
-### 1. Server: sign URLs with the R2 endpoint
+### 1. Server: Sign URLs with the R2 Endpoint
 
 ```ts
 import {
@@ -125,7 +125,7 @@ app.post('/presign/r2', async (req, res) => {
 })
 ```
 
-### 2. Browser: wire it up
+### 2. Browser: Wire It Up
 
 ```ts
 import { MountMode, R2VFS, Workspace } from '@struktoai/mirage-browser'
@@ -151,7 +151,7 @@ const ws = new Workspace({ '/bucket/': r2 }, { mode: MountMode.READ })
 `accountId` on the browser config is only used for display/logging; the actual endpoint is baked into the presigned URLs your backend returns.
 </Tip>
 
-### 3. Configure CORS on the bucket
+### 3. Configure CORS on the Bucket
 
 R2 does accept S3-flavored `PutBucketCors`, but your token needs **"Admin Read & Write"** permissions on the bucket, object-scoped tokens will get `Access Denied`. Two paths:
 

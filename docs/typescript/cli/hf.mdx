@@ -22,7 +22,7 @@ No service mount is required. For YAML and multiple accounts, see the
 [CLI overview](/typescript/cli/index#register-a-cli).
 
 {/* BEGIN GENERATED CLI COMMANDS */}
-## Supported commands
+## Supported Commands
 
 Run `hf <command> --help` for the supported flags and operands.
 This list is generated from Mirage's registered command tree.
@@ -42,7 +42,7 @@ This list is generated from Mirage's registered command tree.
 | `hf version` | Print information about the hf version |
 {/* END GENERATED CLI COMMANDS */}
 
-## Download, edit and upload
+## Download, Edit and Upload
 
 ```bash
 hf auth whoami
@@ -59,7 +59,7 @@ Local paths resolve against the shell's working directory. With no source,
 `hf upload acme/model` reads `./model`. Downloads, uploads and cache files
 use workspace operations rather than the host filesystem.
 
-## Repositories and tags
+## Repositories and Tags
 
 ```bash
 hf repo create acme/new-model --private
@@ -72,7 +72,7 @@ hf repo-files delete acme/model '*.tmp'
 For spaces, use `--repo-type space` and `--space_sdk`. `--exist-ok` accepts
 an existing repository. Deleting matching files creates one commit.
 
-## Select files and cache downloads
+## Select Files and Cache Downloads
 
 `--include`, `--exclude`, `--delete` and `repo-files delete` use Hub glob
 semantics: `*` crosses `/`, `[!a]` negates a character class, and a trailing
@@ -96,7 +96,7 @@ A branch or tag download writes its ref; a commit-pinned download does not.
 `--force-download` refetches a blob. Relative cache paths, including
 `HF_HUB_CACHE` and `HF_HOME`, resolve against the session's working directory.
 
-## VFS and limits
+## VFS and Limits
 
 The [model](/typescript/setup/hf_models), [dataset](/typescript/setup/hf_datasets) and
 [space](/typescript/setup/hf_spaces) VFS adapters expose remote repository files

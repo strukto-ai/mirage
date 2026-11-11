@@ -11,7 +11,7 @@ MIRAGE ships `DiscordVFS` in **two runtimes**:
 
 Both runtimes expose the same filesystem shape (`/discord/<guild>/channels/<channel>/<date>/{chat.jsonl,files/}`, `/discord/<guild>/members/`) and the same shell commands, and both pair with the [discord CLI](/typescript/cli/discord) for acting on the server.
 
-## Get a bot token
+## Get a Bot Token
 
 1. Visit the [Discord Developer Portal](https://discord.com/developers/applications) and create a new application.
 2. Under **Bot**, add a bot user and copy the **Bot Token**.
@@ -30,7 +30,7 @@ Both runtimes expose the same filesystem shape (`/discord/<guild>/channels/<chan
 DISCORD_BOT_TOKEN=...
 ```
 
-## Node (server-side)
+## Node (Server-Side)
 
 ```bash
 pnpm add @struktoai/mirage-node
@@ -84,7 +84,7 @@ The browser package never sees the bot token. Instead, point it at a relative UR
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table browser/discord end */}
 
-### 1. Server: minimal proxy
+### 1. Server: Minimal Proxy
 
 ```ts
 import { createServer } from 'node:http'
@@ -126,7 +126,7 @@ createServer(async (req, res) => {
 Discord bot tokens use the `Bot <token>` auth scheme, **not** `Bearer`. Sending `Bearer …` returns `401 Unauthorized`.
 </Warning>
 
-### 2. Browser: wire it up
+### 2. Browser: Wire It Up
 
 ```ts
 import { DiscordVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
@@ -286,7 +286,7 @@ The root lists one directory per guild the bot has access to. Each guild contain
 
 Display names keep their original spelling from Discord (spaces, apostrophes, emoji are all preserved). Only `/` is replaced with `∕` (U+2215) so it cannot collide with a directory boundary. The Discord snowflake ID is appended after `__` (double underscore) on guild, channel, member, and attachment names so VFS-specific commands can extract it without an extra lookup, and so two same named entities never collide. Quote names containing spaces in shell commands.
 
-## Shell commands
+## Shell Commands
 
 Every standard MIRAGE shell command works on the mounted Discord tree:
 
@@ -312,16 +312,16 @@ tree stays read-oriented.
 ## Troubleshooting
 
 <AccordionGroup>
-  <Accordion title="Empty `/discord/<guild>/members/` listing">
+  <Accordion title="Empty `/discord/<guild>/members/` Listing">
     Listing members requires the **Server Members Intent**. Enable it in the Discord Developer Portal under **Bot → Privileged Gateway Intents**. Without it, `members/` returns an empty directory and `discord members` fails.
   </Accordion>
-  <Accordion title="Empty `content` field in JSONL messages">
+  <Accordion title="Empty `content` Field in JSONL Messages">
     Reading message text requires the **Message Content Intent**. Enable it in the Discord Developer Portal under **Bot → Privileged Gateway Intents**. Without it, the `content` field on every message is empty.
   </Accordion>
-  <Accordion title="`401 Unauthorized` from the proxy">
+  <Accordion title="`401 Unauthorized` from the Proxy">
     Discord bot tokens use the `Authorization: Bot <token>` scheme, **not** `Bearer`. Double-check the proxy server attaches the correct prefix.
   </Accordion>
-  <Accordion title="CORS error in browser">
+  <Accordion title="CORS Error in Browser">
     The browser cannot call `https://discord.com/api/v10/*` directly, Discord does not set permissive CORS headers. You must run the proxy server shown above (or your own equivalent) and point `proxyUrl` at it.
   </Accordion>
   <Accordion title="`rate_limited` from Discord">
@@ -346,7 +346,7 @@ What Discord answers through its own API, so fewer files are read. [Integration]
 
 See [Python Discord VFS](/python/vfs/discord) for the equivalent Python wiring.
 
-## Time scope
+## Time Scope
 
 Set `start_time` and/or `end_time` in the mount's YAML `config` (or pass
 `start_time`/`end_time` to Python; `startTime`/`endTime` to the TypeScript
