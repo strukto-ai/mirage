@@ -461,6 +461,20 @@ async def test_ssh_refuses_a_line_while_the_session_restricts_tmp():
 
 
 @pytest.mark.asyncio
+async def test_ssh_leaves_a_file_mounted_at_its_own_path_off_the_machine():
+    sandbox = FakeMachine("ssh")
+    ws = workspace(sandbox)
+    await ws.vfs_md("/VFS.md")
+    result = await ws.shell("python3 job.py")
+    assert (result.exit_code, await result.stdout_str()) == (0, "ran\n")
+    assert [shlex.split(p.split(" 2>")[0])[-1] for p in sandbox.pipes] == [
+        "/data",
+        "/my notes",
+    ]
+    await ws.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "cwd, ran", [("/notes", False), ("/data", True), ("/", True)]
 )

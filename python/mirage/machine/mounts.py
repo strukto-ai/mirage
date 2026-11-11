@@ -49,6 +49,7 @@ from mirage.runtime.binding import (
 )
 from mirage.runtime.types import RunResult
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
+from mirage.types import FileType
 from mirage.utils.quote import single_quote
 from mirage.workspace.files import Files
 from mirage.workspace.session import SessionState
@@ -347,6 +348,8 @@ class MachineMounts:
         self._instance = uuid.uuid4().hex[:8]
         self._serves = 0
         self._sources: set[str] = set()
+        # Whether each top prefix is a directory, read once per mount.
+        self._directories: dict[str, bool] = {}
 
     @property
     def file_effects_dispatched(self) -> bool:
@@ -627,6 +630,34 @@ class MachineMounts:
             for prefix in ruled
         )
 
+    async def _mountable(self, files: Files, prefixes: list[str]) -> list[str]:
+        """Those of ``prefixes`` sshfs can mount: directories.
+
+        A file mounted at a path of its own, such as a ``VFS.md``, stays
+        off the machine.
+
+        Args:
+            files (Files): the session's files, to stat each prefix.
+            prefixes (list[str]): the top prefixes the session sees.
+
+        Returns:
+            list[str]: the directories among them, in order.
+        """
+        for prefix in list(self._directories):
+            if prefix not in prefixes:
+                del self._directories[prefix]
+        out: list[str] = []
+        for prefix in prefixes:
+            directory = self._directories.get(prefix)
+            if directory is None:
+                directory = (
+                    await files.stat(prefix)
+                ).type == FileType.DIRECTORY
+                self._directories[prefix] = directory
+            if directory:
+                out.append(prefix)
+        return out
+
     async def _reconcile(
         self,
         binding: WorkspaceBinding,
@@ -644,7 +675,9 @@ class MachineMounts:
             machine's own gone, which ``validate`` refuses.
         """
         visible = frozenset(
-            served_prefixes(binding.resolver.prefixes())
+            await self._mountable(
+                files, served_prefixes(binding.resolver.prefixes())
+            )
             if self._mount_type != "fuse"
             else ()
         )

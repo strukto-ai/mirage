@@ -505,6 +505,19 @@ describe('MachineMounts', () => {
     await ws.close()
   })
 
+  it('leaves a file mounted at a path of its own off the machine', async () => {
+    const sandbox = new FakeMachine('ssh')
+    const ws = workspace(sandbox)
+    await ws.vfsMd('/VFS.md')
+    const result = await ws.shell('python3 job.py')
+    expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'ran\n'])
+    expect(sandbox.pipes.map((p) => (p.split(' 2>')[0] ?? '').split(' ').at(-1))).toEqual([
+      "'/data'",
+      "notes'",
+    ])
+    await ws.close()
+  })
+
   it('refuses a line while the session restricts /tmp', async () => {
     const sandbox = new FakeMachine('ssh')
     const ws = new Workspace(

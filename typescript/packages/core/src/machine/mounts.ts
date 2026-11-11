@@ -24,6 +24,7 @@ import { singleQuote } from '../utils/quote.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 import { abortable, mergeSignals } from '../utils/abort.ts'
 import { runDetached } from '../utils/async_context.ts'
+import { FileType } from '../types.ts'
 import type { Files } from '../workspace/files.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 import { refusedRun, restrictedMountsFor, type WorkspaceBinding } from '../runtime/binding.ts'
@@ -296,6 +297,8 @@ export class MachineMounts {
   private readonly instance = crypto.randomUUID().replaceAll('-', '').slice(0, 8)
   private serves = 0
   private readonly sources = new Set<string>()
+  // Whether each top prefix is a directory, read once per mount.
+  private readonly directories = new Map<string, boolean>()
   // Each kill of an ended server's sshfs still running, which close stops.
   private readonly kills = new Set<AbortController>()
 
@@ -559,6 +562,26 @@ export class MachineMounts {
    * in step, or with a mount of the machine's own gone, which `validate`
    * refuses.
    */
+  /**
+   * Those of `prefixes` sshfs can mount: directories. A file mounted at a
+   * path of its own, such as a `VFS.md`, stays off the machine.
+   */
+  private async mountable(files: Files, prefixes: string[]): Promise<string[]> {
+    for (const prefix of [...this.directories.keys()]) {
+      if (!prefixes.includes(prefix)) this.directories.delete(prefix)
+    }
+    const out: string[] = []
+    for (const prefix of prefixes) {
+      let directory = this.directories.get(prefix)
+      if (directory === undefined) {
+        directory = (await files.stat(prefix)).type === FileType.DIRECTORY
+        this.directories.set(prefix, directory)
+      }
+      if (directory) out.push(prefix)
+    }
+    return out
+  }
+
   private async reconcile(
     binding: WorkspaceBinding,
     files: Files,
@@ -567,7 +590,10 @@ export class MachineMounts {
     ruled: ReadonlySet<string>,
     signal?: AbortSignal,
   ): Promise<string | null> {
-    const visible = this.mountType === 'fuse' ? [] : servedPrefixes(binding.resolver.prefixes())
+    const visible =
+      this.mountType === 'fuse'
+        ? []
+        : await this.mountable(files, servedPrefixes(binding.resolver.prefixes()))
     const seen = JSON.stringify([[...every].sort(compareCodePoints), visible])
     const ended = [...this.served].filter(([, entry]) => entry.ended).map(([prefix]) => prefix)
     if (
