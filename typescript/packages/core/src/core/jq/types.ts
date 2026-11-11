@@ -46,12 +46,3 @@ export interface JqHalt {
   /** The exit code `halt_error` named, or null for `halt`. */
   readonly code: number | null
 }
-
-/** What one run of a program printed, and what ended it early. */
-export interface JqRun<T = unknown> {
-  /** Every output it printed, in order: a value, or jq's own compact dump
-   * of one. */
-  readonly outputs: T[]
-  /** The error or the halt that ended it, or null when it ran to its end. */
-  readonly stop: JqError | JqHalt | null
-}

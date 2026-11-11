@@ -18,26 +18,7 @@ import { mergeOperandIos, runOperands, streamOperands } from '../utils.ts'
 import { FlagView, flagOccurrences } from '../../../../spec/flag_view.ts'
 import { type FlagValue } from '../../../../spec/types.ts'
 import { specOf } from '../../../../spec/builtins.ts'
-
-const ENC = new TextEncoder()
-
-export function joinRuns(runs: readonly Uint8Array[], separator: string): Uint8Array {
-  const parts = runs.filter((d) => d.byteLength > 0)
-  const sep = ENC.encode(separator)
-  const size =
-    parts.reduce((n, d) => n + d.byteLength, 0) + sep.byteLength * Math.max(0, parts.length - 1)
-  const out = new Uint8Array(size)
-  let offset = 0
-  parts.forEach((d, i) => {
-    if (i > 0) {
-      out.set(sep, offset)
-      offset += sep.byteLength
-    }
-    out.set(d, offset)
-    offset += d.byteLength
-  })
-  return out
-}
+import { concat } from '../../../../../utils/bytes.ts'
 
 // Run a per-operand command whose operands span mounts. The command runs
 // natively once per operand on the operand's owning mount (globs expand
@@ -76,10 +57,7 @@ export async function runFanout(
   const results = await runOperands(runSingle, cmdName, scopes, [...textArgs], flags)
   const exitCode = Math.max(0, ...results.map((r) => r.io.exitCode))
 
-  const body = joinRuns(
-    results.map((r) => r.data),
-    '',
-  )
+  const body = concat(results.map((r) => r.data))
 
   const io = await mergeOperandIos(results, exitCode)
   return [body, io]

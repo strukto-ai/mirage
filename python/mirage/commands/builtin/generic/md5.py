@@ -1,5 +1,3 @@
-from collections.abc import Sequence
-
 from mirage.commands.builtin.generic.checksum import (
     StoredDigest,
     hash_operands,
@@ -17,35 +15,6 @@ from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
 def _md5_line(digest: str, label: str) -> bytes:
     return f"{digest}  {label}\n".encode()
-
-
-async def md5(
-    paths: Sequence[PathSpec | bytes],
-    *,
-    read_stream: PolymorphicReadFn,
-    stdin: ByteSource | None = None,
-    stored: StoredDigest | None = None,
-) -> tuple[ByteSource | None, IOResult]:
-    """BSD md5 over the operands, or stdin.
-
-    Args:
-        paths (Sequence[PathSpec | bytes]): the operands, and the stderr
-            line of each that did not read, where it stood.
-        read_stream (PolymorphicReadFn): bound reader.
-        stdin (ByteSource | None): the line's input.
-        stored (StoredDigest | None): the mount's stored digest, asked
-            before an operand is read.
-    """
-    return await hash_operands(
-        paths or [STDIN_OPERAND],
-        normalized_read(read_stream)
-        if paths
-        else stdin_stream(read_stream, stdin),
-        "md5",
-        "md5",
-        _md5_line,
-        stored,
-    )
 
 
 async def md5_generic(
@@ -73,7 +42,11 @@ async def md5_generic(
             exit_code=1,
             stderr=b"".join(p for p in order if isinstance(p, bytes)),
         )
-    return await md5(order, read_stream=stream, stdin=ctx.stdin, stored=stored)
-
-
-__all__ = ["md5", "md5_generic"]
+    return await hash_operands(
+        order or [STDIN_OPERAND],
+        normalized_read(stream) if order else stdin_stream(stream, ctx.stdin),
+        "md5",
+        "md5",
+        _md5_line,
+        stored,
+    )

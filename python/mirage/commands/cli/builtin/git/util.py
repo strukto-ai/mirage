@@ -68,13 +68,10 @@ INT_BITS = 31
 WIDE_INT_BITS = 63
 COLOR_WORDS = ("always", "auto", "never")
 VALUE_ESCAPES = {"\n": "\\n", "\t": "\\t", '"': '\\"', "\\": "\\\\"}
-COMMENT_STARTS = (";", "#")
-COMMENT_BYTES = (b";", b"#")
 QUOTED_HEADER = re.compile(
     rb'\s*\[([A-Za-z0-9.-]+)\s+"((?:[^"\\\n]|\\.)*)"\s*\]'
 )
 DOTTED_HEADER = re.compile(rb"\s*\[([A-Za-z0-9-]+)\.([^\]\s]*)\]")
-ESCAPED = re.compile(rb"\\(.)")
 
 
 def start_point(fl: FlagView) -> PathSpec:
@@ -628,7 +625,7 @@ def config_section(
         if (
             value.startswith(" ")
             or value.endswith(" ")
-            or any(ch in value for ch in COMMENT_STARTS)
+            or any(ch in value for ch in ";#")
         ):
             body = f'"{body}"'
         text += f"\t{key} = {body}\n"
@@ -687,7 +684,10 @@ def without_section(
                 dotted = DOTTED_HEADER.match(line)
                 dropping = (
                     quoted is not None
-                    and (quoted.group(1), ESCAPED.sub(rb"\1", quoted.group(2)))
+                    and (
+                        quoted.group(1),
+                        re.sub(rb"\\(.)", rb"\1", quoted.group(2)),
+                    )
                     == want
                 ) or (dotted is not None and dotted.groups() == want)
                 header = quoted or dotted
@@ -695,7 +695,7 @@ def without_section(
                 head = line[:end] + line[len(line.rstrip(b"\r\n")) :]
                 rest = line[end:]
             variable, equals, value = rest.partition(b"=")
-            comment = rest.lstrip().startswith(COMMENT_BYTES)
+            comment = rest.lstrip().startswith((b";", b"#"))
             if not equals or comment:
                 value = b""
             word = b"" if comment else variable.strip().lower()
@@ -736,7 +736,7 @@ def _continues(value: bytes, inside: bool) -> tuple[bool, bool]:
             continue
         if ch == b'"':
             inside = not inside
-        elif not inside and ch in COMMENT_BYTES:
+        elif not inside and ch in (b";", b"#"):
             break
         at += 1
     return False, False

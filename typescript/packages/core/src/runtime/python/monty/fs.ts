@@ -15,7 +15,7 @@
 import { classify } from '../../../errors/index.ts'
 import { isAborting } from '../../../errors/fs.ts'
 import { entryName } from '../../../utils/remnants.ts'
-import { normDir } from '../../../utils/slash.ts'
+import { normDir } from '../../../utils/path.ts'
 import { parseMode } from '../../handles/mode.ts'
 import type { RuntimeFiles } from '../../files.ts'
 import type { VFSEntry } from '../../types.ts'

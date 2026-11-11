@@ -52,13 +52,13 @@ from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import resolve_path
 from mirage.utils.quote import shell_quote_always
 from mirage.view.types import StatPath
+from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.files import Files
 from mirage.workspace.lookup.constants import SHELL_ONLY_BUILTINS
 from mirage.workspace.lookup.lookup import lookup_all
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState
-from mirage.workspace.types import ExecuteLine
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +159,7 @@ def exec_dir(path: str) -> tuple[str, str]:
 
 
 async def _run_exec(
-    execute_fn: ExecuteLine,
+    execute_fn: ExecuteFn,
     session_id: str,
     registry: MountRegistry,
     cwd: str,
@@ -182,7 +182,7 @@ async def _run_exec(
     the action's truth value.
 
     Args:
-        execute_fn (ExecuteLine): runs a line in the session.
+        execute_fn (ExecuteFn): runs a line in the session.
         session_id (str): the session the line runs under.
         registry (MountRegistry): where the head word is looked up.
         cwd (str): the session's working directory.
@@ -509,7 +509,7 @@ async def run_listed_find(
     words: list[str],
     cwd: str,
     dispatch: DispatchFn | None,
-    execute_fn: ExecuteLine | None,
+    execute_fn: ExecuteFn | None,
     session_id: str,
     stdin: ByteSource | None,
 ) -> IOResult:
@@ -528,7 +528,7 @@ async def run_listed_find(
         words (list[str]): the words after ``find``.
         cwd (str): where the list and the names are resolved.
         dispatch (DispatchFn | None): reads the list.
-        execute_fn (ExecuteLine | None): runs the find over the names.
+        execute_fn (ExecuteFn | None): runs the find over the names.
         session_id (str): the session the find runs under.
         stdin (ByteSource | None): find's input, the list under ``-``.
     """
@@ -630,7 +630,7 @@ async def _apply_find_actions(
     registry: MountRegistry,
     cwd: str,
     *,
-    execute_fn: ExecuteLine | None = None,
+    execute_fn: ExecuteFn | None = None,
     session_id: str = "",
     vfs: Files | None = None,
     stat_path: StatPath | None = None,
@@ -688,7 +688,7 @@ async def _apply_find_actions(
         expr (FindExpr): the expression, parsed once for the line.
         registry (MountRegistry): used to route per-match dispatch.
         cwd (str): cwd forwarded to per-match sub-dispatch.
-        execute_fn (ExecuteLine | None): runs an ``-exec`` line in the
+        execute_fn (ExecuteFn | None): runs an ``-exec`` line in the
             session; None outside a workspace, where ``-exec`` is
             refused.
         session_id (str): the session the ``-exec`` lines run under.

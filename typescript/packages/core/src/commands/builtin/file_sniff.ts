@@ -18,7 +18,6 @@ import { openStreamSync } from '../../rs/stream.ts'
 import { z } from 'zod'
 import { byteView, decodeText } from '../../shell/bytes.ts'
 
-const TYPE = z.enum(ContentType)
 const DEC = new TextDecoder()
 
 export function detectFileType(header: Uint8Array, stat: FileStat): ContentType {
@@ -26,7 +25,7 @@ export function detectFileType(header: Uint8Array, stat: FileStat): ContentType 
   const stream = openStreamSync('file', {})
   try {
     stream.feed(header)
-    return TYPE.parse(DEC.decode(stream.finish()))
+    return z.enum(ContentType).parse(DEC.decode(stream.finish()))
   } finally {
     stream.close()
   }

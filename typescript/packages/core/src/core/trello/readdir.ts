@@ -15,7 +15,7 @@
 import type { TrelloAccessor } from '../../accessor/trello.ts'
 import { ContentType, FileStat, FileType } from '../../types.ts'
 import { unsearchedText } from '../../utils/record_search.ts'
-import { stringOf as pickString } from '../../utils/records.ts'
+import { pickNumberOrNull, stringOf as pickString } from '../../utils/records.ts'
 import { makeReaddir } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { entryStat } from '../hierarchy/stat.ts'
@@ -47,11 +47,6 @@ import {
   workspaceDirname,
 } from './pathing.ts'
 import { detectScope } from './scope.ts'
-
-function extraSize(entry: FileStat): number | null {
-  const value = entry.extra.json_size
-  return typeof value === 'number' ? value : null
-}
 
 /** The workspaces the mount shows: the member's, narrowed to `workspaceId` when it is set. */
 export async function filteredWorkspaces(
@@ -140,7 +135,9 @@ function listWorkspace(
   entry: FileStat,
 ): Promise<FileStat[]> {
   return Promise.resolve([
-    WORKSPACE_JSON('workspace.json', match.slots.workspace_id ?? '', { size: extraSize(entry) }),
+    WORKSPACE_JSON('workspace.json', match.slots.workspace_id ?? '', {
+      size: pickNumberOrNull(entry.extra, 'json_size'),
+    }),
     dir('boards'),
   ])
 }
@@ -167,7 +164,7 @@ function listBoard(
 ): Promise<FileStat[]> {
   return Promise.resolve([
     BOARD_JSON('board.json', match.slots.board_id ?? '', {
-      size: extraSize(entry),
+      size: pickNumberOrNull(entry.extra, 'json_size'),
       modified: entry.modified,
     }),
     dir('members'),
@@ -223,7 +220,9 @@ function listList(
   entry: FileStat,
 ): Promise<FileStat[]> {
   return Promise.resolve([
-    LIST_JSON('list.json', match.slots.list_id ?? '', { size: extraSize(entry) }),
+    LIST_JSON('list.json', match.slots.list_id ?? '', {
+      size: pickNumberOrNull(entry.extra, 'json_size'),
+    }),
     dir('cards'),
   ])
 }
@@ -257,7 +256,10 @@ function listCard(
   // comments.jsonl needs a per-card actions call and stays size-unknown.
   const cardId = match.slots.card_id ?? ''
   return Promise.resolve([
-    CARD_JSON('card.json', cardId, { size: extraSize(entry), modified: entry.modified }),
+    CARD_JSON('card.json', cardId, {
+      size: pickNumberOrNull(entry.extra, 'json_size'),
+      modified: entry.modified,
+    }),
     COMMENTS('comments.jsonl', cardId, { modified: entry.modified }),
   ])
 }

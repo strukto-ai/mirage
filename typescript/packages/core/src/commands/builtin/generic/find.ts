@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { modifiedTs, type FindOptions } from '../../../core/generic/find.ts'
+import { modifiedTs } from '../../../core/generic/find.ts'
 import {
   bindTree,
   emitStartPath,
@@ -25,7 +25,7 @@ import {
   treeHasTime,
   unrespellRaw,
 } from '../../../core/generic/find_eval.ts'
-import { type PredNode } from '../../../core/generic/types.ts'
+import { type FindArgs, type PredNode } from '../../../core/generic/types.ts'
 import {
   fsStrerror,
   isEnoent,
@@ -79,7 +79,7 @@ function matchedPath(row: string, root: PathSpec): PathSpec {
 function startPointResults(
   root: PathSpec,
   start: FileStat,
-  options: FindOptions,
+  options: FindArgs,
   tree: PredNode,
   usesEmpty: boolean,
   mtimeMin: number | null,
@@ -164,7 +164,7 @@ export function findGeneric(
   texts: string[],
   ctx: Context,
   // The walk of one start point, given its stat when this already has it.
-  find: (root: PathSpec, options: FindOptions, start: FileStat | null) => AsyncIterable<string>,
+  find: (root: PathSpec, options: FindArgs, start: FileStat | null) => AsyncIterable<string>,
   unreadable?: () => string[],
   unstatted?: () => [string, unknown][],
   // A walker already evaluates times in its predicate tree. Its raw stat is
@@ -231,7 +231,7 @@ export function findGeneric(
   const emptyFlag = parsed.empty
   const effMtimeMin = expr !== null ? expr.mtimeMin : mtimeMin
   const effMtimeMax = expr !== null ? expr.mtimeMax : mtimeMax
-  const options: FindOptions =
+  const options: FindArgs =
     expr !== null
       ? {
           tree: expr.tree,
@@ -269,7 +269,7 @@ export function findGeneric(
       // path nodes before the walk (#396). Bound per start point: options is
       // shared by every one of them and must stay unbound.
       const tree = bindTree(argsToTree(options), '', root.virtual, root.rawPath)
-      const rootOptions: FindOptions = { ...options, tree }
+      const rootOptions: FindArgs = { ...options, tree }
       const rootKey = rstripSlash(root.virtual) || '/'
       await primeRegexes(tree, [rootKey])
       // A start point that is itself a symlink is the walk's to report: the

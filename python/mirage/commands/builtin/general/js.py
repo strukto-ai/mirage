@@ -32,7 +32,7 @@ from mirage.runtime.types import CommandRuntime
 from mirage.types import PathSpec
 
 
-async def _js(
+async def _js_command(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
@@ -60,5 +60,5 @@ async def _js(
     return run_interpreter(runtime, paths, texts, replace(ctx, flags=switches))
 
 
-js = command("js", vfs=None, spec=SPECS["js"], write=True)(_js)
-node = command("node", vfs=None, spec=SPECS["node"], write=True)(_js)
+js = command("js", vfs=None, spec=SPECS["js"], write=True)(_js_command)
+node = command("node", vfs=None, spec=SPECS["node"], write=True)(_js_command)

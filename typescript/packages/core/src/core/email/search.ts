@@ -60,7 +60,7 @@ const RECORD_KEYS: ReadonlySet<string> = new Set([
   'unnamed',
 ])
 
-interface SearchOptions {
+interface SearchMessagesOptions {
   text?: string | null
   subject?: string | null
   fromAddr?: string | null
@@ -78,7 +78,7 @@ interface SearchOptions {
  * early and turning the rest into search keys. Dates are bare atoms, as
  * the grammar has them.
  */
-export function buildSearchCriteria(opts: SearchOptions): string {
+export function buildSearchCriteria(opts: SearchMessagesOptions): string {
   const parts: string[] = []
   if (opts.unseen === true) parts.push('UNSEEN')
   if (opts.text !== undefined && opts.text !== null && opts.text !== '') {
@@ -105,7 +105,7 @@ export function buildSearchCriteria(opts: SearchOptions): string {
 async function searchMessages(
   accessor: EmailAccessor,
   folder: string,
-  opts: SearchOptions = {},
+  opts: SearchMessagesOptions = {},
   maxResults: number | null = null,
 ): Promise<string[]> {
   const criteria = buildSearchCriteria(opts)

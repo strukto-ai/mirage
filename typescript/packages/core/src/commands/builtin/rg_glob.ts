@@ -35,10 +35,8 @@ export enum Verdict {
   WHITELIST = 'whitelist',
 }
 
-const SPECIAL = /[\\^$.|?*+()[\]{}\-/]/
-
 function escapeChar(ch: string): string {
-  return SPECIAL.test(ch) ? `\\${ch}` : ch
+  return /[\\^$.|?*+()[\]{}\-/]/.test(ch) ? `\\${ch}` : ch
 }
 
 // What a class gives `lo`-`hi`, one character when the two are the same and,

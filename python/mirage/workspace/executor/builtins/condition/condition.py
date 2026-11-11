@@ -14,7 +14,7 @@
 
 from mirage.commands.builtin.utils.links import link_view
 from mirage.context import (
-    program_invocation,
+    is_program_invocation,
     reset_admission,
     session_voice,
     set_admission,
@@ -173,7 +173,7 @@ async def test_builtin(call: BuiltinCall) -> Result:
         else:
             err = encode_text(
                 "[: missing ']'\n"
-                if program_invocation(call.context.session)
+                if is_program_invocation(call.context.session)
                 else f"{shell_voice()}[: missing `]'\n"
             )
             return (

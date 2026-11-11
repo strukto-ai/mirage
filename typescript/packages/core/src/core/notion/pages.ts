@@ -152,34 +152,6 @@ export async function listBlockTree(
   return blocks
 }
 
-export interface ChildPageRef {
-  id: string
-  title: string
-  lastEditedTime: string
-}
-
-export async function getChildPages(
-  transport: NotionTransport,
-  parentBlockId: string,
-): Promise<ChildPageRef[]> {
-  const blocks = await listBlockChildren(transport, parentBlockId)
-  const refs: ChildPageRef[] = []
-  for (const block of blocks) {
-    if (block.type !== 'child_page') continue
-    const id = block.id
-    if (typeof id !== 'string') continue
-    const childPage = asObject(block.child_page)
-    const title = childPage.title
-    const lastEditedTime = block.last_edited_time
-    refs.push({
-      id,
-      title: typeof title === 'string' ? title : 'untitled',
-      lastEditedTime: typeof lastEditedTime === 'string' ? lastEditedTime : '',
-    })
-  }
-  return refs
-}
-
 export async function searchPages(
   transport: NotionTransport,
   query = '',
@@ -194,29 +166,7 @@ export async function searchPages(
   return paginateTool(transport, 'API-post-search', baseArgs, maxResults)
 }
 
-export interface CreatePageInput {
-  parent: { type: 'workspace' } | { type: 'page_id'; page_id: string }
-  title: string
-}
-
 export async function createPage(
-  transport: NotionTransport,
-  input: CreatePageInput,
-): Promise<JsonObject> {
-  const parentBody: JsonObject =
-    input.parent.type === 'workspace'
-      ? { type: 'workspace', workspace: true }
-      : { type: 'page_id', page_id: input.parent.page_id }
-  const body: JsonObject = {
-    parent: parentBody,
-    properties: {
-      title: { title: [{ type: 'text', text: { content: input.title } }] },
-    },
-  }
-  return transport.callTool('API-post-page', body)
-}
-
-export async function createPageRaw(
   transport: NotionTransport,
   body: JsonObject,
 ): Promise<JsonObject> {

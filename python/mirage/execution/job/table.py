@@ -48,7 +48,7 @@ from mirage.workspace.record.types import RecordFields, generation_of
 logger = logging.getLogger(__name__)
 
 
-def _entry(record: Job, owner: str) -> RecordFields:
+def _list_entry(record: Job, owner: str) -> RecordFields:
     """A job's entry in its session's list: its record, but for its
     number, which keys the entry, and its session, which keys the list,
     and the daemon running it.
@@ -392,7 +392,7 @@ class JobTable:
         try:
             job_id = await self._allocate(
                 session_id,
-                _entry(
+                _list_entry(
                     Job(
                         JobId(self.processes.workspace_id, name),
                         0,
@@ -474,7 +474,7 @@ class JobTable:
         job.console_name = name
         job.workspace_id = self.processes.workspace_id
         job.id = await self._insert(
-            job.session_id, job.id, _entry(job.record, job.owner)
+            job.session_id, job.id, _list_entry(job.record, job.owner)
         )
         self._jobs.setdefault(job.session_id, {})[job.id] = job
         self._job_added(job.session_id, job.id)
@@ -1163,7 +1163,7 @@ class JobTable:
         Args:
             job (JobHandle): a job this table ran, now ended.
         """
-        kept = _entry(job.record, job.owner)
+        kept = _list_entry(job.record, job.owner)
         try:
             for _ in range(LIST_MAX_RETRIES):
                 fields = await self.store.load(job.session_id)

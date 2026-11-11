@@ -24,7 +24,6 @@ from mirage.policy.decisions import (
     ask_rule,
     covers,
     decision_id,
-    encloses,
 )
 from mirage.policy.match import Outcome
 from mirage.policy.types import (
@@ -373,16 +372,6 @@ async def test_a_grant_one_line_claimed_is_not_on_offer_to_another():
     assert len(ledger.list("s")) == 1
     await ledger.answer(ledger.pending("s")[0].id, Outcome.ALLOW)
     assert await ledger.resolve(_ctx(), ask, None, _at(second)) is None
-
-
-def test_encloses_reads_a_span_and_the_lines_evaluated_inside_it():
-    line = "sleep 1 && cat s & ls"
-    scope = Occurrence(None, line, 0, 18)
-    inside = Occurrence(None, line, 11, 16)
-    assert encloses(scope, inside)
-    assert encloses(scope, Occurrence(inside, "cat s", 0, 5))
-    assert not encloses(scope, Occurrence(None, line, 19, 21))
-    assert not encloses(scope, Occurrence(None, "cat s", 0, 5))
 
 
 @pytest.mark.asyncio

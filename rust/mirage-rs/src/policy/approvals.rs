@@ -99,13 +99,6 @@ pub(super) enum Query {
         rule: RuleKey,
     },
 
-    Encloses {
-        occurrences: Vec<Occurrence>,
-        sources: Vec<Text>,
-        scope: OccurrenceKey,
-        occurrence: OccurrenceKey,
-    },
-
     Plan {
         state: State,
         rules: Vec<RuleKey>,
@@ -419,20 +412,6 @@ pub(super) fn answer(query: Query) -> Result<Reply, StreamError> {
     Ok(match query {
         Query::Covers { record, rule } => Reply::Bool(covers(&record, rule)),
 
-        Query::Encloses {
-            occurrences,
-            sources,
-            scope,
-            occurrence,
-        } => Reply::Bool(
-            State {
-                occurrences,
-                sources,
-                ..State::default()
-            }
-            .encloses(scope, occurrence)?,
-        ),
-
         Query::Plan {
             state,
             rules,
@@ -540,9 +519,6 @@ mod tests {
                 state["sources"] = json!([[99, 97, 116]]);
             }
         }
-        if query["kind"] == "encloses" && query.get("sources").is_none() {
-            query["sources"] = json!([[99, 97, 116]]);
-        }
         let request = serde_json::to_vec(&json!({"op": "approvals", "query": query})).unwrap();
         let (bytes, error) = crate::run("policy", "{}", &[&request]);
         assert!(error.is_none(), "{:?}", error.map(|error| error.message));
@@ -560,6 +536,18 @@ mod tests {
 
     fn node(key: usize, parent: Value, start: usize, end: usize) -> Value {
         json!({"key": key, "parent": parent, "source": 0, "start": start, "end": end})
+    }
+
+    fn encloses(occurrences: Value, sources: Value, scope: usize, occurrence: usize) -> bool {
+        let state: super::State =
+            serde_json::from_value(json!({"occurrences": occurrences, "sources": sources}))
+                .unwrap();
+        state
+            .encloses(
+                super::OccurrenceKey(scope),
+                super::OccurrenceKey(occurrence),
+            )
+            .unwrap()
     }
 
     fn plan(state: Value, rules: Value, claimant: Value) -> Value {
@@ -735,28 +723,28 @@ mod tests {
                 ));
             }
         }
-        assert_eq!(
-            ask(json!({"kind":"encloses", "occurrences":occurrences,
-            "scope":299,"occurrence":699})),
-            true
-        );
-        assert_eq!(
-            ask(json!({"kind":"encloses", "occurrences":occurrences,
-            "scope":0,"occurrence":699})),
-            true
-        );
+        let occurrences = json!(occurrences);
+        assert!(encloses(
+            occurrences.clone(),
+            json!([[99, 97, 116]]),
+            299,
+            699
+        ));
+        assert!(encloses(occurrences, json!([[99, 97, 116]]), 0, 699));
     }
 
     #[test]
     fn source_pool_compares_values_across_distinct_keys() {
         let mut other = node(1, Value::Null, 1, 2);
         other["source"] = json!(1);
-        let query = json!({"kind":"encloses", "sources":[[99,97,116],[99,97,116]],
-            "occurrences":[node(0,Value::Null,0,3),other], "scope":0,"occurrence":1});
-        assert_eq!(ask(query.clone()), true);
-        let mut changed = query;
-        changed["sources"][1] = json!([100]);
-        assert_eq!(ask(changed), false);
+        let occurrences = json!([node(0, Value::Null, 0, 3), other]);
+        assert!(encloses(
+            occurrences.clone(),
+            json!([[99, 97, 116], [99, 97, 116]]),
+            0,
+            1
+        ));
+        assert!(!encloses(occurrences, json!([[99, 97, 116], [100]]), 0, 1));
     }
 
     #[test]

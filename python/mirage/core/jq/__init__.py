@@ -18,7 +18,6 @@ from mirage.core.jq.types import (
     STDIN_NAME,
     JqError,
     JqHalt,
-    JqRun,
 )
 
 __all__ = [
@@ -28,7 +27,6 @@ __all__ = [
     "JqCompileError",
     "JqError",
     "JqHalt",
-    "JqRun",
     "local_zone",
     "load_failure",
 ]

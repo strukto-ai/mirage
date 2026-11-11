@@ -80,7 +80,7 @@ from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.background import start_shell
 from mirage.workspace.executor.builtins.alias import expanding_aliases
-from mirage.workspace.executor.control import UNWINDING, ended
+from mirage.workspace.executor.control import Unwinding, ended
 from mirage.workspace.executor.statement import (
     StatusSnapshot,
     record_status,
@@ -407,7 +407,7 @@ async def recurse(
                 handed=inner,
                 **opts,
             )
-        except UNWINDING as sig:
+        except Unwinding as sig:
             # A substitution runs on a copy of the caller's frames,
             # and it is a child shell: whatever unwinds out of it
             # ends it.
@@ -1663,7 +1663,7 @@ async def run_prepared_line(
         # Drift and invalid routing remain the caller's errors.
         raise
     except Exception as exc:
-        if call_stack is not None and isinstance(exc, UNWINDING):
+        if call_stack is not None and isinstance(exc, Unwinding):
             # A line run in its caller's frame unwinds into the caller.
             raise
         if isinstance(exc, MemoryExhausted) and not top_level:

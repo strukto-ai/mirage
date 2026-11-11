@@ -202,15 +202,6 @@ export interface Recorder {
   clock: Clock
 }
 
-/**
- * Per-task revision pins. Independent of the recording context so that
- * direct {@link Workspace.dispatch} calls (which run outside
- * {@link runWithRecording}) still honour installed pins.
- */
-export interface RevisionsState {
-  map: Map<string, string> | null
-}
-
 /** One lost path's mark. Mirrors Python's `LostMark`. */
 export interface LostMark {
   /** Where in the line's records it was lost. */

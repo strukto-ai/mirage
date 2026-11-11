@@ -24,7 +24,7 @@ import {
   type DiscordResponse,
   type DiscordTransport,
 } from './client.ts'
-import { dateRangeDescending, readdir } from './readdir.ts'
+import { dateRange, readdir } from './readdir.ts'
 import { snowflakeToDate } from './entry.ts'
 import { compactJsonBytes, jsonlBytes } from '../render/json.ts'
 
@@ -91,9 +91,9 @@ describe('snowflakeToDate', () => {
   })
 })
 
-describe('dateRangeDescending', () => {
+describe('dateRange', () => {
   it('returns 30 dates in descending order starting at endDate', () => {
-    const out = dateRangeDescending('2026-04-25', 30)
+    const out = dateRange('2026-04-25', 30)
     expect(out).toHaveLength(30)
     expect(out[0]).toBe('2026-04-25')
     expect(out[1]).toBe('2026-04-24')
@@ -101,28 +101,28 @@ describe('dateRangeDescending', () => {
   })
 
   it('honors a custom days argument', () => {
-    expect(dateRangeDescending('2024-01-03', 3)).toEqual(['2024-01-03', '2024-01-02', '2024-01-01'])
+    expect(dateRange('2024-01-03', 3)).toEqual(['2024-01-03', '2024-01-02', '2024-01-01'])
   })
 
   it('returns [] for malformed input', () => {
-    expect(dateRangeDescending('', 30)).toEqual([])
+    expect(dateRange('', 30)).toEqual([])
   })
 
   it('reaches days outside the window for a glob span', () => {
-    const out = dateRangeDescending('2024-01-15', 30, ['2023-11-01', '2023-12-01'])
+    const out = dateRange('2024-01-15', 30, ['2023-11-01', '2023-12-01'])
     expect(out).toHaveLength(30)
     expect(out[0]).toBe('2023-11-30')
     expect(out[29]).toBe('2023-11-01')
   })
 
   it('clips a glob span at the newest message', () => {
-    const out = dateRangeDescending('2024-01-15', 30, ['2024-01-01', '2024-02-01'])
+    const out = dateRange('2024-01-15', 30, ['2024-01-01', '2024-02-01'])
     expect(out).toHaveLength(15)
     expect(out[0]).toBe('2024-01-15')
   })
 
   it('lists nothing for a glob span after the newest message', () => {
-    expect(dateRangeDescending('2024-01-15', 30, ['2025-01-01', '2025-02-01'])).toEqual([])
+    expect(dateRange('2024-01-15', 30, ['2025-01-01', '2025-02-01'])).toEqual([])
   })
 })
 

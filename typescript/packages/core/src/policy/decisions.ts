@@ -220,23 +220,6 @@ export function opQuestion(
   return [asked, keyed]
 }
 
-export function encloses(scope: Occurrence, occurrence: Occurrence): boolean {
-  const facts = new ApprovalSnapshot()
-  const outer = facts.occurrenceKey(scope)
-  const inner = facts.occurrenceKey(occurrence)
-  const state = facts.wire
-  return approvalQuery(
-    {
-      kind: 'encloses',
-      occurrences: state.occurrences ?? [],
-      sources: state.sources ?? [],
-      scope: outer,
-      occurrence: inner,
-    },
-    z.boolean(),
-  )
-}
-
 export class Decisions extends DecisionOwner {
   private readonly sessions: SessionDecisionsQuery | null
   private readonly onAsk: AskHandler | null

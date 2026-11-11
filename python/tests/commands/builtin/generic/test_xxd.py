@@ -18,7 +18,6 @@ from mirage.commands.builtin.generic.xxd import (
     XxdFlags,
     XxdSeek,
     parse_flags,
-    xxd,
     xxd_generic,
 )
 from mirage.commands.config import Context
@@ -78,8 +77,12 @@ async def _stream(path):
     ],
 )
 async def test_a_dump_starts_its_addresses_at_the_seek(seek, limit, out):
-    stdout, io = await xxd(
-        [F], stream=_stream, seek=parse_seek(seek), limit=limit
+    stdout, io = await xxd_generic(
+        XxdFlags(seek=parse_seek(seek), limit=limit),
+        [F],
+        [],
+        Context(),
+        _stream,
     )
     assert (await materialize(stdout)).decode() == out
     assert io.exit_code == 0
@@ -88,7 +91,9 @@ async def test_a_dump_starts_its_addresses_at_the_seek(seek, limit, out):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("seek", ["-10", "+-2"])
 async def test_a_seek_before_the_start_cannot_seek(seek):
-    stdout, io = await xxd([F], stream=_stream, seek=parse_seek(seek))
+    stdout, io = await xxd_generic(
+        XxdFlags(seek=parse_seek(seek)), [F], [], Context(), _stream
+    )
     assert (stdout, io.exit_code, io.stderr) == (
         None,
         4,
@@ -110,8 +115,8 @@ async def _empty(path):
     ],
 )
 async def test_stdin_is_read_off_and_cannot_seek_back(seek, code, out):
-    stdout, io = await xxd(
-        [], stream=_empty, stdin=DATA, seek=parse_seek(seek)
+    stdout, io = await xxd_generic(
+        XxdFlags(seek=parse_seek(seek)), [], [], Context(stdin=DATA), _empty
     )
     got = b"" if stdout is None else await materialize(stdout)
     assert (got.decode(), io.exit_code) == (out, code)

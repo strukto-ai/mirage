@@ -27,7 +27,7 @@ from mirage.context import (
     get_current_session_for,
     get_current_session_unless_foreign,
     hidden_refusal,
-    program_invocation,
+    is_program_invocation,
     readonly_below,
     reset_current_session,
     reset_program_invocation,
@@ -476,15 +476,15 @@ def test_a_program_run_covers_the_child_evaluations_under_it():
     try:
         token = set_current_session(child, evaluation=evaluation)
         try:
-            assert program_invocation(parent)
-            assert program_invocation(child)
-            assert not program_invocation(other)
+            assert is_program_invocation(parent)
+            assert is_program_invocation(child)
+            assert not is_program_invocation(other)
         finally:
             reset_current_session(token)
-        assert not program_invocation(child)
+        assert not is_program_invocation(child)
     finally:
         reset_program_invocation(mark)
-    assert not program_invocation(parent)
+    assert not is_program_invocation(parent)
 
 
 def test_an_evaluation_binds_with_its_own_session_only():

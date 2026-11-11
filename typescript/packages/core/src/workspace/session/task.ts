@@ -71,16 +71,14 @@ export interface TaskHost {
   ): Promise<[number, string, number, boolean]>
 }
 
-function permissionDenied(name: string): PolicyDenied {
-  return new PolicyDenied(`${name}: permission denied`, name)
-}
-
 /** The error an operation's stop throws. Mirrors Python's fault_error. */
 export function faultError(fault: readonly Item[]): Error {
   const [tag] = fault
   switch (tag) {
-    case 'hidden':
-      return permissionDenied(fault[1] as string)
+    case 'hidden': {
+      const name = fault[1] as string
+      return new PolicyDenied(`${name}: permission denied`, name)
+    }
     case 'readonly':
       return new ReadonlyVariableError(fault[1] as string, fault[2] as boolean)
     case 'arith': {

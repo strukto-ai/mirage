@@ -109,13 +109,6 @@ class DispatchFn(Protocol):
     ) -> Awaitable[tuple[Any, IOResult]]: ...
 
 
-# Whether code may be loaded from one virtual path: the per-script exec
-# question an interpreter command asks about a file operand. Defined
-# beside DispatchFn for the same reason: the consumer receives it, the
-# workspace provides it.
-ExecPathFn: TypeAlias = Callable[[str], bool]
-
-
 @dataclass(frozen=True, slots=True)
 class CommandRuntime:
     """Where an interpreter command (python3, js) runs its code, as the
@@ -126,9 +119,9 @@ class CommandRuntime:
             command to; None when none is.
         exec_allowed (bool): whether policy lets the command start an
             interpreter.
-        exec_path_allowed (ExecPathFn | None): whether policy lets an
-            interpreter load code from a path; None outside a workspace,
-            where ``exec_allowed`` decides.
+        exec_path_allowed (Callable[[str], bool] | None): whether policy
+            lets an interpreter load code from a path; None outside a
+            workspace, where ``exec_allowed`` decides.
         settle (Callable[[], Awaitable[None]] | None): what the workspace
             does once the program's run ends, since the program may have
             written past the dispatcher; None outside a workspace.
@@ -136,7 +129,7 @@ class CommandRuntime:
 
     bound: RuntimeIdentity | None = None
     exec_allowed: bool = True
-    exec_path_allowed: ExecPathFn | None = None
+    exec_path_allowed: Callable[[str], bool] | None = None
     settle: Callable[[], Awaitable[None]] | None = None
 
 

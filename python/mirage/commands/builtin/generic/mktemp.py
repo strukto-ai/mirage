@@ -14,7 +14,7 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import eexist, fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import LineFacts, PathSpec
-from mirage.utils.ids import IdSource, SystemIdSource, random_below
+from mirage.utils.ids import IdSource, random_below
 
 _ALPHABET = string.ascii_letters + string.digits
 DEFAULT_TEMPLATE = "tmp.XXXXXXXXXX"
@@ -106,116 +106,6 @@ def plan_template(
     return template, x_count, len(suffix)
 
 
-async def mktemp(
-    *texts: str,
-    mkdir_fn: Callable[..., Awaitable[None]],
-    write_bytes_fn: Callable[..., Awaitable[None]],
-    d: bool = False,
-    p: PathSpec | None = None,
-    use_dest_dir: bool = False,
-    t: bool = False,
-    dry_run: bool = False,
-    suffix: str | None = None,
-    quiet: bool = False,
-    env_tmpdir: str = "",
-    cwd: str = "/",
-    exists_fn: Callable[[PathSpec], Awaitable[bool]] | None = None,
-    ids: IdSource | None = None,
-) -> tuple[ByteSource | None, IOResult]:
-    """Create a temporary file or directory and print its name.
-
-    The create is one file or one directory, never a directory the line
-    named: a missing one answers ENOENT, the way GNU's
-    ``open(O_CREAT|O_EXCL)`` does. The one exception is ``/tmp`` when it
-    is only the fallback: a system always has it, but a workspace's root
-    starts empty, so it is made on first use. ``mkdir_fn`` and
-    ``write_bytes_fn`` take the resolved virtual path, so the create
-    lands on whichever mount owns it, not the one the working directory
-    is on. A name already taken is never reused: GNU creates exclusively
-    and draws again, so an existing file is left alone, and ``-u`` names
-    only a free one.
-
-    Args:
-        *texts (str): the template operand, if any.
-        mkdir_fn (Callable[..., Awaitable[None]]): creates one directory.
-        write_bytes_fn (Callable[..., Awaitable[None]]): creates one file.
-        d (bool): create a directory (``-d``).
-        p (PathSpec | None): the ``-p``/``--tmpdir`` directory.
-        use_dest_dir (bool): whether ``-p``/``--tmpdir``/``-t`` was given.
-        t (bool): ``-t``.
-        dry_run (bool): ``-u``: print the name only.
-        suffix (str | None): ``--suffix``.
-        quiet (bool): ``-q``: no diagnostic for a failed create.
-        env_tmpdir (str): the session's ``$TMPDIR``.
-        cwd (str): the working directory a relative name resolves in.
-        exists_fn (Callable[[PathSpec], Awaitable[bool]] | None): whether
-            a name is taken, asked of the mount that owns it.
-        ids (IdSource | None): where the name's random characters are
-            drawn; None means the system source.
-    """
-    if len(texts) > 1:
-        raise extra_operand_error(CommandName.MKTEMP, texts[1])
-    dest_dir = p.raw_path if p is not None else ""
-    use_dest_dir = use_dest_dir or p is not None
-    template, x_count, suffix_len = plan_template(
-        texts[0] if texts else None,
-        suffix,
-        dest_dir,
-        use_dest_dir,
-        t,
-        env_tmpdir,
-    )
-    fallback = (
-        (not texts or use_dest_dir or t) and not dest_dir and not env_tmpdir
-    )
-    end = len(template) - suffix_len
-    source = ids if ids is not None else SystemIdSource()
-
-    def draw() -> str:
-        return (
-            template[: end - x_count]
-            + _random_suffix(source, x_count)
-            + template[end:]
-        )
-
-    async def create(path: PathSpec) -> None:
-        if d:
-            await mkdir_fn(path)
-        else:
-            await write_bytes_fn(path, b"")
-
-    try:
-        for _ in range(ATTEMPTS):
-            name = draw()
-            path = PathSpec.from_str_path(name, cwd=cwd)
-            if exists_fn is None or not await exists_fn(path):
-                break
-        else:
-            raise eexist(path.virtual)
-        if not dry_run:
-            try:
-                await create(path)
-            except FileNotFoundError:
-                if not fallback:
-                    raise
-                await mkdir_fn(PathSpec.from_str_path(FALLBACK_TMPDIR))
-                await create(path)
-    except FS_ERRORS as exc:
-        # -q suppresses the diagnostic about the create only (GNU); a
-        # bad template still says so.
-        if quiet:
-            return None, IOResult(exit_code=1)
-        kind = "directory" if d else "file"
-        return None, IOResult(
-            exit_code=1,
-            stderr=(
-                f"mktemp: failed to create {kind} via template "
-                f"'{quote_text(template)}': {fs_strerror(exc)}\n"
-            ).encode(),
-        )
-    return (name + "\n").encode(), IOResult()
-
-
 def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
     """A mktemp line creates its file unless ``-u``.
 
@@ -224,9 +114,6 @@ def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
         operands (Sequence[str | PathSpec]): the line's operands.
     """
     return LineFacts(writes=not fl.as_bool("dry_run"))
-
-
-__all__ = ["facts", "mktemp"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -270,20 +157,89 @@ async def mktemp_generic(
     write_bytes_fn: Callable[..., Awaitable[None]],
     exists_fn: Callable[[PathSpec], Awaitable[bool]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
+    """Create a temporary file or directory and print its name.
+
+    The create is one file or one directory, never a directory the line
+    named: a missing one answers ENOENT, the way GNU's
+    ``open(O_CREAT|O_EXCL)`` does. The one exception is ``/tmp`` when it
+    is only the fallback: a system always has it, but a workspace's root
+    starts empty, so it is made on first use. ``mkdir_fn`` and
+    ``write_bytes_fn`` take the resolved virtual path, so the create
+    lands on whichever mount owns it, not the one the working directory
+    is on. A name already taken is never reused: GNU creates exclusively
+    and draws again, so an existing file is left alone, and ``-u`` names
+    only a free one. The name's random characters are drawn from
+    ``ctx.ids``.
+
+    Args:
+        paths (list[PathSpec]): unused; the template is a text operand.
+        texts (list[str]): the template operand, if any.
+        ctx (Context): flags, ``$TMPDIR``, cwd and the id source.
+        mkdir_fn (Callable[..., Awaitable[None]]): creates one directory.
+        write_bytes_fn (Callable[..., Awaitable[None]]): creates one file.
+        exists_fn (Callable[[PathSpec], Awaitable[bool]] | None): whether
+            a name is taken, asked of the mount that owns it.
+    """
     parsed = parse_flags(ctx.flags)
-    return await mktemp(
-        *texts,
-        mkdir_fn=mkdir_fn,
-        write_bytes_fn=write_bytes_fn,
-        d=parsed.directory,
-        p=parsed.tmpdir,
-        use_dest_dir=parsed.use_dest_dir,
-        t=parsed.template_mode,
-        dry_run=parsed.dry_run,
-        suffix=parsed.suffix,
-        quiet=parsed.quiet,
-        env_tmpdir=(ctx.env or {}).get("TMPDIR", ""),
-        cwd=ctx.cwd.virtual,
-        exists_fn=exists_fn,
-        ids=ctx.ids,
+    d, p, t = parsed.directory, parsed.tmpdir, parsed.template_mode
+    env_tmpdir = (ctx.env or {}).get("TMPDIR", "")
+    if len(texts) > 1:
+        raise extra_operand_error(CommandName.MKTEMP, texts[1])
+    dest_dir = p.raw_path if p is not None else ""
+    use_dest_dir = parsed.use_dest_dir or p is not None
+    template, x_count, suffix_len = plan_template(
+        texts[0] if texts else None,
+        parsed.suffix,
+        dest_dir,
+        use_dest_dir,
+        t,
+        env_tmpdir,
     )
+    fallback = (
+        (not texts or use_dest_dir or t) and not dest_dir and not env_tmpdir
+    )
+    end = len(template) - suffix_len
+
+    def draw() -> str:
+        return (
+            template[: end - x_count]
+            + _random_suffix(ctx.ids, x_count)
+            + template[end:]
+        )
+
+    async def create(path: PathSpec) -> None:
+        if d:
+            await mkdir_fn(path)
+        else:
+            await write_bytes_fn(path, b"")
+
+    try:
+        for _ in range(ATTEMPTS):
+            name = draw()
+            path = PathSpec.from_str_path(name, cwd=ctx.cwd.virtual)
+            if exists_fn is None or not await exists_fn(path):
+                break
+        else:
+            raise eexist(path.virtual)
+        if not parsed.dry_run:
+            try:
+                await create(path)
+            except FileNotFoundError:
+                if not fallback:
+                    raise
+                await mkdir_fn(PathSpec.from_str_path(FALLBACK_TMPDIR))
+                await create(path)
+    except FS_ERRORS as exc:
+        # -q suppresses the diagnostic about the create only (GNU); a
+        # bad template still says so.
+        if parsed.quiet:
+            return None, IOResult(exit_code=1)
+        kind = "directory" if d else "file"
+        return None, IOResult(
+            exit_code=1,
+            stderr=(
+                f"mktemp: failed to create {kind} via template "
+                f"'{quote_text(template)}': {fs_strerror(exc)}\n"
+            ).encode(),
+        )
+    return (name + "\n").encode(), IOResult()

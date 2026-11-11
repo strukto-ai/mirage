@@ -289,103 +289,6 @@ async def _seeked(
     return _limited(past, limit), start
 
 
-async def xxd(
-    paths: list[PathSpec],
-    *,
-    stream: ReadStreamFn,
-    write_bytes: Callable[..., Awaitable[None]] | None = None,
-    pwrite_bytes: Callable[..., Awaitable[None]] | None = None,
-    stdin: ByteSource | None = None,
-    reverse: bool = False,
-    plain: bool = False,
-    render: Mapping[str, JsonValue] | None = None,
-    seek: XxdSeek | None = None,
-    limit: int | None = None,
-    name: str | None = None,
-) -> tuple[ByteSource | None, IOResult]:
-    """xxd over INFILE (or stdin) to OUTFILE (or stdout).
-
-    A dump replaces OUTFILE; ``-r`` writes into it at the dump's offsets
-    and keeps the bytes around them, as xxd does, through ``pwrite`` where
-    the backend has one, one streamed pwrite per run of contiguous
-    offsets, so the stored bytes are what it writes into and no gap is
-    held here. Deliberate divergence:
-    xxd opens OUTFILE before it reads, so an INFILE that is OUTFILE reads
-    empty and a directory INFILE leaves an empty OUTFILE behind; this
-    reads first and writes once.
-
-    Args:
-        paths (list[PathSpec]): INFILE and OUTFILE, either one ``-``.
-        stream (ReadStreamFn): reads INFILE, and OUTFILE for ``-r`` when
-            there is no ``pwrite_bytes``.
-        write_bytes (Callable | None): writes OUTFILE.
-        pwrite_bytes (Callable | None): writes into OUTFILE at an offset.
-        stdin (ByteSource | None): standard input.
-        render (Mapping[str, JsonValue] | None): the dump's
-            configuration as the scan read it; None for the default dump.
-        seek (XxdSeek | None): -s, which ``-r`` adds to every offset.
-        limit (int | None): -l, None for no limit; ``-r`` reads all.
-        name (str | None): -n, the name of -i's array; INFILE's spelling
-            without it.
-    """
-    if len(paths) > 2:
-        raise extra_operand_error(
-            CommandName.XXD, paths[2].raw_path or paths[2].virtual
-        )
-    seek = seek or XxdSeek()
-    render = render or {
-        "mode": "dump",
-        "cols": 16,
-        "group": 2,
-        "uppercase": False,
-    }
-    if name is None and paths and not is_stdin(paths[0]):
-        name = paths[0].raw_path or paths[0].virtual
-    read = stdin_stream(stream, stdin, sole=True)
-    base = 0
-    revert: dict[str, JsonValue] | None = None
-    if reverse:
-        source: AsyncIterator[bytes] = (
-            read(paths[0]) if paths else resolve_source(stdin)
-        )
-        revert = {
-            "mode": "reverse",
-            "plain": plain,
-            "cols": render["cols"],
-            "base": -seek.offset if seek.back else seek.offset,
-        }
-    else:
-        seeked = await _seeked(
-            paths[0] if paths else None,
-            read,
-            stdin,
-            seek,
-            limit,
-        )
-        if seeked is None:
-            return None, IOResult(
-                exit_code=CANNOT_SEEK_EXIT, stderr=CANNOT_SEEK
-            )
-        source, base = seeked
-
-    if len(paths) == 2 and not is_stdin(paths[1]):
-        return await _write_output(
-            paths,
-            source,
-            stream,
-            write_bytes,
-            pwrite_bytes,
-            revert=revert,
-            forward=_forward_stream(source, render, base, name)
-            if revert is None
-            else None,
-        )
-    io = IOResult()
-    if revert is not None:
-        return _xxd_reverse_stream(source, io, revert), io
-    return _forward_stream(source, render, base, name), io
-
-
 async def _write_output(
     paths: list[PathSpec],
     source: AsyncIterator[bytes],
@@ -525,7 +428,7 @@ def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
     return LineFacts(writes=_names_output(operands))
 
 
-__all__ = ["facts", "xxd"]
+__all__ = ["facts"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -603,16 +506,83 @@ async def xxd_generic(
     write_bytes: Callable[..., Awaitable[None]] | None = None,
     pwrite_bytes: Callable[..., Awaitable[None]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    return await xxd(
-        paths,
-        stream=stream,
-        write_bytes=write_bytes,
-        pwrite_bytes=pwrite_bytes,
-        stdin=ctx.stdin,
-        reverse=parsed.reverse,
-        plain=parsed.plain,
-        render=parsed.render,
-        seek=parsed.seek,
-        limit=parsed.limit,
-        name=parsed.name,
-    )
+    """xxd over INFILE (or stdin) to OUTFILE (or stdout).
+
+    A dump replaces OUTFILE; ``-r`` writes into it at the dump's offsets
+    and keeps the bytes around them, as xxd does, through ``pwrite`` where
+    the backend has one, one streamed pwrite per run of contiguous
+    offsets, so the stored bytes are what it writes into and no gap is
+    held here. Deliberate divergence:
+    xxd opens OUTFILE before it reads, so an INFILE that is OUTFILE reads
+    empty and a directory INFILE leaves an empty OUTFILE behind; this
+    reads first and writes once.
+
+    Args:
+        parsed (XxdFlags): the options; ``seek`` is -s, which ``-r``
+            adds to every offset, and ``limit`` is -l, which ``-r``
+            ignores.
+        paths (list[PathSpec]): INFILE and OUTFILE, either one ``-``.
+        texts (list[str]): unused.
+        ctx (Context): standard input.
+        stream (ReadStreamFn): reads INFILE, and OUTFILE for ``-r`` when
+            there is no ``pwrite_bytes``.
+        write_bytes (Callable | None): writes OUTFILE.
+        pwrite_bytes (Callable | None): writes into OUTFILE at an offset.
+    """
+    if len(paths) > 2:
+        raise extra_operand_error(
+            CommandName.XXD, paths[2].raw_path or paths[2].virtual
+        )
+    seek = parsed.seek
+    render = parsed.render or {
+        "mode": "dump",
+        "cols": 16,
+        "group": 2,
+        "uppercase": False,
+    }
+    name = parsed.name
+    if name is None and paths and not is_stdin(paths[0]):
+        name = paths[0].raw_path or paths[0].virtual
+    read = stdin_stream(stream, ctx.stdin, sole=True)
+    base = 0
+    revert: dict[str, JsonValue] | None = None
+    if parsed.reverse:
+        source: AsyncIterator[bytes] = (
+            read(paths[0]) if paths else resolve_source(ctx.stdin)
+        )
+        revert = {
+            "mode": "reverse",
+            "plain": parsed.plain,
+            "cols": render["cols"],
+            "base": -seek.offset if seek.back else seek.offset,
+        }
+    else:
+        seeked = await _seeked(
+            paths[0] if paths else None,
+            read,
+            ctx.stdin,
+            seek,
+            parsed.limit,
+        )
+        if seeked is None:
+            return None, IOResult(
+                exit_code=CANNOT_SEEK_EXIT, stderr=CANNOT_SEEK
+            )
+        source, base = seeked
+
+    if len(paths) == 2 and not is_stdin(paths[1]):
+        return await _write_output(
+            paths,
+            source,
+            stream,
+            write_bytes,
+            pwrite_bytes,
+            revert=revert,
+            forward=_forward_stream(source, render, base, name)
+            if revert is None
+            else None,
+        )
+    io = IOResult()
+    if revert is not None:
+        return _xxd_reverse_stream(source, io, revert), io
+    return _forward_stream(source, render, base, name), io

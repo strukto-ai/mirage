@@ -137,18 +137,6 @@ async def test_a_mount_naming_no_ref_reads_the_repos_default_branch(
 
 
 @pytest.mark.asyncio
-async def test_an_unpinned_mount_is_on_the_default_branch_before_any_fetch(
-    tree_calls,
-):
-    # Naming no ref *means* following the default branch, so the two agree
-    # whatever it turns out to be -- no request, and not the "not known
-    # yet" None a pinned mount answers.
-    vfs = GitHubVFS(GitHubConfig(token="ghp_test", owner="o", repo="r"))
-    assert vfs.is_default_branch is True
-    assert GitHubVFS(CONFIG, "o", "r", "dev").is_default_branch is None
-
-
-@pytest.mark.asyncio
 async def test_reconcile_private_index_can_resolve_github_ids(
     tree_calls, dir_calls
 ):

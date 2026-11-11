@@ -54,8 +54,6 @@ from mirage.types import (
 )
 from mirage.utils.quote import shell_quote
 
-DEFAULT_SLEEP_INTERVAL = 1.0
-
 
 @dataclass(frozen=True, slots=True)
 class TailCounts:
@@ -105,7 +103,7 @@ class TailFlags:
     follow: bool = False
     follow_name: bool = False
     retry: bool = False
-    interval: float = DEFAULT_SLEEP_INTERVAL
+    interval: float = 1.0
     pid: int | None = None
 
 

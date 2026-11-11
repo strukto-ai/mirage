@@ -33,8 +33,8 @@ from mirage.context import (
     RedirectRunner,
     bind_caller,
     current_caller,
+    is_program_invocation,
     note_decision,
-    program_invocation,
     redirect_paths_for,
     redirect_runner_for,
     reset_caller,
@@ -290,7 +290,7 @@ async def _run_alias(
     session = context.session
     if (
         (session.aliases or session._alias_view or session._alias_marks)
-        and not program_invocation(session)
+        and not is_program_invocation(session)
         and parts
         and parts[0].type == NT.COMMAND_NAME
         and parts[0].named_children
@@ -1641,7 +1641,7 @@ async def _route_argv(
     # bash answers it with the builtin's help and status 2 before the
     # builtin reads its options, the job builtins included. A program
     # run (`find -exec printf --help`) is the program's own, not this.
-    if argv.args[:1] == ("--help",) and not program_invocation(session):
+    if argv.args[:1] == ("--help",) and not is_program_invocation(session):
         answered = flag_help(name)
         if answered is not None:
             return answered

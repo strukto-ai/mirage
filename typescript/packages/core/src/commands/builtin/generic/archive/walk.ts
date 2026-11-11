@@ -43,7 +43,7 @@ export type DirProbe = (path: PathSpec) => Promise<boolean>
 
 // What the shared scan needs from the mount it runs on, plus the two
 // knobs the formats disagree about.
-export interface ScanDeps {
+export interface ScanOperandDeps {
   stat: StatFn
   walk: WalkFn
   links?: LinkView | null
@@ -96,7 +96,7 @@ async function subtree(
   root: PathSpec,
   base: string,
   nameBase: string,
-  deps: ScanDeps,
+  deps: ScanOperandDeps,
 ): Promise<[Entry[], string[], string[]]> {
   const walked = base !== root.virtual ? childSpec(base, root) : root
   const found = new Map<string, [MemberKind, string]>()
@@ -161,7 +161,7 @@ async function subtree(
 async function follow(
   virtual: string,
   root: PathSpec,
-  deps: ScanDeps,
+  deps: ScanOperandDeps,
 ): Promise<[Entry[], string[], string, string[]]> {
   const links = deps.links ?? null
   if (links === null) return [[], [], '', []]
@@ -217,7 +217,7 @@ function unreadableProblems(closed: readonly string[]): Problem[] {
  * symlink unless `-h` says to follow it and always descends, zip follows
  * unless `-y` says otherwise and only descends under `-r`.
  */
-export async function scanOperand(path: PathSpec, deps: ScanDeps): Promise<Scan> {
+export async function scanOperand(path: PathSpec, deps: ScanOperandDeps): Promise<Scan> {
   const base = rstripSlash(path.virtual) || '/'
   let entries: Entry[] = []
   let crossings: string[] = []

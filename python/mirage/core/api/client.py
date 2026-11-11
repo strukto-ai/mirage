@@ -442,27 +442,6 @@ def floored_delay(delay: float, status: int, retry: RetryPolicy) -> float:
     return min(max(delay, floor), retry.max_backoff)
 
 
-def _retry_condition(retry: RetryPolicy) -> Any:
-    if retry.retry_transport:
-        # Connection failures, a body cut short and timeouts only (a total
-        # timeout raises asyncio.TimeoutError, not a ClientConnectionError):
-        # response-mapped errors raised by error_of must never come back for
-        # another attempt
-        return retry_if_exception_type((_RetryableStatus, *_TRANSPORT))
-    return retry_if_exception_type(_RetryableStatus)
-
-
-def _merged_headers(
-    headers: Mapping[str, str] | None, window: ByteWindow | None
-) -> Mapping[str, str] | None:
-    if window is None:
-        return headers
-    header = range_header(window.offset, window.size)
-    if header is None:
-        return headers
-    return {**(headers or {}), "Range": header}
-
-
 async def _read_buffer(
     resp: aiohttp.ClientResponse,
     window: ByteWindow | None,
@@ -588,7 +567,7 @@ async def _attempt(
         request = session.request(
             method,
             url,
-            headers=_merged_headers(headers, window),
+            headers=headers,
             params=params,
             data=JsonPayload(None),
         )
@@ -596,7 +575,7 @@ async def _attempt(
         request = session.request(
             method,
             url,
-            headers=_merged_headers(headers, window),
+            headers=headers,
             params=params,
             json=json_body,
             data=data,
@@ -605,7 +584,7 @@ async def _attempt(
         request = session.request(
             method,
             url,
-            headers=_merged_headers(headers, window),
+            headers=headers,
             params=params,
             data=data,
         )
@@ -732,14 +711,27 @@ async def api_request(
             error.resp, error.text, state.attempt_number - 1, retry
         )
 
+    # With retry_transport, connection failures, a body cut short and
+    # timeouts only (a total timeout raises asyncio.TimeoutError, not a
+    # ClientConnectionError): response-mapped errors raised by error_of must
+    # never come back for another attempt
+    retried = (
+        (_RetryableStatus, *_TRANSPORT)
+        if retry.retry_transport
+        else (_RetryableStatus,)
+    )
     retrying = AsyncRetrying(
         sleep=asyncio.sleep if sleep is None else sleep,
         stop=stop_after_attempt(retry.max_retries + 1),
         wait=wait,
-        retry=_retry_condition(retry),
+        retry=retry_if_exception_type(retried),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
+    if window is not None:
+        header = range_header(window.offset, window.size)
+        if header is not None:
+            headers = {**(headers or {}), "Range": header}
     sess, own = resolve_session(session, timeout=timeout)
     try:
         try:

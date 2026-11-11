@@ -159,7 +159,7 @@ async def execute_body(
                 all_stdout,
                 merged_io,
             )
-        except UNWINDING as sig:
+        except Unwinding as sig:
             if isinstance(sig, LoopSignal):
                 record_status(session, sig.io.exit_code)
             raise await carried(sig, _chain_streams(all_stdout), merged_io)
@@ -207,7 +207,7 @@ def _chain_streams(all_stdout: list[ByteSource | None]) -> ByteSource | None:
     return async_chain(non_empty) if non_empty else None
 
 
-UNWINDING = (LoopSignal, ReturnSignal, ExitSignal)
+Unwinding = (LoopSignal, ReturnSignal, ExitSignal)
 
 
 async def carried(
@@ -219,7 +219,7 @@ async def carried(
     wrote it as it went).
 
     Args:
-        sig (Exception): one of ``UNWINDING``.
+        sig (Exception): one of ``Unwinding``.
         stdout (ByteSource | None): the construct's output so far.
         io (IOResult): the construct's result so far, its stderr.
     """
@@ -242,7 +242,7 @@ async def trailed(sig: Exception, stdout: bytes, stderr: bytes) -> None:
     they finished behind the output the signal already carries.
 
     Args:
-        sig (Exception): one of ``UNWINDING``.
+        sig (Exception): one of ``Unwinding``.
         stdout (bytes): output to follow the signal's own.
         stderr (bytes): diagnostics to follow the signal's own.
     """
@@ -300,7 +300,7 @@ async def returning(
             outputs,
             io,
         )
-    except UNWINDING as sig:
+    except Unwinding as sig:
         left = await carried(sig, stdout, io)
         if not isinstance(left, ReturnSignal) or frame.sourced:
             raise left
@@ -311,12 +311,12 @@ async def returning(
 
 
 def ended(sig: Exception, simple: bool = False) -> IOResult:
-    """What a child shell reports when one of ``UNWINDING`` ends it:
+    """What a child shell reports when one of ``Unwinding`` ends it:
     what it wrote, its diagnostic, and its status, ``exit``'s contained
     one, ``return``'s own, or that of ``break`` or ``continue``.
 
     Args:
-        sig (Exception): one of ``UNWINDING``.
+        sig (Exception): one of ``Unwinding``.
         simple (bool): the child runs one simple command, which is the
             shell ``exit`` ends, so it reports ``exit``'s own status
             (``: ${U?} | cat`` is 127, ``( : ${U?} ) | cat`` is 1),
@@ -346,7 +346,7 @@ async def take_stdout(sig: Exception) -> bytes:
     them already.
 
     Args:
-        sig (Exception): one of ``UNWINDING``.
+        sig (Exception): one of ``Unwinding``.
     """
     if not isinstance(sig, (ExitSignal, ReturnSignal)) or not sig.unrouted:
         return b""
@@ -359,11 +359,11 @@ async def take_stdout(sig: Exception) -> bytes:
 
 
 async def take_stderr(sig: Exception) -> bytes:
-    """Take the diagnostic one of ``UNWINDING`` carries, for the
+    """Take the diagnostic one of ``Unwinding`` carries, for the
     redirects it was written under to route.
 
     Args:
-        sig (Exception): one of ``UNWINDING``.
+        sig (Exception): one of ``Unwinding``.
     """
     if isinstance(sig, LoopSignal):
         diagnostic = await materialize(sig.io.stderr)
@@ -501,7 +501,7 @@ class _ConstructHost(ExpandHost):
                 frame(session, self.call_stack)
             tag = "break" if isinstance(sig, BreakSignal) else "continue"
             return sig.io.exit_code, tag, sig.levels, False
-        except UNWINDING as sig:
+        except Unwinding as sig:
             self.left = sig
             return 0, "stop", 0, False
         _keep(self.all_stdout, stdout)
@@ -559,7 +559,7 @@ async def _run_construct(
         said, failed, tag, levels, pending, status = await drive(
             start(session.vars.shell), host, context.frame.diagnostics
         )
-    except UNWINDING as sig:
+    except Unwinding as sig:
         raise await carried(
             sig, _chain_streams(host.all_stdout), host.merged_io
         )
@@ -981,7 +981,7 @@ async def handle_select(
             merged_io = await _absorbed(sig, all_stdout, merged_io)
             if isinstance(sig, BreakSignal):
                 break
-        except UNWINDING as sig:
+        except Unwinding as sig:
             raise await carried(sig, _chain_streams(all_stdout), merged_io)
         else:
             merged_io = await merged_io.merge(io)

@@ -57,11 +57,11 @@ logger = logging.getLogger(__name__)
 
 SetAttrsFn = Callable[[PathSpec, Mapping[str, Any]], Awaitable[Any]]
 
-_ASCII_LOWER = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
-
 
 def _ascii_lower(text: str) -> str:
-    return text.translate(_ASCII_LOWER)
+    return text.translate(
+        str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
+    )
 
 
 def gzip_suffix(name: str, suffix: str) -> str | None:

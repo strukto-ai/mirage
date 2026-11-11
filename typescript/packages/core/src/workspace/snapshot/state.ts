@@ -61,7 +61,7 @@ import {
   VFSName,
   type WritePolicy,
 } from '../../types.ts'
-import { normDir } from '../../utils/slash.ts'
+import { normDir } from '../../utils/path.ts'
 import { VERSION } from '../../version.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import { HISTORY_PREFIX } from '../../vfs/history/history.ts'

@@ -43,6 +43,7 @@ from mirage.types import PathSpec
 from mirage.view.types import FollowOperands
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.command.flags import parse_flags
+from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.files import Files
 from mirage.workspace.mount import (
     MountCommandUnsupported,
@@ -52,7 +53,7 @@ from mirage.workspace.mount import (
 from mirage.workspace.mount.errors import MountCommandAmbiguous
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import env_snapshot, session_view
-from mirage.workspace.types import ExecuteLine, ExecutionNode
+from mirage.workspace.types import ExecutionNode
 
 logger = logging.getLogger(__name__)
 
@@ -169,13 +170,13 @@ def scalar_find_flags(
     }
 
 
-def nested_shell(execute_fn: ExecuteLine, session_id: str) -> ShellFn:
+def nested_shell(execute_fn: ExecuteFn, session_id: str) -> ShellFn:
     """The entry point a command handler runs a nested line through
     (``ctx.shell``): a line it asks for runs in the handler's session,
     reading the input it is handed, None for the ambient one.
 
     Args:
-        execute_fn (ExecuteLine): runs a line in a session.
+        execute_fn (ExecuteFn): runs a line in a session.
         session_id (str): the session the calling command runs under.
     """
 
@@ -198,7 +199,7 @@ async def run_on_mount(
     resolve_hint: PathSpec | None = None,
     mount: MountEntry | None = None,
     argv: tuple[str, ...] = (),
-    execute_fn: ExecuteLine | None = None,
+    execute_fn: ExecuteFn | None = None,
     follow: FollowOperands | None = None,
     find: FindExpr | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -229,7 +230,7 @@ async def run_on_mount(
             checks, which the caller already performed.
         argv (tuple[str, ...]): The words after the command name, as the
             line spelled them; empty for a run split out of a line.
-        execute_fn (ExecuteLine | None): Runs a nested line, which the
+        execute_fn (ExecuteFn | None): Runs a nested line, which the
             handler reaches as ``opts.shell``; None outside a workspace.
         follow (FollowOperands | None): the line's operand resolution,
             which the command's globs give their matches.

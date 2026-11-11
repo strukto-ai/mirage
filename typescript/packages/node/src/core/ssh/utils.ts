@@ -16,7 +16,7 @@ import { eisdir, enoent } from '@struktoai/mirage-core/errors/fs'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { lstripSlash, rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { S_IFDIR, S_IFMT, S_IFREG } from '@struktoai/mirage-core/utils/stat_view'
-import type { OpenMode, SFTPWrapper } from 'ssh2'
+import type { FileEntryWithStats, OpenMode, SFTPWrapper } from 'ssh2'
 import { FXF_CREAT, FXF_WRITE } from './constants.ts'
 
 export function joinRoot(root: string, rel: string): string {
@@ -52,6 +52,18 @@ export function isFailure(err: unknown): boolean {
   return code === 4
 }
 
+/** One SFTP request as a promise, rejected with the error its callback gets. */
+export function sftpCall<T = void>(
+  request: (done: (err?: Error | null, value?: T) => void) => void,
+): Promise<T> {
+  return new Promise<T>((resolveFn, rejectFn) => {
+    request((err, value) => {
+      if (err) rejectFn(err)
+      else resolveFn(value as T)
+    })
+  })
+}
+
 export function isDirectoryAttrs(attrs: { mode?: number }): boolean {
   if (attrs.mode === undefined) return false
   return (attrs.mode & S_IFMT) === S_IFDIR
@@ -76,11 +88,8 @@ export async function openForWrite(
   flags: OpenMode | number = FXF_WRITE | FXF_CREAT,
 ): Promise<Buffer> {
   try {
-    return await new Promise<Buffer>((resolveFn, rejectFn) => {
-      sftp.open(remote, flags, (err, opened) => {
-        if (err) rejectFn(err)
-        else resolveFn(opened)
-      })
+    return await sftpCall<Buffer>((done) => {
+      sftp.open(remote, flags, done)
     })
   } catch (err) {
     if (isNoSuchFile(err)) throw enoent(p)
@@ -105,15 +114,10 @@ export async function openForWrite(
  */
 export async function holdsEntries(sftp: SFTPWrapper, remote: string): Promise<boolean> {
   try {
-    return await new Promise<boolean>((resolveFn, rejectFn) => {
-      sftp.readdir(remote, (err, entries) => {
-        if (err !== undefined) {
-          rejectFn(err)
-          return
-        }
-        resolveFn(entries.some((e) => e.filename !== '.' && e.filename !== '..'))
-      })
+    const entries = await sftpCall<FileEntryWithStats[]>((done) => {
+      sftp.readdir(remote, done)
     })
+    return entries.some((e) => e.filename !== '.' && e.filename !== '..')
   } catch {
     return false
   }

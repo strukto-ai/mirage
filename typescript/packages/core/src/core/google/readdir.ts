@@ -22,11 +22,6 @@ import { TOP_LEVEL_DIRS } from './constants.ts'
 import { globToModifiedRange } from './date_glob.ts'
 import { appFile } from './entry.ts'
 
-export type AppReaddir = (
-  accessor: GoogleApiAccessor,
-  path: PathSpec,
-) => Promise<FileStat[] | DirListing>
-
 /**
  * The readdir of a Google app mount: its corpora and their files. Sheets,
  * Docs and Slides list the same tree, one Drive query per corpus narrowed to
@@ -37,7 +32,7 @@ export function makeAppReaddir(
   mime: string,
   detectScope: DetectFn,
   makeFilename: (title: string, fileId: string, modifiedTime: string) => string,
-): AppReaddir {
+): (accessor: GoogleApiAccessor, path: PathSpec) => Promise<FileStat[] | DirListing> {
   return async (accessor, path) => {
     const modifiedRange = path.pattern ? globToModifiedRange(path.pattern) : null
     const p = rawPathOf(path.pattern ? path.dir : path)

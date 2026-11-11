@@ -27,8 +27,6 @@ import { LineFacts, type PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { neverOpened, stdinStream } from '../utils/stream.ts'
 
-const NEWLINE = new Uint8Array([0x0a])
-
 /**
  * Convert each operand in order through mirage-rs's iconv, as glibc 2.41
  * converts. An input that cannot be opened is reported and skipped; one that
@@ -62,7 +60,10 @@ export async function iconvGeneric(
     if (!(err instanceof StreamRefusal)) throw err
     return [
       null,
-      new IOResult({ exitCode: 1, stderr: concat([fromByteView(err.message), NEWLINE]) }),
+      new IOResult({
+        exitCode: 1,
+        stderr: concat([fromByteView(err.message), new Uint8Array([0x0a])]),
+      }),
     ]
   }
   const converter = engine
@@ -108,7 +109,7 @@ export async function iconvGeneric(
       yield* mergeOutput(converter, readInput, ctx.signal)
     } catch (err) {
       if (!(err instanceof StreamRefusal)) throw err
-      await report(concat([fromByteView(err.message), NEWLINE]))
+      await report(concat([fromByteView(err.message), new Uint8Array([0x0a])]))
       if (err.output.byteLength > 0) yield err.output
     } finally {
       await report(converter.takeStderr())

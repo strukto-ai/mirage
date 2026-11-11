@@ -63,14 +63,10 @@ export async function missCondition(
   } catch (err) {
     if (isEnotdir(err)) return 'ENOTDIR'
     if (isMissError(err)) return 'ENOENT'
-    if (isEloop(err)) return 'ELOOP'
+    if ((err as { code?: string }).code === 'ELOOP') return 'ELOOP'
     throw err
   }
   return 'ENOENT'
-}
-
-function isEloop(err: unknown): boolean {
-  return (err as { code?: string }).code === 'ELOOP'
 }
 
 // List one virtual path through the workspace, as virtual paths.

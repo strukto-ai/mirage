@@ -23,10 +23,6 @@ export interface CacheInvalidator {
   probedStat(path: PathSpec): FileStat | null
 }
 
-export interface CacheContextState {
-  manager: CacheInvalidator | null
-}
-
 /** A replacement with no destination-state requirement. Mirrors Python's `AnyWrite`. */
 export interface AnyWrite {
   readonly kind: 'any'
@@ -51,12 +47,6 @@ export interface ReplaceRequest {
 export type RewriteWriteFn<Written = FileStat | null> = (
   request: ReplaceRequest,
 ) => Promise<Written>
-
-/** The write context of the mount at `prefix`. */
-export interface WriteBinding {
-  prefix: string
-  context: WriteContext | null
-}
 
 /**
  * A file's live tokens: the content token mirage compares, the native token

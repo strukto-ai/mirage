@@ -18,7 +18,7 @@ import { enotsup } from '@struktoai/mirage-core/errors/fs'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { joinRoot, openForWrite } from './utils.ts'
+import { joinRoot, openForWrite, sftpCall } from './utils.ts'
 
 export async function truncate(
   accessor: SSHAccessor,
@@ -32,18 +32,12 @@ export async function truncate(
   const remote = joinRoot(accessor.config.root ?? '/', rawPathOf(p))
   const handle = await openForWrite(sftp, remote, p)
   try {
-    await new Promise<void>((resolveFn, rejectFn) => {
-      sftp.fsetstat(handle, { size: length }, (err) => {
-        if (err) rejectFn(err)
-        else resolveFn()
-      })
+    await sftpCall((done) => {
+      sftp.fsetstat(handle, { size: length }, done)
     })
   } finally {
-    await new Promise<void>((resolveFn, rejectFn) => {
-      sftp.close(handle, (err) => {
-        if (err) rejectFn(err)
-        else resolveFn()
-      })
+    await sftpCall((done) => {
+      sftp.close(handle, done)
     })
   }
   record('truncate', p.virtual, VFSName.SSH, 0, timer)

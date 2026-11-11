@@ -15,7 +15,7 @@
 import { vfsStateRequiresOverride } from '@struktoai/mirage-core/vfs/secrets'
 import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { WorkspaceStateDict } from '@struktoai/mirage-core/workspace/snapshot/types'
-import { normDir } from '@struktoai/mirage-core/utils/slash'
+import { normDir } from '@struktoai/mirage-core/utils/path'
 import type { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'

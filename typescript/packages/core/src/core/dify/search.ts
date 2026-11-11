@@ -32,7 +32,7 @@ export const METHODS: Record<string, string> = {
   keyword: 'keyword_search',
 }
 
-export interface SearchOptions {
+export interface SearchSegmentsOptions {
   method?: string
   topK?: number
   threshold?: number
@@ -43,7 +43,7 @@ export async function searchSegments(
   accessor: DifyAccessor,
   query: string,
   paths: readonly PathSpec[],
-  options: SearchOptions = {},
+  options: SearchSegmentsOptions = {},
 ): Promise<[string, string][]> {
   const method = options.method ?? 'semantic'
   const topK = options.topK ?? 10

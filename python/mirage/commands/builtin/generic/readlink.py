@@ -11,32 +11,6 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def readlink(
-    paths: list[PathSpec],
-    *,
-    f: bool = False,
-    e: bool = False,
-    m: bool = False,
-    n: bool = False,
-) -> tuple[ByteSource | None, IOResult]:
-    if not paths:
-        raise missing_operand_error("readlink", None)
-    normalize = f or e or m
-    results: list[str] = []
-    for p in paths:
-        vp = p.virtual
-        if normalize:
-            vp = posixpath.normpath(vp)
-        results.append(vp)
-    text = "\n".join(results)
-    if not n:
-        text += "\n"
-    return text.encode(), IOResult()
-
-
-__all__ = ["readlink"]
-
-
 @dataclass(frozen=True, slots=True)
 class ReadlinkFlags:
     canonicalize: bool = False
@@ -63,10 +37,15 @@ async def readlink_generic(
     if not paths:
         raise missing_operand_error("readlink", None)
     parsed = parse_flags(ctx.flags)
-    return await readlink(
-        paths,
-        f=parsed.canonicalize,
-        e=parsed.canonicalize_existing,
-        m=parsed.canonicalize_missing,
-        n=parsed.no_newline,
+    normalize = (
+        parsed.canonicalize
+        or parsed.canonicalize_existing
+        or parsed.canonicalize_missing
     )
+    text = "\n".join(
+        posixpath.normpath(p.virtual) if normalize else p.virtual
+        for p in paths
+    )
+    if not parsed.no_newline:
+        text += "\n"
+    return text.encode(), IOResult()

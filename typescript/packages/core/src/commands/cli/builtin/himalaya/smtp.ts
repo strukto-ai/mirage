@@ -16,7 +16,6 @@ import { DEFAULT_TIMEOUT } from '../../../../core/api/constants.ts'
 import { judgeSocket } from '../../../../io/web/network.ts'
 import { missingPeer } from '../../../../utils/optional_peer.ts'
 import type * as Nodemailer from 'nodemailer'
-import type { fromParsed } from '../../../../core/email/_parse.ts'
 import { parseRfc822 } from '../../../../core/email/_parse.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
 
@@ -58,7 +57,7 @@ async function getTransporter(config: EmailConfig): Promise<Nodemailer.Transport
 export async function sendRaw(
   config: EmailConfig,
   raw: Uint8Array,
-): Promise<ReturnType<typeof fromParsed>> {
+): ReturnType<typeof parseRfc822> {
   // An edge isolate opens the socket past its fetch guard, so the network
   // rule is asked here; elsewhere this is a no-op.
   judgeSocket(config.smtpHost, config.smtpPort)

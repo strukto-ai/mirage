@@ -15,45 +15,9 @@
 import { enoent } from '@struktoai/mirage-core/errors/fs'
 import type { PathSpec, SetAttrFields } from '@struktoai/mirage-core/types'
 import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
-import type { SFTPWrapper, Stats } from 'ssh2'
+import type { Stats } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { isNoSuchFile, joinRoot } from './utils.ts'
-
-function sftpStat(sftp: SFTPWrapper, remote: string, p: PathSpec): Promise<Stats> {
-  return new Promise((resolveFn, rejectFn) => {
-    sftp.stat(remote, (err, stats) => {
-      if (err !== undefined) {
-        if (isNoSuchFile(err)) rejectFn(enoent(p))
-        else rejectFn(err)
-        return
-      }
-      resolveFn(stats)
-    })
-  })
-}
-
-function sftpChmod(sftp: SFTPWrapper, remote: string, mode: number): Promise<void> {
-  return new Promise((resolveFn, rejectFn) => {
-    sftp.chmod(remote, mode, (err) => {
-      if (err !== undefined && err !== null) rejectFn(err)
-      else resolveFn()
-    })
-  })
-}
-
-function sftpUtimes(
-  sftp: SFTPWrapper,
-  remote: string,
-  atime: number,
-  mtime: number,
-): Promise<void> {
-  return new Promise((resolveFn, rejectFn) => {
-    sftp.utimes(remote, atime, mtime, (err) => {
-      if (err !== undefined && err !== null) rejectFn(err)
-      else resolveFn()
-    })
-  })
-}
+import { isNoSuchFile, joinRoot, sftpCall } from './utils.ts'
 
 // Write metadata fields (the write side of stat), mirroring disk. Applies
 // natively what the remote inode can take and returns the residual: fields
@@ -71,12 +35,22 @@ export async function setAttrs(
 ): Promise<Record<string, number | string>> {
   const sftp = await accessor.sftp()
   const remote = joinRoot(accessor.config.root ?? '/', rawPathOf(path))
-  const st = await sftpStat(sftp, remote, path)
+  let st: Stats
+  try {
+    st = await sftpCall<Stats>((done) => {
+      sftp.stat(remote, done)
+    })
+  } catch (err) {
+    if (isNoSuchFile(err)) throw enoent(path)
+    throw err
+  }
   const residual: Record<string, number | string> = {}
   if (fields.mode !== undefined) {
-    const keep = st.isDirectory() ? 0o700 : 0o600
-    await sftpChmod(sftp, remote, fields.mode | keep)
-    if ((fields.mode | keep) !== fields.mode) residual.mode = fields.mode
+    const mode = fields.mode | (st.isDirectory() ? 0o700 : 0o600)
+    await sftpCall((done) => {
+      sftp.chmod(remote, mode, done)
+    })
+    if (mode !== fields.mode) residual.mode = fields.mode
   }
   if (fields.uid !== undefined) residual.uid = fields.uid
   if (fields.gid !== undefined) residual.gid = fields.gid
@@ -85,7 +59,9 @@ export async function setAttrs(
       fields.atime !== undefined ? Math.floor(Date.parse(fields.atime) / 1000) : st.atime
     const newMtime =
       fields.mtime !== undefined ? Math.floor(Date.parse(fields.mtime) / 1000) : st.mtime
-    await sftpUtimes(sftp, remote, newAtime, newMtime)
+    await sftpCall((done) => {
+      sftp.utimes(remote, newAtime, newMtime, done)
+    })
   }
   return residual
 }

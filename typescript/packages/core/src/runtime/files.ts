@@ -27,8 +27,8 @@ import {
   posixMode,
 } from '../utils/stat_view.ts'
 import { ABSENT_PATH, LISTING_ENTRY_CONCURRENCY } from './constants.ts'
-import { normDir, rstripSlash } from '../utils/slash.ts'
-import { CycleError, resolvePath } from '../utils/path.ts'
+import { rstripSlash } from '../utils/slash.ts'
+import { CycleError, normDir, resolvePath } from '../utils/path.ts'
 import { READ_CHUNK } from './handles/constants.ts'
 import type { OpenMode } from './handles/index.ts'
 import { MountCore } from '../mount/core.ts'

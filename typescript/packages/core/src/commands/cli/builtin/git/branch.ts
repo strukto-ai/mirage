@@ -119,7 +119,6 @@ import { GLOB_CHARS } from '../../../../utils/glob_walk.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
-const NEWLINE = 0x0a
 const REMOTE = 'remotes/'
 const AUTO_SETUP_MERGE = 'branch.autosetupmerge'
 const TRACK_WORDS: ReadonlyMap<string, Track> = new Map([
@@ -321,7 +320,7 @@ export async function setUpTracking(
     ['remote', remote],
     ...merges.map((merge): [string, string] => ['merge', merge]),
   ])
-  const tail = data.length && data[data.length - 1] !== NEWLINE ? '\n' : ''
+  const tail = data.length && data[data.length - 1] !== 0x0a ? '\n' : ''
   await writeFile(repo.vfs, path, new Uint8Array([...data, ...ENC.encode(tail + section)]))
   const labels = merges.map((merge) => `${prefix}${merge.replace(/^refs\/heads\//, '')}`)
   if (labels.length === 1) return [`branch '${branch}' set up to track '${labels[0] ?? ''}'.\n`, '']

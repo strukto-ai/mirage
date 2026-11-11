@@ -15,7 +15,6 @@ import pytest
 
 from mirage.commands.builtin.generic.cmp import (
     CmpFlags,
-    cmp_cmd,
     cmp_generic,
     parse_flags,
 )
@@ -125,10 +124,10 @@ def test_n_leaves_the_value_unescaped(value):
     )
 
 
-async def _cmp(paths, texts, flags=None, **kwargs):
+async def _cmp(paths, texts, flags, *, stream, stdin=None):
     parsed = _flags(flags or {}, tuple(texts))
-    return await cmp_cmd(
-        paths, texts, skip=parsed.skip, limit=parsed.limit, **kwargs
+    return await cmp_generic(
+        parsed, paths, list(texts), Context(stdin=stdin), stream
     )
 
 
@@ -232,7 +231,9 @@ async def test_a_difference_stops_the_reads():
         P1.virtual: [b"ab\nc", b"d", b"never"],
         P2.virtual: [b"ab", b"\ncX", b"never"],
     }
-    src, io = await cmp_cmd([P1, P2], stream=_chunked(files, pulled))
+    src, io = await cmp_generic(
+        CmpFlags(), [P1, P2], [], Context(), _chunked(files, pulled)
+    )
     assert (await materialize(src), io.exit_code) == (
         b"/F/one /F/two differ: char 5, line 2\n",
         1,
@@ -252,7 +253,9 @@ async def test_a_difference_stops_the_reads():
 )
 async def test_a_shorter_file_ends_the_streamed_compare(first, second, err):
     files = {P1.virtual: first, P2.virtual: second}
-    src, io = await cmp_cmd([P1, P2], stream=_chunked(files, []))
+    src, io = await cmp_generic(
+        CmpFlags(), [P1, P2], [], Context(), _chunked(files, [])
+    )
     assert src is None
     assert (await materialize(io.stderr), io.exit_code) == (
         f"cmp: EOF on /F/one {err}\n".encode(),
@@ -279,12 +282,13 @@ async def test_s_answers_from_the_sizes_when_they_differ(
     async def size_of(path: PathSpec) -> int | None:
         return sizes[0] if path.virtual == P1.virtual else sizes[1]
 
-    src, io = await cmp_cmd(
+    src, io = await cmp_generic(
+        CmpFlags(silent=True, limit=limit),
         [P1, P2],
-        stream=_chunked(files, pulled),
-        size_of=size_of,
-        silent=True,
-        limit=limit,
+        [],
+        Context(),
+        _chunked(files, pulled),
+        size_of,
     )
     assert (src, io.exit_code, bool(pulled)) == (None, code, read)
 

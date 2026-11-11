@@ -24,9 +24,6 @@ from mirage.commands.spec.compile import (
 from mirage.commands.spec.constants import ARG_PLACEHOLDER
 from mirage.commands.spec.types import Argument, CommandSpec, UsageStyle
 
-# (name, one-line help) rows a CLI group passes for its children.
-SubcommandRows = Sequence[tuple[str, str]]
-
 
 def option_metavar(opt: Argument) -> str:
     """The bare name of an option's value, declared or derived.
@@ -138,7 +135,7 @@ def _slot(operand: Argument) -> str:
 def usage_line(
     name: str,
     spec: CommandSpec,
-    subcommands: SubcommandRows,
+    subcommands: Sequence[tuple[str, str]],
     style: UsageStyle,
     synopsis: str | None = None,
 ) -> str:
@@ -151,7 +148,7 @@ def usage_line(
     Args:
         name (str): command name as invoked.
         spec (CommandSpec): the node's grammar.
-        subcommands (SubcommandRows): child rows, empty for a leaf.
+        subcommands (Sequence[tuple[str, str]]): child rows, empty for a leaf.
         style (UsageStyle): the dialect.
     """
     if synopsis is not None:
@@ -190,7 +187,7 @@ def usage_line(
 def render_help(
     name: str,
     spec: CommandSpec,
-    subcommands: SubcommandRows = (),
+    subcommands: Sequence[tuple[str, str]] = (),
     style: UsageStyle = UsageStyle.ARGPARSE,
     synopsis: str | None = None,
 ) -> str:
@@ -201,7 +198,7 @@ def render_help(
         name (str): command name as invoked (a CLI group passes its full
             display path, e.g. "gws gmail").
         spec (CommandSpec): the node's grammar.
-        subcommands (SubcommandRows): (name, one-line help)
+        subcommands (Sequence[tuple[str, str]]): (name, one-line help)
             rows for a CLI group node; when given, the usage line reads
             ``<command> [<args>]`` instead of the operand slots.
         style (UsageStyle): whose help layout to render. clap heads the
@@ -281,7 +278,10 @@ def clap_unexpected_argument(token: str) -> str:
 
 
 def clap_group_refusal(
-    name: str, spec: CommandSpec, subcommands: SubcommandRows, message: str
+    name: str,
+    spec: CommandSpec,
+    subcommands: Sequence[tuple[str, str]],
+    message: str,
 ) -> bytes:
     """A group-level refusal in clap's shape: message, usage, footer.
 
@@ -294,7 +294,7 @@ def clap_group_refusal(
     Args:
         name (str): display path walked so far, e.g. "ntn pages".
         spec (CommandSpec): the node as the renderer lists it.
-        subcommands (SubcommandRows): child rows, which decide whether
+        subcommands (Sequence[tuple[str, str]]): child rows, which decide whether
             the usage line carries a ``<COMMAND>`` slot.
         message (str): the first line, already worded.
     """
@@ -305,7 +305,7 @@ def clap_group_refusal(
 
 
 def argparse_parts(
-    name: str, spec: CommandSpec, subcommands: SubcommandRows = ()
+    name: str, spec: CommandSpec, subcommands: Sequence[tuple[str, str]] = ()
 ) -> tuple[str, list[tuple[str, str]], list[tuple[str, str]]]:
     """The usage line and the operand and option rows of a CLI's
     argparse-shaped help, before they are laid out.
@@ -314,7 +314,7 @@ def argparse_parts(
         name (str): Installed command and canonical subcommand path.
         spec (CommandSpec): Argument grammar for this node; group
             options are listed on their group.
-        subcommands (SubcommandRows): Visible immediate subcommands.
+        subcommands (Sequence[tuple[str, str]]): Visible immediate subcommands.
     """
     compiled = compile_spec(spec)
     usage = [name]
@@ -369,7 +369,7 @@ def argparse_parts(
 
 
 def argparse_help(
-    name: str, spec: CommandSpec, subcommands: SubcommandRows = ()
+    name: str, spec: CommandSpec, subcommands: Sequence[tuple[str, str]] = ()
 ) -> str:
     """Human-readable CLI help from the declared argparse-shaped grammar.
 
@@ -377,7 +377,7 @@ def argparse_help(
         name (str): Installed command and canonical subcommand path.
         spec (CommandSpec): Argument grammar for this node; group
             options are listed on their group.
-        subcommands (SubcommandRows): Visible immediate subcommands.
+        subcommands (Sequence[tuple[str, str]]): Visible immediate subcommands.
     """
     usage, operands, rows = argparse_parts(name, spec, subcommands)
     lines = [usage]

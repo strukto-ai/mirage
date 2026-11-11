@@ -118,11 +118,11 @@ async def dropbox_auth_headers(tm: DropboxTokenManager) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _rpc_error(
-    resp: aiohttp.ClientResponse, text: str, *, endpoint: str
+def _error_of(
+    resp: aiohttp.ClientResponse, text: str, *, label: str
 ) -> Exception:
     return DropboxApiError(
-        f"Dropbox POST {endpoint} → {resp.status} {text}",
+        f"Dropbox {label} → {resp.status} {text}",
         resp.status,
         summary_of(text),
     )
@@ -136,22 +136,12 @@ async def dropbox_rpc(
     data: dict[str, Any] = await api_request(
         "POST",
         f"{tm.api_base}{endpoint}",
-        error_of=partial(_rpc_error, endpoint=endpoint),
+        error_of=partial(_error_of, label=f"POST {endpoint}"),
         headers=await dropbox_auth_headers(tm),
         json_body=body,
         session=tm.pool,
     )
     return data
-
-
-def _upload_error(
-    resp: aiohttp.ClientResponse, text: str, *, path: str
-) -> Exception:
-    return DropboxApiError(
-        f"Dropbox upload {path} → {resp.status} {text}",
-        resp.status,
-        summary_of(text),
-    )
 
 
 async def dropbox_upload(
@@ -192,7 +182,7 @@ async def dropbox_upload(
     resp = await api_request(
         "POST",
         f"{tm.content_base}/files/upload",
-        error_of=partial(_upload_error, path=path),
+        error_of=partial(_error_of, label=f"upload {path}"),
         headers=headers,
         data=data,
         read="response",
@@ -200,16 +190,6 @@ async def dropbox_upload(
     )
     reply: JsonValue = resp.data
     return reply
-
-
-def _download_error(
-    resp: aiohttp.ClientResponse, text: str, *, path: str
-) -> Exception:
-    return DropboxApiError(
-        f"Dropbox download {path} → {resp.status} {text}",
-        resp.status,
-        summary_of(text),
-    )
 
 
 async def dropbox_download(
@@ -231,7 +211,7 @@ async def dropbox_download(
     resp: ApiResponse = await api_request(
         "POST",
         f"{tm.content_base}/files/download",
-        error_of=partial(_download_error, path=path),
+        error_of=partial(_error_of, label=f"download {path}"),
         headers=headers,
         read="bytes_response",
         window=window,
@@ -285,7 +265,7 @@ async def _session_request(
     return await api_request(
         "POST",
         f"{tm.content_base}/files/upload_session/{action}",
-        error_of=partial(_upload_error, path=path),
+        error_of=partial(_error_of, label=f"upload {path}"),
         headers={
             **await dropbox_auth_headers(tm),
             "Content-Type": "application/octet-stream",

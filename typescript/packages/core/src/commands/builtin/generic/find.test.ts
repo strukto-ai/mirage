@@ -14,7 +14,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { runWithCacheManager } from '../../../cache/context.ts'
-import type { FindOptions } from '../../../core/generic/find.ts'
+import type { FindArgs } from '../../../core/generic/types.ts'
 import { modifiedTs, walkFind } from '../../../core/generic/find.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { SessionProfile } from '../../../policy/profile.ts'
@@ -51,7 +51,7 @@ function spec(p: string): PathSpec {
 }
 
 // eslint-disable-next-line @typescript-eslint/require-await -- a walk that fails before its first row
-async function* fakeFind(root: PathSpec, _options: FindOptions): AsyncGenerator<string> {
+async function* fakeFind(root: PathSpec, _options: FindArgs): AsyncGenerator<string> {
   if (root.virtual === '/missing') throw enoent(root.virtual)
   if (root.virtual === '/limited') throw new Error('rate limited')
   yield '/found.txt'
@@ -64,7 +64,7 @@ async function* walked(...rows: string[]): AsyncGenerator<string> {
 
 // The real walk over a listing that must not be read.
 function unlisted(stat: FileStat) {
-  return (root: PathSpec, options: FindOptions) =>
+  return (root: PathSpec, options: FindArgs) =>
     walkFind(
       root,
       {

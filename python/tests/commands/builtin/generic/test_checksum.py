@@ -16,12 +16,16 @@ import hashlib
 
 import pytest
 
-from mirage.commands.builtin.generic.checksum import checksum
+from mirage.commands.builtin.generic.checksum import (
+    ChecksumFlags,
+    checksum_generic,
+)
+from mirage.commands.config import Context
 from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.types import materialize
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.stream import OpenStream
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 
 _DIGEST = hashlib.md5(b"abc").hexdigest()
 
@@ -33,34 +37,39 @@ def _spec(path: str) -> PathSpec:
 
 
 def _fs(files: dict[str, str]):
-    async def read_bytes(p: PathSpec) -> bytes:
-        if p.virtual not in files:
-            raise FileNotFoundError(p.virtual)
-        return files[p.virtual].encode()
-
     async def read_stream(p: PathSpec):
         assert isinstance(p, PathSpec)
         if p.virtual not in files:
             raise FileNotFoundError(p.virtual)
         yield files[p.virtual].encode()
 
-    return read_bytes, read_stream
+    return read_stream
+
+
+async def _a_file(p: PathSpec) -> FileStat:
+    return FileStat(name=p.virtual, type=FileType.FILE)
+
+
+async def _checksum(paths, stream, stored=None, **flags):
+    return await checksum_generic(
+        ChecksumFlags(**flags),
+        paths,
+        [],
+        Context(),
+        _a_file,
+        stream,
+        name="md5sum",
+        stored=stored,
+    )
 
 
 async def _run_check(
-    files: dict[str, str],
-    cwd: str = "/",
-    paths: list[str] | None = None,
-    **flags: bool,
+    files: dict[str, str], paths: list[str] | None = None, **flags: bool
 ) -> tuple[str, str, int]:
-    read_bytes, read_stream = _fs(files)
-    out, io = await checksum(
+    out, io = await _checksum(
         [_spec(p) for p in (paths or ["/sums.txt"])],
-        algorithm="md5",
-        read_list=read_bytes,
-        read_stream=read_stream,
+        _fs(files),
         check=True,
-        cwd=cwd,
         **flags,
     )
     stdout = out.decode() if isinstance(out, bytes) else ""
@@ -129,21 +138,13 @@ async def test_a_list_line_too_long_to_hold_is_that_lists_read_error(
 
 @pytest.mark.asyncio
 async def test_non_fs_read_failure_propagates():
-    async def read_bytes(p: PathSpec) -> bytes:
-        return b"5aabc000000000000000000000000000  /f.txt\n"
-
-    async def read_stream(p: PathSpec):
-        raise RuntimeError("S3 GET f failed: 403 Forbidden")
-        yield b""
+    async def stream(p: PathSpec):
+        if p.virtual == "/f.txt":
+            raise RuntimeError("S3 GET f failed: 403 Forbidden")
+        yield b"5aabc000000000000000000000000000  /f.txt\n"
 
     with pytest.raises(RuntimeError, match="403 Forbidden"):
-        await checksum(
-            [_spec("/sums.txt")],
-            algorithm="md5",
-            read_list=read_bytes,
-            read_stream=read_stream,
-            check=True,
-        )
+        await _checksum([_spec("/sums.txt")], stream, check=True)
 
 
 @pytest.mark.asyncio
@@ -159,14 +160,7 @@ async def test_a_stored_digest_stands_in_for_the_read():
         asked.append((p.virtual, algorithm))
         return "f" * 32 if p.virtual == "/a" else None
 
-    read_bytes, _ = _fs({})
-    out, io = await checksum(
-        [_spec("/a"), _spec("/b")],
-        algorithm="md5",
-        read_list=read_bytes,
-        read_stream=read_stream,
-        stored=stored,
-    )
+    out, io = await _checksum([_spec("/a"), _spec("/b")], read_stream, stored)
     got = b"".join([chunk async for chunk in out])
     assert got == f"{'f' * 32}  /a\n{_DIGEST}  /b\n".encode()
     assert asked == [("/a", "md5"), ("/b", "md5")]
@@ -185,27 +179,17 @@ async def _stored_but_b(p: PathSpec, algorithm: str) -> str | None:
 
 @pytest.mark.asyncio
 async def test_check_reads_the_bytes_and_asks_no_stored_digest():
-    read_bytes, read_stream = _fs({"/list": f"{_DIGEST}  /f\n", "/f": "abc"})
-    out, io = await checksum(
-        [_spec("/list")],
-        algorithm="md5",
-        read_list=read_bytes,
-        read_stream=read_stream,
-        check=True,
-        stored=_never_stored,
+    read_stream = _fs({"/list": f"{_DIGEST}  /f\n", "/f": "abc"})
+    out, io = await _checksum(
+        [_spec("/list")], read_stream, _never_stored, check=True
     )
     assert (out, io.exit_code) == (b"/f: OK\n", 0)
 
 
 @pytest.mark.asyncio
 async def test_a_failed_stored_digest_is_reported_and_the_rest_hash():
-    read_bytes, read_stream = _fs({})
-    out, io = await checksum(
-        [_spec("/a"), _spec("/b"), _spec("/c")],
-        algorithm="md5",
-        read_list=read_bytes,
-        read_stream=read_stream,
-        stored=_stored_but_b,
+    out, io = await _checksum(
+        [_spec("/a"), _spec("/b"), _spec("/c")], _fs({}), _stored_but_b
     )
     got = b"".join([chunk async for chunk in out])
     assert got == f"{'f' * 32}  /a\n{'f' * 32}  /c\n".encode()
@@ -217,20 +201,19 @@ async def test_a_failed_stored_digest_is_reported_and_the_rest_hash():
 async def test_check_list_larger_than_the_memory_budget_is_streamed():
     chunk = b" " * 16383 + b"\n"
 
-    async def read_list(path):
+    async def stream(path):
+        if path.virtual == "/f":
+            yield b"x"
+            return
         for _ in range(2176):
             yield chunk
         yield b"2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881  /f\n"
 
-    async def read_stream(path):
-        yield b"x"
-
     async def run():
-        out, io = await checksum(
+        out, io = await _checksum(
             [PathSpec.from_str_path("/sums")],
+            stream,
             algorithm="sha256",
-            read_list=read_list,
-            read_stream=read_stream,
             check=True,
         )
         assert await materialize(out) == b"/f: OK\n"

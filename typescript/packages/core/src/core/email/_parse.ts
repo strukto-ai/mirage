@@ -20,16 +20,6 @@ import type {
   simpleParser,
 } from 'mailparser'
 
-interface ParsedAttachment {
-  filename: string
-  content_type: string
-  size: number
-}
-
-interface ParsedAttachmentWithPayload extends ParsedAttachment {
-  payload: Uint8Array
-}
-
 let parserPromise: Promise<typeof simpleParser> | null = null
 
 async function getParser(): Promise<typeof simpleParser> {
@@ -42,17 +32,17 @@ async function getParser(): Promise<typeof simpleParser> {
   return parserPromise
 }
 
-export function toAddr(a: MailparserEmailAddress | undefined) {
+function parseAddress(a: MailparserEmailAddress | undefined) {
   if (a === undefined) return { name: '', email: '' }
   return { name: a.name, email: a.address ?? '' }
 }
 
-function toAddrList(
+function parseAddressList(
   list: AddressObject | AddressObject[] | undefined,
-): ReturnType<typeof toAddr>[] {
+): ReturnType<typeof parseAddress>[] {
   if (list === undefined) return []
   const objs = Array.isArray(list) ? list : [list]
-  return objs.flatMap((obj) => obj.value.map((a) => toAddr(a)))
+  return objs.flatMap((obj) => obj.value.map((a) => parseAddress(a)))
 }
 
 // The rendered date must be the raw Date header text (python serves the
@@ -64,7 +54,9 @@ function rawDateHeader(parsed: ParsedMail): string {
   return colon === -1 ? '' : found.line.slice(colon + 1).trim()
 }
 
-export function fromParsed(parsed: ParsedMail, headersOnly: boolean) {
+export async function parseRfc822(raw: Uint8Array, headersOnly = false) {
+  const parser = await getParser()
+  const parsed = await parser(Buffer.from(raw), { skipHtmlToText: false })
   const text = headersOnly ? '' : (parsed.text ?? '')
   const html = headersOnly ? '' : typeof parsed.html === 'string' ? parsed.html : ''
   const attachments = headersOnly
@@ -78,10 +70,10 @@ export function fromParsed(parsed: ParsedMail, headersOnly: boolean) {
   const references =
     typeof refsRaw === 'string' ? refsRaw.split(/\s+/).filter((s) => s !== '') : (refsRaw ?? [])
   return {
-    from: toAddr(parsed.from?.value[0]),
-    reply_to: toAddrList(parsed.replyTo),
-    to: toAddrList(parsed.to),
-    cc: toAddrList(parsed.cc),
+    from: parseAddress(parsed.from?.value[0]),
+    reply_to: parseAddressList(parsed.replyTo),
+    to: parseAddressList(parsed.to),
+    cc: parseAddressList(parsed.cc),
     subject: parsed.subject ?? '',
     date: rawDateHeader(parsed),
     body_text: text,
@@ -97,13 +89,7 @@ export function fromParsed(parsed: ParsedMail, headersOnly: boolean) {
   }
 }
 
-export async function parseRfc822(raw: Uint8Array, headersOnly = false) {
-  const parser = await getParser()
-  const parsed = await parser(Buffer.from(raw), { skipHtmlToText: false })
-  return fromParsed(parsed, headersOnly)
-}
-
-export async function parseWithPayloads(raw: Uint8Array): Promise<ParsedAttachmentWithPayload[]> {
+export async function parseWithPayloads(raw: Uint8Array) {
   const parser = await getParser()
   const parsed = await parser(Buffer.from(raw))
   return parsed.attachments.map((a) => ({

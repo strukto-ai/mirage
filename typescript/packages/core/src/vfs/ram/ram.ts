@@ -22,7 +22,7 @@ import { RAMFiles, RAMStore, type RAMAttrs } from './store.ts'
 import type { CapacityResult, PathSpec, FileStat, SetAttrFields } from '../../types.ts'
 import type { Handed } from '../types.ts'
 import { readdir as ramReaddir } from '../../core/ram/readdir.ts'
-import { read as devAwareRead, readRange as devAwareReadRange } from '../../core/dev/read.ts'
+import { read as devAwareRead } from '../../core/dev/read.ts'
 import { stat as devAwareStat } from '../../core/dev/stat.ts'
 import { exists as ramExists } from '../../core/ram/exists.ts'
 import { write as ramWrite } from '../../core/ram/write.ts'
@@ -101,8 +101,7 @@ export class RAMVFS extends BaseVFS {
     size: number | null = null,
     signal?: AbortSignal,
   ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
-    if (offset === 0 && size === null) return devAwareRead(this.accessor, path, signal)
-    return devAwareReadRange(this.accessor, path, offset, size, signal)
+    return devAwareRead(this.accessor, path, offset, size, signal)
   }
 
   override stat(path: PathSpec): Promise<FileStat> {

@@ -14,24 +14,8 @@
 
 import type { DatabricksVolumeConfig } from '../../vfs/databricks_volume/config.ts'
 import { PathSpec } from '../../types.ts'
+import { posixNormpath } from '../../utils/path.ts'
 import { stripSlash, rstripSlash } from '../../utils/slash.ts'
-
-export function normalizePosix(path: string): string {
-  const absolute = path.startsWith('/')
-  const out: string[] = []
-  for (const part of path.split('/')) {
-    if (part === '' || part === '.') continue
-    if (part === '..') {
-      if (out.length > 0 && out[out.length - 1] !== '..') out.pop()
-      else if (!absolute) out.push('..')
-      continue
-    }
-    out.push(part)
-  }
-  const joined = out.join('/')
-  if (absolute) return '/' + joined
-  return joined === '' ? '.' : joined
-}
 
 export function volumeRoot(config: DatabricksVolumeConfig): string {
   return `/Volumes/${config.catalog}/${config.schema}/${config.volume}`
@@ -45,23 +29,23 @@ function assertInsideRoot(root: string, path: string, message: string): void {
 export function configuredRoot(config: DatabricksVolumeConfig): string {
   const rootRelative = stripSlash(config.rootPath)
   if (rootRelative !== '') {
-    return normalizePosix(`${volumeRoot(config)}/${rootRelative}`)
+    return posixNormpath(`${volumeRoot(config)}/${rootRelative}`)
   }
-  return normalizePosix(volumeRoot(config))
+  return posixNormpath(volumeRoot(config))
 }
 
 export function backendPath(config: DatabricksVolumeConfig, path: PathSpec | string): string {
   const raw = path instanceof PathSpec ? path.mountPath : path
   const relative = stripSlash(raw)
   const root = configuredRoot(config)
-  const remotePath = normalizePosix(relative !== '' ? `${root}/${relative}` : root)
+  const remotePath = posixNormpath(relative !== '' ? `${root}/${relative}` : root)
   assertInsideRoot(root, remotePath, `path escapes Databricks volume root: ${raw}`)
   return remotePath
 }
 
 export function virtualPath(config: DatabricksVolumeConfig, backend: string, prefix = ''): string {
   const root = configuredRoot(config)
-  const remotePath = normalizePosix(backend)
+  const remotePath = posixNormpath(backend)
   assertInsideRoot(root, remotePath, `backend path is outside Databricks volume root: ${backend}`)
   const relative = stripSlash(remotePath === root ? '' : remotePath.slice(root.length))
   const path = relative !== '' ? '/' + relative : '/'

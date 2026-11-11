@@ -40,7 +40,7 @@ LOCK_STALE_SECONDS = 10.0
 LOCK_RETRY_SLEEP = 0.005
 LOCK_RETRY_LIMIT = 2000
 
-_TMP_COUNTER = count()
+_tmp_counter = count()
 
 
 def _acquire_lock(lock_path: str) -> int | None:
@@ -225,7 +225,7 @@ class DiskRecordClient:
         await _release_owned(fd, self.path(name) + ".lock")
 
     async def _write_record(self, path: str, fields: dict[str, Any]) -> None:
-        tmp = f"{path}.{os.getpid()}.{next(_TMP_COUNTER)}.tmp"
+        tmp = f"{path}.{os.getpid()}.{next(_tmp_counter)}.tmp"
         async with aiofiles.open(tmp, "wb") as f:
             await f.write(json.dumps(fields).encode())
             await f.flush()

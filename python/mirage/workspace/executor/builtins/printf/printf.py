@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from contextlib import aclosing
 
 from mirage.commands.spec.usage import usage_hint
-from mirage.context import program_invocation
+from mirage.context import is_program_invocation
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.policy import PolicyDenied
@@ -88,7 +88,7 @@ async def handle_printf(
         diagnostics (list[str | bytes] | None): where the ``-v`` write's
             warnings go (a ``RANDOM`` seed that does not evaluate).
     """
-    program = program_invocation(session)
+    program = is_program_invocation(session)
     target: str | None = None
     parsed: re.Match[str] | None = None
     if len(args) >= 2 and args[0] == "-v" and not program:

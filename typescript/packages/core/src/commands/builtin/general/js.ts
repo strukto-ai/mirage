@@ -22,7 +22,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { execRefusal, notBound, runInterpreter, runtimeVersion } from './interpreter.ts'
 
-function js(
+function jsCommand(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
@@ -52,7 +52,7 @@ export const GENERAL_JS = command({
   vfs: null,
   spec: specOf('js'),
   write: true,
-  fn: js,
+  fn: jsCommand,
 })
 
 export const node = command({
@@ -60,5 +60,5 @@ export const node = command({
   vfs: null,
   spec: specOf('node'),
   write: true,
-  fn: js,
+  fn: jsCommand,
 })

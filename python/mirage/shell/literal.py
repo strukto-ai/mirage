@@ -25,10 +25,6 @@ class LiteralNode:
         return self.children
 
     @property
-    def child_count(self) -> int:
-        return len(self.children)
-
-    @property
     def end_byte(self) -> int:
         return self.start_byte + len(self.text)
 

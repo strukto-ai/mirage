@@ -14,7 +14,7 @@
 
 import { CapacityState, type CapacityResult } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { joinRoot } from './utils.ts'
+import { joinRoot, sftpCall } from './utils.ts'
 
 /**
  * The space of the filesystem the mount's root sits on, for df, from the
@@ -36,11 +36,8 @@ export async function capacity(accessor: SSHAccessor): Promise<CapacityResult> {
     number | bigint
   >
   try {
-    st = await new Promise<typeof st>((resolveFn, rejectFn) => {
-      sftp.ext_openssh_statvfs(remote, (err, info: typeof st) => {
-        if (err !== undefined) rejectFn(err)
-        else resolveFn(info)
-      })
+    st = await sftpCall<typeof st>((done) => {
+      sftp.ext_openssh_statvfs(remote, done)
     })
   } catch (error) {
     console.debug(`ssh statvfs unanswered: ${String(error)}`)

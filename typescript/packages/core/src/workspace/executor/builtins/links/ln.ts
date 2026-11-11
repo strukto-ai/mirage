@@ -18,7 +18,6 @@ import {
   absentDestError,
   dispatchStat,
   dotRefusal,
-  resolvePathStat,
 } from '../../../../commands/builtin/utils/paths.ts'
 import { UsageError } from '../../../../commands/errors.ts'
 import { specOf } from '../../../../commands/spec/builtins.ts'
@@ -60,7 +59,12 @@ import { rstripSlash } from '../../../../utils/slash.ts'
 import type { NamespaceLinks } from '../../../../view/types.ts'
 import type { NamespaceReader } from '../../../dispatcher/reader.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
-import { linkTargetStat, missCondition, pathReaddir } from '../../../mount/namespace/probe.ts'
+import {
+  linkTargetStat,
+  missCondition,
+  pathReaddir,
+  pathStat,
+} from '../../../mount/namespace/probe.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { absPath, fail, result } from '../shared.ts'
 import { posixRelative } from './links.ts'
@@ -195,10 +199,6 @@ export function operandWords(
     i += 1
   }
   return [operands, targetTyped]
-}
-
-async function pathStat(dispatch: DispatchFn, virtual: string): Promise<FileStat | null> {
-  return await resolvePathStat(dispatch, PathSpec.fromStrPath(virtual))
 }
 
 // What a destination operand names once links are resolved. GNU

@@ -21,17 +21,16 @@ import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
 import { enoent } from '../../errors/fs.ts'
 
-const DEFAULT_CHUNK_SIZE = 8192
-
 export async function* readStream(
   accessor: DatabricksVolumeAccessor,
   path: PathSpec,
+  chunkSize = 8192,
 ): AsyncIterable<Uint8Array> {
   const virtual = path.virtual
   const remotePath = backendPath(accessor.config, path)
   const rec = recordStream('read', virtual, VFSName.DATABRICKS_VOLUME)
   try {
-    for await (const piece of rechunk(downloadStream(accessor, remotePath), DEFAULT_CHUNK_SIZE)) {
+    for await (const piece of rechunk(downloadStream(accessor, remotePath), chunkSize)) {
       if (rec !== null) rec.bytes += piece.byteLength
       yield piece
     }

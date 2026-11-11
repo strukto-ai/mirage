@@ -13,13 +13,12 @@ async def _read(stream: AsyncIterator[bytes]) -> bytes:
 
 
 @pytest.mark.asyncio
-async def test_input_counts_what_its_reader_consumed():
+async def test_input_hands_its_reader_what_was_written():
     pipe = ProcessInput()
     reader = asyncio.ensure_future(_read(pipe.stream()))
     await pipe.write(b"x" * 200000)
     pipe.close()
     assert await reader == b"x" * 200000
-    assert pipe.bytes_read == 200000
 
 
 @pytest.mark.asyncio

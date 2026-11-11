@@ -24,7 +24,7 @@ from mirage.cache.index.scope import command_scope
 from mirage.concurrency.limiter import shallow
 from mirage.context import (
     current_caller,
-    program_invocation,
+    is_program_invocation,
     redirect_paths_for,
     redirect_runner_for,
     reset_current_session,
@@ -109,8 +109,8 @@ from mirage.workspace.executor.builtins.shared import (
     result,
 )
 from mirage.workspace.executor.control import (
-    UNWINDING,
     LoopSignal,
+    Unwinding,
     execute_body,
     handle_case,
     handle_cfor,
@@ -944,7 +944,7 @@ async def execute_node(
                 context.frame.diagnostics = outer
                 context.frame.reports = outer_reports
         return process_subs.own(stdout, io, exec_node), io, exec_node
-    except UNWINDING as sig:
+    except Unwinding as sig:
         # `exit`, `return` or `break` ends the node as its last command
         # did: output consumers finish, rather than being cut off.
         await trailed(sig, *await process_subs.settle())
@@ -1119,7 +1119,7 @@ async def _fork_subshell(
         handed=handed,
     )
     child = child_context(context)
-    as_program = program_invocation(session)
+    as_program = is_program_invocation(session)
     results: list[tuple[ByteSource | None, IOResult, ExecutionNode]] = []
 
     async def run_subshell() -> int:

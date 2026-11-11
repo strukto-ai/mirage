@@ -123,6 +123,7 @@ from mirage.workspace.executor.find_action_dispatch import (
 )
 from mirage.workspace.executor.find_refs import resolve_newer_refs
 from mirage.workspace.expand.globs import glob_options, resolve_globs
+from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.files import Files
 from mirage.workspace.lookup import (
     JOB_BUILTINS,
@@ -144,7 +145,7 @@ from mirage.workspace.mount.namespace.probe import path_stat
 from mirage.workspace.mount.storage import make_check_unlink, make_storage_key
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import env_snapshot, session_view
-from mirage.workspace.types import ExecuteLine, ExecutionNode
+from mirage.workspace.types import ExecutionNode
 
 # One handler per JOB_BUILTINS member but ps, which also takes the
 # workspace user; lookup already narrowed the name.
@@ -214,7 +215,7 @@ async def _finish_find(
     expr: FindExpr,
     registry: MountRegistry,
     context: EvaluationContext,
-    execute_fn: ExecuteLine | None,
+    execute_fn: ExecuteFn | None,
     vfs: Files | None,
     stat_path: StatPath | None,
     dispatch: DispatchFn,
@@ -236,7 +237,7 @@ async def _finish_find(
         expr (FindExpr): the parsed expression.
         registry (MountRegistry): used to route per-match dispatch.
         context (EvaluationContext): the session the line runs under.
-        execute_fn (ExecuteLine | None): runs an ``-exec`` line.
+        execute_fn (ExecuteFn | None): runs an ``-exec`` line.
         vfs (Files | None): the name plane's facts.
         stat_path (StatPath | None): dispatcher stat.
         dispatch (DispatchFn): the op dispatcher every matched row is
@@ -374,7 +375,7 @@ async def _bound_find(
     registry: MountRegistry,
     dispatch: DispatchFn,
     namespace: Namespace | None,
-    execute_fn: ExecuteLine | None,
+    execute_fn: ExecuteFn | None,
     view: SessionView,
     stdin: ByteSource | None,
 ) -> FindExpr | tuple[ByteSource | None, IOResult, ExecutionNode]:
@@ -387,7 +388,7 @@ async def _bound_find(
         registry (MountRegistry): registry holding the mounts.
         dispatch (DispatchFn): the command's op dispatcher.
         namespace (Namespace | None): the mount table and links.
-        execute_fn (ExecuteLine | None): runs a line in the session.
+        execute_fn (ExecuteFn | None): runs a line in the session.
         view (SessionView): the session plane's view.
         stdin (ByteSource | None): the line's input.
 
@@ -464,7 +465,7 @@ async def _run_cross_mount(
     registry: MountRegistry,
     dispatch: DispatchFn,
     namespace: Namespace | None,
-    execute_fn: ExecuteLine | None,
+    execute_fn: ExecuteFn | None,
     files: Files,
     view: SessionView,
     follow: FollowOperands | None,
@@ -485,7 +486,7 @@ async def _run_cross_mount(
         registry (MountRegistry): registry holding the mounts.
         dispatch (DispatchFn): the command's op dispatcher.
         namespace (Namespace | None): the mount table and links.
-        execute_fn (ExecuteLine | None): runs a line in the session.
+        execute_fn (ExecuteFn | None): runs a line in the session.
         files (Files): the session's files, made by the command.
         view (SessionView): the session plane's view.
         follow (FollowOperands | None): the line's operand resolution.
@@ -667,7 +668,7 @@ async def _run_single_mount(
     registry: MountRegistry,
     dispatch: DispatchFn,
     namespace: Namespace | None,
-    execute_fn: ExecuteLine | None,
+    execute_fn: ExecuteFn | None,
     files: Files,
     view: SessionView,
     follow: FollowOperands | None,
@@ -688,7 +689,7 @@ async def _run_single_mount(
         registry (MountRegistry): registry holding the mounts.
         dispatch (DispatchFn): the command's op dispatcher.
         namespace (Namespace | None): the mount table and links.
-        execute_fn (ExecuteLine | None): runs a line in the session.
+        execute_fn (ExecuteFn | None): runs a line in the session.
         files (Files): the session's files, made by the command.
         view (SessionView): the session plane's view.
         follow (FollowOperands | None): the line's operand resolution.
@@ -984,7 +985,7 @@ async def handle_command(
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
     namespace: Namespace | None = None,
-    execute_fn: ExecuteLine | None = None,
+    execute_fn: ExecuteFn | None = None,
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:

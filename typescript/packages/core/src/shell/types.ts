@@ -428,7 +428,6 @@ export interface ShellNode extends TSNodeLike {
   readonly endIndex: number
   readonly startPosition: { row: number; column: number }
   readonly endPosition: { row: number; column: number }
-  readonly childCount: number
   readonly children: ShellNode[]
   readonly namedChildren: ShellNode[]
   readonly parent: ShellNode | null

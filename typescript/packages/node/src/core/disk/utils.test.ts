@@ -17,7 +17,8 @@ import { chmod, mkdir, realpath, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { spec, tmpRoot } from '../../../tests/test-utils.ts'
-import { basename, norm, parent, resolveInside, resolveSafe } from './utils.ts'
+import { gnuBasename as basename, norm, parent } from '@struktoai/mirage-core/utils/path'
+import { resolveInside, resolveSafe } from './utils.ts'
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof fs>()

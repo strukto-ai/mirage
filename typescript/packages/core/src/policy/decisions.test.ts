@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { Decisions, askRule, covers, decisionId, encloses } from './decisions.ts'
+import { Decisions, askRule, covers, decisionId } from './decisions.ts'
 import { Outcome, Scope } from './types.ts'
 import type {
   Ask,
@@ -379,16 +379,6 @@ describe('decisions', () => {
     expect(ledger.list('s')).toHaveLength(1)
     await ledger.answer(ledger.pending('s')[0]?.id ?? '', Outcome.ALLOW)
     expect(await ledger.resolve(ctx(), ASK, undefined, at(second))).toBeNull()
-  })
-
-  it('reads a span and the lines evaluated inside it as enclosed', () => {
-    const line = 'sleep 1 && cat s & ls'
-    const scope: Occurrence = { parent: null, source: line, start: 0, end: 18 }
-    const inside: Occurrence = { parent: null, source: line, start: 11, end: 16 }
-    expect(encloses(scope, inside)).toBe(true)
-    expect(encloses(scope, { parent: inside, source: 'cat s', start: 0, end: 5 })).toBe(true)
-    expect(encloses(scope, { parent: null, source: line, start: 19, end: 21 })).toBe(false)
-    expect(encloses(scope, { parent: null, source: 'cat s', start: 0, end: 5 })).toBe(false)
   })
 
   it("hands a job's claims to a run of its own", async () => {

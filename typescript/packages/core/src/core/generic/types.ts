@@ -276,28 +276,21 @@ export interface Effects {
   deferred: Mtime[]
 }
 
-export interface EmitStartPathOptions {
-  kind: FindEntry['kind']
-  isEmpty?: boolean | null
-  exists: boolean
-  tree: PredNode
-  maxDepth: number | null | undefined
-  minDepth: number | null | undefined
-  size?: number | null | undefined
-  minSize?: number | null | undefined
-  maxSize?: number | null | undefined
-  // Epoch-second mtime for the tree's time tests; null when unknown.
-  mtime?: number | null | undefined
-  // The start path's stat, for the tests that read one.
-  stat?: FileStat | null | undefined
-}
-
-export interface BuildTreeOptions {
-  name?: string | null | undefined
-  iname?: string | null | undefined
-  pathPattern?: string | null | undefined
-  type?: string | null | undefined
-  nameExclude?: string | null | undefined
-  orNames?: string[] | null | undefined
-  empty?: boolean | null | undefined
+/** What a find walk filters by: the expression's predicates, parsed. */
+export interface FindArgs {
+  name?: string | null
+  type?: string | null
+  minSize?: number | null
+  maxSize?: number | null
+  maxDepth?: number | null
+  minDepth?: number | null
+  nameExclude?: string | null
+  orNames?: string[] | null
+  iname?: string | null
+  pathPattern?: string | null
+  empty?: boolean | null
+  tree?: PredNode | null
+  mtimeMin?: number | null
+  mtimeMax?: number | null
+  depthFirst?: boolean | null
 }

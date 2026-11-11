@@ -85,6 +85,11 @@ function summaryOf(text: string): string {
   return typeof summary === 'string' ? summary : ''
 }
 
+function errorOf(label: string): (r: Response, text: string) => DropboxApiError {
+  return (r, text) =>
+    new DropboxApiError(`Dropbox ${label} → ${String(r.status)} ${text}`, r.status, summaryOf(text))
+}
+
 function tokenUrlOf(config: DropboxConfig): string {
   if (config.endpoint === undefined || config.endpoint === '') return DROPBOX_TOKEN_URL
   return `${rstripSlash(config.endpoint)}/oauth2/token`
@@ -149,12 +154,7 @@ export async function dropboxRpc(
   const headers = await dropboxAuthHeaders(tm)
   return apiRequest('POST', `${tm.apiBase}${endpoint}`, {
     timeout: tm.timeout,
-    errorOf: (r, text) =>
-      new DropboxApiError(
-        `Dropbox POST ${endpoint} → ${String(r.status)} ${text}`,
-        r.status,
-        summaryOf(text),
-      ),
+    errorOf: errorOf(`POST ${endpoint}`),
     headers: { ...headers, 'Content-Type': 'application/json' },
     json: body,
   })
@@ -186,12 +186,7 @@ export async function dropboxUpload(
       : { path, mode: { '.tag': 'update', update: rev }, mute: true, autorename: false }
   const resp = (await apiRequest('POST', `${tm.contentBase}/files/upload`, {
     timeout: tm.timeout,
-    errorOf: (r, text) =>
-      new DropboxApiError(
-        `Dropbox upload ${path} → ${String(r.status)} ${text}`,
-        r.status,
-        summaryOf(text),
-      ),
+    errorOf: errorOf(`upload ${path}`),
     headers: {
       ...headers,
       'Dropbox-API-Arg': headerJson(arg),
@@ -216,12 +211,7 @@ export async function dropboxDownload(
   const headers = await dropboxAuthHeaders(tm)
   const resp = (await apiRequest('POST', `${tm.contentBase}/files/download`, {
     timeout: tm.timeout,
-    errorOf: (r, text) =>
-      new DropboxApiError(
-        `Dropbox download ${path} → ${String(r.status)} ${text}`,
-        r.status,
-        summaryOf(text),
-      ),
+    errorOf: errorOf(`download ${path}`),
     headers: { ...headers, 'Dropbox-API-Arg': headerJson({ path }) },
     read: 'bytes_response',
     window,
@@ -279,12 +269,7 @@ async function sessionRequest(
 ): Promise<unknown> {
   return apiRequest('POST', `${tm.contentBase}/files/upload_session/${action}`, {
     timeout: tm.timeout,
-    errorOf: (r, text) =>
-      new DropboxApiError(
-        `Dropbox upload ${path} → ${String(r.status)} ${text}`,
-        r.status,
-        summaryOf(text),
-      ),
+    errorOf: errorOf(`upload ${path}`),
     headers: {
       ...(await dropboxAuthHeaders(tm)),
       'Content-Type': 'application/octet-stream',

@@ -65,7 +65,7 @@ from mirage.workspace.executor.builtins.exec import (
     divert_statement,
     diverted_file,
 )
-from mirage.workspace.executor.control import UNWINDING, carried, ended
+from mirage.workspace.executor.control import Unwinding, carried, ended
 from mirage.workspace.executor.statement import (
     answer_closed,
     as_written,
@@ -206,7 +206,7 @@ async def handle_pipe(
                 await waits.join(rest)
         except PipeClosed:
             io.exit_code = SIGPIPE_STATUS
-        except UNWINDING as sig:
+        except Unwinding as sig:
             # A stage is a subshell: whatever unwinds ends it there, a
             # simple command the top shell forked as that shell would.
             unwound = ended(sig, simple_command(cmd) and not forked)
@@ -407,7 +407,7 @@ async def handle_connection(
         right_bytes, right_io, right_exec = await run_program(
             right, context, ran_on
         )
-    except UNWINDING as sig:
+    except Unwinding as sig:
         raise await carried(sig, left_bytes, left_io)
     children.append(right_exec)
     merged = await left_io.merge(right_io)
@@ -428,7 +428,7 @@ async def handle_connection(
             outputs,
             merged,
         )
-    except UNWINDING as sig:
+    except Unwinding as sig:
         raise await carried(sig, async_chain(outputs), merged)
     carry_status(session)
     return (

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { ContentType, FileStat, FileType } from '../../types.ts'
-import { epochToIso } from '../../utils/dates.ts'
+import { epochToIso, utcDateFolder } from '../../utils/dates.ts'
 import { makeIdName } from '../../utils/naming.ts'
 import { compactJsonBytes } from '../render/json.ts'
 import type { DiscordChannel } from './channels.ts'
@@ -36,11 +36,7 @@ export function memberFilename(m: { id: string; name?: string }): string {
 export function snowflakeToDate(snowflake: string): string {
   if (snowflake === '') return ''
   const ms = (BigInt(snowflake) >> 22n) + DISCORD_EPOCH
-  const d = new Date(Number(ms))
-  const yyyy = d.getUTCFullYear().toString().padStart(4, '0')
-  const mm = (d.getUTCMonth() + 1).toString().padStart(2, '0')
-  const dd = d.getUTCDate().toString().padStart(2, '0')
-  return `${yyyy}-${mm}-${dd}`
+  return utcDateFolder(Number(ms))
 }
 
 export function snowflakeToIso(snowflake: string): string | null {

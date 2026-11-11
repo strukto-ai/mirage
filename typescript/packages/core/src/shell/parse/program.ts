@@ -137,9 +137,6 @@ export class ProgramNode implements ShellNode {
   get isNamed(): boolean {
     return this.node.isNamed
   }
-  get childCount(): number {
-    return this.node.childCount
-  }
   child(index: number): ProgramNode | null {
     return this.wrap(this.node.child(index))
   }

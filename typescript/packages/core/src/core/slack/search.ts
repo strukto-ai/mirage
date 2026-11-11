@@ -382,22 +382,6 @@ export async function searchMessages(
   return compactJsonBytes(data)
 }
 
-export async function searchFiles(
-  accessor: SlackAccessor,
-  query: string,
-  count = 20,
-  page = 1,
-): Promise<Uint8Array> {
-  const params: Record<string, string> = {
-    query,
-    count: String(count),
-    page: String(page),
-    sort: 'timestamp',
-  }
-  const data = await accessor.transport.call('search.files', params)
-  return compactJsonBytes(data)
-}
-
 async function fetchNameWords(accessor: SlackAccessor): Promise<ReadonlySet<string>> {
   const names: unknown[] = []
   for await (const page of cursorPages<{ name?: unknown; real_name?: unknown; profile?: unknown }>(

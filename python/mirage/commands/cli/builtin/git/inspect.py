@@ -9,7 +9,7 @@ from dulwich.refs import DictRefsContainer
 from dulwich.repo import BaseRepo
 
 from mirage.accessor.base import Accessor
-from mirage.commands.cli.builtin.git.constants import GIT_DIR
+from mirage.commands.cli.builtin.git.constants import GIT_DIR, HEAD
 from mirage.commands.cli.builtin.git.discover import in_git_dir, is_bare
 from mirage.commands.cli.builtin.git.errors import (
     AbbrevModeError,
@@ -107,7 +107,6 @@ from mirage.version import __version__
 from mirage.workspace.files import Files
 
 SHOW_TOPLEVEL = "--show-toplevel"
-HEAD_REF = "HEAD"
 ALL_REFS = "--all"
 GLOB_OPTION = "--glob"
 EXCLUDE_OPTION = "--exclude"
@@ -682,8 +681,8 @@ def _show_ref_names(
         )
         and resolve_ref(table, name)[0] is not None
     ]
-    if fl.as_bool("head") and resolve_ref(table, HEAD_REF)[0] is not None:
-        names.insert(0, HEAD_REF)
+    if fl.as_bool("head") and resolve_ref(table, HEAD)[0] is not None:
+        names.insert(0, HEAD)
     return names
 
 
@@ -716,7 +715,7 @@ async def show_ref(
     if fl.as_bool("verify"):
         names = []
         for name in texts:
-            valid = (name == HEAD_REF or name.startswith("refs/")) and (
+            valid = (name == HEAD or name.startswith("refs/")) and (
                 resolve_ref(table, name)[0] is not None
             )
             if not valid:

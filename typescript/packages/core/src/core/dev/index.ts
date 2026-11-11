@@ -13,5 +13,5 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export { DEV_RDEV, ZERO_CHUNK_SIZE } from './constants.ts'
-export { read, readRange } from './read.ts'
+export { read } from './read.ts'
 export { stat } from './stat.ts'

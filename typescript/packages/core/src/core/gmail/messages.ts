@@ -108,14 +108,14 @@ function base64UrlDecodeToBytes(input: string): Uint8Array {
   return decodeBase64(padded.replace(/-/g, '+').replace(/_/g, '/'))
 }
 
-const TEXT_DECODER = new TextDecoder('utf-8', { fatal: false })
+const DECODER = new TextDecoder('utf-8', { fatal: false })
 
 export function decodeBody(payload: GmailPayload | undefined): string {
   if (payload === undefined) return ''
   if (payload.mimeType === 'text/plain') {
     const data = payload.body?.data ?? ''
     if (data !== '') {
-      return TEXT_DECODER.decode(base64UrlDecodeToBytes(data))
+      return DECODER.decode(base64UrlDecodeToBytes(data))
     }
   }
   for (const part of payload.parts ?? []) {

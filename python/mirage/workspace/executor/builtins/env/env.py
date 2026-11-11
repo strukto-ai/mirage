@@ -16,7 +16,7 @@ from collections.abc import Callable
 from typing import Any
 
 from mirage.context import (
-    program_invocation,
+    is_program_invocation,
     reset_program_invocation,
     set_program_invocation,
 )
@@ -114,7 +114,7 @@ def env_child(
         break
 
     base = {} if ignore_env else env_snapshot(session)
-    if not ignore_env and not program_invocation(session):
+    if not ignore_env and not is_program_invocation(session):
         base.pop("_", None)
         base["_"] = f"{BIN_PREFIX}/env"
     for name in unset:

@@ -199,22 +199,6 @@ def lineage(handed: HandOff | None) -> tuple[HandOff, ...]:
     return tuple(out)
 
 
-def encloses(scope: Occurrence, occurrence: Occurrence) -> bool:
-    snapshot = ApprovalSnapshot()
-    scope_key = snapshot.occurrence_key(scope)
-    occurrence_key = snapshot.occurrence_key(occurrence)
-    return (
-        approval_query(
-            "encloses",
-            occurrences=snapshot.wire["occurrences"],
-            sources=snapshot.wire["sources"],
-            scope=scope_key,
-            occurrence=occurrence_key,
-        )
-        is True
-    )
-
-
 def is_pending(decision: PolicyDecision | None) -> bool:
     """Whether a decision record is a question the host has not answered
     yet, which holds the line for its retry rather than ending it.

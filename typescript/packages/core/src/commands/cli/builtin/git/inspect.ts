@@ -60,6 +60,7 @@ import {
 } from './util.ts'
 import { gitOptionRefusal, gitUsage, leafRefusal } from '../../refusal.ts'
 import { GIT_LONG_OPTIONS } from '../../constants.ts'
+import { HEAD } from './constants.ts'
 import { inGitDir, isBare } from './discover.ts'
 import type { RepoLocation } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
@@ -67,7 +68,6 @@ import { GLOB_CHARS } from '../../../../utils/glob_walk.ts'
 
 const ENC = new TextEncoder()
 const SHOW_TOPLEVEL = '--show-toplevel'
-const HEAD_REF = 'HEAD'
 const ALL_REFS = '--all'
 const GLOB_OPTION = '--glob'
 const EXCLUDE_OPTION = '--exclude'
@@ -500,7 +500,7 @@ export async function showRef(
   if (fl.asBool('verify')) {
     for (const name of texts) {
       const valid =
-        (name === HEAD_REF || name.startsWith('refs/')) && resolveRef(table, name)[0] !== null
+        (name === HEAD || name.startsWith('refs/')) && resolveRef(table, name)[0] !== null
       if (!valid) {
         if (quiet) return [null, new IOResult({ exitCode: 1 })]
         throw new GitError(`'${name}' - not a valid ref`)
@@ -510,7 +510,7 @@ export async function showRef(
   } else {
     const heads = fl.asBool('heads') || fl.asBool('branches')
     const tags = fl.asBool('tags')
-    if (fl.asBool('head') && resolveRef(table, HEAD_REF)[0] !== null) names.push(HEAD_REF)
+    if (fl.asBool('head') && resolveRef(table, HEAD)[0] !== null) names.push(HEAD)
     for (const ref of [...table.keys()].sort(compareCodePoints)) {
       if (!ref.startsWith('refs/')) continue
       if (

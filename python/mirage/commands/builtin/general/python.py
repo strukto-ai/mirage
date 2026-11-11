@@ -32,7 +32,7 @@ from mirage.runtime.types import CommandRuntime
 from mirage.types import PathSpec
 
 
-async def _python3(
+async def _python_command(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
@@ -80,8 +80,8 @@ async def _python3(
 
 
 python3 = command("python3", vfs=None, spec=SPECS["python3"], write=True)(
-    _python3
+    _python_command
 )
 python_cmd = command("python", vfs=None, spec=SPECS["python"], write=True)(
-    _python3
+    _python_command
 )

@@ -15,7 +15,7 @@
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from mirage.context import program_invocation, voice_name
+from mirage.context import is_program_invocation, voice_name
 from mirage.io import IOResult
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, materialize
@@ -133,7 +133,7 @@ def err_trap_armed(session: SessionState) -> bool:
     return (
         bool(session.err_trap)
         and not session.err_trap_hidden
-        and not program_invocation(session)
+        and not is_program_invocation(session)
     )
 
 
