@@ -81,7 +81,7 @@ def main() -> None:
     api = next(
         tab
         for tab in config["navigation"]["tabs"]
-        if tab["tab"] == "API reference"
+        if tab["tab"] == "API Reference"
     )
     assert "dropdowns" not in api
     expected = [m.upper() + " " + p for p, m, _ in visible]
