@@ -6,9 +6,108 @@ from typing import Any
 
 import jsonschema
 import yaml
-from gen_api_reference import operations, render_overlay, search_terms, slug
+from gen_api_reference import (
+    METHOD_ORDER,
+    operations,
+    render_overlay,
+    search_terms,
+    slug,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
+TIME_FIELD = re.compile(r"_at$|^timestamp$")
+
+
+def resolve(doc: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+    """Follow a local ``$ref`` to the component it names.
+
+    Args:
+        doc (dict[str, Any]): the OpenAPI contract.
+        node (dict[str, Any]): a schema or response, maybe a ``$ref``.
+    """
+    while "$ref" in node:
+        _, _, section, name = node["$ref"].split("/")
+        node = doc["components"][section][name]
+    return node
+
+
+def is_date_time(schema: dict[str, Any]) -> bool:
+    """Whether a schema is an RFC 3339 string, or that or null.
+
+    Args:
+        schema (dict[str, Any]): a property's schema.
+    """
+    branches = schema.get("anyOf") or schema.get("oneOf")
+    if branches:
+        kept = [b for b in branches if b.get("type") != "null"]
+        return bool(kept) and all(is_date_time(b) for b in kept)
+    kind = schema.get("type")
+    kinds = set(kind) if isinstance(kind, list) else {kind}
+    return (
+        "string" in kinds
+        and kinds <= {"string", "null"}
+        and schema.get("format") == "date-time"
+    )
+
+
+def time_fields(node: Any) -> list[tuple[str, dict[str, Any]]]:
+    """Every property named as a time, anywhere under ``node``.
+
+    Args:
+        node (Any): a part of the OpenAPI contract.
+    """
+    if isinstance(node, list):
+        return [found for item in node for found in time_fields(item)]
+    if not isinstance(node, dict):
+        return []
+    found = [
+        (name, schema)
+        for name, schema in (node.get("properties") or {}).items()
+        if TIME_FIELD.search(name) and isinstance(schema, dict)
+    ]
+    return found + [
+        hit
+        for key, value in node.items()
+        if key not in ("example", "examples")
+        for hit in time_fields(value)
+    ]
+
+
+def check_conventions(doc: dict[str, Any]) -> tuple[int, int]:
+    """Hold the contract to the API's shapes: a list answers
+    ``{"items": [...]}``, never a bare array, and a time is an RFC 3339
+    string (``format: date-time``).
+
+    Args:
+        doc (dict[str, Any]): the OpenAPI contract.
+    """
+    answers = 0
+    for path, methods in doc["paths"].items():
+        for method, op in methods.items():
+            if method not in METHOD_ORDER:
+                continue
+            for code, response in op["responses"].items():
+                if not code.startswith("2"):
+                    continue
+                schema = (
+                    resolve(doc, response)
+                    .get("content", {})
+                    .get("application/json", {})
+                    .get("schema")
+                )
+                if schema is None:
+                    continue
+                assert resolve(doc, schema).get("type") != "array", (
+                    f"{method.upper()} {path}: answer a list as "
+                    '{"items": [...]}, not a bare array'
+                )
+                answers += 1
+    times = time_fields(doc)
+    for name, schema in times:
+        assert is_date_time(schema), (
+            f"{name}: a time is a string with format: date-time"
+        )
+    return answers, len(times)
 
 
 def check_examples(doc: dict[str, Any]) -> int:
@@ -160,9 +259,11 @@ def main() -> None:
             subprocess.run(
                 ["bash", "-n"], input=snippet, text=True, check=True
             )
+    answers, times = check_conventions(source)
     print(
         f"{len(visible)} endpoints navigable; "
-        f"{check_examples(source)} JSON examples valid"
+        f"{check_examples(source)} JSON examples valid; "
+        f"{answers} JSON answers are objects; {times} times are date-time"
     )
     print(
         "Single OpenAPI source, success-only display, search, and guide links passed"
