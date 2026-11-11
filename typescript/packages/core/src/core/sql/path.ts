@@ -93,19 +93,34 @@ export async function walk(accessor: SqlAccessor, path: PathSpec | string): Prom
   const p = norm(typeof path === 'string' ? path : path.mountPath)
   const names = namesOf(p)
   const all = [...accessor.rootNames, ...names]
-  const chain = await walkFrom(accessor, ROOT_INO, all.slice(0, NAMES_PER_QUERY))
-  for (let at = NAMES_PER_QUERY; at < all.length; at += NAMES_PER_QUERY) {
-    const part = all.slice(at, at + NAMES_PER_QUERY)
+  let from = (await walkAll(accessor, all)).slice(accessor.rootNames.length)
+  // The mount's folder always stands: one gone since is made again, as the
+  // first op made it, and a file standing at it is ENOTDIR.
+  if (!standing(from)) {
+    await accessor.rootIno()
+    from = (await walkAll(accessor, all)).slice(accessor.rootNames.length)
+  }
+  // Gone again since it was made: every name misses.
+  if (!standing(from)) return { p, names, chain: from.map(() => null) }
+  return { p, names, chain: from }
+}
+
+// Whether the walk found the mount's folder a directory.
+function standing(chain: readonly (Inode | null)[]): boolean {
+  const top = chain[0] ?? null
+  return top !== null && isDir(top)
+}
+
+// The inode each of `names` reaches from the database's root.
+async function walkAll(accessor: SqlAccessor, names: readonly string[]): Promise<(Inode | null)[]> {
+  const chain = await walkFrom(accessor, ROOT_INO, names.slice(0, NAMES_PER_QUERY))
+  for (let at = NAMES_PER_QUERY; at < names.length; at += NAMES_PER_QUERY) {
+    const part = names.slice(at, at + NAMES_PER_QUERY)
     const last = chain[chain.length - 1] ?? null
     if (last === null) chain.push(...part.map(() => null))
     else chain.push(...(await walkFrom(accessor, last.ino, part)).slice(1))
   }
-  const from = chain.slice(accessor.rootNames.length)
-  // A folder a file stands at since reads as gone, so no op takes the file
-  // for a directory.
-  const top = from[0] ?? null
-  if (top !== null && !isDir(top)) return { p, names, chain: from.map(() => null) }
-  return { p, names, chain: from }
+  return chain
 }
 
 /** The inode the whole path reaches, or null. */
@@ -131,9 +146,10 @@ export function leaf(w: Walk): string {
 // The first error resolving the path's parents meets: a name the tree does
 // not hold is ENOENT, a plain file where a directory has to be ENOTDIR, at any
 // depth, as open(2) and rename(2) resolve a path. The mount's folder gone is
-// ENOENT too.
+// ENOENT whatever the path, `/` included, so no entry lands outside it.
 function brokenParent(w: Walk, spec: PathSpec): FsError | null {
-  for (let i = 0; i < w.names.length; i++) {
+  if ((w.chain[0] ?? null) === null) return enoent(spec)
+  for (let i = 1; i < w.names.length; i++) {
     const node = w.chain[i]
     if (node === null || node === undefined) return enoent(spec)
     if (!isDir(node)) return enotdir(spec)

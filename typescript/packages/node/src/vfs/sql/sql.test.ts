@@ -333,7 +333,7 @@ describe('SqlVFS folders', () => {
     expect(folder.storageLocation()).toBe(`${all.storageLocation()}/workspace`)
   })
 
-  it('refuse a folder a file stands at, and a folder gone since', async () => {
+  it('make the folder again when it is gone, and refuse a file standing at it', async () => {
     const all = new SqlVFS({ driver })
     await ops(all).write(at('/f'), enc.encode('x'))
     await expect(ops(new SqlVFS({ driver, root: '/f' })).readdir(at('/'))).rejects.toMatchObject({
@@ -342,29 +342,49 @@ describe('SqlVFS folders', () => {
     const folder = new SqlVFS({ driver, root: '/d' })
     await ops(folder).write(at('/a'), enc.encode('x'))
     await all.rmR(at('/d'))
-    await expect(ops(folder).write(at('/b'), enc.encode('x'))).rejects.toMatchObject({
-      code: 'ENOENT',
-    })
-    await expect(ops(folder).readdir(at('/'))).rejects.toMatchObject({ code: 'ENOENT' })
-    // A snapshot reports the folder gone and leaves it gone.
-    await expect(folder.getState()).rejects.toMatchObject({ code: 'ENOENT' })
-    expect(await ops(all).readdir(at('/'))).toEqual(['/f'])
+    expect(await ops(folder).readdir(at('/'))).toEqual([])
+    expect((await folder.getState()).files).toEqual({})
+    await ops(folder).write(at('/b'), enc.encode('y'))
+    expect(dec.decode(await bytes(all, '/d/b'))).toBe('y')
   })
 
-  it('take no file standing at the folder since for a directory', async () => {
+  it('take no file standing at the folder since for a directory, nor write outside it', async () => {
     const all = new SqlVFS({ driver })
     const folder = new SqlVFS({ driver, root: '/d' })
     await ops(folder).write(at('/a'), enc.encode('x'))
     await all.rmR(at('/d'))
     await ops(all).write(at('/d'), enc.encode('file'))
-    await expect(ops(folder).stat(at('/'))).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(folder.mkdir(at('/x/y'), true)).rejects.toMatchObject({ code: 'ENOENT' })
+    const refused = { code: 'ENOTDIR' }
+    await expect(ops(folder).stat(at('/'))).rejects.toMatchObject(refused)
+    await expect(folder.mkdir(at('/'))).rejects.toMatchObject(refused)
+    await expect(folder.mkdir(at('/x/y'), true)).rejects.toMatchObject(refused)
+    await expect(ops(folder).write(at('/'), enc.encode('z'))).rejects.toMatchObject(refused)
+    expect(await driver.query("SELECT name FROM fs_dentry WHERE name = ''")).toEqual([])
     expect(
       await driver.query(
         "SELECT name FROM fs_dentry WHERE parent_ino = (SELECT ino FROM fs_dentry WHERE parent_ino = 1 AND name = 'd')",
       ),
     ).toEqual([])
   })
+
+  it.each(['the whole database', 'the folder'])(
+    'restore a snapshot of both, taken before the folder was made, %s first',
+    async (first) => {
+      const all = new SqlVFS({ driver })
+      const folder = new SqlVFS({ driver, root: '/w' })
+      await ops(all).write(at('/keep'), enc.encode('k'))
+      // The whole database's snapshot comes first, before the folder's
+      // first op made the folder.
+      const whole = await all.getState()
+      const own = await folder.getState()
+      await ops(folder).write(at('/later'), enc.encode('l'))
+      if (first === 'the folder') await folder.loadState(own)
+      await all.loadState(whole)
+      if (first !== 'the folder') await folder.loadState(own)
+      expect(await ops(folder).readdir(at('/'))).toEqual([])
+      expect(dec.decode(await bytes(all, '/keep'))).toBe('k')
+    },
+  )
 
   it('fail a restore whose folder went before its batch, stranding nothing', async () => {
     const all = new SqlVFS({ driver })

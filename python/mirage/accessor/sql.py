@@ -74,27 +74,28 @@ class SqlAccessor(Accessor):
             )
             rows = self.driver.query(SQL["chunk_size"])
             value = rows[0]["value"] if rows else None
-            self._folder(make=True)
+            self._folder()
             self._chunk_size = int(value or 0) or DEFAULT_CHUNK_SIZE
         return self._chunk_size
 
     def root_ino(self) -> int:
-        """The inode of the mount's folder. Only the first open makes it:
-        a folder gone since is ENOENT, and a file standing at it ENOTDIR.
-        Blocks: for a caller off the loop."""
+        """The inode of the mount's folder, made again with its parents
+        when gone, so a snapshot of the whole database taken first
+        restores beside it in either order. A file standing at it is
+        ENOTDIR. Blocks: for a caller off the loop."""
         self.ready()
-        return self._folder(make=False)
+        return self._folder()
 
-    def _folder(self, *, make: bool) -> int:
+    def _folder(self) -> int:
         # Each name of the folder in turn, made where the database has
-        # none when ``make``, as the root is: a directory inode and the
-        # entry naming it, its parent named through its inode. A writer
-        # that makes one first holds its entry, so this one's insert fails
-        # and it reads the entry instead.
+        # none, as the root is: a directory inode and the entry naming it,
+        # its parent named through its inode. A writer that makes one
+        # first holds its entry, so this one's insert fails and it reads
+        # the entry instead.
         ino = ROOT_INO
         for name in self.root_names:
             rows = self.driver.query(SQL["entry"], (ino, name))
-            if not rows and make:
+            if not rows:
                 now = int(system_date().timestamp())
                 try:
                     self.driver.batch(
