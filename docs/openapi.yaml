@@ -2469,8 +2469,8 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is what the call returns. With `explain=true`, `explanation` says what
-            the call would do; nothing runs.'
+          description: '`data` is what the call returns. With `explain=true`, `explanation` says what the
+            call would do; nothing runs.'
           content:
             application/json:
               schema:
@@ -2486,7 +2486,7 @@ paths:
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
                   value:
                     data: aGVsbG8K
@@ -2572,26 +2572,22 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is `null` when the call succeeds. With `explain=true`, `explanation` says
-            what the call would do; nothing runs.'
+          description: An empty object when the call succeeds. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: object
                     title: Result
-                    properties:
-                      data:
-                        type: 'null'
-                    required:
-                      - data
+                    description: An empty object.
+                    properties: {}
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
-                  value:
-                    data: null
+                  value: {}
                 explain:
                   summary: Explain
                   value:
@@ -2659,26 +2655,22 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is `null` when the call succeeds. With `explain=true`, `explanation` says
-            what the call would do; nothing runs.'
+          description: An empty object when the call succeeds. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: object
                     title: Result
-                    properties:
-                      data:
-                        type: 'null'
-                    required:
-                      - data
+                    description: An empty object.
+                    properties: {}
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
-                  value:
-                    data: null
+                  value: {}
                 explain:
                   summary: Explain
                   value:
@@ -2746,26 +2738,22 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is `null` when the call succeeds. With `explain=true`, `explanation` says
-            what the call would do; nothing runs.'
+          description: An empty object when the call succeeds. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: object
                     title: Result
-                    properties:
-                      data:
-                        type: 'null'
-                    required:
-                      - data
+                    description: An empty object.
+                    properties: {}
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
-                  value:
-                    data: null
+                  value: {}
                 explain:
                   summary: Explain
                   value:
@@ -2838,8 +2826,8 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is what the call returns. With `explain=true`, `explanation` says what
-            the call would do; nothing runs.'
+          description: '`entry` is what the call returns. With `explain=true`, `explanation` says what the
+            call would do; nothing runs.'
           content:
             application/json:
               schema:
@@ -2847,20 +2835,20 @@ paths:
                   - type: object
                     title: Result
                     properties:
-                      data:
+                      entry:
                         $ref: '#/components/schemas/FileStat'
                     required:
-                      - data
+                      - entry
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
                   value:
-                    data:
+                    entry:
                       name: hello.txt
                       size: 6
-                      modified: '2026-11-11T06:10:55.182632Z'
+                      modified: '2026-11-11T06:10:55.182Z'
                       fingerprint: null
                       revision: null
                       type: file
@@ -2936,8 +2924,8 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is what the call returns. With `explain=true`, `explanation` says what
-            the call would do; nothing runs.'
+          description: '`items` is what the call returns. With `explain=true`, `explanation` says what the
+            call would do; nothing runs.'
           content:
             application/json:
               schema:
@@ -2945,20 +2933,20 @@ paths:
                   - type: object
                     title: Result
                     properties:
-                      data:
+                      items:
                         type: array
                         items:
                           type: string
                         description: Full paths.
                     required:
-                      - data
+                      - items
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
                   value:
-                    data:
+                    items:
                       - /hello.txt
                       - /notes
                 explain:
@@ -3022,7 +3010,7 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is what the call returns. With `explain=true`, `explanation` says what
+          description: '`exists` is what the call returns. With `explain=true`, `explanation` says what
             the call would do; nothing runs.'
           content:
             application/json:
@@ -3031,17 +3019,17 @@ paths:
                   - type: object
                     title: Result
                     properties:
-                      data:
+                      exists:
                         type: boolean
                     required:
-                      - data
+                      - exists
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
                   value:
-                    data: true
+                    exists: true
                 explain:
                   summary: Explain
                   value:
@@ -3103,7 +3091,7 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is what the call returns. With `explain=true`, `explanation` says what
+          description: '`is_dir` is what the call returns. With `explain=true`, `explanation` says what
             the call would do; nothing runs.'
           content:
             application/json:
@@ -3112,17 +3100,17 @@ paths:
                   - type: object
                     title: Result
                     properties:
-                      data:
+                      is_dir:
                         type: boolean
                     required:
-                      - data
+                      - is_dir
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
                   value:
-                    data: true
+                    is_dir: true
                 explain:
                   summary: Explain
                   value:
@@ -3184,7 +3172,7 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is what the call returns. With `explain=true`, `explanation` says what
+          description: '`is_file` is what the call returns. With `explain=true`, `explanation` says what
             the call would do; nothing runs.'
           content:
             application/json:
@@ -3193,17 +3181,17 @@ paths:
                   - type: object
                     title: Result
                     properties:
-                      data:
+                      is_file:
                         type: boolean
                     required:
-                      - data
+                      - is_file
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
                   value:
-                    data: true
+                    is_file: true
                 explain:
                   summary: Explain
                   value:
@@ -3265,8 +3253,8 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is what the call returns. With `explain=true`, `explanation` says what
-            the call would do; nothing runs.'
+          description: '`items` is what the call returns. With `explain=true`, `explanation` says what the
+            call would do; nothing runs.'
           content:
             application/json:
               schema:
@@ -3274,20 +3262,20 @@ paths:
                   - type: object
                     title: Result
                     properties:
-                      data:
+                      items:
                         type: array
                         items:
                           type: string
                         description: File names only.
                     required:
-                      - data
+                      - items
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
                   value:
-                    data:
+                    items:
                       - hello.txt
                 explain:
                   summary: Explain
@@ -3350,26 +3338,22 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is `null` when the call succeeds. With `explain=true`, `explanation` says
-            what the call would do; nothing runs.'
+          description: An empty object when the call succeeds. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: object
                     title: Result
-                    properties:
-                      data:
-                        type: 'null'
-                    required:
-                      - data
+                    description: An empty object.
+                    properties: {}
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
-                  value:
-                    data: null
+                  value: {}
                 explain:
                   summary: Explain
                   value:
@@ -3431,26 +3415,22 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is `null` when the call succeeds. With `explain=true`, `explanation` says
-            what the call would do; nothing runs.'
+          description: An empty object when the call succeeds. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: object
                     title: Result
-                    properties:
-                      data:
-                        type: 'null'
-                    required:
-                      - data
+                    description: An empty object.
+                    properties: {}
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
-                  value:
-                    data: null
+                  value: {}
                 explain:
                   summary: Explain
                   value:
@@ -3512,26 +3492,22 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is `null` when the call succeeds. With `explain=true`, `explanation` says
-            what the call would do; nothing runs.'
+          description: An empty object when the call succeeds. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: object
                     title: Result
-                    properties:
-                      data:
-                        type: 'null'
-                    required:
-                      - data
+                    description: An empty object.
+                    properties: {}
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
-                  value:
-                    data: null
+                  value: {}
                 explain:
                   summary: Explain
                   value:
@@ -3593,26 +3569,22 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is `null` when the call succeeds. With `explain=true`, `explanation` says
-            what the call would do; nothing runs.'
+          description: An empty object when the call succeeds. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: object
                     title: Result
-                    properties:
-                      data:
-                        type: 'null'
-                    required:
-                      - data
+                    description: An empty object.
+                    properties: {}
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
-                  value:
-                    data: null
+                  value: {}
                 explain:
                   summary: Explain
                   value:
@@ -3674,26 +3646,22 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is `null` when the call succeeds. With `explain=true`, `explanation` says
-            what the call would do; nothing runs.'
+          description: An empty object when the call succeeds. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: object
                     title: Result
-                    properties:
-                      data:
-                        type: 'null'
-                    required:
-                      - data
+                    description: An empty object.
+                    properties: {}
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
-                  value:
-                    data: null
+                  value: {}
                 explain:
                   summary: Explain
                   value:
@@ -3762,26 +3730,22 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is `null` when the call succeeds. With `explain=true`, `explanation` says
-            what the call would do; nothing runs.'
+          description: An empty object when the call succeeds. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: object
                     title: Result
-                    properties:
-                      data:
-                        type: 'null'
-                    required:
-                      - data
+                    description: An empty object.
+                    properties: {}
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
-                  value:
-                    data: null
+                  value: {}
                 explain:
                   summary: Explain
                   value:
@@ -3848,7 +3812,7 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is what the call returns. With `explain=true`, `explanation` says what
+          description: '`target` is what the call returns. With `explain=true`, `explanation` says what
             the call would do; nothing runs.'
           content:
             application/json:
@@ -3857,18 +3821,18 @@ paths:
                   - type: object
                     title: Result
                     properties:
-                      data:
+                      target:
                         type: string
                         description: The link's target.
                     required:
-                      - data
+                      - target
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
                   value:
-                    data: /hello.txt
+                    target: /hello.txt
                 explain:
                   summary: Explain
                   value:
@@ -3930,7 +3894,7 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is what the call returns. With `explain=true`, `explanation` says what
+          description: '`stored` is what the call returns. With `explain=true`, `explanation` says what
             the call would do; nothing runs.'
           content:
             application/json:
@@ -3939,7 +3903,7 @@ paths:
                   - type: object
                     title: Result
                     properties:
-                      data:
+                      stored:
                         type: object
                         description: The fields the backend could not keep, which Mirage stores instead.
                         additionalProperties:
@@ -3947,14 +3911,14 @@ paths:
                             - integer
                             - string
                     required:
-                      - data
+                      - stored
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
                   value:
-                    data: {}
+                    stored: {}
                 explain:
                   summary: Explain
                   value:
@@ -4037,8 +4001,8 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is what the call returns. With `explain=true`, `explanation` says what
-            the call would do; nothing runs.'
+          description: '`data` is what the call returns. With `explain=true`, `explanation` says what the
+            call would do; nothing runs.'
           content:
             application/json:
               schema:
@@ -4054,7 +4018,7 @@ paths:
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
                   value:
                     data: aGVsbG8K
@@ -4127,8 +4091,8 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is what the call returns. With `explain=true`, `explanation` says what
-            the call would do; nothing runs.'
+          description: '`items` is what the call returns. With `explain=true`, `explanation` says what the
+            call would do; nothing runs.'
           content:
             application/json:
               schema:
@@ -4136,19 +4100,19 @@ paths:
                   - type: object
                     title: Result
                     properties:
-                      data:
+                      items:
                         type: array
                         items:
                           type: string
                     required:
-                      - data
+                      - items
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
                   value:
-                    data:
+                    items:
                       - user.note
                 explain:
                   summary: Explain
@@ -4214,26 +4178,22 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is `null` when the call succeeds. With `explain=true`, `explanation` says
-            what the call would do; nothing runs.'
+          description: An empty object when the call succeeds. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: object
                     title: Result
-                    properties:
-                      data:
-                        type: 'null'
-                    required:
-                      - data
+                    description: An empty object.
+                    properties: {}
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
-                  value:
-                    data: null
+                  value: {}
                 explain:
                   summary: Explain
                   value:
@@ -4315,26 +4275,22 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is `null` when the call succeeds. With `explain=true`, `explanation` says
-            what the call would do; nothing runs.'
+          description: An empty object when the call succeeds. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: object
                     title: Result
-                    properties:
-                      data:
-                        type: 'null'
-                    required:
-                      - data
+                    description: An empty object.
+                    properties: {}
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
-                  value:
-                    data: null
+                  value: {}
                 explain:
                   summary: Explain
                   value:
@@ -4404,26 +4360,22 @@ paths:
         - $ref: '#/components/parameters/explain'
       responses:
         '200':
-          description: '`data` is `null` when the call succeeds. With `explain=true`, `explanation` says
-            what the call would do; nothing runs.'
+          description: An empty object when the call succeeds. With `explain=true`, `explanation` says what
+            the call would do; nothing runs.
           content:
             application/json:
               schema:
                 anyOf:
                   - type: object
                     title: Result
-                    properties:
-                      data:
-                        type: 'null'
-                    required:
-                      - data
+                    description: An empty object.
+                    properties: {}
                     additionalProperties: false
                   - $ref: '#/components/schemas/VfsExplained'
               examples:
-                data:
+                result:
                   summary: '200'
-                  value:
-                    data: null
+                  value: {}
                 explain:
                   summary: Explain
                   value:
@@ -4494,20 +4446,20 @@ paths:
         - $ref: '#/components/parameters/sessionId'
       responses:
         '200':
-          description: '`data` is what the function returns.'
+          description: '`value` is what the function returns.'
           content:
             application/json:
               schema:
                 type: object
                 title: Result
                 properties:
-                  data:
+                  value:
                     description: What the function returns.
                 required:
-                  - data
+                  - value
                 additionalProperties: false
               example:
-                data: null
+                value: null
         '400':
           $ref: '#/components/responses/400'
         '401':

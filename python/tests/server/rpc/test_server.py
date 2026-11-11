@@ -52,26 +52,36 @@ async def test_shell_answers_like_session_shell():
 @pytest.mark.asyncio
 async def test_vfs_methods_mirror_the_ops():
     rpc = server()
-    assert (await call(rpc, "vfs/mkdir", {"path": "/d"}))["result"] is None
+    assert (await call(rpc, "vfs/mkdir", {"path": "/d"}))["result"] == {}
     await call(rpc, "vfs/write", {"path": "/d/a.txt", "data": b64("one\n")})
     await call(rpc, "vfs/append", {"path": "/d/a.txt", "data": b64("two\n")})
-    read = (await call(rpc, "vfs/read", {"path": "/d/a.txt"}))["result"]
+    read = (await call(rpc, "vfs/read", {"path": "/d/a.txt"}))["result"][
+        "data"
+    ]
     assert base64.b64decode(read) == b"one\ntwo\n"
     sliced = await call(
         rpc, "vfs/read", {"path": "/d/a.txt", "offset": 4, "size": 3}
     )
-    assert base64.b64decode(sliced["result"]) == b"two"
-    stat = (await call(rpc, "vfs/stat", {"path": "/d/a.txt"}))["result"]
+    assert base64.b64decode(sliced["result"]["data"]) == b"two"
+    stat = (await call(rpc, "vfs/stat", {"path": "/d/a.txt"}))["result"][
+        "entry"
+    ]
     assert stat["type"] == "file"
     assert stat["size"] == 8
-    listed = (await call(rpc, "vfs/readdir", {"path": "/d"}))["result"]
+    listed = (await call(rpc, "vfs/readdir", {"path": "/d"}))["result"][
+        "items"
+    ]
     assert [name.rsplit("/", 1)[-1] for name in listed] == ["a.txt"]
     await call(rpc, "vfs/rename", {"src": "/d/a.txt", "dst": "/d/b.txt"})
     await call(rpc, "vfs/truncate", {"path": "/d/b.txt", "length": 3})
-    assert (await call(rpc, "vfs/exists", {"path": "/d/b.txt"}))["result"]
+    assert (await call(rpc, "vfs/exists", {"path": "/d/b.txt"}))["result"] == {
+        "exists": True
+    }
     await call(rpc, "vfs/unlink", {"path": "/d/b.txt"})
     await call(rpc, "vfs/rmdir", {"path": "/d"})
-    assert (await call(rpc, "vfs/exists", {"path": "/d"}))["result"] is False
+    assert (await call(rpc, "vfs/exists", {"path": "/d"}))["result"] == {
+        "exists": False
+    }
 
 
 @pytest.mark.asyncio
@@ -134,7 +144,7 @@ async def test_a_message_without_jsonrpc_2_0_runs_nothing():
     assert refused is not None
     assert refused["error"]["code"] == -32600
     kept = await call(rpc, "vfs/exists", {"path": "/keep.txt"})
-    assert kept["result"] is True
+    assert kept["result"] == {"exists": True}
 
 
 @pytest.mark.asyncio

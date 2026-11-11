@@ -63,7 +63,7 @@ the header itself.
 | `shell` | `command`, `cwd?`, `env?`, `stdin?`, `open_stdin?`, `explain?` | `{exit_code, stdout, stderr, decision}` |
 | `stdin/write` | `id`, `data` | `null` |
 | `stdin/close` | `id` | `null` |
-| `vfs/<call>` | the call's arguments, `explain?` | what the call returns |
+| `vfs/<call>` | the call's arguments, `explain?` | the same object as HTTP, such as `{exists}` or `{}` |
 | `tools/<tool>` | the tool's input | `{text, is_error}` |
 | `tools/list` | | `{tools}`, as MCP lists them |
 | `tools/call` | `name`, `arguments` | `{text, is_error}` |

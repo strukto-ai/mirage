@@ -160,7 +160,7 @@ export function registerVfsRoutes(
               .header('Cache-Control', 'no-store')
               .send(streamOf(source))
           }
-          body = bodyOf(await answered(session, call, args, explain), explain)
+          body = bodyOf(call, await answered(session, call, args, explain), explain)
         } catch (err) {
           logger.debug('vfs/%s failed', call.name, err)
           return failure(reply, err)
@@ -179,7 +179,9 @@ export function registerVfsRoutes(
         const session = await sessionOf(ws, req.query.session_id)
         return reply
           .type('application/json; charset=utf-8')
-          .send(JSON.stringify(bodyOf(await customAnswer(session, req.params.name, params))))
+          .send(
+            JSON.stringify(bodyOf(undefined, await customAnswer(session, req.params.name, params))),
+          )
       } catch (err) {
         logger.debug('vfs/%s failed', req.params.name, err)
         return failure(reply, err)

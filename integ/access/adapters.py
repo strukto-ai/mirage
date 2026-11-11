@@ -549,7 +549,7 @@ class Server:
                 f"/v1/workspaces/{wid}/vfs/exists", json={"path": path}
             )
             reply.raise_for_status()
-            return reply.json() is True
+            return reply.json()["exists"] is True
 
     async def write_file(self, wid: str, path: str) -> None:
         """Write ``ready`` at a path through the VFS route, outside any
@@ -1568,6 +1568,24 @@ def route(step: dict[str, Any], sep: str = "/") -> str:
     return call if call == "shell" else f"vfs{sep}{call}"
 
 
+def remote_answer(step: dict[str, Any], body: Any) -> Any:
+    """A call's answer from the object a remote entry point (HTTP, MCP,
+    JSON-RPC) carries it in: the explanation, the value under the call's
+    key, or None for a call that answers ``{}``. A line's explanation
+    travels bare.
+
+    Args:
+        step (dict[str, Any]): the case's input, naming the call.
+        body (Any): the entry point's answer.
+    """
+    if step["call"] == "shell":
+        return body
+    if "explanation" in body:
+        return body["explanation"]
+    key = VFS_CALL_BY_NAME[step["call"]].key
+    return None if key is None else body[key]
+
+
 def call_params(step: dict[str, Any]) -> dict[str, Any]:
     """A bytes or explain case's arguments, without the case's own keys.
 
@@ -1973,12 +1991,12 @@ class Http:
             )
             if op == "explain":
                 reply.raise_for_status()
-                return explain_answer(reply.json())
+                return explain_answer(remote_answer(step, reply.json()))
             if reply.status_code >= 400:
                 return bytes_answer(
                     step, wire_failure(reply.status_code, reply.json())
                 )
-            return bytes_answer(step, reply.json())
+            return bytes_answer(step, remote_answer(step, reply.json()))
         if op == "stdin" and "open_stdin" in step:
 
             async def feed(line_id: str) -> None:
@@ -2392,12 +2410,16 @@ async def mcp_case(
         result = await client.call_tool(
             route(step, "_"), {**call_params(step), "explain": True}
         )
-        return explain_answer(json.loads(result.content[0].text))
+        return explain_answer(
+            remote_answer(step, json.loads(result.content[0].text))
+        )
     elif op == "bytes":
         result = await client.call_tool(route(step, "_"), call_params(step))
         answer = json.loads(result.content[0].text)
         if result.is_error:
             answer = {"errno": answer.get("errno", answer["message"])}
+        else:
+            answer = remote_answer(step, answer)
         return bytes_answer(step, answer)
     elif op == "cancel":
         # The call is cancelled once its line has begun: MCP's cancel is a
@@ -2720,7 +2742,7 @@ async def rpc_case(
         return {"text": await cancel(step["command"])}
     if op == "explain":
         reply = await call(route(step), {**call_params(step), "explain": True})
-        return explain_answer(rpc_result(reply))
+        return explain_answer(remote_answer(step, rpc_result(reply)))
     if op != "bytes":
         raise ValueError(op)
     reply = await call(route(step), call_params(step))
@@ -2729,7 +2751,7 @@ async def rpc_case(
         return bytes_answer(
             step, {"errno": data.get("errno", reply["error"]["message"])}
         )
-    return bytes_answer(step, reply["result"])
+    return bytes_answer(step, remote_answer(step, reply["result"]))
 
 
 SSH_OPTIONS = [

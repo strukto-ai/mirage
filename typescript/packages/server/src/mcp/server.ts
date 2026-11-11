@@ -220,6 +220,7 @@ export function createMirageMcpServer(
       if (vfs !== undefined) {
         return json(
           bodyOf(
+            vfs.call,
             await answered(session, vfs.call, await checked(vfs.call, given), explain === true),
             explain === true,
           ),

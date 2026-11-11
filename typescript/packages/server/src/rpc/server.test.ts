@@ -110,25 +110,30 @@ describe('MirageRpcServer', () => {
 
   it('vfs methods mirror the ops', async () => {
     const rpc = server()
-    expect((await call(rpc, 'vfs/mkdir', { path: '/d' })).result).toBeNull()
+    expect((await call(rpc, 'vfs/mkdir', { path: '/d' })).result).toEqual({})
     await call(rpc, 'vfs/write', { path: '/d/a.txt', data: b64('one\n') })
     await call(rpc, 'vfs/append', { path: '/d/a.txt', data: b64('two\n') })
-    const read = (await call(rpc, 'vfs/read', { path: '/d/a.txt' })).result as string
+    const read = ((await call(rpc, 'vfs/read', { path: '/d/a.txt' })).result as { data: string })
+      .data
     expect(Buffer.from(read, 'base64').toString()).toBe('one\ntwo\n')
-    const sliced = (await call(rpc, 'vfs/read', { path: '/d/a.txt', offset: 4, size: 3 }))
-      .result as string
+    const sliced = (
+      (await call(rpc, 'vfs/read', { path: '/d/a.txt', offset: 4, size: 3 })).result as {
+        data: string
+      }
+    ).data
     expect(Buffer.from(sliced, 'base64').toString()).toBe('two')
-    const stat = (await call(rpc, 'vfs/stat', { path: '/d/a.txt' })).result as Record<
-      string,
-      unknown
-    >
+    const stat = (
+      (await call(rpc, 'vfs/stat', { path: '/d/a.txt' })).result as {
+        entry: Record<string, unknown>
+      }
+    ).entry
     expect([stat.type, stat.size]).toEqual(['file', 8])
     await call(rpc, 'vfs/rename', { src: '/d/a.txt', dst: '/d/b.txt' })
     await call(rpc, 'vfs/truncate', { path: '/d/b.txt', length: 3 })
-    expect((await call(rpc, 'vfs/exists', { path: '/d/b.txt' })).result).toBe(true)
+    expect((await call(rpc, 'vfs/exists', { path: '/d/b.txt' })).result).toEqual({ exists: true })
     await call(rpc, 'vfs/unlink', { path: '/d/b.txt' })
     await call(rpc, 'vfs/rmdir', { path: '/d' })
-    expect((await call(rpc, 'vfs/exists', { path: '/d' })).result).toBe(false)
+    expect((await call(rpc, 'vfs/exists', { path: '/d' })).result).toEqual({ exists: false })
   })
 
   it('tools are the MCP tools', async () => {
@@ -194,7 +199,7 @@ describe('MirageRpcServer', () => {
       params: { path: '/keep.txt' },
     })
     expect((refused?.error as { code: number } | undefined)?.code).toBe(-32600)
-    expect((await call(rpc, 'vfs/exists', { path: '/keep.txt' })).result).toBe(true)
+    expect((await call(rpc, 'vfs/exists', { path: '/keep.txt' })).result).toEqual({ exists: true })
   })
 
   it('starts nothing for a request cancelled before it runs', async () => {
@@ -209,7 +214,7 @@ describe('MirageRpcServer', () => {
       AbortSignal.abort(),
     )
     expect((cancelled?.error as { code: number } | undefined)?.code).toBe(-32800)
-    expect((await call(rpc, 'vfs/exists', { path: '/late.txt' })).result).toBe(false)
+    expect((await call(rpc, 'vfs/exists', { path: '/late.txt' })).result).toEqual({ exists: false })
   })
 
   it('serve answers lines and cancels a running request', async () => {
