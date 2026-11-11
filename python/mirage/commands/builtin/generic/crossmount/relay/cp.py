@@ -22,6 +22,7 @@ from mirage.commands.builtin.generic.cp import cp_generic as generic_cp
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import (
     flat_scopes,
+    parent_followed,
     transfer_primitives,
 )
 from mirage.commands.builtin.utils.links import (
@@ -35,7 +36,22 @@ from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec, PrimitiveCopy
 from mirage.view.types import LinkSubtree, MountView
-from mirage.workspace.files import Files
+from mirage.workspace.dispatcher.reader import NamespaceReader
+from mirage.workspace.files import Files, reader_of
+
+
+def _device_of(
+    reader: NamespaceReader, mounts: MountView, virtual: str
+) -> str:
+    """The mount a name sits on, as link(2) finds it: the links above the
+    name followed, the name itself kept.
+
+    Args:
+        reader (NamespaceReader): the links as the session sees them.
+        mounts (MountView): the mount boundaries.
+        virtual (str): absolute virtual path.
+    """
+    return mounts.root_of(parent_followed(reader, virtual))
 
 
 async def _own_filesystem(
@@ -153,5 +169,9 @@ async def run_cp(
         stdin=stdin,
         dispatch=dispatch,
         cwd=cwd,
-        device_of=mounts.root_of if mounts is not None else None,
+        device_of=(
+            partial(_device_of, reader_of(vfs), mounts)
+            if vfs is not None and mounts is not None
+            else None
+        ),
     )

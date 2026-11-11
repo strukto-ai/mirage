@@ -277,6 +277,20 @@
         "stderr": "mv: cannot move '/vault/d' to '/vault/xm_dst/d': Invalid cross-device link\n"
       },
       "note": "Divergence: GNU renames /vault/d and its mount moves with it; a rename cannot carry a mirage mount, so the move is a copy, which --no-copy refuses. The file beside it still renames; it was refused too."
+    },
+    {
+      "id": "boundary_mv_exchange_keeps_a_mount_with_its_directory",
+      "seq": 923208,
+      "targets": [
+        "ram-commands"
+      ],
+      "command": "mkdir -p /vault/xm_e/d && echo s > /scratch/xm_s && mv --exchange -t /vault /vault/xm_e/d /scratch/xm_s; echo rc=$?; ls /vault/d /vault/xm_e/d; rm -r /vault/xm_e /scratch/xm_s",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n/vault/d:\ninner\nsub\n\n/vault/xm_e/d:\n",
+        "stderr": "mv: cannot exchange '/vault/xm_e/d' and '/vault/d': Invalid cross-device link\nmv: cannot exchange '/scratch/xm_s' and '/vault/xm_s': Invalid cross-device link\n"
+      },
+      "note": "Divergence: GNU's renameat2 swaps /vault/d and its mount moves with it (and words the second pair `Unknown error -1`); a swap cannot carry a mirage mount, so it is refused. It swapped the directories and left the mount at /vault/d/inner."
     }
   ]
 }
