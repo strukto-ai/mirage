@@ -197,8 +197,6 @@
         "s3-prefix",
         "databricks-prefix",
         "gridfs-prefix",
-        "hf",
-        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -211,10 +209,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "echo p > /data/xm_ncp && mkdir /data/xm_ncd && echo q > /data2/xm_ncq && mv --no-copy /data/xm_ncp /data2/xm_ncq /data/xm_ncd; echo rc=$?; ls /data/xm_ncd; cat /data2/xm_ncq; rm -r /data/xm_ncd /data2/xm_ncq",
+      "command": "echo p > /data/xm_ncp && mkdir /data/xm_ncd && echo k > /data/xm_ncd/k && echo q > /data2/xm_ncq && mv --no-copy /data/xm_ncp /data2/xm_ncq /data/xm_ncd; echo rc=$?; ls /data/xm_ncd; cat /data2/xm_ncq; rm -r /data/xm_ncd /data2/xm_ncq",
       "expect": {
         "exit": 0,
-        "stdout": "rc=1\nxm_ncp\nq\n",
+        "stdout": "rc=1\nk\nxm_ncp\nq\n",
         "stderr": "mv: cannot move '/data2/xm_ncq' to '/data/xm_ncd/xm_ncq': Invalid cross-device link\n"
       },
       "note": "coreutils 9.7 over tmpfs mounts: only the source on the other mount meets the other device. A line spanning mounts refused every source."

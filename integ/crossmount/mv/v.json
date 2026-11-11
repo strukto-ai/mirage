@@ -44,8 +44,6 @@
         "databricks",
         "s3-prefix",
         "databricks-prefix",
-        "hf",
-        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -57,10 +55,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "echo p > /data/xm_vp && mkdir /data/xm_vd && echo q > /data2/xm_vq && mv -v /data/xm_vp /data2/xm_vq /data/xm_vd; echo rc=$?; ls /data/xm_vd; rm -r /data/xm_vd",
+      "command": "echo p > /data/xm_vp && mkdir /data/xm_vd && echo k > /data/xm_vd/k && echo q > /data2/xm_vq && mv -v /data/xm_vp /data2/xm_vq /data/xm_vd; echo rc=$?; ls /data/xm_vd; rm -r /data/xm_vd",
       "expect": {
         "exit": 0,
-        "stdout": "renamed '/data/xm_vp' -> '/data/xm_vd/xm_vp'\ncopied '/data2/xm_vq' -> '/data/xm_vd/xm_vq'\nremoved '/data2/xm_vq'\nrc=0\nxm_vp\nxm_vq\n",
+        "stdout": "renamed '/data/xm_vp' -> '/data/xm_vd/xm_vp'\ncopied '/data2/xm_vq' -> '/data/xm_vd/xm_vq'\nremoved '/data2/xm_vq'\nrc=0\nk\nxm_vp\nxm_vq\n",
         "stderr": ""
       },
       "note": "coreutils 9.7 over tmpfs mounts: a source that stays on its mount is renamed, and only the other is copied and removed."

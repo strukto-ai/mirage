@@ -138,7 +138,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir /data2/xm_real /data2/xm_out && echo f > /data2/xm_real/file && ln -s file /data2/xm_real/l && ln -s /data2/xm_real /data/xm_alias && cp -Pl /data/xm_alias/l /data/a.txt /data2/xm_out; echo rc=$?; readlink /data2/xm_out/l; rm -r /data2/xm_real /data2/xm_out /data/xm_alias",
+      "command": "mkdir /data2/xm_real /data2/xm_out && echo f > /data2/xm_real/file && echo k > /data2/xm_out/k && ln -s file /data2/xm_real/l && ln -s /data2/xm_real /data/xm_alias && cp -Pl /data/xm_alias/l /data/a.txt /data2/xm_out; echo rc=$?; readlink /data2/xm_out/l; rm -r /data2/xm_real /data2/xm_out /data/xm_alias",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nfile\n",
