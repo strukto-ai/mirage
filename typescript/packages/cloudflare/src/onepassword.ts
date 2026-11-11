@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { createClient } from '@1password/sdk'
+import { OnePasswordConfig } from '@struktoai/mirage-core/secrets/config'
 import {
   INTEGRATION_NAME,
-  OnePasswordConfig,
   readOnepassword,
   serviceAccountToken,
 } from '@struktoai/mirage-core/secrets/onepassword'

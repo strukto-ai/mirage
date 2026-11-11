@@ -1,6 +1,25 @@
 {
  "baseline": 1626,
  "modules": {
+  "secrets/aws": {
+   "typescript_only": {
+    "REGION": "The signer checks a region before naming an endpoint from it; Python hands the region to boto3, which builds the endpoint.",
+    "SigV4Request": "The signer's input. Python signs nothing itself: boto3 signs every request.",
+    "fetchAwsSmSigned": "aws-sm for a runtime the AWS SDK doesn't serve, a Worker's or a browser's, as one signed fetch; Python always reads through boto3, in fetch_aws_sm.",
+    "hex": "Signature Version 4's digest steps through Web Crypto, for sigv4; boto3 signs Python's requests.",
+    "hmac": "Signature Version 4's digest steps through Web Crypto, for sigv4; boto3 signs Python's requests.",
+    "sha256": "Signature Version 4's digest steps through Web Crypto, for sigv4; boto3 signs Python's requests.",
+    "sigv4": "Signs a request with Signature Version 4 for fetchAwsSmSigned; boto3 signs Python's requests."
+   }
+  },
+  "secrets/onepassword": {
+   "typescript_only": {
+    "OnePasswordClient": "The SDK client's shape, so core names no SDK type: the TypeScript source runs on two runtimes that each load the SDK their own way. Python annotates with the SDK's Client.",
+    "OnePasswordItem": "The SDK item's shape, as OnePasswordClient is the client's; Python annotates with the SDK's Item.",
+    "readOnepassword": "The read past the client, shared by node's source and the Worker's, which each make the client their own way; Python's one runtime does it inside fetch_onepassword.",
+    "serviceAccountToken": "The token lookup both TypeScript runtimes share; Python's onepassword_client does it inline."
+   }
+  },
   "machine/kubernetes/config": {
    "typescript_only": {
     "KUBERNETES_CONFIG_FIELDS": "TypeScript has no dataclass to read a config's fields from, so the provider declares them for the shared field check."

@@ -15,8 +15,8 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { SecretsError } from './errors.ts'
+import { OnePasswordConfig } from './config.ts'
 import {
-  OnePasswordConfig,
   TOKEN_VAR,
   readOnepassword,
   serviceAccountToken,

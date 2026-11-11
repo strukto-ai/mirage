@@ -20,8 +20,7 @@ import { z } from '@struktoai/mirage-core/vfs/secrets'
 
 // The AWS and 1Password configs are core's, shared with the runtimes
 // that read those stores without their SDKs' node installs.
-export { AWSSMConfig } from '@struktoai/mirage-core/secrets/aws'
-export { OnePasswordConfig } from '@struktoai/mirage-core/secrets/onepassword'
+export { AWSSMConfig, OnePasswordConfig } from '@struktoai/mirage-core/secrets/config'
 
 /**
  * Dotenv source config: `path` is the default file when a managed

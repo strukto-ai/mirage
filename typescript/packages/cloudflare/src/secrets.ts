@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { AWSSMConfig, fetchAwsSmSigned } from '@struktoai/mirage-core/secrets/aws'
+import { fetchAwsSmSigned } from '@struktoai/mirage-core/secrets/aws'
+import { AWSSMConfig } from '@struktoai/mirage-core/secrets/config'
 import { registerSecrets } from '@struktoai/mirage-core/secrets/registry'
 
 // The builtin sources a Worker can read, registered on import as node's

@@ -12,65 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { z } from 'zod'
-
 import { compareCodePoints } from '../utils/sort.ts'
+import type { AWSSMConfig } from './config.ts'
 import { SecretsError } from './errors.ts'
 import type { ResolvedSecret } from './types.ts'
-
-/**
- * AWS Secrets Manager source config: the five AWS credential fields
- * every AWS-speaking config shares, nothing else. Python factors them
- * into an `AWSAuth` base its `S3Config` also extends; here the s3
- * config owns its snake_case normalizer, so the shape serves this
- * source alone. The `ref` of a managed entry is the SecretId; it rides
- * the fetch call, not this config.
- */
-const AWS_SM_KEYS: Readonly<Record<string, string>> = {
-  aws_access_key_id: 'awsAccessKeyId',
-  aws_secret_access_key: 'awsSecretAccessKey',
-  aws_session_token: 'awsSessionToken',
-  aws_profile: 'awsProfile',
-}
-
-/**
- * Accept the snake_case spellings a `secrets:` block arrives in.
- *
- * A source's config keys travel raw out of yaml, spelled python's way
- * like a mount's are, so the four prefixed AWS keys reach this schema
- * as `aws_profile` and friends. The rename lives here rather than in
- * the config loader because the loader would impose it on every source's
- * model, a custom one included; this one is the only builtin whose
- * fields are more than a single word. Camel keys pass through, so a
- * TS caller building the config directly is unaffected.
- */
-function normalizeAwsSmKeys(input: unknown): unknown {
-  if (input === null || typeof input !== 'object' || Array.isArray(input)) return input
-  const out: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(input)) {
-    const camel = AWS_SM_KEYS[key]
-    // A config carrying both spellings of one field is refused rather
-    // than settled by insertion order: the snake key is left in place
-    // and the strict object reports it as unrecognized. Python refuses
-    // the same config from the other side, its camel key being the
-    // extra one there.
-    if (camel === undefined || Object.hasOwn(input, camel)) out[key] = value
-    else out[camel] = value
-  }
-  return out
-}
-
-export const AWSSMConfig = z.preprocess(
-  normalizeAwsSmKeys,
-  z.strictObject({
-    region: z.string().optional(),
-    awsAccessKeyId: z.string().optional(),
-    awsSecretAccessKey: z.string().optional(),
-    awsSessionToken: z.string().optional(),
-    awsProfile: z.string().optional(),
-  }),
-)
-export type AWSSMConfig = z.infer<typeof AWSSMConfig>
 
 /**
  * Shape one `SecretString` into secret fields.
