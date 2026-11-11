@@ -873,7 +873,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
         throw new HttpError('not_found', 'workspace not found')
       }
       if (live || deps.registry.removing(id)) await deps.registry.stop(id)
-      return { id, closed_at: msToRfc3339(Date.now()) }
+      return { id, stopped_at: msToRfc3339(Date.now()) }
     },
   )
 

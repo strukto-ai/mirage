@@ -841,7 +841,7 @@ async def stop_workspace(
     if live or registry.removing(workspace_id):
         await registry.stop(workspace_id)
     return StopWorkspaceResponse(
-        id=workspace_id, closed_at=ms_to_rfc3339(time.time() * 1000)
+        id=workspace_id, stopped_at=ms_to_rfc3339(time.time() * 1000)
     )
 
 
