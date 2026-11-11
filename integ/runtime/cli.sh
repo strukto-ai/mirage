@@ -308,17 +308,18 @@ check_step() {
 }
 
 run_case() {
-  local cli="$1" host="$2" suite="$3" case_json="$4" work="$5"
+  local cli="$1" host="$2" suite="$3" case_json="$4" work="$5" lane="$6"
   local case_id wsid world_json session_id
   case_id="$suite/$(jq -r '.id' <<<"$case_json")"
-  # The suite is part of the id: two suites may share a case id. So is
-  # the host: a machine run's tag carries the workspace id, and the two
-  # hosts run the same case in the one container at the same time. The
+  # The suite is part of the id: two suites may share a case id. So are
+  # the host and the lane: a machine run's tag is the workspace id and its
+  # process number, and every lane shares the one container, so two
+  # workspaces of one id would signal and list each other's programs. The
   # TypeScript server routes no path parameter past 100 characters, so the
-  # host is a two-letter head (py, ty) in place of a prefix. A workspace id
-  # takes letters, digits, dots and dashes, so the suite's folders, a mode's
-  # `+` and a variant's `@runtime` are spelled out.
-  wsid=$(printf '%s-%s-%s' "${host:0:2}" "$suite" "$(jq -r '.id' <<<"$case_json")" \
+  # head is the host's letter and the lane (p0, t1) in place of a prefix. A
+  # workspace id takes letters, digits, dots and dashes, so the suite's
+  # folders, a mode's `+` and a variant's `@runtime` are spelled out.
+  wsid=$(printf '%s%s-%s-%s' "${host:0:1}" "$lane" "$suite" "$(jq -r '.id' <<<"$case_json")" \
     | sed 's/+/plus/g' | tr '/_@' '---')
   world_json=$(jq -c '.world // {}' <<<"$case_json")
   write_world_yaml "$world_json" "$work"
@@ -462,7 +463,7 @@ run_host() {
     echo "note $host lane $lane: warm-up delete failed: $(error_line "$work/warm.out")"
   fi
 
-  local file suite suite_json requires unmet only claim
+  local file suite suite_json requires unmet only claim granted
   while IFS= read -r file <&3; do
     suite_json=$(cat "$SUITE_DIR/$file")
     suite="${file%.json}"
@@ -476,8 +477,15 @@ run_host() {
     # Whichever of the host's lanes reaches a suite first runs it: mkdir
     # either creates the claim or fails because another lane already did.
     # Any other failure would drop the suite from both lanes, so it counts.
+    # Each attempt lands in claims.log, which the end checks for a suite two
+    # lanes were both granted.
     claim="$RESULT_DIR/claims/$host-${suite//\//-}"
-    if ! mkdir "$claim" 2>/dev/null; then
+    mkdir "$claim" 2>/dev/null
+    granted=$?
+    printf '%s %s %s %s %s\n' "${EPOCHREALTIME:-$(date +%s)}" "$host" "$suite" \
+      "$lane" "$([ "$granted" = 0 ] && echo granted || echo taken)" \
+      >> "$RESULT_DIR/claims.log"
+    if [ "$granted" != 0 ]; then
       if [ ! -d "$claim" ]; then
         failures+=("$host/$suite: could not claim the suite")
         fail=$((fail + 1))
@@ -552,7 +560,7 @@ run_host() {
           skipped=$((skipped + 1))
           continue
         fi
-        if run_case "$cli" "$host" "$suite" "$case_json" "$work"; then
+        if run_case "$cli" "$host" "$suite" "$case_json" "$work" "$lane"; then
           echo "ok $host/$suite/$case_id"
           pass=$((pass + 1))
         else
@@ -582,13 +590,14 @@ run_host() {
 
 # Every lane is independent: its own daemon port and MIRAGE_HOME, and only
 # ram mounts reach the CLI (see cli_expressible), so no two share a store.
-# The docker container is the one thing the hosts do share: each host's
+# The docker container is the one thing the lanes do share: each lane's
 # workspace ids are its own, so their runs' processes stay apart, and the
 # hosts take turns at sandbox/mounts. Two lanes per
 # host keep a 4-core runner busy, where one host's suites in a row left the
 # longest step of the integ workflow waiting on a single process.
 RESULT_DIR="$(mktemp -d "/tmp/rt-cli-results.XXXXXX")"
 mkdir "$RESULT_DIR/claims"
+: > "$RESULT_DIR/claims.log"
 LANES=(0 1)
 
 pids=()
@@ -611,6 +620,14 @@ for host in python typescript; do
     echo "=== $host (lane $lane) ==="
     cat "$RESULT_DIR/$host.$lane.log"
   done
+done
+
+# A suite runs in one lane. Two lanes granted the same one still pass, as
+# each case's workspace id carries its lane, so the warning and the claim
+# attempts behind it are what show it.
+for doubled in $(awk '$5 == "granted" {print $2 "/" $3}' "$RESULT_DIR/claims.log" | sort | uniq -d); do
+  echo "::warning::$doubled was granted to both lanes"
+  awk -v s="$doubled" '$2 "/" $3 == s' "$RESULT_DIR/claims.log"
 done
 
 pass=0
