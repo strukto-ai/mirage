@@ -793,7 +793,7 @@ describe('a foreground shell request', () => {
       let lineId: string | undefined
       while (lineId === undefined) {
         const listed = await fetch(`${base}/v1/workspaces/named/lines?state=running`)
-        lineId = ((await listed.json()) as { id: string }[])[0]?.id
+        lineId = ((await listed.json()) as { items: { id: string }[] }).items[0]?.id
       }
       expect(
         (await writeStdin(`${base}/v1/workspaces/named/lines/${lineId}/stdin`, 'x')).status,

@@ -1049,7 +1049,7 @@ async def test_stdin_routes_name_a_running_line_with_open_stdin():
                         f"/v1/workspaces/{wid}/lines",
                         params={"state": "running"},
                     )
-                ).json()
+                ).json()["items"]
             line_id = listed[0]["id"]
             route = f"/v1/workspaces/{wid}/lines/{line_id}/stdin"
             assert (await client.post(route, content=b"x")).status_code == 409
