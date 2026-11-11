@@ -1702,7 +1702,8 @@
    "typescript_only": {
     "PROVIDERS": "Python imports a provider's module by path on first use; TypeScript has no import by name, so each provider module registers its class as it loads.",
     "registerMachine": "Python imports a provider's module by path on first use; TypeScript has no import by name, so each provider module registers its class as it loads.",
-    "NODE_PROVIDERS": "The providers @struktoai/mirage-node registers, named for the hint when core is used alone; every Python provider ships in one package."
+    "NODE_PROVIDERS": "The providers @struktoai/mirage-node registers, named for the hint when core is used alone; every Python provider ships in one package.",
+    "CLOUDFLARE_PROVIDERS": "The providers @struktoai/mirage-cloudflare registers, named for the hint when core is used alone; Python does not run in a Durable Object, so it has no such provider."
    }
   },
   "policy/composition": {
