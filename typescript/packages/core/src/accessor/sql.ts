@@ -12,14 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  DEFAULT_CHUNK_SIZE,
-  DIR,
-  LAST_INO,
-  ROOT_INO,
-  SCHEMA,
-  SQL,
-} from '../core/sql/constants.ts'
+import { DEFAULT_CHUNK_SIZE, DIR, LAST_INO, ROOT_INO, SCHEMA, SQL } from '../core/sql/constants.ts'
 import { enoent, enotdir } from '../errors/fs.ts'
 import { PathSpec } from '../types.ts'
 import { systemDate } from '../utils/clock.ts'
