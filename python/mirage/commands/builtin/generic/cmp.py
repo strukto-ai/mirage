@@ -89,127 +89,6 @@ async def _sizes_differ(
     return left[0] != left[1] and (limit is None or min(left) < limit)
 
 
-async def cmp_cmd(
-    paths: list[PathSpec],
-    texts: Sequence[str] = (),
-    *,
-    stream: PolymorphicReadFn,
-    size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
-    length_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
-    stdin: ByteSource | None = None,
-    silent: bool = False,
-    verbose: bool = False,
-    limit: int | None = None,
-    print_bytes: bool = False,
-    skip: tuple[int, int] = (0, 0),
-    argv: Sequence[str] = (),
-) -> tuple[ByteSource | None, IOResult]:
-    """Compare two files byte by byte, GNU cmp semantics.
-
-    Each file is streamed and the reads stop at the first difference,
-    or at ``-n``; only ``-l``, which lists every difference, reads both
-    to the end. Under ``-s`` two regular files whose sizes past their
-    skips differ answer 1 unread, as diffutils does.
-
-    Args:
-        paths (list[PathSpec]): FILE1 and FILE2; a lone FILE1 is
-            compared with stdin.
-        texts (Sequence[str]): SKIP1 and SKIP2, already read into
-            ``skip``; a word past them is an extra operand.
-        stream (PolymorphicReadFn): bound reader called as
-            ``stream(path)``.
-        size_of (Callable | None): a regular file's size, for ``-s``.
-        stdin (ByteSource | None): the line's input.
-        silent (bool): -s.
-        verbose (bool): -l.
-        limit (int | None): -n.
-        print_bytes (bool): -b.
-        skip (tuple[int, int]): each file's skip, the larger of -i's and
-            its operand's.
-        argv (Sequence[str]): the command's words, for usage errors.
-    """
-    if not paths:
-        raise missing_operand_error(CommandName.CMP, None, argv)
-    if len(texts) > 2:
-        raise extra_operand_error(CommandName.CMP, texts[2])
-    # A lone FILE1 is compared with stdin, which GNU names `-`.
-    p0, p1 = paths[0], paths[1] if len(paths) > 1 else STDIN_OPERAND
-    read = stdin_stream(stream, stdin, sole=True)
-    options: dict[str, JsonValue] = {
-        "silent": silent,
-        "verbose": verbose,
-        "limit": limit,
-        "print_bytes": print_bytes,
-    }
-    if is_stdin(p0) and is_stdin(p1):
-        return await _one_stdin_twice(read, p0, skip, options)
-    if (
-        silent
-        and size_of is not None
-        and not (p0.virtual == p1.virtual and skip[0] == skip[1])
-        and await _sizes_differ(size_of, (p0, p1), skip, limit)
-    ):
-        return None, IOResult(exit_code=1)
-    # GNU cmp reserves exit 1 for "files differ"; trouble is exit 2.
-    # diffutils 3.10 opens both operands before it reads either, and -s
-    # drops the message only for an operand it cannot open: a directory
-    # opens, fails at its first read, and is reported whatever -s says,
-    # unless both operands name it, which is the same file at the same
-    # offset and so equal unread. Opening is the first chunk's pull.
-    operands: list[_Operand] = []
-    try:
-        unread: IsADirectoryError | None = None
-        for p in (p0, p1):
-            operand = _Operand(read(p))
-            operands.append(operand)
-            try:
-                await operand.open()
-            except IsADirectoryError as exc:
-                unread = unread or exc
-                operand.held = b""
-            except FS_ERRORS as exc:
-                return None, IOResult(
-                    exit_code=2,
-                    stderr=(
-                        None if silent else format_fs_error("cmp", exc, paths)
-                    ),
-                )
-        if p0.virtual == p1.virtual and skip[0] == skip[1]:
-            return None, IOResult()
-        if unread is not None:
-            return None, IOResult(
-                exit_code=2, stderr=format_fs_error("cmp", unread, paths)
-            )
-        sizes: list[JsonValue] = [None, None]
-        length_of = length_of or size_of
-        if verbose and length_of is not None:
-            for index, path in enumerate((p0, p1)):
-                if not is_stdin(path):
-                    try:
-                        sizes[index] = await length_of(path)
-                    except FS_ERRORS as exc:
-                        logger.debug(
-                            "cmp: no size for %s: %s", path.virtual, exc
-                        )
-        result = await _compare(
-            (operands[0], operands[1]),
-            {
-                **options,
-                "names": [
-                    byte_view(p.raw_path or p.virtual) for p in (p0, p1)
-                ],
-                "piped": [is_stdin(p0), is_stdin(p1)],
-                "skip": list(skip),
-                "sizes": sizes,
-            },
-        )
-        operands.clear()
-        return result
-    finally:
-        for operand in operands:
-            await operand.close()
-
-
 async def _compare(
     operands: tuple[_Operand, _Operand], config: Mapping[str, JsonValue]
 ) -> tuple[ByteSource | None, IOResult]:
@@ -299,9 +178,6 @@ async def _one_stdin_twice(
     return stdout, io
 
 
-__all__ = ["cmp_cmd"]
-
-
 @dataclass(frozen=True, slots=True)
 class CmpFlags:
     silent: bool = False
@@ -358,17 +234,106 @@ async def cmp_generic(
     size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
     length_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    return await cmp_cmd(
-        paths,
-        texts,
-        stream=stream,
-        size_of=size_of,
-        length_of=length_of,
-        stdin=ctx.stdin,
-        silent=parsed.silent,
-        verbose=parsed.verbose,
-        limit=parsed.limit,
-        print_bytes=parsed.print_bytes,
-        skip=parsed.skip,
-        argv=ctx.argv,
-    )
+    """Compare two files byte by byte, GNU cmp semantics.
+
+    Each file is streamed and the reads stop at the first difference,
+    or at ``-n``; only ``-l``, which lists every difference, reads both
+    to the end. Under ``-s`` two regular files whose sizes past their
+    skips differ answer 1 unread, as diffutils does.
+
+    Args:
+        parsed (CmpFlags): the options, each skip the larger of -i's and
+            its operand's.
+        paths (list[PathSpec]): FILE1 and FILE2; a lone FILE1 is
+            compared with stdin.
+        texts (list[str]): SKIP1 and SKIP2, already read into
+            ``parsed.skip``; a word past them is an extra operand.
+        ctx (Context): stdin, and the words for usage errors.
+        stream (PolymorphicReadFn): bound reader called as
+            ``stream(path)``.
+        size_of (Callable | None): a regular file's size, for ``-s``.
+        length_of (Callable | None): a file's size for ``-l``; size_of
+            when None.
+    """
+    silent, verbose, limit = parsed.silent, parsed.verbose, parsed.limit
+    skip = parsed.skip
+    if not paths:
+        raise missing_operand_error(CommandName.CMP, None, ctx.argv)
+    if len(texts) > 2:
+        raise extra_operand_error(CommandName.CMP, texts[2])
+    # A lone FILE1 is compared with stdin, which GNU names `-`.
+    p0, p1 = paths[0], paths[1] if len(paths) > 1 else STDIN_OPERAND
+    read = stdin_stream(stream, ctx.stdin, sole=True)
+    options: dict[str, JsonValue] = {
+        "silent": silent,
+        "verbose": verbose,
+        "limit": limit,
+        "print_bytes": parsed.print_bytes,
+    }
+    if is_stdin(p0) and is_stdin(p1):
+        return await _one_stdin_twice(read, p0, skip, options)
+    if (
+        silent
+        and size_of is not None
+        and not (p0.virtual == p1.virtual and skip[0] == skip[1])
+        and await _sizes_differ(size_of, (p0, p1), skip, limit)
+    ):
+        return None, IOResult(exit_code=1)
+    # GNU cmp reserves exit 1 for "files differ"; trouble is exit 2.
+    # diffutils 3.10 opens both operands before it reads either, and -s
+    # drops the message only for an operand it cannot open: a directory
+    # opens, fails at its first read, and is reported whatever -s says,
+    # unless both operands name it, which is the same file at the same
+    # offset and so equal unread. Opening is the first chunk's pull.
+    operands: list[_Operand] = []
+    try:
+        unread: IsADirectoryError | None = None
+        for p in (p0, p1):
+            operand = _Operand(read(p))
+            operands.append(operand)
+            try:
+                await operand.open()
+            except IsADirectoryError as exc:
+                unread = unread or exc
+                operand.held = b""
+            except FS_ERRORS as exc:
+                return None, IOResult(
+                    exit_code=2,
+                    stderr=(
+                        None if silent else format_fs_error("cmp", exc, paths)
+                    ),
+                )
+        if p0.virtual == p1.virtual and skip[0] == skip[1]:
+            return None, IOResult()
+        if unread is not None:
+            return None, IOResult(
+                exit_code=2, stderr=format_fs_error("cmp", unread, paths)
+            )
+        sizes: list[JsonValue] = [None, None]
+        length_of = length_of or size_of
+        if verbose and length_of is not None:
+            for index, path in enumerate((p0, p1)):
+                if not is_stdin(path):
+                    try:
+                        sizes[index] = await length_of(path)
+                    except FS_ERRORS as exc:
+                        logger.debug(
+                            "cmp: no size for %s: %s", path.virtual, exc
+                        )
+        result = await _compare(
+            (operands[0], operands[1]),
+            {
+                **options,
+                "names": [
+                    byte_view(p.raw_path or p.virtual) for p in (p0, p1)
+                ],
+                "piped": [is_stdin(p0), is_stdin(p1)],
+                "skip": list(skip),
+                "sizes": sizes,
+            },
+        )
+        operands.clear()
+        return result
+    finally:
+        for operand in operands:
+            await operand.close()

@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
-import type { FindOptions } from '../generic/find.ts'
+import type { FindArgs } from '../generic/types.ts'
 import { walkFind } from '../generic/find.ts'
 import { collected } from '../../test-utils.ts'
 
@@ -73,7 +73,7 @@ function statOf(spec: PathSpec): Promise<FileStat> {
   return Promise.reject(enoent(spec.virtual))
 }
 
-async function find(path: PathSpec, options: FindOptions = {}): Promise<string[]> {
+async function find(path: PathSpec, options: FindArgs = {}): Promise<string[]> {
   return collected(walkFind(path, { readdir: readdirOf, stat: statOf }, options))
 }
 

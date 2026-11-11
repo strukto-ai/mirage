@@ -37,26 +37,7 @@ import {
   treeReadsStat,
   timeTestsFailing,
 } from './find_eval.ts'
-import { type FindEntry, type PredNode, type PrintfKind } from './types.ts'
-
-/** What a find walk filters by: the expression's predicates, parsed. */
-export interface FindOptions {
-  name?: string | null
-  type?: string | null
-  minSize?: number | null
-  maxSize?: number | null
-  maxDepth?: number | null
-  minDepth?: number | null
-  nameExclude?: string | null
-  orNames?: string[] | null
-  iname?: string | null
-  pathPattern?: string | null
-  empty?: boolean | null
-  tree?: PredNode | null
-  mtimeMin?: number | null
-  mtimeMax?: number | null
-  depthFirst?: boolean | null
-}
+import { type FindArgs, type FindEntry, type PrintfKind } from './types.ts'
 
 export interface WalkFindDeps {
   readdir: (spec: PathSpec, nofollow?: boolean, limit?: number) => Promise<string[]>
@@ -176,7 +157,7 @@ async function isEmptyEntry(
 export async function* walkFind(
   path: PathSpec,
   found: WalkFindDeps,
-  options: FindOptions = {},
+  options: FindArgs = {},
 ): AsyncGenerator<string> {
   const links = found.follow
   // The last directory read and its names: -empty and the walk each read a
@@ -397,7 +378,7 @@ export function compareDepthFirst(a: string, b: string): number {
 }
 
 // Whether a size falls inside -size's window.
-function sized(options: FindOptions, size: number): boolean {
+function sized(options: FindArgs, size: number): boolean {
   return !(
     (options.minSize != null && size < options.minSize) ||
     (options.maxSize != null && size > options.maxSize)

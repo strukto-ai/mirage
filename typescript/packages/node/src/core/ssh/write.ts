@@ -21,7 +21,7 @@ import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { isNoSuchFile, joinRoot, openForWrite } from './utils.ts'
+import { isNoSuchFile, joinRoot, openForWrite, sftpCall } from './utils.ts'
 
 export async function write(
   accessor: SSHAccessor,
@@ -51,36 +51,24 @@ export async function write(
     staged = atomic
     try {
       for await (const part of chunks(data, signal)) {
-        await new Promise<void>((resolve, reject) => {
-          sftp.write(handle, Buffer.from(part), 0, part.length, size, (error) => {
-            if (error) reject(error)
-            else resolve()
-          })
+        await sftpCall((done) => {
+          sftp.write(handle, Buffer.from(part), 0, part.length, size, done)
         })
         size += part.length
       }
     } finally {
-      await new Promise<void>((resolve, reject) => {
-        sftp.close(handle, (error) => {
-          if (error) reject(error)
-          else resolve()
-        })
+      await sftpCall((done) => {
+        sftp.close(handle, done)
       })
     }
     if (atomic) {
       signal?.throwIfAborted()
       if (mode !== null)
-        await new Promise<void>((resolve, reject) => {
-          sftp.chmod(target, mode & 0o7777, (error) => {
-            if (error) reject(error)
-            else resolve()
-          })
+        await sftpCall((done) => {
+          sftp.chmod(target, mode & 0o7777, done)
         })
-      await new Promise<void>((resolve, reject) => {
-        sftp.ext_openssh_rename(target, remote, (error) => {
-          if (error) reject(error)
-          else resolve()
-        })
+      await sftpCall((done) => {
+        sftp.ext_openssh_rename(target, remote, done)
       })
       staged = false
     }

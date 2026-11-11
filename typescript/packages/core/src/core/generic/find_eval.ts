@@ -20,24 +20,10 @@ import { fnmatch } from '../../utils/fnmatch.ts'
 import { respellOne } from '../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { DIR_SIZE, posixMode } from '../../utils/stat_view.ts'
-import type {
-  BuildTreeOptions,
-  Effects,
-  EmitStartPathOptions,
-  FindEntry,
-  Owner,
-  Path,
-  PredNode,
-  PrintfKind,
-  Regex,
-} from './types.ts'
+import type { Effects, FindEntry, Owner, Path, PredNode, PrintfKind, Regex } from './types.ts'
 
 const ACCESS_BITS = { r: 0o400, w: 0o200, x: 0o100 } as const
 const PERMISSION_BITS = 0o7777
-
-function freshEffects(): Effects {
-  return { acted: false, pruned: false, deferred: [] }
-}
 
 /**
  * The path `-path` and `-regex` read: the entry as `find` prints it under
@@ -412,7 +398,7 @@ export function verdict(
   acts = treeHasAction(tree),
 ): [boolean, boolean] {
   if (minDepth !== null && minDepth !== undefined && entry.depth < minDepth) return [false, false]
-  const effects = freshEffects()
+  const effects: Effects = { acted: false, pruned: false, deferred: [] }
   const matched = evaluate(tree, entry, effects)
   const pruned =
     effects.pruned || (entry.kind === 'd' && effects.deferred.length > 0 && treeHasPrune(tree))
@@ -435,6 +421,22 @@ export function keep(
 // or a nested directory. Returns '' for the bare root '/'.
 export function startBasename(virtual: string): string {
   return rstripSlash(virtual).split('/').pop() ?? ''
+}
+
+interface EmitStartPathOptions {
+  kind: FindEntry['kind']
+  isEmpty?: boolean | null
+  exists: boolean
+  tree: PredNode
+  maxDepth: number | null | undefined
+  minDepth: number | null | undefined
+  size?: number | null | undefined
+  minSize?: number | null | undefined
+  maxSize?: number | null | undefined
+  // Epoch-second mtime for the tree's time tests; null when unknown.
+  mtime?: number | null | undefined
+  // The start path's stat, for the tests that read one.
+  stat?: FileStat | null | undefined
 }
 
 // Append the search start path to results when it matches. Shared by every
@@ -474,6 +476,16 @@ export function emitStartPath(
   results.push(startKey)
 }
 
+interface BuildTreeOptions {
+  name?: string | null | undefined
+  iname?: string | null | undefined
+  pathPattern?: string | null | undefined
+  type?: string | null | undefined
+  nameExclude?: string | null | undefined
+  orNames?: string[] | null | undefined
+  empty?: boolean | null | undefined
+}
+
 export function buildTree(opts: BuildTreeOptions): PredNode {
   const kids: PredNode[] = []
   if (opts.orNames !== null && opts.orNames !== undefined && opts.orNames.length > 0) {
@@ -505,7 +517,7 @@ export function buildTree(opts: BuildTreeOptions): PredNode {
   return { op: 'and', kids }
 }
 
-// The predicate tree for a FindOptions bag: the pre-built expression tree
+// The predicate tree for a FindArgs bag: the pre-built expression tree
 // when present, otherwise the flag-form fields. Single source of truth for
 // the fallback every backend find op used to hand-roll.
 export function argsToTree(options: {

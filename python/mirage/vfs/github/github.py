@@ -118,8 +118,8 @@ class GitHubVFS(BaseVFS):
                 to; falls back to ``config.ref``, and when neither names
                 one the mount follows the repository's default branch,
                 resolved on first read by ``ensure_ref``.
-            default_branch (str | None): the repo's default branch, for
-                ``is_default_branch``. Fetched on first use when None.
+            default_branch (str | None): the repo's default branch.
+                Fetched on first use when None.
             tree (dict[str, TreeEntry] | None): the recursive git tree,
                 keyed by repo-relative path. Fetched on first use when
                 None.
@@ -198,36 +198,6 @@ class GitHubVFS(BaseVFS):
         if not whole_word or self.walk_limit < 0:
             return None
         return await _files_containing(self.accessor, text, [path])
-
-    @property
-    def is_default_branch(self) -> bool | None:
-        """Whether the mount is pinned to the repo's default branch.
-
-        An unpinned mount answers True without a request: naming no ref
-        *means* following the default branch, so the two agree whatever
-        that branch turns out to be.
-
-        Otherwise ``None`` means not known yet, not "no": the default
-        branch is fetched on first use, and until something calls
-        :func:`mirage.core.github.repo.ensure_default_branch` there is
-        nothing to compare ``ref`` against. Answering ``False`` there
-        would be a wrong answer rather than an absent one, and an
-        ordinary read hydrates only the tree, so it could stay wrong for
-        the life of the mount.
-
-        Await ``ensure_default_branch(VFS.accessor)`` first when a
-        definite answer is needed. Diverges from the TypeScript
-        ``GitHubAccessor.isDefaultBranch``, which is always a bool
-        because construction there fetches the fact.
-
-        Returns:
-            bool | None: the comparison, or None if not yet hydrated.
-        """
-        if self.accessor.ref is None:
-            return True
-        if self.accessor.default_branch is None:
-            return None
-        return self.accessor.ref == self.accessor.default_branch
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(

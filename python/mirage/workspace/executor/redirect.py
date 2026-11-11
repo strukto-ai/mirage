@@ -87,7 +87,7 @@ from mirage.workspace.executor.builtins.exec.constants import (
     TO_STDOUT,
 )
 from mirage.workspace.executor.control import (
-    UNWINDING,
+    Unwinding,
     carried,
     take_stderr,
     take_stdout,
@@ -1635,7 +1635,7 @@ async def _handle_redirect(
                     raise ExitSignal(SIGPIPE_STATUS) from None
                 io = IOResult(exit_code=SIGPIPE_STATUS)
                 await recorder.finish_writer()
-    except UNWINDING as sig:
+    except Unwinding as sig:
         unwound, io = sig, IOResult()
         output = await take_stdout(sig)
         if output:

@@ -19,7 +19,7 @@ import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { joinRoot, openForWrite } from './utils.ts'
+import { joinRoot, openForWrite, sftpCall } from './utils.ts'
 
 export async function append(
   accessor: SSHAccessor,
@@ -35,20 +35,14 @@ export async function append(
   let size = 0
   try {
     for await (const chunk of chunks(data, signal)) {
-      await new Promise<void>((resolveFn, rejectFn) => {
-        sftp.write(handle, Buffer.from(chunk), 0, chunk.byteLength, 0, (err) => {
-          if (err) rejectFn(err)
-          else resolveFn()
-        })
+      await sftpCall((done) => {
+        sftp.write(handle, Buffer.from(chunk), 0, chunk.byteLength, 0, done)
       })
       size += chunk.length
     }
   } finally {
-    await new Promise<void>((resolveFn, rejectFn) => {
-      sftp.close(handle, (err) => {
-        if (err) rejectFn(err)
-        else resolveFn()
-      })
+    await sftpCall((done) => {
+      sftp.close(handle, done)
     })
   }
   record('append', p.virtual, VFSName.SSH, size, timer)

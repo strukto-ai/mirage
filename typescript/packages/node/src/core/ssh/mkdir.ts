@@ -18,30 +18,13 @@ import { eexist, enoent } from '@struktoai/mirage-core/errors/fs'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { SFTPWrapper, Stats } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { isFailure, isNoSuchFile, joinRoot } from './utils.ts'
+import { isFailure, isNoSuchFile, joinRoot, sftpCall } from './utils.ts'
 
 async function statRemote(sftp: SFTPWrapper, remote: string): Promise<Stats | null> {
   return new Promise<Stats | null>((resolveFn) => {
     sftp.lstat(remote, (err, stats) => {
       if (err) resolveFn(null)
       else resolveFn(stats)
-    })
-  })
-}
-
-async function mkdirOne(sftp: SFTPWrapper, remote: string, ignoreExisting: boolean): Promise<void> {
-  return new Promise<void>((resolveFn, rejectFn) => {
-    sftp.mkdir(remote, (err) => {
-      if (!err) {
-        resolveFn()
-        return
-      }
-      if (ignoreExisting) {
-        // ignore: dir already exists
-        resolveFn()
-        return
-      }
-      rejectFn(err)
     })
   })
 }
@@ -53,7 +36,9 @@ export async function mkdir(accessor: SSHAccessor, p: PathSpec, recursive = fals
   const remote = joinRoot(root, virtual)
   if (!recursive) {
     try {
-      await mkdirOne(sftp, remote, false)
+      await sftpCall((done) => {
+        sftp.mkdir(remote, done)
+      })
     } catch (err) {
       if (isNoSuchFile(err)) throw enoent(p)
       // OpenSSH answers an existing target with SFTP 3's one generic
@@ -72,6 +57,10 @@ export async function mkdir(accessor: SSHAccessor, p: PathSpec, recursive = fals
     const stepRemote = joinRoot(root, cur)
     const existing = await statRemote(sftp, stepRemote)
     if (existing?.isDirectory()) continue
-    await mkdirOne(sftp, stepRemote, true)
+    await new Promise<void>((resolveFn) => {
+      sftp.mkdir(stepRemote, () => {
+        resolveFn()
+      })
+    })
   }
 }

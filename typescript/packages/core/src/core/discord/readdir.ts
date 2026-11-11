@@ -15,6 +15,7 @@
 import { guardDay } from '../time_range.ts'
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 import { ContentType, DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
+import { utcDateFolder } from '../../utils/dates.ts'
 import { contentTypeForMime } from '../../utils/filetype.ts'
 import { cutListing, makeReaddir, type Listed } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
@@ -37,7 +38,7 @@ import { globSpan, hasGlobSpan } from '../../utils/glob_walk.ts'
  * its own window instead, clipped at the newest message because nothing was
  * posted after it.
  */
-export function dateRangeDescending(
+export function dateRange(
   endDate: string,
   days = 30,
   span: readonly [string, string] | null = null,
@@ -54,13 +55,7 @@ export function dateRangeDescending(
     if (count <= 0) return []
   }
   const dates: string[] = []
-  for (let i = 0; i < count; i++) {
-    const cursor = new Date(end - i * dayMs)
-    const yy = cursor.getUTCFullYear().toString().padStart(4, '0')
-    const mm = (cursor.getUTCMonth() + 1).toString().padStart(2, '0')
-    const dd = cursor.getUTCDate().toString().padStart(2, '0')
-    dates.push(`${yy}-${mm}-${dd}`)
-  }
+  for (let i = 0; i < count; i++) dates.push(utcDateFolder(end - i * dayMs))
   return dates
 }
 
@@ -111,7 +106,7 @@ function listChannelDays(
   const span = globSpan(match.pattern)
   const dates = accessor.timeRange.bounded
     ? accessor.timeRange.listingDays(snowflakeToDate(channelId), endDate, span)
-    : dateRangeDescending(endDate, 30, span)
+    : dateRange(endDate, 30, span)
   return Promise.resolve(
     new DirListing({
       entries: dates.map((d) => historyEntry(channelId, d)),

@@ -162,34 +162,6 @@ def test_missing_owner_repo_raises() -> None:
         GitHubVFS(config=GitHubConfig(token="test-token"))
 
 
-def test_is_default_branch_true() -> None:
-    vfs = _make_vfs(ref="main", default_branch="main")
-    assert vfs.is_default_branch is True
-
-
-def test_is_default_branch_false() -> None:
-    vfs = _make_vfs(ref="feature-branch", default_branch="main")
-    assert vfs.is_default_branch is False
-
-
-def test_is_default_branch_is_unknown_before_hydration() -> None:
-    # None, not False: the branch is fetched on first use, and a bare
-    # read hydrates only the tree, so False here would be a wrong answer
-    # that could survive the life of the mount.
-    vfs = _make_vfs(ref="main", default_branch=None)
-    assert vfs.is_default_branch is None
-
-
-@pytest.mark.asyncio
-async def test_is_default_branch_answers_once_hydrated() -> None:
-    vfs = _make_vfs(ref="main", default_branch=None)
-    with patch(
-        "mirage.core.github.repo.fetch_default_branch", return_value="main"
-    ):
-        await ensure_default_branch(vfs.accessor)
-    assert vfs.is_default_branch is True
-
-
 async def _stat_at(vfs: GitHubVFS, path: str) -> FileStat:
     ws = Workspace({"/gh": vfs}, mode=MountMode.READ)
     try:

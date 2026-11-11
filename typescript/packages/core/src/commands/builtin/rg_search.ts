@@ -15,7 +15,6 @@
 import { decodeText } from '../../shell/bytes.ts'
 import type { TypeChange, TypeSelection } from './rg_filetypes.ts'
 const REPETITION = /\{[0-9]*(,[0-9]*)?\}/y
-const ALNUM = /^[\p{L}\p{N}]$/u
 
 /**
  * Normalized rg options, mirrored by Python's RgFlags.
@@ -156,7 +155,7 @@ function escapeLiteral(pattern: string, i: number): [string | null, number] {
     const cp = Number.parseInt(digits, 16)
     return [cp <= 0x10ffff ? String.fromCodePoint(cp) : null, end]
   }
-  if (ALNUM.test(nxt)) return [null, i + 1 + nxt.length]
+  if (/^[\p{L}\p{N}]$/u.test(nxt)) return [null, i + 1 + nxt.length]
   return [nxt, i + 1 + nxt.length]
 }
 
@@ -226,12 +225,6 @@ function* regexLiterals(pattern: string): Generator<string> {
   }
 }
 
-// Unicode's Uppercase property, which ripgrep's -S asks of a literal: a
-// letter like `ℂ` has no lowercase and still counts.
-function isUpper(ch: string): boolean {
-  return /^\p{Uppercase}$/u.test(ch)
-}
-
 /**
  * Whether -S searches `pattern` without regard to case: it has at least one
  * literal character and none of them is uppercase. `fixedString` is -F,
@@ -242,7 +235,7 @@ export function smartCaseFolds(pattern: string, fixedString: boolean): boolean {
   for (const part of pattern.split('\n')) {
     for (const ch of fixedString ? Array.from(part) : regexLiterals(part)) {
       found = true
-      if (isUpper(ch)) return false
+      if (/^\p{Uppercase}$/u.test(ch)) return false
     }
   }
   return found

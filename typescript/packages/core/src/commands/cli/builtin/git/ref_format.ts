@@ -462,7 +462,7 @@ function defaultOrder(keys: readonly RefSortKey[]): boolean {
 }
 
 /** How a listing writes its rows. */
-export interface ListingOptions {
+export interface FormatRefsOptions {
   /** `--count`, 0 for every ref. */
   readonly count?: number
   /** `--omit-empty`: no line for an empty row. */
@@ -493,7 +493,7 @@ export function formatRefs(
   items: readonly RefItem[],
   ctx: RefContext,
   keys: readonly RefSortKey[] | null,
-  options: ListingOptions = {},
+  options: FormatRefsOptions = {},
 ): [string, GitError | null] {
   const { count = 0, omitEmpty = false, icase = false, detachedFirst = false } = options
   const table = new ValueTable(usedFields(fmt, keys ?? []), ctx)

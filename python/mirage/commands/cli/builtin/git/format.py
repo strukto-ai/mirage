@@ -375,29 +375,6 @@ def preset_block(
     return lines
 
 
-def ident_name(ident: bytes) -> str:
-    """The name half of a ``Name <email>`` identity line.
-
-    Args:
-        ident (bytes): the stored author or committer line.
-    """
-    text = ident.decode("utf-8", errors="replace")
-    marker = text.rfind(" <")
-    return text[:marker] if marker != -1 else text
-
-
-def ident_email(ident: bytes) -> str:
-    """The email half of a ``Name <email>`` identity line.
-
-    Args:
-        ident (bytes): the stored author or committer line.
-    """
-    text = ident.decode("utf-8", errors="replace")
-    start = text.rfind("<")
-    end = text.rfind(">")
-    return text[start + 1 : end] if 0 <= start < end else ""
-
-
 def _subject_lines(message: str) -> list[str]:
     """The subject paragraph's lines, with Git's trailing whitespace removed.
 
@@ -563,17 +540,20 @@ def _ident_placeholder(
             the fixed styles take their clock from.
         mailmap (tuple[MailmapEntry, ...]): the worktree mailmap.
     """
-    ident = commit.author if who == "a" else commit.committer
+    ident: bytes = commit.author if who == "a" else commit.committer
     if field in ("N", "E"):
         ident = mapped_identity(
             ident.decode("utf-8", "replace"), mailmap
         ).encode()
     time = commit.author_time if who == "a" else commit.commit_time
     zone = commit.author_timezone if who == "a" else commit.commit_timezone
+    text = ident.decode("utf-8", errors="replace")
     if field in ("n", "N"):
-        return ident_name(ident)
+        marker = text.rfind(" <")
+        return text[:marker] if marker != -1 else text
     if field in ("e", "E"):
-        return ident_email(ident)
+        start, end = text.rfind("<"), text.rfind(">")
+        return text[start + 1 : end] if 0 <= start < end else ""
     if field == "d":
         return show_date(time, zone, date)
     if field in FIXED_DATE_KINDS:

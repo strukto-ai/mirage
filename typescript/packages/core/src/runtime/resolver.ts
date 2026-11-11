@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ownerPrefix } from '../utils/slash.ts'
+import { ownerPrefix } from '../utils/path.ts'
 import type { LinkChildrenSource, PrefixSource } from './types.ts'
 
 /**

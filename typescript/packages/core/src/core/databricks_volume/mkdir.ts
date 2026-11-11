@@ -14,25 +14,12 @@
 
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { FileType, type PathSpec } from '../../types.ts'
-import { createDirectory as createRemoteDirectory } from './client.ts'
+import { createDirectory } from './client.ts'
 import { parentPath } from './_helpers.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
 import { stat } from './stat.ts'
 import { enoent, enotdir } from '../../errors/fs.ts'
-
-async function createDirectory(
-  accessor: DatabricksVolumeAccessor,
-  remotePath: string,
-  virtualTarget: string,
-): Promise<void> {
-  try {
-    await createRemoteDirectory(accessor, remotePath)
-  } catch (exc) {
-    if (isNotFound(exc)) throw enoent(virtualTarget)
-    throw exc
-  }
-}
 
 export async function mkdir(
   accessor: DatabricksVolumeAccessor,
@@ -40,19 +27,22 @@ export async function mkdir(
   parents = false,
 ): Promise<void> {
   const remotePath = backendPath(accessor.config, path)
-  if (parents) {
-    await createDirectory(accessor, remotePath, path.virtual)
-    return
+  if (!parents) {
+    let parentStat
+    try {
+      parentStat = await stat(accessor, parentPath(path))
+    } catch (exc) {
+      if ((exc as { code?: string }).code === 'ENOENT') throw enoent(path.virtual)
+      throw exc
+    }
+    if (parentStat.type !== FileType.DIRECTORY) {
+      throw enotdir(path.virtual)
+    }
   }
-  let parentStat
   try {
-    parentStat = await stat(accessor, parentPath(path))
+    await createDirectory(accessor, remotePath)
   } catch (exc) {
-    if ((exc as { code?: string }).code === 'ENOENT') throw enoent(path.virtual)
+    if (isNotFound(exc)) throw enoent(path.virtual)
     throw exc
   }
-  if (parentStat.type !== FileType.DIRECTORY) {
-    throw enotdir(path.virtual)
-  }
-  await createDirectory(accessor, remotePath, path.virtual)
 }

@@ -15,26 +15,22 @@
 import { makeIdName } from '../../utils/naming.ts'
 import { VIEW_SUFFIX } from './constants.ts'
 
-function idOf(entity: Record<string, unknown>): string {
-  return String(entity.id)
-}
-
 function label(entity: Record<string, unknown>): string {
   const name = entity.name
-  return typeof name === 'string' && name !== '' ? name : idOf(entity)
+  return typeof name === 'string' && name !== '' ? name : String(entity.id)
 }
 
 /** `<Base_Name>__app...`, the one spelling of a base directory. */
 export function baseDirname(base: Record<string, unknown>): string {
-  return makeIdName(label(base), idOf(base))
+  return makeIdName(label(base), String(base.id))
 }
 
 /** `<Table_Name>__tbl...`, the one spelling of a table directory. */
 export function tableDirname(table: Record<string, unknown>): string {
-  return makeIdName(label(table), idOf(table))
+  return makeIdName(label(table), String(table.id))
 }
 
 /** `<View_Name>__viw....jsonl`, the one spelling of a view file. */
 export function viewFilename(view: Record<string, unknown>): string {
-  return makeIdName(label(view), idOf(view), false, VIEW_SUFFIX)
+  return makeIdName(label(view), String(view.id), false, VIEW_SUFFIX)
 }

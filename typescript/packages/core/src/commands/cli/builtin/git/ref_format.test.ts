@@ -26,7 +26,7 @@ import {
   renderRow,
   ValueTable,
   versioncmp,
-  type ListingOptions,
+  type FormatRefsOptions,
 } from './ref_format.ts'
 import {
   DateKind,
@@ -90,7 +90,7 @@ const CTX: RefContext = {
 function run(
   template: string,
   keys: readonly string[] | null = ['refname'],
-  options: ListingOptions & { items?: RefItem[] } = {},
+  options: FormatRefsOptions & { items?: RefItem[] } = {},
 ): [string, string | null] {
   const [out, stopped] = formatRefs(
     parseFormat(template),

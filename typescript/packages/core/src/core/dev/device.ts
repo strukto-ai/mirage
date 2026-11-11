@@ -16,12 +16,10 @@ import { PipeFiles } from './mixin.ts'
 import type { DevicePipe } from './pipe.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 
-interface DeviceFiles {
-  deviceOf(key: string): string | null
-}
-
 export function activeDevice(accessor: RAMAccessor, key: string): string | null {
-  const files = accessor.store.files as Map<string, Uint8Array> & Partial<DeviceFiles>
+  const files = accessor.store.files as Map<string, Uint8Array> & {
+    deviceOf?: (key: string) => string | null
+  }
   return typeof files.deviceOf === 'function' ? files.deviceOf(key) : null
 }
 

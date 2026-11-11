@@ -26,12 +26,10 @@ export const INVALID_DEFINITION = 'rg: invalid definition (format is type:glob, 
 // The name that selects every type at once; it cannot be defined.
 export const ALL_TYPES = 'all'
 
-const ALNUM = /^[\p{L}\p{N}]+$/u
-
 // Add one glob to a type, creating the type if it is new. The name is
 // alphanumeric and never `all`.
 function addGlob(defs: Map<string, string[]>, name: string, glob: string): void {
-  if (name === ALL_TYPES || !ALNUM.test(name)) throw new UsageError(INVALID_DEFINITION)
+  if (name === ALL_TYPES || !/^[\p{L}\p{N}]+$/u.test(name)) throw new UsageError(INVALID_DEFINITION)
   const globs = defs.get(name)
   if (globs === undefined) defs.set(name, [glob])
   else globs.push(glob)

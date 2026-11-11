@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.find import facts, find_walk_generic
+from mirage.commands.builtin.generic.find import facts, find_generic
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
     CommandFiles,
@@ -59,7 +59,7 @@ async def find_walk(
     readdir, stat = tree_walk(
         files.read_tree, files.readdir, files.stat, False
     )
-    return await find_walk_generic(
+    return await find_generic(
         resolved,
         list(texts),
         ctx,

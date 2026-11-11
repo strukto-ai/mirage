@@ -13,9 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass
-from typing import Generic, TypeVar
-
-T = TypeVar("T")
 
 # What jq names standard input when it reports where it stands, and what
 # it reports before it has read any input at all.
@@ -58,18 +55,3 @@ class JqHalt:
     message: str | None
     string: bool
     code: float | None
-
-
-@dataclass(frozen=True, slots=True)
-class JqRun(Generic[T]):
-    """What one run of a program printed, and what ended it early.
-
-    Args:
-        outputs (list[T]): every output it printed, in order: a value,
-            or jq's own compact dump of one.
-        stop (JqError | JqHalt | None): the error or the halt that ended
-            it, or None when it ran to its end.
-    """
-
-    outputs: list[T]
-    stop: JqError | JqHalt | None = None

@@ -27,9 +27,9 @@ import {
   pageSegmentName,
 } from './normalize.ts'
 import {
-  getChildPages,
   getDatabase,
   getDataSource,
+  listBlockChildren,
   searchDataSources,
   searchPages,
 } from './pages.ts'
@@ -83,17 +83,21 @@ async function listPage(
   _entry: FileStat,
 ): Promise<FileStat[]> {
   const pageId = match.slots.page_id ?? match.slots.row_id ?? ''
-  const refs = await getChildPages(accessor.transport, pageId)
+  const blocks = await listBlockChildren(accessor.transport, pageId)
   // page.json renders from getPage plus the *recursive* block tree while
   // this listing only holds one level of children, so sizing it here would
   // cost an extra call pair per page. It stays size-unknown until a read
   // hydrates it.
   const rows = [new FileStat({ name: 'page.json', type: FileType.FILE })]
-  for (const ref of refs) {
+  for (const block of blocks) {
+    if (block.type !== 'child_page' || typeof block.id !== 'string') continue
+    const title = asObject(block.child_page).title
     rows.push(
-      PAGE(formatSegment({ id: ref.id, title: ref.title }), ref.id, {
-        modified: ref.lastEditedTime,
-      }),
+      PAGE(
+        formatSegment({ id: block.id, title: typeof title === 'string' ? title : 'untitled' }),
+        block.id,
+        { modified: strOf(block, 'last_edited_time') },
+      ),
     )
   }
   return rows

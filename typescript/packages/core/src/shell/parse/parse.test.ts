@@ -53,7 +53,6 @@ describe('parse', () => {
   it('parses a simple command to a program root with a command child', () => {
     const root = parse('echo hello')
     expect(root.type).toBe('program')
-    expect(root.childCount).toBeGreaterThan(0)
     const command = root.child(0)
     expect(command?.type).toBe('command')
   })

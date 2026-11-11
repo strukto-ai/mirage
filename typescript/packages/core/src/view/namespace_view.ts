@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normDir, rstripSlash } from '../utils/slash.ts'
+import { rstripSlash } from '../utils/slash.ts'
 import { FileStat, FileType, type PathSpec, type Visibility } from '../types.ts'
 import { hiddenUnder, pathVisible, visibleLinks } from '../utils/hidden.ts'
 import { getAdmission, sessionVisibility } from '../context/session_context.ts'
 import { eloop } from '../errors/fs.ts'
-import { CycleError } from '../utils/path.ts'
+import { CycleError, normDir } from '../utils/path.ts'
 import type { LinkView, NamespaceLinks } from './types.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 

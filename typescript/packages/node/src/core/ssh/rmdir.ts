@@ -16,7 +16,7 @@ import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent, enotempty } from '@struktoai/mirage-core/errors/fs'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { holdsEntries, isFailure, isNoSuchFile, joinRoot } from './utils.ts'
+import { holdsEntries, isFailure, isNoSuchFile, joinRoot, sftpCall } from './utils.ts'
 
 // SFTP 3 has one generic code for a not-empty refusal (SSH_FX_FAILURE),
 // which is what ssh2 always speaks, so one listing probe decides
@@ -29,17 +29,11 @@ export async function rmdir(accessor: SSHAccessor, p: PathSpec): Promise<void> {
   const virtual = rawPathOf(p)
   const remote = joinRoot(accessor.config.root ?? '/', virtual)
   try {
-    await new Promise<void>((resolveFn, rejectFn) => {
-      sftp.rmdir(remote, (err) => {
-        if (!err) {
-          resolveFn()
-          return
-        }
-        if (isNoSuchFile(err)) rejectFn(enoent(p))
-        else rejectFn(err)
-      })
+    await sftpCall((done) => {
+      sftp.rmdir(remote, done)
     })
   } catch (err) {
+    if (isNoSuchFile(err)) throw enoent(p)
     if (isFailure(err) && (await holdsEntries(sftp, remote))) {
       throw enotempty(p)
     }

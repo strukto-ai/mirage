@@ -41,17 +41,13 @@ export interface StagedEntry {
   readonly size: number
 }
 
-function stageOf(entry: RawEntry): number {
-  return entry.stage ?? entry.flags?.stage ?? 0
-}
-
 function toEntry(entry: RawEntry): IndexEntry {
   return {
     path: entry.path,
     oid: entry.oid,
     mode: entry.mode,
     size: entry.size,
-    stage: stageOf(entry),
+    stage: entry.stage ?? entry.flags?.stage ?? 0,
   }
 }
 

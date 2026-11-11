@@ -18,7 +18,7 @@ import posixpath
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
 from functools import partial
-from typing import Any, Protocol, TypeVar
+from typing import Any, TypeVar
 
 import aiohttp
 
@@ -1068,48 +1068,11 @@ async def stat_item(
 
 
 A = TypeVar("A", bound=Accessor)
-A_contra = TypeVar("A_contra", bound=Accessor, contravariant=True)
 
 
-class StatFn(Protocol[A_contra]):
-    def __call__(
-        self, accessor: A_contra, path: PathSpec
-    ) -> Awaitable[FileStat]: ...
-
-
-class ExistsFn(Protocol[A_contra]):
-    def __call__(
-        self, accessor: A_contra, path: PathSpec
-    ) -> Awaitable[bool]: ...
-
-
-class ReadFn(Protocol[A_contra]):
-    def __call__(
-        self,
-        accessor: A_contra,
-        path: PathSpec,
-        offset: int = ...,
-        size: int | None = ...,
-    ) -> Awaitable[bytes]: ...
-
-
-class WriteFn(Protocol[A_contra]):
-    def __call__(
-        self, accessor: A_contra, path: PathSpec, data: bytes
-    ) -> Awaitable[None]: ...
-
-
-class TruncateFn(Protocol[A_contra]):
-    def __call__(
-        self,
-        accessor: A_contra,
-        path: PathSpec,
-        length: int,
-        no_create: bool = False,
-    ) -> Awaitable[None]: ...
-
-
-def make_exists(stat: StatFn[A]) -> ExistsFn[A]:
+def make_exists(
+    stat: Callable[[A, PathSpec], Awaitable[FileStat]],
+) -> Callable[[A, PathSpec], Awaitable[bool]]:
     """Build the boolean existence probe over a drive backend's stat.
 
     Graph has no cheap HEAD for an item, so existence is a stat that
@@ -1117,10 +1080,11 @@ def make_exists(stat: StatFn[A]) -> ExistsFn[A]:
     probe identically, so only their stat is injected.
 
     Args:
-        stat (StatFn): the backend's stat.
+        stat (Callable[[A, PathSpec], Awaitable[FileStat]]): the
+            backend's stat.
 
     Returns:
-        ExistsFn: the probe.
+        Callable[[A, PathSpec], Awaitable[bool]]: the probe.
     """
 
     async def exists(accessor: A, path: PathSpec) -> bool:
@@ -1133,18 +1097,24 @@ def make_exists(stat: StatFn[A]) -> ExistsFn[A]:
     return exists
 
 
-def make_truncate(read: ReadFn[A], write: WriteFn[A]) -> TruncateFn[A]:
+def make_truncate(
+    read: Callable[[A, PathSpec], Awaitable[bytes]],
+    write: Callable[[A, PathSpec, bytes], Awaitable[None]],
+) -> Callable[..., Awaitable[None]]:
     """Build read-slice-pad-rewrite truncation over a drive backend's IO.
 
     Graph exposes no truncate, so the whole item is rewritten. A missing
     item truncates to a fresh one, matching ``open(path, "w")``.
 
     Args:
-        read (ReadFn): the backend's read_bytes.
-        write (WriteFn): the backend's write_bytes.
+        read (Callable[[A, PathSpec], Awaitable[bytes]]): the backend's
+            read.
+        write (Callable[[A, PathSpec, bytes], Awaitable[None]]): the
+            backend's write.
 
     Returns:
-        TruncateFn: the truncation.
+        Callable[..., Awaitable[None]]: the truncation, called as
+        ``(accessor, path, length, no_create=False)``.
     """
 
     async def truncate(

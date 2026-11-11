@@ -23,7 +23,6 @@ import {
   ANY_WRITE,
   ABSENT_WRITE,
   type ConditionSupport,
-  type CacheContextState,
   type CacheInvalidator,
   type KnownVersions,
   type LiveVersion,
@@ -31,7 +30,6 @@ import {
   OwnRead,
   type WriteCondition,
   type WriteContext,
-  type WriteBinding,
   type WriteKind,
 } from './types.ts'
 
@@ -101,12 +99,6 @@ export async function settleAfter<T>(
   return result
 }
 
-/** A fetch collecting the tokens its bytes carried. */
-export interface ReadFacts {
-  path: string
-  facts: WeakMap<Uint8Array, (string | null)[]>
-}
-
 /** Collect tokens belonging to the exact bytes returned by a fetch. */
 export async function captureRead<T>(
   path: string,
@@ -137,9 +129,9 @@ export function publishRead(path: string, data: Uint8Array, fingerprint: string 
 // caller's module imports no cache module.
 declare module '../context/session_context.ts' {
   interface Caller {
-    readonly cache: CacheContextState | null
-    readonly readFacts: ReadFacts | null
-    readonly write: WriteBinding | null
+    readonly cache: { manager: CacheInvalidator | null } | null
+    readonly readFacts: { path: string; facts: WeakMap<Uint8Array, (string | null)[]> } | null
+    readonly write: { prefix: string; context: WriteContext | null } | null
   }
 }
 

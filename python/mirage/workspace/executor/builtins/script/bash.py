@@ -21,7 +21,7 @@ from mirage.commands.spec.standard import help_page, version_line
 from mirage.context import (
     clear_program_invocation,
     current_caller,
-    program_invocation,
+    is_program_invocation,
     reset_current_session,
     reset_program_invocation,
     set_current_evaluation,
@@ -345,7 +345,7 @@ async def _in_process(
     code = await process.reap()
     # A program that runs it (`xargs sh -c`) is its parent, not the shell.
     node = caller.session._line_node
-    if node is not None and not program_invocation(caller.session):
+    if node is not None and not is_program_invocation(caller.session):
         report_reaped(caller.frame, [(process, code, node)])
     return ran[0] if ran else IOResult(exit_code=code)
 

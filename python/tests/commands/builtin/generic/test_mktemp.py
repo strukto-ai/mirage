@@ -1,7 +1,11 @@
 import pytest
 
-from mirage.commands.builtin.generic.mktemp import mktemp
+from mirage.commands.builtin.generic.mktemp import mktemp_generic
+from mirage.commands.config import Context
+from mirage.types import PathSpec
 from mirage.utils.ids import SeededIdSource
+
+DATA = Context(cwd=PathSpec.from_str_path("/data"))
 
 
 @pytest.mark.asyncio
@@ -19,7 +23,7 @@ async def test_mktemp_makes_only_the_fallback_tmp():
             raise FileNotFoundError(path.virtual)
         files.add(path.virtual)
 
-    out, io = await mktemp(mkdir_fn=mkdir_fn, write_bytes_fn=write_bytes_fn)
+    out, io = await mktemp_generic([], [], Context(), mkdir_fn, write_bytes_fn)
     assert io.exit_code == 0
     assert made == ["/tmp"]
     assert files == {out.decode().rstrip("\n")}
@@ -42,12 +46,8 @@ async def test_mktemp_draws_again_when_a_name_is_taken():
     async def write_bytes_fn(path, data):
         written.append(path.virtual)
 
-    out, io = await mktemp(
-        "x.XXX",
-        mkdir_fn=mkdir_fn,
-        write_bytes_fn=write_bytes_fn,
-        cwd="/data",
-        exists_fn=exists_fn,
+    out, io = await mktemp_generic(
+        [], ["x.XXX"], DATA, mkdir_fn, write_bytes_fn, exists_fn
     )
     assert io.exit_code == 0
     assert len(probed) == 2 and probed[0] != probed[1]
@@ -65,12 +65,8 @@ async def test_mktemp_gives_up_when_every_name_is_taken():
     async def write_bytes_fn(path, data):
         written.append(path.virtual)
 
-    out, io = await mktemp(
-        "x.XXX",
-        mkdir_fn=write_bytes_fn,
-        write_bytes_fn=write_bytes_fn,
-        cwd="/data",
-        exists_fn=exists_fn,
+    out, io = await mktemp_generic(
+        [], ["x.XXX"], DATA, write_bytes_fn, write_bytes_fn, exists_fn
     )
     assert (out, io.exit_code, written) == (None, 1, [])
     assert io.stderr == (
@@ -91,12 +87,12 @@ async def test_mktemp_draws_its_name_from_the_id_source():
     # Pinned by mktemp.test.ts too: one seed names the same file on both
     # hosts.
     for _ in range(2):
-        out, io = await mktemp(
-            "x.XXXXXX",
-            mkdir_fn=_refuse_create,
-            write_bytes_fn=_refuse_create,
-            dry_run=True,
-            ids=SeededIdSource(5),
+        out, io = await mktemp_generic(
+            [],
+            ["x.XXXXXX"],
+            Context(flags={"dry_run": True}, ids=SeededIdSource(5)),
+            _refuse_create,
+            _refuse_create,
         )
         assert io.exit_code == 0
         assert out == b"x.MNjKYk\n"
@@ -107,12 +103,13 @@ async def test_mktemp_draws_one_name_per_attempt():
     # Pinned by mktemp.test.ts too: a create that gives up draws as many
     # names as it probed, so the draw after it is the same on both hosts.
     ids = SeededIdSource(5)
-    out, io = await mktemp(
-        "x.XXX",
-        mkdir_fn=_refuse_create,
-        write_bytes_fn=_refuse_create,
-        exists_fn=_always_taken,
-        ids=ids,
+    out, io = await mktemp_generic(
+        [],
+        ["x.XXX"],
+        Context(ids=ids),
+        _refuse_create,
+        _refuse_create,
+        _always_taken,
     )
     assert (out, io.exit_code) == (None, 1)
     assert ids.random_u32() == 1664735368

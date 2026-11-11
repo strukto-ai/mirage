@@ -19,9 +19,7 @@ import { PaginationStalledError } from '../api/errors.ts'
 import { NotionAPIError } from './client.ts'
 import type { NotionTransport } from './client.ts'
 import {
-  createPage,
   listBlockChildren,
-  getChildPages,
   getDatabase,
   getPage,
   queryDataSourcePage,
@@ -237,82 +235,6 @@ describe('listBlockChildren', () => {
       args: { block_id: 'block-root', page_size: 100, start_cursor: 'cursor-x' },
     })
     expect(blocks.map((b) => b.id)).toEqual(['b1', 'b2'])
-  })
-})
-
-describe('getChildPages', () => {
-  it('filters child_page blocks and returns raw ids and titles', async () => {
-    const transport = new FakeTransport()
-    transport.responses.push({
-      results: [
-        {
-          id: 'aaaa1111-2222-3333-4444-555566667777',
-          type: 'child_page',
-          last_edited_time: '2024-01-03T00:00:00Z',
-          child_page: { title: 'First' },
-        },
-        { id: 'block-paragraph', type: 'paragraph' },
-        {
-          id: 'bbbb1111-2222-3333-4444-555566667777',
-          type: 'child_page',
-          child_page: { title: 'Second' },
-        },
-      ],
-      has_more: false,
-      next_cursor: null,
-    })
-    const pages = await getChildPages(transport, 'parent-block')
-    expect(pages).toEqual([
-      {
-        id: 'aaaa1111-2222-3333-4444-555566667777',
-        title: 'First',
-        lastEditedTime: '2024-01-03T00:00:00Z',
-      },
-      { id: 'bbbb1111-2222-3333-4444-555566667777', title: 'Second', lastEditedTime: '' },
-    ])
-  })
-})
-
-describe('createPage', () => {
-  it('sends workspace parent body to API-post-page', async () => {
-    const transport = new FakeTransport()
-    const created = { id: 'new-page-id', object: 'page' }
-    transport.responses.push(created)
-    const result = await createPage(transport, { parent: { type: 'workspace' }, title: 'New Page' })
-    expect(transport.invocations).toEqual([
-      {
-        name: 'API-post-page',
-        args: {
-          parent: { type: 'workspace', workspace: true },
-          properties: {
-            title: { title: [{ type: 'text', text: { content: 'New Page' } }] },
-          },
-        },
-      },
-    ])
-    expect(result).toEqual(created)
-  })
-
-  it('sends page_id parent body to API-post-page', async () => {
-    const transport = new FakeTransport()
-    const created = { id: 'child-page-id', object: 'page' }
-    transport.responses.push(created)
-    const result = await createPage(transport, {
-      parent: { type: 'page_id', page_id: 'parent-id' },
-      title: 'Child Page',
-    })
-    expect(transport.invocations).toEqual([
-      {
-        name: 'API-post-page',
-        args: {
-          parent: { type: 'page_id', page_id: 'parent-id' },
-          properties: {
-            title: { title: [{ type: 'text', text: { content: 'Child Page' } }] },
-          },
-        },
-      },
-    ])
-    expect(result).toEqual(created)
   })
 })
 

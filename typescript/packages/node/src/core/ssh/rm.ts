@@ -17,55 +17,32 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { FileEntryWithStats, SFTPWrapper, Stats } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { holdsEntries, isDirectoryAttrs, isFailure, isNoSuchFile, joinRoot } from './utils.ts'
-
-async function statRemote(sftp: SFTPWrapper, remote: string): Promise<Stats> {
-  return new Promise<Stats>((resolveFn, rejectFn) => {
-    sftp.lstat(remote, (err, stats) => {
-      if (err !== undefined) rejectFn(err)
-      else resolveFn(stats)
-    })
-  })
-}
-
-async function readdirRemote(sftp: SFTPWrapper, remote: string): Promise<FileEntryWithStats[]> {
-  return new Promise<FileEntryWithStats[]>((resolveFn, rejectFn) => {
-    sftp.readdir(remote, (err, list) => {
-      if (err !== undefined) rejectFn(err)
-      else resolveFn(list)
-    })
-  })
-}
-
-async function unlinkRemote(sftp: SFTPWrapper, remote: string): Promise<void> {
-  return new Promise<void>((resolveFn, rejectFn) => {
-    sftp.unlink(remote, (err) => {
-      if (err) rejectFn(err)
-      else resolveFn()
-    })
-  })
-}
-
-async function rmdirRemote(sftp: SFTPWrapper, remote: string): Promise<void> {
-  return new Promise<void>((resolveFn, rejectFn) => {
-    sftp.rmdir(remote, (err) => {
-      if (err) rejectFn(err)
-      else resolveFn()
-    })
-  })
-}
+import {
+  holdsEntries,
+  isDirectoryAttrs,
+  isFailure,
+  isNoSuchFile,
+  joinRoot,
+  sftpCall,
+} from './utils.ts'
 
 async function rmRInner(sftp: SFTPWrapper, remote: string, root: PathSpec): Promise<void> {
-  const stats = await statRemote(sftp, remote)
+  const stats = await sftpCall<Stats>((done) => {
+    sftp.lstat(remote, done)
+  })
   if (isDirectoryAttrs(stats)) {
-    const entries = await readdirRemote(sftp, remote)
+    const entries = await sftpCall<FileEntryWithStats[]>((done) => {
+      sftp.readdir(remote, done)
+    })
     for (const entry of entries) {
       if (entry.filename === '.' || entry.filename === '..') continue
       const child = remote === '/' ? `/${entry.filename}` : `${remote}/${entry.filename}`
       await rmRInner(sftp, child, root)
     }
     try {
-      await rmdirRemote(sftp, remote)
+      await sftpCall((done) => {
+        sftp.rmdir(remote, done)
+      })
     } catch (err) {
       // A file written after the listing keeps the directory; SFTP 3 says
       // so with its one generic code, so a listing decides.
@@ -74,7 +51,9 @@ async function rmRInner(sftp: SFTPWrapper, remote: string, root: PathSpec): Prom
     }
     return
   }
-  await unlinkRemote(sftp, remote)
+  await sftpCall((done) => {
+    sftp.unlink(remote, done)
+  })
 }
 
 export async function rmR(accessor: SSHAccessor, p: PathSpec): Promise<void> {

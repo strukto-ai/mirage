@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.context import program_invocation
+from mirage.context import is_program_invocation
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
@@ -43,7 +43,7 @@ async def handle_printenv(
     # binary, so the only names it can possibly see are the exported
     # ones. A plain `X=hello` is invisible to it and exits 1.
     env = env_snapshot(session)
-    if not program_invocation(session):
+    if not is_program_invocation(session):
         env.pop("_", None)
         env["_"] = f"{BIN_PREFIX}/printenv"
     end = "\n"

@@ -242,11 +242,12 @@ def test_needs_decorations_scans_for_d_placeholders():
     assert not git_format.needs_decorations(git_format.MEDIUM)
 
 
-def test_ident_helpers_split_the_stored_line():
-    assert git_format.ident_name(AUTHOR) == "Dev Person"
-    assert git_format.ident_email(AUTHOR) == "dev@example.com"
-    assert git_format.ident_name(b"nameless") == "nameless"
-    assert git_format.ident_email(b"nameless") == ""
+def test_an_ident_without_an_email_is_all_name():
+    commit = _commit(b"one\n")
+    commit.author = b"nameless"
+    assert git_format.render_template("%an|%ae", commit, 7, None) == (
+        "nameless|"
+    )
 
 
 def test_render_template_expands_the_placeholder_table():

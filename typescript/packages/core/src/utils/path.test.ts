@@ -19,6 +19,8 @@ import {
   endsAtDot,
   expandTilde,
   globPrefixMatch,
+  normDir,
+  ownerPrefix,
   posixNormpath,
   respellOne,
   resolvePath,
@@ -97,6 +99,32 @@ describe('globPrefixMatch', () => {
   it('matches intermediate segment globs', () => {
     expect(globPrefixMatch('/a/one/b.txt', '/a/*/b.txt')).toBe(true)
     expect(globPrefixMatch('/a/one/c.txt', '/a/*/b.txt')).toBe(false)
+  })
+})
+
+describe('normDir and ownerPrefix', () => {
+  it('normDir yields the trailing-slash directory form', () => {
+    expect(normDir('a/b')).toBe('/a/b/')
+    expect(normDir('/a/b/')).toBe('/a/b/')
+    expect(normDir('///a///')).toBe('/a/')
+    expect(normDir('')).toBe('/')
+    expect(normDir('/')).toBe('/')
+  })
+
+  it('ownerPrefix takes the longest boundary match', () => {
+    const prefixes = ['/', '/data/', '/data/inner/']
+    expect(ownerPrefix(prefixes, '/data/inner/x')).toBe('/data/inner/')
+    expect(ownerPrefix(prefixes, '/data/x')).toBe('/data/')
+    expect(ownerPrefix(prefixes, '/data')).toBe('/data/')
+    expect(ownerPrefix(prefixes, '/other')).toBe('/')
+    expect(ownerPrefix(prefixes, '/')).toBe('/')
+  })
+
+  it('ownerPrefix respects path boundaries and keeps the input spelling', () => {
+    expect(ownerPrefix(['/data/'], '/database')).toBeNull()
+    expect(ownerPrefix(['/data'], '/data/x')).toBe('/data')
+    expect(ownerPrefix(['data/'], '/data/x')).toBe('data/')
+    expect(ownerPrefix([], '/data')).toBeNull()
   })
 })
 

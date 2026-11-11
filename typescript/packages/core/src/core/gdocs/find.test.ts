@@ -30,7 +30,7 @@ import { GDocsAccessor } from '../../accessor/gdocs.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { TokenManager } from '../google/client.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
-import type { FindOptions } from '../generic/find.ts'
+import type { FindArgs } from '../generic/types.ts'
 import { walkFind } from '../generic/find.ts'
 import * as readdirMod from './readdir.ts'
 import * as statMod from './stat.ts'
@@ -39,7 +39,7 @@ import { collected } from '../../test-utils.ts'
 async function find(
   accessor: GDocsAccessor,
   path: PathSpec,
-  options: FindOptions = {},
+  options: FindArgs = {},
 ): Promise<string[]> {
   return collected(
     walkFind(

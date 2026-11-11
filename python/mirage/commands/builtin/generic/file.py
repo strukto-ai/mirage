@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from mirage.commands.builtin.constants import FILE_HEADER_BYTES, MIME_SYMLINK
@@ -33,7 +33,7 @@ from mirage.types import (
     StatFn,
 )
 from mirage.utils.path import CycleError
-from mirage.view.types import LinkView, MountView, StatPath
+from mirage.view.types import LinkView
 
 _logger = logging.getLogger(__name__)
 
@@ -108,39 +108,47 @@ async def _header(
     return await read_prefix(normalized_read(stream)(path), FILE_HEADER_BYTES)
 
 
-async def file_cmd(
-    paths: list[PathSpec],
-    *,
-    stream: PolymorphicReadFn,
-    stat_fn: Callable[..., Awaitable[FileStat]],
-    read_range: ReadStreamFn | None = None,
-    b: bool = False,
-    i: bool = False,
-    links: LinkView | None = None,
-    stat_path: StatPath | None = None,
-    mounts: MountView | None = None,
-) -> tuple[ByteSource | None, IOResult]:
-    """Describe each operand's content type, GNU file semantics.
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """A file line describes a link itself unless the last of ``-L`` and
+    ``-h`` is ``-L`` (file 5.46).
 
     Args:
-        paths (list[PathSpec]): operands to describe.
-        stream (PolymorphicReadFn): backend reader, for the content
-            sniff, which reads only a file's first bytes.
-        stat_fn (Callable): backend stat.
-        read_range (Callable | None): the backend's byte window, read
-            for those bytes instead where the mount has one.
-        b (bool): brief, omit the filename column. GNU always names the
-            operand exactly as typed, never a resolved or absolutised
-            form, so every row is labelled with ``raw_path``.
-        i (bool): report a MIME type instead of a description.
-        links (LinkView | None): the namespace's symlink facts. Without
-            -L the operand arrives unfollowed, so a link is described as
-            a link rather than sniffed as its target.
-        stat_path (StatPath | None): dispatcher-backed stat of one path,
-            which is what answers a directory that exists only because
-            mounts sit under it.
-        mounts (MountView | None): the mount boundaries.
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
     """
+    return LineFacts(
+        follows=(
+            Follow.LAST
+            if fl.typed_order("L", "h")[-1:] == ["L"]
+            else Follow.NONE
+        )
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class FileFlags:
+    brief: bool = False
+    mime: bool = False
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> FileFlags:
+    fl = FlagView(flags, spec=SPECS["file"])
+    return FileFlags(brief=fl.as_bool("b"), mime=fl.as_bool("i"))
+
+
+async def file_generic(
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
+    stream: PolymorphicReadFn,
+    stat_fn: StatFn,
+    read_range: ReadStreamFn | None = None,
+) -> tuple[ByteSource | None, IOResult]:
+    parsed = parse_flags(ctx.flags)
+    b, i = parsed.brief, parsed.mime
+    links = links_of(ctx)
+    stat_path = vfs_stat_path(ctx.vfs)
+    mounts = mounts_of(ctx)
     if not paths:
         return None, IOResult(exit_code=1, stderr=b"file: missing operand\n")
     lines: list[str] = []
@@ -176,56 +184,3 @@ async def file_cmd(
         result = detect_file_type(header, s)
         lines.append(format_file_result(p.raw_path, result, b, i))
     return format_records(lines), IOResult()
-
-
-def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
-    """A file line describes a link itself unless the last of ``-L`` and
-    ``-h`` is ``-L`` (file 5.46).
-
-    Args:
-        fl (FlagView): spec-validated view over the raw flag kwargs.
-        operands (Sequence[str | PathSpec]): the line's operands.
-    """
-    return LineFacts(
-        follows=(
-            Follow.LAST
-            if fl.typed_order("L", "h")[-1:] == ["L"]
-            else Follow.NONE
-        )
-    )
-
-
-__all__ = ["facts", "file_cmd"]
-
-
-@dataclass(frozen=True, slots=True)
-class FileFlags:
-    brief: bool = False
-    mime: bool = False
-
-
-def parse_flags(flags: Mapping[str, FlagValue]) -> FileFlags:
-    fl = FlagView(flags, spec=SPECS["file"])
-    return FileFlags(brief=fl.as_bool("b"), mime=fl.as_bool("i"))
-
-
-async def file_generic(
-    paths: list[PathSpec],
-    texts: list[str],
-    ctx: Context,
-    stream: PolymorphicReadFn,
-    stat_fn: StatFn,
-    read_range: ReadStreamFn | None = None,
-) -> tuple[ByteSource | None, IOResult]:
-    parsed = parse_flags(ctx.flags)
-    return await file_cmd(
-        paths,
-        stream=stream,
-        stat_fn=stat_fn,
-        read_range=read_range,
-        b=parsed.brief,
-        i=parsed.mime,
-        links=links_of(ctx),
-        stat_path=vfs_stat_path(ctx.vfs),
-        mounts=mounts_of(ctx),
-    )

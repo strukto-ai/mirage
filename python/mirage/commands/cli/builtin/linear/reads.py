@@ -265,11 +265,8 @@ async def _search(
     return json_bytes(results)
 
 
-Runner = Callable[[LinearAccessor, list[str], FlagView], Awaitable[bytes]]
-
-
 async def _dispatch(
-    runner: Runner,
+    runner: Callable[[LinearAccessor, list[str], FlagView], Awaitable[bytes]],
     accessor: LinearAccessor,
     paths: list[PathSpec],
     texts: list[str],

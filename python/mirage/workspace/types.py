@@ -12,18 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from mirage.io.types import IOResult
 from mirage.observe.record import OpRecord
 from mirage.types import Limit, MountMode, PathSpec
-
-# Runs one text line in a session (`execute_fn(line, session_id=...)`):
-# what `eval`, `source`, `xargs` and find's `-exec` hand their inner
-# line to.
-ExecuteLine = Callable[..., Awaitable[IOResult]]
 
 
 @dataclass

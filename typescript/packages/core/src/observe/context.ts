@@ -18,14 +18,7 @@ import {
   liveCallers,
   runWithCaller,
 } from '../context/session_context.ts'
-import {
-  LostPaths,
-  OpRecord,
-  RecordIndex,
-  STAMP_FINGERPRINT_OPS,
-  type Recorder,
-  type RevisionsState,
-} from './record.ts'
+import { LostPaths, OpRecord, RecordIndex, STAMP_FINGERPRINT_OPS, type Recorder } from './record.ts'
 import type { PathSpec } from '../types.ts'
 import { SystemClock, type Clock } from '../utils/clock.ts'
 
@@ -37,7 +30,7 @@ const SYSTEM_CLOCK = new SystemClock()
 declare module '../context/session_context.ts' {
   interface Caller {
     readonly recording: Recorder | null
-    readonly revisions: RevisionsState | null
+    readonly revisions: { map: Map<string, string> | null } | null
   }
 }
 

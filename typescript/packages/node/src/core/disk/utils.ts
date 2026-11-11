@@ -28,8 +28,6 @@ import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { lstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { diskError } from './errors.ts'
 
-export { gnuBasename as basename, norm, parent } from '@struktoai/mirage-core/utils/path'
-
 export function resolveSafe(root: string, virtual: string): string {
   const relative = lstripSlash(virtual)
   const resolved = path.resolve(root, relative)

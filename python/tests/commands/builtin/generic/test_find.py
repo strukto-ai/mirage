@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage.commands.builtin.generic.find import (
-    find_walk_generic as stream_walk_find,
+    find_generic as stream_walk_find,
 )
 from mirage.commands.builtin.generic.find import parse_find_args
 from mirage.commands.config import Context
@@ -37,7 +37,7 @@ async def _rows(*args, **kwargs):
     return [row async for row in walk_find(*args, **kwargs)]
 
 
-async def find_walk_generic(*args, **kwargs):
+async def find_generic(*args, **kwargs):
     out, io = await stream_walk_find(*args, **kwargs)
     return await materialize(out), io
 
@@ -452,7 +452,7 @@ async def _walk(
     stat=_unreached,
     **flags,
 ):
-    return await find_walk_generic(
+    return await find_generic(
         paths,
         list(texts),
         Context(flags=flags, vfs=_files(stat_path)),
@@ -796,7 +796,7 @@ async def test_find_follow_reports_a_linked_directory_a_rule_refuses():
 @pytest.mark.asyncio
 async def test_walk_selection_preserves_newlines_before_rendering():
     stats = {"/mnt": _DIR_STAT, "/mnt/a\nb": _FILE_STAT}
-    _, io = await find_walk_generic(
+    _, io = await find_generic(
         [_file_spec(virtual="/mnt", key="")],
         ["-type", "f"],
         Context(vfs=_files(_stat_map(stats))),

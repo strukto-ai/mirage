@@ -235,11 +235,6 @@ impl ShellNode {
             .collect()
     }
 
-    #[getter]
-    fn child_count(&self) -> u32 {
-        self.node().child_count
-    }
-
     fn child(&self, index: i64) -> Option<ShellNode> {
         let node = self.node();
         let index = u32::try_from(index).ok()?;

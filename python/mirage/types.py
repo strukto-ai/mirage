@@ -326,10 +326,10 @@ ReadStreamFn: TypeAlias = Callable[..., AsyncIterator[bytes]]
 # A "polymorphic" reader is the loose `read` contract head/tail/wc
 # accept: a backend may hand back materialized bytes, an awaitable of
 # bytes, or an async byte stream; ensure_stream normalizes downstream.
-PolymorphicReadResult: TypeAlias = (
-    bytes | AsyncIterator[bytes] | Awaitable[bytes | AsyncIterator[bytes]]
-)
-PolymorphicReadFn: TypeAlias = Callable[..., PolymorphicReadResult]
+PolymorphicReadFn: TypeAlias = Callable[
+    ...,
+    bytes | AsyncIterator[bytes] | Awaitable[bytes | AsyncIterator[bytes]],
+]
 CopyFn: TypeAlias = Callable[..., Awaitable[None]]
 MoveFn: TypeAlias = Callable[..., Awaitable[None]]
 ReaddirFn: TypeAlias = Callable[..., Awaitable[list[str]]]

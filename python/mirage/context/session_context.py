@@ -620,7 +620,7 @@ def session_voice(session: SessionState | None) -> str:
     """
     if session is None:
         return "bash: "
-    if program_invocation(session):
+    if is_program_invocation(session):
         return ""
     return f"{voice_name(session)}: line {session.line_number}: "
 
@@ -952,7 +952,7 @@ def reset_program_invocation(token: CallerToken) -> None:
     reset_caller(token)
 
 
-def program_invocation(session: SessionState) -> bool:
+def is_program_invocation(session: SessionState) -> bool:
     """Whether the line running in this session is a program run.
 
     Args:

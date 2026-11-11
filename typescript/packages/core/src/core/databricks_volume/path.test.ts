@@ -17,7 +17,7 @@ import { PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { DatabricksVolumeConfig } from '../../vfs/databricks_volume/config.ts'
 import { parseConfigWithSchema } from '../../vfs/secrets.ts'
-import { backendPath, configuredRoot, normalizePosix, virtualPath, volumeRoot } from './path.ts'
+import { backendPath, configuredRoot, virtualPath, volumeRoot } from './path.ts'
 
 const CONFIG: DatabricksVolumeConfig = parseConfigWithSchema(DatabricksVolumeConfig, {
   catalog: 'main',
@@ -26,14 +26,6 @@ const CONFIG: DatabricksVolumeConfig = parseConfigWithSchema(DatabricksVolumeCon
   host: 'https://dbc.example.com',
   token: 'tok',
   root_path: '/root',
-})
-
-describe('normalizePosix', () => {
-  it('collapses dot segments and duplicate slashes', () => {
-    expect(normalizePosix('/a//b/./c')).toBe('/a/b/c')
-    expect(normalizePosix('/a/b/../c')).toBe('/a/c')
-    expect(normalizePosix('/')).toBe('/')
-  })
 })
 
 describe('volumeRoot / configuredRoot', () => {

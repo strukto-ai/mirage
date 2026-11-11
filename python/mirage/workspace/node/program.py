@@ -47,8 +47,8 @@ from mirage.workspace.executor.builtins.exec import (
     diverted_file,
 )
 from mirage.workspace.executor.control import (
-    UNWINDING,
     LoopSignal,
+    Unwinding,
     carried,
 )
 from mirage.workspace.executor.statement import (
@@ -435,7 +435,7 @@ async def _run_program(
             merged_io = await land_late(
                 recorder, leave, own, sink, all_stdout, merged_io
             )
-        except UNWINDING as sig:
+        except Unwinding as sig:
             # What it wrote before it left; the ERR action answering it
             # left after that was landed.
             merged_io = await land(
@@ -523,7 +523,7 @@ async def _unwound(
     error bash treats as one.
 
     Args:
-        sig (LoopSignal | ReturnSignal | ExitSignal): one of ``UNWINDING``.
+        sig (LoopSignal | ReturnSignal | ExitSignal): one of ``Unwinding``.
         child (TSNodeLike): the statement it left.
         context (EvaluationContext): the shell.
         stdin (ByteSource | None): its standard input.

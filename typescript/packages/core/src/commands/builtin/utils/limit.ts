@@ -20,7 +20,6 @@ import { type Limit, OnExceed } from '../../../types.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import type { Context } from '../../config.ts'
 
-const NEWLINE = 0x0a
 const ENC = new TextEncoder()
 
 const TIMED_OUT = Symbol('timed-out')
@@ -140,7 +139,7 @@ async function* boundedStream(
       if (lines >= limit.maxLines) end = 0
       else {
         for (let i = 0; i < end; i++) {
-          if (chunk[i] === NEWLINE && ++lines === limit.maxLines) {
+          if (chunk[i] === 0x0a && ++lines === limit.maxLines) {
             end = i + 1
             break
           }

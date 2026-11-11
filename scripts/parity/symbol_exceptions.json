@@ -1160,11 +1160,6 @@
     "ByteReader": "Python stream readers and asyncssh implement readexactly; TypeScript transports expose Web ReadableStreams."
    }
   },
-  "commands/builtin/generic/find": {
-   "typescript_only": {
-    "findGeneric": "TypeScript's find hands its walk to findGeneric as a find callback; Python's builder calls find_walk_generic, which walks directly."
-   }
-  },
   "core/postgres/client": {
    "typescript_only": {
     "keyTexts": "A TypeScript driver's key value need not be exact (pg-types parses a jsonb number as a double, and a browser mount takes any driver), so a TypeScript keyset page starts after the key's text form; asyncpg's values are exact, so Python pages from the row itself."
@@ -1397,11 +1392,6 @@
     "ISO_DATE_END": "Python's json_util writes a $date as ISO-8601 for 1970 through 9999 only, the Extended JSON bound; bson's relaxed EJSON runs five hours into year 10000, so TypeScript applies the bound itself before EJSON.",
     "relaxedEjson": "Python's json_util writes a $date as ISO-8601 for 1970 through 9999 only, the Extended JSON bound; bson's relaxed EJSON runs five hours into year 10000, so TypeScript applies the bound itself before EJSON.",
     "isLong": "pymongo decodes every Int64 as an exact int and json_util writes its digits; the JS driver keeps one past 2^53 as a Long, which bson's relaxed EJSON would round to a double, so TypeScript renders it itself."
-   }
-  },
-  "core/mongodb/sampler": {
-   "typescript_only": {
-    "isDBRefLike": "Python tells a DBRef apart with isinstance; the JS driver's DBRef is told apart by its _bsontype, as the sampler's other is*Like checks are."
    }
   },
   "core/linear/client": {

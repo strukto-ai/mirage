@@ -1,6 +1,7 @@
 import pytest
 
-from mirage.commands.builtin.generic.readlink import readlink
+from mirage.commands.builtin.generic.readlink import readlink_generic
+from mirage.commands.config import Context
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -16,23 +17,27 @@ def _spec(original: str, prefix: str = "") -> PathSpec:
 
 @pytest.mark.asyncio
 async def test_readlink_simple():
-    out, _ = await readlink([_spec("/a/b")])
+    out, _ = await readlink_generic([_spec("/a/b")], [], Context())
     assert out == b"/a/b\n"
 
 
 @pytest.mark.asyncio
 async def test_readlink_with_prefix():
-    out, _ = await readlink([_spec("/mnt/b", prefix="/mnt")])
+    out, _ = await readlink_generic(
+        [_spec("/mnt/b", prefix="/mnt")], [], Context()
+    )
     assert out == b"/mnt/b\n"
 
 
 @pytest.mark.asyncio
 async def test_readlink_normalize_with_f():
-    out, _ = await readlink([_spec("/a/./b")], f=True)
+    out, _ = await readlink_generic(
+        [_spec("/a/./b")], [], Context(flags={"canonicalize": True})
+    )
     assert out == b"/a/b\n"
 
 
 @pytest.mark.asyncio
 async def test_readlink_missing_operand():
     with pytest.raises(ValueError, match="missing operand"):
-        await readlink([])
+        await readlink_generic([], [], Context())

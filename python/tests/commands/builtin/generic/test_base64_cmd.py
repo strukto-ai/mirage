@@ -2,12 +2,22 @@ import base64
 
 import pytest
 
-from mirage.commands.builtin.generic.base64_cmd import base64_cmd
+from mirage.commands.builtin.generic.base64_cmd import (
+    Base64Flags,
+    base64_generic,
+)
+from mirage.commands.config import Context
 from mirage.io.types import materialize
 
 
 def _unused(path):
     raise AssertionError("no file operand")
+
+
+async def _base64(stdin, **flags):
+    return await base64_generic(
+        Base64Flags(**flags), [], [], Context(stdin=stdin), _unused, _unused
+    )
 
 
 @pytest.mark.asyncio
@@ -27,9 +37,7 @@ async def test_emits_before_reading_the_tail_and_closes(
         finally:
             closed = True
 
-    output, _ = await base64_cmd(
-        [], read_stream=_unused, stdin=source(), decode=decode
-    )
+    output, _ = await _base64(source(), decode=decode)
     try:
         assert await anext(output) == expected
     finally:
@@ -49,9 +57,7 @@ async def test_encoding_carries_bytes_and_wrap_columns_across_chunks(
         for at in range(0, len(data), size):
             yield data[at : at + size]
 
-    output, _ = await base64_cmd(
-        [], read_stream=_unused, stdin=source(), wrap=wrap
-    )
+    output, _ = await _base64(source(), wrap=wrap)
     parts = [part async for part in output]
     encoded = base64.b64encode(data)
     expected = (
@@ -92,13 +98,7 @@ async def test_decoding_padding_and_failures_are_chunk_independent(
         for at in range(0, len(data), size):
             yield data[at : at + size]
 
-    output, io = await base64_cmd(
-        [],
-        read_stream=_unused,
-        stdin=source(),
-        decode=True,
-        ignore_garbage=ignore,
-    )
+    output, io = await _base64(source(), decode=True, ignore_garbage=ignore)
     assert await materialize(output) == expected
     assert io.exit_code == code
     assert io.stderr == (b"base64: invalid input\n" if code else None)
@@ -116,7 +116,7 @@ async def test_decoding_padding_and_failures_are_chunk_independent(
     ],
 )
 async def test_encoding_flushes_the_final_partial_group(data, expected):
-    output, _ = await base64_cmd([], read_stream=_unused, stdin=data)
+    output, _ = await _base64(data)
     assert await materialize(output) == expected
 
 
@@ -130,9 +130,7 @@ async def test_decoding_all_byte_values_in_bounded_chunks(size):
         for at in range(0, len(encoded), size):
             yield encoded[at : at + size]
 
-    output, io = await base64_cmd(
-        [], read_stream=_unused, stdin=source(), decode=True
-    )
+    output, io = await _base64(source(), decode=True)
     parts = [part async for part in output]
     assert b"".join(parts) == data
     assert max(map(len, parts)) <= 16384

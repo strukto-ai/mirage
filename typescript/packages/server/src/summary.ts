@@ -18,7 +18,7 @@ import { HISTORY_PREFIX } from '@struktoai/mirage-core/vfs/history/history'
 import { MountBackend, parseMountMode, type JsonValue } from '@struktoai/mirage-core/types'
 import { msToRfc3339 } from '@struktoai/mirage-core/utils/dates'
 import { isPlainObject } from '@struktoai/mirage-core/utils/records'
-import { normDir } from '@struktoai/mirage-core/utils/slash'
+import { normDir } from '@struktoai/mirage-core/utils/path'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { WorkspaceEntry } from './registry.ts'
 import type {

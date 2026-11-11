@@ -32,57 +32,32 @@ function bump(counts: Map<string, Map<string, number>>, path: string, tag: strin
   inner.set(tag, (inner.get(tag) ?? 0) + 1)
 }
 
-function isObjectIdLike(v: unknown): boolean {
-  if (typeof v !== 'object' || v === null) return false
-  const proto = (v as { _bsontype?: string })._bsontype
-  return proto === 'ObjectId' || proto === 'ObjectID'
-}
-
-function isDecimalLike(v: unknown): boolean {
-  if (typeof v !== 'object' || v === null) return false
-  return (v as { _bsontype?: string })._bsontype === 'Decimal128'
-}
-
-function isBinaryLike(v: unknown): boolean {
-  if (typeof v !== 'object' || v === null) return false
-  return (v as { _bsontype?: string })._bsontype === 'Binary'
-}
-
-function isLongLike(v: unknown): boolean {
-  if (typeof v !== 'object' || v === null) return false
-  return (v as { _bsontype?: string })._bsontype === 'Long'
-}
-
-function isTimestampLike(v: unknown): boolean {
-  if (typeof v !== 'object' || v === null) return false
-  return (v as { _bsontype?: string })._bsontype === 'Timestamp'
-}
-
-function isRegexLike(v: unknown): boolean {
-  if (v instanceof RegExp) return true
-  if (typeof v !== 'object' || v === null) return false
-  return (v as { _bsontype?: string })._bsontype === 'BSONRegExp'
-}
-
-function isDBRefLike(v: unknown): boolean {
-  if (typeof v !== 'object' || v === null) return false
-  return (v as { _bsontype?: string })._bsontype === 'DBRef'
-}
-
 function scalarTag(v: unknown): string {
   if (typeof v === 'boolean') return BsonTypeTag.BOOL
-  if (isLongLike(v)) return BsonTypeTag.LONG
   if (typeof v === 'number') return Number.isInteger(v) ? BsonTypeTag.INT : BsonTypeTag.DOUBLE
   if (typeof v === 'string') return BsonTypeTag.STRING
-  if (isObjectIdLike(v)) return BsonTypeTag.OBJECT_ID
-  if (isDecimalLike(v)) return BsonTypeTag.DECIMAL
-  if (v instanceof Date) return BsonTypeTag.DATE
-  if (isTimestampLike(v)) return BsonTypeTag.TIMESTAMP
-  if (isBinaryLike(v)) return BsonTypeTag.BINARY
-  if (isRegexLike(v)) return BsonTypeTag.REGEX
-  if (isDBRefLike(v)) return BsonTypeTag.OBJECT
   if (v === null) return BsonTypeTag.NULL
-  return BsonTypeTag.UNKNOWN
+  if (v instanceof Date) return BsonTypeTag.DATE
+  if (v instanceof RegExp) return BsonTypeTag.REGEX
+  switch (typeof v === 'object' ? (v as { _bsontype?: string })._bsontype : undefined) {
+    case 'Long':
+      return BsonTypeTag.LONG
+    case 'ObjectId':
+    case 'ObjectID':
+      return BsonTypeTag.OBJECT_ID
+    case 'Decimal128':
+      return BsonTypeTag.DECIMAL
+    case 'Timestamp':
+      return BsonTypeTag.TIMESTAMP
+    case 'Binary':
+      return BsonTypeTag.BINARY
+    case 'BSONRegExp':
+      return BsonTypeTag.REGEX
+    case 'DBRef':
+      return BsonTypeTag.OBJECT
+    default:
+      return BsonTypeTag.UNKNOWN
+  }
 }
 
 function arrayTag(items: readonly unknown[]): string {

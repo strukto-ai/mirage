@@ -553,106 +553,6 @@ async def _hash_check(
         await records.aclose()
 
 
-async def checksum(
-    paths: Sequence[PathSpec | bytes],
-    *,
-    algorithm: str,
-    read_list: PolymorphicReadFn,
-    read_stream: Callable[..., AsyncIterator[bytes]],
-    check: bool = False,
-    binary: bool = False,
-    tag: bool = False,
-    zero: bool = False,
-    strict: bool = False,
-    ignore_missing: bool = False,
-    status: bool = False,
-    quiet: bool = False,
-    warn: bool = False,
-    cwd: PathSpec | str = "/",
-    stored: StoredDigest | None = None,
-) -> tuple[ByteSource | None, IOResult]:
-    """Hash each operand, or with ``check`` verify each checksum list.
-
-    An operand's digest is asked of ``stored`` first, the one the
-    mount keeps, and the file is read only when there is none; a list
-    under ``check`` is always verified against the bytes.
-
-    Args:
-        paths (Sequence[PathSpec | bytes]): the operands, none for
-            stdin, and when hashing the stderr line of each that did not
-            read, where it stood.
-        algorithm (str): the digest name, e.g. ``"md5"``.
-        read_list (PolymorphicReadFn): checksum-list bytes or chunks.
-        read_stream (Callable): bound streamed reader, stdin for ``-``.
-        check (bool): -c.
-        binary (bool): -b.
-        tag (bool): --tag.
-        zero (bool): -z.
-        strict (bool): --strict.
-        ignore_missing (bool): --ignore-missing.
-        status (bool): --status.
-        quiet (bool): --quiet.
-        warn (bool): -w.
-        cwd (PathSpec | str): where a list's names resolve.
-        stored (StoredDigest | None): the mount's stored digest.
-    """
-    if check and paths:
-        if isinstance(cwd, PathSpec):
-            cwd_dir = cwd.virtual
-            cwd_prefix = mount_prefix_of(cwd.virtual, cwd.vfs_path)
-        else:
-            cwd_dir, cwd_prefix = cwd or "/", ""
-        outs = ByteSpool()
-        errs = ByteSpool()
-        exit_code = 0
-        try:
-            # Every operand is its own checksum list: GNU verifies each in
-            # turn and keeps going when one cannot be read (coreutils 9.7).
-            for p in paths:
-                if isinstance(p, bytes):
-                    continue
-                try:
-                    out, stderr, code = await _hash_check(
-                        p,
-                        read_list,
-                        read_stream,
-                        algorithm,
-                        cwd_dir,
-                        cwd_prefix,
-                        strict,
-                        ignore_missing,
-                        status,
-                        quiet,
-                        warn,
-                    )
-                except WALK_ERRORS as exc:
-                    await errs.append(_check_list_error(algorithm, p, exc))
-                    exit_code = 1
-                    continue
-                await outs.fill(out)
-                if stderr is not None:
-                    await errs.fill(stderr)
-                if code:
-                    exit_code = 1
-            return await outs.output(), IOResult(
-                exit_code=exit_code, stderr=await errs.output()
-            )
-        except BaseException:
-            await outs.close()
-            await errs.close()
-            raise
-    return await hash_operands(
-        paths or [STDIN_OPERAND],
-        read_stream,
-        algorithm,
-        _prog(algorithm),
-        partial(
-            _hash_line, algorithm=algorithm, binary=binary, tag=tag, zero=zero
-        ),
-        stored,
-    )
-
-
 async def checksum_generic(
     parsed: ChecksumFlags,
     paths: list[PathSpec],
@@ -688,45 +588,75 @@ async def checksum_generic(
     stat = stdin_stat(stat)
     stream = stdin_stream(stream, ctx.stdin)
     if parsed.check:
-        # With no operand the checksum list is stdin.
-        return await checksum(
-            paths or [STDIN_OPERAND],
-            algorithm=parsed.algorithm.partition("-")[0],
-            read_list=normalized_read(stream),
-            read_stream=(
-                dispatched_reader(ctx.vfs.dispatch, normalized_read(stream))
-                if ctx.vfs is not None
-                else normalized_read(stream)
-            ),
-            check=True,
-            strict=parsed.strict,
-            ignore_missing=parsed.ignore_missing,
-            status=parsed.status,
-            quiet=parsed.quiet,
-            warn=parsed.warn,
-            cwd=ctx.cwd,
+        algorithm = parsed.algorithm.partition("-")[0]
+        read_list = normalized_read(stream)
+        read_stream = (
+            dispatched_reader(ctx.vfs.dispatch, read_list)
+            if ctx.vfs is not None
+            else read_list
         )
+        cwd_prefix = mount_prefix_of(ctx.cwd.virtual, ctx.cwd.vfs_path)
+        outs = ByteSpool()
+        errs = ByteSpool()
+        exit_code = 0
+        try:
+            # Every operand is its own checksum list: GNU verifies each in
+            # turn and keeps going when one cannot be read (coreutils 9.7).
+            # With no operand the checksum list is stdin.
+            for p in paths or [STDIN_OPERAND]:
+                try:
+                    out, stderr, code = await _hash_check(
+                        p,
+                        read_list,
+                        read_stream,
+                        algorithm,
+                        ctx.cwd.virtual,
+                        cwd_prefix,
+                        parsed.strict,
+                        parsed.ignore_missing,
+                        parsed.status,
+                        parsed.quiet,
+                        parsed.warn,
+                    )
+                except WALK_ERRORS as exc:
+                    await errs.append(_check_list_error(algorithm, p, exc))
+                    exit_code = 1
+                    continue
+                await outs.fill(out)
+                if stderr is not None:
+                    await errs.fill(stderr)
+                if code:
+                    exit_code = 1
+            return await outs.output(), IOResult(
+                exit_code=exit_code, stderr=await errs.output()
+            )
+        except BaseException:
+            await outs.close()
+            await errs.close()
+            raise
     order = await split_in_order(paths, stat, name)
     if order and all(isinstance(p, bytes) for p in order):
         return None, IOResult(
             exit_code=1,
             stderr=b"".join(p for p in order if isinstance(p, bytes)),
         )
-    return await checksum(
-        order,
-        algorithm=parsed.algorithm,
-        read_list=normalized_read(stream),
-        read_stream=normalized_read(stream),
-        binary=parsed.binary,
-        tag=parsed.tag,
-        zero=parsed.zero,
-        cwd=ctx.cwd,
-        stored=stored,
+    return await hash_operands(
+        order or [STDIN_OPERAND],
+        normalized_read(stream),
+        parsed.algorithm,
+        _prog(parsed.algorithm),
+        partial(
+            _hash_line,
+            algorithm=parsed.algorithm,
+            binary=parsed.binary,
+            tag=parsed.tag,
+            zero=parsed.zero,
+        ),
+        stored,
     )
 
 
 __all__ = [
     "StoredDigest",
-    "checksum",
     "checksum_generic",
 ]

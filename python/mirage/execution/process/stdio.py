@@ -10,7 +10,6 @@ class ProcessInput:
     def __init__(self, capacity: int = CAPACITY) -> None:
         self.pipe = BytePipe(capacity)
         self.closed = False
-        self.bytes_read = 0
 
     async def write(self, data: bytes) -> None:
         if not data:
@@ -29,7 +28,6 @@ class ProcessInput:
 
     async def _read(self) -> AsyncIterator[bytes]:
         async for chunk in self.pipe.stream():
-            self.bytes_read += len(chunk)
             yield chunk
 
     def stream(self) -> OutputStream:

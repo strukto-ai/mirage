@@ -412,7 +412,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> FindFlags:
     )
 
 
-async def find_walk_generic(
+async def find_generic(
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,

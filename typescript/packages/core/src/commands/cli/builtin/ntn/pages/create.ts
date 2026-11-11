@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FlagView } from '../../../../spec/flag_view.ts'
-import { createPageRaw } from '../../../../../core/notion/pages.ts'
+import { createPage } from '../../../../../core/notion/pages.ts'
 import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
@@ -55,7 +55,7 @@ export async function create(
   } catch (err) {
     return usageError(err)
   }
-  const page = await createPageRaw(notionTransport(accessor, ctx.flags), body)
+  const page = await createPage(notionTransport(accessor, ctx.flags), body)
   if (fl.asBool('json')) return [prettyJson(page), new IOResult()]
   const id = typeof page.id === 'string' ? page.id : ''
   return [ENC.encode(`${id}\n`), new IOResult()]

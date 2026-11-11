@@ -32,8 +32,6 @@ from mirage.shell.errors import (
 )
 from mirage.workspace.session.session import SessionState
 
-Fault = tuple[Any, ...]
-
 
 class TaskHost(Protocol):
     """What a running shell task asks the host for, on the session whose
@@ -109,11 +107,11 @@ class TaskHost(Protocol):
         ...
 
 
-def fault_error(fault: Fault) -> BaseException:
+def fault_error(fault: tuple[Any, ...]) -> BaseException:
     """The exception an operation's stop raises.
 
     Args:
-        fault (Fault): the tagged tuple mirage-rs ended with.
+        fault (tuple[Any, ...]): the tagged tuple mirage-rs ended with.
     """
     error: BaseException
     match fault:

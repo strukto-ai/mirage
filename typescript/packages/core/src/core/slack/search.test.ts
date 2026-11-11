@@ -27,7 +27,7 @@ import {
 } from './client.ts'
 import type * as History from './history.ts'
 import { getHistoryJsonl } from './history.ts'
-import { MAX_PAGES, searchFiles, searchMessages } from './search.ts'
+import { MAX_PAGES, searchMessages } from './search.ts'
 
 vi.mock('./history.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof History>()
@@ -123,20 +123,6 @@ describe('searchMessages', () => {
     } finally {
       globalThis.fetch = originalFetch
     }
-  })
-})
-
-describe('searchFiles', () => {
-  it('calls search.files with query, count, page, sort=timestamp', async () => {
-    const t = new FakeTransport(() => ({ ok: true, files: { matches: [] } }))
-    await searchFiles(new SlackAccessor(t), 'doc', 5, 2)
-    expect(t.calls[0]?.endpoint).toBe('search.files')
-    expect(t.calls[0]?.params).toEqual({
-      query: 'doc',
-      count: '5',
-      page: '2',
-      sort: 'timestamp',
-    })
   })
 })
 

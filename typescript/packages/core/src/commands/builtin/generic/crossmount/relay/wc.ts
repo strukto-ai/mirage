@@ -34,7 +34,6 @@ const ENC = new TextEncoder()
 
 // GNU prints a row's counts in this order whichever flags ask for them.
 const COLUMNS = ['lines', 'words', 'chars', 'bytes', 'maxLineLength'] as const
-type Column = (typeof COLUMNS)[number]
 
 /**
  * The size GNU sizes the columns by, which it takes from fstat. A stream or a
@@ -108,7 +107,8 @@ export async function runWc(
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
   }
   const asked = COLUMNS.filter((c) => parsed[c])
-  const columns: readonly Column[] = asked.length > 0 ? asked : ['lines', 'words', 'bytes']
+  const columns: readonly (typeof COLUMNS)[number][] =
+    asked.length > 0 ? asked : ['lines', 'words', 'bytes']
   const each = { ...flagKwargs, total: 'never' }
   const runs: OperandRun[] = []
   for (const run of await runOperands(runSingle, Cmd.WC, scopes, [], each)) {

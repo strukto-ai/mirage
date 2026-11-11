@@ -21,49 +21,6 @@ from mirage.shell.bytes import byte_view, encode_text
 from mirage.types import PathSpec, PolymorphicReadFn
 
 
-async def comm(
-    paths: list[PathSpec],
-    *,
-    read_stream: PolymorphicReadFn,
-    stdin: ByteSource | None = None,
-    suppress1: bool = False,
-    suppress2: bool = False,
-    suppress3: bool = False,
-    check_order: bool | None = None,
-    output_delimiter: str = "\t",
-    total: bool = False,
-    zero_terminated: bool = False,
-) -> tuple[ByteSource | None, IOResult]:
-    if len(paths) > 2:
-        raise extra_operand_error(
-            CommandName.COMM, paths[2].raw_path or paths[2].virtual
-        )
-    if len(paths) < 2:
-        raise missing_operand_error(
-            CommandName.COMM,
-            paths[-1].raw_path or paths[-1].virtual if paths else None,
-        )
-    read = normalized_read(read_stream)
-    shared = AsyncLineIterator(resolve_source(stdin))
-    readers = [
-        shared if is_stdin(p) else AsyncLineIterator(read(p)) for p in paths
-    ]
-    stream = open_stream(
-        "comm",
-        {
-            "suppress": [suppress1, suppress2, suppress3],
-            "check_order": check_order,
-            "delimiter": byte_view(output_delimiter),
-            "total": total,
-            "zero_terminated": zero_terminated,
-            "shared": readers[0] is readers[1],
-            "stdin_twice": all(p.raw_path == "-" for p in paths),
-        },
-    )
-    io = IOResult()
-    return _comm_stream(stream, readers, io, paths), io
-
-
 async def _comm_stream(
     stream: OpenStream,
     readers: list[AsyncLineIterator],
@@ -102,9 +59,6 @@ async def _comm_stream(
         io.exit_code = 1 if error else stream.status()
         for reader in dict.fromkeys(readers):
             await reader.discard()
-
-
-__all__ = ["comm"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,15 +102,31 @@ async def comm_generic(
     read_stream: PolymorphicReadFn,
 ) -> tuple[ByteSource | None, IOResult]:
     parsed = parse_flags(ctx.flags)
-    return await comm(
-        paths,
-        read_stream=read_stream,
-        stdin=ctx.stdin,
-        suppress1=parsed.suppress1,
-        suppress2=parsed.suppress2,
-        suppress3=parsed.suppress3,
-        check_order=parsed.check_order,
-        output_delimiter=parsed.output_delimiter,
-        total=parsed.total,
-        zero_terminated=parsed.zero_terminated,
+    if len(paths) > 2:
+        raise extra_operand_error(
+            CommandName.COMM, paths[2].raw_path or paths[2].virtual
+        )
+    if len(paths) < 2:
+        raise missing_operand_error(
+            CommandName.COMM,
+            paths[-1].raw_path or paths[-1].virtual if paths else None,
+        )
+    read = normalized_read(read_stream)
+    shared = AsyncLineIterator(resolve_source(ctx.stdin))
+    readers = [
+        shared if is_stdin(p) else AsyncLineIterator(read(p)) for p in paths
+    ]
+    stream = open_stream(
+        "comm",
+        {
+            "suppress": [parsed.suppress1, parsed.suppress2, parsed.suppress3],
+            "check_order": parsed.check_order,
+            "delimiter": byte_view(parsed.output_delimiter),
+            "total": parsed.total,
+            "zero_terminated": parsed.zero_terminated,
+            "shared": readers[0] is readers[1],
+            "stdin_twice": all(p.raw_path == "-" for p in paths),
+        },
     )
+    io = IOResult()
+    return _comm_stream(stream, readers, io, paths), io

@@ -26,7 +26,7 @@ import {
   type ReaddirFn,
   type StatFn,
 } from '../../../types.ts'
-import type { FindOptions } from '../../../core/generic/find.ts'
+import type { FindArgs } from '../../../core/generic/types.ts'
 import { eacces, enoent, enotsup, fsError, walkDeclined } from '../../../errors/fs.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import {
@@ -552,7 +552,7 @@ describe('parseFlags', () => {
 // Backend whose find honors `type` and whose mkdir records directories.
 function typedBackend(files: Map<string, Uint8Array>, dirs: Set<string>) {
   const { stat, copy } = makeBackend(files, dirs)
-  const find = (p: PathSpec, options: FindOptions): Promise<string[]> => {
+  const find = (p: PathSpec, options: FindArgs): Promise<string[]> => {
     const base = key(p) + '/'
     const source = options.type === 'd' ? [...dirs] : [...files.keys()]
     return Promise.resolve(source.filter((k) => k.startsWith(base)).sort())

@@ -1,6 +1,7 @@
 import pytest
 
-from mirage.commands.builtin.generic.file import file_cmd
+from mirage.commands.builtin.generic.file import file_generic
+from mirage.commands.config import Context
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 
 
@@ -31,7 +32,7 @@ def _make_backend(files: dict[str, tuple[bytes, ContentType]], dirs: set[str]):
 @pytest.mark.asyncio
 async def test_file_missing_operand_reports_and_exits_1():
     stat_fn, stream = _make_backend({}, set())
-    out, io = await file_cmd([], stream=stream, stat_fn=stat_fn)
+    out, io = await file_generic([], [], Context(), stream, stat_fn)
     assert out is None
     assert io.exit_code == 1
     assert io.stderr == b"file: missing operand\n"
@@ -59,7 +60,9 @@ async def _unstreamed(path):
 
 @pytest.mark.asyncio
 async def test_file_read_error_logs_and_falls_back():
-    out, _ = await file_cmd([_spec("x")], stream=_refused, stat_fn=_text_stat)
+    out, _ = await file_generic(
+        [_spec("x")], [], Context(), _refused, _text_stat
+    )
     assert b"x:" in out
 
 
@@ -72,7 +75,9 @@ async def test_file_reads_only_the_first_bytes():
             pulled.append(n)
             yield b"%PDF-1.4\n" if n == 0 else b"x" * 1000
 
-    out, _ = await file_cmd([_spec("/x")], stream=stream, stat_fn=_big_stat)
+    out, _ = await file_generic(
+        [_spec("/x")], [], Context(), stream, _big_stat
+    )
     assert out == b"/x: application/pdf\n"
     assert len(pulled) == 2
 
@@ -85,11 +90,8 @@ async def test_file_asks_a_ranged_read_for_the_header():
         asked.append((offset, size))
         yield b"\x89PNG\r\n\x1a\n"
 
-    out, _ = await file_cmd(
-        [_spec("/x")],
-        stream=_unstreamed,
-        stat_fn=_big_stat,
-        read_range=read_range,
+    out, _ = await file_generic(
+        [_spec("/x")], [], Context(), _unstreamed, _big_stat, read_range
     )
     assert out == b"/x: image/png\n"
     assert asked == [(0, 512)]

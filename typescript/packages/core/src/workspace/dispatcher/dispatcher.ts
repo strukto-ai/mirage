@@ -118,10 +118,18 @@ import {
   visibleLinks,
 } from '../../utils/hidden.ts'
 import { mountKey, underPath } from '../../utils/key_prefix.ts'
-import { CycleError, endsAtDot, norm, parent, posixNormpath } from '../../utils/path.ts'
+import {
+  CycleError,
+  endsAtDot,
+  norm,
+  normDir,
+  ownerPrefix,
+  parent,
+  posixNormpath,
+} from '../../utils/path.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { type RemnantChannel, removeRemnants, visibleBelow } from '../../utils/remnants.ts'
-import { normDir, ownerPrefix, rstripSlash } from '../../utils/slash.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { ident } from '../../utils/stat_view.ts'
 import type { BaseVFS } from '../../vfs/base.ts'

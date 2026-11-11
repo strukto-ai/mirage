@@ -15,7 +15,7 @@
 import type { LinearAccessor } from '../../accessor/linear.ts'
 import { ContentType, FileStat, FileType } from '../../types.ts'
 import { keptText, unsearchedText } from '../../utils/record_search.ts'
-import { stringOf as pickString } from '../../utils/records.ts'
+import { pickNumberOrNull, stringOf as pickString } from '../../utils/records.ts'
 import { cutListing, type Listed, makeReaddir } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { entryStat } from '../hierarchy/stat.ts'
@@ -51,16 +51,6 @@ import {
 import { detectScope } from './scope.ts'
 
 export const TEAM_DIRS = ['members', 'issues', 'projects', 'cycles', 'documents'] as const
-
-function extraSize(entry: FileStat): number | null {
-  const value = entry.extra.json_size
-  return typeof value === 'number' ? value : null
-}
-
-function extraString(entry: FileStat, key: string): string {
-  const value = entry.extra[key]
-  return typeof value === 'string' ? value : ''
-}
 
 /** The teams the mount shows: all of them, or those in `teamIds`. Mirrors Python's `filtered_teams`. */
 export async function filteredTeams(accessor: LinearAccessor): Promise<Record<string, unknown>[]> {
@@ -105,7 +95,7 @@ function listTeam(
 ): Promise<FileStat[]> {
   const rows = [
     TEAM_JSON('team.json', match.slots.team_id ?? '', {
-      size: extraSize(entry),
+      size: pickNumberOrNull(entry.extra, 'json_size'),
       modified: entry.modified,
     }),
   ]
@@ -114,7 +104,10 @@ function listTeam(
     // team listing knows.
     const extra =
       name === 'projects'
-        ? { team_key: extraString(entry, 'team_key'), team_name: extraString(entry, 'team_name') }
+        ? {
+            team_key: pickString(entry.extra, 'team_key'),
+            team_name: pickString(entry.extra, 'team_name'),
+          }
         : {}
     rows.push(new FileStat({ name, type: FileType.DIRECTORY, extra }))
   }
@@ -168,7 +161,7 @@ async function listIssue(
   // comments.jsonl costs the one bounded comments call, paid only when
   // this directory is entered.
   const issueId = match.slots.issue_id ?? ''
-  const issueKey = extraString(entry, 'issue_key')
+  const issueKey = pickString(entry.extra, 'issue_key')
   const comments = await listIssueComments(accessor.transport, issueId)
   const rendered = comments.map((c) =>
     normalizeComment(c, issueId, issueKey !== '' ? issueKey : null),
@@ -179,7 +172,10 @@ async function listIssue(
     if (updated > commentsTime) commentsTime = updated
   }
   return [
-    ISSUE_JSON('issue.json', issueId, { size: extraSize(entry), modified: entry.modified }),
+    ISSUE_JSON('issue.json', issueId, {
+      size: pickNumberOrNull(entry.extra, 'json_size'),
+      modified: entry.modified,
+    }),
     COMMENTS('comments.jsonl', issueId, {
       size: jsonlBytesByCreatedAt(rendered).length,
       modified: commentsTime !== '' ? commentsTime : entry.modified,
@@ -206,8 +202,8 @@ async function listProjects(
     const rendered = jsonBytes(
       normalizeProject(project, {
         teamId,
-        teamKey: extraString(entry, 'team_key') || null,
-        teamName: extraString(entry, 'team_name') || null,
+        teamKey: pickString(entry.extra, 'team_key') || null,
+        teamName: pickString(entry.extra, 'team_name') || null,
         issues: projectIssues,
       }),
     )

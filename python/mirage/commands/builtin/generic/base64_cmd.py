@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Mapping
 from contextlib import aclosing
 from dataclasses import dataclass
 
@@ -53,40 +53,6 @@ async def _base64_decode_stream(
             yield refusal.output
 
 
-async def base64_cmd(
-    paths: list[PathSpec],
-    *,
-    read_stream: Callable[..., AsyncIterator[bytes]],
-    stdin: ByteSource | None = None,
-    decode: bool = False,
-    wrap: int | None = None,
-    ignore_garbage: bool = False,
-) -> tuple[ByteSource | None, IOResult]:
-    if len(paths) > 1:
-        raise extra_operand_error(
-            CommandName.BASE64, paths[1].raw_path or paths[1].virtual
-        )
-    if wrap is not None and wrap < 0:
-        return None, IOResult(
-            exit_code=1,
-            stderr=f"base64: invalid wrap size: '{wrap}'\n".encode(),
-        )
-    if paths:
-        source: AsyncIterator[bytes] = stdin_stream(read_stream, stdin)(
-            paths[0]
-        )
-    else:
-        source = resolve_source(stdin)
-
-    if decode:
-        io = IOResult()
-        return _base64_decode_stream(source, ignore_garbage, io), io
-    return _base64_encode_stream(source, wrap=wrap), IOResult()
-
-
-__all__ = ["base64_cmd"]
-
-
 @dataclass(frozen=True, slots=True)
 class Base64Flags:
     decode: bool = False
@@ -138,15 +104,18 @@ async def base64_generic(
             ``read_stream(path)``.
         stat (StatFn): Bound stat called as ``stat(path)``.
     """
-    if len(paths) == 1:
+    if len(paths) > 1:
+        raise extra_operand_error(
+            CommandName.BASE64, paths[1].raw_path or paths[1].virtual
+        )
+    if paths:
         _, err = await split_readable(paths, stdin_stat(stat), "base64")
         if err:
             return None, IOResult(exit_code=1, stderr=err)
-    return await base64_cmd(
-        paths,
-        read_stream=read_stream,
-        stdin=ctx.stdin,
-        decode=parsed.decode,
-        wrap=parsed.wrap,
-        ignore_garbage=parsed.ignore_garbage,
-    )
+        source = stdin_stream(read_stream, ctx.stdin)(paths[0])
+    else:
+        source = resolve_source(ctx.stdin)
+    if parsed.decode:
+        io = IOResult()
+        return _base64_decode_stream(source, parsed.ignore_garbage, io), io
+    return _base64_encode_stream(source, wrap=parsed.wrap), IOResult()
