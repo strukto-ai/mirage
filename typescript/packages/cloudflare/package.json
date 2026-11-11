@@ -38,6 +38,7 @@
       "import": "./dist/index.js"
     },
     "./cpu_features": "./dist/cpu_features.js",
+    "./onepassword_core": "./dist/generated/onepassword_core.js",
     "./*": {
       "types": "./dist/*.d.ts",
       "import": "./dist/*.js"
@@ -50,9 +51,9 @@
     "THIRD_PARTY_NOTICES"
   ],
   "scripts": {
-    "build": "node scripts/clean.mjs && node scripts/bundle-monty.mjs && tsc -p tsconfig.build.json && node scripts/copy-generated.mjs",
-    "test": "node scripts/bundle-monty.mjs && vitest run",
-    "typecheck": "node scripts/bundle-monty.mjs && tsc --noEmit"
+    "build": "node scripts/clean.mjs && node scripts/bundle-monty.mjs && node scripts/bundle-onepassword.mjs && tsc -p tsconfig.build.json && node scripts/copy-generated.mjs",
+    "test": "node scripts/bundle-monty.mjs && node scripts/bundle-onepassword.mjs && vitest run",
+    "typecheck": "node scripts/bundle-monty.mjs && node scripts/bundle-onepassword.mjs && tsc --noEmit"
   },
   "dependencies": {
     "@bytecodealliance/preview2-shim": "^0.19.0",
@@ -63,7 +64,16 @@
     "@xmldom/xmldom": "^0.9.12",
     "ssh2": "^1.16.0"
   },
+  "peerDependencies": {
+    "@1password/sdk": "0.5.0"
+  },
+  "peerDependenciesMeta": {
+    "@1password/sdk": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@1password/sdk": "0.5.0",
     "@pydantic/monty": "1.4.0",
     "@types/node": "^22.0.0",
     "esbuild": "^0.28.2",

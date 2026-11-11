@@ -12,36 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { fieldsFromSecretString } from '@struktoai/mirage-core/secrets/aws'
 import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
 import type { ResolvedSecret } from '@struktoai/mirage-core/secrets/types'
 
 import type { AWSSMConfig } from './config.ts'
 
-/**
- * Shape one `SecretString` into secret fields.
- *
- * A JSON object with all-string values is the fields as-is (the common
- * Secrets Manager layout); anything else -- a plain string, a JSON
- * list, an object with non-string values -- is the whole text under
- * `value`.
- */
-export function fieldsFromSecretString(text: string): Record<string, string> {
-  let decoded: unknown
-  try {
-    decoded = JSON.parse(text)
-  } catch {
-    return { value: text }
-  }
-  if (
-    decoded !== null &&
-    typeof decoded === 'object' &&
-    !Array.isArray(decoded) &&
-    Object.values(decoded).every((value) => typeof value === 'string')
-  ) {
-    return decoded as Record<string, string>
-  }
-  return { value: text }
-}
+export { fieldsFromSecretString }
 
 /**
  * Fetch one secret from AWS Secrets Manager.

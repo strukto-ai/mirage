@@ -102,8 +102,8 @@ non-empty `ref` overrides the source's configured `path`.
 
 | `from` | `ref` example | `key` example | Prerequisite |
 | --- | --- | --- | --- |
-| `aws-sm` | `mirage/slack` or a secret ARN | `SLACK_BOT_TOKEN` | AWS credentials and region in the SDK's normal environment. Python needs `mirage-ai[aws-sm]`; Node includes the source dependency. |
-| `1password` | `op://Engineering/Slack/credential` | `credential` | `OP_SERVICE_ACCOUNT_TOKEN` in the Mirage process environment. Python needs `mirage-ai[1password]`; Node needs `@1password/sdk`. |
+| `aws-sm` | `mirage/slack` or a secret ARN | `SLACK_BOT_TOKEN` | AWS credentials and region in the SDK's normal environment. Python needs `mirage-ai[aws-sm]`; Node includes the source dependency. On [Cloudflare Workers](/typescript/cloudflare-quickstart#read-secrets-from-aws-and-1password), the source's config gives the region and keys. |
+| `1password` | `op://Engineering/Slack/credential` | `credential` | `OP_SERVICE_ACCOUNT_TOKEN` in the Mirage process environment. Python needs `mirage-ai[1password]`; Node needs `@1password/sdk`; [Cloudflare Workers](/typescript/cloudflare-quickstart#read-secrets-from-aws-and-1password) need it and an import. |
 | `strukto` | `slack`, a saved entry's name | `token` | A Mirage server, the daemon or the hosted API, and an entry saved with [`mirage vfs`, `cli`, `runtime` or `machine`](/home/access/cli#saved-connections). |
 
 Use these values in place of `from`, `ref` and `key` in the mount pointer above.

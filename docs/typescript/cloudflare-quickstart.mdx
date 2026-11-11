@@ -61,6 +61,30 @@ curl -s localhost:8787 -d '{"command": "seq 1 100 | sort -rn | head -3"}'
 
 For anything else from core, import its subpaths (`@struktoai/mirage-core/vfs/registry`), not its package root: the root also imports optional packages, such as Pyodide, that a Worker bundle cannot resolve.
 
+## Read secrets from AWS and 1Password
+
+A [pointer](/home/authentication) reads `aws-sm` in a Worker as it does on the server, and `1password` once the Worker imports it.
+
+`aws-sm` is registered when the package loads. The Worker signs each `GetSecretValue` itself, and has no AWS credentials file or default chain to fall back on, so the source's config gives `region`, `aws_access_key_id` and `aws_secret_access_key`, with `aws_session_token` for temporary keys. `aws_profile` is refused.
+
+`1password` runs 1Password's SDK, whose core is about 13 MiB of WebAssembly, so it is its own import. Install the SDK version the package is built against, and alias its core to the package's build of it, which loads the WebAssembly as a module:
+
+```bash
+npm install @1password/sdk@0.5.0
+```
+
+```toml wrangler.toml
+[alias]
+"cpu-features" = "@struktoai/mirage-cloudflare/cpu_features"
+"@1password/sdk-core" = "@struktoai/mirage-cloudflare/onepassword_core"
+```
+
+```ts src/worker.ts
+import '@struktoai/mirage-cloudflare/onepassword'
+```
+
+The token is the source config's `token`, or `OP_SERVICE_ACCOUNT_TOKEN` among the Worker's secrets, which `nodejs_compat` puts on `process.env`.
+
 ## Serve the server API
 
 `createApp` answers the [HTTP](/home/access/http) routes, [MCP](/home/access/mcp) and [RPC](/home/access/rpc) as the [server](/typescript/access/server) does, over the workspaces the isolate holds:
