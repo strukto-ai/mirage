@@ -141,6 +141,10 @@ same PR.
   are gated by live VFS manifests and `integ/config/`.
 - **YAML keys**, the `mirage` CLI output, the server API and the agent
   adapters are public. A TypeScript API change gets a changeset.
+- **Server API** follows `docs/openapi.yaml`: a list answers
+  `{"items": [...]}`, never a bare array, and a time is an RFC 3339 string
+  in UTC to the millisecond (`format: date-time`).
+  `scripts/check_api_docs.py` gates both.
 - **Handlers** take `(accessor, paths, texts, ctx)`; a CLI leaf takes the
   same, with its install's accessor, and a runtime
   `(engine, paths, texts, ctx)`: one `Context`, files only at `ctx.vfs`.
