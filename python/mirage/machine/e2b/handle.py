@@ -205,7 +205,7 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
         """
         if (hint := self._gone(exc)) is None:
             return None
-        self._connected = False
+        self._disconnected()
         return ConnectionLostError(hint, b"", f"e2b: {hint}\n".encode())
 
     async def _exec_argv(

@@ -82,6 +82,14 @@ function lineOf(argv: readonly string[]): string {
   return inner[0] === '/bin/sh' && inner[1] === '-c' ? (inner[2] ?? '') : inner.join(' ')
 }
 
+// The mountpoints a line's mount guard holds it to, none for an unguarded line.
+function guardedPoints(argv: readonly string[]): string[] {
+  let inner = argv[2] === EXEC_PRELUDE ? argv.slice(5) : argv
+  if (isRun(inner)) inner = inner.slice(7)
+  if (inner[2] !== MOUNT_GUARD) return []
+  return inner.slice(5, inner.indexOf('--', 5)).filter((_, at) => at % 4 === 0)
+}
+
 type Program = (proc: FakeProcess) => Promise<number> | number
 
 /**
@@ -99,9 +107,11 @@ class FakeProcess implements ExecProcess {
   closed = false
   exited = false
   overlapped = false
-  // A deaf process has closed its input; a stubborn one ignores TERM.
+  // A deaf process has closed its input; a stubborn one ignores TERM; an
+  // orphan's output stays open after a kill, held by a child it started.
   deaf = false
   stubborn = false
+  orphan = false
   writes = 0
   onInput: (chunk: Uint8Array) => void = () => undefined
   private readonly eof = deferred<undefined>()
@@ -169,7 +179,7 @@ class FakeProcess implements ExecProcess {
   kill(signal = 15): void {
     this.killed.push(signal)
     this.log.push(`kill ${String(signal)} ${this.line}`)
-    if (this.stubborn && signal !== 9) return
+    if (this.orphan || (this.stubborn && signal !== 9)) return
     setTimeout(() => {
       this.dead.resolve(128 + signal)
     }, 5)
@@ -197,6 +207,9 @@ class FakeContainer implements Container {
   readonly refusals: Error[] = []
   down: Error | null = null
   hung = false
+  // What the container has mounted, which a line's mount guard checks; null checks nothing.
+  mounted: (() => ReadonlySet<string>) | null = null
+  onExit: () => void = () => undefined
   asked = 0
   private exited = deferred<undefined>()
 
@@ -209,8 +222,12 @@ class FakeContainer implements Container {
     if (refusal !== undefined) return Promise.reject(refusal)
     const line = lineOf(argv)
     this.log.push(`exec ${line}`)
-    const program =
-      line === CHECK_LINE ? check : (this.programs[line.split(' ')[0] ?? ''] ?? (() => 0))
+    const held = this.mounted?.()
+    const program = guardedPoints(argv).some((at) => held !== undefined && !held.has(at))
+      ? () => 126
+      : line === CHECK_LINE
+        ? check
+        : (this.programs[line.split(' ')[0] ?? ''] ?? (() => 0))
     const proc = new FakeProcess(line, program, this.log)
     this.execs.push({ argv, options, proc })
     return Promise.resolve(proc)
@@ -222,6 +239,7 @@ class FakeContainer implements Container {
 
   /** The container exits: cleanly, or with `error`. */
   exit(error?: Error): void {
+    this.onExit()
     const was = this.exited
     this.exited = deferred()
     was.promise.catch(() => undefined)
@@ -394,6 +412,41 @@ describe('ContainerMachine exec', () => {
     await expect(failed).rejects.toThrow('the sink refused')
     expect(box.log).toContain('kill 9 loud')
     expect(box.log.at(-1)).toBe(`exec ${stopLine('w1:7', 15)}`)
+  })
+})
+
+describe('ContainerMachine output after a line', () => {
+  it('stops reading output a line let go, which a child it left keeps writing', async () => {
+    const { box, machine } = boxed({
+      parent: async (proc) => {
+        proc.orphan = true
+        await proc.complain('before')
+        return sleep(proc)
+      },
+    })
+    const got: Uint8Array[] = []
+    const abort = new AbortController()
+    const direct = machine as unknown as { execArgv: (...args: unknown[]) => Promise<RunResult> }
+    const line = direct.execArgv(
+      ['parent'],
+      null,
+      { [PROCESS]: 'w1:3' },
+      '/',
+      null,
+      (data: Uint8Array) => Promise.resolve(void got.push(data)),
+      abort.signal,
+    )
+    await vi.waitFor(() => {
+      expect(got).toHaveLength(1)
+    })
+    abort.abort()
+    await expect(line).rejects.toMatchObject({ name: 'AbortError' })
+    await box
+      .ran('parent')
+      .complain('after')
+      .catch(() => undefined)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(DEC.decode(concat(got))).toBe('before')
   })
 })
 
@@ -661,8 +714,8 @@ function source(line: string): string {
  */
 function mounting(job: (fs: Sshfs, proc: FakeProcess) => Promise<number>): FakeContainer {
   const table = new Map<string, string>()
-  const mounted = deferred<Sshfs>()
-  return new FakeContainer({
+  let mounted = deferred<Sshfs>()
+  const box = new FakeContainer({
     cat: async (proc) => {
       if (proc.line === 'cat /proc/mounts') {
         await proc.say([...table].map(([at, from]) => `${from} ${at} fuse.sshfs rw 0 0\n`).join(''))
@@ -683,6 +736,12 @@ function mounting(job: (fs: Sshfs, proc: FakeProcess) => Promise<number>): FakeC
     },
     python3: async (proc) => job(await mounted.promise, proc),
   })
+  box.mounted = () => new Set(table.keys())
+  box.onExit = () => {
+    table.clear()
+    mounted = deferred()
+  }
+  return box
 }
 
 describe('ContainerMachine in a workspace', () => {
@@ -721,6 +780,39 @@ describe('ContainerMachine in a workspace', () => {
       ])
       expect(DEC.decode(await ws.vfs.read('/data/out.txt'))).toBe('written in the container')
       expect(start).toHaveBeenCalledTimes(1)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('serves the files again to a container that restarted, losing no line', async () => {
+    const box = mounting(async (fs, proc) => {
+      const from = await fs.request(FXP.OPEN, 1, '/data/in.txt', OPEN.READ, 0)
+      await proc.say((await fs.request(FXP.READ, 2, from, 0, 0, 100)).slice(4))
+      await fs.request(FXP.CLOSE, 3, from)
+      return 0
+    })
+    const start = vi.fn(() => Promise.resolve())
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { box: new ContainerMachine('box', { mountType: 'ssh' }, box, start) },
+        runtimes: [new RemoteRuntime({ machine: 'box', captures: ['python3'] }), 'workspace'],
+      },
+    )
+    try {
+      await ws.vfs.write('/data/in.txt', 'seeded on the host')
+      expect((await ws.shell('python3 job.py')).stdoutText).toBe('seeded on the host')
+      box.exit()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      const again = await ws.shell('python3 job.py')
+      expect([again.exitCode, again.stdoutText, again.stderrText]).toEqual([
+        0,
+        'seeded on the host',
+        '',
+      ])
+      expect(start).toHaveBeenCalledTimes(2)
     } finally {
       await ws.close()
     }

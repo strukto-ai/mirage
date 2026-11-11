@@ -70,16 +70,19 @@ function stopped(error: unknown): ConnectionLostError {
 }
 
 /**
- * Read `stream` to its end: into `sink`, or into the bytes returned when
+ * Read `reader` to its end: into `sink`, or into the bytes returned when
  * there is none. A read that fails throws what `failed` makes of it.
+ *
+ * @param reader the stream's reader, which the caller may cancel.
+ * @param sink receives each chunk; null keeps them for the result.
+ * @param failed what a failed read throws, given its error.
  */
 async function drain(
-  stream: ReadableStream<Uint8Array>,
+  reader: ReadableStreamDefaultReader<Uint8Array>,
   sink: OutputFn | null,
   failed: (error: unknown) => unknown = (error) => error,
 ): Promise<Uint8Array> {
   const kept: Uint8Array[] = []
-  const reader = stream.getReader()
   for (;;) {
     const { done, value } = await reader.read().catch((error: unknown) => {
       throw failed(error)
@@ -207,6 +210,7 @@ export class ContainerMachine extends MachineHandle implements PipeTransport {
         }),
     )
     const state = { exited: false }
+    const [out, err] = [proc.stdout.getReader(), proc.stderr.getReader()]
     let cut: () => void = () => undefined
     const gone = new Promise<null>((resolve) => {
       cut = () => {
@@ -230,8 +234,8 @@ export class ContainerMachine extends MachineHandle implements PipeTransport {
           logger.debug?.(`cloudflare_container: input after the command ended: ${String(error)}`)
       })
       const finished = Promise.all([
-        drain(proc.stdout, output, stopped),
-        drain(proc.stderr, errors, stopped),
+        drain(out, output, stopped),
+        drain(err, errors, stopped),
         proc.exitCode.catch((error: unknown) => {
           throw stopped(error)
         }),
@@ -259,6 +263,12 @@ export class ContainerMachine extends MachineHandle implements PipeTransport {
     } finally {
       state.exited = true
       this.running.delete(cut)
+      // A line let go stops reading: a child its program left may hold the output open.
+      for (const reader of [out, err]) {
+        reader.cancel().catch((error: unknown) => {
+          logger.debug?.(`cloudflare_container: output not released: ${String(error)}`)
+        })
+      }
     }
   }
 
@@ -351,7 +361,7 @@ export class ContainerMachine extends MachineHandle implements PipeTransport {
     }
     let said: Uint8Array = new Uint8Array()
     const exited = Promise.all([
-      drain(proc.stderr, (data) => {
+      drain(proc.stderr.getReader(), (data) => {
         said = concat([said, data]).subarray(-PIPE_DIAGNOSTIC_BYTES)
         return Promise.resolve()
       }),

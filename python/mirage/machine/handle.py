@@ -804,6 +804,13 @@ class MachineHandle:
             ("/bin/sh", "-c", line), stdin, env, cwd, None, None
         )
 
+    def _disconnected(self) -> None:
+        """Let the next run connect again, and read the machine's mounts
+        again then: a connection that went may have taken them with it."""
+        self._connected = False
+        if self._mounts is not None:
+            self._mounts.forget()
+
     async def close(self) -> None:
         """Unmount what the machine was served; the machine is the user's.
         The next run connects again, so a workspace that takes the handle
@@ -814,7 +821,7 @@ class MachineHandle:
             if self._mounts is not None:
                 await self._mounts.close()
         finally:
-            self._connected = False
+            self._disconnected()
 
 
 def _parse_status(first: str, second: str) -> RunStatus | None:
