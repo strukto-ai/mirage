@@ -55,11 +55,11 @@ not change it. See [From a template](/home/access/cli#from-a-template).
 | `runtimes` | Ordered [runtimes](/home/setup/runtime/overview) for programs. |
 | `route_policy` | Choose runtimes with a [routing policy](/home/policy/route-runtime). |
 | `profiles`, `profile` | Define [agent profiles](/home/profiles) and select the default. |
-| `processes` | Set whose processes a session lists and stops, and how many it holds at once; 128 by default. Each profile's block overrides it. See [profiles](/home/profiles). |
+| `processes` | Whose processes a session can list and stop, and how many it can run at once: 128 by default. See [profiles](/home/profiles). |
 | `command_limits` | Set [output and execution limits](/home/core/output-limits). |
-| `max_body_bytes` | Maximum decoded bytes in one buffered API reply, as a [size](#sizes); `64MB` by default (also when `null`). Per-call caps and the room left under `max_memory` also apply. Error replies retain only their first 64 KiB. |
-| `max_memory` | Bound what the workspace holds in memory, its RAM files and what a command builds, as a [size](#sizes); `96MB` by default, `null` for no cap. See [memory](/home/core/output-limits#limit-a-workspaces-memory). |
-| `max_env` | Bound what each session's variables, functions, aliases and positional parameters hold, as a [size](#sizes); `2MB` by default, `null` for no cap. A write past it ends the line with exit 2 and `bash: xmalloc: cannot allocate N bytes (past max_env of N bytes, a mirage workspace setting)`. |
+| `max_body_bytes` | Largest API reply Mirage reads whole, as a [size](#sizes): `64MB` by default, also when `null`. See [security limits](/home/security). |
+| `max_memory` | Cap on what the workspace holds in memory, as a [size](#sizes): `96MB` by default, `null` for no cap. See [memory](/home/core/output-limits#limit-a-workspaces-memory). |
+| `max_env` | Cap on each session's variables, functions and aliases, as a [size](#sizes): `2MB` by default, `null` for no cap. See [security limits](/home/security). |
 | `network` | Choose where the workspace's connections may go, described [below](#network). |
 | `system_time` | Start the workspace's clock at a set time, described [below](#system-time). |
 | `env` | Seed literal or managed environment variables, described below. |
@@ -124,11 +124,12 @@ refuses a write the same way.
 
 ## Network
 
-`network` decides where the workspace's connections may go: every
-connection a line or a file call opens, whichever command, CLI, runtime or
-mount opens it. A program on a [machine](/home/setup/machine/overview)
-connects from that machine, under its own network settings: `network`,
-`pre_network` and `routes` do not reach it.
+`network` decides where the workspace can connect. It covers every
+connection a line or a file call opens, from a command, a CLI, a runtime or
+a mount. It does not cover a program on a
+[machine](/home/setup/machine/overview): that program connects from the
+machine under the machine's own network settings, and `network`,
+`pre_network` and `routes` do not apply to it.
 
 | Value | Behavior |
 | --- | --- |
@@ -147,30 +148,54 @@ network:
     - "*:22"
 ```
 
-An entry is `*` for every host, a host name, `*.` and a name for every
-host under it, an address, or a range in CIDR form. Any of them but a range
-may end in `:port`, which holds it to that port; an IPv6 address takes one
-in brackets, as in `[::1]:8080`. A name matches the host a connection was
-opened for, and an address or a range the address it reaches. A denied
-entry wins over an allowed one, and an empty `allowed_domains` lets nothing
-through. A mount connects under the same rule, so a list names the mount's
-endpoint too. A [profile](/home/profiles) can hold its sessions to a
-narrower `network` of its own. `routes` sends a connection to one
-`host:port` to another: see [Route Network](/home/policy/route-network).
+Each list entry is one of:
 
-A refused connection fails as a closed port does: `curl` exits 7 with
-`Could not connect to server`. Write `false` rather than `off`, which only
-some YAML readers take as false. A workspace's policies can also judge each
-connection the lists let through, and cap how much it carries, at
-[`pre_network`](/home/policy/policies#pre_network-and-post_network). In a browser or on an
-edge runtime, `fetch` and `WebSocket` are judged by host name and the
-address a name reaches is never seen, so a workspace whose
-`denied_domains` names an address or a range is refused. On an edge
-runtime a limited workspace follows each redirect under the same rule; in
-a browser it follows none, since a page cannot see where one goes. A runtime that starts a
-process on this machine (`local`, Sandlock) opens its connections where
-Mirage cannot judge them, so while `network` limits anything, or a policy
-judges connections, it refuses to run: `Permission denied`, exit 126.
+- `*`, for every host.
+- A host name, such as `api.github.com`.
+- `*.` and a name, such as `*.slack.com`, for every host under that name.
+- An address, or a range in CIDR form, such as `10.0.0.0/8`.
+
+Any entry except a range can end in `:port` to match only that port. An
+IPv6 address puts its port after brackets: `[::1]:8080`.
+
+A name matches the host the connection was opened for. An address or a
+range matches the address the connection reaches. A denied entry wins over
+an allowed one, and an empty `allowed_domains` lets nothing through.
+
+Write `false`, not `off`: only some YAML readers take `off` as false.
+
+Related settings:
+
+- Mounts connect under the same rules, so the lists must let each mount's
+  endpoint through.
+- A [profile](/home/profiles) can hold its sessions to a narrower `network`.
+- `routes` sends a connection for one `host:port` to another. See
+  [Route Network](/home/policy/route-network).
+- Policies can also check each connection the lists let through, and cap how
+  much it carries, at
+  [`pre_network`](/home/policy/policies#pre_network-and-post_network).
+
+### When a connection is refused
+
+A refused connection fails the way a closed port does: `curl` exits 7 with
+`Could not connect to server`.
+
+### In a browser or on an edge runtime
+
+`fetch` and `WebSocket` are checked by host name only. Mirage never sees the
+address a name resolves to, so a workspace whose `denied_domains` names an
+address or a range is refused.
+
+On an edge runtime, a limited workspace checks each redirect under the same
+rules. In a browser, it follows no redirects, because a page cannot see
+where a redirect goes.
+
+### Local runtimes
+
+`local` and Sandlock start processes on this machine, and Mirage cannot
+check the connections those processes open. So while `network` limits
+anything, or a policy checks connections, these runtimes refuse to run:
+`Permission denied`, exit 126.
 
 ## System time
 
@@ -226,40 +251,48 @@ and the machine's clock without it.
 | `unconditional` | Replacements use last-write-wins. The default. |
 | `conditional` | Send the version the live session last observed, such as `If-Match` on the S3 family, so a write based on a stale read is refused. |
 
-Conditional writes and deletes reject changes based on a stale read when the
-backend supports it. Read the file again before retrying. Protection lasts only
-for the live session and does not survive a workspace restart.
+`read: pinned` and `write: staged` are reserved names. A mount that declares
+either is refused when it mounts.
 
-If the session last saw no file at a path (a failed `cat` or `test -e`, or
-its own `rm`), a write there only creates the file and fails if someone else
-created it first. The S3 family sends `If-None-Match: *` for this; backends
-that cannot check it write as usual.
+### Conditional writes
 
-A rejected write stays rejected until you read the file again, even if the
-file was deleted. A write to a path the session never read or checked
-overwrites it, as on a normal filesystem.
+On a backend that supports it, `write: conditional` works like this:
 
-The shared rewrite helpers and object-store truncate require a file observed
-missing to remain absent at commit, under either policy. These paths cover
-append-open and emulated append, positional write, and nonzero truncate. A
-competing creation is refused without replacing its bytes. A
-backend that cannot enforce create-only returns an unsupported-operation
-error. Ordinary replacement and zero-length truncate retain the selected
-write policy.
+- A write or a delete based on a stale read is refused. Read the file again
+  before you retry.
+- If the session last saw no file at a path (a failed `cat` or `test -e`,
+  or its own `rm`), a write there only creates the file. It fails if someone
+  else created the file first. The S3 family sends `If-None-Match: *` for
+  this. A backend that cannot check it writes as usual.
+- A refused write stays refused until the session reads the file again,
+  even if the file was deleted.
+- A write to a path the session never read or checked overwrites it, as on
+  a normal filesystem.
+- An append can be refused when someone else changed the file. Mirage
+  returns the error and does not retry the append or rerun the command.
+- The check lasts only while the session is live. It does not survive a
+  workspace restart.
 
-Backend-specific native truncate implementations outside these shared paths
-retain their existing concurrency behavior.
+Under `unconditional`, a replacement or an append to an existing file is
+last-write-wins.
 
-Conditional appends may refuse a competing update. Conflicts return an error
-without retrying the append or rerunning the command. Existing-file appends under
-`unconditional` remain last-write-wins.
+### Files the session saw missing
+
+Under either policy, these writes fail if the session saw the file missing
+and someone else created it in the meantime:
+
+- an append, including an emulated one;
+- a write at an offset;
+- a truncate to a nonzero size.
+
+The other writer's file keeps its bytes. A backend that cannot check this
+returns an unsupported-operation error. A plain replacement and a truncate
+to zero follow the mount's `write` policy instead. A backend that truncates
+with its own code, rather than Mirage's shared path, keeps its own behavior.
 
 ### S3-compatible stores
 
 On AWS S3 and the provider VFSes built on it (R2, GCS, Wasabi and the rest), a conditional mount conditions writes, copies and deletes; a provider that ignores a copy or delete condition runs it unconditioned. MinIO, and the `s3` VFS pointed at a non-AWS endpoint, condition only writes, so they refuse what would copy or delete within the mount (`cp`, `mv`, `rm`, `find -delete`) with `ENOTSUP`. A TypeScript browser mount signed by presigned URLs cannot declare `write: conditional`.
-
-`read: pinned` and `write: staged` are reserved names. A mount that declares
-either is refused when it mounts.
 
 ## CLI entries
 
