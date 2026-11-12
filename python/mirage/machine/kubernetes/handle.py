@@ -134,6 +134,11 @@ class KubernetesMachine(ProgramMachine):
     program = "kubectl"
     install_hint = KUBECTL_HINT
 
+    @property
+    def instance(self) -> str:
+        """The pod it runs in."""
+        return self.config.pod
+
     def _scope(self) -> tuple[str, ...]:
         """The flags naming the pod's cluster and namespace."""
         config = self.config

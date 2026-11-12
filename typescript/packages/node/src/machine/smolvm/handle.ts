@@ -47,6 +47,11 @@ export class SmolvmMachine extends ProgramMachine<SmolvmConfig> {
     requireId('smolvm', 'machine', this.config.machine)
   }
 
+  /** The VM smolvm runs it in. */
+  override get instance(): string {
+    return this.config.machine
+  }
+
   protected execWords(): readonly [readonly string[], readonly string[]] {
     return [['machine', 'exec', '--name', this.config.machine, '-i'], ['--']]
   }

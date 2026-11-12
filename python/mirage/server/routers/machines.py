@@ -85,7 +85,7 @@ async def get_machine(
         processes = await runner.ws.processes(machine=machine)
         return MachineDetailResponse(
             **_to_response(found[0]).model_dump(),
-            processes=[to_response(p) for p in processes],
+            processes=[to_response(p, runner.ws) for p in processes],
         )
 
     detail = await runner.call(read())

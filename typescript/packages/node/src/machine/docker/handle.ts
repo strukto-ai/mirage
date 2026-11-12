@@ -42,6 +42,11 @@ export class DockerMachine extends ProgramMachine<DockerConfig> {
     requireId('docker', 'container', this.config.container)
   }
 
+  /** The container docker runs it in. */
+  override get instance(): string {
+    return this.config.container
+  }
+
   protected execWords(): readonly [readonly string[], readonly string[]] {
     return [['exec', '-i'], [this.config.container]]
   }

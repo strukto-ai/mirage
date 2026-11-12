@@ -61,6 +61,11 @@ export class SSHMachine extends MachineHandle<SSHMachineConfig> implements PipeT
     requireId('ssh', 'host', this.config.host)
   }
 
+  /** The host ssh reaches. */
+  override get instance(): string {
+    return this.config.host
+  }
+
   // The SDK loader as a seam: tests substitute a fake module here.
   protected loadSdk(): Promise<Ssh2Sdk> {
     return loadSdk()

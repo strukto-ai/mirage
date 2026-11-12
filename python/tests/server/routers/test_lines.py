@@ -64,9 +64,14 @@ async def test_a_line_is_listed_and_found_by_the_id_its_result_names():
             ]
             assert detail["jobs"] == [job["id"]]
             assert job["id"].startswith("job_")
-            assert pid in detail["processes"]
+            [shell] = detail["processes"]
+            assert shell["command"] == "sleep 30 & echo $!"
+            [child] = shell["children"]
+            assert (child["pid"], child["parent"]) == (pid, shell["pid"])
             r = await client.get(f"/v1/workspaces/{wid}/processes/{pid}")
-            assert detail["machines"] == [r.json()["machine"]]
+            assert {**r.json(), "children": []} == child
+            assert child["machine"]["type"] == "host"
+            assert child["machine"]["id"] == child["machine"]["name"]
             r = await client.get(
                 f"/v1/workspaces/{wid}/lines", params={"state": "running"}
             )

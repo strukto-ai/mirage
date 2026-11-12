@@ -205,7 +205,7 @@ interface JobRecord {
 interface ProcessRecord {
   pid: number
   parent: number | null
-  machine: string
+  machine: { type: string; name: string; id: string }
   session_id: string
   command: string
   state: string
@@ -279,7 +279,7 @@ function formatProcesses(items: ProcessRecord[]): string {
     items.map((p) => [
       String(p.pid),
       String(p.parent ?? 0),
-      p.machine,
+      `${p.machine.type}:${p.machine.name}`,
       p.session_id,
       p.state,
       exitCell(p),

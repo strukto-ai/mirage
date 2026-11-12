@@ -21,6 +21,7 @@ from mirage.server.errors import ErrorCode, HttpError
 from mirage.server.routers.vfs import require_entry
 from mirage.server.schemas import Instant
 from mirage.utils.dates import ms_to_rfc3339
+from mirage.workspace.workspace import Workspace
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}/processes")
 
@@ -31,6 +32,12 @@ class MachinePidResponse(BaseModel):
     exited: float | None
 
 
+class ProcessMachineResponse(BaseModel):
+    type: str
+    name: str
+    id: str
+
+
 class ProcessResponse(BaseModel):
     pid: int
     session_id: str
@@ -39,7 +46,7 @@ class ProcessResponse(BaseModel):
     group: int
     command: str
     cwd: str
-    machine: str
+    machine: ProcessMachineResponse
     runtime: str | None
     machine_pid: MachinePidResponse | None
     state: str
@@ -54,7 +61,24 @@ class ProcessList(BaseModel):
     items: list[ProcessResponse]
 
 
-def to_response(record: Process) -> ProcessResponse:
+def machine_response(
+    ws: Workspace, machine: MachineId
+) -> ProcessMachineResponse:
+    """Where a process ran, as its spans name it: the machine's provider,
+    its name and what its provider calls it.
+
+    Args:
+        ws (Workspace): the workspace it ran in.
+        machine (MachineId): the machine.
+    """
+    return ProcessMachineResponse(
+        type=machine.provider,
+        name=machine.name,
+        id=ws.machine_table.instance(machine),
+    )
+
+
+def to_response(record: Process, ws: Workspace) -> ProcessResponse:
     return ProcessResponse(
         pid=record.pid,
         session_id=record.session_id,
@@ -63,7 +87,7 @@ def to_response(record: Process) -> ProcessResponse:
         group=record.group,
         command=record.command,
         cwd=record.cwd.virtual,
-        machine=str(record.machine),
+        machine=machine_response(ws, record.machine),
         runtime=record.runtime,
         machine_pid=(
             MachinePidResponse(
@@ -117,7 +141,7 @@ async def list_processes(
         records = await runner.ws.processes(
             session_id or None, state, line, job, where
         )
-        return ProcessList(items=[to_response(r) for r in records])
+        return ProcessList(items=[to_response(r, runner.ws) for r in records])
 
     return await runner.call(read())
 
@@ -135,4 +159,4 @@ async def get_process(
     record = await runner.call(read())
     if record is None:
         raise HttpError(ErrorCode.NOT_FOUND, "process not found")
-    return to_response(record)
+    return to_response(record, runner.ws)

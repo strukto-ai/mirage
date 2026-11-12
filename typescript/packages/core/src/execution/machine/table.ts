@@ -149,6 +149,15 @@ export class MachineTable {
   }
 
   /**
+   * What `machine`'s provider calls it (`MachineHandle.instance`), its name
+   * for one the table holds no handle of, such as the host. Mirrors Python's
+   * `MachineTable.instance`.
+   */
+  instance(machine: MachineId): string {
+    return this.byId(machine.toString())?.instance ?? machine.name
+  }
+
+  /**
    * Check every machine at once, or the one `machine` names (its id,
    * `docker:tools`), and answer what each check found, stamped by the
    * workspace's clock when its check ends. Mirrors Python's

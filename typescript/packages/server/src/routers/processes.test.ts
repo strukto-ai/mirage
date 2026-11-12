@@ -64,13 +64,18 @@ it('lists a process live and after it ends', async () => {
     expect([ofBare.status, ofBare.body]).toEqual([200, { items: [] }])
     const ofJob = await get(app, `/v1/workspaces/w/processes?job_id=${job?.id ?? ''}`)
     const [live] = (
-      ofJob.body as { items: { pid: number; machine: string; machine_pid: unknown }[] }
+      ofJob.body as {
+        items: {
+          pid: number
+          machine: { type: string; name: string; id: string }
+          machine_pid: unknown
+        }[]
+      }
     ).items
     expect([live?.pid, live?.machine_pid]).toEqual([pid, null])
-    const there = await get(
-      app,
-      `/v1/workspaces/w/processes?machine=${encodeURIComponent(live?.machine ?? '')}`,
-    )
+    expect([live?.machine.type, live?.machine.id]).toEqual(['host', live?.machine.name])
+    const where = `${live?.machine.type ?? ''}:${live?.machine.name ?? ''}`
+    const there = await get(app, `/v1/workspaces/w/processes?machine=${encodeURIComponent(where)}`)
     expect((there.body as { items: { pid: number }[] }).items.map((p) => p.pid)).toContain(pid)
     expect((await get(app, '/v1/workspaces/w/processes?machine=docker:nowhere')).body).toEqual({
       items: [],

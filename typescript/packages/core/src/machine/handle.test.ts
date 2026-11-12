@@ -20,7 +20,7 @@ import { Workspace } from '../workspace/workspace/workspace.ts'
 import { materialize, type ByteSource } from '../io/types.ts'
 import { shellJoin } from '../shell/join.ts'
 import { ConnectionLostError } from './errors.ts'
-import { MachineHandle } from './handle.ts'
+import { MachineHandle, PidLineFilter } from './handle.ts'
 import {
   PROCESS,
   FAKETIME_PROBE_SECONDS,
@@ -28,6 +28,8 @@ import {
   isRun,
   NOT_RUNNING_STATUS,
   MACHINE_STOP_WAIT_SECONDS,
+  RUN_PID_HOLD,
+  RUN_PID_MARK,
   runTag,
   stopLine,
 } from './constants.ts'
@@ -35,6 +37,7 @@ import { LanguageRuntime } from '../runtime/language.ts'
 import { isLineExecutor } from '../runtime/mixin.ts'
 import type { OutputFn, RunResult } from '../runtime/types.ts'
 import type { MachineConfig } from './config.ts'
+import type { RunStatus } from './types.ts'
 import { ProcessTable } from '../execution/process/table.ts'
 import { runAsProcess } from '../context/session_context.ts'
 import { machineRuntime, on } from '../../tests/fixtures/machine.ts'
@@ -750,5 +753,56 @@ describe('MachineHandle', () => {
   it('rejects unknown config keys', () => {
     const config = { snapshot: 'mirage-fuse' } as MachineConfig
     expect(() => new RecordingMachine({ config })).toThrow("unknown machine config key 'snapshot'")
+  })
+})
+
+async function filtered(
+  chunks: readonly Uint8Array[],
+  search: boolean,
+): Promise<[string, RunStatus[]]> {
+  const out: Uint8Array[] = []
+  const seen: RunStatus[] = []
+  const line = new PidLineFilter(
+    (chunk) => Promise.resolve(void out.push(chunk)),
+    (report) => seen.push(report),
+    search,
+  )
+  for (const chunk of chunks) await line.write(chunk)
+  await line.finish()
+  return [out.map((chunk) => DEC.decode(chunk)).join(''), seen]
+}
+
+describe('PidLineFilter', () => {
+  // stderr may carry the exec client's own words ahead of the pid line,
+  // which can arrive in pieces; the line comes out and its pid and start are
+  // told.
+  it("takes the pid line out of stderr after the client's words", async () => {
+    const chunks = [
+      ENC.encode('Defaulted container\n'),
+      RUN_PID_MARK.subarray(0, 4),
+      new Uint8Array([...RUN_PID_MARK.subarray(4), ...ENC.encode('81')]),
+      ENC.encode('2 99\nerr\n'),
+    ]
+    expect(await filtered(chunks, true)).toEqual([
+      'Defaulted container\nerr\n',
+      [{ pid: 812, started: 99, exitCode: null }],
+    ])
+  })
+
+  // stdout carries the line only at its very start; anything else passes at
+  // once, and a line further in is the program's own.
+  it('gives up the pid line from stdout only at its start', async () => {
+    const head = new Uint8Array([...RUN_PID_MARK, ...ENC.encode('7 1\nout')])
+    expect(await filtered([head], false)).toEqual(['out', [{ pid: 7, started: 1, exitCode: null }]])
+    const late = new Uint8Array([...ENC.encode('x'), ...RUN_PID_MARK, ...ENC.encode('7 1\n')])
+    expect(await filtered([late], false)).toEqual([DEC.decode(late), []])
+  })
+
+  // A run whose wrapper wrote no line keeps every byte it wrote, released at
+  // once past the most stderr may hold, else when the stream ends.
+  it('keeps every byte of a stream with no pid line', async () => {
+    expect(await filtered([ENC.encode('only err')], true)).toEqual(['only err', []])
+    const big = 'e'.repeat(RUN_PID_HOLD + 1)
+    expect(await filtered([ENC.encode(big), ENC.encode('!')], true)).toEqual([`${big}!`, []])
   })
 })

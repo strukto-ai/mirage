@@ -48,6 +48,11 @@ export class DaytonaMachine extends MachineHandle<DaytonaConfig> {
     requireId('daytona', 'sandboxId', this.config.sandboxId)
   }
 
+  /** The sandbox's id at Daytona. */
+  override get instance(): string {
+    return this.config.sandboxId
+  }
+
   // The SDK loader as a seam: tests substitute a fake module here.
   protected loadSdk(): Promise<DaytonaSdk> {
     return loadSdk()

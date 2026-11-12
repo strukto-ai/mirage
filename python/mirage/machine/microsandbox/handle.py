@@ -51,6 +51,11 @@ class MicrosandboxMachine(ProgramMachine):
     program = "msb"
     install_hint = MICROSANDBOX_HINT
 
+    @property
+    def instance(self) -> str:
+        """The guest msb runs it in."""
+        return self.config.sandbox
+
     def exec_words(self) -> tuple[tuple[str, ...], tuple[str, ...]]:
         return ("exec", self.config.sandbox, "--quiet"), ("--",)
 

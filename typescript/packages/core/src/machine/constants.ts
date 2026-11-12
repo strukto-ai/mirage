@@ -210,19 +210,29 @@ export const RUN_STATUS_PREFIX = '/tmp/.mirage-run-'
 // the program alone so the wrapper shows in no scan and takes no signal by
 // tag; `$3` the reports of earlier runs to remove; then the program. The
 // subshell execs it, so the pid written first is the program's, with its
-// start in clock ticks; its exit status follows on the next line. A shell
-// reports a child a signal ended on its stderr, so the wrapper's goes nowhere
-// and the program gets the real one back. It needs only a POSIX shell at
-// `/bin/sh`. Mirrors Python's `RUN_WRAPPER`.
+// start in clock ticks; its exit status follows on the next line. The pid
+// and start also go out on stderr ahead of anything the program writes,
+// behind `RUN_PID_MARK`, so the exec that runs the program brings them back
+// itself. A shell reports a child a signal ended on its stderr, so the
+// wrapper's goes nowhere and the program gets the real one back. It needs
+// only a POSIX shell at `/bin/sh`. Mirrors Python's `RUN_WRAPPER`.
 export const RUN_WRAPPER =
   'f=$1; t=$2; o=$3; shift 3; ' +
   `[ -z "$o" ] || PATH=${TOOLS_PATH} rm -f $o 2>/dev/null; ` +
   'exec 6>&2 2>/dev/null; ' +
   'set -C; if >"$f"; then g=$f; else g=/dev/null; fi; set +C; ' +
   "( /bin/sh -c 'read -r s </proc/$PPID/stat; set -- ${s##*)}; " +
-  'echo "$PPID ${20}"\' >>"$g"; ' +
+  'echo "$PPID ${20}"; ' +
+  'printf "\\036mirage-pid %s %s\\n" "$PPID" "${20}" >&6\' >>"$g"; ' +
   'export "$t"; exec 2>&6 6>&-; exec "$@" ); ' +
   's=$?; echo "$s" >>"$g"; exit "$s"'
+
+// The mark ahead of the pid line the wrapper writes on stderr, a record
+// separator first so no program's output starts with it.
+export const RUN_PID_MARK = new TextEncoder().encode('\x1emirage-pid ')
+// How much of stderr may come ahead of that line, the exec client's own
+// words, before a run is taken to have written none.
+export const RUN_PID_HOLD = 4096
 
 export const ENCODE_PRELUDE =
   `e() { PATH=${TOOLS_PATH}; ` +

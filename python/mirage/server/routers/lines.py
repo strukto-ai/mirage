@@ -18,14 +18,17 @@ from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel
 
 from mirage.execution.line.types import Line, LineState
+from mirage.execution.process.types import Process
 from mirage.execution.types import LineId
 from mirage.io.errors import PipeClosed
 from mirage.io.pipe import BytePipe
 from mirage.server.errors import ErrorCode, HttpError
 from mirage.server.requests import RequestTable
+from mirage.server.routers.processes import ProcessResponse, to_response
 from mirage.server.routers.vfs import require_entry
 from mirage.server.schemas import Instant
 from mirage.utils.dates import ms_to_rfc3339
+from mirage.workspace.workspace import Workspace
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}/lines")
 
@@ -48,10 +51,36 @@ class LineList(BaseModel):
     items: list[LineResponse]
 
 
+class ProcessTreeResponse(ProcessResponse):
+    children: list["ProcessTreeResponse"]
+
+
 class LineDetailResponse(LineResponse):
     jobs: list[str]
-    processes: list[int]
-    machines: list[str]
+    processes: list[ProcessTreeResponse]
+
+
+def _tree(records: list[Process], ws: Workspace) -> list[ProcessTreeResponse]:
+    """The processes a line ran, each under the one that started it, by
+    pid; one whose parent the line did not run is at the top.
+
+    Args:
+        records (list[Process]): the line's processes.
+        ws (Workspace): the workspace they ran in.
+    """
+    pids = {record.pid for record in records}
+    under: dict[int | None, list[Process]] = {}
+    for record in sorted(records, key=lambda r: r.pid):
+        parent = record.parent if record.parent in pids else None
+        under.setdefault(parent, []).append(record)
+
+    def node(record: Process) -> ProcessTreeResponse:
+        return ProcessTreeResponse(
+            **to_response(record, ws).model_dump(),
+            children=[node(child) for child in under.get(record.pid, [])],
+        )
+
+    return [node(record) for record in under.get(None, [])]
 
 
 def _to_response(record: Line) -> LineResponse:
@@ -95,9 +124,9 @@ async def list_lines(
 async def get_line(
     workspace_id: str, line_id: str, request: Request
 ) -> LineDetailResponse:
-    """One line, with the ids of the jobs it started, the pids of the
-    processes it ran that the workspace still keeps and the machines
-    those ran on. Read on the workspace's own loop."""
+    """One line, with the ids of the jobs it started and the processes
+    it ran that the workspace still keeps, each under the one that
+    started it. Read on the workspace's own loop."""
     runner = require_entry(request, workspace_id).runner
 
     async def read() -> LineDetailResponse | None:
@@ -105,12 +134,10 @@ async def get_line(
         record = await ws.line(LineId(line_id))
         if record is None:
             return None
-        processes = await ws.processes(line_id=record.id)
         return LineDetailResponse(
             **_to_response(record).model_dump(),
             jobs=[job.id.console for job in await ws.jobs(line_id=record.id)],
-            processes=[p.pid for p in processes],
-            machines=list(dict.fromkeys(str(p.machine) for p in processes)),
+            processes=_tree(await ws.processes(line_id=record.id), ws),
         )
 
     detail = await runner.call(read())

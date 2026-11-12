@@ -21,12 +21,13 @@ from dataclasses import replace
 from typing import Any
 from urllib.parse import quote
 
+from opentelemetry import context as context_api
 from opentelemetry import trace
 
 from mirage.execution.constants import HISTORY_MAX_RECORDS
 from mirage.execution.job.types import Job
-from mirage.execution.process.types import Process
-from mirage.execution.types import LineId, MachineId
+from mirage.execution.process.types import Process, ProcessState
+from mirage.execution.types import MachineId
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.types import IOResult
 from mirage.io.yield_budget import YieldBudget
@@ -183,11 +184,10 @@ def _end_line(
     exit_code: int,
     output: tuple[bytes, bytes],
     records: list[OpRecord],
-    machines: list[str],
 ) -> None:
-    """Close a typed line's ``command`` span: how it ended, the machines
-    its processes ran on, the start of its stdout and stderr, and under
-    it a ``vfs.<call>`` span for each call it made to a mount. Each span
+    """Close a typed line's ``command`` span: how it ended, the start of
+    its stdout and stderr, and under it a ``vfs.<call>`` span for each
+    call it made to a mount. Each span
     also carries its start or end and its length in milliseconds, as the
     history's entries have them, for a tracer that can't be given a
     span's times. ``TRACE_CONTENT_ENV`` leaves out the output and the
@@ -201,12 +201,9 @@ def _end_line(
         output (tuple[bytes, bytes]): its stdout and stderr as it wrote
             them.
         records (list[OpRecord]): the calls it made.
-        machines (list[str]): the machines its processes ran on.
     """
     content = _trace_content()
     line.set_attribute("mirage.exit_code", exit_code)
-    if machines:
-        line.set_attribute("mirage.machine.ids", machines)
     line.set_attribute("mirage.duration_ms", span[1] - span[0])
     calls = records[: _positive_env(TRACE_MAX_SPANS_ENV, TRACE_MAX_SPANS)]
     if content:
@@ -298,8 +295,9 @@ class Observer:
     floor.
 
     Each typed line also goes to OpenTelemetry as a span, its vfs calls
-    as spans under it, and so does each job and process once it ends,
-    under the span of the line that started it while the newest
+    as spans under it, and so does each job and process once it ends: a
+    process under the one that started it, a job's process under its
+    job, and the line's own under the line's span while the newest
     ``HISTORY_MAX_RECORDS`` lines' spans are known; nothing leaves the
     process until an SDK is set up. Tracing stops at the workspace's own
     machine and runtimes: a program a runtime runs elsewhere starts no
@@ -314,8 +312,11 @@ class Observer:
         machine (str | None): the workspace's machine, ``host.id`` on
             its command, job and process spans.
         processes (Callable[[], list[Process]] | None): the process
-            records the workspace keeps, whose machines a line's span
-            lists.
+            records the workspace keeps, which a span goes under.
+        jobs (Callable[[], list[Job]] | None): the jobs the workspace
+            runs, whose processes go under their spans.
+        instance (Callable[[MachineId], str] | None): what each
+            machine's provider calls it, ``mirage.machine.id``.
     """
 
     def __init__(
@@ -325,37 +326,30 @@ class Observer:
         workspace_id: str | None = None,
         machine: str | None = None,
         processes: Callable[[], list[Process]] | None = None,
+        jobs: Callable[[], list[Job]] | None = None,
+        instance: Callable[[MachineId], str] | None = None,
     ) -> None:
         self._store = store if store is not None else RAMObserverStore()
         self._clock: Clock = clock if clock is not None else SystemClock()
         self._workspace_id = workspace_id
         self._machine = machine
         self._processes = processes
+        self._jobs = jobs
+        self._instance = instance
         self._newest: dict[str, int | None] = {}
         # Each open line's start (epoch ms, then monotonic) and span.
         self._started: dict[str, tuple[int, float, trace.Span]] = {}
         # The span of each recent line, which its jobs and processes go
         # under, oldest first.
         self._line_spans: dict[str, trace.SpanContext] = {}
-
-    def _machines_of(self, line: str) -> list[str]:
-        """The machines a line's processes ran on by the time it ended,
-        while the workspace keeps their records; a background job's later
-        processes name theirs on their own spans.
-
-        Args:
-            line (str): the line's id, or one of its history entries'.
-        """
-        if self._processes is None:
-            return []
-        base = line.split(".", 1)[0]
-        return list(
-            dict.fromkeys(
-                str(process.machine)
-                for process in self._processes()
-                if process.line is not None and process.line.value == base
-            )
-        )
+        # The span of each job and process open now, by kind, line and
+        # pid, and of the newest ended ones, which one started under them
+        # still goes under, oldest first.
+        self._open: dict[tuple[str, str | None, int], trace.Span] = {}
+        self._closed: dict[tuple[str, str | None, int], trace.SpanContext] = {}
+        # The pid each of those processes shows, by the same key: its
+        # program's on its machine, else Mirage's own.
+        self._shown: dict[tuple[str, str | None, int], int] = {}
 
     def _now_ms(self) -> int:
         """The clock's wall time in epoch milliseconds, an entry's stamp."""
@@ -499,11 +493,6 @@ class Observer:
                 io.exit_code,
                 (stdout, stderr),
                 op_records,
-                (
-                    self._machines_of(line)
-                    if line is not None and started[2].is_recording()
-                    else []
-                ),
             )
         await self._log(
             LogEntry(
@@ -520,106 +509,271 @@ class Observer:
         )
 
     def trace_process(self, record: Process) -> None:
-        """Send an ended process to OpenTelemetry as a ``process`` span,
-        under its line's: what it ran, where and as whom, and how it
-        ended.
+        """Send an ended process to OpenTelemetry as a ``process`` span:
+        what it ran, where and as whom, and how it ended.
 
         Args:
             record (Process): the process's record.
         """
-        attributes: dict[str, str | int] = {
-            "process.pid": record.pid,
-            "process.command_line": record.command,
-            "process.group_leader.pid": record.group,
-            "mirage.machine.id": str(record.machine),
-            "mirage.workspace.id": record.id.workspace_id,
-            "mirage.session.id": record.session_id,
-            "mirage.cwd": record.cwd.virtual,
-        }
-        if record.parent is not None:
-            attributes["process.parent_pid"] = record.parent
+        line = record.line.value if record.line is not None else None
+        if not self._traced(line):
+            return
+        span = self._process_span(record)
         if record.exit is not None:
-            attributes["process.exit.code"] = record.exit
+            span.set_attribute("process.exit.code", record.exit)
         if record.signal is not None:
-            attributes["mirage.signal"] = record.signal
+            span.set_attribute("mirage.signal", record.signal)
         if record.error is not None:
-            attributes["mirage.error"] = record.error
-        if record.runtime is not None:
-            attributes["mirage.runtime"] = record.runtime
-        if record.machine_pid is not None:
-            attributes["mirage.machine.pid"] = record.machine_pid.pid
-        self._trace_ended(
-            "process",
-            attributes,
-            record.line,
-            record.started_at,
-            record.ended_at,
-        )
+            span.set_attribute("mirage.error", record.error)
+        span.set_attribute("process.pid", record.shown_pid)
+        self._shown[("process", line, record.pid)] = record.shown_pid
+        self._end(("process", line, record.pid), record.ended_at)
 
     def trace_job(self, record: Job, machine: MachineId) -> None:
-        """Send an ended job to OpenTelemetry as a ``job`` span, under its
-        line's: what it ran, where and as whom, and how it ended.
+        """Send an ended job to OpenTelemetry as a ``job`` span: what it
+        ran, where and as whom, and how it ended.
 
         Args:
             record (Job): the job's record.
             machine (MachineId): the machine its process ran on.
         """
+        line = record.line.value if record.line is not None else None
+        if not self._traced(line):
+            return
+        span = self._job_span(record, machine)
+        if record.exit is not None:
+            span.set_attribute("mirage.exit_code", record.exit)
+        if record.signal is not None:
+            span.set_attribute("mirage.signal", record.signal)
+        self._end(("job", line, record.pid or 0), record.ended_at)
+
+    def _traced(self, line: str | None) -> bool:
+        """Whether anyone traces the line: not when its span is one
+        nobody records, so an untraced workspace reads no records.
+
+        Args:
+            line (str | None): the line's id.
+        """
+        known = self._line_spans.get(line) if line is not None else None
+        return known is None or known.is_valid
+
+    def _machine_attributes(self, machine: MachineId) -> dict[str, str | int]:
+        """The attributes naming where a span's work ran: the machine's
+        provider, its name and what its provider calls it.
+
+        Args:
+            machine (MachineId): the machine.
+        """
+        return {
+            "mirage.machine.type": machine.provider,
+            "mirage.machine.name": machine.name,
+            "mirage.machine.id": (
+                machine.name
+                if self._instance is None
+                else self._instance(machine)
+            ),
+        }
+
+    def _context(
+        self, key: tuple[str, str | None, int]
+    ) -> context_api.Context | None:
+        """The context a span goes under to be under ``key``'s span,
+        None while there is none.
+
+        Args:
+            key (tuple[str, str | None, int]): the span's kind, line and
+                pid.
+        """
+        span = self._open.get(key)
+        if span is not None:
+            return trace.set_span_in_context(span)
+        known = self._closed.get(key)
+        if known is not None:
+            return trace.set_span_in_context(trace.NonRecordingSpan(known))
+        return None
+
+    def _under(self, record: Process) -> context_api.Context | None:
+        """The context ``record``'s span goes under: its parent's span,
+        opened now when its parent still runs, else its line's.
+
+        Args:
+            record (Process): the process.
+        """
+        line = record.line.value if record.line is not None else None
+        if record.parent is not None:
+            found = self._context(("process", line, record.parent))
+            if found is not None:
+                return found
+            parent = next(
+                (
+                    p
+                    for p in (self._processes() if self._processes else [])
+                    if p.pid == record.parent
+                    and p.line == record.line
+                    and p.state == ProcessState.RUNNING
+                ),
+                None,
+            )
+            if parent is not None:
+                return trace.set_span_in_context(self._process_span(parent))
+        known = self._line_spans.get(line) if line is not None else None
+        if known is None:
+            return None
+        return trace.set_span_in_context(trace.NonRecordingSpan(known))
+
+    def _process_span(self, record: Process) -> trace.Span:
+        """``record``'s span, opened the first time it is needed (as it
+        ends, or as the first process under it does) from its own start:
+        under its job's span when it is a job's process, else under its
+        parent's or its line's.
+
+        Args:
+            record (Process): the process.
+        """
+        line = record.line.value if record.line is not None else None
+        span = self._open.get(("process", line, record.pid))
+        if span is not None:
+            return span
+        under = self._context(("job", line, record.pid))
+        if under is None and self._jobs is not None:
+            job = next(
+                (
+                    j
+                    for j in self._jobs()
+                    if j.pid == record.pid and j.line == record.line
+                ),
+                None,
+            )
+            if job is not None:
+                under = trace.set_span_in_context(
+                    self._job_span(job, record.machine, record)
+                )
+        if under is None:
+            under = self._under(record)
+        self._shown[("process", line, record.pid)] = record.shown_pid
+        attributes: dict[str, str | int] = {
+            "process.pid": record.shown_pid,
+            "mirage.process.pid": record.pid,
+            "process.command_line": record.command,
+            "process.group_leader.pid": self._shown.get(
+                ("process", line, record.group), record.group
+            ),
+            **self._machine_attributes(record.machine),
+            "mirage.workspace.id": record.id.workspace_id,
+            "mirage.session.id": record.session_id,
+            "mirage.cwd": record.cwd.virtual,
+        }
+        if record.parent is not None:
+            attributes["process.parent_pid"] = self._shown.get(
+                ("process", line, record.parent), record.parent
+            )
+        if record.runtime is not None:
+            attributes["mirage.runtime"] = record.runtime
+        return self._start(
+            ("process", line, record.pid), attributes, under, record.started_at
+        )
+
+    def _job_span(
+        self, record: Job, machine: MachineId, process: Process | None = None
+    ) -> trace.Span:
+        """``record``'s span, opened the first time it is needed from its
+        own start, under the span its process would go under.
+
+        Args:
+            record (Job): the job.
+            machine (MachineId): the machine its process runs on.
+            process (Process | None): its process, when the caller has it.
+        """
+        line = record.line.value if record.line is not None else None
+        key = ("job", line, record.pid or 0)
+        span = self._open.get(key)
+        if span is not None:
+            return span
+        if process is None and self._processes is not None:
+            process = next(
+                (
+                    p
+                    for p in self._processes()
+                    if p.pid == record.pid and p.line == record.line
+                ),
+                None,
+            )
+        under = None
+        if process is not None:
+            under = self._under(process)
+        elif line is not None and line in self._line_spans:
+            under = trace.set_span_in_context(
+                trace.NonRecordingSpan(self._line_spans[line])
+            )
         attributes: dict[str, str | int] = {
             "mirage.job.id": record.id.console,
             "mirage.job.number": record.number,
             "mirage.command": record.command,
-            "mirage.machine.id": str(machine),
+            **self._machine_attributes(machine),
             "mirage.workspace.id": record.id.workspace_id,
             "mirage.session.id": record.session_id,
             "mirage.cwd": record.cwd,
         }
         if record.pid is not None:
-            attributes["process.pid"] = record.pid
-        if record.exit is not None:
-            attributes["mirage.exit_code"] = record.exit
-        if record.signal is not None:
-            attributes["mirage.signal"] = record.signal
-        self._trace_ended(
-            "job", attributes, record.line, record.started_at, record.ended_at
-        )
+            attributes["process.pid"] = (
+                record.pid if process is None else process.shown_pid
+            )
+            attributes["mirage.process.pid"] = record.pid
+        return self._start(key, attributes, under, record.started_at)
 
-    def _trace_ended(
+    def _start(
         self,
-        name: str,
+        key: tuple[str, str | None, int],
         attributes: dict[str, str | int],
-        line: LineId | None,
+        under: context_api.Context | None,
         started_at: float,
-        ended_at: float | None,
-    ) -> None:
-        """Send an ended record to OpenTelemetry as one span over its run,
-        under its line's span while that is known.
+    ) -> trace.Span:
+        """Open the span of a job or process from its start, naming the
+        host and its line, and keep it open under ``key``.
 
         Args:
-            name (str): the span's name.
+            key (tuple[str, str | None, int]): its kind, line and pid.
             attributes (dict[str, str | int]): what it carries.
-            line (LineId | None): the line that started it.
-            started_at (float): when the record started, epoch seconds.
-            ended_at (float | None): when it ended, epoch seconds.
+            under (context_api.Context | None): the context it goes
+                under; None starts a trace of its own.
+            started_at (float): when it started, epoch seconds.
         """
         if self._machine is not None:
             attributes["host.id"] = self._machine
-        parent = None
-        if line is not None:
-            attributes["mirage.line.id"] = line.value
-            known = self._line_spans.get(line.value)
-            if known is not None:
-                parent = trace.set_span_in_context(
-                    trace.NonRecordingSpan(known)
-                )
-        start = int(started_at * 1_000_000_000)
+        if key[1] is not None:
+            attributes["mirage.line.id"] = key[1]
         span = _tracer().start_span(
-            name, context=parent, start_time=start, attributes=attributes
+            key[0],
+            context=under,
+            start_time=int(started_at * 1_000_000_000),
+            attributes=attributes,
         )
+        self._open[key] = span
+        return span
+
+    def _end(
+        self, key: tuple[str, str | None, int], ended_at: float | None
+    ) -> None:
+        """Close the open span ``key`` names as of ``ended_at``, keeping
+        its context for what started under it and ends later.
+
+        Args:
+            key (tuple[str, str | None, int]): its kind, line and pid.
+            ended_at (float | None): when it ended, epoch seconds; None
+                ends it now.
+        """
+        span = self._open.pop(key)
         span.end(
-            end_time=int(ended_at * 1_000_000_000)
-            if ended_at is not None
-            else start
+            end_time=None
+            if ended_at is None
+            else int(ended_at * 1_000_000_000)
         )
+        self._closed.pop(key, None)
+        self._closed[key] = span.get_span_context()
+        while len(self._closed) > HISTORY_MAX_RECORDS:
+            gone = next(iter(self._closed))
+            del self._closed[gone]
+            self._shown.pop(gone, None)
 
     async def log_command_text(
         self,
