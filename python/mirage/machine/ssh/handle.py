@@ -64,6 +64,11 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
 
     _conn: Any = None
 
+    @property
+    def instance(self) -> str:
+        """The host ssh reaches."""
+        return self.config.host
+
     def _connect_kwargs(self) -> dict[str, Any]:
         config = self.config
         kwargs = connect_options(

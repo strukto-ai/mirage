@@ -262,7 +262,7 @@ def _format_processes(items: list[dict[str, Any]]) -> str:
         [
             str(item["pid"]),
             str(item["parent"] or 0),
-            item["machine"],
+            f"{item['machine']['type']}:{item['machine']['name']}",
             item["session_id"],
             item["state"],
             _exit_cell(item),

@@ -476,7 +476,7 @@ def test_processes_read_as_one_row_per_process():
             {
                 "pid": 2,
                 "parent": None,
-                "machine": "host:box",
+                "machine": {"type": "host", "name": "box", "id": "box"},
                 "session_id": "s1",
                 "state": "running",
                 "exit": None,
@@ -485,7 +485,7 @@ def test_processes_read_as_one_row_per_process():
             {
                 "pid": 3,
                 "parent": 2,
-                "machine": "docker:tools",
+                "machine": {"type": "docker", "name": "tools", "id": "c1"},
                 "session_id": "s1",
                 "state": "exited",
                 "exit": 143,

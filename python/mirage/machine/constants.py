@@ -228,20 +228,30 @@ RUN_STATUS_PREFIX = "/tmp/.mirage-run-"
 # for the program alone so the wrapper shows in no scan and takes no signal
 # by tag; ``$3`` the reports of earlier runs to remove; then the program.
 # The subshell execs it, so the pid written first is the program's, with
-# its start in clock ticks; its exit status follows on the next line.
-# A shell reports a child a signal ended on its stderr, so the wrapper's
-# goes nowhere and the program gets the real one back. It needs only a
-# POSIX shell at ``/bin/sh``.
+# its start in clock ticks; its exit status follows on the next line. The
+# pid and start also go out on stderr ahead of anything the program writes,
+# behind ``RUN_PID_MARK``, so the exec that runs the program brings them
+# back itself. A shell reports a child a signal ended on its stderr, so the
+# wrapper's goes nowhere and the program gets the real one back. It needs
+# only a POSIX shell at ``/bin/sh``.
 RUN_WRAPPER = (
     "f=$1; t=$2; o=$3; shift 3; "
     f'[ -z "$o" ] || PATH={TOOLS_PATH} rm -f $o 2>/dev/null; '
     "exec 6>&2 2>/dev/null; "
     'set -C; if >"$f"; then g=$f; else g=/dev/null; fi; set +C; '
     "( /bin/sh -c 'read -r s </proc/$PPID/stat; set -- ${s##*)}; "
-    """echo "$PPID ${20}"' >>"$g"; """
+    'echo "$PPID ${20}"; '
+    'printf "\\036mirage-pid %s %s\\n" "$PPID" "${20}" >&6\' >>"$g"; '
     'export "$t"; exec 2>&6 6>&-; exec "$@" ); '
     's=$?; echo "$s" >>"$g"; exit "$s"'
 )
+
+# The mark ahead of the pid line the wrapper writes on stderr, a record
+# separator first so no program's output starts with it.
+RUN_PID_MARK = b"\x1emirage-pid "
+# How much of stderr may come ahead of that line, the exec client's own
+# words, before a run is taken to have written none.
+RUN_PID_HOLD = 4096
 
 # Output as base64 lines per read, status on fd 3, for an exec that returns text.
 ENCODE_PRELUDE = (

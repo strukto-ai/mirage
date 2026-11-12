@@ -172,6 +172,16 @@ class MachineTable:
             (h for h in self._handles.values() if str(h.id) == machine), None
         )
 
+    def instance(self, machine: MachineId) -> str:
+        """What ``machine``'s provider calls it (``MachineHandle.instance``),
+        its name for one the table holds no handle of, such as the host.
+
+        Args:
+            machine (MachineId): the machine.
+        """
+        handle = self.by_id(str(machine))
+        return machine.name if handle is None else handle.instance
+
     async def resources(self, machine: str, cpu: bool) -> MachineResources:
         """What one machine holds now.
 

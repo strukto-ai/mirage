@@ -520,6 +520,8 @@ export class Workspace {
       this.wsId,
       this.processTable.machine.toString(),
       () => this.processTable.records(),
+      () => this.jobTable.allJobs().map((job) => job.record),
+      (machine) => this.machineTable.instance(machine),
     )
     this.registry.observer = this.observer
     this.planes = [stores.namespace, stores.observe, stores.sessions]

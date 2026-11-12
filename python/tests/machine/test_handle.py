@@ -29,11 +29,15 @@ from mirage.machine import MachineConfig, MachineHandle
 from mirage.machine.constants import (
     NOT_RUNNING_STATUS,
     PROCESS,
+    RUN_PID_HOLD,
+    RUN_PID_MARK,
     faketime_probe,
     is_run,
     stop_line,
 )
 from mirage.machine.errors import ConnectionLostError
+from mirage.machine.handle import PidLineFilter
+from mirage.machine.types import RunStatus
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.machine import RemoteRuntime
@@ -626,3 +630,55 @@ async def test_a_machine_is_asked_once_and_again_after_a_failed_probe():
         assert box.probes == 2
     finally:
         await ws.close()
+
+
+async def _filtered(chunks: list[bytes], search: bool) -> tuple[bytes, list]:
+    out = bytearray()
+    seen: list[RunStatus] = []
+
+    async def keep(chunk: bytes) -> None:
+        out.extend(chunk)
+
+    line = PidLineFilter(keep, seen.append, search)
+    for chunk in chunks:
+        await line.write(chunk)
+    await line.finish()
+    return bytes(out), seen
+
+
+# stderr may carry the exec client's own words ahead of the pid line, which
+# can arrive in pieces; the line comes out and its pid and start are told.
+@pytest.mark.asyncio
+async def test_the_pid_line_comes_out_of_stderr_after_the_clients_words():
+    out, seen = await _filtered(
+        [
+            b"Defaulted container\n",
+            RUN_PID_MARK[:4],
+            RUN_PID_MARK[4:] + b"81",
+            b"2 99\nerr\n",
+        ],
+        search=True,
+    )
+    assert out == b"Defaulted container\nerr\n"
+    assert seen == [RunStatus(812, 99.0, None)]
+
+
+# stdout carries the line only at its very start; anything else passes at
+# once, and a line further in is the program's own.
+@pytest.mark.asyncio
+async def test_stdout_gives_up_the_pid_line_only_at_its_start():
+    assert await _filtered([RUN_PID_MARK + b"7 1\nout"], search=False) == (
+        b"out",
+        [RunStatus(7, 1.0, None)],
+    )
+    late = b"x" + RUN_PID_MARK + b"7 1\n"
+    assert await _filtered([late], search=False) == (late, [])
+
+
+# A run whose wrapper wrote no line keeps every byte it wrote, released at
+# once past the most stderr may hold, else when the stream ends.
+@pytest.mark.asyncio
+async def test_a_stream_with_no_pid_line_keeps_every_byte():
+    assert await _filtered([b"only err"], search=True) == (b"only err", [])
+    big = b"e" * (RUN_PID_HOLD + 1)
+    assert await _filtered([big, b"!"], search=True) == (big + b"!", [])

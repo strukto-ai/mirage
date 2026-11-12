@@ -46,6 +46,11 @@ export class MicrosandboxMachine extends ProgramMachine<MicrosandboxConfig> {
     requireId('microsandbox', 'sandbox', this.config.sandbox)
   }
 
+  /** The guest msb runs it in. */
+  override get instance(): string {
+    return this.config.sandbox
+  }
+
   /** Skip the connect-once latch: every exec probes the guest. */
   protected override ensureConnected(signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted()

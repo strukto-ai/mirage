@@ -93,7 +93,7 @@ export function registerMachinesRoutes(
     const processes = await ws.processes({ machine })
     const detail: MachineDetailResponse = {
       ...toResponse(found),
-      processes: processes.map(processResponse),
+      processes: processes.map((process) => processResponse(process, ws)),
     }
     return detail
   })

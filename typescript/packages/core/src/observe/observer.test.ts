@@ -23,7 +23,7 @@ import {
 } from '@opentelemetry/api'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { IOResult } from '../io/types.ts'
-import { CHECK_MARK } from '../machine/constants.ts'
+import { CHECK_MARK, RUN_PID_MARK, isRun } from '../machine/constants.ts'
 import { MachineHandle } from '../machine/handle.ts'
 import { RemoteRuntime } from '../runtime/machine/runtime.ts'
 import type { RunResult } from '../runtime/types.ts'
@@ -724,8 +724,9 @@ it('ends the span of a line whose route is refused', async () => {
 })
 
 // A job and each process a line ran are spans of their own once they end,
-// under the line's span, named by their line, session, workspace, machine
-// and cwd.
+// named by their line, session, workspace, machine and cwd: the line's own
+// process under the line's span, the job under it and the job's process
+// under the job.
 it('sends an ended job and process as spans', async () => {
   const spans = exported()
   const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
@@ -746,17 +747,29 @@ it('sends an ended job and process as spans', async () => {
     expect(sleep?.attributes['mirage.line.id']).toBe(line?.id.value)
     expect(sleep?.attributes['mirage.session.id']).toBe(line?.sessionId)
     expect(sleep?.attributes['mirage.cwd']).toBe('/')
-    const host = ws.processTable.machine.toString()
+    const machine = ws.processTable.machine
+    const host = machine.toString()
+    const where = (span: Seen | undefined): unknown[] => [
+      span?.attributes['mirage.machine.type'],
+      span?.attributes['mirage.machine.name'],
+      span?.attributes['mirage.machine.id'],
+    ]
     expect(sleep?.attributes['host.id']).toBe(host)
-    expect(sleep?.attributes['mirage.machine.id']).toBe(host)
+    expect(where(sleep)).toEqual(['host', machine.name, machine.name])
     const [command] = spans.filter((s) => s.name === 'command')
     expect(command?.attributes['mirage.line.id']).toBe(line?.id.value)
     expect(command?.attributes['host.id']).toBe(host)
-    expect(command?.attributes['mirage.machine.ids']).toEqual([host])
-    for (const span of [job, sleep]) expect(span?.parent).toEqual(command?.context)
+    expect(command?.attributes['mirage.machine.ids']).toBeUndefined()
+    const [shell] = spans.filter(
+      (s) =>
+        s.name === 'process' && s.attributes['process.command_line'] === 'sleep 30 & kill %1; wait',
+    )
+    expect(shell?.parent).toEqual(command?.context)
+    expect(job?.parent).toEqual(shell?.context)
+    expect(sleep?.parent).toEqual(job?.context)
     expect(job?.attributes['process.pid']).toBe(sleep?.attributes['process.pid'])
     expect(job?.attributes['host.id']).toBe(host)
-    expect(job?.attributes['mirage.machine.id']).toBe(host)
+    expect(where(job)).toEqual(['host', machine.name, machine.name])
     expect(job?.attributes['mirage.cwd']).toBe('/')
   } finally {
     await ws.close()
@@ -764,21 +777,35 @@ it('sends an ended job and process as spans', async () => {
   }
 })
 
+const ENC = new TextEncoder()
+
 class Box extends MachineHandle {
   static override readonly provider = 'box'
+
+  override get instance(): string {
+    return `box-${this.name}`
+  }
 
   connect(): Promise<void> {
     return Promise.resolve()
   }
 
-  protected override execArgv(): Promise<RunResult> {
-    const stdout = new TextEncoder().encode(`${CHECK_MARK}\n`)
-    return Promise.resolve({ stdout, stderr: null, exitCode: 0 })
+  protected override async execArgv(
+    argv: readonly string[],
+    _stdin: unknown,
+    _env: unknown,
+    _cwd: string,
+    _output: unknown,
+    errors: ((data: Uint8Array) => Promise<void>) | null,
+  ): Promise<RunResult> {
+    if (isRun(argv)) await errors?.(new Uint8Array([...RUN_PID_MARK, ...ENC.encode('812 99\n')]))
+    return { stdout: ENC.encode(`${CHECK_MARK}\n`), stderr: null, exitCode: 0 }
   }
 }
 
-// Each span names where its work ran: a process its machine, a line every
-// machine its processes ran on, and `host.id` the host running Mirage.
+// Each job and process span names where its work ran, by the machine's
+// provider, its name and what its provider calls it, and `host.id` the host
+// running Mirage.
 it("names the machine a span's work ran on", async () => {
   const spans = exported()
   const ws = new Workspace(
@@ -793,32 +820,40 @@ it("names the machine a span's work ran on", async () => {
     await ws.shell('train 1 & wait')
     await ws.shell('echo hi')
     await ws.shell('echo a\ntrain 2')
-    const [first, second, third] = await ws.lines()
     const host = ws.processTable.machine.toString()
-    const machines = new Map(
-      spans
-        .filter((s) => s.name === 'command')
-        .map((s) => [s.attributes['mirage.line.id'], s.attributes['mirage.machine.ids']]),
-    )
-    expect(machines).toEqual(
-      new Map([
-        [first?.id.value, [host, 'box:a']],
-        [second?.id.value, [host]],
-        [third?.id.value, [host]],
-        [`${third?.id.value ?? ''}.1`, [host, 'box:a']],
-      ]),
-    )
+    const name = ws.processTable.machine.name
+    expect(
+      spans.filter((s) => s.name === 'command').map((s) => s.attributes['mirage.machine.ids']),
+    ).toEqual([undefined, undefined, undefined, undefined])
     const ran = spans
-      .filter(
-        (s) =>
-          s.name === 'job' ||
-          (s.name === 'process' && s.attributes['process.command_line'] === 'train 1'),
-      )
-      .map((s) => [s.name, s.attributes['mirage.machine.id'], s.attributes['host.id']])
+      .filter((s) => s.name === 'job' || s.name === 'process')
+      .map((s) => [
+        s.name,
+        s.attributes['process.command_line'] ?? s.attributes['mirage.command'],
+        s.attributes['mirage.machine.type'],
+        s.attributes['mirage.machine.name'],
+        s.attributes['mirage.machine.id'],
+        s.attributes['host.id'],
+      ])
       .sort()
+    const pids = new Map(
+      spans
+        .filter((s) => s.name === 'process')
+        .map((s) => [
+          s.attributes['process.command_line'],
+          [s.attributes['process.pid'], s.attributes['mirage.process.pid']],
+        ]),
+    )
+    expect(pids.get('train 2')?.[0]).toBe(812)
+    expect(pids.get('train 2')?.[1]).not.toBe(812)
+    expect(pids.get('echo hi')?.[0]).toBe(pids.get('echo hi')?.[1])
     expect(ran).toEqual([
-      ['job', 'box:a', host],
-      ['process', 'box:a', host],
+      ['job', 'train 1', 'box', 'a', 'box-a', host],
+      ['process', 'echo a\ntrain 2', 'host', name, name, host],
+      ['process', 'echo hi', 'host', name, name, host],
+      ['process', 'train 1 & wait', 'host', name, name, host],
+      ['process', 'train 1', 'box', 'a', 'box-a', host],
+      ['process', 'train 2', 'box', 'a', 'box-a', host],
     ])
   } finally {
     await ws.close()

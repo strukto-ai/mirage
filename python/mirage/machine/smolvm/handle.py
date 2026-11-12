@@ -50,6 +50,11 @@ class SmolvmMachine(ProgramMachine):
     program = "smolvm"
     install_hint = SMOLVM_HINT
 
+    @property
+    def instance(self) -> str:
+        """The VM smolvm runs it in."""
+        return self.config.machine
+
     def exec_words(self) -> tuple[tuple[str, ...], tuple[str, ...]]:
         return ("machine", "exec", "--name", self.config.machine, "-i"), (
             "--",

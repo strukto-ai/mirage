@@ -13,15 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Line, LineState } from '@struktoai/mirage-core/execution/line/types'
+import type { Process } from '@struktoai/mirage-core/execution/process/types'
 import { LineId } from '@struktoai/mirage-core/execution/types'
 import { PipeClosed } from '@struktoai/mirage-core/io/errors'
 import type { BytePipe } from '@struktoai/mirage-core/io/pipe'
 import type { RouteApp } from '../routes.ts'
 import { msToRfc3339 } from '@struktoai/mirage-core/utils/dates'
+import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { WorkspaceRegistry } from '../registry.ts'
 import type { Instant } from '../schemas.ts'
 import type { RequestTable } from '../requests.ts'
 import { HttpError, oneOf, WorkspaceMissing } from '../errors.ts'
+import { toResponse as processResponse, type ProcessResponse } from './processes.ts'
 import { failure, requireEntry } from './vfs.ts'
 
 const NOT_OPEN = "the line's stdin is not open"
@@ -56,10 +59,31 @@ interface LineList {
   items: LineResponse[]
 }
 
+interface ProcessTreeResponse extends ProcessResponse {
+  children: ProcessTreeResponse[]
+}
+
 interface LineDetailResponse extends LineResponse {
   jobs: string[]
-  processes: number[]
-  machines: string[]
+  processes: ProcessTreeResponse[]
+}
+
+/**
+ * The processes a line ran, each under the one that started it, by pid; one
+ * whose parent the line did not run is at the top. Mirrors Python's `_tree`.
+ */
+function tree(records: readonly Process[], ws: Workspace): ProcessTreeResponse[] {
+  const pids = new Set(records.map((record) => record.id.pid))
+  const under = new Map<number | null, Process[]>()
+  for (const record of [...records].sort((a, b) => a.id.pid - b.id.pid)) {
+    const parent = record.parent !== null && pids.has(record.parent) ? record.parent : null
+    under.set(parent, [...(under.get(parent) ?? []), record])
+  }
+  const node = (record: Process): ProcessTreeResponse => ({
+    ...processResponse(record, ws),
+    children: (under.get(record.id.pid) ?? []).map(node),
+  })
+  return (under.get(null) ?? []).map(node)
 }
 
 const STATES: readonly LineState[] = ['waiting', 'running', 'stopping', 'exited']
@@ -124,8 +148,9 @@ export function registerLinesRoutes(
   )
 
   app.get<{ Params: WsLineParams }>('/v1/workspaces/:wsId/lines/:lineId', async (req) => {
-    // One line, with the ids of the jobs it started, the pids of the
-    // processes it ran and the machines those ran on.
+    // One line, with the ids of the jobs it started and the processes it
+    // ran that the workspace still keeps, each under the one that started
+    // it.
     const { wsId, lineId } = req.params
     if (deps.registry.visible(wsId, req.account) === null) {
       throw new WorkspaceMissing(wsId)
@@ -133,12 +158,10 @@ export function registerLinesRoutes(
     const ws = deps.registry.get(wsId).runner.ws
     const record = await ws.line(new LineId(lineId))
     if (record === null) throw new HttpError('not_found', 'line not found')
-    const processes = await ws.processes({ lineId: record.id })
     const detail: LineDetailResponse = {
       ...toResponse(record),
       jobs: (await ws.jobs({ lineId: record.id })).map((job) => job.id.console),
-      processes: processes.map((process) => process.id.pid),
-      machines: [...new Set(processes.map((process) => process.machine.toString()))],
+      processes: tree(await ws.processes({ lineId: record.id }), ws),
     }
     return detail
   })

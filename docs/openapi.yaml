@@ -1446,9 +1446,49 @@ paths:
                 jobs:
                   - job_019a5e2c7b417c3e9f204d8e1a6b5c38
                 processes:
-                  - 42
-                machines:
-                  - host:my-laptop
+                  - pid: 41
+                    session_id: default
+                    line_id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
+                    parent: null
+                    group: 41
+                    command: sleep 30 & wait
+                    cwd: /
+                    machine:
+                      type: host
+                      name: my-laptop
+                      id: my-laptop
+                    runtime: null
+                    machine_pid: null
+                    state: running
+                    started_at: '2026-11-07T00:00:00.000Z'
+                    ended_at: null
+                    exit: null
+                    signal: null
+                    error: null
+                    children:
+                      - pid: 42
+                        session_id: default
+                        line_id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
+                        parent: 41
+                        group: 41
+                        command: sleep 30
+                        cwd: /
+                        machine:
+                          type: host
+                          name: my-laptop
+                          id: my-laptop
+                        runtime: process
+                        machine_pid:
+                          pid: 12345
+                          started: 1794009600
+                          exited: null
+                        state: running
+                        started_at: '2026-11-07T00:00:00.000Z'
+                        ended_at: null
+                        exit: null
+                        signal: null
+                        error: null
+                        children: []
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -1458,7 +1498,7 @@ paths:
         '429':
           $ref: '#/components/responses/429'
       description: |-
-        Get a command execution with its job, process, and machine IDs. Use the `line_id` returned by the shell endpoint.
+        Get a command execution with its job IDs and the processes it ran, each under the one that started it and naming the machine it ran on. Use the `line_id` returned by the shell endpoint.
 
         Completed commands are retained for up to one hour, with a maximum of 1,024 records. Servers sharing a workspace store share these records; snapshots preserve completed records. Times are RFC 3339 strings in UTC.
       tags:
@@ -1701,7 +1741,10 @@ paths:
                     group: 42
                     command: sleep 30
                     cwd: /
-                    machine: host:my-laptop
+                    machine:
+                      type: host
+                      name: my-laptop
+                      id: my-laptop
                     runtime: process
                     machine_pid:
                       pid: 12345
@@ -1758,7 +1801,10 @@ paths:
                 group: 42
                 command: sleep 30
                 cwd: /
-                machine: host:my-laptop
+                machine:
+                  type: host
+                  name: my-laptop
+                  id: my-laptop
                 runtime: process
                 machine_pid:
                   pid: 12345
@@ -6057,16 +6103,12 @@ components:
           title: Jobs
           type: array
           description: IDs of the jobs the line started, each `job_` and 32 hex digits.
-        machines:
-          items:
-            type: string
-          title: Machines
-          type: array
         processes:
           items:
-            type: integer
+            $ref: '#/components/schemas/ProcessTreeResponse'
           title: Processes
           type: array
+          description: The processes the line ran, each under the one that started it.
         session_id:
           title: Session Id
           type: string
@@ -6093,7 +6135,6 @@ components:
         - error
         - jobs
         - processes
-        - machines
       title: LineDetailResponse
       type: object
     LineResponse:
@@ -6228,6 +6269,26 @@ components:
         - exited
       title: MachinePidResponse
       type: object
+    ProcessMachineResponse:
+      properties:
+        id:
+          title: Id
+          type: string
+          description: What the provider calls the machine, such as an E2B sandbox id or a container.
+        name:
+          title: Name
+          type: string
+          description: The machine's name under `machines:`; with the type it makes the machine's id, `type:name`.
+        type:
+          title: Type
+          type: string
+          description: The machine's provider, such as `e2b` or `docker`, or `host` for the host running Mirage.
+      required:
+        - type
+        - name
+        - id
+      title: ProcessMachineResponse
+      type: object
     ProcessResponse:
       properties:
         command:
@@ -6261,8 +6322,7 @@ components:
             - type: 'null'
           title: Line Id
         machine:
-          title: Machine
-          type: string
+          $ref: '#/components/schemas/ProcessMachineResponse'
         machine_pid:
           anyOf:
             - $ref: '#/components/schemas/MachinePidResponse'
@@ -6321,6 +6381,97 @@ components:
         - exited
       title: ProcessState
       type: string
+    ProcessTreeResponse:
+      properties:
+        children:
+          items:
+            $ref: '#/components/schemas/ProcessTreeResponse'
+          title: Children
+          type: array
+        command:
+          title: Command
+          type: string
+        cwd:
+          title: Cwd
+          type: string
+        ended_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+          title: Ended At
+        error:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Error
+        exit:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Exit
+        group:
+          title: Group
+          type: integer
+        line_id:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Line Id
+        machine:
+          $ref: '#/components/schemas/ProcessMachineResponse'
+        machine_pid:
+          anyOf:
+            - $ref: '#/components/schemas/MachinePidResponse'
+            - type: 'null'
+        parent:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Parent
+        pid:
+          title: Pid
+          type: integer
+        runtime:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Runtime
+        session_id:
+          title: Session Id
+          type: string
+        signal:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Signal
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+        state:
+          title: State
+          type: string
+      required:
+        - pid
+        - session_id
+        - line_id
+        - parent
+        - group
+        - command
+        - cwd
+        - machine
+        - runtime
+        - machine_pid
+        - state
+        - started_at
+        - ended_at
+        - exit
+        - signal
+        - error
+        - children
+      title: ProcessTreeResponse
+      type: object
     CLIBlock:
       properties:
         cli:

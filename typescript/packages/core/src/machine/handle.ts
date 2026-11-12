@@ -26,7 +26,7 @@ import type { MountType, RunStatus, ScanFacts } from './types.ts'
 import type { OutputFn, RunResult } from '../runtime/types.ts'
 import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
 import { abortable, hasAborted, mergeSignals, settledWithin, sleep } from '../utils/abort.ts'
-import { concat } from '../utils/bytes.ts'
+import { concat, findBytes, startsWith } from '../utils/bytes.ts'
 import { boundSystemClock } from '../utils/clock.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import { BASE_CONFIG_FIELDS, checkMountType, type MachineConfig } from './config.ts'
@@ -39,6 +39,8 @@ import {
   NOT_RUNNING_STATUS,
   RESOURCE_WAIT_SECONDS,
   RUN_DRAIN_SECONDS,
+  RUN_PID_HOLD,
+  RUN_PID_MARK,
   RUN_START_WAIT_SECONDS,
   RUN_WATCH_SECONDS,
   SCAN_FACTS_MARK,
@@ -62,6 +64,85 @@ import { isPipeTransport } from './mixin.ts'
 import { MachineMounts } from './mounts.ts'
 
 export const logger: { debug?: (message: string) => void } = {}
+
+/**
+ * One stream of a run with the pid line its wrapper writes ahead of the
+ * program (`RUN_PID_MARK`) taken out, and the pid and start the line gives
+ * handed to `found`. stderr may carry the exec client's own words ahead of
+ * the line, so there (`search`) it is looked for within `RUN_PID_HOLD`
+ * bytes, which wait until it shows; stdout carries it only where the exec
+ * joins the two streams, so there only what can still begin it waits. Once
+ * it is out, or can no longer come, everything passes as it arrives.
+ * Mirrors Python's `PidLineFilter`.
+ */
+export class PidLineFilter {
+  private held = new Uint8Array()
+  private passing = false
+
+  constructor(
+    private readonly sink: OutputFn,
+    private readonly found: (report: RunStatus) => void,
+    private readonly search: boolean,
+  ) {}
+
+  /** Pass on what can no longer be, or hold, the pid line. */
+  readonly write = async (data: Uint8Array): Promise<void> => {
+    let out = data
+    if (!this.passing) {
+      this.held = concat([this.held, data])
+      out = this.take()
+    }
+    if (out.byteLength > 0) await this.sink(out)
+  }
+
+  /** Pass on what is still held once the stream has ended. */
+  async finish(): Promise<void> {
+    const held = this.held
+    this.held = new Uint8Array()
+    this.passing = true
+    if (held.byteLength > 0) await this.sink(held)
+  }
+
+  /**
+   * What is held, less the pid line, once the line is out or can no longer
+   * come; nothing while it still may.
+   */
+  private take(): Uint8Array {
+    let held = this.held
+    const at = this.search ? findBytes(held, RUN_PID_MARK) : startsWith(held, RUN_PID_MARK) ? 0 : -1
+    const end = at >= 0 ? held.indexOf(0x0a, at) : -1
+    if (end >= 0) {
+      const text = new TextDecoder().decode(held.subarray(at + RUN_PID_MARK.byteLength, end))
+      const report = parseStatus(text, '')
+      if (report !== null) this.found(report)
+      held = concat([held.subarray(0, at), held.subarray(end + 1)])
+    } else if (
+      held.byteLength < RUN_PID_HOLD &&
+      (at >= 0 || this.search || startsWith(RUN_PID_MARK, held))
+    ) {
+      return new Uint8Array()
+    }
+    this.held = new Uint8Array()
+    this.passing = true
+    return held
+  }
+}
+
+/**
+ * `data`, a stream an exec returned whole, with its pid line taken out
+ * (`PidLineFilter`). Mirrors Python's `_without_pid_line`.
+ */
+async function withoutPidLine(
+  data: Uint8Array,
+  found: (report: RunStatus) => void,
+  search: boolean,
+): Promise<Uint8Array> {
+  const out: Uint8Array[] = []
+  const line = new PidLineFilter((chunk) => Promise.resolve(void out.push(chunk)), found, search)
+  await line.write(data)
+  await line.finish()
+  return concat(out)
+}
 
 /**
  * One machine a workspace runs programs on, reached through its provider:
@@ -130,6 +211,14 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   /** The machine's id, `<provider>:<name>`. */
   get id(): MachineId {
     return new MachineId(this.provider, this.name)
+  }
+
+  /**
+   * What the provider calls the machine: its container, sandbox, pod or
+   * host there. Its name, for a provider that says nothing.
+   */
+  get instance(): string {
+    return this.name
   }
 
   /**
@@ -217,13 +306,29 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     })
     this.ended.set(tag, { settle, finished: runner?.join() ?? left })
     this.runs += 1
+    const found = (report: RunStatus): void => {
+      if (report.pid !== null && report.started !== null)
+        runner?.setMachinePid({ pid: report.pid, started: report.started, exited: null })
+    }
+    const lines = [
+      new PidLineFilter(
+        output ?? ((data) => Promise.resolve(void kept[0].push(data))),
+        found,
+        false,
+      ),
+      new PidLineFilter(
+        errors ?? ((data) => Promise.resolve(void kept[1].push(data))),
+        found,
+        true,
+      ),
+    ] as const
     const execution = this.execArgv(
       runArgv(tag, status, spent, run),
       ctx.stdin,
       { ...given, ...clock },
       ctx.cwd.virtual,
-      output ?? ((data) => Promise.resolve(void kept[0].push(data))),
-      errors ?? ((data) => Promise.resolve(void kept[1].push(data))),
+      lines[0].write,
+      lines[1].write,
       mergeSignals(ctx.signal, letGo.signal),
     )
     const background = runner?.background === true
@@ -234,6 +339,18 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     let done: RunResult
     try {
       done = await this.outcome(execution, ended, letGo)
+      for (const line of lines) await line.finish()
+      done = {
+        ...done,
+        stdout:
+          done.stdout.byteLength > 0
+            ? await withoutPidLine(done.stdout, found, false)
+            : done.stdout,
+        stderr:
+          done.stderr !== null && done.stderr.byteLength > 0
+            ? await withoutPidLine(done.stderr, found, true)
+            : done.stderr,
+      }
       if (background) await watcher
     } catch (error) {
       if (ctx.signal?.aborted === true) {
@@ -243,6 +360,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       if (!(error instanceof ConnectionLostError)) throw error
       logger.debug?.(`${String(this.id)}: connection lost: ${String(error)}`)
       runner?.programSignaled(HANGUP_EXIT_CODE - 128)
+      for (const line of lines) await line.finish()
       const said = new TextEncoder().encode(`mirage: ${String(this.id)}: connection lost\n`)
       done = {
         stdout: error.stdout,
@@ -336,8 +454,9 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
 
   /**
    * Give a background run's process its program's pid as soon as the program
-   * has started, which `$!` waits for. One that ended at once still reported
-   * it. Mirrors Python's `_report_start`.
+   * has started, which `$!` waits for, unless its pid line already did. One
+   * that ended at once still reported it, so a look after the exec ended is
+   * the last. Mirrors Python's `_report_start`.
    */
   private async reportStart(
     runner: ProcessHandle,
@@ -351,6 +470,8 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     execution.then(finished, finished)
     let delay = 0.01
     for (let waited = 0; waited < RUN_START_WAIT_SECONDS;) {
+      if (runner.record.machinePid !== null) return
+      const lastLook = run.ended
       let found: RunStatus | null = null
       try {
         found = await this.readStatus(status)
@@ -362,7 +483,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
           runner.setMachinePid({ pid: found.pid, started: found.started, exited: null })
         return
       }
-      if (run.ended) return
+      if (lastLook) return
       await sleep(delay * 1000)
       waited += delay
       delay = Math.min(delay * 2, 0.5)

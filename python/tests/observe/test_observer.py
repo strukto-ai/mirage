@@ -27,7 +27,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 from mirage import MountMode, Workspace
 from mirage.execution.process.types import Process
 from mirage.io import IOResult
-from mirage.machine.constants import CHECK_MARK
+from mirage.machine.constants import CHECK_MARK, RUN_PID_MARK, is_run
 from mirage.machine.handle import MachineHandle
 from mirage.observe import OpRecord
 from mirage.observe import observer as observer_module
@@ -699,8 +699,9 @@ def test_bash_history_lists_lines_in_the_order_they_ended():
 
 
 # A job and each process a line ran are spans of their own once they end,
-# under the line's span, named by their line, session, workspace, machine
-# and cwd.
+# named by their line, session, workspace, machine and cwd: the line's own
+# process under the line's span, the job under it and the job's process
+# under the job.
 @pytest.mark.asyncio
 async def test_an_ended_job_and_process_are_spans(monkeypatch):
     exporter = _exported(monkeypatch)
@@ -733,34 +734,52 @@ async def test_an_ended_job_and_process_are_spans(monkeypatch):
     assert attributes["mirage.line.id"] == str(line.id)
     assert attributes["mirage.session.id"] == line.session_id
     assert attributes["mirage.cwd"] == "/"
-    host = str(ws.process_table.machine)
+    machine = ws.process_table.machine
+    host = str(machine)
+    where = {
+        "mirage.machine.type": "host",
+        "mirage.machine.name": machine.name,
+        "mirage.machine.id": machine.name,
+    }
     assert attributes["host.id"] == host
-    assert attributes["mirage.machine.id"] == host
+    assert {k: attributes[k] for k in where} == where
     [command] = [s for s in spans if s.name == "command"]
     assert (command.attributes or {})["mirage.line.id"] == str(line.id)
     assert (command.attributes or {})["host.id"] == host
-    assert (command.attributes or {})["mirage.machine.ids"] == (host,)
-    context = command.get_span_context()
-    assert context is not None
-    for span in (job, sleep):
-        assert span.parent is not None
+    assert "mirage.machine.ids" not in (command.attributes or {})
+    [shell] = [
+        s
+        for s in spans
+        if s.name == "process"
+        and (s.attributes or {})["process.command_line"]
+        == "sleep 30 & kill %1; wait"
+    ]
+    for span, above in ((shell, command), (job, shell), (sleep, job)):
+        context = above.get_span_context()
+        assert context is not None and span.parent is not None
         assert (span.parent.trace_id, span.parent.span_id) == (
             context.trace_id,
             context.span_id,
         )
     assert (job.attributes or {})["process.pid"] == attributes["process.pid"]
     assert (job.attributes or {})["host.id"] == host
-    assert (job.attributes or {})["mirage.machine.id"] == host
+    assert {k: (job.attributes or {})[k] for k in where} == where
     assert (job.attributes or {})["mirage.cwd"] == "/"
 
 
 class _Box(MachineHandle):
     provider = "box"
 
+    @property
+    def instance(self) -> str:
+        return f"box-{self.name}"
+
     async def connect(self) -> None:
         return None
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        if is_run(argv):
+            await errors(RUN_PID_MARK + b"812 99\n")
         return RunResult(
             stdout=f"{CHECK_MARK}\n".encode(), stderr=None, exit_code=0
         )
@@ -784,33 +803,46 @@ async def test_a_span_names_the_machine_its_work_ran_on(monkeypatch):
     finally:
         await ws.close()
     spans = exporter.get_finished_spans()
-    machines = {
-        (s.attributes or {})["mirage.line.id"]: (s.attributes or {}).get(
-            "mirage.machine.ids"
-        )
+    assert all(
+        "mirage.machine.ids" not in (s.attributes or {})
         for s in spans
         if s.name == "command"
-    }
-    assert machines == {
-        str(first.id): (host, "box:a"),
-        str(second.id): (host,),
-        str(third.id): (host,),
-        f"{third.id}.1": (host, "box:a"),
-    }
-    ran = [
+    )
+    ran = sorted(
         (
             s.name,
+            (s.attributes or {}).get(
+                "process.command_line",
+                (s.attributes or {}).get("mirage.command"),
+            ),
+            (s.attributes or {})["mirage.machine.type"],
+            (s.attributes or {})["mirage.machine.name"],
             (s.attributes or {})["mirage.machine.id"],
             (s.attributes or {})["host.id"],
         )
         for s in spans
-        if s.name == "job"
-        or (
-            s.name == "process"
-            and (s.attributes or {})["process.command_line"] == "train 1"
+        if s.name in ("job", "process")
+    )
+    name = host.split(":", 1)[1]
+    pids = {
+        (s.attributes or {})["process.command_line"]: (
+            (s.attributes or {})["process.pid"],
+            (s.attributes or {})["mirage.process.pid"],
         )
+        for s in spans
+        if s.name == "process"
+    }
+    assert pids["train 2"][0] == 812
+    assert pids["train 2"][1] != 812
+    assert pids["echo hi"][0] == pids["echo hi"][1]
+    assert ran == [
+        ("job", "train 1", "box", "a", "box-a", host),
+        ("process", "echo a\ntrain 2", "host", name, name, host),
+        ("process", "echo hi", "host", name, name, host),
+        ("process", "train 1", "box", "a", "box-a", host),
+        ("process", "train 1 & wait", "host", name, name, host),
+        ("process", "train 2", "box", "a", "box-a", host),
     ]
-    assert sorted(ran) == [("job", "box:a", host), ("process", "box:a", host)]
 
 
 @pytest.mark.asyncio

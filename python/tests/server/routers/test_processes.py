@@ -68,9 +68,11 @@ async def test_a_process_is_listed_live_and_after_it_ends():
             params={"job_id": job["id"].removeprefix("job_")},
         )
         assert (r.status_code, r.json()) == (200, {"items": []})
+        machine = live["machine"]
+        assert (machine["type"], machine["id"]) == ("host", machine["name"])
         r = await client.get(
             f"/v1/workspaces/{wid}/processes",
-            params={"machine": live["machine"]},
+            params={"machine": f"{machine['type']}:{machine['name']}"},
         )
         assert pid in [p["pid"] for p in r.json()["items"]]
         r = await client.get(

@@ -41,6 +41,11 @@ class DockerMachine(ProgramMachine):
     program = "docker"
     install_hint = DOCKER_HINT
 
+    @property
+    def instance(self) -> str:
+        """The container docker runs it in."""
+        return self.config.container
+
     def exec_words(self) -> tuple[tuple[str, ...], tuple[str, ...]]:
         return ("exec", "-i"), (self.config.container,)
 

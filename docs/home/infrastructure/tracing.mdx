@@ -172,7 +172,6 @@ These are the `command` span's attributes:
   "host.id": "host:my-laptop",
   "mirage.cwd": "/",
   "mirage.exit_code": 0,
-  "mirage.machine.ids": ["host:my-laptop"],
   "mirage.duration_ms": 2,
   "mirage.stdout": "3 notes.txt\n",
   "mirage.stderr": ""
@@ -192,9 +191,46 @@ read:
 }
 ```
 
+### A program on a machine
+
+When a line runs a program on a [machine](/home/setup/machine/overview), its
+`process` span sits under the process that started it, so the trace is the
+line's process tree. Here `python3` runs on an E2B machine named `gpu`:
+
+```bash
+echo hi | python3 train.py | wc -l
+```
+
+```text
+command    echo hi | python3 train.py | wc -l
+└─ process     echo hi | python3 train.py | wc -l   host  my-laptop
+   ├─ process  echo hi                              host  my-laptop
+   ├─ process  python3 train.py                     e2b   gpu        pid 812
+   └─ process  wc -l                                host  my-laptop
+```
+
+The `python3` span names the machine three ways and carries both pids:
+
+```json
+{
+  "process.pid": 812,
+  "mirage.process.pid": 4194311,
+  "process.parent_pid": 4194305,
+  "process.command_line": "python3 train.py",
+  "mirage.machine.type": "e2b",
+  "mirage.machine.name": "gpu",
+  "mirage.machine.id": "ix5k2v0q8n1",
+  "mirage.runtime": "remote",
+  "host.id": "host:my-laptop",
+  "process.exit.code": 0
+}
+```
+
 ## Spans
 
-Each trace covers one line and everything it started. Use the span and
+Each trace covers one line and everything it started. A process sits under
+the process that started it, and a background job's process under its `job`
+span. Use the span and
 attribute names in your backend's queries, dashboards and alerts.
 
 | To find | Filter on |
@@ -210,10 +246,10 @@ attribute names in your backend's queries, dashboards and alerts.
 
 | Span | Sent | Attributes |
 | --- | --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>command</code> | When the line ends | `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.id`, `mirage.machine.ids`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.timestamp`, `mirage.duration_ms`, `mirage.stdout`, `mirage.stderr`, `mirage.vfs.dropped` |
+| <code style={{ whiteSpace: 'nowrap' }}>command</code> | When the line ends | `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.id`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.timestamp`, `mirage.duration_ms`, `mirage.stdout`, `mirage.stderr`, `mirage.vfs.dropped` |
 | <code style={{ whiteSpace: 'nowrap' }}>vfs.&lt;call&gt;</code> | For each call the line makes to a mount, such as `vfs.read` | `mirage.vfs.path`, `mirage.vfs.source`, `mirage.vfs.bytes`, `mirage.vfs.timestamp`, `mirage.vfs.duration_ms` |
-| <code style={{ whiteSpace: 'nowrap' }}>job</code> | When an `&` job ends | `mirage.job.id`, `mirage.job.number`, `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.id`, `mirage.machine.id`, `process.pid`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.signal` |
-| <code style={{ whiteSpace: 'nowrap' }}>process</code> | When a process the line started ends | `process.pid`, `process.parent_pid`, `process.group_leader.pid`, `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.id`, `mirage.machine.id`, `process.command_line`, `mirage.cwd`, `mirage.runtime`, `mirage.machine.pid`, `process.exit.code`, `mirage.signal`, `mirage.error` |
+| <code style={{ whiteSpace: 'nowrap' }}>job</code> | When an `&` job ends | `mirage.job.id`, `mirage.job.number`, `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.id`, `mirage.machine.type`, `mirage.machine.name`, `mirage.machine.id`, `process.pid`, `mirage.process.pid`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.signal` |
+| <code style={{ whiteSpace: 'nowrap' }}>process</code> | When a process the line started ends | `process.pid`, `mirage.process.pid`, `process.parent_pid`, `process.group_leader.pid`, `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.id`, `mirage.machine.type`, `mirage.machine.name`, `mirage.machine.id`, `process.command_line`, `mirage.cwd`, `mirage.runtime`, `process.exit.code`, `mirage.signal`, `mirage.error` |
 
 </Accordion>
 
@@ -222,8 +258,11 @@ attribute names in your backend's queries, dashboards and alerts.
 | Attribute | Meaning |
 | --- | --- |
 | <code style={{ whiteSpace: 'nowrap' }}>host.id</code> | The host that runs Mirage, such as `host:my-laptop`. |
-| <code style={{ whiteSpace: 'nowrap' }}>mirage.machine.id</code> | The [machine](/home/setup/machine/overview) a job or process ran on, such as `docker:tools`. |
-| <code style={{ whiteSpace: 'nowrap' }}>mirage.machine.ids</code> | The machines the line's processes ran on by the time the line ended. A background job that starts a program later names its machine on that program's `process` span. |
+| <code style={{ whiteSpace: 'nowrap' }}>mirage.machine.type</code> | The provider of the [machine](/home/setup/machine/overview) a job or process ran on, such as `e2b` or `docker`, and `host` for the host that runs Mirage. |
+| <code style={{ whiteSpace: 'nowrap' }}>mirage.machine.name</code> | The machine's name under `machines:`, such as `gpu`. With the type it makes the machine's id elsewhere in Mirage, such as `e2b:gpu`. |
+| <code style={{ whiteSpace: 'nowrap' }}>mirage.machine.id</code> | What the provider calls the machine: the sandbox id for E2B and Daytona, the container for Docker, the pod for Kubernetes, the host for SSH. |
+| <code style={{ whiteSpace: 'nowrap' }}>process.pid</code> | The pid the agent sees in `ps` and `$!`: a program's own pid on its machine, else Mirage's number for the process. |
+| <code style={{ whiteSpace: 'nowrap' }}>mirage.process.pid</code> | Mirage's own number for the process, the same as `process.pid` for a command Mirage runs itself. |
 | <code style={{ whiteSpace: 'nowrap' }}>mirage.cwd</code> | The directory the line started in. |
 | <code style={{ whiteSpace: 'nowrap' }}>mirage.timestamp</code> | The span's start, in milliseconds. It repeats the span's own time for tracers that can't set it, such as Cloudflare Workers custom spans. `mirage.duration_ms` does the same for its length. |
 | <code style={{ whiteSpace: 'nowrap' }}>mirage.vfs.timestamp</code> | When the mount call ended, in milliseconds. |
