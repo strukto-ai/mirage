@@ -27,7 +27,7 @@ export const ENV_JWT_ALG = 'MIRAGE_JWT_ALG'
 export const ENV_JWT_ISSUER = 'MIRAGE_JWT_ISSUER'
 export const ENV_JWT_AUDIENCE = 'MIRAGE_JWT_AUDIENCE'
 export const ENV_JWT_AUTHORIZED_PARTIES = 'MIRAGE_JWT_AUTHORIZED_PARTIES'
-export const ENV_JWT_CLOCK_SKEW = 'MIRAGE_JWT_CLOCK_SKEW_SECONDS'
+export const ENV_JWT_CLOCK_SKEW_SECONDS = 'MIRAGE_JWT_CLOCK_SKEW_SECONDS'
 export const ENV_LOGIN_CLIENT_ID = 'MIRAGE_LOGIN_CLIENT_ID'
 
 export const AuthMode = {
@@ -79,20 +79,30 @@ export const CONFIG_ENV_KEYS: Record<string, string> = {
   jwt_alg: ENV_JWT_ALG,
   jwt_issuer: ENV_JWT_ISSUER,
   jwt_audience: ENV_JWT_AUDIENCE,
+  jwt_pubkey: ENV_JWT_PUBKEY,
   jwt_pubkey_file: ENV_JWT_PUBKEY_FILE,
   jwt_jwks_url: ENV_JWT_JWKS_URL,
-  jwt_clock_skew: ENV_JWT_CLOCK_SKEW,
+  jwt_clock_skew_seconds: ENV_JWT_CLOCK_SKEW_SECONDS,
   jwt_authorized_parties: ENV_JWT_AUTHORIZED_PARTIES,
   login_client_id: ENV_LOGIN_CLIENT_ID,
 }
+export const JWT_KEY_ENVS: readonly string[] = [ENV_JWT_PUBKEY, ENV_JWT_PUBKEY_FILE]
 
+/**
+ * Fold config.toml auth keys under their env names, env winning. The raw
+ * `MIRAGE_AUTH_TOKEN` stays env-only. The fixed JWT key is one setting:
+ * when env gives it, inline or as a file, config.toml's `jwt_pubkey` and
+ * `jwt_pubkey_file` are both ignored.
+ */
 function mergeConfigTable(
   env: Record<string, string | undefined>,
   table: Record<string, string>,
 ): Record<string, string | undefined> {
   const merged = { ...env }
+  const envKey = JWT_KEY_ENVS.some((name) => (env[name] ?? '').trim() !== '')
   for (const [cfgKey, envName] of Object.entries(CONFIG_ENV_KEYS)) {
     if ((merged[envName] ?? '').trim() !== '') continue
+    if (envKey && JWT_KEY_ENVS.includes(envName)) continue
     const value = table[cfgKey]
     if (value !== undefined && value.trim() !== '') merged[envName] = value
   }
@@ -163,7 +173,7 @@ export function resolveAuthConfig(opts?: ResolveOptions): AuthConfig {
   const issuer = (env[ENV_JWT_ISSUER] ?? '').trim() || undefined
   const audiences = parseCsv(env[ENV_JWT_AUDIENCE] ?? '')
   const azp = parseCsv(env[ENV_JWT_AUTHORIZED_PARTIES] ?? '')
-  const skewRaw = (env[ENV_JWT_CLOCK_SKEW] ?? '').trim()
+  const skewRaw = (env[ENV_JWT_CLOCK_SKEW_SECONDS] ?? '').trim()
   const skew = skewRaw.length > 0 ? Number.parseInt(skewRaw, 10) : DEFAULT_CLOCK_SKEW_SECONDS
   if (loginClientId !== undefined && (issuer === undefined || !audiences.includes(loginClientId))) {
     throw new Error(

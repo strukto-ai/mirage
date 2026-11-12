@@ -15,6 +15,7 @@
 import pytest
 
 from mirage.server.auth.config import (
+    CONFIG_ENV_KEYS,
     AuthMode,
     JWTConfig,
     resolve_auth_config,
@@ -222,7 +223,7 @@ def test_jwt_settings_from_config_table(tmp_path):
             "jwt_issuer": "https://issuer",
             "jwt_audience": "aud",
             "jwt_authorized_parties": "a,b",
-            "jwt_clock_skew": 9,
+            "jwt_clock_skew_seconds": 9,
         },
     )
     assert cfg.mode == AuthMode.JWT
@@ -250,11 +251,64 @@ def test_env_jwt_alg_beats_config_table(tmp_path):
     assert cfg.jwt.algorithm == "ES256"
 
 
-def test_secret_keys_have_no_config_key():
-    assert "jwt_pubkey" not in ALLOWED_KEYS
-    assert "MIRAGE_AUTH_TOKEN" not in ALLOWED_KEYS
-    assert "auth_mode" in ALLOWED_KEYS
-    assert "jwt_alg" in ALLOWED_KEYS
+def test_only_the_raw_token_has_no_config_key():
+    assert "auth_token" in ALLOWED_KEYS
+    assert "auth_token" not in CONFIG_ENV_KEYS
+    assert CONFIG_ENV_KEYS["jwt_pubkey"] == "MIRAGE_JWT_PUBKEY"
+    assert (
+        CONFIG_ENV_KEYS["jwt_clock_skew_seconds"]
+        == "MIRAGE_JWT_CLOCK_SKEW_SECONDS"
+    )
+    assert "jwt_clock_skew" not in ALLOWED_KEYS
+
+
+JWT_TABLE = {"auth_mode": "jwt", "jwt_alg": "RS256"}
+
+
+@pytest.fixture
+def key_file(tmp_path):
+    path = tmp_path / "pub.pem"
+    path.write_text("FILEKEY")
+    return path
+
+
+def test_inline_key_from_config_table():
+    cfg = resolve_auth_config(
+        env={}, table={**JWT_TABLE, "jwt_pubkey": "-----BEGIN\nTABLE"}
+    )
+    assert cfg.jwt is not None
+    assert cfg.jwt.key == "-----BEGIN\nTABLE"
+
+
+def test_inline_config_key_beats_the_config_key_file(key_file):
+    cfg = resolve_auth_config(
+        env={},
+        table={
+            **JWT_TABLE,
+            "jwt_pubkey": "TABLE",
+            "jwt_pubkey_file": str(key_file),
+        },
+    )
+    assert cfg.jwt is not None
+    assert cfg.jwt.key == "TABLE"
+
+
+def test_env_key_file_beats_the_inline_config_key(key_file):
+    cfg = resolve_auth_config(
+        env={"MIRAGE_JWT_PUBKEY_FILE": str(key_file)},
+        table={**JWT_TABLE, "jwt_pubkey": "TABLE"},
+    )
+    assert cfg.jwt is not None
+    assert cfg.jwt.key == "FILEKEY"
+
+
+def test_env_inline_key_beats_the_config_key_file(key_file):
+    cfg = resolve_auth_config(
+        env={"MIRAGE_JWT_PUBKEY": "ENV"},
+        table={**JWT_TABLE, "jwt_pubkey_file": str(key_file)},
+    )
+    assert cfg.jwt is not None
+    assert cfg.jwt.key == "ENV"
 
 
 CLERK_JWT = {

@@ -14,7 +14,7 @@
 
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
-import { CONFIG_ENV_KEYS } from '@struktoai/mirage-server/auth/config'
+import { CONFIG_ENV_KEYS, JWT_KEY_ENVS } from '@struktoai/mirage-server/auth/config'
 import { defaultTokenFile, readTokenFile } from '@struktoai/mirage-server/auth/storage'
 import {
   ALLOWED_KEYS,
@@ -23,6 +23,8 @@ import {
   NUMERIC_KEYS,
   parseDaemonTable,
   readDaemonTable,
+  RENAMED_KEYS,
+  renamedKeyMessage,
 } from '@struktoai/mirage-server/daemon_config'
 import {
   ENV_ALLOWED_HOSTS,
@@ -248,9 +250,10 @@ function defaultForKey(key: string, home: string): string {
     jwt_alg: '',
     jwt_issuer: '',
     jwt_audience: '',
+    jwt_pubkey: '',
     jwt_pubkey_file: '',
     jwt_jwks_url: '',
-    jwt_clock_skew: '5',
+    jwt_clock_skew_seconds: '5',
     jwt_authorized_parties: '',
     login_client_id: '',
     socket: '',
@@ -282,6 +285,7 @@ export function resolvedConfig(
 ): Record<string, [string, string]> {
   const home = mirageHome(env)
   const table = readDaemonTable(home)
+  const envKey = JWT_KEY_ENVS.some((name) => (env[name] ?? '').trim() !== '')
   const out: Record<string, [string, string]> = {}
   for (const key of [...ALLOWED_KEYS].sort(compareCodePoints)) {
     const envName = ENV_FOR_KEY[key]
@@ -289,6 +293,10 @@ export function resolvedConfig(
       const envValue = env[envName]
       if (envValue !== undefined && envValue !== '') {
         out[key] = [envValue, `env ${envName}`]
+        continue
+      }
+      if (envKey && JWT_KEY_ENVS.includes(envName)) {
+        out[key] = [defaultForKey(key, home), 'default']
         continue
       }
     }
@@ -303,6 +311,7 @@ export function resolvedConfig(
 }
 
 function checkKey(key: string): void {
+  if (Object.hasOwn(RENAMED_KEYS, key)) throw new DaemonConfigError(renamedKeyMessage(key))
   if (!ALLOWED_KEYS.has(key)) {
     throw new DaemonConfigError(
       `unknown config key: '${key}'; allowed: ${[...ALLOWED_KEYS].sort(compareCodePoints).join(', ')}`,
@@ -312,7 +321,12 @@ function checkKey(key: string): void {
 
 function formatValue(key: string, value: string): string {
   if (NUMERIC_KEYS.has(key)) return value
-  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+  const escaped = value
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+  return `"${escaped}"`
 }
 
 export function listConfig(path?: string): Record<string, string> {
