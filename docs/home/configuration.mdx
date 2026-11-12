@@ -284,7 +284,7 @@ Some backends, such as object stores, cannot append, write at an offset or
 truncate in place. For these writes Mirage reads the whole file and writes
 it back:
 
-- an append, including `cmd >> f` with nothing written;
+- an append;
 - a write at an offset;
 - a truncate to a nonzero size.
 
@@ -292,6 +292,10 @@ If that read finds no file, the write back only creates the file, under
 either policy. It fails if someone else created the file between the read
 and the write, and that file keeps its bytes. A backend that cannot check
 this returns an unsupported-operation error.
+
+An append with nothing to add, such as `cmd >> f` when `cmd` prints
+nothing, is not rewritten. It leaves an existing file alone, and creates a
+missing one under the same create-only rule.
 
 A backend with its own append, offset write or truncate, such as RAM, keeps
 its own behavior. A plain replacement and a truncate to zero follow the
