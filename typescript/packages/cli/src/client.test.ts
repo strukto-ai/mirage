@@ -153,6 +153,35 @@ describe('DaemonClient spawn wait', () => {
     }
     expect([asked.length, asked.at(-1)]).toEqual([4, '/v1/health'])
   })
+
+  it('waits for a local daemon busy past the first probe', async () => {
+    // Twin of test_a_local_daemon_busy_past_the_first_probe_is_waited_for.
+    let asked = 0
+    const server = createServer((_req, res) => {
+      asked += 1
+      setTimeout(() => res.writeHead(200).end(), asked === 1 ? 1000 : 0)
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const { port } = server.address() as AddressInfo
+    const spawn = vi.spyOn(
+      DaemonClient.prototype as unknown as { spawnDaemon: () => ChildProcess },
+      'spawnDaemon',
+    )
+    const client = new DaemonClient({
+      context: 'local',
+      url: `http://127.0.0.1:${String(port)}`,
+      authToken: 't',
+      idleGraceSeconds: 30,
+    })
+    try {
+      await client.ensureRunning({ allowSpawn: false })
+    } finally {
+      server.closeAllConnections()
+      await new Promise((resolve) => server.close(resolve))
+    }
+    expect(asked).toBeGreaterThanOrEqual(2)
+    expect(spawn).not.toHaveBeenCalled()
+  })
 })
 
 describe('DaemonClient token', () => {

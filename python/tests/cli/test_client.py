@@ -175,6 +175,43 @@ def test_a_remote_server_slow_to_answer_is_waited_for(tmp_path, monkeypatch):
         server.server_close()
 
 
+def test_a_local_daemon_busy_past_the_first_probe_is_waited_for(
+    tmp_path, monkeypatch
+):
+    # A daemon busy with other commands misses the half-second probe; it
+    # holds its port, so the command waits for it and spawns nothing.
+    monkeypatch.setenv(ENV_HOME, str(tmp_path))
+    spawned = []
+    monkeypatch.setattr(
+        "mirage.cli.client.subprocess.Popen",
+        lambda *args, **kwargs: spawned.append(kwargs),
+    )
+    asked = []
+
+    class Busy(BaseHTTPRequestHandler):
+        def do_GET(self):
+            asked.append(self.path)
+            if len(asked) == 1:
+                time.sleep(1)
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Busy)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with DaemonClient(DaemonSettings(url=url)) as client:
+            client.ensure_running(allow_spawn=False)
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert len(asked) >= 2
+    assert spawned == []
+
+
 class _GonePopen:
     """A spawned daemon that has already exited, as a crash leaves it."""
 
