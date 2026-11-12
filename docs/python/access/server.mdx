@@ -41,10 +41,10 @@ uvicorn.run(app, host="127.0.0.1", port=8765)
 | `policies` | none | The server's own [policies](/home/access/http#server-policies): each answers `pre_workspace` before a workspace is built, and is registered on every workspace the app builds. |
 | `policy_file` | `MIRAGE_POLICY_FILE`, else the `policy_file` key, else none | A file of policy programs that answer the same way. |
 | `max_sessions` | `MIRAGE_MAX_SESSIONS`, else the `max_sessions` key, else `16` | The most sessions each workspace holds, its default session among them. A new session past it, over HTTP or SSH, answers 429. |
-| `max_memory` | `MIRAGE_MAX_MEMORY`, else the `max_memory` key, else none | The most any workspace's `max_memory` reaches, as a [size](/home/configuration#sizes). A workspace that sets more, or lifts its cap, gets this. |
+| `max_memory` | `MIRAGE_MAX_MEMORY`, else the `max_memory` key, else none | The most any workspace's `max_memory` reaches, as a [size](/home/configuration/workspace#sizes). A workspace that sets more, or lifts its cap, gets this. |
 | `max_processes` | `MIRAGE_MAX_PROCESSES`, else the `max_processes` key, else none | The most any session's `processes.max` reaches, whatever a config or profile sets. |
 | `max_line_seconds` | `MIRAGE_MAX_LINE_SECONDS`, else the `max_line_seconds` key, else none | The most seconds any line runs, whatever `@line` a config or profile sets. A line past it exits 124. |
-| `max_env` | `MIRAGE_MAX_ENV`, else the `max_env` key, else none | The most any workspace's `max_env` reaches, as a [size](/home/configuration#sizes). |
+| `max_env` | `MIRAGE_MAX_ENV`, else the `max_env` key, else none | The most any workspace's `max_env` reaches, as a [size](/home/configuration/workspace#sizes). |
 | `rate_limits` | `MIRAGE_RATE_LIMITS`, else the `rate_limits` key, else `ip=1000/minute` | A list of `RateLimit(key, rate)`; an empty list disables limits. See [Rate limits](/home/access/http#rate-limits). |
 | `forwarded_allow_ips` | `MIRAGE_FORWARDED_ALLOW_IPS`, else the `forwarded_allow_ips` key, else none | The proxies, addresses or networks, whose `X-Forwarded-For` names the client. `["*"]` believes any. |
 | `graceful_timeout` | `MIRAGE_GRACEFUL_TIMEOUT`, else the `graceful_timeout` key, else `0` | Seconds running lines get to finish on SIGTERM or SIGINT before they are cancelled. New work is refused meanwhile. |
@@ -76,7 +76,7 @@ gc.set_threshold(10_000, *gc.get_threshold()[1:])
 sys.setswitchinterval(0.001)
 ```
 
-Its other settings are on the [CLI page](/home/access/cli#daemon-config).
+Its other settings are on the [Server](/home/configuration/server) page.
 
 ## Beside your own event loop
 

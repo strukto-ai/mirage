@@ -29,7 +29,7 @@ A second workspace on the same server can route `localhost:5003` to
   Python or JavaScript code. HTTPS, WebSocket and database connections
   too. Over HTTPS, the service's certificate must still match the address
   the agent typed.
-- [`allowed_domains`, `denied_domains`](/home/configuration#network) and
+- [`allowed_domains`, `denied_domains`](/home/configuration/workspace#network) and
   [`pre_network`](/home/policy/policies#pre_network-and-post_network)
   policies check where the route goes, not the address the agent typed.
 - `local` and Sandlock runtimes don't run in a workspace with routes, and
@@ -39,7 +39,7 @@ A second workspace on the same server can route `localhost:5003` to
 
 ## Per session
 
-A [profile](/home/profiles) can set `routes` for its sessions. They replace
+A [profile](/home/configuration/session) can set `routes` for its sessions. They replace
 the workspace's routes for the same address, and the workspace's allowed
 and denied lists still apply:
 

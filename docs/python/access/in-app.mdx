@@ -50,7 +50,7 @@ One virtual terminal over the backends mounted at each prefix.
   Where the workspace keeps its [state](/home/infrastructure/overview#workspace-state): symlinks and file attributes, command logs, sessions and background jobs. In memory when unset. A store passed in is borrowed: close it after `ws.close()`, or pass `owns_store=True`.
 </ResponseField>
 
-See [Workspace configuration](/home/configuration) for YAML settings.
+See [Workspace configuration](/home/configuration/workspace) for YAML settings.
 Direct SDK construction defaults `mode` to `READ`; YAML defaults it to `write`.
 
 ```python

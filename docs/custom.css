@@ -71,3 +71,7 @@ h1#page-title {
 .mdx-content h2 {
   font-weight: 700;
 }
+
+.prose td:first-child > code {
+  word-break: normal;
+}

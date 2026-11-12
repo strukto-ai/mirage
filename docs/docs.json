@@ -129,6 +129,9 @@
             "group": "Configuration",
             "pages": [
               "home/configuration",
+              "home/configuration/server",
+              "home/configuration/workspace",
+              "home/configuration/session",
               "home/credentials",
               "home/limits"
             ]
@@ -271,12 +274,6 @@
               "home/core/output-limits",
               "home/core/tools",
               "home/core/data-network"
-            ]
-          },
-          {
-            "group": "Agent Profiles",
-            "pages": [
-              "home/profiles"
             ]
           },
           {

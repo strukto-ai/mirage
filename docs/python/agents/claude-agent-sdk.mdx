@@ -88,7 +88,7 @@ options = ClaudeAgentOptions(
 
 - Bash runs in the workspace, and Mirage's `read`, `write`, `edit`, `ls`, `grep` and `glob` take the place of Claude's Read, Edit, Write, Glob and Grep, so every file the agent touches goes through Mirage.
 - Mount the project and `/tmp` at their own paths, as the [Claude Code page](/home/agents/claude-code#shell) shows, so `cd` carries over.
-- To run under a [profile](/home/profiles), create a session with `mirage workspace session create -w demo -s agent -p reviewer`, then set `MIRAGE_SESSION` to `agent` and add `-s agent` to the `mirage mcp` arguments.
+- To run under a [profile](/home/configuration/session), create a session with `mirage workspace session create -w demo -s agent -p reviewer`, then set `MIRAGE_SESSION` to `agent` and add `-s agent` to the `mirage mcp` arguments.
 
 ## Tools
 
