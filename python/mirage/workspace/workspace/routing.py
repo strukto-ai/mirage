@@ -38,6 +38,7 @@ from mirage.runtime.constants import EXTERNAL_COMMANDS, WHOLE_LINE
 from mirage.runtime.routing import RouteError
 from mirage.runtime.table import (
     catch_all,
+    check_route_machine,
     routed,
     runtime_bindings_for,
     whole_line_runtime,
@@ -316,7 +317,8 @@ class Router:
             route (Route): the runtime and machine the route names.
 
         Raises:
-            RouteError: no entry or machine has the name.
+            RouteError: no entry or machine has the name, or the runtime
+                does not run on the machine.
         """
         self._known_machine(route.machine)
         try:
@@ -390,7 +392,8 @@ class Router:
                 self._runtimes.entries,
                 decision.bindings,
                 answer.runtime,
-                answer.machine or decision.machine,
+                answer.machine,
+                decision.machine,
             )
         return self._serving(one, decision)
 
@@ -410,7 +413,8 @@ class Router:
             self._runtimes.entries,
             decision.bindings,
             route.runtime,
-            route.machine or decision.machine,
+            route.machine,
+            decision.machine,
         )
 
     def _wrapper_answer(
@@ -561,7 +565,8 @@ class Router:
                 self._runtimes.entries,
                 decision.bindings,
                 route.runtime,
-                route.machine or decision.machine,
+                route.machine,
+                decision.machine,
             )
         except ValueError as exc:
             raise RouteError(str(exc)) from exc
@@ -627,14 +632,15 @@ class Router:
             machine (str | None): the machine it runs on.
 
         Raises:
-            RouteError: no entry or machine has the name, or the runtime
-                cannot be selected.
+            RouteError: no entry or machine has the name, the runtime
+                cannot be selected, or it does not run on the machine.
         """
         self._known_machine(machine)
         try:
             overlay = (
                 {} if name is None else runtime_bindings_for(entries, name)
             )
+            check_route_machine(entries, name, machine)
         except ValueError as exc:
             raise RouteError(str(exc)) from exc
         return RouteDecision(

@@ -53,16 +53,27 @@ async def test_a_runtime_name_places_the_line_and_none_says_nothing():
 
 
 @pytest.mark.asyncio
+async def test_a_route_places_the_line_on_a_runtime_a_machine_or_both():
+    for route in (
+        Route("beta"),
+        Route(machine="box"),
+        Route("beta", machine="box"),
+    ):
+        policy = _route_policy(lambda ctx, route=route: route)
+        assert await policy.pre_execute(_line("python3 heavy")) == route
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "verdict",
-    ["", {"route": "beta"}, {"deny": "no"}, Route("beta"), Deny("no"), 42],
+    ["", {"route": "beta"}, {"deny": "no"}, Deny("no"), 42],
 )
-async def test_anything_but_a_name_or_none_is_the_deployments_mistake(
+async def test_anything_but_a_name_a_route_or_none_is_the_deployments_mistake(
     verdict,
 ):
     # Refusing a line is a policy's answer, not the router's; a route
     # policy that answers anything else is misconfigured, not a refusal.
-    with pytest.raises(RouteError, match="a runtime name or None"):
+    with pytest.raises(RouteError, match="a runtime name, a Route or None"):
         await _route_policy(lambda ctx: verdict).pre_execute(_line("echo hi"))
 
 

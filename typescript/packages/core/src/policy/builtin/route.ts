@@ -17,15 +17,15 @@ import type { RouteRule, RouteVerdict } from '../../runtime/routing/types.ts'
 import type { Policy } from '../base.ts'
 import { compileProgram, parseProgram } from '../profile.ts'
 import type { ScriptPolicy } from '../script.ts'
-import type { Action, ProfileScript, RouteContext } from '../types.ts'
+import type { Action, ProfileScript, Route, RouteContext } from '../types.ts'
 
 /**
  * The workspace's `routePolicy`, answering at `preExecute`. The workspace
  * compiles the configured callable or program into this built-in
  * (`Policies.place`), so a route is one more `preExecute` answer. A
- * callable answers a runtime name (a Route) or null (silence). A program,
- * `{script, runtime}`, runs as a profile's policy programs run and prints
- * what a `preExecute` program may answer. A mistake in either (any other
+ * callable answers a runtime name, a Route (a runtime, a machine or both)
+ * or null (silence). A program, `{script, runtime}`, runs as a profile's
+ * policy programs run and prints what a `preExecute` program may answer. A mistake in either (any other
  * answer, a program that fails) throws `RouteError` to the caller rather
  * than failing closed, since a misconfigured route policy is the
  * deployment's to fix and not a refusal to show an agent.
@@ -77,8 +77,11 @@ export class RoutePolicy implements Policy {
     const verdict: unknown = await this.call?.(ctx)
     if (verdict === null || verdict === undefined) return null
     if (typeof verdict === 'string' && verdict !== '') return { kind: 'route', runtime: verdict }
+    if (typeof verdict === 'object' && (verdict as { kind?: unknown }).kind === 'route') {
+      return verdict as Route
+    }
     throw new RouteError(
-      `route policy must answer a runtime name or None, got ${JSON.stringify(verdict)}`,
+      `route policy must answer a runtime name, a Route or None, got ${JSON.stringify(verdict)}`,
     )
   }
 }

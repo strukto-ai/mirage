@@ -1,0 +1,131 @@
+---
+title: Route Machine
+description: Choose which machine runs each command line.
+icon: server
+---
+
+A [machine](/home/setup/machine/overview) is somewhere you already run
+programs: a container, a VM, a cloud sandbox, a server over SSH. The
+`remote` runtime runs programs on a machine. When you have more than one, a
+route policy picks the machine for each line.
+
+## Example
+
+Run jobs on a CPU container by default, and GPU jobs on a GPU container:
+
+```yaml
+machines:
+  box:
+    provider: docker
+    container: my-box
+  gpu:
+    provider: docker
+    container: my-gpu
+runtimes:
+  - monty
+  - name: remote
+    captures: ["@python"]
+    machine: box
+  - workspace
+route_policy: {script: ./route.py, runtime: monty}
+```
+
+```python route.py
+def pre_execute(ctx):
+    paths = [p for c in ctx["commands"] for p in c["paths"]]
+    if any(p.startswith("/jobs/gpu/") for p in paths):
+        return {"kind": "route", "runtime": "remote", "machine": "gpu"}
+    if any(p.startswith("/jobs/") for p in paths):
+        return {"kind": "route", "runtime": "remote"}
+```
+
+Now `python3 /jobs/gpu/train.py` runs in `my-gpu`, `python3 /jobs/train.py`
+runs in `my-box` (the `machine` of the `remote` entry), and
+`cat data.csv | python3 -c "..."` stays on monty.
+
+## Name the runtime too
+
+Only the `remote` runtime runs on a machine. A route that names just a
+machine changes where `remote` runs, not what `remote` runs:
+
+| Return | What happens |
+| --- | --- |
+| `{"kind": "route", "runtime": "remote", "machine": "gpu"}` | `remote` runs every command it captures, on `gpu` |
+| `{"kind": "route", "machine": "gpu"}` | commands `remote` already runs go to `gpu`; the rest stay where they are |
+
+In the example, monty captures `python3` first. So
+`{"kind": "route", "machine": "gpu"}` alone would leave `python3` on monty.
+Name `remote` as well.
+
+A route fails the line with a routing error when it names:
+
+- a machine that is not under `machines:`
+- a machine together with a runtime other than `remote`
+- a machine in a workspace that has no `remote` runtime
+
+## One machine per session
+
+`ctx["session_id"]` tells the script whose line it is, so each agent can
+get its own machine:
+
+```yaml
+machines:
+  alice:
+    provider: docker
+    container: alice-box
+  bob:
+    provider: docker
+    container: bob-box
+runtimes:
+  - name: remote
+    machine: alice
+  - workspace
+route_policy: {script: ./route.py, runtime: monty}
+```
+
+```python route.py
+def pre_execute(ctx):
+    return {"kind": "route", "runtime": "remote", "machine": ctx["session_id"]}
+```
+
+## In code
+
+A route function returns a `Route` to pick a machine:
+
+<CodeGroup>
+
+```python Python
+from mirage.policy import Route, RouteContext
+
+def route(ctx: RouteContext) -> Route | None:
+    paths = [p.virtual for c in ctx.commands for p in c.paths]
+    if any(p.startswith("/jobs/gpu/") for p in paths):
+        return Route("remote", machine="gpu")
+    return None
+
+ws = Workspace(mounts, machines=machines, runtimes=runtimes, route_policy=route)
+```
+
+```typescript TypeScript
+const ws = new Workspace(mounts, {
+  machines,
+  runtimes,
+  routePolicy: (ctx) =>
+    ctx.commands.some((c) => c.paths.some((p) => p.virtual.startsWith('/jobs/gpu/')))
+      ? { kind: 'route', runtime: 'remote', machine: 'gpu' }
+      : null,
+})
+```
+
+</CodeGroup>
+
+To pick the machine for one line yourself, pass it to the call:
+`ws.shell(line, machine="gpu")`, or `{ machine: 'gpu' }` in TypeScript.
+
+A [policy](/home/policy/policies) in code can return `Route(machine=...)`
+too. At `pre_command` it moves one command: in `ls; python3 train.py`, only
+`python3` goes to the machine. Behind `nohup`, `nice`, `setsid`, `stdbuf` or
+`ionice`, the wrapper goes where its program goes.
+
+The rules of [Route Runtime](/home/policy/route-runtime#rules) apply here
+too, and `ws.explain(line)` shows the machine each command would run on.

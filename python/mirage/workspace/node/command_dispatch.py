@@ -958,7 +958,8 @@ async def _run_argv(
                     registry.runtime_entries,
                     here.bindings,
                     route.runtime,
-                    route.machine or here.machine,
+                    route.machine,
+                    here.machine,
                 )
             except ValueError as exc:
                 raise RouteError(str(exc)) from exc

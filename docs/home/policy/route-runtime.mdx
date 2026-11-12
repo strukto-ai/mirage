@@ -1,21 +1,20 @@
 ---
 title: Route Runtime
-description: Route commands across runtimes, free from the limits of a local terminal or a single kernel.
+description: Choose which runtime runs each command line.
 icon: route
 ---
 
-Mirage’s virtual terminal is not tied to a local terminal or a single kernel.
-Your agent uses one shell while Mirage routes commands to in-process,
-containerized or remote runtimes.
+Your agent types into one shell. A runtime is what runs a command:
+`monty` runs Python inside Mirage, `remote` runs programs on a
+[machine](/home/setup/machine/overview), and `workspace` is Mirage itself.
+A route policy looks at each line and picks the runtime for it.
 
-Use `route_policy` to choose a runtime for each command line with a script
-or a function. Here, `monty` runs `python3` in-process, while `machine` runs
-it on the `box` machine, a container with your packages. Start the
-[Docker container](/home/setup/machine/docker) `my-box` with
-`/jobs/train.py` and its dependencies before using this excerpt:
+## Example
+
+Run small Python snippets on monty, and the training jobs under `/jobs/`
+on a container:
 
 ```yaml
-mode: exec
 machines:
   box:
     provider: docker
@@ -36,81 +35,81 @@ def pre_execute(ctx):
         return {"kind": "route", "runtime": "remote"}
 ```
 
-`python3 /jobs/train.py` runs in the container; `cat data.csv | python3
--c ...` stays on monty.
+Now `python3 /jobs/train.py` runs on `remote`, in `my-box`, and
+`cat data.csv | python3 -c "..."` stays on monty.
 
-## Input and answers
+Without a route, each command goes to the first runtime in `runtimes` that
+captures it. Here that is monty for `python3`.
 
-A runtime routing script is a [policy program](/home/policy/scripts) shared
-by every session. Its `pre_execute` function takes the same `ctx` a program
-gets at `pre_execute`: the line, each of its commands with its words and
-resolved paths, and the session. It returns its answer:
+## What the script returns
 
-| Returns | Effect |
+| Return | What happens |
 | --- | --- |
-| `{"kind": "route", "runtime": "remote"}` | that runtime serves every command it captures |
-| `{"kind": "route", "machine": "box"}` | the `remote` runtime runs the line's programs on that machine |
-| `{"kind": "route", "runtime": "remote", "reason": "..."}` | the same, with why for `ws.explain(line)` to show |
-| `{"kind": "route", "runtime": "workspace"}` | entries that capture `@line` are excluded entirely; other entries still serve their captures, and a command only an excluded entry captures is refused |
-| `None` | the first capturer in `runtimes` order serves each command |
-| `{"kind": "deny", "reason": "..."}` | the line is refused, as by any `pre_execute` program |
+| `{"kind": "route", "runtime": "remote"}` | `remote` runs every command it captures |
+| `{"kind": "route", "runtime": "remote", "reason": "..."}` | the same, and `ws.explain(line)` shows the reason |
+| `{"kind": "route", "runtime": "workspace"}` | runtimes that take whole lines (`@line`) are skipped; a command only they capture is refused |
+| `None` | no opinion: the first runtime that captures each command runs it |
+| `{"kind": "deny", "reason": "..."}` | the line is refused |
 
-A program that exits non-zero, runs past 10 seconds, or answers anything
-else fails the line with a routing error. It runs on its own runtime,
-monty unless the block names one, as
-[a profile's programs do](/home/policy/scripts#runtimes).
+To also pick the machine, see [Route Machine](/home/policy/route-machine).
 
-In code, `route_policy=` takes the same block with a `ScriptSource`, or
-a plain function, sync or async, returning a runtime name or `None`:
+The script gets the line, each command with its words and paths, and the
+session. It runs on monty unless the block names another runtime, and
+has 10 seconds. If it fails, times out or returns anything else, the line
+fails with a routing error. See [Scripts](/home/policy/scripts) for
+everything it can read.
 
-```python
+## In code
+
+`route_policy` also takes a function. It returns a runtime name, a `Route`,
+or nothing:
+
+<CodeGroup>
+
+```python Python
 from mirage.policy import RouteContext
 
-def policy(ctx: RouteContext) -> str | None:
+def route(ctx: RouteContext) -> str | None:
     paths = [p.virtual for c in ctx.commands for p in c.paths]
     return "remote" if any(p.startswith("/jobs/") for p in paths) else None
 
-ws = Workspace(mounts, runtimes=runtimes, route_policy=policy)
+ws = Workspace(mounts, runtimes=runtimes, route_policy=route)
 ```
 
-## Admit, then route
-
-Runtime selection happens at
-[`pre_execute`](/home/policy/policies#lifecycle), before commands run.
-Mirage checks `route_policy` first, then any policies defined in code.
-These policies can also choose a runtime or refuse a command line:
-
-```python
-from mirage.policy import Deny, Policy, Route, RouteContext
-
-class JobsOnTheBox(Policy):
-    async def pre_execute(self, ctx: RouteContext) -> Route | Deny | None:
-        if "/prod/" in ctx.line:
-            return Deny("the prod tree is read only")
-        return Route(machine="box") if "/jobs/" in ctx.line else None
+```typescript TypeScript
+const ws = new Workspace(mounts, {
+  runtimes,
+  routePolicy: (ctx) =>
+    ctx.commands.some((c) => c.paths.some((p) => p.virtual.startsWith('/jobs/')))
+      ? 'remote'
+      : null,
+})
 ```
 
-A `pre_command` policy may answer a Route too, which places that one
-command alone: `Route(machine="gpu")` for `python3 train.py` in
-`ls; python3 train.py` runs only `python3` there. Behind `nohup`, `nice`,
-`setsid`, `stdbuf` or `ionice`, the policy is asked about the program, and
-the wrapper runs where the program is placed.
+</CodeGroup>
 
-A line the rules refuse is never placed. A Deny beats any Route, and two
-policies naming different runtimes or machines refuse the line. Nested
-lines (`$( )`, `eval`, `source`, `xargs`) keep the outer line's placement.
-`ws.explain(line)` shows each placement answer and each command's runtime
-and machine. The caller's `runtime=` and `machine=` arguments place the
-line itself.
+To pick the runtime for one line yourself, pass it to the call:
+`ws.shell(line, runtime="remote")`, or `{ runtime: 'remote' }` in
+TypeScript.
+
+## Rules
+
+- A refused line never runs anywhere. A deny beats any route.
+- If two policies pick different runtimes, the line is refused.
+- Lines inside a line (`$( )`, `eval`, `source`, `xargs`) run where the
+  outer line runs.
+- `ws.explain(line)` shows which runtime each command would run on.
+
+A [policy](/home/policy/policies) in code can return a `Route` too. At
+`pre_command` it moves one command: in `ls; python3 train.py`, only
+`python3` moves.
 
 ## Ask a model
 
-A routing program can ask an LLM where a line runs. A program on monty has
+A route script can ask an LLM where a line should run. Scripts on monty have
 no network, so the model call is a
-[host function](/home/policy/scripts#host-functions) that returns the
-runtime and a reason, which `explain` shows. The answer counts against the
-program's 10 seconds. The example sends each `python3` line to monty or to
-the host's Python, on an OpenAI model or on Jev:
+[host function](/home/policy/scripts#host-functions). Its answer counts
+against the script's 10 seconds. See the example in
 [Python](https://github.com/strukto-ai/mirage/tree/main/examples/python/policy/llm_routing)
 and
 [TypeScript](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/policy/llm_routing).
