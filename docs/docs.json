@@ -129,7 +129,7 @@
             "group": "Configuration",
             "pages": [
               "home/configuration",
-              "home/authentication",
+              "home/credentials",
               "home/security"
             ]
           },
