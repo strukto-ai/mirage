@@ -1976,7 +1976,10 @@ paths:
                     group: 4194305
                     command: rm /notes.txt
                     cwd: /
-                    machine: host:my-laptop
+                    machine:
+                      type: host
+                      name: my-laptop
+                      id: my-laptop
                     runtime: null
                     machine_pid: null
                     state: exited
