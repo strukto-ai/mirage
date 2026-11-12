@@ -1422,6 +1422,10 @@
   "server/daemon_config": {
    "python_only": {
     "SIZE_KEYS": "Python's tomllib hands each [daemon] value back typed, so a size key takes an int or a string; TypeScript's reader returns every value as text and checks only the numeric keys."
+   },
+   "typescript_only": {
+    "BASIC_ESCAPES": "TypeScript reads config.toml with its own line reader, which decodes a basic string's escapes (a PEM's \\n) itself; Python's tomllib decodes them.",
+    "unescapeBasicString": "TypeScript reads config.toml with its own line reader, which decodes a basic string's escapes (a PEM's \\n) itself; Python's tomllib decodes them."
    }
   },
   "rs/session": {
