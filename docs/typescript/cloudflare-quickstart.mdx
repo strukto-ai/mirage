@@ -63,7 +63,7 @@ For anything else from core, import its subpaths (`@struktoai/mirage-core/vfs/re
 
 ## Read secrets from AWS and 1Password
 
-A [pointer](/home/authentication) reads `aws-sm` in a Worker as it does on the server, and `1password` once the Worker imports it.
+A [pointer](/home/credentials) reads `aws-sm` in a Worker as it does on the server, and `1password` once the Worker imports it.
 
 `aws-sm` is registered when the package loads. The Worker signs each `GetSecretValue` itself, and has no AWS credentials file or default chain to fall back on, so the source's config gives `region`, `aws_access_key_id` and `aws_secret_access_key`, with `aws_session_token` for temporary keys. `aws_profile` is refused.
 
