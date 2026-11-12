@@ -14,6 +14,7 @@
 
 import { logger } from '../handle.ts'
 import {
+  NO_WEBSOCKET,
   RELAY_EXEC,
   RELAY_MONITOR,
   RELAY_START,
@@ -164,6 +165,8 @@ class RelayProcess implements ExecProcess {
   )
   private exited = false
   private closed = false
+  // Set once the relay says the program closed its input: later writes fail as a closed pipe would.
+  private inputClosed = false
   // Bytes of stdin sent that the program has not taken, and the write waiting for room.
   private untaken = 0
   private room: (() => void) | null = null
@@ -182,15 +185,17 @@ class RelayProcess implements ExecProcess {
     })
     this.stdin = new WritableStream<Uint8Array>({
       write: async (chunk) => {
+        this.refuseClosedInput()
         this.send(chunk.slice())
         this.untaken += chunk.byteLength
-        while (!this.closed && this.untaken > RELAY_WINDOW_BYTES)
+        while (!this.closed && !this.inputClosed && this.untaken > RELAY_WINDOW_BYTES)
           await new Promise<void>((resolve) => {
             this.room = resolve
           })
+        this.refuseClosedInput()
       },
       close: () => {
-        this.control({ eof: true })
+        if (!this.inputClosed) this.control({ eof: true })
       },
       abort: () => {
         this.control({ eof: true })
@@ -224,6 +229,9 @@ class RelayProcess implements ExecProcess {
     if (typeof event.took === 'number') {
       this.untaken -= event.took
       if (this.untaken <= RELAY_WINDOW_BYTES) this.free()
+    } else if (event.closed === 'stdin') {
+      this.inputClosed = true
+      this.free()
     } else if (event.closed === 'stdout' || event.closed === 'stderr')
       (event.closed === 'stdout' ? this.out : this.err).close()
     else if (typeof event.exit === 'number') {
@@ -240,6 +248,10 @@ class RelayProcess implements ExecProcess {
     this.out.fail(error)
     this.err.fail(error)
     if (!this.exited) this.rejectExit(error)
+  }
+
+  private refuseClosedInput(): void {
+    if (this.inputClosed) throw new Error('the program closed its input')
   }
 
   private send(data: string | Uint8Array<ArrayBuffer>): void {
@@ -295,6 +307,8 @@ export class RelayContainer implements Container {
 
   /** Start the container when it is not running; a refusal fails with the relay's words. */
   async start(): Promise<void> {
+    if (typeof globalThis.WebSocket !== 'function')
+      throw new Error(`cloudflare_container: ${NO_WEBSOCKET}`)
     const response = await this.post(`${this.base}/${RELAY_START}`)
     if (response.ok) return
     const said = (await response.text()).trim()

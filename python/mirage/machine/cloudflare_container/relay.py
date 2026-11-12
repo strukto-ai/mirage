@@ -134,11 +134,14 @@ class RelayInput:
         self._process = process
 
     async def write(self, data: bytes) -> None:
+        self._process.refuse_closed_input()
         await self._process.send(bytes(data))
         await self._process.room()
+        self._process.refuse_closed_input()
 
     async def close(self) -> None:
-        await self._process.control({"eof": True})
+        if not self._process.input_closed:
+            await self._process.control({"eof": True})
 
 
 class RelayProcess:
@@ -163,8 +166,10 @@ class RelayProcess:
         self._done = {STDOUT_CHANNEL: False, STDERR_CHANNEL: False}
         self._closed = False
         self._tasks: set[asyncio.Task[None]] = set()
-        # Bytes of stdin sent that the program has not taken.
+        # Bytes of stdin sent that the program has not taken, and whether
+        # the relay said the program closed its input.
         self._untaken = 0
+        self.input_closed = False
         self._free = asyncio.Event()
 
     @property
@@ -202,9 +207,19 @@ class RelayProcess:
         await self._socket.send_bytes(data)
         self._untaken += len(data)
 
+    def refuse_closed_input(self) -> None:
+        """Fail a write once the program has closed its input, as a
+        closed pipe would."""
+        if self.input_closed:
+            raise BrokenPipeError("the program closed its input")
+
     async def room(self) -> None:
         """Wait until the program has taken enough stdin for more."""
-        while not self._closed and self._untaken > RELAY_WINDOW_BYTES:
+        while (
+            not self._closed
+            and not self.input_closed
+            and self._untaken > RELAY_WINDOW_BYTES
+        ):
             self._free.clear()
             await self._free.wait()
 
@@ -242,6 +257,9 @@ class RelayProcess:
             self._untaken -= took
             if self._untaken <= RELAY_WINDOW_BYTES:
                 self._free.set()
+        elif event.get("closed") == "stdin":
+            self.input_closed = True
+            self._free.set()
         elif (closed := event.get("closed")) is not None:
             channel = STDOUT_CHANNEL if closed == "stdout" else STDERR_CHANNEL
             if not self._done[channel]:

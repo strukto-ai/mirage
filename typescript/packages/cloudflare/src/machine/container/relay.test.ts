@@ -115,6 +115,7 @@ class ScriptedProcess implements ExecProcess {
     })
     this.stdin = new WritableStream<Uint8Array>({
       write: (chunk) => {
+        if (this.inputClosed) throw new Error('Broken pipe')
         this.input = concat([this.input, chunk])
         // A deaf program takes nothing past its first chunk.
         return deaf ? new Promise<void>(() => undefined) : undefined
@@ -463,6 +464,66 @@ describe('ContainerRelay limits', () => {
     proc.kill(9)
     await proc.exitCode
     void sending.catch(() => undefined)
+  })
+
+  it('fails a write once the program has closed its input', async () => {
+    const { relay } = relayed({
+      deaf: async (proc) => {
+        await proc.stdin.close()
+        return new Promise<number>(() => undefined)
+      },
+    })
+    const proc = await new MemoryClient(relay).exec(['deaf'])
+    const input = proc.stdin?.getWriter()
+    const chunk = new Uint8Array(RELAY_WINDOW_BYTES / 4)
+    const flood = async (): Promise<void> => {
+      for (let at = 0; at < 16; at++) await input?.write(chunk)
+    }
+    await expect(flood()).rejects.toThrow('the program closed its input')
+    proc.kill(9)
+    await proc.exitCode
+  })
+
+  it('closes a socket that sends no request in time', async () => {
+    vi.useFakeTimers()
+    const { relay } = relayed()
+    const [mine, theirs] = pair()
+    const heard: unknown[] = []
+    mine.addEventListener('message', ({ data }) => heard.push(data))
+    relay.serveSocket('exec', theirs)
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(heard).toEqual([JSON.stringify({ refused: 'no request within 10s' })])
+    expect(mine.closed).toBe(true)
+  })
+
+  it('stops a process that starts after its caller gave up', async () => {
+    const { box, relay } = relayed({ sleep: () => new Promise<number>(() => undefined) })
+    let answer: () => void = () => undefined
+    box.held = new Promise((resolve) => {
+      answer = resolve
+    })
+    const client = new MemoryClient(relay)
+    const machine = new ContainerMachine('box', {}, client, () => client.start())
+    const gaveUp = new AbortController()
+    const line = machine.execLine('sleep 30', null, { MIRAGE_PROCESS: 't' }, '/', gaveUp.signal)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    gaveUp.abort()
+    await expect(line).rejects.toThrow()
+    answer()
+    for (let tick = 0; tick < 5 && box.procs[0]?.killed.length !== 1; tick++)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(box.procs[0]?.killed).toEqual([9])
+  })
+
+  it('says a runtime with no WebSocket cannot reach a relay', async () => {
+    vi.stubGlobal('WebSocket', undefined)
+    try {
+      await expect(new RelayContainer(URL_BASE, TOKEN).start()).rejects.toThrow(
+        'this runtime has no WebSocket, which a relay needs',
+      )
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('closes its sockets, the exit watch among them, when the machine closes', async () => {

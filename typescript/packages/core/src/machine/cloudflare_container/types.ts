@@ -49,8 +49,8 @@ export interface RelayRequest {
 /**
  * What a relay sends as text. On an exec: `started` once the container
  * took it, or `stopped` when it refused; then `took` as the program takes
- * each chunk of stdin, `closed` as each output stream ends and `exit` with
- * the status. On a monitor: `exited` once the container has, with its
+ * each chunk of stdin, `closed` as each output stream ends or once the
+ * program closed its input, and `exit` with the status. On a monitor: `exited` once the container has, with its
  * error or null. `refused` answers a bad token, and `alive` keeps a quiet
  * socket open.
  */
@@ -58,7 +58,7 @@ export type RelayEvent =
   | { readonly started: true }
   | { readonly took: number }
   | { readonly stopped: string }
-  | { readonly closed: 'stdout' | 'stderr' }
+  | { readonly closed: 'stdin' | 'stdout' | 'stderr' }
   | { readonly exit: number }
   | { readonly exited: string | null }
   | { readonly refused: string }
