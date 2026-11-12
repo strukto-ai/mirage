@@ -6849,19 +6849,11 @@ components:
           type: string
           title: Reason
         commands:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - additionalProperties:
-                items:
-                  type: string
-                type: array
-              type: object
+          items:
+            type: string
+          type: array
           title: Commands
           default: []
-          description: Command patterns, or each command pattern mapped to the paths it
-            applies to.
         paths:
           items:
             type: string
@@ -6894,7 +6886,29 @@ components:
             anyOf:
               - type: string
                 description: One command pattern, refused or asked with the default reason.
-              - $ref: '#/components/schemas/CommandRule'
+              - type: object
+                description: A rule as written. Give `commands`, `paths`, or `commands` as a
+                  map from each command pattern to its paths; a list of commands beside a
+                  list of paths is refused.
+                properties:
+                  reason:
+                    type: string
+                    description: Why the rule refuses or asks. A default when omitted.
+                  commands:
+                    anyOf:
+                      - type: array
+                        items:
+                          type: string
+                      - type: object
+                        additionalProperties:
+                          type: array
+                          items:
+                            type: string
+                  paths:
+                    type: array
+                    items:
+                      type: string
+                additionalProperties: false
           type: array
           title: Ask
           default: []
@@ -6903,7 +6917,29 @@ components:
             anyOf:
               - type: string
                 description: One command pattern, refused or asked with the default reason.
-              - $ref: '#/components/schemas/CommandRule'
+              - type: object
+                description: A rule as written. Give `commands`, `paths`, or `commands` as a
+                  map from each command pattern to its paths; a list of commands beside a
+                  list of paths is refused.
+                properties:
+                  reason:
+                    type: string
+                    description: Why the rule refuses or asks. A default when omitted.
+                  commands:
+                    anyOf:
+                      - type: array
+                        items:
+                          type: string
+                      - type: object
+                        additionalProperties:
+                          type: array
+                          items:
+                            type: string
+                  paths:
+                    type: array
+                    items:
+                      type: string
+                additionalProperties: false
           type: array
           title: Deny
           default: []
@@ -7221,7 +7257,29 @@ components:
             anyOf:
               - type: string
                 description: One command pattern, refused or asked with the default reason.
-              - $ref: '#/components/schemas/CommandRule'
+              - type: object
+                description: A rule as written. Give `commands`, `paths`, or `commands` as a
+                  map from each command pattern to its paths; a list of commands beside a
+                  list of paths is refused.
+                properties:
+                  reason:
+                    type: string
+                    description: Why the rule refuses or asks. A default when omitted.
+                  commands:
+                    anyOf:
+                      - type: array
+                        items:
+                          type: string
+                      - type: object
+                        additionalProperties:
+                          type: array
+                          items:
+                            type: string
+                  paths:
+                    type: array
+                    items:
+                      type: string
+                additionalProperties: false
           type: array
           title: Ask
           default: []
@@ -7230,7 +7288,29 @@ components:
             anyOf:
               - type: string
                 description: One command pattern, refused or asked with the default reason.
-              - $ref: '#/components/schemas/CommandRule'
+              - type: object
+                description: A rule as written. Give `commands`, `paths`, or `commands` as a
+                  map from each command pattern to its paths; a list of commands beside a
+                  list of paths is refused.
+                properties:
+                  reason:
+                    type: string
+                    description: Why the rule refuses or asks. A default when omitted.
+                  commands:
+                    anyOf:
+                      - type: array
+                        items:
+                          type: string
+                      - type: object
+                        additionalProperties:
+                          type: array
+                          items:
+                            type: string
+                  paths:
+                    type: array
+                    items:
+                      type: string
+                additionalProperties: false
           type: array
           title: Deny
           default: []
@@ -7373,7 +7453,17 @@ components:
         runtime:
           anyOf:
             - type: string
-            - $ref: '#/components/schemas/RuntimeEntry'
+            - type: object
+              description: A runtime by name, with its settings.
+              properties:
+                name:
+                  type: string
+                config:
+                  type: object
+                  additionalProperties: true
+              required:
+                - name
+              additionalProperties: false
           title: Runtime
           default: monty
         env:
@@ -7973,7 +8063,10 @@ components:
             - type: 'null'
           title: Description
         config:
-          $ref: '#/components/schemas/WorkspaceConfig'
+          additionalProperties: true
+          type: object
+          title: Config
+          description: The workspace config, as it was saved.
       type: object
       required:
         - name
@@ -8554,16 +8647,22 @@ components:
           type: string
           description: A registered runtime, such as monty, or a `source:Class` reference.
         captures:
-          type: array
+          type:
+            - array
+            - 'null'
           items:
             type: string
-          description: The commands the runtime runs.
+          description: The commands the runtime runs. `null` keeps the runtime's default.
         config:
-          type: object
+          type:
+            - object
+            - 'null'
           additionalProperties: true
-          description: The runtime's settings.
+          description: The runtime's settings. `null` keeps the runtime's default.
         machine:
-          type: string
+          type:
+            - string
+            - 'null'
           description: The machine a remote runtime runs on, by its name under `machines`.
       required:
         - name
