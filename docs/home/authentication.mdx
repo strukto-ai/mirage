@@ -62,10 +62,37 @@ machines:
 | --- | --- |
 | `from` | A built-in source name or a named instance under `secrets`. |
 | `ref` | Source-specific address, such as a secret name or file path. Defaults to an empty string. |
-| `key` | Field selected from the secret. Required in mount, CLI and source config pointers. Managed `env` entries default it to the variable's name. |
+| `key` | Field selected from the secret. Required in mount, CLI and source config pointers. An `env` pointer defaults it to the variable's name. |
 
 The `env` source uses only `key`, with no `ref`. A source needing settings is
 declared under `secrets`, and pointers use that instance's name in `from`.
+
+A pointer in a mount, CLI or source config is fetched before Mirage builds
+that mount or CLI. An `env` pointer is fetched when it is first used, as
+below.
+
+## Set environment variables
+
+`env` sets the environment variables each session starts with. A string is a
+literal value. A pointer fetches the value from a credential source, so it
+never sits in the YAML:
+
+```yaml workspace.yaml
+env:
+  APP_ENV: production
+  API_TOKEN:
+    from: env
+    readonly: true
+```
+
+Here `APP_ENV` is `production`, and `API_TOKEN` comes from the Mirage
+process environment. Both are exported.
+
+- A pointer defaults `key` to the variable's name.
+- `readonly: true` stops the shell from assigning or unsetting the variable.
+- Mirage fetches the value the first time a line uses the variable. With
+  `fetch: eager`, it fetches the value before a line runs, even a line that
+  does not use it.
 
 ## Read a dotenv file
 
