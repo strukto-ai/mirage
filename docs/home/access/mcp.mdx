@@ -115,7 +115,7 @@ Every tool answers text, with `isError` set when it fails.
 | [`grep`](#grep) | Search file contents. | yes |
 | [`glob`](#glob) | Find paths by pattern. | yes |
 
-A session sees only the tools its [agent profile](/home/policy/explain#which-tools-the-agent-gets)
+A session sees only the tools its [session profile](/home/policy/explain#which-tools-the-agent-gets)
 allows: `shell` needs a command the allow list allows, `ls` and `grep` need
 those commands, and `write` and `edit` need a mount the session may write. A
 tool it does not see answers `not found`.
@@ -258,6 +258,6 @@ take `explain: true`, which reports what the call would do without running it; s
 
 Calls run in the workspace's default session. To use another, add
 `?session_id=<id>` to the URL, or `-s <id>` to `mirage mcp`. The session's
-[agent profile](/home/profiles) applies as it does to a shell line: a path
+[session profile](/home/configuration/session) applies as it does to a shell line: a path
 hidden from `cat` is hidden from `read`. Command rules apply only to `shell`,
 `ls` and `grep`.

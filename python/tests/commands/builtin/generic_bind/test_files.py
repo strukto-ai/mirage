@@ -180,6 +180,22 @@ async def test_dir_aware_stat_and_stream_judge_each_kind_of_directory(
 
 
 @pytest.mark.asyncio
+async def test_a_file_written_while_the_listing_probes_reads_as_a_file():
+    backend = Backend()
+
+    def landing(at: str) -> list[str]:
+        backend.stored["/a"] = b"hi"
+        return ["/a"]
+
+    backend.listing = landing
+    ctx = _ctx(backend)
+    with _on_mount():
+        files = _files(ctx)
+    st = await dir_aware_stat(files, ctx)(_path("/a"))
+    assert st.type == FileType.FILE
+
+
+@pytest.mark.asyncio
 async def test_a_mount_reads_the_stored_bytes_and_a_run_across_renders():
     backend = Backend(stored={"/f": b"x"}, explicit={"/d"})
     with _on_mount():

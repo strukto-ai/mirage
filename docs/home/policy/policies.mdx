@@ -375,7 +375,7 @@ a value goes in the method that uses it.
 `pre_network` runs once for each connection the workspace opens, before it
 carries any byte, whoever opens it: `curl`, `wget` or `git`, a builtin or
 installed CLI, a mount's VFS, a runtime or an SDK in the process. The
-workspace's [`network`](/home/configuration#network) lists judge it first,
+workspace's [`network`](/home/configuration/workspace#network) lists judge it first,
 and a connection they refuse reaches no policy. The context says where it
 goes (`host`, empty for a bare address; `address`; `port`) and who opened
 it: `command`, `program` and `words` as `pre_command` reads them, `line`,

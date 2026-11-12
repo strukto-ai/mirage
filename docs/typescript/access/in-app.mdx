@@ -33,7 +33,7 @@ One virtual terminal over the backends mounted at each prefix.
     | `vfs` | With the workspace's `mode`. |
     | `[vfs, mode]` | With its own mode. |
     | `[vfs, mode, limits]` | With its own mode and [command limits](/home/core/output-limits), keyed by command name. |
-    | `new Mount(vfs, options)` | With any of `mode`, `backend`, `mountpoint`, `commandLimits`, `index`, `read` and `write`, as the [mount settings](/home/configuration#mount-settings) describe. |
+    | `new Mount(vfs, options)` | With any of `mode`, `backend`, `mountpoint`, `commandLimits`, `index`, `read` and `write`, as the [mount settings](/home/configuration/workspace#mount-settings) describe. |
   </Expandable>
 </ResponseField>
 <ResponseField name="options.mode" type="MountMode" default="MountMode.READ">
@@ -61,7 +61,7 @@ One virtual terminal over the backends mounted at each prefix.
   Where the workspace keeps its [state](/home/infrastructure/overview#workspace-state): symlinks and file attributes, command logs, sessions and background jobs. In memory when unset. A store passed in is borrowed: close it after `ws.close()`, or pass `ownsStore: true`.
 </ResponseField>
 
-See [Workspace configuration](/home/configuration) for `snake_case` YAML settings.
+See [Workspace configuration](/home/configuration/workspace) for `snake_case` YAML settings.
 Direct SDK construction defaults `mode` to `READ`; YAML defaults it to `write`.
 
 ```ts
