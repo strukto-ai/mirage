@@ -36,8 +36,9 @@ const NODE_PROVIDERS: readonly string[] = [
 
 /**
  * Register a provider's handle class. Each provider module calls it as it
- * loads: e2b's in core, the rest in @struktoai/mirage-node. Python reaches
- * its providers by module path (`MACHINE_MODULES`) instead.
+ * loads: e2b's and cloudflare_container's in core, the rest in
+ * @struktoai/mirage-node. Python reaches its providers by module path
+ * (`MACHINE_MODULES`) instead.
  *
  * @param provider the name a `machines:` entry's `provider` spells.
  * @param cls the handle class.

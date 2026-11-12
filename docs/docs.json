@@ -324,6 +324,7 @@
               "home/setup/machine/microsandbox",
               "home/setup/machine/daytona",
               "home/setup/machine/e2b",
+              "home/setup/machine/cloudflare_container",
               "home/setup/machine/ssh"
             ]
           },

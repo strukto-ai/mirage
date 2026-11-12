@@ -1760,6 +1760,41 @@
    "typescript_only": {
     "NEVER_TAKEN": "Only Pyodide programs take signals through their runner (onSignal), and Pyodide runs on the TypeScript host alone."
    }
+  },
+  "machine/cloudflare_container/config": {
+   "typescript_only": {
+    "CONTAINER_CONFIG_FIELDS": "A TypeScript runtime lists the keys its config takes, each with its type, so an unknown key fails loud at construction and a saved runtime's form is typed; Python reads both off the config dataclass."
+   }
+  },
+  "machine/cloudflare_container/constants": {
+   "typescript_only": {
+    "NO_WEBSOCKET": "TypeScript reaches a relay through the runtime's own WebSocket, which core alone on Node 20 lacks; Python's client always has aiohttp."
+   }
+  },
+  "machine/cloudflare_container/handle": {
+   "python_only": {
+    "PipeInput": "Python's pipe writer is a sync write and close over an async stdin, so a task sends the queued writes in order; TypeScript chains each write onto the last inside openPipe.",
+    "READ_BYTES": "Python reads a stream reader a bounded chunk at a time; a TypeScript reader hands over each chunk as it came."
+   },
+   "typescript_only": {
+    "PIPES": "workerd's exec takes its pipes as options and may answer a process without them; Python's container always pipes all three.",
+    "piped": "workerd's exec takes its pipes as options and may answer a process without them; Python's container always pipes all three."
+   }
+  },
+  "machine/cloudflare_container/relay": {
+   "python_only": {
+    "CLOSED": "Python raises the one lost-connection message from several places in its relay process; TypeScript builds it where the socket closes.",
+    "RelayInput": "A Python process's stdin is an object with async write and close; TypeScript's is a WritableStream built in place."
+   }
+  },
+  "machine/cloudflare_container/types": {
+   "python_only": {
+    "ProcessInput": "A Python process's stdin is an object with async write and close; TypeScript's is a WritableStream."
+   },
+   "typescript_only": {
+    "ExecOptions": "workerd's exec takes env and its pipes as options; Python's container takes env alone and always pipes all three.",
+    "RelaySocket": "TypeScript's client and the relay share one socket shape across a browser, Node and workerd; Python's client speaks aiohttp's WebSocket only."
+   }
   }
  }
 }

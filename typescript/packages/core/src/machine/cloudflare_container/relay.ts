@@ -1,0 +1,407 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { logger } from '../handle.ts'
+import {
+  NO_WEBSOCKET,
+  RELAY_EXEC,
+  RELAY_MONITOR,
+  RELAY_START,
+  RELAY_WINDOW_BYTES,
+  STDERR_CHANNEL,
+  STDOUT_CHANNEL,
+} from './constants.ts'
+import type {
+  Container,
+  ExecOptions,
+  ExecProcess,
+  RelayControl,
+  RelayRequest,
+  RelaySocket,
+} from './types.ts'
+
+/**
+ * The object a text frame carries, or null for a frame that is not one. Its
+ * fields come off the network, so each reader checks the type of the ones
+ * it takes.
+ */
+export function frameOf(data: unknown): Readonly<Record<string, unknown>> | null {
+  if (typeof data !== 'string') return null
+  try {
+    const frame: unknown = JSON.parse(data)
+    return typeof frame === 'object' && frame !== null && !Array.isArray(frame)
+      ? (frame as Record<string, unknown>)
+      : null
+  } catch (error) {
+    logger.debug?.(`cloudflare_container: a frame that is not an event: ${String(error)}`)
+    return null
+  }
+}
+
+/** The bytes of a binary frame, as a browser, Node, workerd or a test delivers them; null for text. */
+export function bytesOf(data: unknown): Uint8Array | null {
+  if (data instanceof ArrayBuffer) return new Uint8Array(data)
+  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+  return null
+}
+
+/**
+ * One output stream of a relayed process, fed from its socket. A chunk
+ * leaves the queue only when the reader asks for it, and `took` then tells
+ * the relay, which sends no more than `RELAY_WINDOW_BYTES` ahead of that.
+ * A stream its reader cancelled takes everything still coming, so the
+ * program writing it never waits on a reader that has gone.
+ */
+class Channel {
+  readonly stream: ReadableStream<Uint8Array>
+  done = false
+  private readonly queue: Uint8Array[] = []
+  private cancelled = false
+  // How the stream ends once the queue drains: at its end, or with the lost connection.
+  private ending: Error | 'end' | null = null
+  private wake: (() => void) | null = null
+
+  constructor(
+    private readonly finished: () => void,
+    private readonly took: (bytes: number) => void,
+  ) {
+    this.stream = new ReadableStream<Uint8Array>(
+      {
+        pull: async (controller) => {
+          while (this.queue.length === 0 && this.ending === null)
+            await new Promise<void>((resolve) => {
+              this.wake = resolve
+            })
+          const chunk = this.queue.shift()
+          if (chunk !== undefined) {
+            controller.enqueue(chunk)
+            this.took(chunk.byteLength)
+            return
+          }
+          if (this.ending === 'end') controller.close()
+          else if (this.ending !== null) controller.error(this.ending)
+          this.end()
+        },
+        cancel: () => {
+          this.cancelled = true
+          const dropped = this.queue.reduce((sum, chunk) => sum + chunk.byteLength, 0)
+          this.queue.length = 0
+          if (dropped > 0) this.took(dropped)
+          this.ending ??= 'end'
+          this.end()
+        },
+      },
+      { highWaterMark: 0 },
+    )
+  }
+
+  push(data: Uint8Array): void {
+    if (this.cancelled) {
+      this.took(data.byteLength)
+      return
+    }
+    if (this.ending !== null) return
+    this.queue.push(data)
+    this.rouse()
+  }
+
+  close(): void {
+    this.ending ??= 'end'
+    this.rouse()
+  }
+
+  fail(error: Error): void {
+    this.ending ??= error
+    this.rouse()
+  }
+
+  private rouse(): void {
+    this.wake?.()
+    this.wake = null
+  }
+
+  private end(): void {
+    if (this.done) return
+    this.done = true
+    this.finished()
+  }
+}
+
+/**
+ * A process a relay runs: its stdin sent as binary frames and ended by an
+ * `eof`, its output fed from the frames that come back. The socket closes
+ * once the process has exited and both its output streams are done; one
+ * that closes sooner errors what is still open, as a lost connection.
+ */
+class RelayProcess implements ExecProcess {
+  readonly stdin: WritableStream<Uint8Array>
+  readonly exitCode: Promise<number>
+  private readonly out = new Channel(
+    () => {
+      this.settle()
+    },
+    (bytes) => {
+      this.read(STDOUT_CHANNEL, bytes)
+    },
+  )
+  private readonly err = new Channel(
+    () => {
+      this.settle()
+    },
+    (bytes) => {
+      this.read(STDERR_CHANNEL, bytes)
+    },
+  )
+  private exited = false
+  private closed = false
+  // Set once the relay says the program closed its input: later writes fail as a closed pipe would.
+  private inputClosed = false
+  // Bytes of stdin sent that the program has not taken, and the write waiting for room.
+  private untaken = 0
+  private room: (() => void) | null = null
+  private resolveExit: (code: number) => void = () => undefined
+  private rejectExit: (error: Error) => void = () => undefined
+
+  constructor(private readonly socket: RelaySocket) {
+    this.exitCode = new Promise<number>((resolve, reject) => {
+      this.resolveExit = resolve
+      this.rejectExit = reject
+    })
+    this.exitCode.catch((error: unknown) => {
+      logger.debug?.(
+        `cloudflare_container: a relayed process ended without its status: ${String(error)}`,
+      )
+    })
+    this.stdin = new WritableStream<Uint8Array>({
+      write: async (chunk) => {
+        this.refuseClosedInput()
+        this.send(chunk.slice())
+        this.untaken += chunk.byteLength
+        while (!this.closed && !this.inputClosed && this.untaken > RELAY_WINDOW_BYTES)
+          await new Promise<void>((resolve) => {
+            this.room = resolve
+          })
+        this.refuseClosedInput()
+      },
+      close: () => {
+        if (!this.inputClosed) this.control({ eof: true })
+      },
+      abort: () => {
+        this.control({ eof: true })
+      },
+    })
+  }
+
+  get stdout(): ReadableStream<Uint8Array> {
+    return this.out.stream
+  }
+
+  get stderr(): ReadableStream<Uint8Array> {
+    return this.err.stream
+  }
+
+  kill(signal = 15): void {
+    if (!this.closed) this.control({ kill: signal })
+  }
+
+  /** Take one frame the relay sent after `started`. */
+  take(data: unknown): void {
+    const bytes = bytesOf(data)
+    if (bytes !== null) {
+      const channel =
+        bytes[0] === STDOUT_CHANNEL ? this.out : bytes[0] === STDERR_CHANNEL ? this.err : null
+      channel?.push(bytes.slice(1))
+      return
+    }
+    const event = frameOf(data)
+    if (event === null) return
+    if (typeof event.took === 'number') {
+      this.untaken -= event.took
+      if (this.untaken <= RELAY_WINDOW_BYTES) this.free()
+    } else if (event.closed === 'stdin') {
+      this.inputClosed = true
+      this.free()
+    } else if (event.closed === 'stdout' || event.closed === 'stderr')
+      (event.closed === 'stdout' ? this.out : this.err).close()
+    else if (typeof event.exit === 'number') {
+      this.exited = true
+      this.resolveExit(event.exit)
+      this.settle()
+    } else if (typeof event.stopped === 'string') this.lost(new Error(event.stopped))
+  }
+
+  /** The socket closed: whatever is still open lost its connection. */
+  lost(error: Error = new Error('the connection to the relay closed')): void {
+    this.closed = true
+    this.free()
+    this.out.fail(error)
+    this.err.fail(error)
+    if (!this.exited) this.rejectExit(error)
+  }
+
+  private refuseClosedInput(): void {
+    if (this.inputClosed) throw new Error('the program closed its input')
+  }
+
+  private send(data: string | Uint8Array<ArrayBuffer>): void {
+    if (this.closed) throw new Error('the connection to the relay closed')
+    this.socket.send(data)
+  }
+
+  private control(control: RelayControl): void {
+    this.send(JSON.stringify(control))
+  }
+
+  /** Tell the relay the reader took `bytes` of `channel`, while there is a relay to tell. */
+  private read(channel: number, bytes: number): void {
+    if (!this.closed) this.control({ channel, read: bytes })
+  }
+
+  private free(): void {
+    this.room?.()
+    this.room = null
+  }
+
+  private settle(): void {
+    if (this.exited && this.out.done && this.err.done && !this.closed) {
+      this.closed = true
+      this.socket.close()
+    }
+  }
+}
+
+/**
+ * A Cloudflare Container reached through a `ContainerRelay`, from anywhere
+ * that has `fetch` and `WebSocket`: Node, a browser or another Worker.
+ *
+ * `url` is the relay route that names the container. `start` is one POST;
+ * each exec and each monitor is a socket of its own whose first frame
+ * carries the token. A socket that closes before its process exits is a
+ * lost connection, as an exec on a container that stopped is.
+ */
+export class RelayContainer implements Container {
+  private readonly base: string
+  private readonly sockets = new Set<RelaySocket>()
+
+  /**
+   * @param url the relay route that names the container.
+   * @param token the relay's token.
+   */
+  constructor(
+    url: string,
+    private readonly token: string,
+  ) {
+    this.base = url.replace(/\/+$/, '')
+  }
+
+  /** Start the container when it is not running; a refusal fails with the relay's words. */
+  async start(): Promise<void> {
+    if (typeof globalThis.WebSocket !== 'function')
+      throw new Error(`cloudflare_container: ${NO_WEBSOCKET}`)
+    const response = await this.post(`${this.base}/${RELAY_START}`)
+    if (response.ok) return
+    const said = (await response.text()).trim()
+    throw new Error(
+      `cloudflare_container: the relay answered ${String(response.status)} to start` +
+        (said === '' ? '' : `: ${said}`),
+    )
+  }
+
+  async exec(cmd: string[], options?: ExecOptions): Promise<ExecProcess> {
+    const socket = await this.open(RELAY_EXEC)
+    const proc = new RelayProcess(socket)
+    return new Promise<ExecProcess>((resolve, reject) => {
+      let started = false
+      socket.addEventListener('message', ({ data }) => {
+        if (started) {
+          proc.take(data)
+          return
+        }
+        const event = frameOf(data)
+        if (event === null) return
+        const refusal = event.stopped ?? event.refused
+        if (event.started === true) {
+          started = true
+          resolve(proc)
+        } else if (typeof refusal === 'string') {
+          socket.close()
+          reject(new Error(refusal))
+        }
+      })
+      socket.addEventListener('close', () => {
+        proc.lost()
+        reject(new Error('the relay closed the exec before it started'))
+      })
+      const request: RelayRequest = { token: this.token, argv: cmd, env: options?.env ?? {} }
+      socket.send(JSON.stringify(request))
+    })
+  }
+
+  async monitor(): Promise<void> {
+    const socket = await this.open(RELAY_MONITOR)
+    return new Promise<void>((resolve, reject) => {
+      socket.addEventListener('message', ({ data }) => {
+        const event = frameOf(data)
+        if (event === null) return
+        if (typeof event.refused === 'string') {
+          socket.close()
+          reject(new Error(event.refused))
+        } else if (event.exited === null || typeof event.exited === 'string') {
+          socket.close()
+          if (event.exited === null) resolve()
+          else reject(new Error(event.exited))
+        }
+      })
+      socket.addEventListener('close', () => {
+        reject(new Error('the relay closed the monitor'))
+      })
+      const request: RelayRequest = { token: this.token }
+      socket.send(JSON.stringify(request))
+    })
+  }
+
+  /** Close the sockets still open, so the relay hears each client go; the next call opens another. */
+  close(): Promise<void> {
+    for (const socket of this.sockets) socket.close()
+    this.sockets.clear()
+    return Promise.resolve()
+  }
+
+  private async open(call: string): Promise<RelaySocket> {
+    const socket = await this.openSocket(`${this.base}/${call}`)
+    this.sockets.add(socket)
+    socket.addEventListener('close', () => {
+      this.sockets.delete(socket)
+    })
+    return socket
+  }
+
+  // The network as two seams: tests substitute an in-memory relay here.
+  protected post(url: string): Promise<Response> {
+    return fetch(url, { method: 'POST', headers: { authorization: `Bearer ${this.token}` } })
+  }
+
+  protected openSocket(url: string): Promise<RelaySocket> {
+    const socket = new WebSocket(url.replace(/^http/, 'ws'))
+    socket.binaryType = 'arraybuffer'
+    return new Promise<RelaySocket>((resolve, reject) => {
+      socket.addEventListener('open', () => {
+        resolve(socket)
+      })
+      socket.addEventListener('error', () => {
+        reject(new Error(`could not reach the relay at ${url}`))
+      })
+    })
+  }
+}
