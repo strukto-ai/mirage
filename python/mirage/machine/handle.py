@@ -76,9 +76,10 @@ class PidLineFilter:
 
     stderr may carry the exec client's own words ahead of the line, so
     there it is looked for within ``RUN_PID_HOLD`` bytes, which wait until
-    it shows; stdout carries it only where the exec joins the two
-    streams, so there only what can still begin it waits. Once it is out,
-    or can no longer come, everything passes as it arrives.
+    it shows; stdout carries it only where the exec returns the two
+    streams joined, at its very start, so there only what can still
+    begin it waits. Once it is out, or can no longer come, everything
+    passes as it arrives.
 
     Args:
         sink (OutputFn): receives the stream without the line.
@@ -330,7 +331,12 @@ class MachineHandle:
         async def keep_errors(data: bytes) -> None:
             kept[1].extend(data)
 
+        reported: list[RunStatus] = []
+
         def found(report: RunStatus) -> None:
+            if reported:
+                return
+            reported.append(report)
             if (
                 runner is not None
                 and report.pid is not None
@@ -338,10 +344,7 @@ class MachineHandle:
             ):
                 runner.set_machine_pid(MachinePid(report.pid, report.started))
 
-        lines = (
-            PidLineFilter(output or keep_output, found, search=False),
-            PidLineFilter(errors or keep_errors, found, search=True),
-        )
+        pid_line = PidLineFilter(errors or keep_errors, found, search=True)
         ended: asyncio.Future[int] = asyncio.get_running_loop().create_future()
         task = asyncio.current_task()
         if task is not None:
@@ -353,8 +356,8 @@ class MachineHandle:
                 ctx.stdin,
                 {**given, **clock},
                 ctx.cwd.virtual,
-                lines[0].write,
-                lines[1].write,
+                output or keep_output,
+                pid_line.write,
             )
         )
         background = runner is not None and runner.background
@@ -365,15 +368,19 @@ class MachineHandle:
         )
         try:
             done = await self._outcome(execution, ended)
-            for line in lines:
-                await line.finish()
-            done = replace(
-                done,
-                stdout=done.stdout
-                and await _without_pid_line(done.stdout, found, False),
-                stderr=done.stderr
-                and await _without_pid_line(done.stderr, found, True),
-            )
+            await pid_line.finish()
+            # An exec that returns its streams whole, or joined into
+            # stdout, brings the line back with them.
+            if not reported and done.stderr:
+                done = replace(
+                    done,
+                    stderr=await _without_pid_line(done.stderr, found, True),
+                )
+            if not reported and done.stdout:
+                done = replace(
+                    done,
+                    stdout=await _without_pid_line(done.stdout, found, False),
+                )
             if background:
                 await watching
         except asyncio.CancelledError:
@@ -392,8 +399,7 @@ class MachineHandle:
             logger.debug("%s: connection lost", self.id, exc_info=True)
             if runner is not None:
                 runner.program_signaled(HANGUP_EXIT_CODE - 128)
-            for line in lines:
-                await line.finish()
+            await pid_line.finish()
             said = f"mirage: {self.id}: connection lost\n".encode()
             done = RunResult(
                 stdout=exc.stdout,

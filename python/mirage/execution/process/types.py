@@ -33,8 +33,9 @@ class ProcessUsage:
 class Process:
     """One managed runner, as every instance on its store reads it: not
     an OS process or a shell job number. Its machine is where its
-    program runs and its runtime what Mirage runs it with; a native
-    program's own pid there is ``machine_pid``, and the letter ``ps``
+    program runs, ``machine_instance`` what its provider called it then,
+    and its runtime what Mirage runs it with; a native program's own pid
+    there is ``machine_pid``, and the letter ``ps``
     shows for what it is doing, when something knows, is ``shown_state``,
     and what the last scan read of its use of the machine ``usage``.
 
@@ -67,6 +68,7 @@ class Process:
     shown_state: str | None = None
     stages: tuple[int, ...] = ()
     usage: ProcessUsage | None = None
+    machine_instance: str | None = None
 
     @property
     def pid(self) -> int:

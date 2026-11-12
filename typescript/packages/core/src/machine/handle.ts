@@ -71,8 +71,9 @@ export const logger: { debug?: (message: string) => void } = {}
  * handed to `found`. stderr may carry the exec client's own words ahead of
  * the line, so there (`search`) it is looked for within `RUN_PID_HOLD`
  * bytes, which wait until it shows; stdout carries it only where the exec
- * joins the two streams, so there only what can still begin it waits. Once
- * it is out, or can no longer come, everything passes as it arrives.
+ * returns the two streams joined, at its very start, so there only what can
+ * still begin it waits. Once it is out, or can no longer come, everything
+ * passes as it arrives.
  * Mirrors Python's `PidLineFilter`.
  */
 export class PidLineFilter {
@@ -306,29 +307,25 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     })
     this.ended.set(tag, { settle, finished: runner?.join() ?? left })
     this.runs += 1
+    const reported: RunStatus[] = []
     const found = (report: RunStatus): void => {
+      if (reported.length > 0) return
+      reported.push(report)
       if (report.pid !== null && report.started !== null)
         runner?.setMachinePid({ pid: report.pid, started: report.started, exited: null })
     }
-    const lines = [
-      new PidLineFilter(
-        output ?? ((data) => Promise.resolve(void kept[0].push(data))),
-        found,
-        false,
-      ),
-      new PidLineFilter(
-        errors ?? ((data) => Promise.resolve(void kept[1].push(data))),
-        found,
-        true,
-      ),
-    ] as const
+    const pidLine = new PidLineFilter(
+      errors ?? ((data) => Promise.resolve(void kept[1].push(data))),
+      found,
+      true,
+    )
     const execution = this.execArgv(
       runArgv(tag, status, spent, run),
       ctx.stdin,
       { ...given, ...clock },
       ctx.cwd.virtual,
-      lines[0].write,
-      lines[1].write,
+      output ?? ((data) => Promise.resolve(void kept[0].push(data))),
+      pidLine.write,
       mergeSignals(ctx.signal, letGo.signal),
     )
     const background = runner?.background === true
@@ -339,18 +336,13 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     let done: RunResult
     try {
       done = await this.outcome(execution, ended, letGo)
-      for (const line of lines) await line.finish()
-      done = {
-        ...done,
-        stdout:
-          done.stdout.byteLength > 0
-            ? await withoutPidLine(done.stdout, found, false)
-            : done.stdout,
-        stderr:
-          done.stderr !== null && done.stderr.byteLength > 0
-            ? await withoutPidLine(done.stderr, found, true)
-            : done.stderr,
-      }
+      await pidLine.finish()
+      // An exec that returns its streams whole, or joined into stdout,
+      // brings the line back with them.
+      if (reported.length === 0 && done.stderr !== null && done.stderr.byteLength > 0)
+        done = { ...done, stderr: await withoutPidLine(done.stderr, found, true) }
+      if (reported.length === 0 && done.stdout.byteLength > 0)
+        done = { ...done, stdout: await withoutPidLine(done.stdout, found, false) }
       if (background) await watcher
     } catch (error) {
       if (ctx.signal?.aborted === true) {
@@ -360,7 +352,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       if (!(error instanceof ConnectionLostError)) throw error
       logger.debug?.(`${String(this.id)}: connection lost: ${String(error)}`)
       runner?.programSignaled(HANGUP_EXIT_CODE - 128)
-      for (const line of lines) await line.finish()
+      await pidLine.finish()
       const said = new TextEncoder().encode(`mirage: ${String(this.id)}: connection lost\n`)
       done = {
         stdout: error.stdout,

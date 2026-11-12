@@ -250,7 +250,8 @@ export abstract class Runtime<E = unknown> {
     if (this.reach === 'workspace' || processes === null || shell == null || session == null)
       return run(ctx)
     const machine = this.machineFor(ctx)
-    if (shell.take(machine, this.name)) return run(ctx)
+    const instance = machine === null ? null : (processes.machineInstance?.(machine) ?? null)
+    if (shell.take(machine, this.name, instance)) return run(ctx)
     const line = ctx.flags.c
     const command =
       kind === 'line' && typeof line === 'string'

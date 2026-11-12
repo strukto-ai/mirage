@@ -475,6 +475,7 @@ class Workspace:
             daemon=daemon_id,
         )
 
+        self.job_table.started = self._trace_job
         self.job_table.ended = self._trace_job
 
         self.job_table.taken = self._end_lost
@@ -621,7 +622,6 @@ class Workspace:
             workspace_id=self._workspace_id,
             machine=str(self.process_table.machine),
             processes=self.process_table.records,
-            jobs=lambda: [job.record for job in self.job_table.all_jobs()],
             instance=lambda machine: self.machine_table.instance(machine),
         )
         self._registry.observer = self.observer
@@ -739,20 +739,17 @@ class Workspace:
         )
 
     def _trace_job(self, record: Job) -> None:
-        """Tell the observer a job ended, on the machine it ran on.
+        """Tell the observer a job started or ended, on the machine it
+        runs on.
 
         Args:
-            record (Job): the job that ended.
+            record (Job): the job.
         """
-        machine = next(
-            (
-                process.machine
-                for process in self.process_table.records()
-                if process.pid == record.pid
-            ),
-            self.process_table.machine,
+        process = next(
+            (p for p in self.process_table.records() if p.pid == record.pid),
+            None,
         )
-        self.observer.trace_job(record, machine)
+        self.observer.trace_job(record, process)
 
     async def _end_lost(self) -> None:
         """End what the daemon before this one left running, as its jobs
@@ -883,6 +880,7 @@ class Workspace:
             str(handle.id) for handle in self.machine_table.handles()
         ]
         self.process_table.machine_resources = self.machine_table.resources
+        self.process_table.machine_instance = self.machine_table.instance
 
     def _start_installs(
         self,

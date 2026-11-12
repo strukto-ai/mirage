@@ -15,6 +15,7 @@
 import asyncio
 import json
 import logging
+from dataclasses import replace
 
 import pytest
 from opentelemetry import trace
@@ -25,7 +26,8 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 )
 
 from mirage import MountMode, Workspace
-from mirage.execution.process.types import Process
+from mirage.execution.process.types import Process, ProcessState
+from mirage.execution.types import LineId, MachineId, ProcessId
 from mirage.io import IOResult
 from mirage.machine.constants import CHECK_MARK, RUN_PID_MARK, is_run
 from mirage.machine.handle import MachineHandle
@@ -44,6 +46,7 @@ from mirage.observe.store import RAMObserverStore
 from mirage.policy import ExecuteResultContext, Policy
 from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.types import RunResult
+from mirage.types import PathSpec
 from mirage.utils.clock import ManualClock
 from mirage.vfs.ram import RAMVFS
 
@@ -858,3 +861,92 @@ async def test_a_line_nobody_traces_reads_no_process_records(monkeypatch):
     await obs.log_command("true", "s", line="line_1")
     await obs.log_result(IOResult(exit_code=0), [], "s", line="line_1")
     assert reads == []
+
+
+# A process started under a parent that is stopping, as a killed job's
+# child still finishing, still goes under that parent's span.
+@pytest.mark.asyncio
+async def test_a_child_of_a_stopping_parent_goes_under_it(monkeypatch):
+    exporter = _exported(monkeypatch)
+    cwd = PathSpec.from_str_path("/")
+    shell = Process(
+        ProcessId("w", 10),
+        "s",
+        LineId("line_1"),
+        None,
+        10,
+        "(train) &",
+        cwd,
+        MachineId("host", "h"),
+        1.0,
+        state=ProcessState.STOPPING,
+    )
+    child = Process(
+        ProcessId("w", 11),
+        "s",
+        LineId("line_1"),
+        10,
+        10,
+        "train",
+        cwd,
+        MachineId("box", "a"),
+        2.0,
+        runtime="remote",
+        state=ProcessState.EXITED,
+        ended_at=3.0,
+        exit=143,
+    )
+    obs = Observer(processes=lambda: [shell, child])
+    await obs.log_command("(train) &", "s", line="line_1")
+    obs.trace_process(child)
+    obs.trace_process(
+        replace(shell, state=ProcessState.EXITED, ended_at=4.0, exit=143)
+    )
+    await obs.log_result(IOResult(exit_code=143), [], "s", line="line_1")
+    spans = {
+        (s.attributes or {}).get("process.command_line", s.name): s
+        for s in exporter.get_finished_spans()
+    }
+    for name, above in (("train", "(train) &"), ("(train) &", "command")):
+        context = spans[above].get_span_context()
+        assert context is not None
+        assert spans[name].parent is not None
+        assert spans[name].parent.span_id == context.span_id
+
+
+# A job started inside a background subshell lives in that subshell's job
+# list; its process still goes under its job, and the job under the
+# subshell.
+@pytest.mark.asyncio
+async def test_a_nested_jobs_process_goes_under_its_job(monkeypatch):
+    exporter = _exported(monkeypatch)
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"a": _Box("a")},
+        runtimes=[RemoteRuntime(["train"], machine="a")],
+    )
+    try:
+        await ws.shell("(train 1 & wait) & wait")
+    finally:
+        await ws.close()
+    spans = exporter.get_finished_spans()
+    by_id = {s.context.span_id: s for s in spans if s.context is not None}
+
+    def name(span) -> str:
+        a = span.attributes or {}
+        return f"{span.name} {a.get('process.command_line', a.get('mirage.command'))}"
+
+    [train] = [s for s in spans if name(s) == "process train 1"]
+    chain = []
+    span = train
+    while span.parent is not None and span.parent.span_id in by_id:
+        span = by_id[span.parent.span_id]
+        chain.append(name(span))
+    assert chain == [
+        "job train 1",
+        "process (train 1 & wait)",
+        "job (train 1 & wait)",
+        "process (train 1 & wait) & wait",
+        "command (train 1 & wait) & wait",
+    ]

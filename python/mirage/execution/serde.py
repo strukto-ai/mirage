@@ -85,6 +85,7 @@ def process_to_fields(record: Process) -> RecordFields:
         "command": record.command,
         "cwd": record.cwd.virtual,
         "machine": str(record.machine),
+        "machine_instance": record.machine_instance,
         "started_at": record.started_at,
         "runtime": record.runtime,
         "machine_pid": machine_pid,
@@ -114,6 +115,7 @@ def process_from_fields(fields: RecordFields) -> Process:
         command=fields["command"],
         cwd=PathSpec.from_str_path(fields["cwd"]),
         machine=MachineId.parse(fields["machine"]),
+        machine_instance=fields.get("machine_instance"),
         started_at=fields["started_at"],
         runtime=fields.get("runtime"),
         machine_pid=(

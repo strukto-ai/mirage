@@ -59,6 +59,11 @@ export class ProcessTable {
   machineIds: (() => string[]) | null = null
   /** What one of those machines holds now. */
   machineResources: ((machine: string, cpu: boolean) => Promise<MachineResources>) | null = null
+  /**
+   * What a machine's provider calls it, kept on each process that starts
+   * there. The workspace sets it. Mirrors Python's `machine_instance`.
+   */
+  machineInstance: ((machine: MachineId) => string) | null = null
 
   /**
    * @param workspaceId the workspace whose pids these are.
@@ -172,6 +177,7 @@ export class ProcessTable {
         signal: null,
         error: null,
         ancestors: ancestry,
+        machineInstance: this.machineInstance?.(init.machine ?? this.machine) ?? null,
       },
       init.run,
       () => {

@@ -185,8 +185,9 @@ export class JobTable {
    * the runtimes that reach it.
    */
   runStopper: ((record: RecordFields, signum: number) => Promise<boolean>) | null = null
-  // Told each job this table's jobs run as it ends; the workspace sets it,
-  // to trace the job.
+  // Told each job this table's jobs run as it starts and as it ends; the
+  // workspace sets them, to trace the job.
+  started: ((record: Job) => void) | null = null
   ended: ((record: Job) => void) | null = null
   // Run once this table's daemon takes the workspace's lease; the workspace
   // sets it, to end the line and process records the daemon before it left
@@ -451,6 +452,11 @@ export class JobTable {
     job.process = process
     this.sessionJobs(sessionId).set(job.id, job)
     this.jobAdded(sessionId, job.id)
+    try {
+      this.plane.started?.(job.record)
+    } catch (error) {
+      console.debug(`job ${String(job.id)}: started hook failed:`, error)
+    }
     ready()
     const plane = this.plane
     const pid = process.record.id.pid

@@ -313,10 +313,9 @@ class Observer:
             its command, job and process spans.
         processes (Callable[[], list[Process]] | None): the process
             records the workspace keeps, which a span goes under.
-        jobs (Callable[[], list[Job]] | None): the jobs the workspace
-            runs, whose processes go under their spans.
         instance (Callable[[MachineId], str] | None): what each
-            machine's provider calls it, ``mirage.machine.id``.
+            machine's provider calls it, ``mirage.machine.id`` for a
+            record that does not say.
     """
 
     def __init__(
@@ -326,7 +325,6 @@ class Observer:
         workspace_id: str | None = None,
         machine: str | None = None,
         processes: Callable[[], list[Process]] | None = None,
-        jobs: Callable[[], list[Job]] | None = None,
         instance: Callable[[MachineId], str] | None = None,
     ) -> None:
         self._store = store if store is not None else RAMObserverStore()
@@ -334,7 +332,6 @@ class Observer:
         self._workspace_id = workspace_id
         self._machine = machine
         self._processes = processes
-        self._jobs = jobs
         self._instance = instance
         self._newest: dict[str, int | None] = {}
         # Each open line's start (epoch ms, then monotonic) and span.
@@ -525,22 +522,42 @@ class Observer:
             span.set_attribute("mirage.signal", record.signal)
         if record.error is not None:
             span.set_attribute("mirage.error", record.error)
-        span.set_attribute("process.pid", record.shown_pid)
+        span.set_attributes(
+            {
+                "process.pid": record.shown_pid,
+                **self._machine_attributes(
+                    record.machine, record.machine_instance
+                ),
+            }
+        )
         self._shown[("process", line, record.pid)] = record.shown_pid
         self._end(("process", line, record.pid), record.ended_at)
 
-    def trace_job(self, record: Job, machine: MachineId) -> None:
-        """Send an ended job to OpenTelemetry as a ``job`` span: what it
-        ran, where and as whom, and how it ended.
+    def trace_job(self, record: Job, process: Process | None) -> None:
+        """Send a job to OpenTelemetry as a ``job`` span, opened as it
+        starts, so its process goes under it, and closed as it ends: what
+        it ran, where and as whom, and how it ended.
 
         Args:
             record (Job): the job's record.
-            machine (MachineId): the machine its process ran on.
+            process (Process | None): its process's record, which names
+                where its program runs once it does.
         """
         line = record.line.value if record.line is not None else None
         if not self._traced(line):
             return
-        span = self._job_span(record, machine)
+        span = self._job_span(record, process)
+        if record.ended_at is None:
+            return
+        if process is not None:
+            span.set_attributes(
+                {
+                    "process.pid": process.shown_pid,
+                    **self._machine_attributes(
+                        process.machine, process.machine_instance
+                    ),
+                }
+            )
         if record.exit is not None:
             span.set_attribute("mirage.exit_code", record.exit)
         if record.signal is not None:
@@ -557,21 +574,27 @@ class Observer:
         known = self._line_spans.get(line) if line is not None else None
         return known is None or known.is_valid
 
-    def _machine_attributes(self, machine: MachineId) -> dict[str, str | int]:
+    def _machine_attributes(
+        self, machine: MachineId, instance: str | None = None
+    ) -> dict[str, str | int]:
         """The attributes naming where a span's work ran: the machine's
         provider, its name and what its provider calls it.
 
         Args:
             machine (MachineId): the machine.
+            instance (str | None): what its provider called it when the
+                work started, when the record kept it.
         """
-        return {
-            "mirage.machine.type": machine.provider,
-            "mirage.machine.name": machine.name,
-            "mirage.machine.id": (
+        if instance is None:
+            instance = (
                 machine.name
                 if self._instance is None
                 else self._instance(machine)
-            ),
+            )
+        return {
+            "mirage.machine.type": machine.provider,
+            "mirage.machine.name": machine.name,
+            "mirage.machine.id": instance,
         }
 
     def _context(
@@ -610,7 +633,7 @@ class Observer:
                     for p in (self._processes() if self._processes else [])
                     if p.pid == record.parent
                     and p.line == record.line
-                    and p.state == ProcessState.RUNNING
+                    and p.state != ProcessState.EXITED
                 ),
                 None,
             )
@@ -635,19 +658,6 @@ class Observer:
         if span is not None:
             return span
         under = self._context(("job", line, record.pid))
-        if under is None and self._jobs is not None:
-            job = next(
-                (
-                    j
-                    for j in self._jobs()
-                    if j.pid == record.pid and j.line == record.line
-                ),
-                None,
-            )
-            if job is not None:
-                under = trace.set_span_in_context(
-                    self._job_span(job, record.machine, record)
-                )
         if under is None:
             under = self._under(record)
         self._shown[("process", line, record.pid)] = record.shown_pid
@@ -658,7 +668,9 @@ class Observer:
             "process.group_leader.pid": self._shown.get(
                 ("process", line, record.group), record.group
             ),
-            **self._machine_attributes(record.machine),
+            **self._machine_attributes(
+                record.machine, record.machine_instance
+            ),
             "mirage.workspace.id": record.id.workspace_id,
             "mirage.session.id": record.session_id,
             "mirage.cwd": record.cwd.virtual,
@@ -673,31 +685,19 @@ class Observer:
             ("process", line, record.pid), attributes, under, record.started_at
         )
 
-    def _job_span(
-        self, record: Job, machine: MachineId, process: Process | None = None
-    ) -> trace.Span:
+    def _job_span(self, record: Job, process: Process | None) -> trace.Span:
         """``record``'s span, opened the first time it is needed from its
         own start, under the span its process would go under.
 
         Args:
             record (Job): the job.
-            machine (MachineId): the machine its process runs on.
-            process (Process | None): its process, when the caller has it.
+            process (Process | None): its process.
         """
         line = record.line.value if record.line is not None else None
         key = ("job", line, record.pid or 0)
         span = self._open.get(key)
         if span is not None:
             return span
-        if process is None and self._processes is not None:
-            process = next(
-                (
-                    p
-                    for p in self._processes()
-                    if p.pid == record.pid and p.line == record.line
-                ),
-                None,
-            )
         under = None
         if process is not None:
             under = self._under(process)
@@ -709,11 +709,16 @@ class Observer:
             "mirage.job.id": record.id.console,
             "mirage.job.number": record.number,
             "mirage.command": record.command,
-            **self._machine_attributes(machine),
             "mirage.workspace.id": record.id.workspace_id,
             "mirage.session.id": record.session_id,
             "mirage.cwd": record.cwd,
         }
+        if process is not None:
+            attributes.update(
+                self._machine_attributes(
+                    process.machine, process.machine_instance
+                )
+            )
         if record.pid is not None:
             attributes["process.pid"] = (
                 record.pid if process is None else process.shown_pid
