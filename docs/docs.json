@@ -138,9 +138,9 @@
           {
             "group": "Service Credentials",
             "pages": [
-              "home/credentials",
-              "home/credentials/aws-secrets-manager",
-              "home/credentials/1password"
+              "home/service-credentials",
+              "home/service-credentials/aws-secrets-manager",
+              "home/service-credentials/1password"
             ]
           },
           {

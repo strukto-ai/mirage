@@ -62,8 +62,8 @@ not change it. See [From a template](/home/access/cli#from-a-template).
 | `max_env` | Cap on each session's variables, functions and aliases, as a [size](#sizes): `2MB` by default, `null` for no cap. See [limits](/home/limits). |
 | `network` | Choose where the workspace's connections may go, described [below](#network). |
 | `system_time` | Start the workspace's clock at a set time, described [below](#system-time). |
-| `env` | Environment variables each session starts with, literal or fetched from a credential source. See [Credentials](/home/credentials#set-environment-variables). |
-| `secrets` | Declare named [credential sources](/home/credentials). |
+| `env` | Environment variables each session starts with, literal or fetched from a credential source. See [Credentials](/home/service-credentials#set-environment-variables). |
+| `secrets` | Declare named [credential sources](/home/service-credentials). |
 | `machines` | Name the [machines](/home/setup/machine/overview) programs can run on. |
 | `cache`, `index` | Configure cached file content and directory/stat metadata, described [below](#workspace-state-and-caches). |
 | `store` | Configure workspace state, background jobs included, described [below](#workspace-state-and-caches). |
@@ -236,7 +236,7 @@ clis:
 ```
 
 A `script` entry's `config` cannot hold a credential pointer. Read the
-credential from an [`env` pointer](/home/credentials#set-environment-variables) instead.
+credential from an [`env` pointer](/home/service-credentials#set-environment-variables) instead.
 
 ## Workspace state and caches
 
