@@ -17,6 +17,10 @@ Each setting comes from the first of these that sets it:
 2. Its environment variable, such as `MIRAGE_MAX_SESSIONS`.
 3. Its key in the `[daemon]` section of `~/.mirage/config.toml`.
 
+The Cloudflare app has no `config.toml`. It reads only the sign-in settings
+and the six ceilings, `max_workspaces` to `max_env`, from options or the
+Worker's variables. Its `max_sessions` defaults to `4`.
+
 ## Set a value
 
 `mirage daemon config` edits `~/.mirage/config.toml`:
@@ -39,28 +43,22 @@ and remove keys.
 ## Settings
 
 Each key's environment variable is `MIRAGE_` and the key in capitals:
-`max_sessions` is `MIRAGE_MAX_SESSIONS`. These differ:
-
-- `port` is `MIRAGE_DAEMON_PORT`.
-- `url` is `MIRAGE_DAEMON_URL`.
-- `auth_token` is `MIRAGE_TOKEN`.
-- `jwt_clock_skew` is `MIRAGE_JWT_CLOCK_SKEW_SECONDS`.
-- `MIRAGE_JWT_PUBKEY` has no key: use `jwt_pubkey_file`.
+`max_sessions` is `MIRAGE_MAX_SESSIONS`. Two differ: `port`, in its row
+below, and `jwt_clock_skew`, on
+[Configure authentication](/home/access/http#jwt).
 
 | Key | Default |
 | --- | --- |
-| `port` | `8765`; the `local` context follows it |
-| `url` | `http://127.0.0.1:PORT`: the `local` context's URL; `mirage login URL` adds another server |
-| `auth_token` | your [login](/home/access/cli#log-in) for the `local` context, else `~/.mirage/auth_token` |
+| `port` | `8765`; its environment variable is `MIRAGE_DAEMON_PORT` |
 | `auth_mode` | `local` |
 | `allowed_hosts` | `127.0.0.1,localhost,::1` |
 | `idle_grace_seconds` | `30` |
 | `max_workspaces` | no cap; past it a new workspace answers 503 |
 | `max_sessions` | `16`; past it a new session answers 429 |
-| `max_memory` | none; the most any workspace's `max_memory` reaches, as a [size](/home/configuration#sizes) |
+| `max_memory` | none; the most any workspace's `max_memory` reaches, as a [size](/home/configuration/workspace#sizes) |
 | `max_processes` | none; the most any session's `processes.max` reaches |
 | `max_line_seconds` | none; the most seconds any line runs |
-| `max_env` | none; the most any workspace's `max_env` reaches, as a [size](/home/configuration#sizes) |
+| `max_env` | none; the most any workspace's `max_env` reaches, as a [size](/home/configuration/workspace#sizes) |
 | `workers` | `1`; see [Workers](/typescript/access/server#workers) |
 | `worker_type` | `thread` in TypeScript; in Python, `thread` without the GIL, else `process` |
 | `rate_limits` | `ip=1000/minute`; see [Rate limits](/home/access/http#rate-limits) |
@@ -71,6 +69,18 @@ Each key's environment variable is `MIRAGE_` and the key in capitals:
 | `ssh_*` | see [SSH](/home/access/ssh#set-up) |
 | `jwt_*` | see [Configure authentication](/home/access/http#configure-authentication) |
 | `login_client_id` | see [Log in](/home/access/cli#log-in) |
+
+Two keys are for the CLI, not the server. They tell `mirage` how to reach
+the server on this machine, its `local` context:
+
+- `url`, or `MIRAGE_DAEMON_URL`: `http://127.0.0.1:PORT`.
+  `mirage login URL` adds another server.
+- `auth_token`, or `MIRAGE_TOKEN`: your [login](/home/access/cli#log-in), else
+  `~/.mirage/auth_token`.
+
+The server's own token is `MIRAGE_AUTH_TOKEN`, else `~/.mirage/auth_token`. It
+has no key in `config.toml`. See
+[Configure authentication](/home/access/http#configure-authentication).
 
 `MIRAGE_HOME` sets the folder Mirage keeps its files in, `~/.mirage` by
 default: `config.toml`, `state/`, `snapshots/`, the daemon's log and the rest.

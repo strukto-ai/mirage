@@ -127,6 +127,10 @@ Every token needs `exp` and `sub`. A token with `aud` must name an entry in
 
 Set one of the JWKS URL or a fixed key, not both.
 
+In the `[daemon]` section of `config.toml`, each setting is its name without `MIRAGE_`, in lower case,
+such as `jwt_alg`. `MIRAGE_JWT_CLOCK_SKEW_SECONDS` is `jwt_clock_skew`, and
+the inline `MIRAGE_JWT_PUBKEY` has no key: use `jwt_pubkey_file`.
+
 <Accordion title="Accept both app session tokens and OAuth access tokens">
   A token with `aud` must name an entry in `MIRAGE_JWT_AUDIENCE`. A token
   without `aud` needs an `azp` in `MIRAGE_JWT_AUTHORIZED_PARTIES` when that is
