@@ -40,6 +40,10 @@ export async function configValue(
   const cacheKey = `${ref.from}\u0000${ref.ref}`
   const seen = fetched.get(cacheKey)
   if (seen !== undefined) return selectField(label, ref, seen, sources)
+  // Resolving an undeclared source quotes no secret, so an unknown name
+  // or a missing optional SDK reaches the caller in its own words, with
+  // the package to install, instead of as the redacted fetch failure.
+  if (sources === undefined || !Object.hasOwn(sources, ref.from)) sourceFor(ref.from)
   let secret
   try {
     secret = await fetchSecret(ref.from, ref.ref, sources)
