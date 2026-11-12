@@ -981,11 +981,5 @@
     "socials": {
       "github": "https://github.com/strukto-ai/mirage"
     }
-  },
-  "redirects": [
-    {
-      "source": "/home/infrastructure/tracing",
-      "destination": "/home/infrastructure/command-logs#trace-setup"
-    }
-  ]
+  }
 }
