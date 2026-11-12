@@ -56,20 +56,17 @@ export const SharePointConfig = z.object({
     ),
 })
 
-function normalizePrefix(value: string | undefined): string {
-  const normalized = stripSlash(value ?? '')
-  if (normalized.split('/').includes('..'))
-    throw new Error("keyPrefix must not contain '..' segments")
-  return normalized
-}
-
 export function resolveSharePointConfig(config: SharePointConfig) {
+  const graph = resolveMsGraphConfig(config)
+  const keyPrefix = stripSlash(config.keyPrefix ?? '')
+  if (keyPrefix.split('/').includes('..'))
+    throw new Error("keyPrefix must not contain '..' segments")
   return {
-    ...resolveMsGraphConfig(config),
+    ...graph,
     siteFilter: optionalText(config.siteFilter),
     site: optionalText(config.site),
     drive: optionalText(config.drive),
-    keyPrefix: normalizePrefix(config.keyPrefix),
+    keyPrefix,
   }
 }
 

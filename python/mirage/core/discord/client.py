@@ -80,25 +80,13 @@ def discord_base(config: DiscordConfig) -> str:
     return (config.base_url or DISCORD_API).rstrip("/")
 
 
-def _retry_after_of(body: str) -> Any:
-    try:
-        data = json.loads(body)
-    except ValueError:
-        return 1
-    if isinstance(data, dict):
-        return data.get("retry_after", 1)
-    return 1
-
-
-def _get_error(resp: aiohttp.ClientResponse, body: str) -> Exception:
-    if resp.status == 429:
-        return ApiError(f"Rate limited after {MAX_RETRIES} retries", 429)
-    return status_error(resp, body)
-
-
 def _mutation_error(resp: aiohttp.ClientResponse, body: str) -> Exception:
     if resp.status == 429:
-        retry = _retry_after_of(body)
+        try:
+            data = json.loads(body)
+        except ValueError:
+            data = None
+        retry = data.get("retry_after", 1) if isinstance(data, dict) else 1
         return ApiError(f"Rate limited, retry after {retry}s", 429)
     return status_error(resp, body)
 
@@ -111,7 +99,11 @@ async def discord_get(
     data: dict[str, Any] | list[Any] = await api_request(
         "GET",
         f"{discord_base(accessor.config)}{endpoint}",
-        error_of=_get_error,
+        error_of=lambda resp, body: (
+            ApiError(f"Rate limited after {MAX_RETRIES} retries", 429)
+            if resp.status == 429
+            else status_error(resp, body)
+        ),
         headers=discord_headers(accessor.config),
         params=params,
         retry=_RATE_LIMIT_RETRY,

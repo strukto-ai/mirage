@@ -148,6 +148,17 @@ def resolve_path(path: str, cwd: str) -> str:
     """
     if not path.startswith("/"):
         path = cwd.rstrip("/") + "/" + path
+    return posix_normpath(path)
+
+
+def posix_normpath(path: str) -> str:
+    """Resolve ``.`` and ``..`` segments and collapse redundant slashes
+    without touching the filesystem: ``posixpath.normpath``, except that a
+    leading ``//`` is one slash too.
+
+    Args:
+        path (str): the path to normalize.
+    """
     resolved = posixpath.normpath(path)
     if resolved.startswith("//"):
         resolved = "/" + resolved.lstrip("/")

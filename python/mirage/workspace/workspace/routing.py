@@ -38,6 +38,7 @@ from mirage.runtime.constants import EXTERNAL_COMMANDS, WHOLE_LINE
 from mirage.runtime.routing import RouteError
 from mirage.runtime.table import (
     catch_all,
+    check_route_machine,
     routed,
     runtime_bindings_for,
     whole_line_runtime,
@@ -316,7 +317,8 @@ class Router:
             route (Route): the runtime and machine the route names.
 
         Raises:
-            RouteError: no entry or machine has the name.
+            RouteError: no entry or machine has the name, or the runtime
+                does not run on the machine.
         """
         self._known_machine(route.machine)
         try:
@@ -386,12 +388,7 @@ class Router:
         decision = self._own_placed(one, decision)
         answer = self._wrapper_answer(one, decision, programs)
         if isinstance(answer, Route):
-            decision = routed(
-                self._runtimes.entries,
-                decision.bindings,
-                answer.runtime,
-                answer.machine or decision.machine,
-            )
+            decision = self._overlaid(decision, answer)
         return self._serving(one, decision)
 
     def _own_placed(
@@ -406,12 +403,32 @@ class Router:
         route = command_route(one.judgment.answers)
         if route is None:
             return decision
-        return routed(
-            self._runtimes.entries,
-            decision.bindings,
-            route.runtime,
-            route.machine or decision.machine,
-        )
+        return self._overlaid(decision, route)
+
+    def _overlaid(
+        self, decision: RouteDecision[RuntimeIdentity], route: Route
+    ) -> RouteDecision[RuntimeIdentity]:
+        """A decision with a command's route over it, as its run places
+        it (``routed``).
+
+        Args:
+            decision (RouteDecision): the placement it runs under.
+            route (Route): the command's route.
+
+        Raises:
+            RouteError: the route names no runtime entry, or a machine
+                its runtime does not run on.
+        """
+        try:
+            return routed(
+                self._runtimes.entries,
+                decision.bindings,
+                route.runtime,
+                route.machine,
+                decision.machine,
+            )
+        except ValueError as exc:
+            raise RouteError(str(exc)) from exc
 
     def _wrapper_answer(
         self,
@@ -550,21 +567,14 @@ class Router:
             decision (RouteDecision): the line's placement.
 
         Raises:
-            RouteError: the route names no runtime entry.
+            RouteError: the route names no runtime entry, or a machine its
+                runtime does not run on.
         """
         route = command_route(one.judgment.answers)
         whole = whole_line_runtime(decision.bindings)
         if route is None or not isinstance(whole, Runtime):
             return False
-        try:
-            placed = routed(
-                self._runtimes.entries,
-                decision.bindings,
-                route.runtime,
-                route.machine or decision.machine,
-            )
-        except ValueError as exc:
-            raise RouteError(str(exc)) from exc
+        placed = self._overlaid(decision, route)
         return (
             whole_line_runtime(placed.bindings) is not whole
             or _machine_of(whole, placed) != _machine_of(whole, decision)
@@ -627,14 +637,15 @@ class Router:
             machine (str | None): the machine it runs on.
 
         Raises:
-            RouteError: no entry or machine has the name, or the runtime
-                cannot be selected.
+            RouteError: no entry or machine has the name, the runtime
+                cannot be selected, or it does not run on the machine.
         """
         self._known_machine(machine)
         try:
             overlay = (
                 {} if name is None else runtime_bindings_for(entries, name)
             )
+            check_route_machine(entries, name, machine)
         except ValueError as exc:
             raise RouteError(str(exc)) from exc
         return RouteDecision(

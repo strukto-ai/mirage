@@ -92,13 +92,6 @@ export function validateDaemonTable(table: Record<string, string>): void {
   }
 }
 
-function parseValue(raw: string): string {
-  if (raw.startsWith('"') && raw.endsWith('"')) {
-    return raw.slice(1, -1).replace(/\\(["\\])/g, '$1')
-  }
-  return raw
-}
-
 export function parseDaemonTable(text: string): Record<string, string> {
   const out: Record<string, string> = {}
   let inDaemon = false
@@ -121,7 +114,9 @@ export function parseDaemonTable(text: string): Record<string, string> {
     if (eq < 0) {
       throw new DaemonConfigError(`malformed config.toml [daemon] line: ${trimmed}`)
     }
-    out[trimmed.slice(0, eq).trim()] = parseValue(trimmed.slice(eq + 1).trim())
+    const raw = trimmed.slice(eq + 1).trim()
+    out[trimmed.slice(0, eq).trim()] =
+      raw.startsWith('"') && raw.endsWith('"') ? raw.slice(1, -1).replace(/\\(["\\])/g, '$1') : raw
   }
   return out
 }

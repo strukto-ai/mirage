@@ -139,7 +139,7 @@ import { HISTORY_PREFIX, HistoryViewVFS } from '../../vfs/history/history.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
 import type { OpKwargs, SessionView } from '../../view/types.ts'
-import { newStatusWriter, runWithLineAbort } from '../abort.ts'
+import { runWithLineAbort } from '../abort.ts'
 import type { CLIInstall } from '../cli/types.ts'
 import { Dispatcher } from '../dispatcher/index.ts'
 import { Documents } from '../documentation/documents.ts'
@@ -423,6 +423,9 @@ export class Workspace {
       this.clock,
       options.daemonId ?? null,
     )
+    this.jobTable.started = (record) => {
+      this.traceJob(record)
+    }
     this.jobTable.ended = (record) => {
       this.traceJob(record)
     }
@@ -520,6 +523,7 @@ export class Workspace {
       this.wsId,
       this.processTable.machine.toString(),
       () => this.processTable.records(),
+      (machine) => this.machineTable.instance(machine),
     )
     this.registry.observer = this.observer
     this.planes = [stores.namespace, stores.observe, stores.sessions]
@@ -683,12 +687,10 @@ export class Workspace {
     checkEnvFits(this.sessionManager.get(this.sessionManager.defaultId), this.registry.maxEnv)
   }
 
-  /** Tell the observer a job ended, on the machine it ran on. */
+  /** Tell the observer a job started or ended, with its process's record. */
   private traceJob(record: Job): void {
-    const machine =
-      this.processTable.records().find((process) => process.id.pid === record.pid)?.machine ??
-      this.processTable.machine
-    this.observer.traceJob(record, machine)
+    const process = this.processTable.records().find((p) => p.id.pid === record.pid) ?? null
+    this.observer.traceJob(record, process)
   }
 
   /** End what the daemon before this one left running, as its jobs ended: hung up. */
@@ -797,6 +799,7 @@ export class Workspace {
       this.machineTable.send(this.processTable, handle, signum)
     this.processTable.machineIds = () => this.machineTable.handles().map((h) => h.id.toString())
     this.processTable.machineResources = (machine, cpu) => this.machineTable.resources(machine, cpu)
+    this.processTable.machineInstance = (machine) => this.machineTable.instance(machine)
   }
 
   /**
@@ -1879,14 +1882,7 @@ export class Workspace {
    */
   async unmount(prefix: string): Promise<void> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
-    await unmountPrefix(
-      {
-        registry: this.registry,
-        sharedMounts: this.sharedMounts,
-        isShuttingDown: () => this.isShuttingDown(),
-      },
-      prefix,
-    )
+    await unmountPrefix(this.registry, prefix, () => this.isShuttingDown(), this.sharedMounts)
     this.documents.views.delete(rstripSlash(prefix) || '/')
   }
 
@@ -2486,7 +2482,7 @@ export class Workspace {
     // line still waiting on the session: where tasks share one frame stack
     // (a browser) that line's frame is live here too, and its abort would
     // put back what it found over this status.
-    await runWithLineAbort(options.signal, [source], newStatusWriter(), () => {
+    await runWithLineAbort(options.signal, [source], Symbol('line'), () => {
       recordStatus(source, result.exitCode)
       return Promise.resolve()
     })

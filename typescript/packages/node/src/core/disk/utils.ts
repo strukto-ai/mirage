@@ -28,19 +28,6 @@ import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { lstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { diskError } from './errors.ts'
 
-export function resolveSafe(root: string, virtual: string): string {
-  const relative = lstripSlash(virtual)
-  const resolved = path.resolve(root, relative)
-  const rootResolved = path.resolve(root)
-  if (
-    resolved !== rootResolved &&
-    !resolved.startsWith(rootResolved.endsWith(path.sep) ? rootResolved : rootResolved + path.sep)
-  ) {
-    throw new Error(`path escapes root: ${virtual}`)
-  }
-  return resolved
-}
-
 async function nativeRealpath(file: string): Promise<string> {
   return realpath(file)
 }
@@ -176,9 +163,12 @@ export async function resolveInside(
   spec: PathSpec,
   virtual: string = spec.mountPath,
 ): Promise<string> {
-  const full = resolveSafe(root, virtual)
   const base = path.resolve(root)
+  const full = path.resolve(base, lstripSlash(virtual))
   if (full === base) return full
+  if (!full.startsWith(base.endsWith(path.sep) ? base : base + path.sep)) {
+    throw new Error(`path escapes root: ${virtual}`)
+  }
   const parts = path.relative(base, full).split(path.sep)
   const end = parts.includes('') ? parts.indexOf('') : parts.length
   let probe = end > 0 ? probeName(base, parts[0] ?? '') : null

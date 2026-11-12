@@ -15,8 +15,8 @@
 import { z } from 'zod'
 import { timeoutShape } from '../../core/api/config.ts'
 import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
-import type { ConfigOf, RedactedSchema } from '../secrets.ts'
-import { REDACTED_SECRET, secretStr } from '../secrets.ts'
+import type { ConfigOf } from '../secrets.ts'
+import { secretStr } from '../secrets.ts'
 
 export const LanceDBConfig = z.object({
   ...timeoutShape,
@@ -103,10 +103,4 @@ export function resolveLanceDBConfig(config: LanceDBConfig) {
     searchLimit: config.searchLimit ?? 10,
     maxRows: config.maxRows ?? 1000,
   }
-}
-
-export function redactLanceDBConfig(
-  config: ReturnType<typeof resolveLanceDBConfig>,
-): RedactedSchema<typeof LanceDBConfig, ReturnType<typeof resolveLanceDBConfig>> {
-  return { ...config, apiKey: config.apiKey === null ? null : REDACTED_SECRET }
 }

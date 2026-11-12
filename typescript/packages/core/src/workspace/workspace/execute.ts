@@ -114,7 +114,6 @@ import type { DriftQueue } from '../snapshot/drift.ts'
 import type { SessionManager } from '../session/manager.ts'
 import { type SessionState } from '../session/session.ts'
 import { type StatusWriter, ExecutionNode } from '../types.ts'
-import { newStatusWriter } from '../abort.ts'
 import { failureResult, isControlFlowError, placementRefused } from './failure.ts'
 import { ended, isUnwinding } from '../executor/control.ts'
 import { startShell } from '../executor/background.ts'
@@ -267,7 +266,7 @@ export async function executeLine(
   options: ExecuteOptions,
   argv?: readonly string[],
 ): Promise<ExecuteResult> {
-  const frame: LineFrame = { session: null, statusBefore: null, writer: newStatusWriter() }
+  const frame: LineFrame = { session: null, statusBefore: null, writer: Symbol('line') }
   try {
     let result = await runLine(env, command, options, frame, argv)
     // The drain is the last await of the line, and a stalled store would

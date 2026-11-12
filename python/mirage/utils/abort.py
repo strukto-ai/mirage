@@ -27,7 +27,7 @@ class MirageAbortError(RuntimeError):
         super().__init__("execute aborted")
 
 
-async def cancellable_sleep(
+async def sleep(
     seconds: float,
     cancel: asyncio.Event | None = None,
 ) -> None:

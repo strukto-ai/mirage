@@ -24,7 +24,7 @@ import { formatFindLs } from '../../commands/builtin/utils/formatting.ts'
 import type { Identity } from '../../commands/builtin/utils/identity.ts'
 import { linkView } from '../../commands/builtin/utils/links.ts'
 import { currentCaller, getCurrentSession, runAsProgram } from '../../context/session_context.ts'
-import { compareDepthFirst, modifiedTs } from '../../core/generic/find.ts'
+import { depthFirstOrder, modifiedTs } from '../../core/generic/find.ts'
 import { printfKind, treeHas, treeHasTime } from '../../core/generic/find_eval.ts'
 import { ebusy, enoent, enotempty, isFsError, strerrorOf } from '../../errors/fs.ts'
 import { posixPhrase } from '../../errors/posix.ts'
@@ -262,40 +262,44 @@ function lsRow(ps: PathSpec, st: FileStat, identity: Identity | null): Uint8Arra
 }
 
 /**
- * The facts one `-printf` row renders from, off the stat find holds for
- * it. A symlink row is the link itself, and %Y reads what it points at
- * through the workspace, so a link into another mount classifies and a
- * dangling one reads N.
+ * Render one accepted row through a `-printf` format, from the stat find
+ * holds for it (`st`, null when the format names no stat directive) and
+ * the start point's spelling (`base`), which %P and %d measure from. A
+ * symlink row is the link itself, and %Y reads what it points at through
+ * the workspace, so a link into another mount classifies and a dangling
+ * one reads N.
  */
-async function printfFacts(
+async function printfRow(
+  formatter: OpenStream,
   ps: PathSpec,
-  st: FileStat,
+  base: string,
+  st: FileStat | null,
   vfs: Files | null,
-): Promise<PrintfStatFacts> {
+  identity: Identity | null,
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
   const links = linkView(vfs ?? undefined) ?? null
-  const link = links !== null && links.statAt(ps.virtual) !== null
+  const link = st !== null && links !== null && links.statAt(ps.virtual) !== null
   const target = link ? await links.targetStat(ps.virtual) : null
-  return {
-    size: contentSize(st),
-    kind: link ? 'l' : printfKind(st),
-    mtimeEpoch: modifiedTs(st.modified) ?? 0,
-    mode: st.mode,
-    targetKind: !link ? null : target === null ? 'N' : printfKind(target),
-    uid: st.uid,
-    gid: st.gid,
-  }
+  const facts: PrintfStatFacts | null =
+    st === null
+      ? null
+      : {
+          size: contentSize(st),
+          kind: link ? 'l' : printfKind(st),
+          mtimeEpoch: modifiedTs(st.modified) ?? 0,
+          mode: st.mode,
+          targetKind: !link ? null : target === null ? 'N' : printfKind(target),
+          uid: st.uid,
+          gid: st.gid,
+        }
+  return renderPrintf(formatter, ps.rawPath || ps.virtual, base, facts, identity, signal)
 }
 
 /** Whether an action reads the row's stat: `-ls`, and a `-printf` whose
  * format names a stat directive (%s %y %m %T ...). */
 function readsStat(action: FindAction): boolean {
   return action.kind === 'ls' || (action.kind === 'printf' && action.stat)
-}
-
-/** The spelling a start point's rows are measured from (%P, %d); with no
- * operand, the working directory find walked, which prints as `.`. */
-function startBase(start: PathSpec | undefined): string {
-  return start === undefined ? '.' : start.rawPath || start.virtual
 }
 
 /** Refuse a row the mount table pins, as the kernel refuses its rmdir: a
@@ -557,10 +561,15 @@ export async function applyFindActions(
       ? [...records].sort(
           (a, b) =>
             a.run - b.run ||
-            compareDepthFirst(a.path.rawPath || a.path.virtual, b.path.rawPath || b.path.virtual),
+            depthFirstOrder(a.path.rawPath || a.path.virtual, b.path.rawPath || b.path.virtual),
         )
       : records
-  ).map((record): [PathSpec, string] => [record.path, startBase(starts[record.run])])
+  ).map((record): [PathSpec, string] => {
+    // %P and %d measure from the start point's spelling; with no operand,
+    // the working directory find walked, which prints as `.`.
+    const start = starts[record.run]
+    return [record.path, start === undefined ? '.' : start.rawPath || start.virtual]
+  })
   // An expression with no action of its own prints, which is the one
   // implicit action -depth reorders.
   const actions: FindAction[] =
@@ -639,19 +648,12 @@ export async function applyFindActions(
           }
           sink(action.kind === 'printf' || action.kind === 'ls' ? action.file : null).push(
             formatter !== undefined
-              ? await renderPrintf(
-                  formatter,
-                  path,
-                  base,
-                  await printfFacts(match, held, vfs),
-                  identity,
-                  signal,
-                )
+              ? await printfRow(formatter, match, base, held, vfs, identity, signal)
               : lsRow(match, held, identity),
           )
         } else if (formatter !== undefined) {
           sink(action.kind === 'printf' ? action.file : null).push(
-            await renderPrintf(formatter, path, base, null, identity, signal),
+            await printfRow(formatter, match, base, null, vfs, identity, signal),
           )
         } else if (action.kind === 'delete') {
           if (!(await deleteRow(match, vfs, dispatch, errors, statPath, registry))) {

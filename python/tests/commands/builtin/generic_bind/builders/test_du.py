@@ -19,7 +19,7 @@ import pytest
 
 from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.config import Context
-from mirage.context import reset_mount_gate, set_mount_gate
+from mirage.context import reset_caller, set_mount_gate
 from mirage.errors.fs import enotsup, walk_declined
 from mirage.errors.types import OperationNotSupportedError
 from mirage.io import IOResult
@@ -122,7 +122,7 @@ async def _du(
             None, [_spec(p) for p in paths], [], ctx
         )
     finally:
-        reset_mount_gate(token)
+        reset_caller(token)
     return (
         (await materialize(stream)).decode(),
         io.exit_code,

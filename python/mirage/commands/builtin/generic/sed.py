@@ -256,7 +256,7 @@ async def sed_generic(
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
-    resolve_glob: Callable[..., Awaitable[list[PathSpec]]],
+    resolve_glob: Callable[..., Awaitable[list[PathSpec]]] | None,
     read_stream: PolymorphicReadFn,
     writable: bool,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -274,8 +274,9 @@ async def sed_generic(
         paths (list[PathSpec]): The path operands, unresolved.
         texts (list[str]): Positional words (script, or files under -e/-f).
         ctx (Context): Flags, stdin and cwd from the dispatcher.
-        resolve_glob (Callable[..., Awaitable[list[PathSpec]]]):
-            Expands globs against the backend.
+        resolve_glob (Callable[..., Awaitable[list[PathSpec]]] | None):
+            Expands globs against the backend; None for operands the
+            executor already expanded.
         read_stream (PolymorphicReadFn): Bound input reader.
         writable (bool): Whether the backend can write, as -i needs.
     """
@@ -315,7 +316,7 @@ async def sed_generic(
     if flag_script:
         # With -e/-f the positional operand is a file, not the script.
         operands = _positional_as_paths(list(texts), ctx.cwd) + operands
-    if operands:
+    if operands and resolve_glob is not None:
         operands = await resolve_glob(operands)
     # -i edits `-` as a file; otherwise an operand naming stdin is `-`
     # to F and to sed's messages.

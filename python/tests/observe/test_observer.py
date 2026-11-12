@@ -15,19 +15,21 @@
 import asyncio
 import json
 import logging
+from dataclasses import replace
 
 import pytest
 from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
 
 from mirage import MountMode, Workspace
-from mirage.execution.process.types import Process
+from mirage.execution.process.types import Process, ProcessState
+from mirage.execution.types import LineId, MachineId, ProcessId
 from mirage.io import IOResult
-from mirage.machine.constants import CHECK_MARK
+from mirage.machine.constants import CHECK_MARK, RUN_PID_MARK, is_run
 from mirage.machine.handle import MachineHandle
 from mirage.observe import OpRecord
 from mirage.observe import observer as observer_module
@@ -44,6 +46,7 @@ from mirage.observe.store import RAMObserverStore
 from mirage.policy import ExecuteResultContext, Policy
 from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.types import RunResult
+from mirage.types import PathSpec
 from mirage.utils.clock import ManualClock
 from mirage.vfs.ram import RAMVFS
 
@@ -699,8 +702,9 @@ def test_bash_history_lists_lines_in_the_order_they_ended():
 
 
 # A job and each process a line ran are spans of their own once they end,
-# under the line's span, named by their line, session, workspace, machine
-# and cwd.
+# named by their line, session, workspace, machine and cwd: the line's own
+# process under the line's span, the job under it and the job's process
+# under the job.
 @pytest.mark.asyncio
 async def test_an_ended_job_and_process_are_spans(monkeypatch):
     exporter = _exported(monkeypatch)
@@ -733,34 +737,52 @@ async def test_an_ended_job_and_process_are_spans(monkeypatch):
     assert attributes["mirage.line.id"] == str(line.id)
     assert attributes["mirage.session.id"] == line.session_id
     assert attributes["mirage.cwd"] == "/"
-    host = str(ws.process_table.machine)
+    machine = ws.process_table.machine
+    host = str(machine)
+    where = {
+        "mirage.machine.type": "host",
+        "mirage.machine.name": machine.name,
+        "mirage.machine.id": machine.name,
+    }
     assert attributes["host.id"] == host
-    assert attributes["mirage.machine.id"] == host
+    assert {k: attributes[k] for k in where} == where
     [command] = [s for s in spans if s.name == "command"]
     assert (command.attributes or {})["mirage.line.id"] == str(line.id)
     assert (command.attributes or {})["host.id"] == host
-    assert (command.attributes or {})["mirage.machine.ids"] == (host,)
-    context = command.get_span_context()
-    assert context is not None
-    for span in (job, sleep):
-        assert span.parent is not None
+    assert "mirage.machine.ids" not in (command.attributes or {})
+    [shell] = [
+        s
+        for s in spans
+        if s.name == "process"
+        and (s.attributes or {})["process.command_line"]
+        == "sleep 30 & kill %1; wait"
+    ]
+    for span, above in ((shell, command), (job, shell), (sleep, job)):
+        context = above.get_span_context()
+        assert context is not None and span.parent is not None
         assert (span.parent.trace_id, span.parent.span_id) == (
             context.trace_id,
             context.span_id,
         )
     assert (job.attributes or {})["process.pid"] == attributes["process.pid"]
     assert (job.attributes or {})["host.id"] == host
-    assert (job.attributes or {})["mirage.machine.id"] == host
+    assert {k: (job.attributes or {})[k] for k in where} == where
     assert (job.attributes or {})["mirage.cwd"] == "/"
 
 
 class _Box(MachineHandle):
     provider = "box"
 
+    @property
+    def instance(self) -> str:
+        return f"box-{self.name}"
+
     async def connect(self) -> None:
         return None
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        if is_run(argv):
+            await errors(RUN_PID_MARK + b"812 99\n")
         return RunResult(
             stdout=f"{CHECK_MARK}\n".encode(), stderr=None, exit_code=0
         )
@@ -784,33 +806,46 @@ async def test_a_span_names_the_machine_its_work_ran_on(monkeypatch):
     finally:
         await ws.close()
     spans = exporter.get_finished_spans()
-    machines = {
-        (s.attributes or {})["mirage.line.id"]: (s.attributes or {}).get(
-            "mirage.machine.ids"
-        )
+    assert all(
+        "mirage.machine.ids" not in (s.attributes or {})
         for s in spans
         if s.name == "command"
-    }
-    assert machines == {
-        str(first.id): (host, "box:a"),
-        str(second.id): (host,),
-        str(third.id): (host,),
-        f"{third.id}.1": (host, "box:a"),
-    }
-    ran = [
+    )
+    ran = sorted(
         (
             s.name,
+            (s.attributes or {}).get(
+                "process.command_line",
+                (s.attributes or {}).get("mirage.command"),
+            ),
+            (s.attributes or {})["mirage.machine.type"],
+            (s.attributes or {})["mirage.machine.name"],
             (s.attributes or {})["mirage.machine.id"],
             (s.attributes or {})["host.id"],
         )
         for s in spans
-        if s.name == "job"
-        or (
-            s.name == "process"
-            and (s.attributes or {})["process.command_line"] == "train 1"
+        if s.name in ("job", "process")
+    )
+    name = host.split(":", 1)[1]
+    pids = {
+        (s.attributes or {})["process.command_line"]: (
+            (s.attributes or {})["process.pid"],
+            (s.attributes or {})["mirage.process.pid"],
         )
+        for s in spans
+        if s.name == "process"
+    }
+    assert pids["train 2"][0] == 812
+    assert pids["train 2"][1] != 812
+    assert pids["echo hi"][0] == pids["echo hi"][1]
+    assert ran == [
+        ("job", "train 1", "box", "a", "box-a", host),
+        ("process", "echo a\ntrain 2", "host", name, name, host),
+        ("process", "echo hi", "host", name, name, host),
+        ("process", "train 1", "box", "a", "box-a", host),
+        ("process", "train 1 & wait", "host", name, name, host),
+        ("process", "train 2", "box", "a", "box-a", host),
     ]
-    assert sorted(ran) == [("job", "box:a", host), ("process", "box:a", host)]
 
 
 @pytest.mark.asyncio
@@ -826,3 +861,99 @@ async def test_a_line_nobody_traces_reads_no_process_records(monkeypatch):
     await obs.log_command("true", "s", line="line_1")
     await obs.log_result(IOResult(exit_code=0), [], "s", line="line_1")
     assert reads == []
+
+
+# A process started under a parent that is stopping, as a killed job's
+# child still finishing, still goes under that parent's span.
+@pytest.mark.asyncio
+async def test_a_child_of_a_stopping_parent_goes_under_it(monkeypatch):
+    exporter = _exported(monkeypatch)
+    cwd = PathSpec.from_str_path("/")
+    shell = Process(
+        ProcessId("w", 10),
+        "s",
+        LineId("line_1"),
+        None,
+        10,
+        "(train) &",
+        cwd,
+        MachineId("host", "h"),
+        1.0,
+        state=ProcessState.STOPPING,
+    )
+    child = Process(
+        ProcessId("w", 11),
+        "s",
+        LineId("line_1"),
+        10,
+        10,
+        "train",
+        cwd,
+        MachineId("box", "a"),
+        2.0,
+        runtime="remote",
+        state=ProcessState.EXITED,
+        ended_at=3.0,
+        exit=143,
+    )
+    obs = Observer(processes=lambda: [shell, child])
+    await obs.log_command("(train) &", "s", line="line_1")
+    obs.trace_process(child)
+    obs.trace_process(
+        replace(shell, state=ProcessState.EXITED, ended_at=4.0, exit=143)
+    )
+    await obs.log_result(IOResult(exit_code=143), [], "s", line="line_1")
+    spans = {
+        (s.attributes or {}).get("process.command_line", s.name): s
+        for s in exporter.get_finished_spans()
+    }
+    for name, above in (("train", "(train) &"), ("(train) &", "command")):
+        context = spans[above].get_span_context()
+        assert context is not None
+        assert spans[name].parent is not None
+        assert spans[name].parent.span_id == context.span_id
+
+
+def _span_name(span: ReadableSpan) -> str:
+    """A span's kind and the command it stands for.
+
+    Args:
+        span (ReadableSpan): the span.
+    """
+    a = span.attributes or {}
+    return (
+        f"{span.name} {a.get('process.command_line', a.get('mirage.command'))}"
+    )
+
+
+# A job started inside a background subshell lives in that subshell's job
+# list; its process still goes under its job, and the job under the
+# subshell.
+@pytest.mark.asyncio
+async def test_a_nested_jobs_process_goes_under_its_job(monkeypatch):
+    exporter = _exported(monkeypatch)
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"a": _Box("a")},
+        runtimes=[RemoteRuntime(["train"], machine="a")],
+    )
+    try:
+        await ws.shell("(train 1 & wait) & wait")
+    finally:
+        await ws.close()
+    spans = exporter.get_finished_spans()
+    by_id = {s.context.span_id: s for s in spans if s.context is not None}
+    [train] = [s for s in spans if _span_name(s) == "process train 1"]
+    chain = []
+    span = train
+    while span.parent is not None and span.parent.span_id in by_id:
+        span = by_id[span.parent.span_id]
+        chain.append(_span_name(span))
+    assert chain == [
+        "job train 1",
+        "process (train 1 & wait)",
+        "job (train 1 & wait)",
+        "process (train 1 & wait) & wait",
+        "command (train 1 & wait) & wait",
+    ]

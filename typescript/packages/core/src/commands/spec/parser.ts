@@ -427,12 +427,6 @@ function setBoolFlag(
   }
 }
 
-interface MixedCluster {
-  bools: string[]
-  valueFlag: string
-  attached: string | null
-}
-
 // getopt-style cluster of bool flags ending in a value flag, e.g. -ne / -nepat.
 // An optional-value short (getopt's `x::`) takes whatever follows it in the
 // cluster as its value, as getopt does, so `date -uIs` is `-u -Is`; with
@@ -444,7 +438,10 @@ function attached(value: string, equals: boolean): string {
   return equals && value.startsWith('=') ? value.slice(1) : value
 }
 
-function matchMixedCluster(tok: string, cs: CompiledSpec): MixedCluster | null {
+function matchMixedCluster(
+  tok: string,
+  cs: CompiledSpec,
+): { bools: string[]; valueFlag: string; attached: string | null } | null {
   const bools: string[] = []
   const chars = tok.slice(1)
   for (let idx = 0; idx < chars.length; idx++) {

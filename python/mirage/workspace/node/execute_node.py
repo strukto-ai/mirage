@@ -27,9 +27,7 @@ from mirage.context import (
     is_program_invocation,
     redirect_paths_for,
     redirect_runner_for,
-    reset_current_session,
-    reset_program_invocation,
-    reset_redirect_paths,
+    reset_caller,
     set_current_evaluation,
     set_program_invocation,
     set_redirect_paths,
@@ -781,7 +779,7 @@ async def _run_redirected(
                     own_diagnostics=False,
                 )
             finally:
-                reset_redirect_paths(token)
+                reset_caller(token)
         else:
             stdout, io, exec_node = await handle_redirect(
                 partial(recurse, own_diagnostics=False) if simple else recurse,
@@ -1144,9 +1142,9 @@ async def _fork_subshell(
             results.append(result)
             return result[1].exit_code
         finally:
-            reset_current_session(token)
+            reset_caller(token)
             if program_token is not None:
-                reset_program_invocation(program_token)
+                reset_caller(program_token)
             await child.session.close_inputs()
 
     # A body that is one nested shell (`( sh -c ... )`) is the

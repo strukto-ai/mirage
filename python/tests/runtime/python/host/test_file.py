@@ -25,7 +25,7 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.bridge.sync import handed, run_async_from_sync
-from mirage.context import reset_current_session, set_current_session
+from mirage.context import reset_caller, set_current_session
 from mirage.policy import Deny, Policy
 from mirage.runtime.handles.constants import READ_CHUNK
 from mirage.runtime.python.host.fs import HostFs, os_routing
@@ -412,7 +412,7 @@ def test_unbuffered_reads_recheck_retained_bytes_and_preserve_position(
         assert stream.read(2) == b"secret"[before : before + 2]
     finally:
         stream.close()
-        reset_current_session(token)
+        reset_caller(token)
         loop.run_until_complete(ws.close())
         loop.close()
 

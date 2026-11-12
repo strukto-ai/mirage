@@ -889,7 +889,7 @@ async def server_checks(server: Server, report: Report) -> None:
             (await http.get("/v1/templates", headers=auth)).status_code,
             (await http.get(template, headers=auth)).status_code,
             (await http.delete(template, headers=auth)).status_code,
-            (await http.post(f"{template}/restore", headers=auth)).status_code,
+            (await http.get(template, headers=auth)).status_code,
         ]
         report.check(
             f"{server.key} server.templates", codes, want["templates"][d.name]
@@ -1270,10 +1270,9 @@ async def lifecycle(
     _, out, _ = await cli("template", "get", "t1", "-o", "yaml")
     back = root / "back.yaml"
     back.write_text(out)
-    await cli("template", "delete", "t1")
     await cli("template", "create", "t2", "-f", str(back))
-    await cli("template", "restore", "t1")
     _, out, _ = await cli("template", "list")
+    await cli("template", "delete", "t1")
     saved = json.loads(out)
     same = len({json.dumps(t["config"], sort_keys=True) for t in saved}) == 1
     got["template_round_trip"] = " ".join(

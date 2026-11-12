@@ -29,19 +29,6 @@ import {
   tableSizeBytes,
 } from './client.ts'
 
-interface DatabaseTable {
-  schema: string
-  name: string
-  row_count_estimate: number
-  size_bytes_estimate: number
-}
-
-interface DatabaseView {
-  schema: string
-  name: string
-  kind: 'view' | 'materialized'
-}
-
 interface EntityColumn extends ColumnInfo {
   primary_key?: boolean
   references?: { schema: string; table: string; column: string }
@@ -49,8 +36,13 @@ interface EntityColumn extends ColumnInfo {
 
 export async function buildDatabaseJson(accessor: PostgresAccessor) {
   const schemas = await listSchemas(accessor, accessor.config.schemas)
-  const tables: DatabaseTable[] = []
-  const views: DatabaseView[] = []
+  const tables: {
+    schema: string
+    name: string
+    row_count_estimate: number
+    size_bytes_estimate: number
+  }[] = []
+  const views: { schema: string; name: string; kind: 'view' | 'materialized' }[] = []
   for (const s of schemas) {
     for (const t of await listTables(accessor, s)) {
       tables.push({

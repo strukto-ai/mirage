@@ -28,7 +28,7 @@ from mirage.commands.builtin.utils.types import AsyncReaddirFn
 from mirage.errors.classify import classify
 from mirage.errors.constants import WALK_ERRORS
 from mirage.errors.fs import fs_strerror
-from mirage.errors.posix import linux_errno
+from mirage.errors.posix import LINUX_ERRNO
 from mirage.types import FileStat, FileType, PathSpec, StatFn
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.path import respell_one
@@ -49,7 +49,7 @@ def os_error_text(exc: BaseException) -> str:
     condition = classify(exc)
     if condition is None:
         return text
-    return f"{text} (os error {linux_errno(condition)})"
+    return f"{text} (os error {LINUX_ERRNO[condition]})"
 
 
 def walk_error_line(

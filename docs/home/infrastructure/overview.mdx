@@ -17,8 +17,8 @@ copy. The `store` key sets where Mirage saves it.
 | Store | Holds | Backends | Key |
 | --- | --- | --- | --- |
 | [Namespace](/home/infrastructure/namespace) | Symlinks and file attributes | `ram`, `disk`, `redis` | `store.namespace` |
-| [Sessions](/home/infrastructure/sessions) | Each session's working directory, variables and functions | `ram`, `disk`, `redis`, `s3` | `store.workspace` |
-| [Command Logs](/home/infrastructure/command-logs) | Every command run, its output and the files it touched | `ram`, `disk` | `store.observer` |
+| [Sessions](/home/infrastructure/sessions) | Each session's working directory, variables and functions | `ram`, `disk`, `redis`, `s3` | `store.sessions` |
+| [Command Logs](/home/infrastructure/command-logs) | Every command run, its output and the files it touched | `ram`, `disk` | `store.logs` |
 | [Jobs](/home/infrastructure/jobs) | Background jobs, their output and the processes the workspace runs | `ram`, `redis` | `store.execution` |
 
 To see command logs from many machines in one place, send them to an
@@ -70,8 +70,7 @@ store:
 ```
 
 To move one store to a backend of its own, add its key under `store`:
-`namespace`, `workspace` for sessions, `observer` for command logs or
-`execution` for jobs. Here the command logs go to a disk path you choose:
+`namespace`, `sessions`, `logs` for command logs or `execution` for jobs. Here the command logs go to a disk path you choose:
 
 <Tabs>
   <Tab title="YAML" icon="file-code">
@@ -80,7 +79,7 @@ To move one store to a backend of its own, add its key under `store`:
     store:
       type: redis
       url: redis://redis.internal:6379/0
-      observer:
+      logs:
         type: disk
         root: /var/lib/mirage
     mounts:
@@ -95,7 +94,7 @@ To move one store to a backend of its own, add its key under `store`:
 
     store = RedisWorkspaceStateStore(
         url="redis://redis.internal:6379/0",
-        observer=DiskWorkspaceStateStore(root="/var/lib/mirage"),
+        logs=DiskWorkspaceStateStore(root="/var/lib/mirage"),
     )
     ws = Workspace(
         {"/data": RAMVFS()},
@@ -118,7 +117,7 @@ To move one store to a backend of its own, add its key under `store`:
 
     const store = new RedisWorkspaceStateStore({
       url: 'redis://redis.internal:6379/0',
-      observer: new DiskWorkspaceStateStore({ root: '/var/lib/mirage' }),
+      logs: new DiskWorkspaceStateStore({ root: '/var/lib/mirage' }),
     })
     const ws = new Workspace(
       { '/data': new RAMVFS() },

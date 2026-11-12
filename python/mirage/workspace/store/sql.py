@@ -53,8 +53,8 @@ class SqlWorkspaceStateStore(WorkspaceStateStore):
         scope: str = "",
         owns_driver: bool = False,
         namespace: WorkspaceStateStore | None = None,
-        observer: WorkspaceStateStore | None = None,
-        workspace: WorkspaceStateStore | None = None,
+        logs: WorkspaceStateStore | None = None,
+        sessions: WorkspaceStateStore | None = None,
         execution: WorkspaceStateStore | None = None,
     ) -> None:
         """Args:
@@ -65,17 +65,17 @@ class SqlWorkspaceStateStore(WorkspaceStateStore):
             a passed driver is borrowed by default.
         namespace (WorkspaceStateStore | None): serves the namespace
             plane instead.
-        observer (WorkspaceStateStore | None): serves the observer plane
+        logs (WorkspaceStateStore | None): serves the command logs
             instead.
-        workspace (WorkspaceStateStore | None): serves the metadata and
+        sessions (WorkspaceStateStore | None): serves the metadata and
             sessions instead.
         execution (WorkspaceStateStore | None): serves the execution
             plane instead.
         """
         super().__init__(
             namespace=namespace,
-            observer=observer,
-            workspace=workspace,
+            logs=logs,
+            sessions=sessions,
             execution=execution,
         )
         self._driver = driver

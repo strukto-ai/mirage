@@ -20,17 +20,6 @@ import { errorSummary, fieldSummary } from './summary.ts'
 import type { ResolvedSecret, ResolvedSource } from './types.ts'
 
 /**
- * Whether one config value is a pointer rather than a literal.
- *
- * The same rule the block's own schema applies, restated for a value
- * that reached us already parsed: a mapping carrying `from` is a
- * pointer, everything else belongs to the source's own model.
- */
-function isSecretRef(value: unknown): value is SecretRef {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) && 'from' in value
-}
-
-/**
  * Read one source-config value from its bootstrap source.
  *
  * Throws SecretsError naming the instance, the field and the source,
@@ -253,10 +242,15 @@ export async function resolveSources(
     // the way to the source's own model.
     const pairs: [string, unknown][] = []
     for (const [field, value] of Object.entries(block.config)) {
+      // The rule the block's own schema applies, restated for a value that
+      // reached us already parsed: a mapping carrying `from` is a pointer,
+      // everything else belongs to the source's own model.
+      const pointer =
+        typeof value === 'object' && value !== null && !Array.isArray(value) && 'from' in value
       pairs.push([
         field,
-        isSecretRef(value)
-          ? await configValue(`secrets.${name}.config.${field}`, value, fetched)
+        pointer
+          ? await configValue(`secrets.${name}.config.${field}`, value as SecretRef, fetched)
           : value,
       ])
     }

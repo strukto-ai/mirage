@@ -6,7 +6,6 @@ from mirage.types import PathSpec
 from mirage.utils.path import CycleError, resolve_symlinks
 from mirage.workspace.executor.builtins.dirs.dirs import (
     join_raw,
-    norm,
     resolve_target,
     split_mode_options,
     typed_path,
@@ -41,8 +40,7 @@ def test_split_mode_options_reads_a_pathspec_operand():
     assert operands == [spec] and bad is None and physical is True
 
 
-def test_norm_and_join_raw():
-    assert norm("//a/./b/../c") == "/a/c"
+def test_join_raw():
     assert join_raw("x/..", "/data") == "/data/x/.."
     assert join_raw("/abs", "/data") == "/abs"
 

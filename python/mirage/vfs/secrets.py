@@ -27,45 +27,44 @@ def reveal_secret(value: Any) -> Any:
 
 
 def redacted_config_dump(config: BaseModel) -> dict[str, Any]:
-    return _walk_config_dump(config, _base_dump(config), True)
+    return _walk_config_dump(config, True)
 
 
 def revealed_config_dump(config: BaseModel) -> dict[str, Any]:
-    return _walk_config_dump(config, _base_dump(config), False)
-
-
-def _base_dump(config: BaseModel) -> dict[str, Any]:
-    """Dump every field pydantic can serialize, secrets excluded.
-
-    A credential is not always a ``SecretStr``: ``MsGraphConfig`` and
-    ``GoogleConfig`` both accept a provider callable, so the holder of
-    the OAuth dance can hand over a fresh token per request instead of a
-    long-lived one. pydantic cannot serialize a function, so dumping the
-    whole model raised ``PydanticSerializationError`` and took the whole
-    snapshot with it. The walk writes every secret field back off the
-    model anyway, so excluding them here loses nothing.
-
-    Args:
-        config (BaseModel): the VFS config being dumped.
-
-    Returns:
-        dict[str, Any]: the JSON-mode dump, minus the secret fields.
-    """
-    return config.model_dump(
-        mode="json", exclude=set(secret_field_names(config))
-    )
+    return _walk_config_dump(config, False)
 
 
 def _walk_config_dump(
-    config: BaseModel, data: dict[str, Any], redact: bool
+    config: BaseModel, redact: bool, data: dict[str, Any] | None = None
 ) -> dict[str, Any]:
-    # Nested models carry their own secret annotations, so the walk
-    # recurses instead of trusting the top-level field list: a missed
-    # nested SecretStr would serialize as pydantic's mask, which reads
-    # as a real credential and never demands a fresh override.
+    """Dump a config with every secret field redacted or revealed.
+
+    The dump starts from every field pydantic can serialize, secrets
+    excluded. A credential is not always a ``SecretStr``:
+    ``MsGraphConfig`` and ``GoogleConfig`` both accept a provider
+    callable, so the holder of the OAuth dance can hand over a fresh
+    token per request instead of a long-lived one. pydantic cannot
+    serialize a function, so dumping the whole model raised
+    ``PydanticSerializationError`` and took the whole snapshot with it.
+    The walk writes every secret field back off the model, so excluding
+    them from the dump loses nothing.
+
+    Nested models carry their own secret annotations, so the walk
+    recurses instead of trusting the top-level field list: a missed
+    nested SecretStr would serialize as pydantic's mask, which reads as a
+    real credential and never demands a fresh override.
+
+    Args:
+        config (BaseModel): the VFS config being dumped.
+        redact (bool): whether secrets become the redaction marker.
+        data (dict[str, Any] | None): the dump of a nested model, already
+            taken by its parent; None dumps ``config`` itself.
+    """
     secrets = set(secret_field_names(config))
+    if data is None:
+        data = config.model_dump(mode="json", exclude=secrets)
     for name in type(config).model_fields:
-        # A secret is absent from `data` by construction (_base_dump
+        # A secret is absent from `data` by construction (the dump
         # excludes them) and is written back below off the model.
         if name not in data and name not in secrets:
             continue
@@ -86,10 +85,10 @@ def _walk_config_dump(
                     REDACTED_SECRET if redact else reveal_secret(value)
                 )
         elif isinstance(value, BaseModel):
-            data[name] = _walk_config_dump(value, data[name], redact)
+            data[name] = _walk_config_dump(value, redact, data[name])
         elif isinstance(value, (list, tuple)):
             data[name] = [
-                _walk_config_dump(item, dumped, redact)
+                _walk_config_dump(item, redact, dumped)
                 if isinstance(item, BaseModel)
                 else dumped
                 for item, dumped in zip(value, data[name])
@@ -107,7 +106,7 @@ def secret_field_names(config: type[BaseModel] | BaseModel) -> list[str]:
     ]
 
 
-def has_redacted_secret(config: Mapping[str, Any] | None) -> bool:
+def has_redacted_secret(value: Any) -> bool:
     """Whether a saved config carries the redaction marker anywhere.
 
     Every value is scanned, never just the secret fields of a config
@@ -119,20 +118,14 @@ def has_redacted_secret(config: Mapping[str, Any] | None) -> bool:
     values the same way.
 
     Args:
-        config (Mapping[str, Any] | None): the saved config dump.
+        value (Any): the saved config dump, or any value inside it.
     """
-    if config is None:
-        return False
-    return _contains_redacted_secret(config)
-
-
-def _contains_redacted_secret(value: Any) -> bool:
     if value == REDACTED_SECRET:
         return True
     if isinstance(value, Mapping):
-        return any(_contains_redacted_secret(v) for v in value.values())
+        return any(has_redacted_secret(v) for v in value.values())
     if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
-        return any(_contains_redacted_secret(v) for v in value)
+        return any(has_redacted_secret(v) for v in value)
     return False
 
 

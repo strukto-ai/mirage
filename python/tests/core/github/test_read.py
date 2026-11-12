@@ -12,20 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import base64
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
 from mirage.accessor.github import GitHubAccessor, GitHubAccount
 from mirage.cache.index.ram import ListingCheckStore
 from mirage.core.github.config import GhConfig, GitHubConfig
-from mirage.core.github.read import (
-    read,
-    read_bytes,
-    read_many,
-    read_stream,
-)
+from mirage.core.github.read import read, read_many, read_stream
 from mirage.core.github.readdir import readdir
 from mirage.core.github.stat import stat
 from mirage.observe.context import RecordingScope
@@ -34,30 +26,6 @@ from mirage.vfs.github import GitHubVFS
 from mirage.workspace import Workspace
 from tests.fixtures.github_api import FakeGitHub, blob_sha, serve
 from tests.fixtures.handed import entry_at
-
-
-@pytest.fixture
-def account():
-    return GitHubAccount(GhConfig(token="ghp_test"))
-
-
-@pytest.mark.asyncio
-@patch("mirage.core.github.read.github_get", new_callable=AsyncMock)
-async def test_read_bytes_utf8(mock_get, account):
-    content = b"hello world"
-    mock_get.return_value = {"content": base64.b64encode(content).decode()}
-    result = await read_bytes(account, "acme", "proj", "sha123")
-    assert result == content
-    assert result.decode("utf-8") == "hello world"
-
-
-@pytest.mark.asyncio
-@patch("mirage.core.github.read.github_get", new_callable=AsyncMock)
-async def test_read_bytes_binary(mock_get, account):
-    content = bytes(range(256))
-    mock_get.return_value = {"content": base64.b64encode(content).decode()}
-    result = await read_bytes(account, "acme", "proj", "sha456")
-    assert result == content
 
 
 # A read is handed its row; with none, or a folder's, it asks nothing.

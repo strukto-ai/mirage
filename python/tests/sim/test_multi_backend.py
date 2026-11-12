@@ -165,7 +165,7 @@ def test_sim_github():
     ops = [e.op for e in trace.served()]
     assert "fetch_default_branch" in ops
     assert "fetch_tree" in ops
-    assert "read_bytes" in ops
+    assert "fetch_blob" in ops
 
 
 async def dropbox_scenario(sim: Sim):
@@ -484,8 +484,8 @@ def test_sim_github_batched_graphql_read():
 
     ops = [e.op for e in trace.served()]
     assert "graphql_data" in ops
-    read_bytes_ops = [e for e in trace.served() if e.op == "read_bytes"]
-    assert len(read_bytes_ops) == 1
+    fetch_blob_ops = [e for e in trace.served() if e.op == "fetch_blob"]
+    assert len(fetch_blob_ops) == 1
 
 
 def test_sim_github_cold_stat_no_real_io():

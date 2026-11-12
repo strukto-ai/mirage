@@ -75,13 +75,9 @@ const CONFLICT_CODES: Record<string, string> = {
  */
 type StagedRow = readonly [string, string | null, number]
 
-function isRegular(mode: string): boolean {
-  return mode === REGULAR_MODE || mode === EXECUTABLE_MODE
-}
-
 /** What a mode makes a path, for a rename pair that must not cross kinds. */
 export function kindOf(mode: string): string {
-  if (isRegular(mode)) return REGULAR_KIND
+  if (mode === REGULAR_MODE || mode === EXECUTABLE_MODE) return REGULAR_KIND
   return mode === SYMLINK_MODE ? SYMLINK_KIND : mode
 }
 
@@ -315,7 +311,7 @@ function conflictCodes(conflicts: ReadonlyMap<string, ConflictedEntry>): Map<str
  * executable file look changed.
  */
 function modeDiffers(entry: IndexEntry, info: FileStat): boolean {
-  if (info.mode === null || !isRegular(entry.mode.toString(8))) return false
+  if (info.mode === null || kindOf(entry.mode.toString(8)) !== REGULAR_KIND) return false
   return Boolean(entry.mode & 0o100) !== Boolean(info.mode & 0o100)
 }
 

@@ -91,13 +91,6 @@ export interface Move {
   readonly directory: boolean
 }
 
-/** What one refusal check found: a reason, or the paths that move. */
-interface Verdict {
-  readonly reason: string | null
-  readonly paths: readonly string[]
-  readonly directory: boolean
-}
-
 /** Where one tracked path lands after a move. */
 export function movedPath(move: Move, path: string): string {
   if (!move.directory) return move.destination
@@ -160,7 +153,8 @@ export function overlapping(moves: readonly Move[]): [string, string] | null {
  * The index is read before the destination is looked at, which is git's order
  * and observable: a conflicted source is refused as conflicted even when the
  * destination is occupied, and a directory holding an unmerged path is refused
- * for that rather than for a destination that already exists.
+ * for that rather than for a destination that already exists. What it finds is
+ * a reason, or the paths that move.
  */
 export async function check(
   vfs: Files,
@@ -170,7 +164,11 @@ export async function check(
   tracked: ReadonlySet<string>,
   conflicted: ReadonlySet<string>,
   force: boolean,
-): Promise<Verdict> {
+): Promise<{
+  readonly reason: string | null
+  readonly paths: readonly string[]
+  readonly directory: boolean
+}> {
   const info = await lstat(vfs, location.worktree.join(source))
   if (info === null) return { reason: BAD_SOURCE, paths: [], directory: false }
   if (destination === source || destination.startsWith(`${source}/`)) {

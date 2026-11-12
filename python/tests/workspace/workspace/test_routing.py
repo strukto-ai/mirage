@@ -340,3 +340,82 @@ def _commands(node):
         if getattr(child, "type", "") == "command":
             yield child
         yield from _commands(child)
+
+
+class _MontyOnB(Policy):
+    def pre_execute(self, ctx):
+        return Route("monty", machine="b")
+
+
+def _with_monty(*policies: Policy) -> Workspace:
+    return Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"a": _Box("a"), "b": _Box("b")},
+        runtimes=[
+            RemoteRuntime(["hostname"], machine="a"),
+            "monty",
+            "workspace",
+        ],
+        policies=list(policies),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_route_refuses_a_machine_its_runtime_does_not_run_on():
+    refusal = "runtime 'monty' runs on the workspace's machine"
+    ws = _with_monty(_MontyOnB())
+    try:
+        with pytest.raises(RouteError, match=refusal):
+            await ws.shell("hostname")
+    finally:
+        await ws.close()
+    ws = _with_monty()
+    try:
+        with pytest.raises(RouteError, match=refusal):
+            await ws.shell("hostname", runtime="monty", machine="b")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_route_to_a_machine_needs_a_remote_runtime():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"b": _Box("b")},
+        runtimes=["monty", "workspace"],
+        policies=[_OnB()],
+    )
+    try:
+        with pytest.raises(RouteError, match="machine 'b' takes the remote"):
+            await ws.shell("echo hi")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_command_routed_to_a_local_runtime_keeps_the_lines_machine():
+    ws = _with_monty(_HostnameOnMonty())
+    try:
+        said = await ws.shell("hostname", machine="b")
+        assert (said.exit_code, said.stdout) == (0, b"b\n")
+    finally:
+        await ws.close()
+
+
+class _HostnameOnMontyOnB(Policy):
+    def pre_command(self, ctx):
+        if ctx.command == "hostname":
+            return Route("monty", machine="b")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_explain_refuses_a_command_route_to_a_machine_as_a_route_error():
+    ws = _with_monty(_HostnameOnMontyOnB())
+    try:
+        with pytest.raises(RouteError, match="runs on the workspace's"):
+            await ws.explain("hostname")
+    finally:
+        await ws.close()

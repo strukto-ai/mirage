@@ -150,19 +150,6 @@ def unpatch_process(patched: list[Patched]) -> None:
         setattr(module, name, fn)
 
 
-async def close_local_parts(deps: CloseDeps) -> None:
-    """Release kernel mounts and remaining local bookkeeping.
-
-    Args:
-        deps (CloseDeps): what the workspace owns.
-    """
-    try:
-        await run_blocking(deps.kernel_mounts.close)
-    finally:
-        for job in deps.job_table.all_running_jobs():
-            job.cancel()
-
-
 async def _drop_state(deps: CloseDeps) -> None:
     """Delete the workspace's state: its own planes, then its store scope.
 
@@ -261,7 +248,11 @@ async def close_workspace(deps: CloseDeps) -> list[BaseException]:
         await settle(_drop_state(deps))
     if deps.owns_state_store:
         await settle(deps.state_store.close())
-    await settle(close_local_parts(deps))
+    try:
+        await settle(run_blocking(deps.kernel_mounts.close))
+    finally:
+        for job in deps.job_table.all_running_jobs():
+            job.cancel()
     await settle(deps.cache.clear())
     await settle(deps.cache.close())
     return failures

@@ -25,7 +25,6 @@ from mirage.fuse.constants import XATTR_CREATE, XATTR_REPLACE
 from mirage.fuse.darwin import rename_flags_check
 from mirage.mount.core import MountCore
 from mirage.mount.errors import classify_error
-from mirage.mount.types import MountAttrs
 from mirage.runtime.handles.mode import open_mode
 from mirage.types import JsonValue
 from mirage.workspace.files import Files
@@ -33,25 +32,6 @@ from mirage.workspace.session.session import SessionState
 
 P = ParamSpec("P")
 T = TypeVar("T")
-
-
-def stat_dict(attrs: MountAttrs) -> dict[str, Any]:
-    """One entry's attributes in libfuse's ``st_*`` spelling.
-
-    Args:
-        attrs (MountAttrs): what the core answered.
-    """
-    return {
-        "st_mode": attrs.mode,
-        "st_nlink": attrs.nlink,
-        "st_uid": attrs.uid,
-        "st_gid": attrs.gid,
-        "st_size": attrs.size,
-        "st_rdev": attrs.rdev,
-        "st_atime": attrs.atime,
-        "st_mtime": attrs.mtime,
-        "st_ctime": attrs.ctime,
-    }
 
 
 class MirageFS:
@@ -128,7 +108,18 @@ class MirageFS:
             raise OSError(code, os.strerror(code)) from err
 
     def getattr(self, path: str, fh: int | None = None) -> dict[str, Any]:
-        return stat_dict(self._call(self.core.fgetattr, path, fh))
+        attrs = self._call(self.core.fgetattr, path, fh)
+        return {
+            "st_mode": attrs.mode,
+            "st_nlink": attrs.nlink,
+            "st_uid": attrs.uid,
+            "st_gid": attrs.gid,
+            "st_size": attrs.size,
+            "st_rdev": attrs.rdev,
+            "st_atime": attrs.atime,
+            "st_mtime": attrs.mtime,
+            "st_ctime": attrs.ctime,
+        }
 
     def readdir(self, path: str, fh: int) -> list[str]:
         return self._call(self.core.readdir, path)

@@ -14,10 +14,10 @@
 
 import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
-import { browserAliasSchema, derivedEndpoint, makeBrowserS3Alias } from '../s3_alias.ts'
+import { aliasSchema, derivedEndpoint, makeS3Alias } from '../s3_alias.ts'
 
-export const SupabaseConfig = makeBrowserS3Alias({
-  schema: browserAliasSchema({
+export const SupabaseConfig = makeS3Alias({
+  schema: aliasSchema({
     projectRef: z
       .string()
       .optional()

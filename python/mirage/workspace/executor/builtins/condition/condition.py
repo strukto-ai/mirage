@@ -15,7 +15,7 @@
 from mirage.commands.builtin.utils.links import link_view
 from mirage.context import (
     is_program_invocation,
-    reset_admission,
+    reset_caller,
     session_voice,
     set_admission,
 )
@@ -155,7 +155,7 @@ async def _flat_status(
     try:
         return 0 if await eval_flat(ctx, args) else 1
     finally:
-        reset_admission(token)
+        reset_caller(token)
 
 
 async def test_builtin(call: BuiltinCall) -> Result:

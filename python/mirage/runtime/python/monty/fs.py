@@ -14,9 +14,6 @@
 
 import logging
 import time as _time
-from collections.abc import Iterator
-from concurrent.futures import CancelledError
-from contextlib import contextmanager
 from datetime import date, datetime, tzinfo
 from pathlib import PurePosixPath
 from stat import S_ISREG
@@ -31,7 +28,7 @@ from mirage.runtime.python.monty.constants import (
     SCAN_LINK_DEPTH,
     SCAN_MAX_ENTRIES,
 )
-from mirage.runtime.python.monty.errors import guest_error
+from mirage.runtime.python.monty.errors import as_guest_error, guest_error
 from mirage.runtime.python.monty.list import child_paths
 from mirage.runtime.python.monty.loader import (
     AbstractOS,
@@ -45,33 +42,6 @@ from mirage.utils.remnants import entry_name
 from mirage.utils.timezone import TZ_VAR, zone_from_env
 
 logger = logging.getLogger(__name__)
-
-
-@contextmanager
-def _as_guest(path: str, target: str | None = None) -> Iterator[None]:
-    """Re-raise a mount failure the way guest CPython raises it.
-
-    A backend words its refusals its own way; a guest catches the
-    builtin and may print its message. Every named condition converts,
-    so a non-empty rmdir is ``OSError`` errno 39 wherever it happened,
-    and a failure the vocabulary does not name is EIO, as a kernel
-    reports a device that failed (the engine knows only builtin types,
-    so a backend's own exception would reach the guest as
-    ``RuntimeError``). A stopped run's refusal is no failed device: it
-    leaves as itself, so a callback making call after call (a scan)
-    ends with its run.
-
-    Args:
-        path (str): the path the operation names.
-        target (str | None): a rename's destination.
-    """
-    try:
-        yield
-    except CancelledError:
-        raise
-    except Exception as exc:
-        condition = classify(exc) or FsCondition.EIO
-        raise guest_error(condition, path, target) from exc
 
 
 class MontyFs(AbstractOS):
@@ -181,7 +151,7 @@ class MontyFs(AbstractOS):
     def _row(self, path: PurePosixPath) -> VFSStat | None:
         if self._files is None:
             return None
-        with _as_guest(str(path)):
+        with as_guest_error(str(path)):
             return self._files.view_stat(str(path))
 
     def path_exists(self, path: PurePosixPath) -> bool:
@@ -206,7 +176,7 @@ class MontyFs(AbstractOS):
         """
         if self._files is None:
             return False
-        with _as_guest(str(path)):
+        with as_guest_error(str(path)):
             try:
                 self._files.readlink(str(path))
             except Exception as caught:
@@ -228,7 +198,7 @@ class MontyFs(AbstractOS):
 
     def path_iterdir(self, path: PurePosixPath) -> list[PurePosixPath]:
         files = self._structure(path)
-        with _as_guest(str(path)):
+        with as_guest_error(str(path)):
             entries = files.readdir(str(path), classify=False)
         return child_paths(path, [entry.path for entry in entries])
 
@@ -272,7 +242,7 @@ class MontyFs(AbstractOS):
             if max_depth is not None and depth >= max_depth:
                 continue
             try:
-                with _as_guest(str(directory)):
+                with as_guest_error(str(directory)):
                     rows = files.readdir(str(directory))
             except OSError as exc:
                 if depth == 0:
@@ -328,7 +298,7 @@ class MontyFs(AbstractOS):
         handle = MontyFileHandle(str(path), mode)
         files = self._files_for(path)
         parsed = parse_mode(mode)
-        with _as_guest(str(path)):
+        with as_guest_error(str(path)):
             fh = files.open(str(path), parsed)
             try:
                 size = files.fstat(fh).size if parsed.append else 0
@@ -344,7 +314,7 @@ class MontyFs(AbstractOS):
     def path_read_bytes(self, path: PurePosixPath | MontyFileHandle) -> bytes:
         target = path_from_arg(path)
         files = self._files_for(target)
-        with _as_guest(str(target)):
+        with as_guest_error(str(target)):
             return files.read(str(target))
 
     def path_write_text(
@@ -358,7 +328,7 @@ class MontyFs(AbstractOS):
     ) -> int:
         target = path_from_arg(path)
         files = self._files_for(target)
-        with _as_guest(str(target)):
+        with as_guest_error(str(target)):
             files.write(str(target), bytes(data))
         return len(data)
 
@@ -384,7 +354,7 @@ class MontyFs(AbstractOS):
         """
         target = path_from_arg(path)
         files = self._files_for(target)
-        with _as_guest(str(target)):
+        with as_guest_error(str(target)):
             files.append(str(target), bytes(data))
         return len(data)
 
@@ -412,17 +382,17 @@ class MontyFs(AbstractOS):
                 return
             raise guest_error(FsCondition.EEXIST, str(path))
         files = self._files_for(path)
-        with _as_guest(str(path)):
+        with as_guest_error(str(path)):
             files.mkdir(str(path), parents=parents)
 
     def path_rmdir(self, path: PurePosixPath) -> None:
         files = self._files_for(path)
-        with _as_guest(str(path)):
+        with as_guest_error(str(path)):
             files.rmdir(str(path))
 
     def path_unlink(self, path: PurePosixPath) -> None:
         files = self._files_for(path)
-        with _as_guest(str(path)):
+        with as_guest_error(str(path)):
             files.unlink(str(path))
 
     def path_rename(self, path: PurePosixPath, target: PurePosixPath) -> None:
@@ -439,5 +409,5 @@ class MontyFs(AbstractOS):
             target (PurePosixPath): the destination path.
         """
         files = self._files_for(path)
-        with _as_guest(str(path), str(target)):
+        with as_guest_error(str(path), str(target)):
             files.rename(str(path), str(target))

@@ -27,7 +27,6 @@ import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 const DEFAULT_MAX_REQUEST_BYTES = 8 * 1024 * 1024
 const SCAN_COUNT = 1000
 const KEY_BATCH = 500
-const UTF8 = new TextEncoder()
 
 export interface UpstashRedisStoreOptions {
   /**
@@ -120,11 +119,12 @@ function expectStrings(value: JsonValue, command: string): string[] {
  * on its own, so the server is the one to refuse it rather than a silent drop.
  */
 function packJson<T>(items: readonly T[], limit: number): T[][] {
+  const utf8 = new TextEncoder()
   const runs: T[][] = []
   let run: T[] = []
   let bytes = 2
   for (const item of items) {
-    const size = UTF8.encode(JSON.stringify(item)).byteLength + 1
+    const size = utf8.encode(JSON.stringify(item)).byteLength + 1
     if (run.length > 0 && (run.length >= KEY_BATCH || bytes + size > limit)) {
       runs.push(run)
       run = []

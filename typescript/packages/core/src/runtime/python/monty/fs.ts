@@ -19,22 +19,13 @@ import { normDir } from '../../../utils/path.ts'
 import { parseMode } from '../../handles/mode.ts'
 import type { RuntimeFiles } from '../../files.ts'
 import type { VFSEntry } from '../../types.ts'
-import type { MontyFsBits } from './loader.ts'
+import { type MontyFsBits, pathFromArg } from './loader.ts'
 import { MAX_URANDOM_BYTES, NOT_A_LINK, SCAN_LINK_DEPTH, SCAN_MAX_ENTRIES } from './constants.ts'
 import { asGuestError, guestError } from './errors.ts'
 import { childPaths } from './list.ts'
 import { isDirRow, isRegularRow, statResult } from './stat.ts'
 import { boundSystemClock, type Clock } from '../../../utils/clock.ts'
 import { zoneFromEnv } from '../../../utils/timezone.ts'
-
-function pathArg(value: unknown): string | null {
-  if (typeof value === 'string') return value
-  if (value !== null && typeof value === 'object' && 'path' in value) {
-    const p = (value as { path: unknown }).path
-    return typeof p === 'string' ? p : null
-  }
-  return null
-}
 
 /** Character count the way python's `len` counts: code points, not UTF-16 units. */
 function textLength(data: unknown): number {
@@ -62,57 +53,6 @@ function urandom(value: unknown): Uint8Array {
     globalThis.crypto.getRandomValues(bytes.subarray(offset, Math.min(offset + 65_536, size)))
   }
   return bytes
-}
-
-interface TimeZoneMarker {
-  offsetSeconds: number
-  name?: string
-}
-
-function timeZoneArg(value: unknown): TimeZoneMarker | null {
-  if (value === null || typeof value !== 'object') return null
-  const marker = value as { __monty_type__?: unknown; offsetSeconds?: unknown; name?: unknown }
-  if (marker.__monty_type__ !== 'TimeZone' || typeof marker.offsetSeconds !== 'number') return null
-  return {
-    offsetSeconds: marker.offsetSeconds,
-    ...(typeof marker.name === 'string' ? { name: marker.name } : {}),
-  }
-}
-
-/**
- * `seconds` since the epoch as monty's DateTime marker, which the engine
- * turns into a real guest `datetime`. No timezone argument means a naive
- * now in UTC, as monty's own clock answers; a TimeZone marker means an
- * aware now in that offset.
- */
-function dateTimeMarker(seconds: number, tz: TimeZoneMarker | null): Record<string, unknown> {
-  const shifted = new Date((seconds + (tz?.offsetSeconds ?? 0)) * 1000)
-  const fields = {
-    __monty_type__: 'DateTime',
-    year: shifted.getUTCFullYear(),
-    month: shifted.getUTCMonth() + 1,
-    day: shifted.getUTCDate(),
-    hour: shifted.getUTCHours(),
-    minute: shifted.getUTCMinutes(),
-    second: shifted.getUTCSeconds(),
-    microsecond: shifted.getUTCMilliseconds() * 1000,
-  }
-  if (tz === null) return fields
-  return {
-    ...fields,
-    offsetSeconds: tz.offsetSeconds,
-    ...(tz.name !== undefined ? { timezoneName: tz.name } : {}),
-  }
-}
-
-function dateMarker(seconds: number): Record<string, unknown> {
-  const now = new Date(seconds * 1000)
-  return {
-    __monty_type__: 'Date',
-    year: now.getUTCFullYear(),
-    month: now.getUTCMonth() + 1,
-    day: now.getUTCDate(),
-  }
 }
 
 // The calls that read or change content: only a path in the runtime's
@@ -195,6 +135,52 @@ export class MontyFs {
     return wall + zoneFromEnv(this.env).parts(new Date(wall * 1000)).offsetSec
   }
 
+  /**
+   * Now as monty's DateTime marker, which the engine turns into a real
+   * guest `datetime`: with no TimeZone marker a naive now on the session's
+   * wall clock, with one an aware now in its offset. Mirrors Python's
+   * `MontyFs.datetime_now`.
+   */
+  private datetimeNow(arg: unknown): Record<string, unknown> {
+    const tz = arg as { __monty_type__?: unknown; offsetSeconds?: unknown; name?: unknown } | null
+    const offset =
+      typeof arg === 'object' &&
+      tz !== null &&
+      tz.__monty_type__ === 'TimeZone' &&
+      typeof tz.offsetSeconds === 'number'
+        ? tz.offsetSeconds
+        : null
+    const seconds = offset === null ? this.sessionWall() : this.wall() + offset
+    const shifted = new Date(seconds * 1000)
+    const fields = {
+      __monty_type__: 'DateTime',
+      year: shifted.getUTCFullYear(),
+      month: shifted.getUTCMonth() + 1,
+      day: shifted.getUTCDate(),
+      hour: shifted.getUTCHours(),
+      minute: shifted.getUTCMinutes(),
+      second: shifted.getUTCSeconds(),
+      microsecond: shifted.getUTCMilliseconds() * 1000,
+    }
+    if (offset === null) return fields
+    return {
+      ...fields,
+      offsetSeconds: offset,
+      ...(typeof tz?.name === 'string' ? { timezoneName: tz.name } : {}),
+    }
+  }
+
+  /** Today as monty's Date marker, on the session's wall clock. Mirrors Python's `MontyFs.date_today`. */
+  private dateToday(): Record<string, unknown> {
+    const today = new Date(this.sessionWall() * 1000)
+    return {
+      __monty_type__: 'Date',
+      year: today.getUTCFullYear(),
+      month: today.getUTCMonth() + 1,
+      day: today.getUTCDate(),
+    }
+  }
+
   readonly handle = (
     name: string,
     args: unknown[],
@@ -218,11 +204,8 @@ export class MontyFs {
     // The clock callbacks: python's engine defaults these to the host
     // clock, so declining them (a guest RuntimeError) was a divergence
     // for any program that stamps its output.
-    if (name === 'datetime.now') {
-      const zone = timeZoneArg(args[0])
-      return dateTimeMarker(zone === null ? this.sessionWall() : this.wall(), zone)
-    }
-    if (name === 'date.today') return dateMarker(this.sessionWall())
+    if (name === 'datetime.now') return this.datetimeNow(args[0])
+    if (name === 'date.today') return this.dateToday()
     // Every `time` module clock asks here, naming itself: the wall clocks
     // read the system clock; monotonic and perf_counter keep the host's.
     if (name === 'time.time') {
@@ -233,7 +216,7 @@ export class MontyFs {
     }
     if (name === 'os.urandom') return urandom(args[0])
     // Everything below serves a path; the callbacks above need none.
-    const path = pathArg(args[0])
+    const path = pathFromArg(args[0])
     if (path === null) return this.notHandled
     // Lexical questions need no mount: resolve() is absolute() and '/'
     // is the working directory, which is also what python's engine
@@ -250,7 +233,7 @@ export class MontyFs {
     if (!(out instanceof Promise)) return out
     // A mount words its refusals its own way; the guest catches the
     // builtin CPython raises and may print its message.
-    const target = name === 'Path.rename' ? (pathArg(args[1]) ?? undefined) : undefined
+    const target = name === 'Path.rename' ? (pathFromArg(args[1]) ?? undefined) : undefined
     return out.catch((caught: unknown) => {
       throw asGuestError(caught, path, target)
     })
@@ -299,7 +282,7 @@ export class MontyFs {
       case 'Path.unlink':
         return files.unlink(path).then(() => null)
       case 'Path.rename': {
-        const dst = pathArg(args[1])
+        const dst = pathFromArg(args[1])
         if (dst === null) return this.notHandled
         return files.rename(path, dst).then(() => null)
       }

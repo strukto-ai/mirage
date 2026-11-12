@@ -35,6 +35,7 @@ import { rstripSlash } from '../../utils/slash.ts'
 import { type ByteWindow } from '../../utils/ranges.ts'
 import type { JsonValue } from '../../types.ts'
 import { ApiError } from '../api/errors.ts'
+import type { DropboxConfig } from '../../vfs/dropbox/config.ts'
 
 // The Dropbox-API-Arg header carries JSON, and a header is a ByteString:
 // a path with a character past U+00FF makes fetch refuse the request.
@@ -45,20 +46,6 @@ function headerJson(arg: Record<string, JsonValue>): string {
     /[\u007f-\uffff]/g,
     (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`,
   )
-}
-
-export interface DropboxConfig {
-  timeout?: number
-  clientId: string
-  clientSecret?: string
-  refreshToken: string
-  /**
-   * Base URL overriding the real Dropbox hosts (integ fakes): one origin
-   * serving `/oauth2/token`, the RPC API under `/2`, and content downloads
-   * under `/2`. Unset means the production oauth/api/content hosts.
-   */
-  endpoint?: string
-  refreshFn?: (refreshToken: string) => Promise<{ accessToken: string; expiresIn: number }>
 }
 
 export class DropboxApiError extends ApiError {

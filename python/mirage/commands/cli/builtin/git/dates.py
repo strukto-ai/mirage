@@ -194,16 +194,6 @@ def zone_text(offset: int) -> str:
     return f"{sign}{hours:02d}{minutes:02d}"
 
 
-def _local_moment(timestamp: int, mode: DateMode) -> datetime:
-    """A moment on the session's clock: its ``TZ``, UTC without one.
-
-    Args:
-        timestamp (int): seconds since the epoch.
-        mode (DateMode): carries the zone.
-    """
-    return datetime.fromtimestamp(timestamp, mode.zone)
-
-
 def _offset_of(moment: datetime) -> int:
     """Seconds east of UTC a moment is shown at.
 
@@ -375,7 +365,9 @@ def _shown(timestamp: int, offset: int, mode: DateMode) -> tuple[Wall, int]:
         mode (DateMode): carries ``local`` and the session's zone.
     """
     if mode.local:
-        offset = _offset_of(_local_moment(_in_range(timestamp), mode))
+        offset = _offset_of(
+            datetime.fromtimestamp(_in_range(timestamp), mode.zone)
+        )
     return _fixed_wall(timestamp, offset), offset
 
 
@@ -395,7 +387,7 @@ def _human(timestamp: int, offset: int, mode: DateMode) -> str:
         offset (int): the date's own offset, seconds east of UTC.
         mode (DateMode): carries the clock and the zone.
     """
-    today = _local_moment(mode.now, mode)
+    today = datetime.fromtimestamp(mode.now, mode.zone)
     wall, offset = _shown(timestamp, offset, mode)
     if (wall.year, wall.month, wall.day) == (
         today.year,
@@ -437,7 +429,7 @@ def _formatted(timestamp: int, offset: int, mode: DateMode) -> str:
     held = _in_range(timestamp)
     years = (timestamp - held) // (146097 * 86400) * 400
     if mode.local:
-        moment = _local_moment(held, mode)
+        moment = datetime.fromtimestamp(held, mode.zone)
         offset = _offset_of(moment)
     else:
         moment = datetime.fromtimestamp(held + offset, GMT)

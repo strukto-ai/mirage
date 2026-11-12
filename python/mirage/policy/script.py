@@ -61,7 +61,7 @@ from mirage.policy.types import (
     WorkspaceContext,
 )
 from mirage.runtime.binding import WorkspaceBinding
-from mirage.runtime.constants import SCRIPT_EVAL_TIMEOUT_SECONDS
+from mirage.runtime.constants import SCRIPT_EVAL_TIMEOUT
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.python.monty.execution import compile_error
 from mirage.runtime.python.monty.runtime import MontyRuntime
@@ -715,11 +715,11 @@ class ScriptPolicy(Policy, SessionScopedMixin):
                             stdin=payload.encode(),
                         ),
                     ),
-                    timeout=SCRIPT_EVAL_TIMEOUT_SECONDS,
+                    timeout=SCRIPT_EVAL_TIMEOUT,
                 )
         except asyncio.TimeoutError as exc:
             raise ValueError(
-                f"script timed out after {SCRIPT_EVAL_TIMEOUT_SECONDS:g}s"
+                f"script timed out after {SCRIPT_EVAL_TIMEOUT:g}s"
             ) from exc
         if result.exit_code != 0:
             stderr = (result.stderr or b"").decode(errors="replace")
@@ -798,7 +798,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         if task is None:
             task = asyncio.ensure_future(
                 asyncio.wait_for(
-                    self._read_env(entry), timeout=SCRIPT_EVAL_TIMEOUT_SECONDS
+                    self._read_env(entry), timeout=SCRIPT_EVAL_TIMEOUT
                 )
             )
             self._envs[key] = task

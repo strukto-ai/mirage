@@ -22,7 +22,7 @@ from typing import Any, TypeVar, cast
 from weakref import WeakKeyDictionary
 
 from mirage.concurrency.limiter import owned_task
-from mirage.context import reset_current_session, set_current_session
+from mirage.context import reset_caller, set_current_session
 from mirage.errors import FsCondition, classify
 from mirage.errors.fs import ebadf, eexist, einval, eisdir, enoent, enotdir
 from mirage.errors.types import NoMountError, OperationNotSupportedError
@@ -166,7 +166,7 @@ class MountCore:
         try:
             return await call
         finally:
-            reset_current_session(token)
+            reset_caller(token)
 
     async def _stat_cached(self, path: str, row: FileStat) -> FileStat:
         """Judge retained metadata through the stat policy boundary.
@@ -1965,7 +1965,7 @@ class MountCore:
             return reader.follow_parent(virtual)
         finally:
             if token is not None:
-                reset_current_session(token)
+                reset_caller(token)
 
     async def truncate(self, path: str, length: int) -> None:
         """Resize a file, settling every open handle on the same file.

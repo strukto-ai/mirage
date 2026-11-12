@@ -61,7 +61,7 @@ function historyRoot(root: string, url: string, keyPrefix: string): string {
  * config alone gets identical overlays, sessions, and grants, and sees
  * the jobs every other one runs. History only grows, so it stays out of
  * Redis: on this machine's disk, in a folder of this store's own under
- * `root`, unless `observer` names another store.
+ * `root`, unless `logs` names another store.
  * Mirrors the Python RedisWorkspaceStateStore.
  */
 export class RedisWorkspaceStateStore extends WorkspaceStateStore {
@@ -79,8 +79,8 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
     const prefix = keyPrefix ?? 'mirage:'
     super({
       ...overrides,
-      observer:
-        overrides.observer ??
+      logs:
+        overrides.logs ??
         new DiskWorkspaceStateStore({
           root: historyRoot(root ?? DEFAULT_STATE_ROOT, at, prefix),
         }),
@@ -105,7 +105,7 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
 
   protected makeObserver(_workspaceId: string): ObserverStore {
     throw new Error(
-      'The redis store keeps no history; it goes to the observer override, disk by default',
+      'The redis store keeps no history; it goes to the logs override, disk by default',
     )
   }
 

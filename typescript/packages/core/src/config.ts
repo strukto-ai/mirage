@@ -213,10 +213,6 @@ function camelizeKeys(obj: Record<string, unknown>): Record<string, unknown> {
   return out
 }
 
-const STORE_GROUPS = ['namespace', 'observer', 'workspace', 'execution'] as const
-
-const CLI_KEYS: readonly string[] = ['cli', 'script', 'runtime', 'config']
-
 // Python's index block models refuse a ttl that is not a number
 // (StrictFloat) and a non-string url or key_prefix at load. This stops at
 // the first bad value, so it checks them in the models' field order.
@@ -369,51 +365,41 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
   validateDocument('config', raw.index, 'index', { names: 'index' })
   validateIndexValues(raw.index, 'index')
   validateDocument('config', raw.store, 'store', { names: 'store' })
-  validateEnvBlock(raw.env)
-  validateSecretsBlock(raw.secrets)
-}
-
-/**
- * The source table: one map, instance name -> declaration. Blocks
- * validate through the core schema (the same one the workspace applies
- * at build), so a pointer at a source that cannot bootstrap another
- * fails at load naming the instance. The block travels raw: an
- * instance name must not be camelized, and a source's own config keys
- * are snake_case for the same reason a mount's are.
- */
-function validateSecretsBlock(value: unknown): void {
-  if (value === undefined || value === null) return
-  if (!isPlainObject(value)) throw new Error('config `secrets` must be a mapping')
-  for (const [name, block] of Object.entries(value)) {
-    if (!isPlainObject(block)) throw new Error(`config \`secrets.${name}\` must be a mapping`)
-    validateDocument('config', block, `config \`secrets.${name}\``, { names: 'source' })
-    const parsed = SecretSource.safeParse(block)
-    if (!parsed.success) {
-      const detail = parsed.error.issues[0]?.message ?? parsed.error.message
-      throw new Error(`config \`secrets.${name}\`: ${detail}`)
+  // The env block: one map, name -> entry. Entries validate through the
+  // core schema (the same one `varsFromEntries` applies at build), so a
+  // bad entry fails at load naming the variable, and the block travels
+  // raw -- variable names must not be camelized and a literal's text must
+  // arrive verbatim.
+  if (raw.env !== undefined && raw.env !== null) {
+    if (!isPlainObject(raw.env)) throw new Error('config `env` must be a mapping')
+    for (const [name, entry] of Object.entries(raw.env)) {
+      if (typeof entry === 'string') continue
+      if (!isPlainObject(entry)) {
+        throw new Error(`config \`env.${name}\` must be a string or a mapping`)
+      }
+      const parsed = EnvVar.safeParse(entry)
+      if (!parsed.success) {
+        const detail = parsed.error.issues[0]?.message ?? parsed.error.message
+        throw new Error(`config \`env.${name}\`: ${detail}`)
+      }
     }
   }
-}
-
-/**
- * The env block: one map, name -> entry. Entries validate through the
- * core schema (the same one `varsFromEntries` applies at build), so a
- * bad entry fails at load naming the variable, and the block travels
- * raw -- variable names must not be camelized and a literal's text must
- * arrive verbatim.
- */
-function validateEnvBlock(value: unknown): void {
-  if (value === undefined || value === null) return
-  if (!isPlainObject(value)) throw new Error('config `env` must be a mapping')
-  for (const [name, entry] of Object.entries(value)) {
-    if (typeof entry === 'string') continue
-    if (!isPlainObject(entry)) {
-      throw new Error(`config \`env.${name}\` must be a string or a mapping`)
-    }
-    const parsed = EnvVar.safeParse(entry)
-    if (!parsed.success) {
-      const detail = parsed.error.issues[0]?.message ?? parsed.error.message
-      throw new Error(`config \`env.${name}\`: ${detail}`)
+  // The source table: one map, instance name -> declaration. Blocks
+  // validate through the core schema (the same one the workspace applies
+  // at build), so a pointer at a source that cannot bootstrap another
+  // fails at load naming the instance. The block travels raw: an
+  // instance name must not be camelized, and a source's own config keys
+  // are snake_case for the same reason a mount's are.
+  if (raw.secrets !== undefined && raw.secrets !== null) {
+    if (!isPlainObject(raw.secrets)) throw new Error('config `secrets` must be a mapping')
+    for (const [name, block] of Object.entries(raw.secrets)) {
+      if (!isPlainObject(block)) throw new Error(`config \`secrets.${name}\` must be a mapping`)
+      validateDocument('config', block, `config \`secrets.${name}\``, { names: 'source' })
+      const parsed = SecretSource.safeParse(block)
+      if (!parsed.success) {
+        const detail = parsed.error.issues[0]?.message ?? parsed.error.message
+        throw new Error(`config \`secrets.${name}\`: ${detail}`)
+      }
     }
   }
 }
@@ -443,7 +429,7 @@ export function normalizeConfigKeys(raw: Record<string, unknown>): Record<string
   }
   if (isPlainObject(out.store)) {
     const store = camelizeKeys(out.store)
-    for (const group of STORE_GROUPS) {
+    for (const group of ['namespace', 'logs', 'sessions', 'execution'] as const) {
       const block = store[group]
       if (!isPlainObject(block)) continue
       // An s3 group carries its backend's own spellings (`aws_access_key_id`
@@ -628,7 +614,7 @@ interface RedisStoreBlock {
  * An S3 group IS an S3Config plus the discriminator, so its keys are
  * the backend's, validated by the s3 config model rather than here.
  * It hosts only the sessions+meta plane (conditional-PUT CAS), so it
- * is valid as the `workspace` override and never as the default.
+ * is valid as the `sessions` override and never as the default.
  */
 interface S3StoreBlock {
   type: 's3'
@@ -640,10 +626,10 @@ export type StoreGroupBlock = RamStoreBlock | DiskStoreBlock | RedisStoreBlock |
 /**
  * The workspace state store: one block, five planes. The top-level
  * type/url/keyPrefix pick the default backend for every control-plane
- * group (namespace nodes, observer events, sessions + workspace
+ * group (namespace nodes, command logs, sessions + workspace
  * metadata, execution); the optional per-group overrides redirect one
  * group to a different backend. Sessions and workspace metadata move
- * together by design, so there is one `workspace` override, not two. A
+ * together by design, so there is one `sessions` override, not two. A
  * disk store keeps the execution plane in memory, since a job's console
  * is a stream other processes follow, so the `execution` group (job
  * lists, consoles, the workspace's lease, process records) is ram or
@@ -655,8 +641,8 @@ export interface StoreBlock {
   keyPrefix?: string
   root?: string
   namespace?: StoreGroupBlock | null
-  observer?: StoreGroupBlock | null
-  workspace?: StoreGroupBlock | null
+  logs?: StoreGroupBlock | null
+  sessions?: StoreGroupBlock | null
   execution?: StoreGroupBlock | null
 }
 
@@ -699,7 +685,7 @@ export interface ConfigHost {
   releaseNetwork(rule: NetworkRule): Promise<void>
 }
 
-export interface WorkspaceConfigRaw {
+export interface WorkspaceConfig {
   io?: Partial<IOConfig>
   commandLimits?: unknown
   /** What the RAM mounts store and a command builds may hold; null for no cap. */
@@ -743,7 +729,7 @@ export interface WorkspaceConfigRaw {
    * The environment plane: one map, name -> entry. A bare string is
    * the literal short form; a mapping is an env entry, either a
    * literal with attrs or a managed pointer (`from`/`ref`/`key`/
-   * `fetch`). Validated by `validateEnvBlock`, translated by the
+   * `fetch`). Validated by `validateConfigKeys`, translated by the
    * workspace.
    */
   env?: Record<string, unknown> | null
@@ -801,8 +787,8 @@ export function checkWorkspaceConfig(
 export function loadWorkspaceConfig(
   source: Record<string, unknown>,
   env?: Record<string, string> | null,
-): WorkspaceConfigRaw {
-  return normalizeConfigKeys(checkWorkspaceConfig(source, env)) as unknown as WorkspaceConfigRaw
+): WorkspaceConfig {
+  return normalizeConfigKeys(checkWorkspaceConfig(source, env)) as unknown as WorkspaceConfig
 }
 
 function buildIndexConfig(block: IndexBlock | null | undefined): IndexConfig | undefined {
@@ -827,7 +813,7 @@ function buildIndexConfig(block: IndexBlock | null | undefined): IndexConfig | u
  * a list nobody remembered to extend.
  */
 export async function configToWorkspaceArgs(
-  cfg: WorkspaceConfigRaw,
+  cfg: WorkspaceConfig,
   host: ConfigHost,
 ): Promise<{
   mounts: Record<string, Mount>
@@ -955,12 +941,6 @@ export async function configToWorkspaceArgs(
   }
 }
 
-/** Resolve a `cli:` value: a bare name stays a name, a ref loads a spec. */
-async function resolveCliRef(ref: string, name: string, host: ConfigHost): Promise<string | CLI> {
-  if (!ref.includes(':')) return ref
-  return asCliSpec(await host.loadRef(ref), name, ref)
-}
-
 /** Validate the shared grammar and execution shape from another core copy. */
 function looksLikeCliSpec(value: unknown): boolean {
   if (value === null || typeof value !== 'object') return false
@@ -998,18 +978,45 @@ function looksLikeCliSpec(value: unknown): boolean {
 }
 
 /**
- * Check that a `cli:` reference resolved to a program tree.
+ * Resolve one checked `clis:` entry to a registered name or a CLI; null
+ * for `cli: mcp`, which names no registered tree: the tree is its
+ * server's tool list. A `script` entry becomes a single-node CLI carrying
+ * the embedded source. Mirrors Python's `_cli_entry`.
  *
- * `instanceof` is the fast path, not the test. The referenced file lives
- * in someone else's project, which is the whole point of the ref form,
- * and that project may resolve its own copy of `@struktoai/mirage-core`:
- * a real CLI carrying every method, built off a different class
- * object. Demanding `instanceof` would refuse exactly the case this
- * exists to serve, so anything else is admitted on its shape instead,
- * and refused at create time rather than when an agent first types the
- * head word.
+ * A `cli` value carrying a colon points at code: `./tool.mjs:TALLY` (a
+ * file) or `my-clis:JIRA` (a package specifier). A bare name stays a name
+ * for the workspace to resolve against the registered specs. Mirrors the
+ * `":" in name` branch of Python's `cli_spec_for`, one layer up:
+ * `cliSpecFor` lives in core, which has no filesystem and is synchronous.
+ * A `vfs:` value reads the same way, resolved by `buildVfs` rather than
+ * here, because a mount block reaches the registry and a `clis` block
+ * does not.
+ *
+ * What a reference loads must be a program tree. `instanceof` is the
+ * fast path, not the test. The referenced file lives in someone else's
+ * project, which is the whole point of the ref form, and that project may
+ * resolve its own copy of `@struktoai/mirage-core`: a real CLI carrying
+ * every method, built off a different class object. Demanding
+ * `instanceof` would refuse exactly the case this exists to serve, so
+ * anything else is admitted on its shape instead, and refused at create
+ * time rather than when an agent first types the head word.
  */
-function asCliSpec(value: unknown, name: string, ref: string): CLI {
+async function cliEntry(
+  name: string,
+  block: Record<string, unknown>,
+  host: ConfigHost,
+): Promise<string | CLI | null> {
+  if (typeof block.script === 'string') {
+    return new CLI({
+      spec: new CommandSpec({ name }),
+      script: loadScriptSource(block.script, host),
+      runtime: (block.runtime as string | undefined) ?? null,
+    })
+  }
+  const ref = block.cli as string
+  if (ref === MCP_CLI) return null
+  if (!ref.includes(':')) return ref
+  const value = await host.loadRef(ref)
   if (value instanceof CLI) return value
   if (looksLikeCliSpec(value)) return new CLI(value as CLI)
   throw new Error(`clis entry '${name}': ${ref} is not a CLI`)
@@ -1031,7 +1038,9 @@ async function buildCliEntries(
     if (!isPlainObject(block)) {
       throw new Error(`clis entry '${name}' must be a mapping`)
     }
-    const unknown = Object.keys(block).filter((k) => !CLI_KEYS.includes(k))
+    const unknown = Object.keys(block).filter(
+      (k) => !['cli', 'script', 'runtime', 'config'].includes(k),
+    )
     if (unknown.length > 0) {
       throw new Error(
         `clis entry '${name}': unknown keys: ${unknown.sort(compareCodePoints).join(', ')}`,
@@ -1051,24 +1060,7 @@ async function buildCliEntries(
     if (block.config !== undefined && !isPlainObject(block.config)) {
       throw new Error(`clis entry '${name}': config must be a mapping`)
     }
-    // A `cli` value carrying a colon points at code: `./tool.mjs:TALLY`
-    // (a file) or `my-clis:JIRA` (a package specifier). A bare name stays
-    // a name for the workspace to resolve against the registered specs.
-    // Mirrors the `":" in name` branch of Python's `cli_spec_for`, one
-    // layer up: `cliSpecFor` lives in core, which has no filesystem and
-    // is synchronous. A `vfs:` value reads the same way, resolved by
-    // `buildVfs` rather than here, because a mount block reaches the
-    // registry and a `clis` block does not.
-    // `cli: mcp` names no registered tree: the tree is its server's tool list.
-    const entry = hasScript
-      ? new CLI({
-          spec: new CommandSpec({ name }),
-          script: loadScriptSource(block.script as string, host),
-          runtime: block.runtime ?? null,
-        })
-      : block.cli === MCP_CLI
-        ? null
-        : await resolveCliRef(block.cli as string, name, host)
+    const entry = await cliEntry(name, block, host)
     // A CLI credential reads a pointer the way a mount's does: the
     // account CLI's `config_model` is the same model a VFS
     // parses, so it must receive the credential, not the pointer.

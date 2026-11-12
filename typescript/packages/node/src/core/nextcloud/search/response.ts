@@ -85,7 +85,7 @@ function parseResponse(response: XmlElement, target: SearchTarget): SearchEntry 
   }
 }
 
-function validateXml(content: string): void {
+export function parsePage(content: string, target: SearchTarget): SearchEntry[] {
   try {
     const validation = SyntaxValidator.validate(content)
     if (validation !== true) throw new Error(validation.err.msg)
@@ -93,10 +93,6 @@ function validateXml(content: string): void {
     const message = error instanceof Error ? error.message : String(error)
     throw new Error(`invalid Nextcloud Files Search XML: ${message}`, { cause: error })
   }
-}
-
-export function parsePage(content: string, target: SearchTarget): SearchEntry[] {
-  validateXml(content)
   const parsed = parser.parse(content) as unknown
   if (!isRecord(parsed) || !('multistatus' in parsed)) {
     throw new Error('invalid Nextcloud Files Search response')

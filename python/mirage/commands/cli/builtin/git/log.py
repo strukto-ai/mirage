@@ -79,39 +79,6 @@ BOUNDARY_PREFIX = b"- "
 COMMIT_WORD = b"commit "
 
 
-def _collect(
-    repo: BaseRepo,
-    revisions: tuple[str, ...],
-    flags: LogFlags,
-    diff: DiffFlags,
-    dashed: bool = False,
-) -> tuple[list[Commit], Walk, Decorations | None]:
-    """Resolve the starting points and walk them, synchronously.
-
-    Runs on a worker thread. dulwich's walker is synchronous and now
-    fetches objects as it goes, so it has to sit off the event loop that
-    serves those fetches; enumerating refs and peeling tags fetch the
-    same way, which is why ``--all`` and the decoration table are
-    resolved here too.
-
-    Args:
-        repo (BaseRepo): repository to walk.
-        revisions (tuple[str, ...]): the revisions and ranges to walk,
-            HEAD when none was given.
-        flags (LogFlags): the parsed invocation, whose decoration style
-            says whether to load ref labels and how to spell them.
-        diff (DiffFlags): the diff the pickaxe searches.
-        dashed (bool): whether ``--`` is on the line, which makes an
-            operand that resolves to nothing a bad revision.
-    """
-    starts, hidden = walk_ends(repo, revisions or (HEAD,), dashed)
-    if flags.all_refs:
-        starts.extend(ref_commits(repo))
-    decor = decorations(repo, flags.decorate)
-    walk = walked(repo, starts, flags, tuple(hidden), diff)
-    return in_print_order(walk, flags), walk, decor
-
-
 def _marked(entry: bytes, kind: str) -> bytes:
     """A ``--boundary`` commit's entry outside ``--graph``: a oneline row
     starts ``- ``, and a block preset's header reads ``commit - <id>``;
@@ -382,9 +349,20 @@ async def log(
     diff_flags = replace(
         diff_flags, pickaxe=parsed.pickaxe, pathspecs=patterns
     )
-    commits, walk, decor = await asyncio.to_thread(
-        _collect, repo, revisions, parsed, diff_flags, dashed
-    )
+
+    def collect() -> tuple[list[Commit], Walk, Decorations | None]:
+        # On a worker thread: dulwich's walker is synchronous and fetches
+        # objects as it goes, so it has to sit off the event loop that
+        # serves those fetches; enumerating refs (--all) and peeling tags
+        # for the decoration table fetch the same way.
+        starts, hidden = walk_ends(repo, revisions or (HEAD,), dashed)
+        if parsed.all_refs:
+            starts.extend(ref_commits(repo))
+        decor = decorations(repo, parsed.decorate)
+        walk = walked(repo, starts, parsed, tuple(hidden), diff_flags)
+        return in_print_order(walk, parsed), walk, decor
+
+    commits, walk, decor = await asyncio.to_thread(collect)
     boundary = frozenset(commit.id for commit in walk.boundary)
     if not diffing:
         out = (

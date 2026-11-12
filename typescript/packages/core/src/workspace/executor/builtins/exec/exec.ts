@@ -289,23 +289,6 @@ export async function routeRebound(
   return route(dispatch, session, binding, data, stdout ? TO_STDOUT : TO_STDERR)
 }
 
-type StreamBindings = Pick<SessionState, (typeof EXEC_STREAM_FIELDS)[number] | 'descriptors'>
-
-function bindingsOf(session: SessionState): StreamBindings {
-  return {
-    descriptors: new Map(session.descriptors),
-    execStdout: session.execStdout,
-    execStdoutAppend: session.execStdoutAppend,
-    execStdoutInput: session.execStdoutInput,
-    execStderr: session.execStderr,
-    execStderrAppend: session.execStderrAppend,
-    execStderrInput: session.execStderrInput,
-    execStdin: session.execStdin,
-    execStdinUnreadable: session.execStdinUnreadable,
-    execStdinIdentity: session.execStdinIdentity,
-  }
-}
-
 /**
  * Undo a redirect list that failed part-way, the way bash does: it keeps
  * the side effect of opening each earlier target (`exec >f </missing`
@@ -318,7 +301,7 @@ function bindingsOf(session: SessionState): StreamBindings {
 async function rollBack(
   dispatch: DispatchFn,
   session: SessionState,
-  saved: StreamBindings,
+  saved: Partial<SessionState>,
   err: Uint8Array,
 ): Promise<RedirectResult> {
   const partial = session.execStderr
@@ -347,7 +330,18 @@ export async function installExecRedirects(
   if (badFd !== null) return execFailure(badDescriptorLine(badFd))
   const before = session.openInputs()
   const owned: SharedInput[] = []
-  const saved = bindingsOf(session)
+  const saved: Pick<SessionState, (typeof EXEC_STREAM_FIELDS)[number] | 'descriptors'> = {
+    descriptors: new Map(session.descriptors),
+    execStdout: session.execStdout,
+    execStdoutAppend: session.execStdoutAppend,
+    execStdoutInput: session.execStdoutInput,
+    execStderr: session.execStderr,
+    execStderrAppend: session.execStderrAppend,
+    execStderrInput: session.execStderrInput,
+    execStdin: session.execStdin,
+    execStdinUnreadable: session.execStdinUnreadable,
+    execStdinIdentity: session.execStdinIdentity,
+  }
   let err: Uint8Array | null
   try {
     err = await install(owned, dispatch, session, redirects, stdin, expand)
@@ -527,7 +521,14 @@ export async function divertStatement(
   const rest: Written[] = []
   let failed = false
   let unwritable = false
-  const grouped = runs(written)
+  // Adjacent chunks of one stream and one kind joined, in order.
+  const grouped: Written[] = []
+  for (const [channel, data, kept] of written) {
+    const last = grouped[grouped.length - 1]
+    if (last?.[0] === channel && last[2] === kept)
+      grouped[grouped.length - 1] = [channel, asyncChain([last[1], data]), kept]
+    else grouped.push([channel, data, kept])
+  }
   for (const [index, [channel, data, kept]] of grouped.entries()) {
     if (kept) {
       rest.push([channel, data, true])
@@ -567,18 +568,6 @@ export async function divertStatement(
   }
   if (io.exitCode !== earned) recordStatus(session, io.exitCode)
   return rest
-}
-
-/** Adjacent chunks of one stream and one kind joined, in order. */
-function runs(written: readonly Written[]): Written[] {
-  const out: Written[] = []
-  for (const [channel, data, kept] of written) {
-    const last = out[out.length - 1]
-    if (last?.[0] === channel && last[2] === kept)
-      out[out.length - 1] = [channel, asyncChain([last[1], data]), kept]
-    else out.push([channel, data, kept])
-  }
-  return out
 }
 
 /** Route one run of output through its stream's binding, adding what

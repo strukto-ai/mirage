@@ -118,15 +118,10 @@ export function registerTemplatesRoutes(
     stored(registry, async () => present(await resources.getTemplate(req.params.ref))),
   )
 
-  // Deleted, not wiped: restore brings it back.
   app.delete<{ Params: RefParams }>('/v1/templates/:ref', (req, reply) =>
     stored(registry, async () => {
       await resources.deleteTemplate(req.params.ref)
       return reply.status(204).send()
     }),
-  )
-
-  app.post<{ Params: RefParams }>('/v1/templates/:ref/restore', (req) =>
-    stored(registry, async () => present(await resources.restoreTemplate(req.params.ref))),
   )
 }

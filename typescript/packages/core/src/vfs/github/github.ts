@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
-import { fetchRepoInfo as fetchGitHubRepoInfo } from '../../core/github/client.ts'
 import { GitHubConfig } from '../../core/github/config.ts'
 import { COMMIT_SHA, WALK_LIMIT } from '../../core/github/constants.ts'
 import { readMany as githubReadMany, readStream as githubStream } from '../../core/github/read.ts'
 import { readdir as githubReaddir } from '../../core/github/readdir.ts'
+import { fetchDefaultBranch } from '../../core/github/repo.ts'
 import { filesContaining as githubFilesContaining } from '../../core/github/search.ts'
 import { stat as githubStat, tree as githubTree } from '../../core/github/stat.ts'
 import {
@@ -89,8 +89,8 @@ export class GitHubVFS extends BaseVFS {
         ? { token: config.token }
         : { token: config.token, baseUrl: config.baseUrl },
     )
-    const repoInfo = await fetchGitHubRepoInfo(account.transport, config.owner, config.repo)
-    const ref = config.ref ?? repoInfo.default_branch
+    const defaultBranch = await fetchDefaultBranch(account.transport, config.owner, config.repo)
+    const ref = config.ref ?? defaultBranch
     const { tree, truncated } = await fetchGitHubTree(
       account.transport,
       config.owner,
@@ -103,7 +103,7 @@ export class GitHubVFS extends BaseVFS {
       owner: config.owner,
       repo: config.repo,
       ref,
-      defaultBranch: repoInfo.default_branch,
+      defaultBranch,
       truncated,
       tree: treeMap,
     })

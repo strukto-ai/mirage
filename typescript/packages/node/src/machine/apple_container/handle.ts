@@ -51,6 +51,11 @@ export class AppleContainerMachine extends ProgramMachine<AppleContainerConfig> 
     requireId('apple_container', 'container', this.config.container)
   }
 
+  /** The container Apple's container runs it in. */
+  override get instance(): string {
+    return this.config.container
+  }
+
   protected execWords(): readonly [readonly string[], readonly string[]] {
     return [['exec', '-i'], [this.config.container]]
   }

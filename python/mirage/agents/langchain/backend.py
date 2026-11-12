@@ -88,35 +88,6 @@ BINARY_EXTENSIONS = frozenset(
         ".wmv",
     }
 )
-COMMAND_SUCCESS_EXIT_CODES = frozenset({0})
-GREP_SUCCESS_EXIT_CODES = frozenset({0, 1})
-
-
-def _is_binary(file_path: str, data: bytes) -> bool:
-    suffix = PurePosixPath(file_path).suffix.lower()
-    if suffix in BINARY_EXTENSIONS or b"\x00" in data:
-        return True
-    try:
-        data.decode("utf-8")
-    except UnicodeDecodeError:
-        return True
-    return False
-
-
-def _to_read_result(
-    file_path: str, data: bytes, offset: int, limit: int
-) -> ReadResult:
-    if _is_binary(file_path, data):
-        content = base64.standard_b64encode(data).decode("ascii")
-        return ReadResult(
-            file_data=FileData(content=content, encoding="base64")
-        )
-
-    return slice_read_response(
-        FileData(content=data.decode("utf-8"), encoding="utf-8"),
-        offset,
-        limit,
-    )
 
 
 def _relative_to(root: str, path: str) -> str:
@@ -132,7 +103,7 @@ async def _capped(io: IOResult) -> bool:
 
 async def _command_error(
     io: IOResult,
-    success_exit_codes: frozenset[int] = COMMAND_SUCCESS_EXIT_CODES,
+    success_exit_codes: frozenset[int] = frozenset({0}),
 ) -> str | None:
     if io.exit_code in success_exit_codes:
         return None
@@ -249,7 +220,23 @@ class LangchainWorkspace(SandboxBackendProtocol):
             data = await ops.read(file_path)
         except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
             return ReadResult(error=f"Error: {exc}")
-        return _to_read_result(file_path, data, offset, limit)
+        suffix = PurePosixPath(file_path).suffix.lower()
+        try:
+            text = (
+                None
+                if suffix in BINARY_EXTENSIONS or b"\x00" in data
+                else data.decode("utf-8")
+            )
+        except UnicodeDecodeError:
+            text = None
+        if text is None:
+            content = base64.standard_b64encode(data).decode("ascii")
+            return ReadResult(
+                file_data=FileData(content=content, encoding="base64")
+            )
+        return slice_read_response(
+            FileData(content=text, encoding="utf-8"), offset, limit
+        )
 
     # ── write ────────────────────────────────────────────────
 
@@ -369,7 +356,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
         parts.append(shlex.quote(root))
         io = await self._exec(" ".join(parts))
         await io.materialize_stdout()
-        error = await _command_error(io, GREP_SUCCESS_EXIT_CODES)
+        error = await _command_error(io, frozenset({0, 1}))
         if error:
             return GrepResult(error=error)
         matches = io_to_grep_matches(io)

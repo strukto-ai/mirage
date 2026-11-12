@@ -31,16 +31,12 @@ export function asRows(value: unknown): Row[] {
   return Array.isArray(value) ? value.filter(isRow) : []
 }
 
-function field(row: Row, key: string): unknown {
-  return row[key] ?? null
-}
-
 /** One base as the listing names it: id, name and permission level. */
 export function normalizeBaseSummary(base: Row): Row {
   return {
-    base_id: field(base, 'id'),
-    base_name: field(base, 'name'),
-    permission_level: field(base, 'permissionLevel'),
+    base_id: base.id ?? null,
+    base_name: base.name ?? null,
+    permission_level: base.permissionLevel ?? null,
   }
 }
 
@@ -49,9 +45,9 @@ export function normalizeBase(base: Row, tables: readonly Row[]): Row {
   return {
     ...normalizeBaseSummary(base),
     tables: tables.map((table) => ({
-      table_id: field(table, 'id'),
-      table_name: field(table, 'name'),
-      primary_field_id: field(table, 'primaryFieldId'),
+      table_id: table.id ?? null,
+      table_name: table.name ?? null,
+      primary_field_id: table.primaryFieldId ?? null,
     })),
   }
 }
@@ -59,31 +55,31 @@ export function normalizeBase(base: Row, tables: readonly Row[]): Row {
 /** One column: its id, name, type and the type's options. */
 export function normalizeField(column: Row): Row {
   return {
-    field_id: field(column, 'id'),
-    field_name: field(column, 'name'),
-    type: field(column, 'type'),
-    description: field(column, 'description'),
-    options: field(column, 'options'),
+    field_id: column.id ?? null,
+    field_name: column.name ?? null,
+    type: column.type ?? null,
+    description: column.description ?? null,
+    options: column.options ?? null,
   }
 }
 
 /** One saved view: its id, name and kind (grid, kanban, ...). */
 export function normalizeView(view: Row): Row {
   return {
-    view_id: field(view, 'id'),
-    view_name: field(view, 'name'),
-    type: field(view, 'type'),
+    view_id: view.id ?? null,
+    view_name: view.name ?? null,
+    type: view.type ?? null,
   }
 }
 
 /** table.json: the column schema and the saved views. */
 export function normalizeTable(table: Row, baseId: string): Row {
   return {
-    table_id: field(table, 'id'),
-    table_name: field(table, 'name'),
+    table_id: table.id ?? null,
+    table_name: table.name ?? null,
     base_id: baseId,
-    description: field(table, 'description'),
-    primary_field_id: field(table, 'primaryFieldId'),
+    description: table.description ?? null,
+    primary_field_id: table.primaryFieldId ?? null,
     fields: asRows(table.fields).map(normalizeField),
     views: asRows(table.views).map(normalizeView),
   }
@@ -97,8 +93,8 @@ export function normalizeTable(table: Row, baseId: string): Row {
  */
 export function normalizeRecord(record: Row): Row {
   return {
-    record_id: field(record, 'id'),
-    created_time: field(record, 'createdTime'),
+    record_id: record.id ?? null,
+    created_time: record.createdTime ?? null,
     fields: asRow(record.fields),
   }
 }
@@ -107,19 +103,19 @@ export function normalizeRecord(record: Row): Row {
 export function normalizeComment(comment: Row): Row {
   const who = asRow(comment.author)
   return {
-    comment_id: field(comment, 'id'),
-    author_id: field(who, 'id'),
-    author_email: field(who, 'email'),
-    author_name: field(who, 'name'),
-    text: field(comment, 'text'),
-    created_time: field(comment, 'createdTime'),
-    last_updated_time: field(comment, 'lastUpdatedTime'),
+    comment_id: comment.id ?? null,
+    author_id: who.id ?? null,
+    author_email: who.email ?? null,
+    author_name: who.name ?? null,
+    text: comment.text ?? null,
+    created_time: comment.createdTime ?? null,
+    last_updated_time: comment.lastUpdatedTime ?? null,
   }
 }
 
 /** One deleted record, as the delete answer names it. */
 export function normalizeDeletion(row: Row): Row {
-  return { record_id: field(row, 'id'), deleted: field(row, 'deleted') }
+  return { record_id: row.id ?? null, deleted: row.deleted ?? null }
 }
 
 /** Render records one per line, in the order they were listed. */

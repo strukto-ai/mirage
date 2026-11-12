@@ -10,7 +10,6 @@ from mirage.commands.cli.builtin.git.constants import GITLINK
 from mirage.commands.cli.builtin.git.errors import EmptyTreeNameError, GitError
 from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.io import (
-    file_size,
     read_file,
     read_names,
     read_optional,
@@ -45,7 +44,7 @@ async def check_pack(vfs: Files, path: PathSpec, expected: bytes) -> None:
     tail = b""
     offset = 0
     try:
-        size = await file_size(vfs, path)
+        size = (await vfs.stat(path)).size
         while size is None or offset < size:
             count = (
                 PACK_BLOCK if size is None else min(PACK_BLOCK, size - offset)
@@ -124,23 +123,6 @@ async def log_roots(vfs: Files, path: PathSpec) -> set[bytes]:
     return found
 
 
-def links(obj: ShaFile) -> list[bytes]:
-    """Object links, excluding gitlinks into other repositories.
-
-    Args:
-        obj (ShaFile): a validated object.
-    """
-    if isinstance(obj, Commit):
-        return [obj.tree, *obj.parents]
-    if isinstance(obj, Tree):
-        return [
-            entry.sha for entry in obj.iteritems() if entry.mode != GITLINK
-        ]
-    if isinstance(obj, Tag):
-        return [obj.object[1]]
-    return []
-
-
 def reachable(
     roots: set[bytes], edges: dict[bytes, list[bytes]]
 ) -> set[bytes]:
@@ -189,7 +171,19 @@ def check(
             if obj.id != oid:
                 raise ValueError("hash mismatch")
             objects[oid] = obj
-            edges[oid] = links(obj)
+            if isinstance(obj, Commit):
+                edges[oid] = [obj.tree, *obj.parents]
+            elif isinstance(obj, Tree):
+                # A gitlink points into another repository.
+                edges[oid] = [
+                    entry.sha
+                    for entry in obj.iteritems()
+                    if entry.mode != GITLINK
+                ]
+            elif isinstance(obj, Tag):
+                edges[oid] = [obj.object[1]]
+            else:
+                edges[oid] = []
             referenced.update(edges[oid])
         except Exception as exc:
             if isinstance(exc, EmptyTreeNameError):

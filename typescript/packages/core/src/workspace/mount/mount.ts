@@ -93,7 +93,6 @@ import {
   type ReadSpec,
   type SearchQuery,
   type SetAttrFields,
-  type WalkProbe,
   WritePolicy,
 } from '../../types.ts'
 import { Activity } from '../../utils/activity.ts'
@@ -354,15 +353,6 @@ export interface MountInit {
   vfsRef?: string | null
   /** Where the mount's id is drawn; omitted means the system source. */
   ids?: IdSource
-}
-
-// What the walk guard proves an operand's `.` and `..` with: the
-// dispatcher's stat and link follow, bound around the handler. No session
-// files (a mount driven directly) binds nothing. Mirrors the Python
-// set_walk_probe binding in Mount.run_command.
-function walkProbeOf(ctx: Partial<Context>): WalkProbe | null {
-  if (ctx.vfs === undefined) return null
-  return { stat: dispatchStat(ctx.vfs.dispatch), follow: linkFollow(linkView(ctx.vfs)) }
 }
 
 /**
@@ -733,7 +723,15 @@ export class MountEntry {
     for (const name of this.generalCmds.keys()) {
       if (!result.has(name)) result.set(name, [])
     }
-    return sortFiletypeMap(result)
+    const out: Record<string, (string | null)[]> = {}
+    for (const name of [...result.keys()].sort(compareCodePoints)) {
+      out[name] = (result.get(name) ?? []).sort((a, b) =>
+        a === null || b === null
+          ? Number(a !== null) - Number(b !== null)
+          : compareCodePoints(a, b),
+      )
+    }
+    return out
   }
 
   /**
@@ -1869,9 +1867,8 @@ export class MountEntry {
           }),
         ]
       }
-      const probe = walkProbeOf(ctx)
       const access = ctx.session?.access()
-      return this.inCommandScope(probe, async (): Promise<[ByteSource | null, IOResult]> => {
+      return this.inCommandScope(ctx, async (): Promise<[ByteSource | null, IOResult]> => {
         for (const cmd of handlers) {
           const user = this.isUserCommand(cmd)
           const operands = user ? this.keyedPaths(cmdName, paths) : paths.map(virtualKey)
@@ -2036,14 +2033,28 @@ export class MountEntry {
    * with, the recorder's mount, the mount's cache manager and write context,
    * and the snapshot revision pins. Mirrors Python's MountEntry._command_scope.
    */
-  private inCommandScope<T>(probe: WalkProbe | null, fn: () => Promise<T>): Promise<T> {
+  /**
+   * Run a handler with what its calls read from the context: the mount it
+   * runs on, its cache manager, and the dispatcher's stat and link follow
+   * the walk guard proves an operand's `.` and `..` with. No session files
+   * (a mount driven directly) binds no probe. Mirrors Python's
+   * `_command_scope`.
+   */
+  private inCommandScope<T>(ctx: Partial<Context>, fn: () => Promise<T>): Promise<T> {
     const outer = currentCaller()
+    const files = ctx.vfs
     return runWithCaller(
       {
         ...this.onMount(outer),
         cache: { manager: this.cacheManager },
         mount: [this.prefix, this.mode],
-        walkProbe: probe === null ? outer.walkProbe : [this.prefix, probe],
+        walkProbe:
+          files === undefined
+            ? outer.walkProbe
+            : [
+                this.prefix,
+                { stat: dispatchStat(files.dispatch), follow: linkFollow(linkView(files)) },
+              ],
       },
       fn,
     )
@@ -2177,11 +2188,10 @@ export class MountEntry {
     })
     return this.use(async (): Promise<CommandFnResult> => {
       const keyedPaths = this.keyedPaths(prog, paths)
-      const probe = walkProbeOf(ctx)
       const access = ctx.session?.access()
       const flags = this.keyedFlags(ctx.flags)
       const runCtx = this.commandCtx(flags, ctx, this.prefix)
-      return this.inCommandScope(probe, async (): Promise<CommandFnResult> => {
+      return this.inCommandScope(ctx, async (): Promise<CommandFnResult> => {
         // No flag here is answered for the leaf: walkLeaf answered the
         // tree's own help, and the leaf is handed the rest.
         const refusal = this.commandRefusal(prog, leaf, {}, access, root)
@@ -2458,21 +2468,4 @@ function wrapMountStreams(
   const [stream, io] = result
   if (stream === null || stream instanceof Uint8Array) return [stream, io]
   return [activity.hold(withCaller(stream, currentCaller())), io]
-}
-
-function sortFiletypeMap(m: Map<string, (string | null)[]>): Record<string, (string | null)[]> {
-  const out: Record<string, (string | null)[]> = {}
-  for (const k of [...m.keys()].sort(compareCodePoints)) {
-    const list = m.get(k) ?? []
-    list.sort((a, b) => {
-      const aKey = a === null ? 0 : 1
-      const bKey = b === null ? 0 : 1
-      if (aKey !== bKey) return aKey - bKey
-      const as = a ?? ''
-      const bs = b ?? ''
-      return compareCodePoints(as, bs)
-    })
-    out[k] = list
-  }
-  return out
 }

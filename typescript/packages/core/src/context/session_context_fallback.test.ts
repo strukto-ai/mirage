@@ -36,7 +36,7 @@ import { expandPattern, resolveGlobWith } from '../utils/glob_walk.ts'
 import { pathVisible } from '../utils/hidden.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import type { Handed } from '../vfs/types.ts'
-import { newStatusWriter, runWithLineAbort } from '../workspace/abort.ts'
+import { runWithLineAbort } from '../workspace/abort.ts'
 import { EvaluationContext } from '../workspace/evaluation.ts'
 import { handleXargs as streamXargs } from '../workspace/executor/builtins/xargs/xargs.ts'
 import { Files, readerOf } from '../workspace/files.ts'
@@ -1357,7 +1357,7 @@ it('glob traversal keeps its captured signal across overlapping fallback session
     }
     return calls === 2 ? ['/root/one/file'] : ['/second/file']
   }
-  const work = runWithLineAbort(wanted.signal, [first], newStatusWriter(), () =>
+  const work = runWithLineAbort(wanted.signal, [first], Symbol('line'), () =>
     runWithEvaluation(new EvaluationContext(first), () =>
       resolveGlobWith(
         read,
@@ -1383,7 +1383,7 @@ it('glob traversal keeps its captured signal across overlapping fallback session
     ),
   )
   await listed
-  const overlap = runWithLineAbort(unwanted.signal, [other], newStatusWriter(), () =>
+  const overlap = runWithLineAbort(unwanted.signal, [other], Symbol('line'), () =>
     runWithEvaluation(new EvaluationContext(other), () => otherHold),
   )
   try {
@@ -1391,7 +1391,7 @@ it('glob traversal keeps its captured signal across overlapping fallback session
     expect((await work).map((path) => path.virtual)).toEqual(['/root/one/file', '/second/file'])
     wanted.abort()
     await expect(
-      runWithLineAbort(wanted.signal, [first], newStatusWriter(), () =>
+      runWithLineAbort(wanted.signal, [first], Symbol('line'), () =>
         runWithEvaluation(new EvaluationContext(first), () =>
           expandPattern(read, null, PathSpec.fromStrPath('/root/*/*', '/*/*')),
         ),
@@ -1423,7 +1423,7 @@ it.each([true, false])(
     const work = runWithLineAbort(
       withSignal ? wanted.signal : undefined,
       [first],
-      newStatusWriter(),
+      Symbol('line'),
       () =>
         runWithEvaluation(new EvaluationContext(first), () =>
           searchScope(tree, null, [
@@ -1438,7 +1438,7 @@ it.each([true, false])(
         ),
     )
     await loaded
-    const overlap = runWithLineAbort(unwanted.signal, [other], newStatusWriter(), () =>
+    const overlap = runWithLineAbort(unwanted.signal, [other], Symbol('line'), () =>
       runWithEvaluation(new EvaluationContext(other), () => otherHold),
     )
     try {

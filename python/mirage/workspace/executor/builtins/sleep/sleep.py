@@ -30,7 +30,7 @@ from mirage.io import IOResult
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
-from mirage.utils.abort import cancellable_sleep
+from mirage.utils.abort import sleep
 from mirage.workspace.executor.builtins.sleep.constants import (
     SLEEP_INTERVAL,
     SLEEP_SUFFIXES,
@@ -243,7 +243,7 @@ async def handle_sleep(
             IOResult(exit_code=1, stderr=err),
             ExecutionNode(command="sleep", exit_code=1),
         )
-    await cancellable_sleep(total, cancel)
+    await sleep(total, cancel)
     await while_paused()
     return None, IOResult(), ExecutionNode(command="sleep", exit_code=0)
 

@@ -53,6 +53,11 @@ class DaytonaMachine(MachineHandle):
     _client: Any = None
     _sandbox: Any = None
 
+    @property
+    def instance(self) -> str:
+        """The sandbox's id at Daytona."""
+        return self.config.sandbox_id
+
     async def connect(self) -> None:
         if sdk.AsyncDaytona is None:
             raise ImportError(sdk_install_hint("daytona"))

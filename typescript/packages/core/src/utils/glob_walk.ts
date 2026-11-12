@@ -15,7 +15,7 @@
 import { callerSignal } from '../context/session_context.ts'
 import { dotglobActive, extglobActive, sessionVisibility } from '../context/session_context.ts'
 import { pathVisible } from './hidden.ts'
-import type { FollowOperands, SessionAccess } from '../view/types.ts'
+import type { FollowOperands, LinkTargetStat, SessionAccess } from '../view/types.ts'
 import { type FileStat, FileType, PathSpec, type ReaddirFn, type StatFn } from '../types.ts'
 import { isFsError } from '../errors/fs.ts'
 import { GlobLimitError } from '../errors/types.ts'
@@ -192,7 +192,6 @@ const GLOB_CHAR_OF: Readonly<Record<string, string>> = Object.fromEntries(
 // One native pass, not a per-character rebuild: every expanded word is
 // marked and unmarked, so a JS-level loop made the cost quadratic in a
 // loop that grows one word (`while true; do export X=$X.; done`).
-const GLOB_CHAR_RE = /[*?[@+!()|]/g
 const GLOB_MARK_RE = /[\uFDD0-\uFDD8]/g
 
 export function hasGlob(segment: string, access?: SessionAccess): boolean {
@@ -204,7 +203,7 @@ export function hasGlob(segment: string, access?: SessionAccess): boolean {
 
 // Quote every glob character, the way enclosing quotes would.
 export function markGlobs(text: string): string {
-  return text.replace(GLOB_CHAR_RE, (ch) => GLOB_MARKS[ch] ?? ch)
+  return text.replace(/[*?[@+!()|]/g, (ch) => GLOB_MARKS[ch] ?? ch)
 }
 
 // The literal spelling: every quoted glob character as itself.
@@ -338,24 +337,6 @@ export function spellMatch(
   return [...head.map(unmarkGlobs), ...tail].join('/')
 }
 
-// Shared resolve_glob loop: resolved specs pass through, pattern specs
-// expand segment-by-segment (mid-path aware, spelled as typed), an
-// unmatched glob word stays the literal (bash nullglob off: the command
-// then errors on it like GNU), and a pattern matching more than `limit`
-// paths is refused (`GlobLimitError`), not cut short; -1 for no limit.
-// Per-backend glob modules bind their own readdir.
-//
-// The spec shape is how a caller chooses between the two answers, and the
-// choice matters because the literal is not distinguishable from a match by
-// looking at it: a file may be named exactly like the word that globbed for
-// it. A word-shaped spec asks for bash's own answer, literal included. A
-// directory-shaped spec (`PathSpec.dir`) asks for matches alone, so an empty
-// list means nothing matched -- what a caller merging these matches with
-// another source needs, since only it can tell whether the union is empty.
-// The namespace's stat of what an owed name points at, resolved through
-// the workspace: null when the link dangles or loops.
-export type TargetStat = (virtual: string) => Promise<FileStat | null>
-
 // Whether a match is a directory, the way a trailing slash asks. One stat
 // per match, served from the index the readdir just filled. A link's own
 // row is followed through `targetStat`, which stats what the link reaches,
@@ -367,7 +348,7 @@ async function isDirectory<A, I>(
   accessor: A,
   match: PathSpec,
   index: I | undefined,
-  targetStat: TargetStat | undefined,
+  targetStat: LinkTargetStat | undefined,
 ): Promise<boolean> {
   if (stat === undefined) return true
   let row: FileStat
@@ -384,6 +365,20 @@ async function isDirectory<A, I>(
   return row.type === FileType.DIRECTORY
 }
 
+// Shared resolve_glob loop: resolved specs pass through, pattern specs
+// expand segment-by-segment (mid-path aware, spelled as typed), an
+// unmatched glob word stays the literal (bash nullglob off: the command
+// then errors on it like GNU), and a pattern matching more than `limit`
+// paths is refused (`GlobLimitError`), not cut short; -1 for no limit.
+// Per-backend glob modules bind their own readdir.
+//
+// The spec shape is how a caller chooses between the two answers, and the
+// choice matters because the literal is not distinguishable from a match by
+// looking at it: a file may be named exactly like the word that globbed for
+// it. A word-shaped spec asks for bash's own answer, literal included. A
+// directory-shaped spec (`PathSpec.dir`) asks for matches alone, so an empty
+// list means nothing matched -- what a caller merging these matches with
+// another source needs, since only it can tell whether the union is empty.
 export async function resolveGlobWith<A, I>(
   readdir: (accessor: A, path: PathSpec, index?: I) => Promise<string[]>,
   accessor: A,
@@ -391,7 +386,7 @@ export async function resolveGlobWith<A, I>(
   index: I | undefined,
   limit = -1,
   stat?: (accessor: A, path: PathSpec, index?: I) => Promise<FileStat>,
-  targetStat?: TargetStat,
+  targetStat?: LinkTargetStat,
   access?: SessionAccess,
   follow?: FollowOperands,
   signal: AbortSignal | null = callerSignal() ?? null,
@@ -609,7 +604,7 @@ export function makeResolveGlob(
   readdir: ReaddirFn,
   limit = -1,
   stat?: StatFn,
-  targetStat?: TargetStat,
+  targetStat?: LinkTargetStat,
   access?: SessionAccess,
   follow?: FollowOperands,
   resolved?: (found: PathSpec[]) => void,

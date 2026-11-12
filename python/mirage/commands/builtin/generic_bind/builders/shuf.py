@@ -57,7 +57,30 @@ async def shuf(
         ctx (Context): flags and stdin from the dispatcher.
     """
     try:
-        return await _shuf(accessor, paths, texts, ctx)
+        parsed = parse_flags(ctx.flags)
+        if isinstance(parsed, IOResult):
+            return None, parsed
+        files = command_files(ctx, paths)
+        if paths:
+            paths = await files.resolve_glob(paths)
+        return await generic_shuf(
+            paths,
+            texts,
+            read=files.read,
+            stdin=ctx.stdin,
+            count=parsed.count,
+            echo=parsed.echo,
+            zero_terminated=parsed.zero_terminated,
+            with_replacement=parsed.with_replacement,
+            input_range=parsed.input_range,
+            output=parsed.output,
+            # Only ``-o`` writes, so a read-only backend still serves plain
+            # shuf: without a write of its own it is refused at ``-o``.
+            write_bytes=(files.write if files.answers("write") else None),
+            root=mount_root(ctx),
+            ids=ctx.ids,
+            random_source=parsed.random_source,
+        )
     except ValueError as exc:
         # Every user-facing refusal becomes an IOResult, but a `-o` on a
         # backend with no write op is a wiring fault and the TypeScript
@@ -65,38 +88,6 @@ async def shuf(
         if str(exc) == NO_WRITE_OP:
             raise
         return None, IOResult(exit_code=1, stderr=f"{exc}\n".encode())
-
-
-async def _shuf(
-    accessor: Accessor,
-    paths: list[PathSpec],
-    texts: list[str],
-    ctx: Context,
-) -> tuple[ByteSource | None, IOResult]:
-    parsed = parse_flags(ctx.flags)
-    if isinstance(parsed, IOResult):
-        return None, parsed
-    files = command_files(ctx, paths)
-    if paths:
-        paths = await files.resolve_glob(paths)
-    return await generic_shuf(
-        paths,
-        texts,
-        read=files.read,
-        stdin=ctx.stdin,
-        count=parsed.count,
-        echo=parsed.echo,
-        zero_terminated=parsed.zero_terminated,
-        with_replacement=parsed.with_replacement,
-        input_range=parsed.input_range,
-        output=parsed.output,
-        # Only ``-o`` writes, so a read-only backend still serves plain
-        # shuf: without a write of its own it is refused at ``-o``.
-        write_bytes=(files.write if files.answers("write") else None),
-        root=mount_root(ctx),
-        ids=ctx.ids,
-        random_source=parsed.random_source,
-    )
 
 
 BUILDER = GenericCommand("shuf", shuf, write=True, read=True, facts=facts)

@@ -18,6 +18,7 @@ import pytest
 
 from mirage.commands.config import Context, command
 from mirage.commands.spec import CommandSpec
+from mirage.context import reset_caller
 from mirage.io.types import IOResult
 from mirage.mount.core import MountCore
 from mirage.policy import Action, Deny, Policy, VfsContext
@@ -35,7 +36,6 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.session import (
     env_snapshot,
-    reset_current_session,
     set_current_session,
 )
 from mirage.workspace.session.state import seed_var, set_attr
@@ -455,7 +455,7 @@ def test_facade_symlink_respects_the_sessions_view():
             with pytest.raises(FileNotFoundError):
                 await ws.vfs.symlink("/b/lk", "y.txt")
         finally:
-            reset_current_session(token)
+            reset_caller(token)
 
     asyncio.run(run())
     assert ws.namespace.is_link("/a/lk")
@@ -948,7 +948,7 @@ def test_ops_read_of_a_hidden_path_is_enoent():
             with pytest.raises(FileNotFoundError):
                 await ws.vfs.read("/a/note.key")
         finally:
-            reset_current_session(token)
+            reset_caller(token)
 
     asyncio.run(run())
 
@@ -962,7 +962,7 @@ def test_ops_readdir_drops_hidden_names():
         try:
             return await ws.vfs.readdir("/a")
         finally:
-            reset_current_session(token)
+            reset_caller(token)
 
     names = [e.rstrip("/").rsplit("/", 1)[-1] for e in asyncio.run(run())]
     assert "x.txt" in names
@@ -979,7 +979,7 @@ def test_ops_exists_says_a_hidden_path_does_not():
         try:
             return await ws.vfs.exists("/a/secrets/token.txt")
         finally:
-            reset_current_session(token)
+            reset_caller(token)
 
     assert asyncio.run(run()) is False
 
@@ -1002,7 +1002,7 @@ def test_ops_create_into_hidden_space_never_lands():
             with pytest.raises(PermissionError):
                 await ws.vfs.write("/a/new.key", b"x")
         finally:
-            reset_current_session(token)
+            reset_caller(token)
 
     asyncio.run(run())
     files = next(

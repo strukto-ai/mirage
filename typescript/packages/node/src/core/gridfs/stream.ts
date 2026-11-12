@@ -23,8 +23,6 @@ import { bucket, gridfsKey } from './client.ts'
 import { isNotFound } from './driver.ts'
 import { resolveFileId } from './read.ts'
 
-const DEFAULT_CHUNK_SIZE = 8192
-
 export async function* readStream(
   accessor: GridFSAccessor,
   path: PathSpec,
@@ -44,7 +42,7 @@ export async function* readStream(
   const b = await bucket(accessor)
   const readable = b.openDownloadStream(fileId)
   try {
-    for await (const piece of rechunk(readable as AsyncIterable<Uint8Array>, DEFAULT_CHUNK_SIZE)) {
+    for await (const piece of rechunk(readable as AsyncIterable<Uint8Array>, 8192)) {
       if (rec !== null) rec.bytes += piece.byteLength
       yield piece
     }

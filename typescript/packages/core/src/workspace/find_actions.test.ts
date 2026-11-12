@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
-import { compareDepthFirst } from '../core/generic/find.ts'
+import { depthFirstOrder } from '../core/generic/find.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 function singleMountWs(): Workspace {
@@ -183,9 +183,9 @@ describe('find action layer', () => {
     })
 
     it('drops a trailing slash from the depth key', () => {
-      expect(compareDepthFirst('d/a', 'd/')).toBeLessThan(0)
-      expect(compareDepthFirst('/a', '/')).toBeLessThan(0)
-      expect(compareDepthFirst('d/', 'd')).toBe(0)
+      expect(depthFirstOrder('d/a', 'd/')).toBeLessThan(0)
+      expect(depthFirstOrder('/a', '/')).toBeLessThan(0)
+      expect(depthFirstOrder('d/', 'd')).toBe(0)
     })
 
     it('walks a nested or repeated start point on its own', async () => {

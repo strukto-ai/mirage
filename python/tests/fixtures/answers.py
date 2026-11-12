@@ -17,7 +17,7 @@ from typing import Any
 
 from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.config import Context
-from mirage.context import reset_mount_gate, set_mount_gate
+from mirage.context import reset_caller, set_mount_gate
 from mirage.errors.fs import enotsup
 from mirage.io import IOResult
 from mirage.io.stream import materialize
@@ -94,7 +94,7 @@ async def run_generic(
             None, list(paths), list(texts), ctx
         )
     finally:
-        reset_mount_gate(token)
+        reset_caller(token)
     return (await materialize(stdout) if stdout is not None else b""), io
 
 

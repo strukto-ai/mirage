@@ -24,7 +24,7 @@ import {
   Workspace,
 } from '@struktoai/mirage-node'
 
-const GROUPS = ['namespace', 'workspace', 'observer'] as const
+const GROUPS = ['namespace', 'sessions', 'logs'] as const
 const PROBES: Record<string, string> = {
   symlink: 'readlink /data/link || echo gone',
   cwd: 'pwd',

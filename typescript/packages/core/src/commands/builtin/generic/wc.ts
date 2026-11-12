@@ -121,14 +121,6 @@ function selectedValues(counts: WcCounts, flags: WcFlags): number[] {
   return values
 }
 
-function addCounts(total: WcCounts, counts: WcCounts): void {
-  total.lines += counts.lines
-  total.words += counts.words
-  total.bytes += counts.bytes
-  total.chars += counts.chars
-  total.maxLineLength = Math.max(total.maxLineLength, counts.maxLineLength)
-}
-
 /**
  * GNU wc's column width, which it takes from the operands.
  *
@@ -337,7 +329,11 @@ export async function wcGeneric(
       rows.push({ values: selectedValues(counts, parsed), label: p.rawPath })
       records.push({ path: p, run, values: selectedValues(counts, parsed) })
       sizes.push(isStdin(p) ? null : counts.bytes)
-      addCounts(total, counts)
+      total.lines += counts.lines
+      total.words += counts.words
+      total.bytes += counts.bytes
+      total.chars += counts.chars
+      total.maxLineLength = Math.max(total.maxLineLength, counts.maxLineLength)
     }
     const width = pushed
       ? null

@@ -80,10 +80,10 @@ from mirage.io.yield_budget import task_turn
 from mirage.observe.context import (
     RecordingScope,
     active_lost,
-    active_recorder,
     command_records,
     finish_record,
     record,
+    recording_active,
     start_op,
 )
 from mirage.observe.record import (
@@ -694,7 +694,7 @@ def _retracted(virtual: str) -> bool:
     Args:
         virtual (str): the path read.
     """
-    recorder = active_recorder()
+    recorder = current_caller().recorder
     if recorder is None:
         return False
     rec = recorder.index.newest_version(virtual)
@@ -1843,7 +1843,7 @@ class Dispatcher:
         if not batches:
             return False
         scope = RecordingScope(
-            active=active_recorder() is None,
+            active=not recording_active(),
             clock=self._namespace.registry.clock,
         )
         token = bind_caller(current_caller().changed({"version_reads": False}))
@@ -2600,7 +2600,7 @@ class Dispatcher:
         # read outside a line (FUSE, ws.vfs) records into a scope of its
         # own for that.
         scope = RecordingScope(
-            active=filler is not None and active_recorder() is None,
+            active=filler is not None and not recording_active(),
             clock=self._namespace.registry.clock,
         )
         try:
@@ -2986,7 +2986,7 @@ class Dispatcher:
                 await self._invalidate_stream(mount, call.path)
                 kwargs = {**kwargs, "data": payload.chunks()}
             scope = RecordingScope(
-                active=active_recorder() is None,
+                active=not recording_active(),
                 clock=self._namespace.registry.clock,
             )
             try:

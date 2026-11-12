@@ -24,7 +24,7 @@ import re
 
 import pytest
 
-from mirage.core.generic.find import depth_first_key
+from mirage.core.generic.find import depth_first_order
 from mirage.io.stream import SharedStdin
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -586,10 +586,10 @@ async def test_depth_orders_a_trailing_slash_start_point_after_its_tree():
     assert await _run_line(ws, "test -e d") == ("", "", 1)
 
 
-def test_depth_first_key_drops_a_trailing_slash():
-    assert depth_first_key("d/") == depth_first_key("d")
-    assert depth_first_key("d/a") < depth_first_key("d/")
-    assert depth_first_key("/a") < depth_first_key("/")
+def test_depth_first_order_drops_a_trailing_slash():
+    assert depth_first_order("d/") == depth_first_order("d")
+    assert depth_first_order("d/a") < depth_first_order("d/")
+    assert depth_first_order("/a") < depth_first_order("/")
 
 
 @pytest.mark.asyncio

@@ -181,14 +181,14 @@ async def test_always_reads_current_github_blob_after_probe(
     async def fetch_dir_page(*args, **kwargs):
         return [TreeEntry(path="f.txt", type="blob", sha=sha, size=2)], False
 
-    async def read_bytes(config, owner, repo, blob_sha):
+    async def fetch_blob(config, owner, repo, blob_sha):
         return blob_sha.encode()
 
     monkeypatch.setattr("mirage.core.github.tree.fetch_tree", fetch_tree)
     monkeypatch.setattr(
         "mirage.core.github.tree.fetch_dir_page", fetch_dir_page
     )
-    monkeypatch.setattr("mirage.core.github.read.read_bytes", read_bytes)
+    monkeypatch.setattr("mirage.core.github.read.fetch_blob", fetch_blob)
     monkeypatch.setattr("mirage.core.github.read.stream_blob", _blob_stream)
     vfs = GitHubVFS(CONFIG, "o", "r", "main")
     ws = Workspace({"/gh": vfs}, read=ReadSpec(policy=ReadPolicy.FRESH))

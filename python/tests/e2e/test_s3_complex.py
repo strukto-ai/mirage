@@ -21,7 +21,7 @@ import pytest
 
 from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.config import Context
-from mirage.context import reset_mount_gate, set_mount_gate
+from mirage.context import reset_caller, set_mount_gate
 from mirage.types import MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.ram import RAMVFS
@@ -295,7 +295,7 @@ async def _cat(backend: S3VFS, paths: list[PathSpec]):
     try:
         return await s3_cat(backend.accessor, paths, [], ctx)
     finally:
-        reset_mount_gate(token)
+        reset_caller(token)
 
 
 def _resolved(original: str) -> PathSpec:

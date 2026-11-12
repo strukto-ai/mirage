@@ -105,16 +105,6 @@ function utcWall(dt: Date): WallParts & { weekday: number } {
   }
 }
 
-class UtcZone implements Zone {
-  parts(dt: Date): ZoneParts {
-    return { ...utcWall(dt), offsetSec: 0, abbrev: 'UTC' }
-  }
-
-  fromWall(p: WallParts): Date {
-    return utcFromWall(p)
-  }
-}
-
 /** One offset under one abbreviation: `UTC0`, `JST-9`, `<+0530>-5:30`. */
 class FixedZone implements Zone {
   constructor(
@@ -261,11 +251,6 @@ const FALLBACK_END: TransitionRule = { ...FALLBACK_START, month: 11, week: 1 }
 const UNREAD_RULE: TransitionRule = { kind: 'D', month: 0, week: 0, weekday: 0, day: 0, seconds: 0 }
 const DAY_BEFORE_YEAR: TransitionRule = { ...UNREAD_RULE, kind: 'J' }
 
-// Days in `month` (1 for January) of `year`: day 0 of the next month.
-export function daysInMonth(year: number, month: number): number {
-  return utcFromWall({ year, month, day: 0, hour: 0, minute: 0, second: 0, ms: 0 }).getUTCDate()
-}
-
 // Midnight of a calendar day, as a Date read as UTC; `day` may overflow.
 function midnightOf(year: number, month: number, day: number): Date {
   return utcFromWall({ year, month, day, hour: 0, minute: 0, second: 0, ms: 0 })
@@ -284,7 +269,7 @@ function weekdayInMonth(year: number, month: number, week: number, weekday: numb
   const first = midnightOf(year, month - 1, 1)
   const opensOn = first.getUTCDay()
   const offset = weekday <= 6 ? (weekday - opensOn + 7) % 7 : weekday - opensOn
-  const last = daysInMonth(year, month) - 1
+  const last = midnightOf(year, month, 0).getUTCDate() - 1
   // How many of that day the month holds from the first one on: one even
   // when the first already runs past the month.
   const held = 1 + Math.max(0, Math.floor((last - offset) / 7))
@@ -392,7 +377,7 @@ export function posixTransitions(zone: Zone, year: number): [number, number] | n
   return zone instanceof PosixZone ? zone.transitions(year) : null
 }
 
-export const UTC_ZONE: Zone = new UtcZone()
+export const UTC_ZONE: Zone = new FixedZone(0, 'UTC')
 
 /**
  * The zone a command environment's TZ names, UTC when TZ is unset (or there

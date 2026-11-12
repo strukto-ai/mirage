@@ -30,7 +30,6 @@ import asyncssh
 from fastapi import WebSocket, WebSocketDisconnect
 from starlette.status import WS_1011_INTERNAL_ERROR
 
-from mirage import Workspace
 from mirage.commands.builtin.utils.links import link_view, mount_view
 from mirage.commands.builtin.utils.tree import WalkBudget
 from mirage.errors import FsCondition, classify
@@ -57,14 +56,8 @@ from mirage.server.ssh.session import (
     open_login,
     open_session,
 )
-from mirage.server.ssh.stream import (
-    ChannelInput,
-    Mark,
-    Send,
-    decode,
-    deliver,
-    encode,
-)
+from mirage.server.ssh.stream import ChannelInput, Mark, deliver
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.console.terminal import JobOutput
 from mirage.shell.constants import INTERRUPTED_STATUS
 from mirage.types import JsonValue, PathSpec
@@ -79,7 +72,6 @@ Handler = Callable[[Message], Awaitable[JsonValue]]
 
 FILE_SCHEME = "file://"
 NS_PER_MS = 1_000_000
-MISSING = (FileNotFoundError, NotADirectoryError, NoMountError)
 WRITE = OpenMode(
     readable=False,
     writable=True,
@@ -224,7 +216,7 @@ def not_a_file(path: str) -> CodexRPCError:
 async def lookup(core: MountCore, path: str) -> MountAttrs | None:
     try:
         return await core.getattr(path)
-    except MISSING:
+    except (FileNotFoundError, NotADirectoryError, NoMountError):
         return None
 
 
@@ -506,85 +498,12 @@ class CodexProcess:
             self.retained -= dropped
 
 
-async def run_process(
-    ws: Workspace,
-    session_id: str,
-    line: str,
-    cwd: str,
-    env: dict[str, str],
-    stdin: ByteSource,
-    send: Send,
-) -> int:
-    """Run one process's line as the session, streaming its output as
-    the line produces it.
-
-    The line runs on a fork of the session, as a background job of it
-    does: it reads the session's variables and records into its
-    history, keeps what it changes to itself, and waits on no other
-    line, so Codex's commands run side by side, as on its own
-    exec-server: ``nvidia-smi`` answers while ``python3 train.py``
-    still runs. Like ``bash -c``, it has jobs of its own, which its
-    ``wait`` waits on and whose output it reports. Runs on the
-    workspace's loop. The status is read once the output has ended,
-    because a streaming command settles it only then.
-
-    Args:
-        ws (Workspace): the workspace.
-        session_id (str): the channel's session.
-        line (str): the shell line.
-        cwd (str): where it runs.
-        env (dict[str, str]): variables it sets for itself.
-        stdin (ByteSource): its input; empty, like ``/dev/null``, when
-            Codex does not pipe one.
-        send (Send): where output goes.
-
-    Returns:
-        int: the line's exit status.
-    """
-    session = ws.get_session(session_id).fork()
-    session.job_output = JobOutput(session.job_output or session.tty.jobs)
-    async with await ws.shell(
-        line,
-        session_id=session_id,
-        stdin=stdin,
-        cwd=cwd,
-        env=env or None,
-        stream=True,
-        session=session,
-        job_table=ws.job_table.child(),
-    ) as execution:
-        io = await deliver(execution, send)
-    return io.exit_code
-
-
-async def run_quiet(
-    ws: Workspace, session_id: str, line: str
-) -> tuple[int, str]:
-    """Run an unrecorded line as the session and drain it.
-
-    Runs on the workspace's loop; the status is read once both streams
-    are drained, as ``run_process`` reads it.
-
-    Args:
-        ws (Workspace): the workspace.
-        session_id (str): the channel's session.
-        line (str): the shell line.
-
-    Returns:
-        tuple[int, str]: the exit status and stderr.
-    """
-    io = await ws.shell(line, session_id=session_id, record=False)
-    await io.materialize_stdout()
-    err = await io.stderr_str()
-    return io.exit_code, err
-
-
 class CodexChannel:
     """One codex-exec channel: Codex's exec-server over one session.
 
     Codex runs its agent where it is and sends each tool call here: a
     process runs as a line on a fork of the channel's session, beside
-    the channel's other processes (``run_process``), and a file call
+    the channel's other processes (``_launch``), and a file call
     lands on the MountCore SFTP uses, so both see the tree, modes and
     policies a shell in that session sees. Requests are answered one
     at a time, in order, as the exec-server answers them by default,
@@ -765,9 +684,15 @@ class CodexChannel:
             CodexRPCError: the line failed; its stderr is the message.
         """
         runner = self._entry.runner
-        code, err = await runner.call(
-            run_quiet(runner.ws, self._session_id, line)
-        )
+
+        async def quiet() -> tuple[int, str]:
+            io = await runner.ws.shell(
+                line, session_id=self._session_id, record=False
+            )
+            await io.materialize_stdout()
+            return io.exit_code, await io.stderr_str()
+
+        code, err = await runner.call(quiet())
         if code != 0:
             raise CodexRPCError(
                 RPC_INTERNAL_ERROR, err.strip() or f"exit {code}"
@@ -815,6 +740,26 @@ class CodexChannel:
     def _launch(
         self, proc: CodexProcess, line: str, cwd: str, env: dict[str, str]
     ) -> None:
+        """Run one process's line as the session on the workspace's loop,
+        streaming its output as the line produces it.
+
+        The line runs on a fork of the session, as a background job of
+        it does: it reads the session's variables and records into its
+        history, keeps what it changes to itself, and waits on no other
+        line, so Codex's commands run side by side, as on its own
+        exec-server: ``nvidia-smi`` answers while ``python3 train.py``
+        still runs. Like ``bash -c``, it has jobs of its own, which its
+        ``wait`` waits on and whose output it reports. Its input is
+        empty, like ``/dev/null``, when Codex does not pipe one. The
+        status is read once the output has ended, because a streaming
+        command settles it only then.
+
+        Args:
+            proc (CodexProcess): the process.
+            line (str): the shell line.
+            cwd (str): where it runs.
+            env (dict[str, str]): variables it sets for itself.
+        """
         runner = self._entry.runner
         loop = asyncio.get_running_loop()
 
@@ -825,13 +770,27 @@ class CodexChannel:
                 )
             )
 
-        stdin: ByteSource = b"" if proc.stdin is None else proc.stdin
-        proc.future = asyncio.run_coroutine_threadsafe(
-            run_process(
-                runner.ws, self._session_id, line, cwd, env, stdin, send
-            ),
-            runner.loop,
-        )
+        async def run() -> int:
+            ws = runner.ws
+            session = ws.get_session(self._session_id).fork()
+            session.job_output = JobOutput(
+                session.job_output or session.tty.jobs
+            )
+            stdin: ByteSource = b"" if proc.stdin is None else proc.stdin
+            async with await ws.shell(
+                line,
+                session_id=self._session_id,
+                stdin=stdin,
+                cwd=cwd,
+                env=env or None,
+                stream=True,
+                session=session,
+                job_table=ws.job_table.child(),
+            ) as execution:
+                io = await deliver(execution, send)
+            return io.exit_code
+
+        proc.future = asyncio.run_coroutine_threadsafe(run(), runner.loop)
         proc.task = asyncio.create_task(self._finish(proc))
 
     async def _output(
@@ -863,7 +822,7 @@ class CodexChannel:
             logger.warning(
                 "codex: process failed on %s: %r", self._entry.id, exc
             )
-            await self._output(proc, encode(f"mirage: {exc}\n"), True)
+            await self._output(proc, encode_text(f"mirage: {exc}\n"), True)
             code = 1
         proc.exit_code = code
         if proc.stdin is not None:
@@ -1133,7 +1092,7 @@ async def serve_codex(
             if item is Mark.EOF:
                 break
             if isinstance(item, bytes):
-                await channel.receive(decode(item))
+                await channel.receive(decode_text(item))
     finally:
         await channel.shutdown()
         await lines.close()
@@ -1183,7 +1142,9 @@ async def serve_codex_socket(
                 break
             data = message.get("bytes")
             await channel.receive(
-                decode(data) if data is not None else message.get("text", "")
+                decode_text(data)
+                if data is not None
+                else message.get("text", "")
             )
     finally:
         await channel.shutdown()

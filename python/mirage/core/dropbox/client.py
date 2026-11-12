@@ -74,12 +74,6 @@ def _token_url_of(config: DropboxConfig) -> str:
     return f"{config.endpoint.rstrip('/')}/oauth2/token"
 
 
-def _flow_error(resp: aiohttp.ClientResponse, text: str) -> Exception:
-    return DropboxApiError(
-        f"Dropbox token refresh → {resp.status} {text}", resp.status
-    )
-
-
 async def refresh_access_token(config: DropboxConfig) -> tuple[str, int]:
     body = {
         "grant_type": "refresh_token",
@@ -90,7 +84,12 @@ async def refresh_access_token(config: DropboxConfig) -> tuple[str, int]:
     if secret:
         body["client_secret"] = secret
     data = await api_request(
-        "POST", _token_url_of(config), error_of=_flow_error, data=body
+        "POST",
+        _token_url_of(config),
+        error_of=lambda resp, text: DropboxApiError(
+            f"Dropbox token refresh → {resp.status} {text}", resp.status
+        ),
+        data=body,
     )
     return data["access_token"], int(data["expires_in"])
 

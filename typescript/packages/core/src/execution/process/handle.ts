@@ -168,14 +168,16 @@ export class ProcessHandle {
    *
    * @param machine where the program runs; null for the workspace's own.
    * @param runtime what runs it.
+   * @param instance what `machine`'s provider calls it.
    */
-  take(machine: MachineId | null, runtime: string): boolean {
+  take(machine: MachineId | null, runtime: string, instance: string | null = null): boolean {
     if (!this.oneCommand) return false
     this.oneCommand = false
     this.ignores = this.programIgnores
     this.current = Object.freeze({
       ...this.current,
       machine: machine ?? this.current.machine,
+      machineInstance: machine === null ? (this.current.machineInstance ?? null) : instance,
       runtime,
     })
     this.tell()

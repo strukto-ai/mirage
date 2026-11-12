@@ -49,20 +49,6 @@ import type { RouteContext } from './types.ts'
 const ABANDONED: Abandoned = { kind: 'abandoned' }
 
 /**
- * Tell the abandonment of a question from a host's answer.
- *
- * Structural, not by identity: a `Decision` carries no `kind`, so the
- * field alone separates the two without depending on this module being
- * the only place the sentinel is built.
- *
- * @param said what the wait produced.
- * @returns true when the run went away mid-question.
- */
-function isAbandoned(said: Decision | null | Abandoned): said is Abandoned {
-  return said !== null && 'kind' in said
-}
-
-/**
  * A host's answer, or the abandonment of the question when the run
  * waiting on it is killed first.
  *
@@ -436,7 +422,9 @@ export class Decisions extends DecisionOwner {
     const onAsk = this.onAsk
     if (onAsk === null) return { kind: 'pending', id: record.id, reason: rule.reason }
     const said = await answered(() => onAsk(record, signal), signal)
-    if (isAbandoned(said)) return said
+    // A `Decision` carries no `kind`, so the field alone tells the run
+    // going away mid-question from a host's answer.
+    if (said !== null && 'kind' in said) return said
     if (said?.outcome == null) return { kind: 'pending', id: record.id, reason: rule.reason }
     const settled = this.writeAnswer(record.id, said.outcome, said.scope, said.note)
     if (claimant !== null && settled.outcome === Outcome.ALLOW && settled.scope === Scope.ONCE)

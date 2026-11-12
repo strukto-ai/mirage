@@ -32,7 +32,9 @@ export interface MountSnapshot {
   ttl: number
   write: string
   vfs_class: string
-  vfs_ref: string | null
+  // Absent from a v3 snapshot written before the key existed (the format
+  // version did not move), as from a mount constructed in code.
+  vfs_ref?: string | null
   index_config?: IndexConfigSnapshot | null
   vfs_state: VFSState
   // Set on the scratch root: one the workspace added because no mount claims `/`, or restored.

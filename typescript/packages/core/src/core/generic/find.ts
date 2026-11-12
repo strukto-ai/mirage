@@ -363,7 +363,7 @@ export async function* walkFind(
  * sorts the directory ahead of everything under it, which is the one
  * order `-delete` cannot remove a tree in.
  */
-export function compareDepthFirst(a: string, b: string): number {
+export function depthFirstOrder(a: string, b: string): number {
   const pa = rstripSlash(a).split('/')
   const pb = rstripSlash(b).split('/')
   const n = Math.min(pa.length, pb.length)

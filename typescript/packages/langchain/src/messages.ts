@@ -12,37 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-interface MessageLike {
-  content?: unknown
-}
-
-interface ContentBlock {
-  type?: string
-  text?: string
-}
-
-function isTextBlock(value: unknown): value is { type: 'text'; text: string } {
-  if (typeof value !== 'object' || value === null) return false
-  const block = value as ContentBlock
-  return block.type === 'text' && typeof block.text === 'string'
-}
-
 /**
  * Returns the non-empty text blocks of an array of LangChain messages, in
  * order, as `string[]`.
  */
-export function extractText(messages: readonly MessageLike[]): string[] {
+export function extractText(messages: readonly { content?: unknown }[]): string[] {
   const texts: string[] = []
-  for (const msg of messages) {
-    if (!('content' in msg) || msg.content === undefined || msg.content === null) continue
-    const content = msg.content
+  for (const { content } of messages) {
     if (typeof content === 'string') {
       if (content.trim().length > 0) texts.push(content)
-      continue
-    }
-    if (Array.isArray(content)) {
-      for (const block of content) {
-        if (isTextBlock(block) && block.text.trim().length > 0) {
+    } else if (Array.isArray(content)) {
+      for (const block of content as ({ type?: unknown; text?: unknown } | null)[]) {
+        if (block?.type === 'text' && typeof block.text === 'string' && block.text.trim() !== '') {
           texts.push(block.text)
         }
       }

@@ -98,7 +98,7 @@ async function call(method: string, path: string, body?: unknown): Promise<unkno
 export function registerTemplateCommands(program: Command): void {
   const template = program
     .command('template')
-    .description('Saved workspace configs: create, list, get, delete, restore.')
+    .description('Saved workspace configs: create, list, get, delete.')
 
   template
     .command('create')
@@ -147,22 +147,11 @@ export function registerTemplateCommands(program: Command): void {
 
   template
     .command('delete')
-    .description('Delete a template; `restore` brings it back.')
+    .description('Delete a template.')
     .argument('<id>', ID_HELP)
     .action(async (name: string) => {
       await call('DELETE', templatePath(name))
       header(`deleted template ${name}`)
       emit({ deleted: name }, () => `Deleted template ${name}.`)
-    })
-
-  template
-    .command('restore')
-    .description('Bring back a deleted template.')
-    .argument('<id>', ID_HELP)
-    .action(async (name: string) => {
-      const restored = (await call('POST', `${templatePath(name)}/restore`)) as Template
-      header(`restored template ${name}`)
-      const text = await asYaml(restored)
-      emit(restored, () => text.trimEnd())
     })
 }

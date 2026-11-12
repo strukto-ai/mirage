@@ -12,13 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeS3Alias, REGION_ALIAS_SCHEMA, type S3AliasConfig } from '../s3_alias.ts'
+import { makeS3Alias, RegionEndpointConfig, type S3AliasConfig } from '../s3_alias.ts'
 
 export interface DigitalOceanConfig extends S3AliasConfig {
   region: string
 }
 
 export const DigitalOceanConfig = makeS3Alias({
-  schema: REGION_ALIAS_SCHEMA,
+  schema: RegionEndpointConfig,
   endpointFor: (config) => `https://${config.region}.digitaloceanspaces.com`,
 })

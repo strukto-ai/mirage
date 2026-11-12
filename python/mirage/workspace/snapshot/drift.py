@@ -32,7 +32,7 @@ from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.snapshot.keys import FingerprintKey
 
-TryMountFor = Callable[[str], MountEntry | None]
+MountLookup = Callable[[str], MountEntry | None]
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,7 @@ class DriftQueue:
         self._entries.append((path, fingerprint, mount_id))
         self._pending = True
 
-    async def drain(self, mount_for: TryMountFor) -> None:
+    async def drain(self, mount_for: MountLookup) -> None:
         """Stat every queued path in parallel; raise on the first drift.
 
         Subsequent calls are no-ops. Stats are issued with
@@ -116,7 +116,7 @@ class DriftQueue:
         with the number of recorded reads.
 
         Args:
-            mount_for (TryMountFor): resolves a virtual path to its
+            mount_for (MountLookup): resolves a virtual path to its
                 owning mount, None for none.
 
         Raises:
@@ -350,7 +350,7 @@ def live_only_mount_prefixes(
 
 
 async def check_drift(
-    mount_for: TryMountFor,
+    mount_for: MountLookup,
     path: str,
     recorded: str,
     mount_id: str | None = None,
@@ -362,7 +362,7 @@ async def check_drift(
     fingerprint (raises only on a real, observable mismatch).
 
     Args:
-        mount_for (TryMountFor): resolves a virtual path to its owning
+        mount_for (MountLookup): resolves a virtual path to its owning
             mount, None for none.
         path (str): Virtual path to check.
         recorded (str): Fingerprint recorded at snapshot time.

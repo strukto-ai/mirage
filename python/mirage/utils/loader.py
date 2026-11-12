@@ -16,7 +16,7 @@ import importlib
 import importlib.util
 import sys
 from collections.abc import Callable, Mapping
-from typing import Any, cast
+from typing import Any
 
 # The module name a class loaded from a script file runs under. A snapshot
 # records a VFS's class as ``module.Class``, and this name is the one
@@ -88,19 +88,6 @@ def optional_attr(spec: str, extra: str, who: str) -> Any:
             f"Install with: pip install mirage-ai[{extra}]"
         )
     return load_attr(spec)
-
-
-def load_backend_class(spec: str) -> type[Any]:
-    """Load a backend class from a spec string via :func:`load_attr`.
-
-    Args:
-        spec (str): ``"source:class_name"`` where source is a file path
-            or module dotpath.
-
-    Returns:
-        type: The loaded class.
-    """
-    return cast(type[Any], load_attr(spec))
 
 
 def lazy_exports(

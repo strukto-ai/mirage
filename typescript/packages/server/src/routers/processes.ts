@@ -16,6 +16,7 @@ import type { Process, ProcessState } from '@struktoai/mirage-core/execution/pro
 import { JobId, LineId, MachineId, ProcessId } from '@struktoai/mirage-core/execution/types'
 import type { RouteApp } from '../routes.ts'
 import { msToRfc3339 } from '@struktoai/mirage-core/utils/dates'
+import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { WorkspaceRegistry } from '../registry.ts'
 import type { Instant } from '../schemas.ts'
 import { HttpError, oneOf, WorkspaceMissing } from '../errors.ts'
@@ -43,6 +44,12 @@ interface MachinePidResponse {
   exited: number | null
 }
 
+interface ProcessMachineResponse {
+  type: string
+  name: string
+  id: string
+}
+
 export interface ProcessResponse {
   pid: number
   session_id: string
@@ -51,7 +58,7 @@ export interface ProcessResponse {
   group: number
   command: string
   cwd: string
-  machine: string
+  machine: ProcessMachineResponse
   runtime: string | null
   machine_pid: MachinePidResponse | null
   state: string
@@ -68,7 +75,21 @@ interface ProcessList {
 
 const STATES: readonly ProcessState[] = ['running', 'stopping', 'exited']
 
-export function toResponse(record: Process): ProcessResponse {
+/**
+ * Where a process ran, as its spans name it: the machine's provider, its
+ * name and what its provider called it then, else calls it now. Mirrors
+ * Python's `machine_response`.
+ */
+function machineResponse(ws: Workspace, record: Process): ProcessMachineResponse {
+  const machine = record.machine
+  return {
+    type: machine.provider,
+    name: machine.name,
+    id: record.machineInstance ?? ws.machineTable.instance(machine),
+  }
+}
+
+export function toResponse(record: Process, ws: Workspace): ProcessResponse {
   return {
     pid: record.id.pid,
     session_id: record.sessionId,
@@ -77,7 +98,7 @@ export function toResponse(record: Process): ProcessResponse {
     group: record.group,
     command: record.command,
     cwd: record.cwd.virtual,
-    machine: record.machine.toString(),
+    machine: machineResponse(ws, record),
     runtime: record.runtime,
     machine_pid:
       record.machinePid === null
@@ -134,7 +155,7 @@ export function registerProcessesRoutes(
         ...(jobId !== undefined && jobId !== '' ? { jobId: new JobId(ws.workspaceId, jobId) } : {}),
         ...(where !== null ? { machine: where } : {}),
       })
-      return { items: records.map(toResponse) }
+      return { items: records.map((record) => toResponse(record, ws)) }
     },
   )
 
@@ -150,6 +171,6 @@ export function registerProcessesRoutes(
     const ws = deps.registry.get(wsId).runner.ws
     const record = await ws.process(new ProcessId(ws.workspaceId, Number(pid)))
     if (record === null) throw new HttpError('not_found', 'process not found')
-    return toResponse(record)
+    return toResponse(record, ws)
   })
 }

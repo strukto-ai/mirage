@@ -111,7 +111,7 @@ Build a template with `sshfs` and pass its sandbox ID as `sandbox_id`:
     from e2b import AsyncSandbox, Template
 
     Template.build(Template().from_base_image().apt_install("sshfs"), "mirage-sshfs")
-    sandbox = await AsyncSandbox.create("mirage-sshfs")
+    sandbox = await AsyncSandbox.create("mirage-sshfs", timeout=3600)
     print(sandbox.sandbox_id)
     ```
   </Tab>
@@ -120,7 +120,7 @@ Build a template with `sshfs` and pass its sandbox ID as `sandbox_id`:
     import { Sandbox, Template } from 'e2b'
 
     await Template.build(Template().fromBaseImage().aptInstall('sshfs'), 'mirage-sshfs')
-    const sandbox = await Sandbox.create('mirage-sshfs')
+    const sandbox = await Sandbox.create('mirage-sshfs', { timeoutMs: 3_600_000 })
     console.log(sandbox.sandboxId)
     ```
   </Tab>
@@ -130,13 +130,26 @@ Keep the base image's user, which has `sudo` for mountpoints such as
 `/data`. On the default template, run
 `sudo apt-get update && sudo apt-get install -y sshfs` instead.
 
+## The sandbox's lifetime
+
+The timeout you give the sandbox at creation, one hour above, sets when it
+ends. Mirage never makes a sandbox, kills one or sets its timeout. Reaching a
+sandbox resumes it if it is paused and keeps it alive at least 5 more
+minutes, as any E2B connect does, so reaching it near the end moves the end
+back. Stopping or closing the workspace leaves the sandbox running.
+
+Once the sandbox has ended, a line exits 1, and its error names the fix:
+
+```text
+sandbox sb-123 is not running: it was killed or reached its timeout; create a new sandbox and set the machine's sandbox_id to it
+```
+
+A line that is running when the sandbox ends exits 129. Create a new sandbox
+from the same template, set the machine's `sandbox_id` to its ID, and create
+the workspace again.
+
 ## Notes
 
-- Stopping or closing the workspace leaves the sandbox running.
-- The sandbox is yours: Mirage never extends or kills it, so its timeout
-  is your deadline. Once it has ended, a line says so and exits 1 (129
-  if the sandbox ends while the line runs); create a new sandbox and set
-  `sandbox_id` to it.
 - With `mount_type: ssh` or `both`, a workspace that restarts with the
   same workspace ID takes back the mounts it left in the sandbox. Give
   each live workspace its own ID: two live workspaces with one ID take
@@ -148,6 +161,6 @@ Keep the base image's user, which has `sudo` for mountpoints such as
   nothing, prints why and exits 127.
 - Commands run concurrently, each with its own input and output. Without
   piped input, stdin starts closed.
-- Templates, sizing, networking and lifecycle stay E2B settings.
+- Templates, sizing and networking stay E2B settings.
 - A Mirage [timeout](/home/setup/machine/overview#timeouts) tries to kill the command; its child
   processes may survive.

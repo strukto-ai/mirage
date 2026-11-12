@@ -39,7 +39,7 @@ from mirage.cache.types import Measured, OwnRead
 from mirage.cache.versions import VersionScope
 from mirage.context.session_context import Caller, current_caller
 from mirage.io.stream import close_quietly
-from mirage.observe.context import active_recorder, line_version
+from mirage.observe.context import line_version
 from mirage.observe.record import OpRecord
 from mirage.types import DEFAULT_READ_TTL, FileChangeKind, FileStat, PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -667,7 +667,7 @@ class CacheManager:
         """
         session = current_caller().session
         if self._conditional and session is not None:
-            recorder = active_recorder()
+            recorder = current_caller().recorder
             out: list[Measured | None] = []
             for path in paths:
                 lost = (
@@ -686,7 +686,7 @@ class CacheManager:
             return out
         out = [None] * len(paths)
         pending: list[tuple[int, str]] = []
-        recorder = active_recorder()
+        recorder = current_caller().recorder
         for i, path in enumerate(paths):
             key = self._cache_key(path)
             if recorder is not None:
@@ -730,7 +730,7 @@ class CacheManager:
                 be kept once fetched; None keeps them.
         """
         generation = self._read_generation
-        recorder = active_recorder()
+        recorder = current_caller().recorder
         start = len(recorder.sink) if recorder is not None else 0
         key = self._cache_key(path)
         data, facts = await capture_read(key, fetch)

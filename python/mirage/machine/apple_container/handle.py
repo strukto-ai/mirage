@@ -56,6 +56,11 @@ class AppleContainerMachine(ProgramMachine):
     program = "container"
     install_hint = APPLE_CONTAINER_HINT
 
+    @property
+    def instance(self) -> str:
+        """The container Apple's container runs it in."""
+        return self.config.container
+
     def exec_words(self) -> tuple[tuple[str, ...], tuple[str, ...]]:
         return ("exec", "-i"), (self.config.container,)
 

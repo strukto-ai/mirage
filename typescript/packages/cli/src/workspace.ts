@@ -108,31 +108,18 @@ interface WorkspaceBrief {
   status: string
 }
 
-interface MountSummary {
-  prefix: string
-  vfs: string
-  mode: string
-}
-
-interface SessionSummary {
-  session_id: string
-  cwd: string
-}
-
-interface Internals {
-  cache_bytes: number | null
-  cache_entries: number | null
-  history_length: number
-  in_flight_jobs: number
-}
-
 interface WorkspaceDetail {
   id: string
   status: string
   created_at: string
-  mounts?: MountSummary[]
-  sessions?: SessionSummary[]
-  internals?: Internals | null
+  mounts?: { prefix: string; vfs: string; mode: string }[]
+  sessions?: { session_id: string; cwd: string }[]
+  internals?: {
+    cache_bytes: number | null
+    cache_entries: number | null
+    history_length: number
+    in_flight_jobs: number
+  } | null
 }
 
 /** What the server's policies make of a config: the verdict, then each policy's answer. */
@@ -218,7 +205,7 @@ interface JobRecord {
 interface ProcessRecord {
   pid: number
   parent: number | null
-  machine: string
+  machine: { type: string; name: string; id: string }
   session_id: string
   command: string
   state: string
@@ -292,7 +279,7 @@ function formatProcesses(items: ProcessRecord[]): string {
     items.map((p) => [
       String(p.pid),
       String(p.parent ?? 0),
-      p.machine,
+      `${p.machine.type}:${p.machine.name}`,
       p.session_id,
       p.state,
       exitCell(p),

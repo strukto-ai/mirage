@@ -60,6 +60,7 @@ export function processToFields(record: Process): RecordFields {
     command: record.command,
     cwd: record.cwd.virtual,
     machine: record.machine.toString(),
+    machine_instance: record.machineInstance ?? null,
     started_at: record.startedAt,
     runtime: record.runtime,
     machine_pid:
@@ -95,6 +96,7 @@ export function processFromFields(fields: RecordFields): Process {
     command: fields.command as string,
     cwd: PathSpec.fromStrPath(fields.cwd as string),
     machine: MachineId.parse(fields.machine as string),
+    machineInstance: (fields.machine_instance as string | null | undefined) ?? null,
     startedAt: fields.started_at as number,
     runtime: (fields.runtime as string | null | undefined) ?? null,
     machinePid:

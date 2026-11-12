@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
 from collections.abc import Callable
 
 from mirage.types import PathSpec
+from mirage.utils.path import posix_normpath
 from mirage.workspace.executor.builtins.dirs.constants import CD_OPTIONS
 
 DirArgs = list[str | PathSpec]
@@ -66,13 +66,6 @@ def split_mode_options(
             parsing = False
         operands.append(arg)
     return operands, None, physical
-
-
-def norm(path: str) -> str:
-    resolved = posixpath.normpath(path)
-    if resolved.startswith("//"):
-        resolved = "/" + resolved.lstrip("/")
-    return resolved
 
 
 def join_raw(path: str, cwd: str) -> str:
@@ -136,4 +129,6 @@ def resolve_target(
     Raises:
         CycleError: On a symlink loop or unbounded expansion (ELOOP).
     """
-    return norm(follow(combined if physical else norm(combined)))
+    return posix_normpath(
+        follow(combined if physical else posix_normpath(combined))
+    )

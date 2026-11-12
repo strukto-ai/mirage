@@ -17,8 +17,6 @@ import { rstripSlash } from '../../utils/slash.ts'
 import { secretSchema } from '../../vfs/secrets.ts'
 import { DEFAULT_TIMEOUT } from '../api/constants.ts'
 
-export type AccessTokenProvider = () => string | Promise<string>
-
 const GRAPH_VERSION = 'v1.0'
 
 const DEFAULT_GRAPH_API = `https://graph.microsoft.com/${GRAPH_VERSION}`
@@ -29,7 +27,10 @@ const DEFAULT_GRAPH_API = `https://graph.microsoft.com/${GRAPH_VERSION}`
 // keeps it out of snapshot state.
 export const MSGRAPH_CONFIG_SHAPE = {
   accessToken: secretSchema(
-    z.union([z.string(), z.custom<AccessTokenProvider>((value) => typeof value === 'function')]),
+    z.union([
+      z.string(),
+      z.custom<() => string | Promise<string>>((value) => typeof value === 'function'),
+    ]),
   ).describe(
     'Microsoft Graph bearer token, or a function (sync or async) that returns one; it is called for each request and again after a `401`.',
   ),
@@ -58,7 +59,7 @@ export const MSGRAPH_CONFIG_SHAPE = {
 }
 
 export interface MsGraphConfig {
-  accessToken: string | AccessTokenProvider
+  accessToken: string | (() => string | Promise<string>)
   tenantHost?: string
   // Full service root, version segment included, for any deployment other
   // than the worldwide one: a sovereign cloud, a private endpoint, or a

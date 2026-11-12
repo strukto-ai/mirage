@@ -25,12 +25,6 @@ export interface ForeignKey {
   references: { schema: string; table: string; columns: string[] }
 }
 
-export interface IndexInfo {
-  name: string
-  columns: string[]
-  unique: boolean
-}
-
 export interface Relationship {
   from: { schema: string; table: string; columns: string[] }
   to: { schema: string; table: string; columns: string[] }
@@ -452,11 +446,7 @@ export async function fetchForeignKeys(
   return [...grouped.values()]
 }
 
-export async function fetchIndexes(
-  accessor: PostgresAccessor,
-  schema: string,
-  name: string,
-): Promise<IndexInfo[]> {
+export async function fetchIndexes(accessor: PostgresAccessor, schema: string, name: string) {
   const result = await accessor.store.query<{
     name: string
     unique: boolean

@@ -16,13 +16,6 @@ import { DIR_SIZE, S_IFDIR, S_IFMT, S_IFREG } from '../../../utils/stat_view.ts'
 import type { VFSStat } from '../../types.ts'
 import type { MontyFsBits } from './loader.ts'
 
-const PERMISSION_BITS = 0o7777
-// What monty's own StatResult reports for a directory (DIR_SIZE, shared,
-// and two links), so a guest sees the same two numbers whichever host
-// answered.
-const DIR_LINKS = 2
-const FILE_LINKS = 1
-
 /**
  * The row's type bits, the one rule every answer derived from a mode
  * reads.
@@ -53,22 +46,20 @@ export function isDirRow(st: VFSStat): boolean {
 }
 
 /**
- * One mount row as the guest's stat fields.
+ * One mount row as the guest's stat fields, spelled the way CPython
+ * spells them because the guest reads them by those names.
  *
  * The numbers are monty's own `StatResult.file_stat` / `dir_stat`
  * rules, replicated rather than imported because the JS package
  * exports no `StatResult`: the type bits come from the row, the
  * permission bits from its mode, and a directory reports 4096 bytes
- * and two links whatever the backend said. Keeping the two hosts on
- * one rule is the whole point — `python/mirage/runtime/python/monty/
- * stat.py` reaches the same numbers by calling the constructors.
+ * and two links whatever the backend said, a file one link. Keeping
+ * the two hosts on one rule is the whole point —
+ * `python/mirage/runtime/python/monty/stat.py` reaches the same
+ * numbers by calling the constructors.
  *
  * Args:
  *   st: the mount's row for the path.
- */
-/**
- * The fields of the guest's `os.stat_result`, spelled the way CPython
- * spells them because the guest reads them by those names.
  */
 export function statFields(st: VFSStat) {
   const type = fileType(st)
@@ -76,10 +67,10 @@ export function statFields(st: VFSStat) {
   // than the host clock.
   const stamp = (st.mtimeMs ?? 0) / 1000
   return {
-    st_mode: type | (st.mode & PERMISSION_BITS),
+    st_mode: type | (st.mode & 0o7777),
     st_ino: 0,
     st_dev: 0,
-    st_nlink: st.isDir ? DIR_LINKS : FILE_LINKS,
+    st_nlink: st.isDir ? 2 : 1,
     st_uid: 0,
     st_gid: 0,
     st_size: st.isDir ? DIR_SIZE : st.size,

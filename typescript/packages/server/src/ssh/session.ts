@@ -330,7 +330,8 @@ export class ShellChannel {
   }
 }
 
-function refuse(channel: ServerChannel, message: string): void {
+/** Tell the client why its channel cannot run, and exit it 1. */
+export function refuse(channel: ServerChannel, message: string): void {
   channel.stderr.write(`mirage: ${message}\n`)
   channel.exit(1)
   channel.end()
@@ -392,9 +393,4 @@ export async function handleChannel(
   const status = await shell.serve()
   channel.exit(status)
   channel.end()
-}
-
-/** Refuse a subsystem other than SFTP and codex-exec, in the voice of every refusal. */
-export function refuseSubsystem(channel: ServerChannel, name: string): void {
-  refuse(channel, `unsupported subsystem: ${name}`)
 }

@@ -666,7 +666,7 @@ describe('configToWorkspaceArgs', () => {
       mounts: { '/': { vfs: 'ram' } },
       store: {
         type: 'ram',
-        workspace: {
+        sessions: {
           type: 's3',
           bucket: 'b',
           region: 'us-east-1',
@@ -679,15 +679,15 @@ describe('configToWorkspaceArgs', () => {
       },
     }
     const cfg = loadWorkspaceConfig(raw)
-    const group = (cfg.store as unknown as { workspace: Record<string, unknown> }).workspace
+    const group = (cfg.store as unknown as { sessions: Record<string, unknown> }).sessions
     expect(group.aws_access_key_id).toBe('AKIA')
     const args = await configToWorkspaceArgs(cfg)
     expect(args.options.store?.namespace('ws1')).toBeInstanceOf(RAMNamespaceStore)
     const s3 = (
       args.options.store as unknown as {
-        workspaceOverride: { config: Record<string, unknown> }
+        sessionsOverride: { config: Record<string, unknown> }
       }
-    ).workspaceOverride
+    ).sessionsOverride
     expect(s3.config).toMatchObject({
       bucket: 'b',
       region: 'us-east-1',
@@ -704,7 +704,7 @@ describe('configToWorkspaceArgs', () => {
     const root = mkdtempSync(join(tmpdir(), 'mirage-obs-'))
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },
-      store: { type: 'ram', observer: { type: 'disk', root } },
+      store: { type: 'ram', logs: { type: 'disk', root } },
     })
     const args = await configToWorkspaceArgs(cfg)
     expect(args.options.store).toBeInstanceOf(RAMWorkspaceStateStore)
@@ -717,9 +717,9 @@ describe('configToWorkspaceArgs', () => {
     expect(() =>
       loadWorkspaceConfig({
         mounts: { '/': { vfs: 'ram' } },
-        store: { type: 'ram', observer: { type: 'redis' } },
+        store: { type: 'ram', logs: { type: 'redis' } },
       }),
-    ).toThrow(/store.observer` cannot be redis/)
+    ).toThrow(/store.logs` cannot be redis/)
   })
 
   it("keeps a redis store's history on disk under its root", async () => {

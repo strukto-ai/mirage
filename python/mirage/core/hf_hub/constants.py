@@ -72,9 +72,6 @@ HTTP_CONFLICT = 409
 RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 MAX_RETRIES = 3
 
-# How much a streaming read pulls per chunk.
-DEFAULT_CHUNK_SIZE = 1024 * 1024
-
 # How many files one preupload probe asks about. huggingface_hub chunks
 # at the same 256.
 COMMIT_CHUNK = 256

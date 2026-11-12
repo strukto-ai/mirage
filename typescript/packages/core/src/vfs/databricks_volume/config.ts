@@ -58,10 +58,6 @@ function normalizeHost(value: string): string {
   return host.origin
 }
 
-function validToken(value: string): boolean {
-  return value.trim() !== '' && !/[\r\n]/.test(value)
-}
-
 export const DatabricksVolumeConfig = z.object({
   ...timeoutShape,
   catalog: z
@@ -91,7 +87,12 @@ export const DatabricksVolumeConfig = z.object({
     ),
   token: secretSchema(
     z.union([
-      z.string().refine(validToken, 'token must be nonblank without CR or LF'),
+      z
+        .string()
+        .refine(
+          (value) => value.trim() !== '' && !/[\r\n]/.test(value),
+          'token must be nonblank without CR or LF',
+        ),
       z.custom<TokenProvider>((value) => typeof value === 'function'),
     ]),
   ).describe(

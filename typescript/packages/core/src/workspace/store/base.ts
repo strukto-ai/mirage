@@ -25,8 +25,8 @@ export type WorkspaceFields = Record<string, unknown>
 
 export interface WorkspaceStateStoreOverrides {
   namespace?: WorkspaceStateStore
-  observer?: WorkspaceStateStore
-  workspace?: WorkspaceStateStore
+  logs?: WorkspaceStateStore
+  sessions?: WorkspaceStateStore
   execution?: WorkspaceStateStore
 }
 
@@ -47,23 +47,23 @@ export interface WorkspaceStateStoreOverrides {
  * The node table and the session table are two NamespaceStores, the
  * observer keeps its ObserverStore and the execution plane its
  * ExecutionStore; this provider only unifies their construction,
- * connection, and key scoping. Per-group overrides
- * redirect a plane group to a different provider (e.g. large observer
- * logs elsewhere while everything else stays on Redis). Sessions and
+ * connection, and key scoping. Per-group overrides (`namespace`, `logs`,
+ * `sessions`, `execution`) redirect a plane group to a different provider
+ * (e.g. large command logs elsewhere while everything else stays on Redis). Sessions and
  * metadata form one inseparable group: the default-session pointer in
  * the metadata must never live on a different server than the session
  * table it points into.
  */
 export abstract class WorkspaceStateStore {
   private readonly namespaceOverride: WorkspaceStateStore | null
-  private readonly observerOverride: WorkspaceStateStore | null
-  private readonly workspaceOverride: WorkspaceStateStore | null
+  private readonly logsOverride: WorkspaceStateStore | null
+  private readonly sessionsOverride: WorkspaceStateStore | null
   private readonly executionOverride: WorkspaceStateStore | null
 
   constructor(overrides: WorkspaceStateStoreOverrides = {}) {
     this.namespaceOverride = overrides.namespace ?? null
-    this.observerOverride = overrides.observer ?? null
-    this.workspaceOverride = overrides.workspace ?? null
+    this.logsOverride = overrides.logs ?? null
+    this.sessionsOverride = overrides.sessions ?? null
     this.executionOverride = overrides.execution ?? null
   }
 
@@ -74,12 +74,12 @@ export abstract class WorkspaceStateStore {
 
   /** The observer plane (history events) for one workspace. */
   observer(workspaceId: string): ObserverStore {
-    return (this.observerOverride ?? this).makeObserver(workspaceId)
+    return (this.logsOverride ?? this).makeObserver(workspaceId)
   }
 
   /** The session table for one workspace. */
   sessions(workspaceId: string): NamespaceStore {
-    return (this.workspaceOverride ?? this).makeSessions(workspaceId)
+    return (this.sessionsOverride ?? this).makeSessions(workspaceId)
   }
 
   /**
@@ -92,7 +92,7 @@ export abstract class WorkspaceStateStore {
 
   /** Read one workspace's metadata record; null when never written. */
   loadMeta(workspaceId: string): Promise<WorkspaceFields | null> {
-    return (this.workspaceOverride ?? this).readMeta(workspaceId)
+    return (this.sessionsOverride ?? this).readMeta(workspaceId)
   }
 
   /**
@@ -108,7 +108,7 @@ export abstract class WorkspaceStateStore {
     fields: WorkspaceFields,
     expectedGeneration: number,
   ): Promise<boolean> {
-    return (this.workspaceOverride ?? this).casWriteMeta(workspaceId, fields, expectedGeneration)
+    return (this.sessionsOverride ?? this).casWriteMeta(workspaceId, fields, expectedGeneration)
   }
 
   /**
@@ -163,8 +163,8 @@ export abstract class WorkspaceStateStore {
   private overrides(): WorkspaceStateStore[] {
     return [
       this.namespaceOverride,
-      this.observerOverride,
-      this.workspaceOverride,
+      this.logsOverride,
+      this.sessionsOverride,
       this.executionOverride,
     ].filter((override) => override !== null)
   }

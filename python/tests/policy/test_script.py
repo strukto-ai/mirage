@@ -814,9 +814,7 @@ async def test_a_program_that_exits_non_zero_fails_closed():
 
 @pytest.mark.asyncio
 async def test_a_program_that_timed_out_fails_closed(monkeypatch):
-    monkeypatch.setattr(
-        "mirage.policy.script.SCRIPT_EVAL_TIMEOUT_SECONDS", 0.01
-    )
+    monkeypatch.setattr("mirage.policy.script.SCRIPT_EVAL_TIMEOUT", 0.01)
     policy = _policy("pre_command", FakeProgram(delay=1.0))
     assert await policy.pre_command(_ctx()) == (
         Deny("profile 'release' policy timed out after 0.01s"),
@@ -1318,9 +1316,7 @@ async def test_only_a_monty_runtime_is_handed_the_functions(monkeypatch):
 async def test_an_env_read_that_stalls_times_out_and_is_tried_again(
     monkeypatch,
 ):
-    monkeypatch.setattr(
-        "mirage.policy.script.SCRIPT_EVAL_TIMEOUT_SECONDS", 0.05
-    )
+    monkeypatch.setattr("mirage.policy.script.SCRIPT_EVAL_TIMEOUT", 0.05)
 
     monkeypatch.setenv("POLICY_TOKEN", "t")
     calls = 0

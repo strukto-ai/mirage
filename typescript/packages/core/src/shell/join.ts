@@ -12,10 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// Mirrors Python's shlex: a token is safe unquoted only if every
-// character is in the shlex safe set.
-const SAFE_TOKEN = /^[A-Za-z0-9@%+=:,./_-]+$/
-
 // A byte UTF-8 cannot read, carried as its surrogate escape (see
 // `byteChar` in `shell/bytes.ts`): a lone low surrogate, not the second
 // half of a pair.
@@ -23,7 +19,9 @@ const BYTE_SENTINEL = /(?<![\uD800-\uDBFF])[\uDC80-\uDCFF]/g
 
 function quoteToken(token: string): string {
   if (token === '') return "''"
-  if (SAFE_TOKEN.test(token)) return token
+  // Mirrors Python's shlex: a token is safe unquoted only if every
+  // character is in the shlex safe set.
+  if (/^[A-Za-z0-9@%+=:,./_-]+$/.test(token)) return token
   const quoted = `'${token.split("'").join("'\\''")}'`
   return quoted.replace(
     BYTE_SENTINEL,

@@ -13,4 +13,3 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 SCOPE_ERROR = 10000
-DEFAULT_CHUNK_SIZE = 8192

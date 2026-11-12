@@ -21,23 +21,13 @@ from typing import Any, NamedTuple, cast
 from pydantic import ValidationError
 
 from mirage.secrets.summary import error_summary
-from mirage.utils.loader import load_backend_class
+from mirage.utils.loader import load_attr
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.errors import VFSConfigError
 
 logger = logging.getLogger(__name__)
 
 ENTRY_POINT_GROUP = "mirage.vfs"
-
-# pydantic's code for a key no field takes, which is what a typed
-# config reports through `error_summary`; a kwargs-built VFS reports
-# its unknown keys under the same code so the two read alike.
-EXTRA_FORBIDDEN = "extra_forbidden"
-
-_NAMED_PARAMETERS = (
-    inspect.Parameter.POSITIONAL_OR_KEYWORD,
-    inspect.Parameter.KEYWORD_ONLY,
-)
 
 
 class VFSEntry(NamedTuple):
@@ -262,12 +252,12 @@ def known_vfs_names() -> list[str]:
 
 def resolve_class(ref: str | type) -> type:
     """Resolve a registry class reference: a class passes through, a
-    loader spec string loads via :func:`load_backend_class`.
+    loader spec string loads via :func:`load_attr`.
 
     Args:
         ref (str | type): class object or ``"source:ClassName"`` spec.
     """
-    return ref if isinstance(ref, type) else load_backend_class(ref)
+    return ref if isinstance(ref, type) else load_attr(ref)
 
 
 def resolve_entry(name: str) -> VFSEntry | None:
@@ -358,7 +348,15 @@ def unknown_kwargs(vfs_cls: type, config: Mapping[str, Any]) -> list[str]:
     params = inspect.signature(vfs_cls).parameters.values()
     if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params):
         return []
-    named = {p.name for p in params if p.kind in _NAMED_PARAMETERS}
+    named = {
+        p.name
+        for p in params
+        if p.kind
+        in (
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+    }
     return [key for key in config if key not in named]
 
 
@@ -420,9 +418,12 @@ def build_vfs(name: str, config: dict[str, Any] | None = None) -> BaseVFS:
         if config_ref is None:
             unknown = unknown_kwargs(vfs_cls, cfg_dict)
             if unknown:
+                # pydantic's code for a key no field takes, as a typed
+                # config reports it through `error_summary`, so the two
+                # read alike.
                 raise VFSConfigError(
                     f"{name}: "
-                    + "; ".join(f"{key}: {EXTRA_FORBIDDEN}" for key in unknown)
+                    + "; ".join(f"{key}: extra_forbidden" for key in unknown)
                 )
             built = vfs_cls(**cfg_dict)
         else:

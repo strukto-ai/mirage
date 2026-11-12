@@ -41,7 +41,3 @@ export interface RunFile extends FileMetadata {
   directUrl?: string | null
   url: string
 }
-export interface Connection<T> {
-  edges: { node: T; cursor: string }[]
-  pageInfo: { endCursor: string | null; hasNextPage: boolean }
-}

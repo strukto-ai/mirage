@@ -213,8 +213,9 @@ class JobTable:
         self.run_stopper: (
             Callable[[RecordFields, int], Awaitable[bool]] | None
         ) = None
-        # Told each job this table's jobs run as it ends; the workspace
-        # sets it, to trace the job.
+        # Told each job this table's jobs run as it starts and as it
+        # ends; the workspace sets them, to trace the job.
+        self.started: Callable[[Job], None] | None = None
         self.ended: Callable[[Job], None] | None = None
         # Run once this table's daemon takes the workspace's lease; the
         # workspace sets it, to end the line and process records the
@@ -441,6 +442,12 @@ class JobTable:
         job.process = process
         self._jobs.setdefault(session_id, {})[job_id] = job
         self._job_added(session_id, job_id)
+        started = self._plane.started
+        if started is not None:
+            try:
+                started(job.record)
+            except Exception as exc:
+                logger.debug("job %d: started hook failed: %s", job.id, exc)
         ready.set()
         plane, pid = self._plane, process.record.pid
         plane._job_tables[pid] = self

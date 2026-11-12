@@ -13,21 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-from mirage.context import bind_caller, current_caller
+from mirage.context import current_caller
 from mirage.workspace.types import StatusWriter
-
-
-def set_line_writer(writer: StatusWriter) -> None:
-    """Mark the running task as this line's.
-
-    Set by ``execute_line``, which is the line's whole task, so every
-    statement and every nested evaluation the line spawns inherits it
-    and no other line can see it.
-
-    Args:
-        writer (StatusWriter): the line's identity.
-    """
-    bind_caller(current_caller().changed({"line_writer": writer}))
 
 
 def line_status_writer() -> StatusWriter | None:

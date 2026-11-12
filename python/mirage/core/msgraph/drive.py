@@ -48,9 +48,9 @@ from mirage.errors.fs import eexist, enoent, enotdir, enotsup, listing_error
 from mirage.io.spool import ByteSpool, size_of, slice_of
 from mirage.io.types import ByteSource
 from mirage.observe.context import (
-    active_recorder,
     record,
     record_stream,
+    recording_active,
     revision_for,
     start_op,
 )
@@ -557,7 +557,7 @@ async def read_item(
                 accessor,
                 loc,
                 virtual,
-                versions=active_recorder() is not None,
+                versions=recording_active(),
             )
             if download_url:
                 data = await graph_get_bytes(

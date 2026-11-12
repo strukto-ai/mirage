@@ -75,7 +75,7 @@ from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, PolicyDecision, under_ceiling
 from mirage.utils.abort import MirageAbortError
 from mirage.utils.clock import run_with_system_clock
-from mirage.workspace.abort import line_status_writer, set_line_writer
+from mirage.workspace.abort import line_status_writer
 from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.background import start_shell
@@ -109,7 +109,6 @@ from mirage.workspace.node.run_tree import run_command_tree
 from mirage.workspace.session import (
     SessionState,
     get_current_session_for,
-    reset_current_session,
     set_current_session,
 )
 from mirage.workspace.session.budget import run_with_env_limit
@@ -472,7 +471,7 @@ async def recurse(
     finally:
         if substitution:
             if child_token is not None:
-                reset_current_session(child_token)
+                reset_caller(child_token)
             await session.close_inputs()
     if io.decision is not None:
         nested.latest = io.decision
@@ -760,7 +759,7 @@ async def _run_as_shell(
             results.append(result)
             return result.exit_code
         finally:
-            reset_current_session(token)
+            reset_caller(token)
 
     def started(process: ProcessHandle) -> None:
         session.process_id = session.shell_pid = process.record.pid
@@ -1368,8 +1367,9 @@ async def run_prepared_line(
         frame.session = session
         frame.status_before = snapshot_status(session)
         # This coroutine is the line's whole task, so every statement
-        # and every nested evaluation under it inherits the identity.
-        set_line_writer(frame.writer)
+        # and every nested evaluation under it inherits the identity, and
+        # no other line can see it.
+        bind_caller(current_caller().changed({"line_writer": frame.writer}))
     previous_alias_expansion = effective_session._alias_expansion
     effective_session._alias_expansion = None
     # bash adds a line to history only when it is non-empty (anything
@@ -1693,7 +1693,7 @@ async def run_prepared_line(
             # aliases it changed goes with it.
             effective_session._alias_marks.clear()
             effective_session._expand_aliases_marks.clear()
-        reset_current_session(session_token)
+        reset_caller(session_token)
         await ws.sessions.end_line(session_id, parent is None)
         ws.records.extend(scope.records)
         if recorded:

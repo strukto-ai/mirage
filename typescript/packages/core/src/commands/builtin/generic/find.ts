@@ -293,7 +293,7 @@ export function findGeneric(
       if (root.walkError !== null) {
         // The walk refused the start point before find ran (the empty
         // name, a link loop), and every probe below goes by the path it
-        // simplifies to. Mirrors Python's resolve_start.
+        // simplifies to.
         missing.push(
           `find: '${root.rawPath}': ${fsStrerror(walkRefusal(root)) ?? posixPhrase('ENOENT')}`,
         )

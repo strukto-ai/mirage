@@ -51,16 +51,6 @@ export interface HttpResponse {
 // A chain past this many hops reads as a loop. undici's own limit, and the
 // connect failure is what its native following reported at it.
 const MAX_REDIRECTS = 20
-const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
-
-// The Fetch standard's rule, which curl shares by default: 303 answers with
-// a GET for anything but HEAD, 301 and 302 turn a POST into a GET, and 307
-// and 308 keep the method and its body.
-function redirectMethod(status: number, method: string): string {
-  if (status === 303 && method !== 'HEAD') return 'GET'
-  if ((status === 301 || status === 302) && method === 'POST') return 'GET'
-  return method
-}
 
 function nextHop(location: string, current: string): { url: string; sameOrigin: boolean } | null {
   try {
@@ -190,7 +180,10 @@ async function* streamed(
   }
 }
 
-async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpResponse> {
+export async function httpRequest(
+  url: string,
+  options: HttpRequestOptions = {},
+): Promise<HttpResponse> {
   const timeoutMs =
     options.timeoutMs === undefined ? HTTP_TIMEOUT_SECONDS * 1000 : options.timeoutMs
   const send = options.verify === false && insecureFetch !== null ? insecureFetch : fetch
@@ -263,7 +256,7 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
       }
       const location = resp.headers.get('location')
       const next =
-        follow && REDIRECT_STATUSES.has(resp.status) && location !== null
+        follow && [301, 302, 303, 307, 308].includes(resp.status) && location !== null
           ? nextHop(location, current)
           : null
       if (next === null && options.stream === true) {
@@ -302,7 +295,14 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
           ),
         )
       }
-      const switched = redirectMethod(resp.status, method)
+      // The Fetch standard's rule, which curl shares by default: 303 answers
+      // with a GET for anything but HEAD, 301 and 302 turn a POST into a GET,
+      // and 307 and 308 keep the method and its body.
+      const switched =
+        (resp.status === 303 && method !== 'HEAD') ||
+        ((resp.status === 301 || resp.status === 302) && method === 'POST')
+          ? 'GET'
+          : method
       if (switched !== method) body = undefined
       method = switched
       current = next.url
@@ -310,11 +310,6 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
   } finally {
     if (!handed && timer !== null) clearTimeout(timer)
   }
-}
-
-export function httpRequest(url: string, options: HttpRequestOptions = {}): Promise<HttpResponse> {
-  const method = options.method ?? 'GET'
-  return doFetch(url, { ...options, method })
 }
 
 export function httpFormRequest(
@@ -340,7 +335,7 @@ export function httpFormRequest(
     'Content-Type': 'application/x-www-form-urlencoded',
     ...(opts.headers ?? {}),
   }
-  return doFetch(url, {
+  return httpRequest(url, {
     method,
     headers,
     body: new TextEncoder().encode(form.toString()),

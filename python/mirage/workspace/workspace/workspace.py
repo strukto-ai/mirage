@@ -52,10 +52,6 @@ from mirage.context import (
     get_current_session_for,
     get_current_session_unless_foreign,
     reset_caller,
-    reset_current_session,
-    reset_decision_sink,
-    reset_explaining,
-    reset_program_invocation,
     session_visibility,
     set_current_session,
     set_decision_sink,
@@ -151,6 +147,7 @@ from mirage.shell.literal import literal_tree
 from mirage.shell.parse import parse
 from mirage.shell.variable import VarAttr
 from mirage.types import (
+    KERNEL_BACKENDS,
     Ceilings,
     DriftPolicy,
     FileEvent,
@@ -268,7 +265,6 @@ from mirage.workspace.workspace.meta import WorkspaceMeta
 from mirage.workspace.workspace.mounts import (
     check_vfs,
     install_mounts,
-    kernel_targets,
     normalize_mounts,
     prepare_added_mount,
     unmount_prefix,
@@ -479,6 +475,7 @@ class Workspace:
             daemon=daemon_id,
         )
 
+        self.job_table.started = self._trace_job
         self.job_table.ended = self._trace_job
 
         self.job_table.taken = self._end_lost
@@ -625,6 +622,7 @@ class Workspace:
             workspace_id=self._workspace_id,
             machine=str(self.process_table.machine),
             processes=self.process_table.records,
+            instance=lambda machine: self.machine_table.instance(machine),
         )
         self._registry.observer = self.observer
         # The stores this workspace's state lives in, whether the state
@@ -741,20 +739,17 @@ class Workspace:
         )
 
     def _trace_job(self, record: Job) -> None:
-        """Tell the observer a job ended, on the machine it ran on.
+        """Tell the observer a job started or ended, on the machine it
+        runs on.
 
         Args:
-            record (Job): the job that ended.
+            record (Job): the job.
         """
-        machine = next(
-            (
-                process.machine
-                for process in self.process_table.records()
-                if process.pid == record.pid
-            ),
-            self.process_table.machine,
+        process = next(
+            (p for p in self.process_table.records() if p.pid == record.pid),
+            None,
         )
-        self.observer.trace_job(record, machine)
+        self.observer.trace_job(record, process)
 
     async def _end_lost(self) -> None:
         """End what the daemon before this one left running, as its jobs
@@ -885,6 +880,7 @@ class Workspace:
             str(handle.id) for handle in self.machine_table.handles()
         ]
         self.process_table.machine_resources = self.machine_table.resources
+        self.process_table.machine_instance = self.machine_table.instance
 
     def _start_installs(
         self,
@@ -910,10 +906,11 @@ class Workspace:
                 )
                 self._registry.clis.install(cli_name, cli_spec, cli_config)
             self._registry.bind_clocks()
-            for prefix, target_backend, target_point in kernel_targets(specs):
-                self.add_fuse_mount(
-                    prefix, target_point, backend=target_backend
-                )
+            for spec in specs:
+                if spec.backend in KERNEL_BACKENDS:
+                    self.add_fuse_mount(
+                        spec.prefix, spec.mountpoint, backend=spec.backend
+                    )
         except BaseException:
             self._registry.release_clocks()
             raise
@@ -992,8 +989,8 @@ class Workspace:
         try:
             return await self._explained(line, session_id)
         finally:
-            reset_explaining(token)
-            reset_decision_sink(sink_token)
+            reset_caller(token)
+            reset_caller(sink_token)
 
     async def _explained(self, line: str, session_id: str) -> ShellExplanation:
         """:meth:`explain`'s judging, run with its policies deciding.
@@ -1564,7 +1561,7 @@ class Workspace:
                 ),
             )
         finally:
-            reset_current_session(token)
+            reset_caller(token)
 
     def spawn(
         self, request: SpawnRequest, session_id: str | None = None
@@ -1681,8 +1678,8 @@ class Workspace:
                 )
                 return result.exit_code
             finally:
-                reset_program_invocation(program_token)
-                reset_current_session(token)
+                reset_caller(program_token)
+                reset_caller(token)
                 input_stream.stop()
                 output.end()
 
@@ -3223,7 +3220,7 @@ class Workspace:
         try:
             return await run()
         finally:
-            reset_current_session(token)
+            reset_caller(token)
 
     async def dispatch(
         self, name: str, path: PathSpec, /, **kwargs: Any
@@ -3463,7 +3460,7 @@ class Workspace:
         try:
             return await run(tty=session.tty), source
         finally:
-            reset_current_session(token)
+            reset_caller(token)
             session.tty.hand_over(source.tty)
 
     @overload
@@ -3797,7 +3794,7 @@ class Workspace:
                 return result
             finally:
                 if bound is not None:
-                    reset_current_session(bound)
+                    reset_caller(bound)
 
         try:
             if stop is not None:

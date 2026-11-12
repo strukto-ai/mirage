@@ -23,7 +23,6 @@ import type { Limit, PathSpec } from '../types.ts'
 import type { IdSource } from '../utils/ids.ts'
 import type { SessionView } from '../view/types.ts'
 import type { Files } from '../workspace/files.ts'
-import type { AggregateResult } from './builtin/aggregators.ts'
 import { isBuiltinGrammar, registeredSpec } from './spec/builtins.ts'
 import { compileSpec } from './spec/compile.ts'
 import { OWN_OPTION_LOOP } from './spec/constants.ts'
@@ -107,7 +106,7 @@ export type CommandFn<A extends Accessor = Accessor> = (
   ctx: Context,
 ) => Promise<CommandFnResult> | CommandFnResult
 
-export type AggregateFn = (results: AggregateResult[]) => Uint8Array
+export type AggregateFn = (results: [path: string, data: Uint8Array][]) => Uint8Array
 
 /**
  * One command as a mount registers it: the grammar (with `--help` and

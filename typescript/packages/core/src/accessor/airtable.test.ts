@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_REQUESTS_PER_SECOND } from '../core/airtable/constants.ts'
 import { ManualClock } from '../utils/clock.ts'
 import { AirtableAccessor } from './airtable.ts'
 
@@ -23,7 +22,7 @@ describe('AirtableAccessor', () => {
     accessor.bindClock(clock, 'ws')
     await accessor.limiter.acquire('appA')
     await accessor.limiter.acquire('appA')
-    expect(clock.monotonic()).toBeCloseTo(1 / DEFAULT_REQUESTS_PER_SECOND)
+    expect(clock.monotonic()).toBeCloseTo(1 / 5)
   })
 
   it('takes another clock once the holder lets go', () => {

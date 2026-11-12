@@ -158,6 +158,11 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
 
     _sandbox: Any = None
 
+    @property
+    def instance(self) -> str:
+        """The sandbox's id at E2B."""
+        return self.config.sandbox_id
+
     def _api_params(self) -> dict[str, Any]:
         api_key = self.config.api_key
         return {"api_key": api_key} if api_key is not None else {}

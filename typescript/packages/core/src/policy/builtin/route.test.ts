@@ -45,19 +45,23 @@ describe('RoutePolicy', () => {
   })
 
   it.each([
-    '',
-    { route: 'beta' },
-    { deny: 'no' },
     { kind: 'route', runtime: 'beta' },
-    { kind: 'deny', reason: 'no' },
-    42,
-  ])("treats anything but a name or null as the deployment's mistake: %j", async (verdict) => {
-    // Refusing a line is a policy's answer, not the router's; a route
-    // policy that answers anything else is misconfigured, not a refusal.
-    await expect(
-      routePolicy((() => verdict) as unknown as RouteRule).preExecute(line('echo hi')),
-    ).rejects.toThrow(/a runtime name or None/)
+    { kind: 'route', machine: 'box' },
+    { kind: 'route', runtime: 'beta', machine: 'box' },
+  ] as const)('places the line on a runtime, a machine or both: %j', async (route) => {
+    expect(await routePolicy(() => route).preExecute(line('python3 heavy'))).toEqual(route)
   })
+
+  it.each(['', { route: 'beta' }, { deny: 'no' }, { kind: 'deny', reason: 'no' }, 42])(
+    "treats anything but a name, a route or null as the deployment's mistake: %j",
+    async (verdict) => {
+      // Refusing a line is a policy's answer, not the router's; a route
+      // policy that answers anything else is misconfigured, not a refusal.
+      await expect(
+        routePolicy((() => verdict) as unknown as RouteRule).preExecute(line('echo hi')),
+      ).rejects.toThrow(/a runtime name, a Route or None/)
+    },
+  )
 
   it('runs a program that prints its route or nothing', async () => {
     const policy = routePolicy({

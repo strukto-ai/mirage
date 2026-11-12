@@ -141,39 +141,6 @@ async def _watch_exit(
     on_exit()
 
 
-def _load_ssh_starter() -> StartSSH:
-    module_path, attr = SERVER_MODULE.split(":")
-    try:
-        module = importlib.import_module(module_path)
-    except ModuleNotFoundError as exc:
-        raise SSHConfigError(
-            "ssh_port is set but the SSH server needs asyncssh; install "
-            "the ssh extra (pip install 'mirage-ai[ssh]')"
-        ) from exc
-    return cast(StartSSH, getattr(module, attr))
-
-
-async def _start_ssh(app: FastAPI) -> SSHListener | None:
-    """Open the SSH endpoint when one is configured.
-
-    A configured entry point that cannot open (the port is taken, asyncssh is
-    missing) fails the daemon's start rather than leaving it up without
-    the entry point its config asked for.
-
-    Args:
-        app (FastAPI): the daemon app.
-
-    Returns:
-        SSHListener | None: the running listener, or None when SSH is
-            off.
-    """
-    config: SSHConfig = app.state.ssh_config
-    if config.port is None:
-        return None
-    start = _load_ssh_starter()
-    return await start(app.state.registry, config)
-
-
 def _drain_on_signals(
     app: FastAPI,
 ) -> dict[signal.Signals, Callable[[int, FrameType | None], Any]]:
@@ -268,7 +235,28 @@ async def _drain_then_stop(
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    listener = await _start_ssh(app)
+    """Open the app's endpoints, and close them as it stops.
+
+    A configured SSH endpoint that cannot open (the port is taken,
+    asyncssh is missing) fails the daemon's start rather than leaving it
+    up without the entry point its config asked for.
+
+    Args:
+        app (FastAPI): the daemon app.
+    """
+    config: SSHConfig = app.state.ssh_config
+    listener: SSHListener | None = None
+    if config.port is not None:
+        module_path, attr = SERVER_MODULE.split(":")
+        try:
+            module = importlib.import_module(module_path)
+        except ModuleNotFoundError as exc:
+            raise SSHConfigError(
+                "ssh_port is set but the SSH server needs asyncssh; install "
+                "the ssh extra (pip install 'mirage-ai[ssh]')"
+            ) from exc
+        start: StartSSH = getattr(module, attr)
+        listener = await start(app.state.registry, config)
     app.state.ssh = listener
     if app.state.pid_file is not None:
         await run_blocking(_write_pid_file, app.state.pid_file)

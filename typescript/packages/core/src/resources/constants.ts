@@ -28,9 +28,6 @@ export const POLICY_NAME = /^[a-z0-9][a-z0-9._-]{0,59}\.py$/
 /** The source a config names a saved field through: `{from: strukto, ref, key}`. */
 export const STRUKTO = 'strukto'
 
-/** The folder deleted templates wait in until restored. */
-export const DELETED_TEMPLATES = '.deleted/template'
-
 /** Each kind as its messages name it. */
 export const NOUN: Readonly<Record<ResourceKind, string>> = {
   vfs: 'VFS',

@@ -14,8 +14,10 @@
 
 import {
   context,
+  isSpanContextValid,
   trace,
   type Attributes,
+  type Context,
   type Span,
   type SpanContext,
   type Tracer,
@@ -23,7 +25,7 @@ import {
 import { HISTORY_MAX_RECORDS } from '../execution/constants.ts'
 import type { Job } from '../execution/job/types.ts'
 import type { Process } from '../execution/process/types.ts'
-import type { LineId, MachineId } from '../execution/types.ts'
+import type { MachineId } from '../execution/types.ts'
 import { CHUNK_SIZE } from '../io/cooperative.ts'
 import type { IOResult } from '../io/types.ts'
 import { YieldBudget } from '../io/yield_budget.ts'
@@ -167,11 +169,9 @@ function endLine(
   exitCode: number,
   output: [Uint8Array, Uint8Array],
   records: readonly OpRecord[],
-  machines: readonly string[],
 ): void {
   const content = traceContent()
   line.setAttribute('mirage.exit_code', exitCode)
-  if (machines.length > 0) line.setAttribute('mirage.machine.ids', [...machines])
   line.setAttribute('mirage.duration_ms', span[1] - span[0])
   const calls = records.slice(0, positiveEnv(TRACE_MAX_SPANS_ENV, TRACE_MAX_SPANS))
   if (content) {
@@ -244,10 +244,6 @@ function parseFiles(files: Map<string, Uint8Array>): JsonObject[] {
   return out
 }
 
-function eventTimestamp(e: JsonObject): number {
-  return typeof e.timestamp === 'number' ? e.timestamp : 0
-}
-
 /** The latest timestamp among `events`, null when none carries one. */
 function newestStamp(events: readonly JsonObject[]): number | null {
   return events.reduce<number | null>(
@@ -280,14 +276,16 @@ function later(a: number | null, b: number | null): number | null {
  * commands it acts on. A session with no history sets no floor.
  *
  * Each typed line also goes to OpenTelemetry as a span, its vfs calls as
- * spans under it, and so does each job and process once it ends, under the
- * span of the line that started it while the newest `HISTORY_MAX_RECORDS`
+ * spans under it, and so does each job and process once it ends: a process
+ * under the one that started it, a job's process under its job, and the
+ * line's own under the line's span while the newest `HISTORY_MAX_RECORDS`
  * lines' spans are known; nothing leaves the process until an SDK is set
  * up. Tracing stops at the workspace's own machine and runtimes: a program
  * a runtime runs elsewhere starts no trace of its own there. `machine` is
  * the workspace's, `host.id` on its command, job and process spans;
- * `processes` gives the process records the workspace keeps, whose machines
- * a line's span lists.
+ * `processes` gives the process records the workspace keeps, which a span
+ * goes under, and `instance` what each machine's provider calls it,
+ * `mirage.machine.id` for a record that does not say.
  */
 export class Observer {
   private readonly _store: ObserverStore
@@ -298,6 +296,14 @@ export class Observer {
   // The span of each recent line, which its jobs and processes go under,
   // oldest first.
   private readonly lineSpans = new Map<string, SpanContext>()
+  // The span of each job and process open now, by kind, line and pid, and
+  // of the newest ended ones, which one started under them still goes
+  // under, oldest first.
+  private readonly openSpans = new Map<string, Span>()
+  private readonly closedSpans = new Map<string, SpanContext>()
+  // The pid each of those processes shows, by the same key: its program's
+  // on its machine, else Mirage's own.
+  private readonly shownPids = new Map<string, number>()
 
   constructor(
     store?: ObserverStore,
@@ -305,27 +311,10 @@ export class Observer {
     private readonly workspaceId?: string,
     private readonly machine?: string,
     private readonly processes?: () => Process[],
+    private readonly instance?: (machine: MachineId) => string,
   ) {
     this._store = store ?? new RAMObserverStore()
     this.clock = clock
-  }
-
-  /**
-   * The machines a line's processes ran on by the time it ended, while the
-   * workspace keeps their records; a background job's later processes name
-   * theirs on their own spans. `line` is the line's id or one of its
-   * history entries'. Mirrors Python's `_machines_of`.
-   */
-  private machinesOf(line: string): string[] {
-    if (this.processes === undefined) return []
-    const base = line.split('.', 1)[0]
-    return [
-      ...new Set(
-        this.processes()
-          .filter((process) => process.line?.value === base)
-          .map((process) => process.machine.toString()),
-      ),
-    ]
   }
 
   /** The clock's wall time in epoch milliseconds, an entry's stamp. */
@@ -400,69 +389,221 @@ export class Observer {
     }
   }
 
-  /** Send an ended process to OpenTelemetry as a `process` span, under its line's. */
+  /**
+   * Send an ended process to OpenTelemetry as a `process` span: what it ran,
+   * where and as whom, and how it ended. Mirrors Python's `trace_process`.
+   */
   traceProcess(record: Process): void {
+    const line = record.line?.value ?? null
+    if (!this.traced(line)) return
+    const span = this.processSpan(record)
+    if (record.exit !== null) span.setAttribute('process.exit.code', record.exit)
+    if (record.signal !== null) span.setAttribute('mirage.signal', record.signal)
+    if (record.error !== null) span.setAttribute('mirage.error', record.error)
+    const shown = record.machinePid?.pid ?? record.id.pid
+    span.setAttribute('process.pid', shown)
+    for (const [key, value] of Object.entries(
+      this.machineAttributes(record.machine, record.machineInstance ?? null),
+    )) {
+      if (value !== undefined) span.setAttribute(key, value)
+    }
+    this.shownPids.set(this.spanKey('process', line, record.id.pid), shown)
+    this.endSpan(this.spanKey('process', line, record.id.pid), record.endedAt)
+  }
+
+  /**
+   * Send a job to OpenTelemetry as a `job` span, opened as it starts, so its
+   * process goes under it, and closed as it ends: what it ran, where and as
+   * whom, and how it ended; `process` is its process's record, which names
+   * where its program runs once it does. Mirrors Python's `trace_job`.
+   */
+  traceJob(record: Job, process: Process | null): void {
+    const line = record.line?.value ?? null
+    if (!this.traced(line)) return
+    const span = this.jobSpan(record, process)
+    if (record.endedAt === null) return
+    if (process !== null) {
+      span.setAttribute('process.pid', process.machinePid?.pid ?? process.id.pid)
+      for (const [key, value] of Object.entries(
+        this.machineAttributes(process.machine, process.machineInstance ?? null),
+      )) {
+        if (value !== undefined) span.setAttribute(key, value)
+      }
+    }
+    if (record.exit !== null) span.setAttribute('mirage.exit_code', record.exit)
+    if (record.signal !== null) span.setAttribute('mirage.signal', record.signal)
+    this.endSpan(this.spanKey('job', line, record.pid ?? 0), record.endedAt)
+  }
+
+  /**
+   * Whether anyone traces the line: not when its span is one nobody records,
+   * so an untraced workspace reads no records. Mirrors Python's `_traced`.
+   */
+  private traced(line: string | null): boolean {
+    const known = line === null ? undefined : this.lineSpans.get(line)
+    return known === undefined || isSpanContextValid(known)
+  }
+
+  /**
+   * The attributes naming where a span's work ran: the machine's provider,
+   * its name and what its provider calls it (`instance`, as the record kept
+   * it when the work started, else asked now). Mirrors Python's
+   * `_machine_attributes`.
+   */
+  private machineAttributes(machine: MachineId, instance: string | null = null): Attributes {
+    return {
+      'mirage.machine.type': machine.provider,
+      'mirage.machine.name': machine.name,
+      'mirage.machine.id': instance ?? this.instance?.(machine) ?? machine.name,
+    }
+  }
+
+  /** The key a job's or process's span is kept under: its kind, line and pid. */
+  private spanKey(kind: string, line: string | null, pid: number): string {
+    return `${kind} ${line ?? ''} ${String(pid)}`
+  }
+
+  /**
+   * The context a span goes under to be under the span `key` names,
+   * undefined while there is none. Mirrors Python's `_context`.
+   */
+  private contextOf(key: string): Context | undefined {
+    const span = this.openSpans.get(key)
+    if (span !== undefined) return trace.setSpan(context.active(), span)
+    const known = this.closedSpans.get(key)
+    return known === undefined ? undefined : trace.setSpanContext(context.active(), known)
+  }
+
+  /**
+   * The context `record`'s span goes under: its parent's span, opened now
+   * when its parent still runs, else its line's. Mirrors Python's `_under`.
+   */
+  private under(record: Process): Context | undefined {
+    const line = record.line?.value ?? null
+    if (record.parent !== null) {
+      const found = this.contextOf(this.spanKey('process', line, record.parent))
+      if (found !== undefined) return found
+      const parent = (this.processes?.() ?? []).find(
+        (p) =>
+          p.id.pid === record.parent && (p.line?.value ?? null) === line && p.state !== 'exited',
+      )
+      if (parent !== undefined) return trace.setSpan(context.active(), this.processSpan(parent))
+    }
+    const known = line === null ? undefined : this.lineSpans.get(line)
+    return known === undefined ? undefined : trace.setSpanContext(context.active(), known)
+  }
+
+  /**
+   * `record`'s span, opened the first time it is needed (as it ends, or as
+   * the first process under it does) from its own start: under its job's
+   * span when it is a job's process, else under its parent's or its line's.
+   * Mirrors Python's `_process_span`.
+   */
+  private processSpan(record: Process): Span {
+    const line = record.line?.value ?? null
+    const key = this.spanKey('process', line, record.id.pid)
+    const open = this.openSpans.get(key)
+    if (open !== undefined) return open
+    const under = this.contextOf(this.spanKey('job', line, record.id.pid)) ?? this.under(record)
+    const shown = record.machinePid?.pid ?? record.id.pid
+    this.shownPids.set(this.spanKey('process', line, record.id.pid), shown)
     const attributes: Attributes = {
-      'process.pid': record.id.pid,
+      'process.pid': shown,
+      'mirage.process.pid': record.id.pid,
       'process.command_line': record.command,
-      'process.group_leader.pid': record.group,
-      'mirage.machine.id': record.machine.toString(),
+      'process.group_leader.pid':
+        this.shownPids.get(this.spanKey('process', line, record.group)) ?? record.group,
+      ...this.machineAttributes(record.machine, record.machineInstance ?? null),
       'mirage.workspace.id': record.id.workspaceId,
       'mirage.session.id': record.sessionId,
       'mirage.cwd': record.cwd.virtual,
     }
-    if (record.parent !== null) attributes['process.parent_pid'] = record.parent
-    if (record.exit !== null) attributes['process.exit.code'] = record.exit
-    if (record.signal !== null) attributes['mirage.signal'] = record.signal
-    if (record.error !== null) attributes['mirage.error'] = record.error
+    if (record.parent !== null) {
+      attributes['process.parent_pid'] =
+        this.shownPids.get(this.spanKey('process', line, record.parent)) ?? record.parent
+    }
     if (record.runtime !== null) attributes['mirage.runtime'] = record.runtime
-    if (record.machinePid !== null) attributes['mirage.machine.pid'] = record.machinePid.pid
-    this.traceEnded('process', attributes, record.line, record.startedAt, record.endedAt)
+    return this.startSpan('process', key, line, attributes, under, record.startedAt)
   }
 
   /**
-   * Send an ended job to OpenTelemetry as a `job` span, under its line's;
-   * `machine` is where its process ran.
+   * `record`'s span, opened the first time it is needed from its own start,
+   * under the span its process would go under. Mirrors Python's `_job_span`.
    */
-  traceJob(record: Job, machine: MachineId): void {
+  private jobSpan(record: Job, process: Process | null): Span {
+    const line = record.line?.value ?? null
+    const key = this.spanKey('job', line, record.pid ?? 0)
+    const open = this.openSpans.get(key)
+    if (open !== undefined) return open
+    let under: Context | undefined
+    if (process !== null) under = this.under(process)
+    else if (line !== null) {
+      const known = this.lineSpans.get(line)
+      if (known !== undefined) under = trace.setSpanContext(context.active(), known)
+    }
     const attributes: Attributes = {
       'mirage.job.id': record.id.console,
       'mirage.job.number': record.number,
       'mirage.command': record.command,
-      'mirage.machine.id': machine.toString(),
       'mirage.workspace.id': record.id.workspaceId,
       'mirage.session.id': record.sessionId,
       'mirage.cwd': record.cwd,
     }
-    if (record.pid !== null) attributes['process.pid'] = record.pid
-    if (record.exit !== null) attributes['mirage.exit_code'] = record.exit
-    if (record.signal !== null) attributes['mirage.signal'] = record.signal
-    this.traceEnded('job', attributes, record.line, record.startedAt, record.endedAt)
+    if (process !== null) {
+      Object.assign(
+        attributes,
+        this.machineAttributes(process.machine, process.machineInstance ?? null),
+      )
+    }
+    if (record.pid !== null) {
+      attributes['process.pid'] = process?.machinePid?.pid ?? record.pid
+      attributes['mirage.process.pid'] = record.pid
+    }
+    return this.startSpan('job', key, line, attributes, under, record.startedAt)
   }
 
   /**
-   * Send an ended record to OpenTelemetry as one span over its run, from
-   * `startedAt` to `endedAt`, epoch seconds, under the span of its line
-   * while that is known. Mirrors Python's `_trace_ended`.
+   * Open the `name` span of a job or process from `startedAt` (epoch
+   * seconds), naming the host and its line, under `under` (a trace of its
+   * own when undefined), and keep it open under `key`. Mirrors Python's
+   * `_start`.
    */
-  private traceEnded(
+  private startSpan(
     name: string,
+    key: string,
+    line: string | null,
     attributes: Attributes,
-    line: LineId | null,
+    under: Context | undefined,
     startedAt: number,
-    endedAt: number | null,
-  ): void {
+  ): Span {
     if (this.machine !== undefined) attributes['host.id'] = this.machine
-    let parent = context.active()
-    if (line !== null) {
-      attributes['mirage.line.id'] = line.value
-      const known = this.lineSpans.get(line.value)
-      if (known !== undefined) parent = trace.setSpanContext(parent, known)
+    if (line !== null) attributes['mirage.line.id'] = line
+    const span = tracer().startSpan(
+      name,
+      { startTime: startedAt * 1000, attributes },
+      under ?? context.active(),
+    )
+    this.openSpans.set(key, span)
+    return span
+  }
+
+  /**
+   * Close the open span `key` names as of `endedAt` (epoch seconds; null
+   * ends it now), keeping its context for what started under it and ends
+   * later. Mirrors Python's `_end`.
+   */
+  private endSpan(key: string, endedAt: number | null): void {
+    const span = this.openSpans.get(key)
+    if (span === undefined) return
+    this.openSpans.delete(key)
+    span.end(endedAt === null ? undefined : endedAt * 1000)
+    this.closedSpans.delete(key)
+    this.closedSpans.set(key, span.spanContext())
+    for (const oldest of this.closedSpans.keys()) {
+      if (this.closedSpans.size <= HISTORY_MAX_RECORDS) break
+      this.closedSpans.delete(oldest)
+      this.shownPids.delete(oldest)
     }
-    const start = startedAt * 1000
-    tracer()
-      .startSpan(name, { startTime: start, attributes }, parent)
-      .end(endedAt === null ? start : endedAt * 1000)
   }
 
   /**
@@ -501,14 +642,7 @@ export class Observer {
     const took =
       started === undefined ? undefined : Math.round((this.clock.monotonic() - started[1]) * 1000)
     if (started !== undefined && took !== undefined) {
-      endLine(
-        started[2],
-        [started[0], started[0] + took],
-        io.exitCode,
-        [out, err],
-        opRecords,
-        line !== undefined && started[2].isRecording() ? this.machinesOf(line) : [],
-      )
+      endLine(started[2], [started[0], started[0] + took], io.exitCode, [out, err], opRecords)
     }
     const init: LogEntryInit = {
       type: EVENT_RESULT,
@@ -576,7 +710,11 @@ export class Observer {
         ? this._store.readAll()
         : this._store.readMatching(`/${await sessionFile(session)}`)),
     )
-    out.sort((a, b) => eventTimestamp(a) - eventTimestamp(b))
+    out.sort(
+      (a, b) =>
+        (typeof a.timestamp === 'number' ? a.timestamp : 0) -
+        (typeof b.timestamp === 'number' ? b.timestamp : 0),
+    )
     return out
   }
 

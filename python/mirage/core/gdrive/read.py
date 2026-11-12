@@ -24,9 +24,9 @@ from mirage.core.gdrive.fingerprint import (
 )
 from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import (
-    active_recorder,
     record,
     record_stream,
+    recording_active,
     revision_for,
     start_op,
 )
@@ -98,7 +98,7 @@ async def read_file_versioned(
     revision = pinned
     if pinned:
         data = await drive.download_revision(file_id, pinned, window)
-    elif active_recorder() is not None:
+    elif recording_active():
         md5, revision = await drive.capture_file_metadata(file_id)
         data = await drive.download_file(file_id, window)
         if whole and _stale_md5(md5, data):

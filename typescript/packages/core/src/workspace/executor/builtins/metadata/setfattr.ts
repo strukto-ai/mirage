@@ -27,9 +27,6 @@ import type { SessionState } from '../../../session/session.ts'
 import { finish, result } from '../shared.ts'
 import { attrError, attrOperands, attrUsageRefusal, SETFATTR_USAGE } from './xattr.ts'
 
-const HEX = /^[0-9a-fA-F]*$/
-const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/
-
 /**
  * A `-v` value as setfattr stores it, or null when it is malformed. `0x`
  * is hex and `0s` base64, whitespace ignored. Anything else is text:
@@ -41,12 +38,12 @@ export function decodeValue(text: string): Uint8Array | null {
   const kind = text.length > 2 && text.startsWith('0') ? (text[1] ?? '').toLowerCase() : ''
   if (kind === 'x') {
     const digits = text.slice(2).replace(/\s/g, '')
-    if (digits.length % 2 !== 0 || !HEX.test(digits)) return null
+    if (digits.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(digits)) return null
     return Uint8Array.from(digits.match(/../g) ?? [], (pair) => parseInt(pair, 16))
   }
   if (kind === 's') {
     const digits = text.slice(2).replace(/\s/g, '')
-    if (digits.length % 4 !== 0 || !BASE64.test(digits)) return null
+    if (digits.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(digits)) return null
     return decodeBase64(digits)
   }
   let raw = encodeText(text)

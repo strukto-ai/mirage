@@ -74,7 +74,7 @@ export async function* readStream(
     columns = await columnNames(accessor, schema, entity)
   }
   if (pk.length === 0) {
-    yield await read(accessor, path, entry, parent, options)
+    yield await read(accessor, spec, entry, parent, options)
     return
   }
   const cfg = accessor.config
@@ -165,7 +165,7 @@ const readEntityRows: WindowedReader<PostgresAccessor> = (
   window,
 ) => readRows(accessor, match.slots.schema ?? '', match.slots.entity ?? '', path, window)
 
-const kitRead = makeRead<PostgresAccessor>(
+export const read = makeRead<PostgresAccessor>(
   detectScope,
   {
     database_json: readDatabaseJson,
@@ -174,17 +174,6 @@ const kitRead = makeRead<PostgresAccessor>(
   },
   { windowed: { entity_rows: readEntityRows }, parented: true },
 )
-
-export async function read(
-  accessor: PostgresAccessor,
-  path: PathSpec | string,
-  entry: FileStat | null = null,
-  parent: FileStat | null = null,
-  options: ReadWindow = {},
-): Promise<Uint8Array> {
-  const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
-  return kitRead(accessor, spec, entry, parent, options)
-}
 
 /**
  * Render a relation's rows.jsonl, or the window `options` picks. The whole file
@@ -432,12 +421,10 @@ export const follow = perKind(detectScope, { entity_rows: followRows }, { guard:
 
 /** One row as rows.jsonl spells it. Mirrors `row_line` in `core/postgres/read.py`. */
 export function rowLine(row: Record<string, unknown>): string {
-  return JSON.stringify(row, jsonReplacer)
-}
-
-function jsonReplacer(_key: string, value: unknown): unknown {
-  if (value instanceof Date) return value.toISOString()
-  if (typeof value === 'bigint') return value.toString()
-  if (value instanceof Uint8Array) return encodeBase64(value)
-  return value
+  return JSON.stringify(row, (_key: string, value: unknown): unknown => {
+    if (value instanceof Date) return value.toISOString()
+    if (typeof value === 'bigint') return value.toString()
+    if (value instanceof Uint8Array) return encodeBase64(value)
+    return value
+  })
 }

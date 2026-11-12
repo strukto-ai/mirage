@@ -27,6 +27,7 @@ from mirage.machine.program import read_into
 from mirage.machine.ssh import sdk
 from mirage.machine.ssh.config import SSHMachineConfig
 from mirage.machine.types import MachinePipe
+from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.types import OutputFn, RunResult
 from mirage.utils.ssh import connect_options
 
@@ -63,6 +64,11 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
 
     _conn: Any = None
 
+    @property
+    def instance(self) -> str:
+        """The host ssh reaches."""
+        return self.config.host
+
     def _connect_kwargs(self) -> dict[str, Any]:
         config = self.config
         kwargs = connect_options(
@@ -84,7 +90,7 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
 
     async def connect(self) -> None:
         if sdk.connect is None:
-            raise ImportError(sdk.ASYNCSSH_HINT)
+            raise ImportError(sdk_install_hint("ssh", "asyncssh"))
         self._conn = await sdk.connect(**self._connect_kwargs())
 
     async def _exec_argv(

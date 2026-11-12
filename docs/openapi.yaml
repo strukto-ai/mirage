@@ -93,8 +93,7 @@ paths:
               schema:
                 anyOf:
                   - $ref: '#/components/schemas/WorkspaceDetail'
-                  - type: object
-                    title: Policy explanation
+                  - $ref: '#/components/schemas/Explanation'
               example:
                 id: demo
                 status: running
@@ -193,6 +192,7 @@ paths:
           schema:
             type: boolean
             default: false
+          description: Include cache, history and job counts under `internals`.
       responses:
         '200':
           description: OK
@@ -200,6 +200,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceDetail'
+              example:
+                id: demo
+                status: running
+                created_at: '2026-11-07T00:00:00.000Z'
+                system_time: null
+                sessions:
+                  - session_id: 01a1b425-ec80-7038-86e0-75b597344043
+                    cwd: /
+                  - session_id: agent
+                    cwd: /
+                mounts:
+                  - prefix: /
+                    vfs: ram
+                    mode: write
+                    description: ''
+                    backend: workspace
+                    mountpoint: null
+                internals: null
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -282,11 +300,11 @@ paths:
                 $ref: '#/components/schemas/LogPage'
               example:
                 items:
-                  - id: c1
+                  - id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
                     command: echo hi
                     cwd: /
-                    started_at: '2023-11-14T22:13:20.000Z'
-                    duration_ms: 8
+                    started_at: '2026-11-07T00:00:01.000Z'
+                    duration_ms: 7
                     exit_code: 0
                     stdout: 'hi
 
@@ -299,12 +317,9 @@ paths:
             application/x-ndjson:
               schema:
                 type: string
-              example: '{"type":"command","session":"s1","timestamp":"2023-11-14T22:13:20.000Z","id":"c1","command":"echo
-                hi"}
-
-                {"type":"result","session":"s1","timestamp":"2023-11-14T22:13:20.008Z","parent":"c1","duration_ms":8,"exit_code":0,"stdout":"hi\n","stderr":""}
-
-                '
+              example: |
+                {"type":"command","session":"01a1b425-ec80-7038-86e0-75b597344043","timestamp":"2026-11-07T00:00:01.000Z","cwd":"/","id":"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37","command":"echo hi"}
+                {"type":"result","session":"01a1b425-ec80-7038-86e0-75b597344043","timestamp":"2026-11-07T00:00:01.007Z","cwd":"/","parent":"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37","duration_ms":7,"exit_code":0,"stdout":"hi\n","stderr":""}
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -368,6 +383,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceDetail'
+              example:
+                id: demo
+                status: running
+                created_at: '2026-11-07T00:00:00.000Z'
+                system_time: null
+                sessions:
+                  - session_id: 01a1b425-ec80-7038-86e0-75b597344043
+                    cwd: /
+                  - session_id: agent
+                    cwd: /
+                mounts:
+                  - prefix: /
+                    vfs: ram
+                    mode: write
+                    description: ''
+                    backend: workspace
+                    mountpoint: null
+                internals: null
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -403,6 +436,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CancelLinesResponse'
+              example:
+                canceled: 1
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -430,6 +465,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/KillJobsResponse'
+              example:
+                killed: 1
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -455,6 +492,7 @@ paths:
           required: true
           schema:
             type: string
+          description: Profile name.
       requestBody:
         required: true
         content:
@@ -463,6 +501,19 @@ paths:
               $ref: '#/components/schemas/SessionProfile'
             example:
               cwd: /
+              mounts:
+                /:
+                  mode: read
+              commands:
+                deny:
+                  - curl
+                ask:
+                  - commands:
+                      - rm
+                    reason: Deletes need sign-off
+              vars:
+                hide:
+                  - AWS_*
       responses:
         '200':
           description: OK
@@ -648,6 +699,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TemplateList'
+              example:
+                items:
+                  - name: demo
+                    description: One RAM mount
+                    config:
+                      mounts:
+                        /:
+                          vfs: ram
+                          mode: write
         '401':
           $ref: '#/components/responses/401'
         '429':
@@ -682,6 +742,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TemplateResponse'
+              example:
+                name: demo
+                description: One RAM mount
+                config:
+                  mounts:
+                    /:
+                      vfs: ram
+                      mode: write
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -706,6 +774,7 @@ paths:
           required: true
           schema:
             type: string
+          description: Template name.
       responses:
         '200':
           description: OK
@@ -713,6 +782,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TemplateResponse'
+              example:
+                name: demo
+                description: One RAM mount
+                config:
+                  mounts:
+                    /:
+                      vfs: ram
+                      mode: write
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -737,6 +814,7 @@ paths:
           required: true
           schema:
             type: string
+          description: Template name.
       responses:
         '204':
           description: No content
@@ -750,43 +828,11 @@ paths:
           $ref: '#/components/responses/429'
         '501':
           $ref: '#/components/responses/501'
-      description: Delete a saved template. Use the restore endpoint to recover it.
+      description: Delete a saved template.
       tags:
         - Templates
       x-hosts:
         - daemon
-  /v1/templates/{ref}/restore:
-    post:
-      summary: Restore template
-      operationId: restore_template_v1_templates__ref__restore_post
-      parameters:
-        - name: ref
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TemplateResponse'
-        '400':
-          $ref: '#/components/responses/400'
-        '401':
-          $ref: '#/components/responses/401'
-        '404':
-          $ref: '#/components/responses/404'
-        '429':
-          $ref: '#/components/responses/429'
-        '501':
-          $ref: '#/components/responses/501'
-      tags:
-        - Templates
-      x-hosts:
-        - daemon
-      description: Restore a deleted template.
   /v1/workspaces/{workspace_id}/vfs-md:
     get:
       summary: Read VFS.md
@@ -801,6 +847,7 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
+          description: Preview the document as this named profile allows it. Accepted only without `session_id`.
       responses:
         '200':
           $ref: '#/components/responses/VfsDocument'
@@ -830,6 +877,7 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
+          description: Not accepted with a path, so a write that sets it answers `400`.
       requestBody:
         required: true
         content:
@@ -947,6 +995,7 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
+          description: Preview the document as this named profile allows it. Accepted only without `session_id`.
       responses:
         '200':
           $ref: '#/components/responses/SkillDocument'
@@ -976,6 +1025,7 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
+          description: Not accepted with a path, so a write that sets it answers `400`.
       requestBody:
         required: true
         content:
@@ -1300,6 +1350,7 @@ paths:
           schema:
             type: boolean
             default: false
+          description: Include asks that were already answered.
       responses:
         '200':
           description: OK
@@ -1307,6 +1358,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AskList'
+              example:
+                items:
+                  - id: 791070cdf81c
+                    session_id: agent
+                    command: rm
+                    argv:
+                      - /notes.txt
+                    cwd: /
+                    paths:
+                      - /notes.txt
+                    reason: Deletes need sign-off
+                    outcome: null
+                    scope: once
+                    note: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -1332,6 +1397,7 @@ paths:
           required: true
           schema:
             type: string
+          description: Ask ID, as `GET /v1/workspaces/{workspace_id}/asks` lists it.
       requestBody:
         required: true
         content:
@@ -1348,6 +1414,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AskResponse'
+              example:
+                id: 791070cdf81c
+                session_id: agent
+                command: rm
+                argv:
+                  - /notes.txt
+                cwd: /
+                paths:
+                  - /notes.txt
+                reason: Deletes need sign-off
+                outcome: allow
+                scope: once
+                note: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -1446,9 +1525,49 @@ paths:
                 jobs:
                   - job_019a5e2c7b417c3e9f204d8e1a6b5c38
                 processes:
-                  - 42
-                machines:
-                  - host:my-laptop
+                  - pid: 41
+                    session_id: default
+                    line_id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
+                    parent: null
+                    group: 41
+                    command: sleep 30 & wait
+                    cwd: /
+                    machine:
+                      type: host
+                      name: my-laptop
+                      id: my-laptop
+                    runtime: null
+                    machine_pid: null
+                    state: running
+                    started_at: '2026-11-07T00:00:00.000Z'
+                    ended_at: null
+                    exit: null
+                    signal: null
+                    error: null
+                    children:
+                      - pid: 42
+                        session_id: default
+                        line_id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
+                        parent: 41
+                        group: 41
+                        command: sleep 30
+                        cwd: /
+                        machine:
+                          type: host
+                          name: my-laptop
+                          id: my-laptop
+                        runtime: process
+                        machine_pid:
+                          pid: 12345
+                          started: 1794009600
+                          exited: null
+                        state: running
+                        started_at: '2026-11-07T00:00:00.000Z'
+                        ended_at: null
+                        exit: null
+                        signal: null
+                        error: null
+                        children: []
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -1458,7 +1577,7 @@ paths:
         '429':
           $ref: '#/components/responses/429'
       description: |-
-        Get a command execution with its job, process, and machine IDs. Use the `line_id` returned by the shell endpoint.
+        Get a command execution with its job IDs and the processes it ran, each under the one that started it and naming the machine it ran on. Use the `line_id` returned by the shell endpoint.
 
         Completed commands are retained for up to one hour, with a maximum of 1,024 records. Servers sharing a workspace store share these records; snapshots preserve completed records. Times are RFC 3339 strings in UTC.
       tags:
@@ -1701,7 +1820,10 @@ paths:
                     group: 42
                     command: sleep 30
                     cwd: /
-                    machine: host:my-laptop
+                    machine:
+                      type: host
+                      name: my-laptop
+                      id: my-laptop
                     runtime: process
                     machine_pid:
                       pid: 12345
@@ -1758,7 +1880,10 @@ paths:
                 group: 42
                 command: sleep 30
                 cwd: /
-                machine: host:my-laptop
+                machine:
+                  type: host
+                  name: my-laptop
+                  id: my-laptop
                 runtime: process
                 machine_pid:
                   pid: 12345
@@ -1799,6 +1924,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MachineList'
+              example:
+                items:
+                  - id: host:my-laptop
+                    state: managed
+                    checked_at: '2026-11-07T00:00:05.000Z'
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -1834,6 +1964,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MachineDetailResponse'
+              example:
+                id: host:my-laptop
+                state: managed
+                checked_at: '2026-11-07T00:00:05.000Z'
+                processes:
+                  - pid: 4194305
+                    session_id: agent
+                    line_id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
+                    parent: null
+                    group: 4194305
+                    command: rm /notes.txt
+                    cwd: /
+                    machine:
+                      type: host
+                      name: my-laptop
+                      id: my-laptop
+                    runtime: null
+                    machine_pid: null
+                    state: exited
+                    started_at: '2026-11-07T00:00:04.000Z'
+                    ended_at: '2026-11-07T00:00:04.008Z'
+                    exit: 126
+                    signal: null
+                    error: null
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -4443,6 +4597,7 @@ paths:
           required: true
           schema:
             type: string
+          description: The function's name, as a mount declares it.
         - $ref: '#/components/parameters/sessionId'
       responses:
         '200':
@@ -4517,6 +4672,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: ok
+                workspaces: 1
+                uptime_ms: 3600000
       tags:
         - Service
       x-hosts:
@@ -4577,6 +4736,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ShutdownResponse'
+              example:
+                status: shutting_down
+                pid: 48213
         '401':
           $ref: '#/components/responses/401'
         '429':
@@ -4642,6 +4804,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntryList'
+              example:
+                items:
+                  - id: assets
+                    name: assets
+                    kind: vfs
+                    type: s3
+                    builtin: false
+                    config:
+                      bucket: example-bucket
+                      region: us-east-1
+                    created_by: null
+                    created_at: null
+                    updated_at: null
+                    used_by: 1
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -4665,6 +4841,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntry'
+              example:
+                id: assets
+                name: assets
+                kind: vfs
+                type: s3
+                builtin: false
+                config:
+                  bucket: example-bucket
+                  region: us-east-1
+                created_by: null
+                created_at: null
+                updated_at: null
         '400':
           $ref: '#/components/responses/400'
           description: The request is malformed or a field is not valid for the type (`param`
@@ -4788,6 +4976,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntryDetail'
+              example:
+                id: assets
+                name: assets
+                kind: vfs
+                type: s3
+                builtin: false
+                config:
+                  bucket: example-bucket
+                  region: us-east-1
+                created_by: null
+                created_at: null
+                updated_at: null
+                sealed: []
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -4820,6 +5021,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntry'
+              example:
+                id: assets
+                name: assets
+                kind: vfs
+                type: s3
+                builtin: false
+                config:
+                  bucket: example-bucket
+                  region: eu-west-1
+                created_by: null
+                created_at: null
+                updated_at: null
         '400':
           $ref: '#/components/responses/400'
           description: The request is malformed or a field is not valid for the type (`param`
@@ -4843,7 +5056,7 @@ paths:
             example:
               fields:
                 bucket: example-bucket
-                region: us-east-1
+                region: eu-west-1
       description: Update a saved VFS configuration. The name and type cannot change. Omitted secret fields
         keep their values; `null` removes a field.
       tags:
@@ -4903,6 +5116,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntryList'
+              example:
+                items:
+                  - id: github
+                    name: github
+                    kind: cli
+                    type: gh
+                    builtin: false
+                    config:
+                      repo: owner/repository
+                    created_by: null
+                    created_at: null
+                    updated_at: null
+                    used_by: 1
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -4925,6 +5151,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntry'
+              example:
+                id: github
+                name: github
+                kind: cli
+                type: gh
+                builtin: false
+                config:
+                  repo: owner/repository
+                created_by: null
+                created_at: null
+                updated_at: null
         '400':
           $ref: '#/components/responses/400'
           description: The request is malformed or a field is not valid for the type (`param`
@@ -5019,6 +5256,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntryDetail'
+              example:
+                id: github
+                name: github
+                kind: cli
+                type: gh
+                builtin: false
+                config:
+                  repo: owner/repository
+                created_by: null
+                created_at: null
+                updated_at: null
+                sealed:
+                  - token
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -5051,6 +5301,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntry'
+              example:
+                id: github
+                name: github
+                kind: cli
+                type: gh
+                builtin: false
+                config:
+                  repo: owner/another-repository
+                created_by: null
+                created_at: null
+                updated_at: null
         '400':
           $ref: '#/components/responses/400'
           description: The request is malformed or a field is not valid for the type (`param`
@@ -5133,6 +5394,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntryList'
+              example:
+                items:
+                  - id: python
+                    name: python
+                    kind: runtime
+                    type: monty
+                    builtin: false
+                    config:
+                      max_memory: 128MB
+                    captures: []
+                    created_by: null
+                    created_at: null
+                    updated_at: null
+                    used_by: 1
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -5155,6 +5430,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntry'
+              example:
+                id: python
+                name: python
+                kind: runtime
+                type: monty
+                builtin: false
+                config:
+                  max_memory: 128MB
+                captures: []
+                created_by: null
+                created_at: null
+                updated_at: null
         '400':
           $ref: '#/components/responses/400'
           description: The request is malformed or a field is not valid for the type (`param`
@@ -5231,6 +5518,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntryDetail'
+              example:
+                id: python
+                name: python
+                kind: runtime
+                type: monty
+                builtin: false
+                config:
+                  max_memory: 128MB
+                captures: []
+                created_by: null
+                created_at: null
+                updated_at: null
+                sealed: []
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -5263,6 +5563,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntry'
+              example:
+                id: python
+                name: python
+                kind: runtime
+                type: monty
+                builtin: false
+                config:
+                  max_memory: 256MB
+                captures: []
+                created_by: null
+                created_at: null
+                updated_at: null
         '400':
           $ref: '#/components/responses/400'
           description: The request is malformed or a field is not valid for the type (`param`
@@ -5345,6 +5657,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntryList'
+              example:
+                items:
+                  - id: tools
+                    name: tools
+                    kind: machine
+                    type: docker
+                    builtin: false
+                    config:
+                      container: mirage-tools
+                    created_by: null
+                    created_at: null
+                    updated_at: null
+                    used_by: 1
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -5367,6 +5692,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntry'
+              example:
+                id: tools
+                name: tools
+                kind: machine
+                type: docker
+                builtin: false
+                config:
+                  container: mirage-tools
+                created_by: null
+                created_at: null
+                updated_at: null
         '400':
           $ref: '#/components/responses/400'
           description: The request is malformed or a field is not valid for the type (`param`
@@ -5443,6 +5779,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntryDetail'
+              example:
+                id: tools
+                name: tools
+                kind: machine
+                type: docker
+                builtin: false
+                config:
+                  container: mirage-tools
+                created_by: null
+                created_at: null
+                updated_at: null
+                sealed: []
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -5475,6 +5823,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SavedEntry'
+              example:
+                id: tools
+                name: tools
+                kind: machine
+                type: docker
+                builtin: false
+                config:
+                  container: mirage-tools-2
+                created_by: null
+                created_at: null
+                updated_at: null
         '400':
           $ref: '#/components/responses/400'
           description: The request is malformed or a field is not valid for the type (`param`
@@ -5540,6 +5899,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PolicyList'
+              example:
+                items:
+                  - name: guard.py
         '401':
           $ref: '#/components/responses/401'
         '429':
@@ -5573,6 +5935,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PolicyResponse'
+              example:
+                name: guard.py
+                source: "def pre_command(ctx):\n    if ctx[\"command\"] == \"rm\":\n        return {\"kind\"\
+                  : \"deny\", \"reason\": \"Deletes are disabled\"}\n"
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -6057,16 +6423,12 @@ components:
           title: Jobs
           type: array
           description: IDs of the jobs the line started, each `job_` and 32 hex digits.
-        machines:
-          items:
-            type: string
-          title: Machines
-          type: array
         processes:
           items:
-            type: integer
+            $ref: '#/components/schemas/ProcessTreeResponse'
           title: Processes
           type: array
+          description: The processes the line ran, each under the one that started it.
         session_id:
           title: Session Id
           type: string
@@ -6093,7 +6455,6 @@ components:
         - error
         - jobs
         - processes
-        - machines
       title: LineDetailResponse
       type: object
     LineResponse:
@@ -6228,6 +6589,26 @@ components:
         - exited
       title: MachinePidResponse
       type: object
+    ProcessMachineResponse:
+      properties:
+        id:
+          title: Id
+          type: string
+          description: What the provider calls the machine, such as an E2B sandbox id or a container.
+        name:
+          title: Name
+          type: string
+          description: The machine's name under `machines:`; with the type it makes the machine's id, `type:name`.
+        type:
+          title: Type
+          type: string
+          description: The machine's provider, such as `e2b` or `docker`, or `host` for the host running Mirage.
+      required:
+        - type
+        - name
+        - id
+      title: ProcessMachineResponse
+      type: object
     ProcessResponse:
       properties:
         command:
@@ -6261,8 +6642,7 @@ components:
             - type: 'null'
           title: Line Id
         machine:
-          title: Machine
-          type: string
+          $ref: '#/components/schemas/ProcessMachineResponse'
         machine_pid:
           anyOf:
             - $ref: '#/components/schemas/MachinePidResponse'
@@ -6321,6 +6701,97 @@ components:
         - exited
       title: ProcessState
       type: string
+    ProcessTreeResponse:
+      properties:
+        children:
+          items:
+            $ref: '#/components/schemas/ProcessTreeResponse'
+          title: Children
+          type: array
+        command:
+          title: Command
+          type: string
+        cwd:
+          title: Cwd
+          type: string
+        ended_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+          title: Ended At
+        error:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Error
+        exit:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Exit
+        group:
+          title: Group
+          type: integer
+        line_id:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Line Id
+        machine:
+          $ref: '#/components/schemas/ProcessMachineResponse'
+        machine_pid:
+          anyOf:
+            - $ref: '#/components/schemas/MachinePidResponse'
+            - type: 'null'
+        parent:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Parent
+        pid:
+          title: Pid
+          type: integer
+        runtime:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Runtime
+        session_id:
+          title: Session Id
+          type: string
+        signal:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Signal
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+        state:
+          title: State
+          type: string
+      required:
+        - pid
+        - session_id
+        - line_id
+        - parent
+        - group
+        - command
+        - cwd
+        - machine
+        - runtime
+        - machine_pid
+        - state
+        - started_at
+        - ended_at
+        - exit
+        - signal
+        - error
+        - children
+      title: ProcessTreeResponse
+      type: object
     CLIBlock:
       properties:
         cli:
@@ -6342,6 +6813,8 @@ components:
           additionalProperties: true
           type: object
           title: Config
+          description: Settings and credentials for the `cli` type. `GET /v1/clis/types`
+            lists each type's fields.
       additionalProperties: false
       type: object
       title: CLIBlock
@@ -6413,13 +6886,63 @@ components:
           title: Allow
         ask:
           items:
-            $ref: '#/components/schemas/CommandRule'
+            anyOf:
+              - type: string
+                description: One command pattern, refused or asked with the default reason.
+              - type: object
+                description: A rule as written. Give `commands`, `paths`, or `commands` as a
+                  map from each command pattern to its paths; a list of commands beside a
+                  list of paths is refused.
+                properties:
+                  reason:
+                    type: string
+                    description: Why the rule refuses or asks. A default when omitted.
+                  commands:
+                    anyOf:
+                      - type: array
+                        items:
+                          type: string
+                      - type: object
+                        additionalProperties:
+                          type: array
+                          items:
+                            type: string
+                  paths:
+                    type: array
+                    items:
+                      type: string
+                additionalProperties: false
           type: array
           title: Ask
           default: []
         deny:
           items:
-            $ref: '#/components/schemas/CommandRule'
+            anyOf:
+              - type: string
+                description: One command pattern, refused or asked with the default reason.
+              - type: object
+                description: A rule as written. Give `commands`, `paths`, or `commands` as a
+                  map from each command pattern to its paths; a list of commands beside a
+                  list of paths is refused.
+                properties:
+                  reason:
+                    type: string
+                    description: Why the rule refuses or asks. A default when omitted.
+                  commands:
+                    anyOf:
+                      - type: array
+                        items:
+                          type: string
+                      - type: object
+                        additionalProperties:
+                          type: array
+                          items:
+                            type: string
+                  paths:
+                    type: array
+                    items:
+                      type: string
+                additionalProperties: false
           type: array
           title: Deny
           default: []
@@ -6685,6 +7208,8 @@ components:
           additionalProperties: true
           type: object
           title: Config
+          description: Settings for the `vfs` type. `GET /v1/vfs/types` lists each type's
+            fields.
         command_limits:
           additionalProperties:
             $ref: '#/components/schemas/Limit'
@@ -6732,13 +7257,63 @@ components:
       properties:
         ask:
           items:
-            $ref: '#/components/schemas/CommandRule'
+            anyOf:
+              - type: string
+                description: One command pattern, refused or asked with the default reason.
+              - type: object
+                description: A rule as written. Give `commands`, `paths`, or `commands` as a
+                  map from each command pattern to its paths; a list of commands beside a
+                  list of paths is refused.
+                properties:
+                  reason:
+                    type: string
+                    description: Why the rule refuses or asks. A default when omitted.
+                  commands:
+                    anyOf:
+                      - type: array
+                        items:
+                          type: string
+                      - type: object
+                        additionalProperties:
+                          type: array
+                          items:
+                            type: string
+                  paths:
+                    type: array
+                    items:
+                      type: string
+                additionalProperties: false
           type: array
           title: Ask
           default: []
         deny:
           items:
-            $ref: '#/components/schemas/CommandRule'
+            anyOf:
+              - type: string
+                description: One command pattern, refused or asked with the default reason.
+              - type: object
+                description: A rule as written. Give `commands`, `paths`, or `commands` as a
+                  map from each command pattern to its paths; a list of commands beside a
+                  list of paths is refused.
+                properties:
+                  reason:
+                    type: string
+                    description: Why the rule refuses or asks. A default when omitted.
+                  commands:
+                    anyOf:
+                      - type: array
+                        items:
+                          type: string
+                      - type: object
+                        additionalProperties:
+                          type: array
+                          items:
+                            type: string
+                  paths:
+                    type: array
+                    items:
+                      type: string
+                additionalProperties: false
           type: array
           title: Deny
           default: []
@@ -6881,8 +7456,17 @@ components:
         runtime:
           anyOf:
             - type: string
-            - additionalProperties: true
-              type: object
+            - type: object
+              description: A runtime by name, with its settings.
+              properties:
+                name:
+                  type: string
+                config:
+                  type: object
+                  additionalProperties: true
+              required:
+                - name
+              additionalProperties: false
           title: Runtime
           default: monty
         env:
@@ -7416,7 +8000,7 @@ components:
                   s3: '#/components/schemas/S3StoreBlock'
             - type: 'null'
           title: Namespace
-        observer:
+        logs:
           anyOf:
             - oneOf:
                 - $ref: '#/components/schemas/RamStoreBlock'
@@ -7431,8 +8015,8 @@ components:
                   redis: '#/components/schemas/RedisStoreBlock'
                   s3: '#/components/schemas/S3StoreBlock'
             - type: 'null'
-          title: Observer
-        workspace:
+          title: Logs
+        sessions:
           anyOf:
             - oneOf:
                 - $ref: '#/components/schemas/RamStoreBlock'
@@ -7447,7 +8031,7 @@ components:
                   redis: '#/components/schemas/RedisStoreBlock'
                   s3: '#/components/schemas/S3StoreBlock'
             - type: 'null'
-          title: Workspace
+          title: Sessions
         execution:
           anyOf:
             - oneOf:
@@ -7470,7 +8054,7 @@ components:
       description: |-
         Storage settings for workspace metadata, sessions, filesystem records, logs, and execution records. Top-level settings select the default backend; per-group settings override it.
 
-        S3 is supported only for the `workspace` group. Disk storage uses `root` and keeps jobs in memory. The `execution` group supports RAM or Redis.
+        S3 is supported only for the `sessions` group. Disk storage uses `root` and keeps jobs in memory. The `logs` group supports RAM or disk, and the `execution` group RAM or Redis.
     TemplateResponse:
       properties:
         name:
@@ -7485,6 +8069,7 @@ components:
           additionalProperties: true
           type: object
           title: Config
+          description: The workspace config, as it was saved.
       type: object
       required:
         - name
@@ -7618,8 +8203,7 @@ components:
         machines:
           anyOf:
             - additionalProperties:
-                additionalProperties: true
-                type: object
+                $ref: '#/components/schemas/MachineEntry'
               type: object
             - type: 'null'
           title: Machines
@@ -7630,8 +8214,7 @@ components:
             - items:
                 anyOf:
                   - type: string
-                  - additionalProperties: true
-                    type: object
+                  - $ref: '#/components/schemas/RuntimeEntry'
               type: array
             - type: 'null'
           title: Runtimes
@@ -8056,9 +8639,144 @@ components:
             stderr:
               type: string
             node:
-              type: object
-              description: Parsed command structure and policy evaluation for each command.
+              $ref: '#/components/schemas/ExplainNode'
       title: Explanation (explain=true)
+    RuntimeEntry:
+      type: object
+      description: A runtime by name, with its options. Other keys are the runtime's own
+        options.
+      properties:
+        name:
+          type: string
+          description: A registered runtime, such as monty, or a `source:Class` reference.
+        captures:
+          type:
+            - array
+            - 'null'
+          items:
+            type: string
+          description: The commands the runtime runs. `null` keeps the runtime's default.
+        config:
+          type:
+            - object
+            - 'null'
+          additionalProperties: true
+          description: The runtime's settings. `null` keeps the runtime's default.
+        machine:
+          type:
+            - string
+            - 'null'
+          description: The machine a remote runtime runs on, by its name under `machines`.
+      required:
+        - name
+      additionalProperties: true
+    MachineEntry:
+      type: object
+      description: A machine by its provider. Other keys say how to reach it and depend on
+        the provider, such as `container` for docker.
+      properties:
+        provider:
+          type: string
+          description: The provider, such as docker or ssh.
+      required:
+        - provider
+      additionalProperties: true
+    ExplainNode:
+      type: object
+      description: One part of the line. A `command` node carries its own policy outcome;
+        other nodes group their children.
+      properties:
+        type:
+          type: string
+          description: What the part is, such as line, pipeline or command.
+        text:
+          type: string
+          description: The part as written.
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExplainNode'
+        command:
+          type: string
+          description: The command name. Command nodes only.
+        words:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExplainWord'
+          description: The command line word by word. Command nodes only.
+        outcome:
+          type: string
+          enum:
+            - allow
+            - deny
+            - ask
+          description: Command nodes only.
+        reason:
+          type: string
+          description: Command nodes only.
+        source:
+          type: string
+          description: Where in the profile the deciding rule is written. Command nodes only.
+        decision:
+          anyOf:
+            - $ref: '#/components/schemas/PolicyDecision'
+            - type: 'null'
+          description: Command nodes only.
+        answers:
+          type: array
+          items:
+            $ref: '#/components/schemas/PolicyAnswer'
+          description: Command nodes only.
+        exit_code:
+          type: integer
+          description: What the command is refused with, 0 when it runs. Command nodes only.
+        stderr:
+          type: string
+          description: Command nodes only.
+        runtime:
+          type:
+            - string
+            - 'null'
+          description: The runtime the command is routed to. Command nodes only.
+        machine:
+          type:
+            - string
+            - 'null'
+          description: The machine the command is routed to. Command nodes only.
+      required:
+        - type
+        - text
+        - children
+    ExplainWord:
+      type: object
+      properties:
+        text:
+          type: string
+          description: The word as the command receives it, expanded.
+        kind:
+          type: string
+          enum:
+            - name
+            - subcommand
+            - option
+            - value
+            - operand
+            - redirect
+        option:
+          type:
+            - string
+            - 'null'
+          description: For a value, the option word that takes it, as typed.
+        path:
+          type:
+            - string
+            - 'null'
+          description: The virtual path the word names.
+      required:
+        - text
+        - kind
+        - option
+        - path
     VfsExplanation:
       allOf:
         - $ref: '#/components/schemas/Explanation'
@@ -8214,7 +8932,9 @@ components:
         - type: number
         - type: boolean
         - type: array
-          items: {}
+          items:
+            type: string
+            minLength: 1
         - $ref: '#/components/schemas/SecretPointer'
     TypeField:
       type: object
@@ -8229,7 +8949,6 @@ components:
             - number
             - boolean
             - list
-            - object
         secret:
           type: boolean
           description: Secret value. Accepted in writes and omitted from read responses.
@@ -8276,9 +8995,10 @@ components:
             - vfs
             - cli
             - runtime
+            - machine
         type:
           type: string
-          description: The VFS, CLI or runtime type, such as s3.
+          description: The VFS, CLI, runtime or machine type, such as s3.
         builtin:
           type: boolean
         config:
@@ -8288,8 +9008,9 @@ components:
           description: Non-secret configuration values. Secret values are omitted.
         captures:
           type: array
-          items: {}
-          description: Runtime capture settings, when applicable.
+          items:
+            type: string
+          description: The commands the runtime captures. Runtimes only.
         created_by:
           type:
             - string

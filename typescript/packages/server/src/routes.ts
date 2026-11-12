@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { configToWorkspaceArgs, WorkspaceConfigRaw } from '@struktoai/mirage-core/config'
+import type { configToWorkspaceArgs, WorkspaceConfig } from '@struktoai/mirage-core/config'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import type { ResolvedSource } from '@struktoai/mirage-core/secrets/types'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
@@ -129,7 +129,7 @@ export interface RouteApp {
  */
 export interface ServerHost {
   readonly Workspace: typeof Workspace
-  workspaceArgs(cfg: WorkspaceConfigRaw): ReturnType<typeof configToWorkspaceArgs>
+  workspaceArgs(cfg: WorkspaceConfig): ReturnType<typeof configToWorkspaceArgs>
   buildVfs(
     name: string,
     config: Record<string, unknown>,
@@ -142,7 +142,7 @@ export interface ServerHost {
    * A fresh handle on the store workspaces keep their state in, or on the
    * one `cfg`'s `store:` block names; the caller closes it.
    */
-  stateStore(cfg?: WorkspaceConfigRaw): WorkspaceStateStore
+  stateStore(cfg?: WorkspaceConfig): WorkspaceStateStore
   /**
    * This daemon's id, which the lease of each workspace it runs names; a host
    * that keeps it on disk holds its workspaces again after a restart.

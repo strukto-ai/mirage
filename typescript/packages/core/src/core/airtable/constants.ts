@@ -12,10 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const DEFAULT_BASE_URL = 'https://api.airtable.com/v0'
-export const DEFAULT_MAX_READ_RECORDS = 10_000
-export const DEFAULT_REQUESTS_PER_SECOND = 5
-
 export const PAGE_SIZE = 100
 
 // The most payloads one webhook payloads read answers.

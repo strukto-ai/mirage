@@ -27,17 +27,11 @@ export const FOLLOW =
   'test -f {path} && exec 3< {path} && command -v tail >/dev/null' +
   ' && echo && exec tail -n {n} -f <&3 3<&-'
 
-async function waitForClose(rs: ReadStream): Promise<Error | null> {
-  try {
-    await once(rs, 'close')
-    return null
-  } catch (error) {
-    return error instanceof Error ? error : new Error(String(error))
-  }
-}
-
 export async function* readChunks(rs: ReadStream): AsyncIterable<Uint8Array> {
-  const closed = waitForClose(rs)
+  const closed = once(rs, 'close').then(
+    () => null,
+    (error: unknown) => (error instanceof Error ? error : new Error(String(error))),
+  )
   let closeError: Error | null = null
   try {
     for await (const chunk of rs) {

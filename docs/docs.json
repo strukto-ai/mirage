@@ -126,6 +126,14 @@
             ]
           },
           {
+            "group": "Configuration",
+            "pages": [
+              "home/configuration",
+              "home/authentication",
+              "home/security"
+            ]
+          },
+          {
             "group": "VFS",
             "pages": [
               "home/setup/vfs",
@@ -279,6 +287,7 @@
               "home/policy/scripts",
               "home/policy/explain",
               "home/policy/route-runtime",
+              "home/policy/route-machine",
               "home/policy/route-network"
             ]
           },
@@ -333,14 +342,6 @@
               "home/infrastructure/jobs",
               "home/infrastructure/file-cache",
               "home/infrastructure/file-index"
-            ]
-          },
-          {
-            "group": "Configuration",
-            "pages": [
-              "home/configuration",
-              "home/authentication",
-              "home/security"
             ]
           },
           {
@@ -866,8 +867,7 @@
                   "GET /v1/templates",
                   "POST /v1/templates",
                   "GET /v1/templates/{ref}",
-                  "DELETE /v1/templates/{ref}",
-                  "POST /v1/templates/{ref}/restore"
+                  "DELETE /v1/templates/{ref}"
                 ]
               },
               {

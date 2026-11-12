@@ -77,7 +77,7 @@ SYSTEM_WAITS = frozenset(
         "asyncio.timeout",
         "asyncio.wait_for",
         "time.sleep",
-        "mirage.utils.abort.cancellable_sleep",
+        "mirage.utils.abort.sleep",
     }
 )
 
@@ -370,9 +370,8 @@ def _seamed_clock_reads() -> set[tuple[str, str]]:
             {"asyncio.timeout"},
         ),
         (
-            "from ...utils.abort import cancellable_sleep\n"
-            "await cancellable_sleep(1, cancel)",
-            {"mirage.utils.abort.cancellable_sleep"},
+            "from ...utils.abort import sleep\nawait sleep(1, cancel)",
+            {"mirage.utils.abort.sleep"},
         ),
         (
             "from ...utils.dates import now_iso\nnow_iso()",

@@ -6,7 +6,7 @@ import pytest
 
 from mirage import RAMVFS, Deny, MountMode, Policy, Session, Workspace
 from mirage.context.session_context import (
-    reset_current_session,
+    reset_caller,
     set_current_session,
 )
 from mirage.policy import Decision, Outcome, VfsContext
@@ -465,7 +465,7 @@ async def test_a_bound_session_is_kept_rather_than_widened():
     try:
         read = await wide.call("read", {"path": "/vault/key.txt"})
     finally:
-        reset_current_session(token)
+        reset_caller(token)
         await ws.close()
     assert read.text == "Error: file '/vault/key.txt' not found"
 

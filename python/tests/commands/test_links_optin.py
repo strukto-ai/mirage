@@ -24,14 +24,11 @@ from tests.fixtures.mount_commands import registered_commands as _registered
 # notices until someone makes a link on that backend.
 LINK_AWARE = ("ls", "stat", "find", "file")
 
-# The two spellings of delegation: the family's full-command generic
-# entry, or find's walk primitives for the wrappers with custom guards
-# (email pushes a folder-level -name down to IMAP search) that still
-# route filtering through the shared walk.
+# The spellings of delegation: the family's full-command generic entry.
 GENERIC_CALLS = {
     "ls": ("ls_generic(",),
     "stat": ("stat_generic(", "generic_stat("),
-    "find": ("find_generic(", "resolve_start("),
+    "find": ("find_generic(",),
     "file": ("file_generic(",),
 }
 

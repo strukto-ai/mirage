@@ -137,6 +137,11 @@ export class KubernetesMachine extends ProgramMachine<KubernetesConfig> {
     requireId('kubernetes', 'pod', this.config.pod)
   }
 
+  /** The pod it runs in. */
+  override get instance(): string {
+    return this.config.pod
+  }
+
   /** The flags naming the pod's cluster and namespace. */
   private scope(): string[] {
     const { context, namespace } = this.config

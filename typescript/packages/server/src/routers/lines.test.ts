@@ -70,16 +70,29 @@ it('lists a line and finds it by the id its result names', async () => {
       ])
       const detail = await get(app, `/v1/workspaces/w/lines/${result.line_id}`)
       expect(detail.status).toBe(200)
-      const found = detail.body as { jobs: string[]; processes: number[]; machines: string[] }
+      interface Node {
+        pid: number
+        parent: number | null
+        command: string
+        machine: { type: string; name: string; id: string }
+        children: Node[]
+      }
+      const found = detail.body as { jobs: string[]; processes: Node[] }
       const [job] = ((await get(app, '/v1/workspaces/w/jobs')).body as { items: { id: string }[] })
         .items
       expect(found.jobs).toEqual([job?.id])
       expect(job?.id.startsWith('job_')).toBe(true)
-      expect(found.processes).toContain(pid)
-      const process = (await get(app, `/v1/workspaces/w/processes/${String(pid)}`)).body as {
-        machine: string
-      }
-      expect(found.machines).toEqual([process.machine])
+      const [shell] = found.processes
+      expect(shell?.command).toBe('sleep 30 & echo $!')
+      const [child] = shell?.children ?? []
+      expect([child?.pid, child?.parent]).toEqual([pid, shell?.pid])
+      const process = (await get(app, `/v1/workspaces/w/processes/${String(pid)}`)).body as Omit<
+        Node,
+        'children'
+      >
+      expect({ ...process, children: [] }).toEqual(child)
+      expect(child?.machine.type).toBe('host')
+      expect(child?.machine.id).toBe(child?.machine.name)
       expect((await get(app, '/v1/workspaces/w/lines?state=running')).body).toEqual({ items: [] })
       expect((await get(app, '/v1/workspaces/nope/lines?state=lost')).body).toEqual({
         error: {

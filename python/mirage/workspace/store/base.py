@@ -47,10 +47,11 @@ class WorkspaceStateStore(ABC):
     observer keeps its ObserverStore and the execution plane its
     ExecutionStore; this
     provider only unifies their construction, connection, and key
-    scoping. Per-group overrides redirect a plane group to a different
-    provider (e.g. large observer logs to disk while everything else
-    stays on Redis). Sessions and metadata form one inseparable group:
-    the default-session pointer in the metadata must never live on a
+    scoping. Per-group overrides (``namespace``, ``logs``, ``sessions``,
+    ``execution``) redirect a plane group to a different provider (e.g.
+    large command logs to disk while everything else stays on Redis).
+    Sessions and metadata form one inseparable group: the
+    default-session pointer in the metadata must never live on a
     different server than the session table it points into.
     """
 
@@ -58,13 +59,13 @@ class WorkspaceStateStore(ABC):
         self,
         *,
         namespace: "WorkspaceStateStore | None" = None,
-        observer: "WorkspaceStateStore | None" = None,
-        workspace: "WorkspaceStateStore | None" = None,
+        logs: "WorkspaceStateStore | None" = None,
+        sessions: "WorkspaceStateStore | None" = None,
         execution: "WorkspaceStateStore | None" = None,
     ) -> None:
         self._namespace_override = namespace
-        self._observer_override = observer
-        self._workspace_override = workspace
+        self._logs_override = logs
+        self._sessions_override = sessions
         self._execution_override = execution
         self._closed = False
 
@@ -80,17 +81,15 @@ class WorkspaceStateStore(ABC):
     def observer(self, workspace_id: str) -> ObserverStore:
         """The observer plane (history events) for one workspace."""
         target = (
-            self._observer_override
-            if self._observer_override is not None
-            else self
+            self._logs_override if self._logs_override is not None else self
         )
         return target._make_observer(workspace_id)
 
     def sessions(self, workspace_id: str) -> NamespaceStore:
         """The session table for one workspace."""
         target = (
-            self._workspace_override
-            if self._workspace_override is not None
+            self._sessions_override
+            if self._sessions_override is not None
             else self
         )
         return target._make_sessions(workspace_id)
@@ -108,8 +107,8 @@ class WorkspaceStateStore(ABC):
     async def load_meta(self, workspace_id: str) -> WorkspaceFields | None:
         """Read one workspace's metadata record; None when never written."""
         target = (
-            self._workspace_override
-            if self._workspace_override is not None
+            self._sessions_override
+            if self._sessions_override is not None
             else self
         )
         return await target._load_meta(workspace_id)
@@ -127,7 +126,7 @@ class WorkspaceStateStore(ABC):
         generation 0, so create-if-absent is ``expected_generation=0``.
         Returns True when the write landed, False on conflict.
         """
-        target = self._workspace_override or self
+        target = self._sessions_override or self
         return await target._cas_set_meta(
             workspace_id, fields, expected_generation
         )
@@ -182,8 +181,8 @@ class WorkspaceStateStore(ABC):
             for provider in (
                 self,
                 self._namespace_override,
-                self._observer_override,
-                self._workspace_override,
+                self._logs_override,
+                self._sessions_override,
                 self._execution_override,
             )
             if provider is not None
@@ -198,8 +197,8 @@ class WorkspaceStateStore(ABC):
         self._closed = True
         for override in (
             self._namespace_override,
-            self._observer_override,
-            self._workspace_override,
+            self._logs_override,
+            self._sessions_override,
             self._execution_override,
         ):
             if override is not None:

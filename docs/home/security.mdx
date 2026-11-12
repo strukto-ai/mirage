@@ -38,7 +38,10 @@ Three layers set them:
 positional parameters, one more for each array element and parameter, and a
 session that would start past it, from the workspace's `env`, a profile's or a
 snapshot, is refused. `processes.max` counts every pipeline stage, subshell
-and background job a session has running. `timeout` stops the jobs its
+and background job a session has running. `max_body_bytes` counts the decoded
+bytes of one API reply read whole; a call's own cap, or the room left under
+`max_memory`, can stop it sooner, and an error reply keeps only its first
+64 KiB. `timeout` stops the jobs its
 command started when the time runs out, as GNU's does by signalling its
 process group, unless it is given `--foreground`, `-s INT` or `-s QUIT`. As
 in Bash, a background job that is one program ignores `INT`, one that runs

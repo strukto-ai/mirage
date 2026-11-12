@@ -617,8 +617,8 @@
   },
   "no_snapshot_store": [400, "this server has no snapshot store"],
   "templates": {
-   "dev": [201, 200, 200, 204, 200],
-   "token": [201, 200, 200, 204, 200],
+   "dev": [201, 200, 200, 204, 404],
+   "token": [201, 200, 200, 204, 404],
    "jwt": [501, 501, 501, 501, 501]
   },
   "policies": {

@@ -62,15 +62,6 @@ export function splitRef(spec: string): [string, string] {
   return [spec.slice(0, cut), spec.slice(cut + 1)]
 }
 
-function isNotFound(error: unknown): boolean {
-  if (!isRecord(error)) return false
-  return error.code === 'ERR_MODULE_NOT_FOUND' || error.code === 'ENOENT'
-}
-
-function isUnsupportedTypeScript(error: unknown): boolean {
-  return isRecord(error) && error.code === 'ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX'
-}
-
 /**
  * Load a module export from a `source:exportName` reference.
  *
@@ -99,10 +90,11 @@ export async function loadAttr(spec: string): Promise<unknown> {
   try {
     mod = (await import(target)) as Record<string, unknown>
   } catch (error) {
-    if (path === null && isNotFound(error)) {
+    const code = isRecord(error) ? error.code : undefined
+    if (path === null && (code === 'ERR_MODULE_NOT_FOUND' || code === 'ENOENT')) {
       throw new Error(`cannot load script ${JSON.stringify(source)}`)
     }
-    if (isUnsupportedTypeScript(error)) {
+    if (code === 'ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX') {
       const detail = error instanceof Error ? error.message : String(error)
       throw new Error(
         `cannot load script ${JSON.stringify(source)}: ${detail}. Node strips types ` +

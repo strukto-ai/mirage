@@ -136,19 +136,20 @@ export interface NoMountError extends Error {
   noMount: true
 }
 
-// A missing-op error also names the op the backend did not register, so
-// capability probes (metadata.ts) can test for one specific gap instead of
-// sniffing message text.
-export interface MissingOpError extends FsError {
+// A mount was asked for an op its backend does not register; the error also
+// names the op, so capability probes (metadata.ts) can test for one specific
+// gap instead of sniffing message text. Mirrors Python's
+// OperationNotSupportedError.
+export interface OperationNotSupportedError extends FsError {
   op: string
 }
 
 // A one-call walk the dispatcher declined for the caller's view: a hide, the
 // command's path rule or a coded preVfs policy reaches below the path, so the
 // caller walks it entry by entry and each call is judged on its own. A
-// backend's own refusal stays a plain MissingOpError. Mirrors Python's
-// WalkDeclinedError.
-export interface WalkDeclinedError extends MissingOpError {
+// backend's own refusal stays a plain OperationNotSupportedError. Mirrors
+// Python's WalkDeclinedError.
+export interface WalkDeclinedError extends OperationNotSupportedError {
   declined: true
 }
 

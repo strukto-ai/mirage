@@ -14,7 +14,6 @@
 
 import { classify } from '../errors/classify.ts'
 import { eexist, enoent, enotdir } from '../errors/fs.ts'
-import type { FsCondition } from '../errors/types.ts'
 import { registerPipeServer } from '../machine/mounts.ts'
 import { PolicyDenied } from '../policy/errors.ts'
 import type { PipeWriter } from '../runtime/types.ts'
@@ -87,14 +86,6 @@ type OpenHandle =
       done: boolean
     }
 
-function isDir(mode: number): boolean {
-  return (mode & S_IFMT) === S_IFDIR
-}
-
-function seconds(date: Date): number {
-  return Math.floor(date.getTime() / 1000)
-}
-
 /** SFTP attributes from a MountCore attr record. */
 export function toAttrs(a: MountAttrs): Attributes {
   return {
@@ -102,28 +93,23 @@ export function toAttrs(a: MountAttrs): Attributes {
     uid: a.uid,
     gid: a.gid,
     size: a.size,
-    atime: seconds(a.atime),
-    mtime: seconds(a.mtime),
+    atime: Math.floor(a.atime.getTime() / 1000),
+    mtime: Math.floor(a.mtime.getTime() / 1000),
   }
-}
-
-function permissions(mode: number): string {
-  const kind = isDir(mode) ? 'd' : (mode & S_IFMT) === S_IFLNK ? 'l' : '-'
-  let bits = ''
-  for (let shift = 6; shift >= 0; shift -= 3) {
-    const triplet = (mode >> shift) & 0o7
-    bits += (triplet & 4 ? 'r' : '-') + (triplet & 2 ? 'w' : '-') + (triplet & 1 ? 'x' : '-')
-  }
-  return kind + bits
 }
 
 /** The `ls -l` line an SFTP v3 client prints for an entry. */
 export function longname(name: string, a: Attributes): string {
+  let permissions = (a.mode & S_IFMT) === S_IFDIR ? 'd' : (a.mode & S_IFMT) === S_IFLNK ? 'l' : '-'
+  for (let shift = 6; shift >= 0; shift -= 3) {
+    const triplet = (a.mode >> shift) & 0o7
+    permissions += (triplet & 4 ? 'r' : '-') + (triplet & 2 ? 'w' : '-') + (triplet & 1 ? 'x' : '-')
+  }
   const when = new Date(a.mtime * 1000)
   const day = String(when.getDate()).padStart(2)
   const time = `${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}`
   const month = MONTHS[when.getMonth()] ?? ''
-  return `${permissions(a.mode)}    1 ${String(a.uid).padEnd(8)} ${String(a.gid).padEnd(8)} ${String(a.size).padStart(8)} ${month} ${day} ${time} ${name}`
+  return `${permissions}    1 ${String(a.uid).padEnd(8)} ${String(a.gid).padEnd(8)} ${String(a.size).padStart(8)} ${month} ${day} ${time} ${name}`
 }
 
 /** A client path as a workspace path: absolute, normalized, never above `/`. */
@@ -146,7 +132,24 @@ function modeOf(attrs: Partial<Attributes>): number | null {
   return typeof attrs.mode === 'number' ? attrs.mode : null
 }
 
-const DENIED: ReadonlySet<FsCondition> = new Set(['EACCES', 'EROFS', 'EPERM'])
+/**
+ * Apply an SFTP setstat: a size truncates, and permissions, owner and times
+ * are stored as chmod, chown and utimens through a kernel mount store them.
+ * One with nothing to change still needs the path. SETSTAT and FSETSTAT
+ * follow a link, as chmod(2) and fchmod(2) do. Mirrors Python's `set_attrs`.
+ */
+async function setAttrs(core: MountCore, path: string, attrs: Partial<Attributes>): Promise<void> {
+  if (typeof attrs.size === 'number') await core.truncate(path, attrs.size)
+  const fields = [
+    modeOf(attrs),
+    attrs.uid ?? null,
+    attrs.gid ?? null,
+    typeof attrs.atime === 'number' ? new Date(attrs.atime * 1000) : null,
+    typeof attrs.mtime === 'number' ? new Date(attrs.mtime * 1000) : null,
+  ] as const
+  if (fields.some((field) => field !== null)) await core.setattr(path, ...fields, true)
+  else if (typeof attrs.size !== 'number') await core.getattr(path, true)
+}
 
 /**
  * The SFTP status and message for a failure, by the condition core names,
@@ -162,7 +165,9 @@ function statusOf(err: unknown): [number, string] {
   const condition = classify(err) ?? messageCondition(err)
   const message = err instanceof Error ? err.message : String(err)
   if (condition === 'ENOENT') return [STATUS.NO_SUCH_FILE, message]
-  if (condition !== null && DENIED.has(condition)) return [STATUS.PERMISSION_DENIED, message]
+  if (condition === 'EACCES' || condition === 'EROFS' || condition === 'EPERM') {
+    return [STATUS.PERMISSION_DENIED, message]
+  }
   if (condition === null && (err as { code?: unknown } | null)?.code === undefined) {
     console.warn(`unclassified mount error: ${String(err)}`)
   }
@@ -222,14 +227,14 @@ export class MirageSFTPServer {
       this.serve(id, () => this.fstat(id, handle))
     })
     s.on('SETSTAT', (id: number, path: string, attrs: Partial<Attributes>) => {
-      this.serve(id, () => this.setAttrs(id, workspacePath(path), attrs))
+      this.serve(id, () => this.simple(id, (core) => setAttrs(core, workspacePath(path), attrs)))
     })
     s.on('FSETSTAT', (id: number, handle: Uint8Array, attrs: Partial<Attributes>) => {
       this.serve(id, () => {
         const f = this.file(handle)
         // Its name now belongs to another file, or to none.
         if (this.core?.handles.get(f.fd)?.detached !== undefined) throw enoent(f.path)
-        return this.setAttrs(id, f.path, attrs)
+        return this.simple(id, (core) => setAttrs(core, f.path, attrs))
       })
     })
     s.on('OPENDIR', (id: number, path: string) => {
@@ -349,29 +354,10 @@ export class MirageSFTPServer {
     this.sftp.attrs(id, toAttrs(await core.fgetattr(f.path, f.fd)))
   }
 
-  // A size truncates, and permissions, owner and times are stored as
-  // chmod, chown and utimens through a kernel mount store them. One with
-  // nothing to change still needs the path. Mirrors Python's `set_attrs`.
-  private async setAttrs(id: number, path: string, attrs: Partial<Attributes>): Promise<void> {
-    const core = await this.mount()
-    if (typeof attrs.size === 'number') await core.truncate(path, attrs.size)
-    const fields = [
-      modeOf(attrs),
-      attrs.uid ?? null,
-      attrs.gid ?? null,
-      typeof attrs.atime === 'number' ? new Date(attrs.atime * 1000) : null,
-      typeof attrs.mtime === 'number' ? new Date(attrs.mtime * 1000) : null,
-    ] as const
-    // SETSTAT and FSETSTAT follow a link, as chmod(2) and fchmod(2) do.
-    if (fields.some((field) => field !== null)) await core.setattr(path, ...fields, true)
-    else if (typeof attrs.size !== 'number') await core.getattr(path, true)
-    this.sftp.status(id, STATUS.OK)
-  }
-
   private async opendir(id: number, path: string): Promise<void> {
     const core = await this.mount()
     const p = workspacePath(path)
-    if (!isDir((await core.getattr(p)).mode)) throw enotdir(p)
+    if (((await core.getattr(p)).mode & S_IFMT) !== S_IFDIR) throw enotdir(p)
     this.sftp.handle(id, this.addHandle({ kind: 'dir', path: p, done: false }))
   }
 

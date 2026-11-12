@@ -53,6 +53,8 @@ export interface Process {
   readonly shownState?: string | null
   readonly stages?: readonly number[]
   readonly usage?: ProcessUsage | null
+  /** What its machine's provider called the machine when it ran there. */
+  readonly machineInstance?: string | null
 }
 
 /** Whether a process is a program on a machine, not Mirage's own. */

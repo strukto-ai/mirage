@@ -12,10 +12,6 @@ from mirage.types import PathSpec
 from mirage.workspace.files import Files
 
 
-async def _resolved(paths: list[PathSpec]) -> list[PathSpec]:
-    return paths
-
-
 async def run_sed(
     scopes: list[PathSpec],
     texts: list[str],
@@ -56,7 +52,7 @@ async def run_sed(
             env=env,
             argv=argv,
         ),
-        _resolved,
+        None,
         file_stream_op(dispatch),
         True,
     )

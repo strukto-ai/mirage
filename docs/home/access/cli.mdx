@@ -241,7 +241,6 @@ mirage workspace create --template ram-only -w demo
 | `mirage template list` | List templates. |
 | `mirage template get ID [-o yaml]` | Print one; `-o yaml` is a file `create -f` reads back. |
 | `mirage template delete ID` | Delete one. |
-| `mirage template restore ID` | Bring a deleted one back. |
 
 The file is saved as written: `${NAME}` is not read from the environment. The
 server checks the config when it saves the template, as a create would. A
@@ -249,8 +248,8 @@ workspace gets a copy of the template's config, so a later change to the
 template leaves it as it is, and a template's config cannot set
 `workspace_id`: `-w` names the workspace. Give a config file or `--template`,
 not both. The local daemon keeps templates under `~/.mirage/resources`, as
-`resource_store` sets. `get`, `delete` and `restore` take the template's ID or
-its name: a name is unique, so it works as an ID. On the local daemon a
+`resource_store` sets. `get` and `delete` take the template's ID or its
+name: a name is unique, so it works as an ID. On the local daemon a
 template's ID is its name.
 
 ### Saved policies

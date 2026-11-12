@@ -17,7 +17,7 @@ from dataclasses import dataclass
 import pytest
 
 from mirage.commands.errors import UsageError
-from mirage.context import reset_current_session, set_current_session
+from mirage.context import reset_caller, set_current_session
 from mirage.errors.fs import enoent
 from mirage.io import IOResult
 from mirage.io.errors import PipeClosed
@@ -170,5 +170,5 @@ async def test_rows_outside_a_workspace_lose_what_the_bound_session_hides():
     try:
         stdout, _io = await _run(body(), vfs=Files(no_calls))
     finally:
-        reset_current_session(token)
+        reset_caller(token)
     assert await materialize(stdout) == b"/m/a\n"

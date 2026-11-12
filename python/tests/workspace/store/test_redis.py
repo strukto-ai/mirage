@@ -41,7 +41,7 @@ def prefix() -> str:
 @pytest_asyncio.fixture
 async def store(prefix):
     s = RedisWorkspaceStateStore(
-        url=REDIS_URL, key_prefix=prefix, observer=RAMWorkspaceStateStore()
+        url=REDIS_URL, key_prefix=prefix, logs=RAMWorkspaceStateStore()
     )
     yield s
     client = aioredis.from_url(REDIS_URL)
@@ -71,7 +71,7 @@ async def test_meta_visible_across_providers(prefix, store):
         "ws1", {"workspace_id": "ws1", "default_session_id": "default"}, 0
     )
     sibling = RedisWorkspaceStateStore(
-        url=REDIS_URL, key_prefix=prefix, observer=RAMWorkspaceStateStore()
+        url=REDIS_URL, key_prefix=prefix, logs=RAMWorkspaceStateStore()
     )
     try:
         meta = await sibling.load_meta("ws1")
@@ -87,7 +87,7 @@ async def test_cas_set_meta_create_race_one_winner(prefix, store):
     """Two providers race the discovery-record create; exactly one
     conditional write lands and the loser sees the winner's record."""
     sibling = RedisWorkspaceStateStore(
-        url=REDIS_URL, key_prefix=prefix, observer=RAMWorkspaceStateStore()
+        url=REDIS_URL, key_prefix=prefix, logs=RAMWorkspaceStateStore()
     )
     try:
         mine = {
@@ -146,7 +146,7 @@ async def test_workspace_discovery_and_session_sharing(prefix):
     with only the store config + workspace id finds its default
     session and reads its session table."""
     store_a = RedisWorkspaceStateStore(
-        url=REDIS_URL, key_prefix=prefix, observer=RAMWorkspaceStateStore()
+        url=REDIS_URL, key_prefix=prefix, logs=RAMWorkspaceStateStore()
     )
     ws = Workspace(
         {"/data": RAMVFS()},
@@ -155,7 +155,7 @@ async def test_workspace_discovery_and_session_sharing(prefix):
         store=store_a,
     )
     store_b = RedisWorkspaceStateStore(
-        url=REDIS_URL, key_prefix=prefix, observer=RAMWorkspaceStateStore()
+        url=REDIS_URL, key_prefix=prefix, logs=RAMWorkspaceStateStore()
     )
     try:
         ws.create_session("narrow", mounts={"/data": "read"})

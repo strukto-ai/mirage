@@ -24,10 +24,6 @@ export const SPAN_SEP = '--'
 
 const DAY_MS = 86_400_000
 
-// An offset is mandatory on dateTime UNLESS the slot names its own zone, so
-// a bare wall clock is a zoned event rather than an error.
-const HAS_OFFSET = /(?:Z|[+-]\d{2}:?\d{2})$/
-
 const formatters = new Map<string, Intl.DateTimeFormat>()
 
 /**
@@ -226,7 +222,9 @@ export function validDay(day: string): boolean {
 export function slotInstant(slot: Record<string, JsonValue>, tz: string): number | null {
   const raw = slot.dateTime
   if (typeof raw === 'string' && raw !== '') {
-    if (HAS_OFFSET.test(raw)) return Date.parse(raw)
+    // An offset is mandatory on dateTime UNLESS the slot names its own zone,
+    // so a bare wall clock is a zoned event rather than an error.
+    if (/(?:Z|[+-]\d{2}:?\d{2})$/.test(raw)) return Date.parse(raw)
     const declared = slot.timeZone
     return wallClockMs(raw, typeof declared === 'string' && declared !== '' ? declared : tz)
   }

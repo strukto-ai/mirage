@@ -299,36 +299,6 @@ def staged_letters(
     return staged, shas, kinds
 
 
-def staged_state(
-    repo: BaseRepo,
-    entries: dict[bytes, IndexEntry],
-    conflicts: set[bytes],
-) -> tuple[
-    dict[str, str],
-    dict[str, bytes],
-    dict[str, int],
-    dict[bytes, tuple[int, bytes]] | None,
-]:
-    """HEAD against the index, read off the event loop.
-
-    On the worker thread because reading HEAD's tree fetches objects
-    through a store that goes over the dispatcher, which a blocking read
-    on the loop that has to serve it would never get.
-
-    Args:
-        repo (BaseRepo): the opened repository.
-        entries (dict[bytes, IndexEntry]): the index.
-        conflicts (set[bytes]): paths left unmerged.
-
-    Returns:
-        tuple: what ``staged_letters`` returns, then HEAD's tree, None
-            when HEAD resolves to nothing yet.
-    """
-    head = head_entries(repo)
-    staged, shas, kinds = staged_letters(head, entries, conflicts)
-    return staged, shas, kinds, head
-
-
 def conflict_codes(
     conflicts: dict[bytes, ConflictedIndexEntry],
 ) -> dict[str, str]:
@@ -664,8 +634,12 @@ async def collect(
             tracked file outside them reading as gone. None walks all.
     """
     state = await read_index(vfs, location.gitdir)
-    staged, shas, kinds, head = await asyncio.to_thread(
-        staged_state, repo, state.entries, set(state.conflicts)
+    # HEAD's tree is read on a worker thread: it fetches objects through a
+    # store that goes over the dispatcher, which a blocking read on the
+    # loop that has to serve it would never get.
+    head = await asyncio.to_thread(head_entries, repo)
+    staged, shas, kinds = staged_letters(
+        head, state.entries, set(state.conflicts)
     )
     # The walk collapses a directory holding nothing tracked into
     # ``dir/``, and which directories those are is the session's view of

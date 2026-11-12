@@ -17,12 +17,6 @@ import { BsonTypeTag, PRIMARY_KEY } from './types.ts'
 import { isPlainObject } from '../../utils/records.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
-export interface SampledField {
-  path: string
-  presence: number
-  types: Record<string, number>
-}
-
 function bump(counts: Map<string, Map<string, number>>, path: string, tag: string): void {
   let inner = counts.get(path)
   if (inner === undefined) {
@@ -92,7 +86,7 @@ export async function sampleFieldTypes(
   database: string,
   collection: string,
   sampleSize = 100,
-): Promise<SampledField[]> {
+) {
   const counts = new Map<string, Map<string, number>>()
   let total = 0
   for await (const doc of accessor.driver.iterDocuments(database, collection, {
@@ -104,7 +98,7 @@ export async function sampleFieldTypes(
     if (total >= sampleSize) break
   }
   if (total === 0) return []
-  const fields: SampledField[] = []
+  const fields: { path: string; presence: number; types: Record<string, number> }[] = []
   for (const path of [...counts.keys()].sort(compareCodePoints)) {
     if (path === PRIMARY_KEY) continue
     const inner = counts.get(path) ?? new Map<string, number>()

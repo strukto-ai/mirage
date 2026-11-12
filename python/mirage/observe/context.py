@@ -83,10 +83,6 @@ def fresh_recorder(
     )
 
 
-def _set_recorder(rec: Recorder | None) -> CallerToken:
-    return bind_caller(current_caller().changed({"recorder": rec}))
-
-
 class RecordingScope:
     """Op-collection scope for one typed line.
 
@@ -118,7 +114,9 @@ class RecordingScope:
         if active:
             rec = fresh_recorder(ledger, clock)
             self.records = rec.sink
-            self._token = _set_recorder(rec)
+            self._token = bind_caller(
+                current_caller().changed({"recorder": rec})
+            )
 
     def close(self) -> None:
         """Restore the previous recorder. Idempotent."""
@@ -141,12 +139,6 @@ def active_records() -> list[OpRecord] | None:
     """
     rec = current_caller().recorder
     return rec.sink if rec is not None else None
-
-
-def _set_command_sink(
-    sink: tuple[list[OpRecord] | None, list[OpRecord]] | None,
-) -> CallerToken:
-    return bind_caller(current_caller().changed({"command_sink": sink}))
 
 
 @contextmanager
@@ -174,7 +166,9 @@ def command_records(own: bool = False) -> Iterator[list[OpRecord]]:
     mine: list[OpRecord] = []
     held = current_caller().command_sink
     command = mine if own else held[0] if held is not None else None
-    token = _set_command_sink((command, mine))
+    token = bind_caller(
+        current_caller().changed({"command_sink": (command, mine)})
+    )
     try:
         yield mine
     finally:
@@ -221,18 +215,11 @@ def lift_lost(path: PathSpec, upto: int, subtree: bool = False) -> None:
         lost.lift(path.virtual, upto, subtree)
 
 
-def active_recorder() -> Recorder | None:
-    """Return the active Recorder for the current async context, if any."""
-    return current_caller().recorder
-
-
-def reset_active_recorder(token: CallerToken) -> None:
-    """Restore the previous recorder after a :func:`push_mount_context`.
-
-    Args:
-        token (CallerToken): The token returned by ``push_mount_context``.
-    """
-    reset_caller(token)
+def recording_active() -> bool:
+    """Whether a recording context is active. Backends that need an extra
+    API call to capture fingerprint or revision metadata (Drive, Graph)
+    gate it on this so unrecorded reads stay single-request."""
+    return current_caller().recorder is not None
 
 
 def push_mount_context(mount_id: str | None) -> CallerToken:
@@ -242,21 +229,26 @@ def push_mount_context(mount_id: str | None) -> CallerToken:
     ``_recorder.set`` (the new Recorder shares the same sink list, so
     records still aggregate together). Binds the unrecorded state again
     when no recorder is active. Returns the token for
-    :func:`reset_active_recorder`.
+    :func:`reset_caller`.
 
     Args:
         mount_id (str | None): instance identity, absent outside a mount.
     """
-    rec = current_caller().recorder
-    return _set_recorder(
-        None
-        if rec is None
-        else Recorder(
-            sink=rec.sink,
-            mount_id=mount_id,
-            lost=rec.lost,
-            index=rec.index,
-            clock=rec.clock,
+    outer = current_caller()
+    rec = outer.recorder
+    return bind_caller(
+        outer.changed(
+            {
+                "recorder": None
+                if rec is None
+                else Recorder(
+                    sink=rec.sink,
+                    mount_id=mount_id,
+                    lost=rec.lost,
+                    index=rec.index,
+                    clock=rec.clock,
+                )
+            }
         )
     )
 
@@ -292,7 +284,7 @@ async def with_mount_context(
             except StopAsyncIteration:
                 return
             finally:
-                reset_active_recorder(token)
+                reset_caller(token)
             yield chunk
     finally:
         close = getattr(aiter, "aclose", None)

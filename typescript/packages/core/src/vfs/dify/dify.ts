@@ -22,7 +22,8 @@ import type { DirListing, FileStat, PathSpec, SearchQuery } from '../../types.ts
 import { VFSName } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import type { ConfigState, Handed } from '../types.ts'
-import { redactDifyConfig, resolveDifyConfig, type DifyConfig } from './config.ts'
+import { REDACTED_SECRET, type RedactedSchema } from '../secrets.ts'
+import { resolveDifyConfig, type DifyConfig } from './config.ts'
 
 export const VFS_MD = `- A Dify knowledge base, mounted read only.
 - Every file is plain text assembled from the document's Dify segments,
@@ -54,10 +55,12 @@ export class DifyVFS extends BaseVFS {
     this.accessor = new DifyAccessor(this.config)
   }
 
-  override getState(): ConfigState<ReturnType<typeof redactDifyConfig>> & { needs_override: true } {
+  override getState(): ConfigState<RedactedSchema<typeof DifyConfig, DifyVFS['config']>> & {
+    needs_override: true
+  } {
     return {
       type: this.name,
-      config: redactDifyConfig(this.config),
+      config: { ...this.config, apiKey: REDACTED_SECRET },
       // TypeScript cannot rebuild a config-backed mount from state:
       // `buildMountArgs` substitutes a RAMVFS for anything it was
       // not handed. Saying so out loud turns a silently empty mount

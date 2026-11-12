@@ -35,9 +35,9 @@ class S3WorkspaceStateStore(WorkspaceStateStore):
     the compare-read's ETag, giving S3 the same generation contract as
     the Redis Lua script; bucket versioning (when enabled) doubles as
     an audit trail for free. This store hosts only the sessions+meta
-    group: namespace nodes and observer events are chatty per-op
-    planes that belong on RAM or Redis, so use this store as the
-    ``workspace`` group override of a RAM or Redis default store.
+    group: namespace nodes and command logs are chatty per-op
+    planes that belong elsewhere, so use this store as the
+    ``sessions`` group override of a RAM or Redis default store.
     """
 
     def __init__(
@@ -53,21 +53,21 @@ class S3WorkspaceStateStore(WorkspaceStateStore):
         raise RuntimeError(
             "The s3 store hosts only the sessions+meta group; keep the "
             "namespace plane on ram or redis and pass the s3 store as "
-            "the 'workspace' group override."
+            "the 'sessions' group override."
         )
 
     def _make_observer(self, workspace_id: str) -> ObserverStore:
         raise RuntimeError(
             "The s3 store hosts only the sessions+meta group; keep the "
-            "observer plane on ram or redis and pass the s3 store as "
-            "the 'workspace' group override."
+            "logs plane on ram or disk and pass the s3 store as "
+            "the 'sessions' group override."
         )
 
     def _make_execution(self, workspace_id: str) -> ExecutionStore:
         raise RuntimeError(
             "The s3 store hosts only the sessions+meta group; keep the "
             "execution plane on ram or redis and pass the s3 store as the "
-            "'workspace' group override."
+            "'sessions' group override."
         )
 
     def _make_sessions(self, workspace_id: str) -> NamespaceStore:

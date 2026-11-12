@@ -13,10 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import builtins
+from collections.abc import Iterator
+from concurrent.futures import CancelledError
+from contextlib import contextmanager
 from dataclasses import dataclass
 
-from mirage.errors import FsCondition
-from mirage.errors.posix import linux_errno, posix_phrase
+from mirage.errors import FsCondition, classify
+from mirage.errors.posix import LINUX_ERRNO, posix_phrase
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +67,7 @@ def cpython_error(condition: FsCondition) -> CPythonError:
     if condition is FsCondition.NO_XATTR:
         phrase = "No data available"
     return CPythonError(
-        EXCEPTIONS.get(condition, "OSError"), linux_errno(condition), phrase
+        EXCEPTIONS.get(condition, "OSError"), LINUX_ERRNO[condition], phrase
     )
 
 
@@ -88,3 +91,30 @@ def guest_error(
     if target is None:
         return kind(row.errno, row.phrase, path)
     return kind(row.errno, row.phrase, path, None, target)
+
+
+@contextmanager
+def as_guest_error(path: str, target: str | None = None) -> Iterator[None]:
+    """Re-raise a mount failure the way guest CPython raises it.
+
+    A backend words its refusals its own way; a guest catches the
+    builtin and may print its message. Every named condition converts,
+    so a non-empty rmdir is ``OSError`` errno 39 wherever it happened,
+    and a failure the vocabulary does not name is EIO, as a kernel
+    reports a device that failed (the engine knows only builtin types,
+    so a backend's own exception would reach the guest as
+    ``RuntimeError``). A stopped run's refusal is no failed device: it
+    leaves as itself, so a callback making call after call (a scan)
+    ends with its run.
+
+    Args:
+        path (str): the path the operation names.
+        target (str | None): a rename's destination.
+    """
+    try:
+        yield
+    except CancelledError:
+        raise
+    except Exception as exc:
+        condition = classify(exc) or FsCondition.EIO
+        raise guest_error(condition, path, target) from exc

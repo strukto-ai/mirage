@@ -25,7 +25,6 @@ from mirage.core.email._parse import parse_rfc822, parse_with_payloads
 logger = logging.getLogger(__name__)
 
 INTERNAL_DATE_KEY = "internal_date"
-INTERNAL_DATE_RE = re.compile(r'INTERNALDATE "([^"]*)"')
 # Metadata is asked for ahead of the body: a server may answer the items
 # in the order they were requested, and anything after BODY[] lands on
 # the line *behind* the literal, where the parsers below never look.
@@ -262,11 +261,18 @@ async def fetch_message(
         # backend.
         response = await imap.uid("fetch", uid, FETCH_ITEMS)
     raw_bytes = _extract_body(response)
-    flags = _extract_flags(response)
+    flags = next(
+        (
+            _extract_flags_from_line(line)
+            for line in _text_lines(response)
+            if "FLAGS" in line
+        ),
+        [],
+    )
     msg_dict = parse_rfc822(raw_bytes)
     msg_dict["uid"] = uid
     msg_dict["flags"] = flags
-    msg_dict[INTERNAL_DATE_KEY] = _extract_internal_date(response)
+    msg_dict[INTERNAL_DATE_KEY] = _internal_date_of(response)
     msg_dict["raw_size"] = len(raw_bytes)
     return msg_dict
 
@@ -529,18 +535,6 @@ def _extract_body(response: IMAPResponse) -> bytes:
     return b""
 
 
-def _extract_flags(response: IMAPResponse) -> list[str]:
-    """The flags a FETCH answer reports.
-
-    Args:
-        response (IMAPResponse): the answer.
-    """
-    for line in _text_lines(response):
-        if "FLAGS" in line:
-            return _extract_flags_from_line(line)
-    return []
-
-
 def _parse_multi_fetch(
     response: IMAPResponse, uids: list[str]
 ) -> list[dict[str, Any]]:
@@ -586,11 +580,11 @@ def _parse_multi_fetch(
 
 
 def _internal_date_from_line(line: str) -> str:
-    match = INTERNAL_DATE_RE.search(line)
+    match = re.search(r'INTERNALDATE "([^"]*)"', line)
     return match.group(1) if match else ""
 
 
-def _extract_internal_date(response: IMAPResponse) -> str:
+def _internal_date_of(response: IMAPResponse) -> str:
     """The INTERNALDATE a FETCH answer reports.
 
     Args:

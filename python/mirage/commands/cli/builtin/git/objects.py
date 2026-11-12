@@ -25,7 +25,6 @@ from dulwich.repo import BaseRepo
 from mirage.bridge.sync import run_async_from_sync
 from mirage.commands.cli.builtin.git.format import FULL_SHA, abbrev_length
 from mirage.commands.cli.builtin.git.io import (
-    file_size,
     read_file,
     read_names,
     read_optional,
@@ -361,7 +360,7 @@ async def load_packs(
         idx_bytes = await read_file(vfs, root.join(name))
         index = load_pack_index_file(name, BytesIO(idx_bytes), SHA1)
         pack_path = root.join(f"{stem}{PACK_SUFFIX}")
-        size = await file_size(vfs, pack_path)
+        size = (await vfs.stat(pack_path)).size
         if size is None:
             raw = await read_file(vfs, pack_path)
             data = PackData.from_file(BytesIO(raw), SHA1, len(raw))

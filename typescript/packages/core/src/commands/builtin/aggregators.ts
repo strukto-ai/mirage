@@ -15,14 +15,12 @@
 import { rstripNewlines } from '../../utils/text.ts'
 import { concat } from '../../utils/bytes.ts'
 
-export type AggregateResult = [path: string, data: Uint8Array]
-
-export function concatAggregate(results: AggregateResult[]): Uint8Array {
+export function concatAggregate(results: [path: string, data: Uint8Array][]): Uint8Array {
   const chunks = results.map(([, data]) => data)
   return concat(chunks)
 }
 
-export function headerAggregate(results: AggregateResult[]): Uint8Array {
+export function headerAggregate(results: [path: string, data: Uint8Array][]): Uint8Array {
   const enc = new TextEncoder()
   const chunks: Uint8Array[] = []
   for (let i = 0; i < results.length; i++) {
@@ -39,7 +37,7 @@ export function headerAggregate(results: AggregateResult[]): Uint8Array {
   return concat(chunks)
 }
 
-export function prefixAggregate(results: AggregateResult[]): Uint8Array {
+export function prefixAggregate(results: [path: string, data: Uint8Array][]): Uint8Array {
   const enc = new TextEncoder()
   const dec = new TextDecoder()
   const lines: string[] = []

@@ -1158,7 +1158,15 @@ def _construct_vfs(mount_state: dict[str, Any]) -> BaseVFS:
         )
     else:
         config = vfs_state.get(VFSStateKey.CONFIG)
-        config_cls = _saved_config_class(cls, entry)
+        # The typed config the constructor takes, exactly what
+        # ``build_vfs`` reads: the registry entry's config class when the
+        # entry declares one, else the class's own ``CONFIG_CLS``.
+        ref = (
+            entry.config_path
+            if entry is not None and entry.config_path is not None
+            else getattr(cls, "CONFIG_CLS", None)
+        )
+        config_cls = None if ref is None else resolve_class(ref)
         if config is None:
             built = cls()
         elif config_cls is not None:
@@ -1254,12 +1262,17 @@ def _saved_entry(mount_state: dict[str, Any]) -> VFSEntry | None:
     The ``vfs_ref`` the registry built the mount from when one was
     recorded (a registered name, or a colon reference, which is how a
     mount declared as ``./wiki.py:WikiVFS`` comes back), else the
-    builtin entry whose class is the saved class, else the VFS's
+    builtin entry whose class is exactly the saved class, else the VFS's
     ``type``, the last locator a VFS constructed in code leaves. The
     ref comes first because ``type`` is the class's ``name`` and a
     subclass inherits it: an alias registered over a builtin, or a
     script subclassing one, reports the builtin's type and rebuilt as
-    the builtin while the type was consulted first. A recorded ref this
+    the builtin while the type was consulted first; for the same reason
+    a class constructed in code, which saves its own config under a
+    builtin's type when it keeps the builtin's name, rebuilds through the
+    entry whose class it is (matched by identity, after narrowing by
+    class name so only that candidate is imported), never the type's,
+    whose config class refuses keys it does not know. A recorded ref this
     process cannot resolve is not a reason to fall back to that guess;
     ``_saved_class`` imports the class the snapshot names as the last
     resort, and the loader asks for an override when even that fails.
@@ -1270,45 +1283,22 @@ def _saved_entry(mount_state: dict[str, Any]) -> VFSEntry | None:
     ref = mount_state.get(MountKey.VFS_REF)
     if ref:
         return resolve_entry(ref)
-    entry = _builtin_entry_for_class(mount_state[MountKey.VFS_CLASS])
-    if entry is not None:
-        return entry
+    cls_path = mount_state[MountKey.VFS_CLASS]
+    mod_name, separator, cls_name = cls_path.rpartition(".")
+    if separator and mod_name != SCRIPT_MODULE_NAME:
+        for entry in REGISTRY.values():
+            path = entry.vfs_path
+            name = (
+                path.__name__
+                if isinstance(path, type)
+                else path.rsplit(":")[-1]
+            )
+            if name == cls_name:
+                cls = resolve_class(path)
+                if f"{cls.__module__}.{cls.__name__}" == cls_path:
+                    return entry
     ptype = mount_state[MountKey.VFS_STATE].get(VFSStateKey.TYPE, "")
     return resolve_entry(ptype) if ptype else None
-
-
-def _builtin_entry_for_class(cls_path: str) -> VFSEntry | None:
-    """The builtin entry that builds exactly the saved class, or None.
-
-    A mount constructed in code records no ref, and its ``type`` is the
-    class's ``name``, which a subclass inherits unless it declares its
-    own: a subclass of a builtin that keeps the builtin's name saves its
-    own config under the builtin's type, and rebuilding through the
-    type's entry hands that config to the builtin's config class, which
-    refuses the keys it does not know. (The S3-compatible aliases once
-    did exactly this under ``s3``; each now carries its own name.) The
-    saved class path names the class that was running, so the entry
-    whose class it is -- matched by identity, after narrowing by class
-    name so only that candidate is imported -- is the one to rebuild
-    through.
-
-    Args:
-        cls_path (str): the saved ``module.ClassName``.
-    """
-    mod_name, separator, cls_name = cls_path.rpartition(".")
-    if not separator:
-        return None
-    if mod_name == SCRIPT_MODULE_NAME:
-        return None
-    for entry in REGISTRY.values():
-        ref = entry.vfs_path
-        name = ref.__name__ if isinstance(ref, type) else ref.rsplit(":")[-1]
-        if name != cls_name:
-            continue
-        cls = resolve_class(ref)
-        if f"{cls.__module__}.{cls.__name__}" == cls_path:
-            return entry
-    return None
 
 
 def _saved_class(
@@ -1337,21 +1327,3 @@ def _saved_class(
         logger.debug("saved VFS class %s is not importable: %s", cls_path, exc)
         return None, None
     return getattr(module, cls_name, None), None
-
-
-def _saved_config_class(vfs_cls: type, entry: VFSEntry | None) -> type | None:
-    """The typed config a saved mount's constructor takes, or None.
-
-    The registry entry's config class when the entry declares one, else
-    the class's own ``CONFIG_CLS``: exactly what ``build_vfs``
-    reads. It used to scan the class's module for the first name ending
-    in ``Config``, which picked a neighbour by alphabet.
-
-    Args:
-        vfs_cls (type): the VFS class being rebuilt.
-        entry (VFSEntry | None): its registry entry, when it has one.
-    """
-    if entry is not None and entry.config_path is not None:
-        return resolve_class(entry.config_path)
-    ref = getattr(vfs_cls, "CONFIG_CLS", None)
-    return None if ref is None else resolve_class(ref)

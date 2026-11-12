@@ -23,18 +23,13 @@ function mask(key: string, value: string): string {
   return value
 }
 
-interface ResolvedEntry {
-  value: string
-  origin: string
-}
-
 function humanTable(table: Record<string, string>): string {
   return Object.entries(table)
     .map(([k, v]) => `${k} = ${v}`)
     .join('\n')
 }
 
-function humanResolved(table: Record<string, ResolvedEntry>): string {
+function humanResolved(table: Record<string, { value: string; origin: string }>): string {
   return Object.entries(table)
     .map(([k, e]) => `${k} = ${e.value}  (${e.origin})`)
     .join('\n')
@@ -48,7 +43,7 @@ function listResolved(): void {
     fail((e as Error).message, 2)
     return
   }
-  const payload: Record<string, ResolvedEntry> = {}
+  const payload: Record<string, { value: string; origin: string }> = {}
   for (const [key, [value, origin]] of Object.entries(resolved)) {
     payload[key] = { value: mask(key, value), origin }
   }

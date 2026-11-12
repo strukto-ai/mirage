@@ -22,7 +22,7 @@ from mirage.workspace.store import (
     RAMWorkspaceStateStore,
 )
 
-GROUPS = ("namespace", "workspace", "observer")
+GROUPS = ("namespace", "sessions", "logs")
 PROBES = {
     "symlink": "readlink /data/link || echo gone",
     "cwd": "pwd",

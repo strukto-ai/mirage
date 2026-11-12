@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import type { ConfigOf, RedactedSchema } from '../secrets.ts'
+import type { ConfigOf } from '../secrets.ts'
 import { normalizeNonEmpty } from '../secrets.ts'
 
 export const ChromaConfig = z.object({
@@ -53,10 +53,4 @@ export function resolveChromaConfig(config: ChromaConfig) {
     slugField: normalizeNonEmpty(config.slugField ?? 'page_slug', 'slugField'),
     chunkIndexField: normalizeNonEmpty(config.chunkIndexField ?? 'chunk_index', 'chunkIndexField'),
   }
-}
-
-export function redactChromaConfig(
-  config: ReturnType<typeof resolveChromaConfig>,
-): RedactedSchema<typeof ChromaConfig, ReturnType<typeof resolveChromaConfig>> {
-  return { ...config }
 }

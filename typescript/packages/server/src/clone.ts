@@ -25,15 +25,16 @@ import type { SecretEntries } from '@struktoai/mirage-core/secrets/config'
 import { resolveSourcesFor } from '@struktoai/mirage-core/secrets/sources'
 import type { ServerHost } from './routes.ts'
 
-interface OverrideMountBlock {
-  vfs: string
-  config?: Record<string, unknown>
-  write?: string | null
-  command_limits?: Record<string, unknown>
-}
-
 export interface OverrideShape {
-  mounts?: Record<string, OverrideMountBlock>
+  mounts?: Record<
+    string,
+    {
+      vfs: string
+      config?: Record<string, unknown>
+      write?: string | null
+      command_limits?: Record<string, unknown>
+    }
+  >
   /** `secrets:` declarations for the restored env pointers. */
   secrets?: SecretEntries
 }

@@ -15,10 +15,8 @@
 import { LanceDBAccessor } from '@struktoai/mirage-core/accessor/lancedb'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { LanceDBConfig } from '@struktoai/mirage-core/vfs/lancedb/config'
-import {
-  redactLanceDBConfig,
-  resolveLanceDBConfig,
-} from '@struktoai/mirage-core/vfs/lancedb/config'
+import { resolveLanceDBConfig } from '@struktoai/mirage-core/vfs/lancedb/config'
+import { REDACTED_SECRET, type RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
 import { LanceDBVFS as CoreLanceDBVFS, VFS_MD } from '@struktoai/mirage-core/vfs/lancedb/lancedb'
 import type { ConfigState } from '@struktoai/mirage-core/vfs/types'
 import { LanceDBStore } from './store.ts'
@@ -54,12 +52,12 @@ export class LanceDBVFS extends CoreLanceDBVFS {
     this.searchable = [[...Array<string>(depth).fill('*'), '*.md'].join('/')]
   }
 
-  override getState(): ConfigState<ReturnType<typeof redactLanceDBConfig>> & {
+  override getState(): ConfigState<RedactedSchema<typeof LanceDBConfig, LanceDBVFS['config']>> & {
     needs_override: true
   } {
     return {
       type: this.name,
-      config: redactLanceDBConfig(this.config),
+      config: { ...this.config, apiKey: this.config.apiKey === null ? null : REDACTED_SECRET },
       // TypeScript cannot rebuild a config-backed mount from state:
       // `buildMountArgs` substitutes a RAMVFS for anything it was
       // not handed. Saying so out loud turns a silently empty mount

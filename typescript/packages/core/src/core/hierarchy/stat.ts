@@ -38,10 +38,6 @@ export type RowFn = (
   },
 ) => FileStat
 
-// The node kinds, so `entryStat` can tell a FileType from a ContentType:
-// both are string unions and the two vocabularies do not overlap.
-const KINDS: ReadonlySet<string> = new Set(Object.values(FileType))
-
 /**
  * The row most id-addressed nodes share, keyed by an id field: the listed
  * name, size and modified time, and the node's id under `idField` in
@@ -54,7 +50,12 @@ const KINDS: ReadonlySet<string> = new Set(Object.values(FileType))
  * attachment). Mirrors `entry_stat` in `mirage/core/hierarchy/stat.py`.
  */
 export function entryStat(idField: string, kind?: FileType | ContentType): RowFn {
-  const node = kind !== undefined && KINDS.has(kind) ? (kind as FileType) : null
+  // A FileType and a ContentType are both string unions, and the two
+  // vocabularies do not overlap.
+  const node =
+    kind !== undefined && (Object.values(FileType) as string[]).includes(kind)
+      ? (kind as FileType)
+      : null
   return function build(name, ident, options = {}): FileStat {
     const extra = { ...(options.extra ?? {}), [idField]: ident }
     const modified = options.modified ?? null

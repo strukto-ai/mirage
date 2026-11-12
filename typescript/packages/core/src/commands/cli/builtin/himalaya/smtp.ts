@@ -23,29 +23,6 @@ const IMPLICIT_TLS_PORT = 465
 
 const transporterCache = new WeakMap<EmailConfig, Nodemailer.Transporter>()
 
-async function getTransporter(config: EmailConfig): Promise<Nodemailer.Transporter> {
-  const existing = transporterCache.get(config)
-  if (existing !== undefined) return existing
-  const mod = (await import('nodemailer').catch(
-    missingPeer({ feature: 'himalaya message send', packageName: 'nodemailer' }),
-  )) as unknown as typeof Nodemailer
-  // Port 465 speaks TLS from its first byte (RFC 8314's implicit TLS);
-  // with secure false nodemailer connects in plaintext and upgrades when
-  // the server advertises STARTTLS. Mirrors Python's send_raw.
-  const timeoutMs = (config.timeout ?? DEFAULT_TIMEOUT) * 1000
-  const transporter = mod.createTransport({
-    host: config.smtpHost,
-    port: config.smtpPort,
-    secure: config.smtpPort === IMPLICIT_TLS_PORT,
-    auth: { user: config.username, pass: config.password },
-    connectionTimeout: timeoutMs,
-    greetingTimeout: timeoutMs,
-    socketTimeout: timeoutMs,
-  })
-  transporterCache.set(config, transporter)
-  return transporter
-}
-
 /**
  * Pushes an RFC 5322 message through the account's SMTP path.
  *
@@ -61,7 +38,26 @@ export async function sendRaw(
   // An edge isolate opens the socket past its fetch guard, so the network
   // rule is asked here; elsewhere this is a no-op.
   judgeSocket(config.smtpHost, config.smtpPort)
-  const transporter = await getTransporter(config)
+  let transporter = transporterCache.get(config)
+  if (transporter === undefined) {
+    const mod = (await import('nodemailer').catch(
+      missingPeer({ feature: 'himalaya message send', packageName: 'nodemailer' }),
+    )) as unknown as typeof Nodemailer
+    // Port 465 speaks TLS from its first byte (RFC 8314's implicit TLS);
+    // with secure false nodemailer connects in plaintext and upgrades when
+    // the server advertises STARTTLS. Mirrors Python's send_raw.
+    const timeoutMs = (config.timeout ?? DEFAULT_TIMEOUT) * 1000
+    transporter = mod.createTransport({
+      host: config.smtpHost,
+      port: config.smtpPort,
+      secure: config.smtpPort === IMPLICIT_TLS_PORT,
+      auth: { user: config.username, pass: config.password },
+      connectionTimeout: timeoutMs,
+      greetingTimeout: timeoutMs,
+      socketTimeout: timeoutMs,
+    })
+    transporterCache.set(config, transporter)
+  }
   const parsed = await parseRfc822(raw)
   const recipients = [
     ...parsed.to.map((entry) => entry.email),
@@ -84,19 +80,6 @@ export async function sendRaw(
  * message the mount serves.
  */
 export function bccAddresses(raw: Uint8Array): string[] {
-  const addresses: string[] = []
-  for (const line of bccLines(raw)) {
-    const value = line.replace(/^bcc:/i, '')
-    for (const part of value.split(',')) {
-      const angled = /<([^>]+)>/.exec(part)
-      const email = (angled === null ? part : (angled[1] ?? '')).trim()
-      if (email !== '') addresses.push(email)
-    }
-  }
-  return addresses
-}
-
-function bccLines(raw: Uint8Array): string[] {
   const text = new TextDecoder().decode(raw)
   const split = text.search(/\r?\n\r?\n/)
   const head = split === -1 ? text : text.slice(0, split)
@@ -113,7 +96,16 @@ function bccLines(raw: Uint8Array): string[] {
     collecting = /^bcc:/i.test(line)
     if (collecting) found.push(line)
   }
-  return found
+  const addresses: string[] = []
+  for (const line of found) {
+    const value = line.replace(/^bcc:/i, '')
+    for (const part of value.split(',')) {
+      const angled = /<([^>]+)>/.exec(part)
+      const email = (angled === null ? part : (angled[1] ?? '')).trim()
+      if (email !== '') addresses.push(email)
+    }
+  }
+  return addresses
 }
 
 /** Drops the Bcc header (and its folded continuation lines) from a message. */

@@ -20,7 +20,7 @@ import { generationOf } from '@struktoai/mirage-core/workspace/record/types'
 // A .lock older than this is presumed abandoned by a crashed writer and
 // reclaimed (loudly). Live CAS critical sections are milliseconds.
 const LOCK_STALE_SECONDS = 10
-const LOCK_RETRY_SLEEP_MS = 5
+const LOCK_RETRY_SLEEP_SECONDS = 0.005
 const LOCK_RETRY_LIMIT = 2000
 
 let tmpCounter = 0
@@ -245,7 +245,7 @@ export class DiskRecordClient {
       const fh = await acquireLock(lockPath)
       if (fh !== null) return fh
       if (await reclaimStaleLock(lockPath)) continue
-      await new Promise((r) => setTimeout(r, LOCK_RETRY_SLEEP_MS))
+      await new Promise((r) => setTimeout(r, LOCK_RETRY_SLEEP_SECONDS * 1000))
     }
     throw new Error(`could not acquire lock ${lockPath}`)
   }

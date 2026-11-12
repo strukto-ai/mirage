@@ -22,8 +22,7 @@ from mirage.context import (
     clear_program_invocation,
     current_caller,
     is_program_invocation,
-    reset_current_session,
-    reset_program_invocation,
+    reset_caller,
     set_current_evaluation,
 )
 from mirage.execution.job import JobTable
@@ -284,8 +283,8 @@ async def handle_bash(
             )
             return await finish_shell(execute_fn, session, io, stdin)
         finally:
-            reset_program_invocation(token)
-            reset_current_session(child_token)
+            reset_caller(token)
+            reset_caller(child_token)
             await session.close_inputs()
 
     if shell is None or job_table is None:

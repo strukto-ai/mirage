@@ -1620,7 +1620,7 @@
       "target": "$.paths[\"/v1/templates/{ref}\"].delete",
       "update": {
         "x-mint": {
-          "content": "Delete a saved template. Use the restore endpoint to recover it.\n\n<div className=\"hidden\">\n<ResponseExample>\n\n```http 204 No Content\nHTTP/1.1 204 No Content\n```\n\n</ResponseExample>\n</div>\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | The request is malformed: the body is not JSON (`invalid_json`) or not a JSON object, a field is missing (`missing_field`), unknown (`unknown_field`) or has a wrong value (`invalid_value`), or the request is otherwise invalid (`invalid_request`). `param` names the field at fault. |\n| `401` | The token is missing or wrong (`unauthorized`). |\n| `404` | The workspace, session, job, file or route does not exist, or the caller may not see it (`not_found`). |\n| `429` | Past a rate limit (`rate_limited`), or a new session past max_sessions (`session_limit`). |\n| `501` | The server does not support this call (`not_supported`). Saved configs are kept only on a server of one account. |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
+          "content": "Delete a saved template.\n\n<div className=\"hidden\">\n<ResponseExample>\n\n```http 204 No Content\nHTTP/1.1 204 No Content\n```\n\n</ResponseExample>\n</div>\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | The request is malformed: the body is not JSON (`invalid_json`) or not a JSON object, a field is missing (`missing_field`), unknown (`unknown_field`) or has a wrong value (`invalid_value`), or the request is otherwise invalid (`invalid_request`). `param` names the field at fault. |\n| `401` | The token is missing or wrong (`unauthorized`). |\n| `404` | The workspace, session, job, file or route does not exist, or the caller may not see it (`not_found`). |\n| `429` | Past a rate limit (`rate_limited`), or a new session past max_sessions (`session_limit`). |\n| `501` | The server does not support this call (`not_supported`). Saved configs are kept only on a server of one account. |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
         }
       }
     },
@@ -1646,38 +1646,6 @@
     },
     {
       "target": "$.paths[\"/v1/templates/{ref}\"].delete.responses[\"501\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/templates/{ref}/restore\"].post",
-      "update": {
-        "x-mint": {
-          "content": "Restore a deleted template.\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | The request is malformed: the body is not JSON (`invalid_json`) or not a JSON object, a field is missing (`missing_field`), unknown (`unknown_field`) or has a wrong value (`invalid_value`), or the request is otherwise invalid (`invalid_request`). `param` names the field at fault. |\n| `401` | The token is missing or wrong (`unauthorized`). |\n| `404` | The workspace, session, job, file or route does not exist, or the caller may not see it (`not_found`). |\n| `429` | Past a rate limit (`rate_limited`), or a new session past max_sessions (`session_limit`). |\n| `501` | The server does not support this call (`not_supported`). Saved configs are kept only on a server of one account. |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
-        }
-      }
-    },
-    {
-      "target": "$.paths[\"/v1/templates/{ref}/restore\"].post.description",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/templates/{ref}/restore\"].post.responses[\"400\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/templates/{ref}/restore\"].post.responses[\"401\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/templates/{ref}/restore\"].post.responses[\"404\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/templates/{ref}/restore\"].post.responses[\"429\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/templates/{ref}/restore\"].post.responses[\"501\"]",
       "remove": true
     },
     {
@@ -2640,7 +2608,7 @@
       "target": "$.paths[\"/v1/workspaces/{workspace_id}/lines/{line_id}\"].get",
       "update": {
         "x-mint": {
-          "content": "Get a command execution with its job, process, and machine IDs. Use the `line_id` returned by the shell endpoint.\n\nCompleted commands are retained for up to one hour, with a maximum of 1,024 records. Servers sharing a workspace store share these records; snapshots preserve completed records. Times are RFC 3339 strings in UTC.\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | The request is malformed: the body is not JSON (`invalid_json`) or not a JSON object, a field is missing (`missing_field`), unknown (`unknown_field`) or has a wrong value (`invalid_value`), or the request is otherwise invalid (`invalid_request`). `param` names the field at fault. |\n| `401` | The token is missing or wrong (`unauthorized`). |\n| `404` | The workspace, session, job, file or route does not exist, or the caller may not see it (`not_found`). |\n| `429` | Past a rate limit (`rate_limited`), or a new session past max_sessions (`session_limit`). |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
+          "content": "Get a command execution with its job IDs and the processes it ran, each under the one that started it and naming the machine it ran on. Use the `line_id` returned by the shell endpoint.\n\nCompleted commands are retained for up to one hour, with a maximum of 1,024 records. Servers sharing a workspace store share these records; snapshots preserve completed records. Times are RFC 3339 strings in UTC.\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | The request is malformed: the body is not JSON (`invalid_json`) or not a JSON object, a field is missing (`missing_field`), unknown (`unknown_field`) or has a wrong value (`invalid_value`), or the request is otherwise invalid (`invalid_request`). `param` names the field at fault. |\n| `401` | The token is missing or wrong (`unauthorized`). |\n| `404` | The workspace, session, job, file or route does not exist, or the caller may not see it (`not_found`). |\n| `429` | Past a rate limit (`rate_limited`), or a new session past max_sessions (`session_limit`). |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
         }
       }
     },

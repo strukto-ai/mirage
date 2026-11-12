@@ -74,14 +74,16 @@ const MACHINE_PROVIDERS: readonly string[] = [
   'ssh',
 ]
 
-const NODE_HINT =
-  'lives in @struktoai/mirage-node; import that package to register it. Browser ' +
-  "worlds support 'monty' (sandboxed), 'pyodide' (WASM CPython), and " +
-  "'quickjs' (sandboxed JavaScript)"
-
 /** Why a name a config may carry is not registered here, and where it lives. */
 const RUNTIME_HINTS: Record<string, string> = {
-  ...Object.fromEntries(NODE_RUNTIMES.map((name) => [name, `runtime '${name}' ${NODE_HINT}`])),
+  ...Object.fromEntries(
+    NODE_RUNTIMES.map((name) => [
+      name,
+      `runtime '${name}' lives in @struktoai/mirage-node; import that package to register ` +
+        "it. Browser worlds support 'monty' (sandboxed), 'pyodide' (WASM CPython), and " +
+        "'quickjs' (sandboxed JavaScript)",
+    ]),
+  ),
   wasi:
     "runtime 'wasi' is Python-only (a CPython WASI build); TypeScript " +
     "supports 'monty' (sandboxed), 'pyodide' (WASM CPython), " +
@@ -332,17 +334,22 @@ export function isSandbox(entry: Runtime | null | undefined): entry is Runtime &
  * takes it, and each command stays on its first other capturer. Any other
  * runtime serves every command it captures over `bindings`; none leaves
  * each command where `bindings` put it. `bindings` are the static ones for
- * a line, the line's own for a command. Mirrors Python's `routed`.
+ * a line, the line's own for a command. `inherited` is the machine of the
+ * placement the route overlays, kept when the route names none. Mirrors
+ * Python's `routed`.
  *
  * Throws:
- *   Error: no entry has the runtime's name.
+ *   Error: no entry has the runtime's name, or no runtime it places takes
+ *   the machine (`checkRouteMachine`).
  */
 export function routed(
   entries: readonly Runtime[],
   bindings: Readonly<Record<string, Runtime | null | undefined>>,
   runtime: string | undefined,
   machine: string | undefined,
+  inherited?: string,
 ): RouteDecision<Runtime> {
+  checkRouteMachine(entries, runtime, machine)
   // Null prototype: captures are arbitrary command names.
   const placed = Object.create(null) as Record<string, Runtime | null>
   if (runtime === 'workspace') {
@@ -357,10 +364,43 @@ export function routed(
     Object.assign(placed, bindings)
     if (runtime !== undefined) Object.assign(placed, runtimeBindingsFor(entries, runtime))
   }
+  const on = machine ?? inherited
   return {
     bindings: placed,
     fallback: catchAll(entries),
-    ...(machine !== undefined ? { machine } : {}),
+    ...(on !== undefined ? { machine: on } : {}),
+  }
+}
+
+/**
+ * Refuse a placement whose machine no runtime it places would run on: only
+ * the remote runtime runs on a machine a line names, so a named runtime has
+ * to be one, and a placement naming no runtime needs one among the entries.
+ * Mirrors Python's `check_route_machine`.
+ *
+ * Throws:
+ *   Error: the named runtime runs on its own machine, or no entry is a
+ *   remote runtime.
+ */
+export function checkRouteMachine(
+  entries: readonly Runtime[],
+  runtime: string | undefined,
+  machine: string | undefined,
+): void {
+  if (machine === undefined) return
+  if (runtime === undefined || runtime === 'workspace') {
+    if (!entries.some((e) => e instanceof RemoteRuntime)) {
+      throw new Error(`machine '${machine}' takes the remote runtime, and the workspace has none`)
+    }
+    return
+  }
+  for (const entry of entries) {
+    if (entry.name === runtime && !(entry instanceof RemoteRuntime)) {
+      throw new Error(
+        `runtime '${runtime}' runs on the workspace's machine; ` +
+          `machine '${machine}' takes the remote runtime`,
+      )
+    }
   }
 }
 

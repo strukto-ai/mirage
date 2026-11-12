@@ -155,6 +155,11 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
     requireId('e2b', 'sandboxId', this.config.sandboxId)
   }
 
+  /** The sandbox's id at E2B. */
+  override get instance(): string {
+    return this.config.sandboxId
+  }
+
   // The SDK loader as a seam: tests substitute a fake module here.
   protected loadSdk(): Promise<E2bSdk> {
     return loadSdk()

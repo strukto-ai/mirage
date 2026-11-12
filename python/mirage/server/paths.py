@@ -22,10 +22,6 @@ from mirage.server.env import ENV_HOME
 logger = logging.getLogger(__name__)
 
 
-def _absolute(value: str | Path) -> Path:
-    return Path(os.path.abspath(value))
-
-
 def mirage_home() -> Path:
     """Resolve the base directory backing the ``.mirage`` data tree.
 
@@ -38,7 +34,11 @@ def mirage_home() -> Path:
             auth token, config, repos, and snapshots.
     """
     override = os.environ.get(ENV_HOME)
-    return _absolute(override) if override else Path.home() / ".mirage"
+    return (
+        Path(os.path.abspath(override))
+        if override
+        else Path.home() / ".mirage"
+    )
 
 
 def pid_file_path(explicit: str | Path | None = None) -> Path:
@@ -56,7 +56,7 @@ def pid_file_path(explicit: str | Path | None = None) -> Path:
         Path: the resolved absolute pid file path.
     """
     if explicit is not None:
-        return _absolute(explicit)
+        return Path(os.path.abspath(explicit))
     return mirage_home() / "daemon.pid"
 
 
@@ -73,7 +73,7 @@ def state_root_path(explicit: str | Path | None = None) -> Path:
         Path: the resolved absolute state root.
     """
     if explicit is not None:
-        return _absolute(explicit)
+        return Path(os.path.abspath(explicit))
     return mirage_home() / "state"
 
 
@@ -90,7 +90,7 @@ def resources_root_path(explicit: str | Path | None = None) -> Path:
         Path: the resolved absolute resources root.
     """
     if explicit is not None:
-        return _absolute(explicit)
+        return Path(os.path.abspath(explicit))
     return mirage_home() / "resources"
 
 

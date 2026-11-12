@@ -29,7 +29,7 @@ from mirage.commands.builtin.utils.links import (
     typed_link,
 )
 from mirage.commands.config import Context
-from mirage.context import reset_mount_gate, set_mount_gate
+from mirage.context import reset_caller, set_mount_gate
 from mirage.errors.types import DotWalkLoop
 from mirage.io.types import IOResult
 from mirage.types import (
@@ -345,7 +345,7 @@ def test_a_command_in_a_mount_scope_walks_and_answers_as_that_mount():
         bound = mounts_of(ctx)
         assert (crosses_mounts(ctx), mount_root(ctx)) == (False, "/data")
     finally:
-        reset_mount_gate(token)
+        reset_caller(token)
     assert bound is not None and bound.answers is not None
     assert bound.descendants("/data") == ["/data/inner"]
     assert bound.answers("/data/x", "read_tree")
