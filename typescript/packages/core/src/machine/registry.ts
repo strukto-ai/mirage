@@ -26,6 +26,7 @@ const PROVIDERS: Record<string, MachineClass> = Object.create(null) as Record<st
 // The providers @struktoai/mirage-node registers when it is imported.
 const NODE_PROVIDERS: readonly string[] = [
   'apple_container',
+  'boxd',
   'daytona',
   'docker',
   'kubernetes',

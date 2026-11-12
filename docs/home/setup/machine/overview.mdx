@@ -52,6 +52,7 @@ entry.
 | [E2B](/home/setup/machine/e2b) | An E2B cloud sandbox |
 | [Cloudflare Container](/home/setup/machine/cloudflare_container) | A Cloudflare Container, from its Durable Object or through a relay |
 | [Daytona](/home/setup/machine/daytona) | A Daytona cloud sandbox |
+| [boxd](/home/setup/machine/boxd) | A boxd cloud VM |
 | [Kubernetes](/home/setup/machine/kubernetes) | A pod, including an AWS Nitro Sandbox on EKS |
 | [smolvm](/home/setup/machine/smolvm) | A microVM with its own kernel |
 | [Microsandbox](/home/setup/machine/microsandbox) | A microVM with its own kernel |
@@ -76,7 +77,8 @@ so the machine must see the mounts. `mount_type` picks how:
 | unset | Nothing; you put the files there yourself | The machine's |
 
 Daytona takes no `mount_type`: run a Mirage on the machine, as `fuse` does,
-or put the files there yourself. Once connected, run the shared
+or put the files there yourself. boxd takes none either: put the files
+there yourself. Once connected, run the shared
 [workspace file check](/home/setup/runtime/overview#verify-workspace-file-access).
 
 ### ssh

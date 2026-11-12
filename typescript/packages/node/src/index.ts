@@ -198,6 +198,8 @@ export {
 export { LocalRuntime } from './runtime/python/local/runtime.ts'
 export type { AppleContainerConfig } from './machine/apple_container/config.ts'
 export { AppleContainerMachine } from './machine/apple_container/handle.ts'
+export type { BoxdConfig } from './machine/boxd/config.ts'
+export { BoxdMachine } from './machine/boxd/handle.ts'
 export type { DaytonaConfig } from './machine/daytona/config.ts'
 export { DaytonaMachine } from './machine/daytona/handle.ts'
 export type { DockerConfig } from './machine/docker/config.ts'

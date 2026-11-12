@@ -333,6 +333,7 @@
               "home/setup/machine/daytona",
               "home/setup/machine/e2b",
               "home/setup/machine/cloudflare_container",
+              "home/setup/machine/boxd",
               "home/setup/machine/ssh"
             ]
           },

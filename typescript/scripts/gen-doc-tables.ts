@@ -116,8 +116,8 @@ const PEER_FEATURES: readonly { feature: string; packages: readonly string[]; ne
   },
   {
     feature: 'Cloud machines',
-    packages: ['e2b', '@daytonaio/sdk'],
-    needs: 'The `e2b` and `daytona` machines.',
+    packages: ['e2b', '@daytonaio/sdk', '@boxd-sh/sdk'],
+    needs: 'The `e2b`, `daytona` and `boxd` machines.',
   },
   {
     feature: 'AWS Secrets Manager',
