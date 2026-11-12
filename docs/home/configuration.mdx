@@ -57,9 +57,9 @@ not change it. See [From a template](/home/access/cli#from-a-template).
 | `profiles`, `profile` | Define [agent profiles](/home/profiles) and select the default. |
 | `processes` | Whose processes a session can list and stop, and how many it can run at once: 128 by default. See [profiles](/home/profiles). |
 | `command_limits` | Set [output and execution limits](/home/core/output-limits). |
-| `max_body_bytes` | Largest API reply Mirage reads whole, as a [size](#sizes): `64MB` by default, also when `null`. See [security limits](/home/security). |
+| `max_body_bytes` | Largest API reply Mirage reads whole, as a [size](#sizes): `64MB` by default, also when `null`. See [limits](/home/limits). |
 | `max_memory` | Cap on what the workspace holds in memory, as a [size](#sizes): `96MB` by default, `null` for no cap. See [memory](/home/core/output-limits#limit-a-workspaces-memory). |
-| `max_env` | Cap on each session's variables, functions and aliases, as a [size](#sizes): `2MB` by default, `null` for no cap. See [security limits](/home/security). |
+| `max_env` | Cap on each session's variables, functions and aliases, as a [size](#sizes): `2MB` by default, `null` for no cap. See [limits](/home/limits). |
 | `network` | Choose where the workspace's connections may go, described [below](#network). |
 | `system_time` | Start the workspace's clock at a set time, described [below](#system-time). |
 | `env` | Environment variables each session starts with, literal or fetched from a credential source. See [Credentials](/home/credentials#set-environment-variables). |
@@ -219,8 +219,8 @@ exactly one of `cli` or `script`:
 
 | Key | Purpose |
 | --- | --- |
-| `cli` | A registered CLI, such as `slack`. |
-| `script` | A `.py`, `.js` or `.mjs` program file, read when the config loads. |
+| `cli` | A registered CLI, such as `slack`. See [CLIs](/home/setup/clis) for the twelve bundled ones. |
+| `script` | A `.py`, `.js` or `.mjs` program file, read when the config loads. See custom CLIs in [Python](/python/cli/custom) and [TypeScript](/typescript/cli/custom). |
 | `runtime` | The runtime entry that runs `script`. Unset runs it on the runtime that would run `python3`, or `node` for JavaScript, on the same line, including a `route_policy` choice. Only valid with `script`. |
 | `config` | Fields the CLI validates at install time. |
 
@@ -229,7 +229,7 @@ clis:
   slack:
     cli: slack
     config:
-      token: ${SLACK_TOKEN}
+      token: {from: env, key: SLACK_TOKEN}
   pager:
     script: pager.py
     runtime: monty

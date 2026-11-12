@@ -1,7 +1,7 @@
 ---
-title: Security Limits
-description: The limits that keep one agent's lines from using up what other agents and the host share.
-icon: shield-halved
+title: Limits
+description: Limits that stop one agent's commands from starving other agents or the host.
+icon: gauge
 ---
 
 A line an agent writes can loop forever, start processes without end, or grow
@@ -13,8 +13,8 @@ its case the way bash and Linux would, with the same exit status.
 Three layers set them:
 
 - **The host** (the server, or an edge app) sets ceilings. A workspace may
-  set a lower value, never a higher one, and one that lifts a limit with
-  `null` gets the ceiling instead.
+  set a lower value, never a higher one. A workspace that sets `null` (no
+  limit) gets the ceiling.
 - **The workspace** sets each limit for every session it holds.
 - **A profile** overrides `processes` and `command_limits` for its
   sessions, field by field over the workspace's. It may raise a workspace's
@@ -29,24 +29,29 @@ Three layers set them:
 | A variable that keeps doubling, `x=$x$x` | `max_env` | `2MB` per session | exit 2, `bash: xmalloc: cannot allocate N bytes (past max_env of N bytes, a mirage workspace setting)` |
 | A file or a command's output held in memory | `max_memory` | `96MB` per workspace | exit 1, `line: memory exhausted`; a write to a RAM file fails with `Disk quota exceeded` |
 | One API reply read whole | `max_body_bytes` | `64MB` | the call fails |
+| A command printing a huge result | [`command_limits`](/home/core/output-limits) `max_lines` | 2,000 lines for `cat`, `grep`, `rg`, `head` and `tail` | the output is cut, with a notice on stderr; the exit code is kept |
+| A walk over a huge mount | `command_limits` [`walk_limit`](/home/integration/walks#walk_limit) | set by each VFS | the walk stops at the limit |
+| A mount filling up | [`capacity`](/home/setup/vfs#mount-capacity) on a RAM, disk, Redis, OPFS or SQL mount | no cap | `Disk quota exceeded` |
+| The read cache growing | [`cache.limit`](/home/infrastructure/file-cache) | `32MB`, `512MB` on Redis | nothing; see File Cache |
 | Deep recursion in functions, `source`, `eval` or `bash -c` | 32 levels | fixed; `FUNCNEST` can lower it | exit 1, `environment: line 1: f: maximum function nesting level exceeded (32)` |
 | Many sessions on one workspace | `max_sessions` | 16, or 4 on an edge runtime | HTTP 429 |
 | Many workspaces on one server | `max_workspaces` | no cap | HTTP 503 |
 | A burst of requests | `rate_limits` | `ip=1000/minute` | HTTP 429 |
 
-`max_env` counts the bytes of a session's variables, functions, aliases and
-positional parameters, one more for each array element and parameter, and a
-session that would start past it, from the workspace's `env`, a profile's or a
-snapshot, is refused. `processes.max` counts every pipeline stage, subshell
-and background job a session has running. `max_body_bytes` counts the decoded
-bytes of one API reply read whole; a call's own cap, or the room left under
-`max_memory`, can stop it sooner, and an error reply keeps only its first
-64 KiB. `timeout` stops the jobs its
-command started when the time runs out, as GNU's does by signalling its
-process group, unless it is given `--foreground`, `-s INT` or `-s QUIT`. As
-in Bash, a background job that is one program ignores `INT`, one that runs
-several commands loses only the command, subshell or pipeline it is running
-and goes on, and one that runs a function ends with it.
+What each limit counts:
+
+- **`max_env`:** bytes in a session's variables, functions, aliases and
+  positional parameters, plus 1 per array element and parameter.
+  - A session that would start over it, from `env`, a profile or a
+    snapshot, is refused.
+- **`processes.max`:** pipeline stages, subshells and background jobs
+  running in the session.
+- **`max_body_bytes`:** decoded bytes of one API reply read whole.
+  - A call's own cap, or the memory left under `max_memory`, can stop it
+    sooner.
+  - An error reply keeps only its first 64 KiB.
+
+For how the `timeout` command stops jobs, see [Shell](/home/core/shell).
 
 Some bounds are fixed:
 

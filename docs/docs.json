@@ -130,7 +130,7 @@
             "pages": [
               "home/configuration",
               "home/credentials",
-              "home/security"
+              "home/limits"
             ]
           },
           {
