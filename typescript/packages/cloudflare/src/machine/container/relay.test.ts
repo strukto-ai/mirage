@@ -463,7 +463,9 @@ describe('ContainerRelay limits', () => {
     expect(sent).toBeLessThanOrEqual(5)
     proc.kill(9)
     await proc.exitCode
-    void sending.catch(() => undefined)
+    void sending.catch((error: unknown) => {
+      logger.debug?.(`relay test: input not sent: ${String(error)}`)
+    })
   })
 
   it('fails a write once the program has closed its input', async () => {
