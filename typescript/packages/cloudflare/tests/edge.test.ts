@@ -17,6 +17,7 @@ import type { AddressInfo } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { unstable_dev, type Unstable_DevWorker } from 'wrangler'
+import { RelayContainer } from '@struktoai/mirage-core/machine/cloudflare_container/relay'
 
 interface Result {
   readonly exit: number
@@ -25,6 +26,8 @@ interface Result {
 }
 
 let worker: Unstable_DevWorker
+// NUL and CR LF, which line framing trips on, and bytes that are not UTF-8.
+const ODD = new Uint8Array([0, 13, 10, 255, 128, 254, 0])
 const REDIS_URL = process.env.REDIS_URL
 
 async function run(
@@ -63,6 +66,27 @@ describe('mirage in workerd', () => {
     const response = await worker.fetch('http://localhost/sftp')
     // VERSION, HANDLE, then DATA with the file's bytes.
     expect(await response.json()).toEqual({ kinds: [2, 102, 103], data: 'served from the edge' })
+  })
+
+  it('relays a container to a client outside Cloudflare', async () => {
+    const url = `http://${worker.address}:${String(worker.port)}/relay/box`
+    await expect(new RelayContainer(url, 'wrong').start()).rejects.toThrow(
+      'the relay answered 401 to start: the relay refused the token',
+    )
+    const relay = new RelayContainer(url, 'relay-test-token')
+    await relay.start()
+    const proc = await relay.exec(['cat', '-'], {})
+    const input = proc.stdin?.getWriter()
+    await input?.write(ODD)
+    await input?.close()
+    const read = (stream: ReadableStream<Uint8Array> | null) =>
+      new Response(stream).arrayBuffer().then((buffer) => new Uint8Array(buffer))
+    const [out, err, code] = await Promise.all([
+      read(proc.stdout),
+      read(proc.stderr),
+      proc.exitCode,
+    ])
+    expect([out, new TextDecoder().decode(err), code]).toEqual([ODD, 'cat -', 7])
   })
 
   it('registers the container machine with the host', async () => {

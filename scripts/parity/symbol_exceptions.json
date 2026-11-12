@@ -1702,8 +1702,7 @@
    "typescript_only": {
     "PROVIDERS": "Python imports a provider's module by path on first use; TypeScript has no import by name, so each provider module registers its class as it loads.",
     "registerMachine": "Python imports a provider's module by path on first use; TypeScript has no import by name, so each provider module registers its class as it loads.",
-    "NODE_PROVIDERS": "The providers @struktoai/mirage-node registers, named for the hint when core is used alone; every Python provider ships in one package.",
-    "CLOUDFLARE_PROVIDERS": "The providers @struktoai/mirage-cloudflare registers, named for the hint when core is used alone; Python does not run in a Durable Object, so it has no such provider."
+    "NODE_PROVIDERS": "The providers @struktoai/mirage-node registers, named for the hint when core is used alone; every Python provider ships in one package."
    }
   },
   "policy/composition": {
@@ -1758,6 +1757,39 @@
   "execution/process/constants": {
    "typescript_only": {
     "NEVER_TAKEN": "Only Pyodide programs take signals through their runner (onSignal), and Pyodide runs on the TypeScript host alone."
+   }
+  },
+  "machine/cloudflare_container/config": {
+   "typescript_only": {
+    "CONTAINER_CONFIG_FIELDS": "A TypeScript runtime lists the keys its config takes, each with its type, so an unknown key fails loud at construction and a saved runtime's form is typed; Python reads both off the config dataclass."
+   }
+  },
+  "machine/cloudflare_container/handle": {
+   "python_only": {
+    "PipeInput": "Python's pipe writer is a sync write and close over an async stdin, so a task sends the queued writes in order; TypeScript chains each write onto the last inside openPipe.",
+    "READ_BYTES": "Python reads a stream reader a bounded chunk at a time; a TypeScript reader hands over each chunk as it came."
+   },
+   "typescript_only": {
+    "PIPES": "workerd's exec takes its pipes as options and may answer a process without them; Python's container always pipes all three.",
+    "piped": "workerd's exec takes its pipes as options and may answer a process without them; Python's container always pipes all three."
+   }
+  },
+  "machine/cloudflare_container/relay": {
+   "python_only": {
+    "CLOSED": "Python raises the one lost-connection message from several places in its relay process; TypeScript builds it where the socket closes.",
+    "RelayInput": "A Python process's stdin is an object with async write and close; TypeScript's is a WritableStream built in place."
+   },
+   "typescript_only": {
+    "Channel": "A TypeScript output stream is a ReadableStream fed through its controller, with a cancel the caller may call; Python's is an asyncio.StreamReader fed directly."
+   }
+  },
+  "machine/cloudflare_container/types": {
+   "python_only": {
+    "ProcessInput": "A Python process's stdin is an object with async write and close; TypeScript's is a WritableStream."
+   },
+   "typescript_only": {
+    "ExecOptions": "workerd's exec takes env and its pipes as options; Python's container takes env alone and always pipes all three.",
+    "RelaySocket": "TypeScript's client and the relay share one socket shape across a browser, Node and workerd; Python's client speaks aiohttp's WebSocket only."
    }
   }
  }

@@ -1,37 +1,43 @@
 ---
 title: Cloudflare Container
 icon: /images/cloudflare-logo.svg
-description: Run captured programs in a Cloudflare Container owned by the workspace's Durable Object.
+description: Run captured programs in a Cloudflare Container, from its Durable Object or from anywhere through a relay.
 ---
 
-The `cloudflare_container` machine provider reaches the
-[Cloudflare Container](https://developers.cloudflare.com/containers/) a
-Durable Object owns, and the `remote` runtime runs captured programs in it.
-Give each workspace its own Durable Object and it gets a container of its
-own. Your Durable Object decides when the container starts and stops; Mirage
-asks it for a running container and runs programs there. TypeScript on
-Cloudflare Workers only.
+The `cloudflare_container` machine provider reaches a
+[Cloudflare Container](https://developers.cloudflare.com/containers/), and
+the `remote` runtime runs captured programs in it. A container belongs to a
+Durable Object, which decides when it starts and stops. Mirage reaches it in
+one of two ways:
+
+- **In the Durable Object**: a workspace on Cloudflare Workers hands the
+  handle its own `ctx.container`. TypeScript only.
+- **Through a relay**: you deploy a `ContainerRelay` Durable Object with the
+  container, and a workspace anywhere reaches it by `url` and `token`.
+  Python, Node, browsers and other Workers.
 
 ## Installation
 
-```bash
-npm install @struktoai/mirage-cloudflare @struktoai/mirage-core
-```
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```bash
+    pip install 'mirage-ai[ssh]'
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```bash
+    npm install @struktoai/mirage-cloudflare @struktoai/mirage-core
+    ```
+  </Tab>
+</Tabs>
 
-Set the Worker up as the [Cloudflare quickstart](/typescript/cloudflare-quickstart)
-does, then give the Durable Object class a container in your wrangler config:
-
-```jsonc wrangler.jsonc
-{
-  "containers": [
-    { "class_name": "WorkspaceObject", "image": "./Dockerfile", "max_instances": 5 },
-  ],
-}
-```
+The `ssh` extra serves the workspace into the container with
+`mount_type: ssh`. The relay itself is a Worker, so deploying it needs
+`@struktoai/mirage-cloudflare` whichever language the workspace runs in.
 
 Start the image from a Debian or Ubuntu base, which has the shell tools
 Mirage's own lines use. Add the interpreters it runs, here `python3` and
-`nodejs`, and `sshfs` and `fuse3` for `mountType: 'ssh'`:
+`nodejs`, and `sshfs` and `fuse3` for `mount_type: ssh`:
 
 ```dockerfile Dockerfile
 FROM ubuntu:24.04
@@ -47,15 +53,117 @@ session's environment on top. Put anything a program needs, such as a
 `PATH` entry for a tool installed outside `/usr/local/bin` or `/usr/bin`, in
 the machine's `env`.
 
-## Usage
+## Usage through a relay
 
-Build the handle in the Durable Object, from its own `ctx.container` and a
-function that starts the container when it is not running:
+Deploy a Worker whose Durable Object class extends `ContainerRelay`, and
+route requests to it with `relayFetch`:
+
+```typescript src/relay.ts
+import { ContainerRelay, relayFetch } from '@struktoai/mirage-cloudflare'
+
+export class Relay extends ContainerRelay {}
+
+export default {
+  fetch: (request: Request, env: { RELAY: DurableObjectNamespace }) =>
+    relayFetch(request, env.RELAY),
+}
+```
+
+```jsonc wrangler.jsonc
+{
+  "name": "mirage-relay",
+  "main": "src/relay.ts",
+  "compatibility_flags": ["nodejs_compat"],
+  "containers": [{ "class_name": "Relay", "image": "./Dockerfile", "max_instances": 5 }],
+  "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "Relay" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Relay"] }],
+}
+```
+
+Set the token every call must carry, then deploy:
+
+```bash
+openssl rand -hex 32 | npx wrangler secret put MIRAGE_RELAY_TOKEN
+npx wrangler deploy
+```
+
+A relay without `MIRAGE_RELAY_TOKEN` refuses every call. The last path
+segment before the call names the container: each `<name>` in
+`https://mirage-relay.<account>.workers.dev/<name>` is a Durable Object, and
+a container, of its own.
+
+Point a machine at one:
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import RAMVFS, MountMode, Workspace
+    from mirage.runtime.machine import RemoteRuntime
+
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={
+            "box": {
+                "provider": "cloudflare_container",
+                "url": "https://mirage-relay.example.workers.dev/box",
+                "token": "relay-token",
+                "mount_type": "ssh",
+            }
+        },
+        runtimes=[RemoteRuntime(["@python", "@external"], machine="box")],
+    )
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { RemoteRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
+
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: {
+          box: {
+            provider: 'cloudflare_container',
+            url: 'https://mirage-relay.example.workers.dev/box',
+            token: 'relay-token',
+            mountType: 'ssh',
+          },
+        },
+        runtimes: [new RemoteRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+      },
+    )
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+</Tabs>
+
+The relay starts the container with the image its wrangler config names. To
+start it with options of your own, such as `enableInternet: false`, override
+`startContainer`:
+
+```typescript
+export class Relay extends ContainerRelay {
+  protected override startContainer(): Promise<void> {
+    const container = this.container()
+    if (!container.running) container.start({ enableInternet: false })
+    return Promise.resolve()
+  }
+}
+```
+
+## Usage in the Durable Object
+
+A workspace that already runs in a Durable Object builds the handle from its
+own `ctx.container` and a function that starts the container when it is not
+running:
 
 ```typescript src/worker.ts
 import { DurableObject } from 'cloudflare:workers'
-import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-cloudflare'
-import { ContainerMachine } from '@struktoai/mirage-cloudflare/machine/container/handle'
+import { ContainerMachine, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-cloudflare'
 import { RemoteRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
 
 export class WorkspaceObject extends DurableObject {
@@ -83,27 +191,37 @@ export class WorkspaceObject extends DurableObject {
 }
 ```
 
+Give the Durable Object class the container in your wrangler config, as the
+relay's is above, and set the Worker up as the
+[Cloudflare quickstart](/typescript/cloudflare-quickstart) does.
+
 Mirage calls the start function the first time it reaches the machine, and
 again the first time after the container has stopped: for a line that runs
 there, and for `ps`, `kill` and the like when they ask it. An error it
 throws, such as a quota of your own, fails that line with the error's
 message.
 
-The start function decides everything about the container: its image,
-instance type and network (`enableInternet`). None of them is a config
-field, so a `machines:` entry takes only `env` and `mount_type`.
+## Configuration
 
-A `machines:` entry in YAML or a saved workspace that names
-`provider: cloudflare_container` builds a handle with no container. Replace
-it with one built as above before creating the workspace; otherwise its
-first line fails and says how to build the handle.
+| Field | Description |
+| --- | --- |
+| `url` | The relay route that names the container. Leave it out in the Durable Object. |
+| `token` | The relay's `MIRAGE_RELAY_TOKEN`. Required with `url`. |
+| `env` | Environment set for every program. |
+| `mount_type` | How the container sees the workspace: `ssh`, `fuse` or `both`, as on [every machine](/home/setup/machine/overview#connecting-the-workspace). |
+
+The container's image, instance type and network belong to the Durable
+Object that starts it, so none of them is a field. An entry with neither
+`url` nor a container handed in fails its first line and says how to reach
+one.
 
 ## Connecting the workspace
 
-Use [`mountType: 'ssh'`](/home/setup/machine/overview#connecting-the-workspace):
-Mirage serves the workspace's mounts through the container's exec pipe and
-the container mounts each with `sshfs`. No port, key or network is needed,
-so it works in a container with `enableInternet: false`.
+Use [`mount_type: ssh`](/home/setup/machine/overview#connecting-the-workspace):
+Mirage serves the workspace's mounts through the container's exec pipe, over
+the relay when there is one, and the container mounts each with `sshfs`. No
+port, key or network is needed in the container, so it works with
+`enableInternet: false`.
 
 ## Notes
 
@@ -111,7 +229,8 @@ so it works in a container with `enableInternet: false`.
   Files a program should keep belong in a mounted folder.
 - If the container stops while a line runs, the line fails: it exits 129 and
   says the container stopped, or, when the Durable Object destroys the
-  container itself, it may exit 137. The next line starts it again.
+  container itself, it may exit 137. The next line starts it again. A relay
+  connection that drops under a line fails it the same way.
 - The first line after a start waits for the container to answer, up to 60
   seconds. Most starts answer within a second; a start that never comes up
   fails that line, and the next line starts the container again.

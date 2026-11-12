@@ -12,11 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// A handle built from config alone has no container: only the Durable
-// Object that owns one can hand it over.
+// A handle with neither a container nor a relay has nothing to reach.
 export const NO_CONTAINER =
-  'cloudflare_container runs in the Durable Object that owns the container: ' +
-  'build it with new ContainerMachine(name, config, ctx.container, start)'
+  'cloudflare_container needs the container: set url and token to reach it ' +
+  'through a ContainerRelay, or build it in the Durable Object that owns it ' +
+  'with new ContainerMachine(name, config, ctx.container, start)'
+
+// A container handed in has no relay to name.
+export const BOTH = 'cloudflare_container takes ctx.container or a relay url, not both'
 
 // What a line the container stopped under says, after the provider's name.
 export const STOPPED = 'the container stopped; the next line starts it again'
@@ -30,3 +33,19 @@ export const CHECK_POLL_SECONDS = 0.1
 export const START_WAIT_SECONDS = 60
 
 export const NOT_ANSWERING = `the container did not answer within ${String(START_WAIT_SECONDS)}s of starting`
+
+// The relay's three calls, each a path segment after the url that names the
+// container: start it, run one exec over a socket, hear when it exits.
+export const RELAY_START = 'start'
+export const RELAY_EXEC = 'exec'
+export const RELAY_MONITOR = 'monitor'
+
+// The secret a relay checks every call's token against.
+export const RELAY_TOKEN = 'MIRAGE_RELAY_TOKEN'
+
+// The byte before each chunk of output on an exec's socket: its stream.
+export const STDOUT_CHANNEL = 1
+export const STDERR_CHANNEL = 2
+
+// How often a relay speaks on a quiet socket, so nothing between drops it as idle.
+export const RELAY_HEARTBEAT_SECONDS = 30

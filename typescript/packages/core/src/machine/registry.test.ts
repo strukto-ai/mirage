@@ -16,12 +16,9 @@ import { describe, expect, it } from 'vitest'
 import { machineClass } from './registry.ts'
 
 describe('machineClass', () => {
-  it.each([
-    ['docker', '@struktoai/mirage-node'],
-    ['cloudflare_container', '@struktoai/mirage-cloudflare'],
-  ])('names the package that registers %s', (provider, home) => {
-    expect(() => machineClass(provider)).toThrow(
-      `machine provider '${provider}' lives in ${home}; import that package to register it`,
+  it('names the package that registers a node provider', () => {
+    expect(() => machineClass('docker')).toThrow(
+      "machine provider 'docker' lives in @struktoai/mirage-node; import that package to register it",
     )
   })
 })

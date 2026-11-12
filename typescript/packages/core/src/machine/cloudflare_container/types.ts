@@ -38,3 +38,37 @@ export interface Container {
   /** Settles when the container exits, rejecting when it exits with an error. */
   monitor(): Promise<void>
 }
+
+/** What a client sends first on a relay socket: the token and, on an exec, its command. */
+export interface RelayRequest {
+  readonly token: string
+  readonly argv?: readonly string[]
+  readonly env?: Readonly<Record<string, string>>
+}
+
+/**
+ * What a relay sends as text. On an exec: `started` once the container
+ * took it, or `stopped` when it refused; then `closed` as each output
+ * stream ends and `exit` with the status. On a monitor: `exited` once the
+ * container has, with its error or null. `refused` answers a bad token,
+ * and `alive` keeps a quiet socket open.
+ */
+export type RelayEvent =
+  | { readonly started: true }
+  | { readonly stopped: string }
+  | { readonly closed: 'stdout' | 'stderr' }
+  | { readonly exit: number }
+  | { readonly exited: string | null }
+  | { readonly refused: string }
+  | { readonly alive: true }
+
+/** What a client sends as text after its request: the end of stdin, or a signal. */
+export type RelayControl = { readonly eof: true } | { readonly kill: number }
+
+/** The part of a WebSocket both ends of a relay use: a browser's, Node's or workerd's. */
+export interface RelaySocket {
+  send(data: string | Uint8Array<ArrayBuffer>): void
+  close(code?: number, reason?: string): void
+  addEventListener(type: 'message', listener: (event: { readonly data: unknown }) => void): void
+  addEventListener(type: 'close' | 'error', listener: () => void): void
+}
