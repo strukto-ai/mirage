@@ -238,13 +238,28 @@ export class ContainerMachine extends MachineHandle<ContainerConfig> implements 
     const runner = currentCaller().process
     const exits = this.exits
     // exec starts from Cloudflare's own PATH and HOME and merges env on top; the image's ENV never reaches it.
-    const proc = piped(
-      await this.container
-        .exec(['/bin/sh', '-c', EXEC_PRELUDE, 'sh', cwd, ...argv], { env, ...PIPES })
-        .catch((error: unknown) => {
-          throw stopped(error)
-        }),
-    )
+    const starting = this.container
+      .exec(['/bin/sh', '-c', EXEC_PRELUDE, 'sh', cwd, ...argv], { env, ...PIPES })
+      .catch((error: unknown) => {
+        throw stopped(error)
+      })
+    let started: ExecProcess
+    try {
+      started = await abortable(starting, signal)
+    } catch (error) {
+      // A caller gone while exec was starting leaves a process to stop once it starts.
+      if (signal?.aborted === true)
+        starting.then(
+          (late) => {
+            late.kill(9)
+          },
+          (lateError: unknown) => {
+            logger.debug?.(`cloudflare_container: an abandoned exec failed: ${String(lateError)}`)
+          },
+        )
+      throw error
+    }
+    const proc = piped(started)
     const state = { exited: false }
     const [out, err] = [proc.stdout.getReader(), proc.stderr.getReader()]
     let cut: () => void = () => undefined

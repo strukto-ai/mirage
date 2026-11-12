@@ -211,3 +211,28 @@ async def test_an_exact_read_past_the_window_completes():
         assert await asyncio.wait_for(proc.exit_code, 10) == 0
         await relay.close()
     assert len(whole) == 2 * RELAY_WINDOW_BYTES
+
+
+async def deaf(proc: FakeProcess) -> int:
+    await proc.stdin.close()
+    await asyncio.Event().wait()
+    return 0
+
+
+@pytest.mark.asyncio
+async def test_a_write_after_the_program_closed_its_input_fails():
+    box = FakeContainer({"deaf": deaf})
+    async with relay_server(box) as url:
+        relay = RelayContainer(url, TOKEN)
+        proc = await relay.exec(["deaf"], {})
+        chunk = b"x" * (RELAY_WINDOW_BYTES // 4)
+
+        async def flood() -> None:
+            for _ in range(16):
+                await proc.stdin.write(chunk)
+
+        with pytest.raises(BrokenPipeError, match="closed its input"):
+            await asyncio.wait_for(flood(), 5)
+        await proc.kill(9)
+        await asyncio.wait_for(proc.exit_code, 5)
+        await relay.close()

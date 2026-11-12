@@ -191,6 +191,7 @@ async def _exec(
         await ws.close()
         return
     exited = False
+    refused = False
     unread = {1: 0, 2: 0}
     room = {1: asyncio.Event(), 2: asyncio.Event()}
     await ws.send_json({"started": True})
@@ -227,7 +228,15 @@ async def _exec(
     finishing = asyncio.create_task(finish())
     async for message in ws:
         if message.type is WSMsgType.BINARY:
-            await proc.stdin.write(message.data)
+            if refused:
+                continue
+            try:
+                await proc.stdin.write(message.data)
+            except BrokenPipeError as exc:
+                logger.debug("fake relay: input not taken: %s", exc)
+                refused = True
+                await ws.send_json({"closed": "stdin"})
+                continue
             await ws.send_json({"took": len(message.data)})
         elif message.type is WSMsgType.TEXT:
             control = json.loads(message.data)

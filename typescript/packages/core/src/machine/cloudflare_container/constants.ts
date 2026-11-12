@@ -34,6 +34,10 @@ export const START_WAIT_SECONDS = 60
 
 export const NOT_ANSWERING = `the container did not answer within ${String(START_WAIT_SECONDS)}s of starting`
 
+// A runtime with no WebSocket, such as core alone on Node 20, cannot reach a relay.
+export const NO_WEBSOCKET =
+  'this runtime has no WebSocket, which a relay needs: use Node 22 or later, a browser or a Worker'
+
 // The relay's three calls, each a path segment after the url that names the
 // container: start it, run one exec over a socket, hear when it exits.
 export const RELAY_START = 'start'

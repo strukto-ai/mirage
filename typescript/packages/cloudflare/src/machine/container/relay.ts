@@ -34,6 +34,8 @@ import { logger } from '@struktoai/mirage-core/machine/handle'
 import { concat } from '@struktoai/mirage-core/utils/bytes'
 
 const ENC = new TextEncoder()
+// How long an accepted socket has to send its request, and so its token.
+const ASK_SECONDS = 10
 const PIPES = { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' } as const
 // The token is a bearer header, never a cookie, so a page on any origin may call start.
 const CORS = { 'access-control-allow-origin': '*' }
@@ -190,9 +192,19 @@ export class ContainerRelay<Env = unknown> {
    */
   protected serve(call: string, socket: RelaySocket): void {
     let asked = false
+    const deadline = setTimeout(() => {
+      if (asked) return
+      asked = true
+      say(socket, { refused: `no request within ${String(ASK_SECONDS)}s` })
+      socket.close(1008, 'refused')
+    }, ASK_SECONDS * 1000)
+    socket.addEventListener('close', () => {
+      clearTimeout(deadline)
+    })
     socket.addEventListener('message', ({ data }) => {
       if (asked) return
       asked = true
+      clearTimeout(deadline)
       const frame = frameOf(data)
       const refusal = this.refusal(typeof frame?.token === 'string' ? frame.token : '')
       const request = frame === null ? null : requestOf(frame)
@@ -277,10 +289,16 @@ export class ContainerRelay<Env = unknown> {
     const input = proc.stdin?.getWriter()
     // One write lands before the next: a program reads its input in order.
     let writing: Promise<void> = Promise.resolve()
+    // A write the program refused means it closed its input: the client hears so, and the rest is dropped.
+    let refused = false
     const write = (step: () => Promise<void> | undefined): void => {
-      writing = writing.then(step).catch((error: unknown) => {
-        logger.debug?.(`cloudflare relay: input not taken: ${message(error)}`)
-      })
+      writing = writing
+        .then(() => (refused ? undefined : step()))
+        .catch((error: unknown) => {
+          refused = true
+          logger.debug?.(`cloudflare relay: input not taken: ${message(error)}`)
+          say(socket, { closed: 'stdin' })
+        })
     }
     const finish = (): void => {
       if (!state.exited || state.pumping > 0 || state.gone) return
