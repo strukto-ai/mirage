@@ -28,6 +28,10 @@ interface Result {
 let worker: Unstable_DevWorker
 // NUL and CR LF, which line framing trips on, and bytes that are not UTF-8.
 const ODD = new Uint8Array([0, 13, 10, 255, 128, 254, 0])
+
+async function read(stream: ReadableStream<Uint8Array> | null): Promise<Uint8Array> {
+  return new Uint8Array(await new Response(stream).arrayBuffer())
+}
 const REDIS_URL = process.env.REDIS_URL
 
 async function run(
@@ -79,8 +83,6 @@ describe('mirage in workerd', () => {
     const input = proc.stdin?.getWriter()
     await input?.write(ODD)
     await input?.close()
-    const read = (stream: ReadableStream<Uint8Array> | null) =>
-      new Response(stream).arrayBuffer().then((buffer) => new Uint8Array(buffer))
     const [out, err, code] = await Promise.all([
       read(proc.stdout),
       read(proc.stderr),
