@@ -56,7 +56,7 @@ Mirage 是 **面向 AI Agent 的虛擬終端機**：一個涵蓋資料、CLI 與
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-arch-dark.svg">
-    <img src="../assets/mirage-arch-light.svg" alt="Mirage 架構：Agent 與 Harness 連接 Profile 和 Mirage Shell，兩者把類 Unix 命令、虛擬 CLI 和程式語言解析到機器、執行環境與虛擬檔案系統上，認證、策略引擎和通知在旁" width="100%">
+    <img src="../assets/mirage-arch-light.svg" alt="Mirage 架構：Agent 與 Harness 連接 Profile 和 Mirage Shell，兩者把類 Unix 命令、虛擬 CLI 和程式語言解析到機器、執行環境與虛擬檔案系統上，服務憑證、策略引擎和通知在旁" width="100%">
   </picture>
 </p>
 

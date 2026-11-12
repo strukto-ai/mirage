@@ -56,7 +56,7 @@ Mirage est **un terminal virtuel pour les agents IA** : un seul shell au-dessus 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-arch-dark.svg">
-    <img src="../assets/mirage-arch-light.svg" alt="Architecture Mirage : les agents et le harnais atteignent les profils et le shell Mirage, qui résolvent les commandes de type Unix, les CLI virtuelles et les langages de programmation vers les machines, les runtimes et le système de fichiers virtuel, avec l'authentification, le moteur de politiques et les notifications à côté" width="100%">
+    <img src="../assets/mirage-arch-light.svg" alt="Architecture Mirage : les agents et le harnais atteignent les profils et le shell Mirage, qui résolvent les commandes de type Unix, les CLI virtuelles et les langages de programmation vers les machines, les runtimes et le système de fichiers virtuel, avec les identifiants de service, le moteur de politiques et les notifications à côté" width="100%">
   </picture>
 </p>
 

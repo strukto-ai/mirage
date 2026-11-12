@@ -56,7 +56,7 @@ Mirage là **terminal ảo cho AI Agent**: một shell duy nhất phủ lên d�
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-arch-dark.svg">
-    <img src="../assets/mirage-arch-light.svg" alt="Kiến trúc Mirage: agent và harness tiếp cận profile và Mirage shell, hai thành phần này phân giải các lệnh kiểu Unix, CLI ảo và ngôn ngữ lập trình xuống máy, runtime và hệ thống tệp ảo, cùng với xác thực, công cụ chính sách và thông báo bên cạnh" width="100%">
+    <img src="../assets/mirage-arch-light.svg" alt="Kiến trúc Mirage: agent và harness tiếp cận profile và Mirage shell, hai thành phần này phân giải các lệnh kiểu Unix, CLI ảo và ngôn ngữ lập trình xuống máy, runtime và hệ thống tệp ảo, cùng với thông tin xác thực dịch vụ, công cụ chính sách và thông báo bên cạnh" width="100%">
   </picture>
 </p>
 

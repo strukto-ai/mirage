@@ -56,7 +56,7 @@ Mirage 是 **面向 AI Agent 的虚拟终端**：一个覆盖数据、CLI 和运
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-arch-dark.svg">
-    <img src="../assets/mirage-arch-light.svg" alt="Mirage 架构：Agent 与 Harness 连接 Profile 和 Mirage Shell，二者把类 Unix 命令、虚拟 CLI 和编程语言解析到机器、运行时与虚拟文件系统上，认证、策略引擎和通知在旁" width="100%">
+    <img src="../assets/mirage-arch-light.svg" alt="Mirage 架构：Agent 与 Harness 连接 Profile 和 Mirage Shell，二者把类 Unix 命令、虚拟 CLI 和编程语言解析到机器、运行时与虚拟文件系统上，服务凭据、策略引擎和通知在旁" width="100%">
   </picture>
 </p>
 

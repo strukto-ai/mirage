@@ -56,7 +56,7 @@ Mirage ist **ein virtuelles Terminal für KI-Agenten**: eine Shell über Daten, 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-arch-dark.svg">
-    <img src="../assets/mirage-arch-light.svg" alt="Mirage-Architektur: Agenten und Harness erreichen Profile und die Mirage-Shell, die Unix-artige Befehle, virtuelle CLIs und Programmiersprachen auf Maschinen, Laufzeitumgebungen und das virtuelle Dateisystem auflösen, mit Authentifizierung, Policy-Engine und Benachrichtigungen daneben" width="100%">
+    <img src="../assets/mirage-arch-light.svg" alt="Mirage-Architektur: Agenten und Harness erreichen Profile und die Mirage-Shell, die Unix-artige Befehle, virtuelle CLIs und Programmiersprachen auf Maschinen, Laufzeitumgebungen und das virtuelle Dateisystem auflösen, mit Dienst-Zugangsdaten, Policy-Engine und Benachrichtigungen daneben" width="100%">
   </picture>
 </p>
 

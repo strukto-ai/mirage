@@ -56,7 +56,7 @@ Mirage는 **AI 에이전트를 위한 가상 터미널**입니다. 데이터와 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-arch-dark.svg">
-    <img src="../assets/mirage-arch-light.svg" alt="Mirage 아키텍처: 에이전트와 하네스가 프로파일과 Mirage 셸에 연결되고, 이들이 유닉스 계열 명령과 가상 CLI, 프로그래밍 언어를 머신과 런타임, 가상 파일 시스템으로 해석하며, 인증과 정책 엔진, 알림이 함께 있습니다" width="100%">
+    <img src="../assets/mirage-arch-light.svg" alt="Mirage 아키텍처: 에이전트와 하네스가 프로파일과 Mirage 셸에 연결되고, 이들이 유닉스 계열 명령과 가상 CLI, 프로그래밍 언어를 머신과 런타임, 가상 파일 시스템으로 해석하며, 서비스 자격 증명과 정책 엔진, 알림이 함께 있습니다" width="100%">
   </picture>
 </p>
 

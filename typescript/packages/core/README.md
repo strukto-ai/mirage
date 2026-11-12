@@ -55,7 +55,7 @@ Mirage is **a Virtual Terminal for AI Agents**: one shell over data, CLIs and ru
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/strukto-ai/mirage/main/assets/mirage-arch-dark.svg">
-    <img src="https://raw.githubusercontent.com/strukto-ai/mirage/main/assets/mirage-arch-light.svg" alt="Mirage architecture: agents and harness reach profiles and the Mirage shell, which resolve Unix-like commands, virtual CLIs and programming languages onto machines, runtimes and the virtual filesystem, with authentication, the policy engine and notifications alongside" width="100%">
+    <img src="https://raw.githubusercontent.com/strukto-ai/mirage/main/assets/mirage-arch-light.svg" alt="Mirage architecture: agents and harness reach profiles and the Mirage shell, which resolve Unix-like commands, virtual CLIs and programming languages onto machines, runtimes and the virtual filesystem, with service credentials, the policy engine and notifications alongside" width="100%">
   </picture>
 </p>
 
