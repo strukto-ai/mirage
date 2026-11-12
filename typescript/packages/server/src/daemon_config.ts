@@ -26,9 +26,10 @@ export const ALLOWED_KEYS: ReadonlySet<string> = new Set([
   'jwt_alg',
   'jwt_issuer',
   'jwt_audience',
+  'jwt_pubkey',
   'jwt_pubkey_file',
   'jwt_jwks_url',
-  'jwt_clock_skew',
+  'jwt_clock_skew_seconds',
   'jwt_authorized_parties',
   'login_client_id',
   'idle_grace_seconds',
@@ -53,7 +54,7 @@ export const ALLOWED_KEYS: ReadonlySet<string> = new Set([
 export const NUMERIC_KEYS: ReadonlySet<string> = new Set([
   'idle_grace_seconds',
   'graceful_timeout',
-  'jwt_clock_skew',
+  'jwt_clock_skew_seconds',
   'max_workspaces',
   'max_sessions',
   'max_processes',
@@ -63,6 +64,9 @@ export const NUMERIC_KEYS: ReadonlySet<string> = new Set([
   'workers',
 ])
 export const DEFAULT_RATE_LIMITS = 'ip=1000/minute'
+export const RENAMED_KEYS: Readonly<Record<string, string>> = {
+  jwt_clock_skew: 'jwt_clock_skew_seconds',
+}
 
 export class DaemonConfigError extends Error {
   constructor(message: string) {
@@ -71,7 +75,18 @@ export class DaemonConfigError extends Error {
   }
 }
 
+/** Name the new key for a `[daemon]` key under its old name. */
+export function renamedKeyMessage(key: string): string {
+  return `config.toml: \`daemon.${key}\` is now \`daemon.${RENAMED_KEYS[key] ?? ''}\`; rename the key`
+}
+
 export function validateDaemonTable(table: Record<string, string>): void {
+  const renamed = Object.keys(table)
+    .filter((k) => Object.hasOwn(RENAMED_KEYS, k))
+    .sort(compareCodePoints)
+  if (renamed.length > 0) {
+    throw new DaemonConfigError(renamed.map(renamedKeyMessage).join('; '))
+  }
   const unknown = Object.keys(table)
     .filter((k) => !ALLOWED_KEYS.has(k))
     .sort(compareCodePoints)
@@ -90,6 +105,27 @@ export function validateDaemonTable(table: Record<string, string>): void {
       'config.toml: the following [daemon] keys have the wrong ' + `type: ${badTypes.join(', ')}`,
     )
   }
+}
+
+const BASIC_ESCAPES: Readonly<Record<string, string>> = {
+  b: '\b',
+  t: '\t',
+  n: '\n',
+  f: '\f',
+  r: '\r',
+  '"': '"',
+  '\\': '\\',
+}
+
+function unescapeBasicString(body: string): string {
+  return body.replace(
+    /\\(?:u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8})|(.))/g,
+    (whole, short?: string, long?: string, one?: string) => {
+      const code = short ?? long
+      if (code !== undefined) return String.fromCodePoint(Number.parseInt(code, 16))
+      return (one !== undefined ? BASIC_ESCAPES[one] : undefined) ?? whole
+    },
+  )
 }
 
 export function parseDaemonTable(text: string): Record<string, string> {
@@ -116,7 +152,7 @@ export function parseDaemonTable(text: string): Record<string, string> {
     }
     const raw = trimmed.slice(eq + 1).trim()
     out[trimmed.slice(0, eq).trim()] =
-      raw.startsWith('"') && raw.endsWith('"') ? raw.slice(1, -1).replace(/\\(["\\])/g, '$1') : raw
+      raw.startsWith('"') && raw.endsWith('"') ? unescapeBasicString(raw.slice(1, -1)) : raw
   }
   return out
 }

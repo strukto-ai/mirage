@@ -60,6 +60,23 @@ def test_validate_rejects_unknown_keys():
         validate_daemon_table({"typo_key": "x", "url": "http://h:1"})
 
 
+def test_validate_names_the_new_key_for_a_renamed_one():
+    with pytest.raises(DaemonConfigError) as err:
+        validate_daemon_table({"jwt_clock_skew": 9, "typo_key": "x"})
+    assert str(err.value) == (
+        "config.toml: `daemon.jwt_clock_skew` is now "
+        "`daemon.jwt_clock_skew_seconds`; rename the key"
+    )
+
+
+def test_validate_accepts_the_jwt_keys():
+    validate_daemon_table(
+        {"jwt_clock_skew_seconds": 9, "jwt_pubkey": "-----BEGIN"}
+    )
+    with pytest.raises(DaemonConfigError, match="jwt_clock_skew_seconds"):
+        validate_daemon_table({"jwt_clock_skew_seconds": "soon"})
+
+
 def test_validate_rejects_wrong_type():
     with pytest.raises(DaemonConfigError, match="url"):
         validate_daemon_table({"url": 123})

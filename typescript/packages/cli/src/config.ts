@@ -13,7 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
-import { ALLOWED_KEYS, DaemonConfigError } from '@struktoai/mirage-server/daemon_config'
+import {
+  ALLOWED_KEYS,
+  DaemonConfigError,
+  RENAMED_KEYS,
+  renamedKeyMessage,
+} from '@struktoai/mirage-server/daemon_config'
 import type { Command } from 'commander'
 import { emit, fail } from './output.ts'
 import { getConfig, listConfig, resolvedConfig, setConfig, unsetConfig } from './settings.ts'
@@ -59,9 +64,11 @@ function listFile(): void {
     fail(e.message, 2)
     return
   }
-  const unknown = Object.keys(table)
-    .filter((k) => !ALLOWED_KEYS.has(k))
-    .sort(compareCodePoints)
+  const keys = Object.keys(table).sort(compareCodePoints)
+  for (const key of keys.filter((k) => Object.hasOwn(RENAMED_KEYS, k))) {
+    process.stderr.write(`warning: ${renamedKeyMessage(key)}\n`)
+  }
+  const unknown = keys.filter((k) => !ALLOWED_KEYS.has(k) && !Object.hasOwn(RENAMED_KEYS, k))
   if (unknown.length > 0) {
     process.stderr.write(
       'warning: unknown [daemon] keys (daemon will refuse to ' + `start): ${unknown.join(', ')}\n`,

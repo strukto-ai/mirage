@@ -40,8 +40,10 @@ from mirage.server.daemon_config import (
     ALLOWED_KEYS,
     DEFAULT_RATE_LIMITS,
     NUMERIC_KEYS,
+    RENAMED_KEYS,
     DaemonConfigError,
     read_daemon_table,
+    renamed_key_message,
 )
 from mirage.server.env import (
     ENV_ALLOWED_HOSTS,
@@ -294,9 +296,10 @@ def _default_for_key(key: str) -> str:
         "jwt_alg": "",
         "jwt_issuer": "",
         "jwt_audience": "",
+        "jwt_pubkey": "",
         "jwt_pubkey_file": "",
         "jwt_jwks_url": "",
-        "jwt_clock_skew": "5",
+        "jwt_clock_skew_seconds": "5",
         "jwt_authorized_parties": "",
         "login_client_id": "",
         "socket": "",
@@ -351,6 +354,8 @@ def resolved_config() -> dict[str, tuple[str, str]]:
 
 
 def _check_key(key: str) -> None:
+    if key in RENAMED_KEYS:
+        raise DaemonConfigError(renamed_key_message(key))
     if key not in ALLOWED_KEYS:
         raise DaemonConfigError(
             f"unknown config key: {key!r}; allowed: "
@@ -361,7 +366,12 @@ def _check_key(key: str) -> None:
 def _format_value(key: str, value: str) -> str:
     if key in NUMERIC_KEYS:
         return value
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    escaped = (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+    )
     return f'"{escaped}"'
 
 
