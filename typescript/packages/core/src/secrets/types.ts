@@ -17,8 +17,7 @@
  *
  * `fields` are the secret's key/value pairs; an env entry's `key`
  * selects one of them. `expiresAt` is epoch seconds after which the
- * fields are stale, null when the source does not expire (all of v1's
- * sources; expiry arrives with auth0 as a per-var fact).
+ * fields are stale, null when the source does not expire.
  */
 export interface ResolvedSecret {
   readonly fields: Record<string, string>

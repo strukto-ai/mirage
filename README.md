@@ -192,13 +192,13 @@ the [policy docs](https://docs.mirage.strukto.ai/home/policy/overview).
 ## Authentication
 
 Credentials and authentication integrate with the stores secrets already live in,
-including AWS Secrets Manager, 1Password, Auth0 and dotenv, so an environment variable
+including AWS Secrets Manager, 1Password and dotenv, so an environment variable
 in Mirage can resolve straight to a credential held in one of them.
 
 |              | Sources                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Built in** | <a href="https://en.wikipedia.org/wiki/Environment_variable"><img src="assets/icons/terminal.svg" width="20" height="20" alt="Environment" title="Environment" /></a> <a href="https://www.dotenv.org"><img src="https://cdn.simpleicons.org/dotenv" width="20" height="20" alt="dotenv" title="dotenv" /></a> <a href="https://aws.amazon.com/secrets-manager/"><img src="https://api.iconify.design/logos/aws-secrets-manager.svg" width="20" height="20" alt="AWS Secrets Manager" title="AWS Secrets Manager" /></a> |
-| **Custom**   | <a href="https://1password.com"><img src="https://cdn.simpleicons.org/1password" width="20" height="20" alt="1Password" title="1Password" /></a> <a href="https://auth0.com"><img src="https://cdn.simpleicons.org/auth0" width="20" height="20" alt="Auth0" title="Auth0" /></a>                                                                                                                                                                                                                                        |
+| **Custom**   | <a href="https://1password.com"><img src="https://cdn.simpleicons.org/1password" width="20" height="20" alt="1Password" title="1Password" /></a>                                                                                                                                                                                                                                                                                                                                                                         |
 
 ## Installation
 

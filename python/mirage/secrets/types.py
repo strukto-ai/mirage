@@ -27,8 +27,7 @@ class ResolvedSecret:
         fields (dict[str, str]): the secret's key/value pairs; an env
             entry's `key` selects one of them.
         expires_at (float | None): epoch seconds after which the fields
-            are stale, None when the source does not expire (all of
-            v1's sources; expiry arrives with auth0 as a per-var fact).
+            are stale, None when the source does not expire.
     """
 
     fields: dict[str, str]
