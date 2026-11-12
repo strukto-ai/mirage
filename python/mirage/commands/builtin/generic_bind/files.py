@@ -634,13 +634,31 @@ async def _stat_refusing_dirs(
         raise
     except FileNotFoundError:
         if await is_implicit_dir(files.readdir, path):
+            st = await _landed_or_dir(files, path)
+        elif _is_namespace_dir(ctx, path):
             raise eisdir(path) from None
-        if _is_namespace_dir(ctx, path):
-            raise eisdir(path) from None
-        raise
+        else:
+            raise
     if st.type == FileType.DIRECTORY:
         raise eisdir(path)
     return st
+
+
+async def _landed_or_dir(files: CommandFiles, path: PathSpec) -> FileStat:
+    """The stat of a file written between the stat that missed it and
+    the listing that named it, which otherwise looks like a prefix of
+    deeper keys, so ``echo hi > f &`` then ``cat f`` read the new file
+    as a directory. A second stat tells the two apart: only a prefix
+    misses again.
+
+    Args:
+        files (CommandFiles): the command's files.
+        path (PathSpec): the operand the listing named.
+    """
+    try:
+        return await files.stat(path)
+    except FileNotFoundError:
+        raise eisdir(path) from None
 
 
 def dir_aware_stat(files: CommandFiles, ctx: Context) -> StatFn:
