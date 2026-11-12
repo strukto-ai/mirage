@@ -49,8 +49,6 @@ class Runtimes:
         binding (WorkspaceBinding): the live workspace connection shared
             by every runtime entry.
         machines (MachineTable): the machines a machine entry runs on.
-        routed (bool): the workspace has a route policy, which can name
-            an entry a capture listed earlier would otherwise take.
     """
 
     def __init__(
@@ -58,12 +56,10 @@ class Runtimes:
         registry: MountRegistry,
         binding: WorkspaceBinding,
         machines: MachineTable,
-        routed: bool,
     ) -> None:
         self._registry = registry
         self._binding = binding
         self._machines = machines
-        self._routed = routed
         self._entries: list[Runtime[Any]] = []
         self._retiring: dict[int, asyncio.Task[None]] = {}
 
@@ -214,8 +210,9 @@ class Runtimes:
     def _install(
         self, entries: list[Runtime[Any]], bindings: dict[str, Runtime[Any]]
     ) -> None:
+        routed = self._registry.policies.has_placement()
         for capture, winner, shadowed in (
-            [] if self._routed else shadowed_captures(entries)
+            [] if routed else shadowed_captures(entries)
         ):
             logger.warning(
                 "runtime %r runs %r only when a route names it: %r, "

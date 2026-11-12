@@ -676,18 +676,15 @@ class Workspace:
             machines, scan_host, signal_host, stop_host_run, host_resources
         )
         self._wire_machines()
-        self._runtimes = Runtimes(
-            self._registry,
-            self._runtime_binding,
-            self.machine_table,
-            routed=route_policy is not None,
-        )
-        self._runtimes.resolve(runtimes)
-        self._router = Router(self._registry, self._runtimes)
         if route_policy is not None:
             self._registry.policies.place(
                 RoutePolicy(route_policy, self._script_policy)
             )
+        self._runtimes = Runtimes(
+            self._registry, self._runtime_binding, self.machine_table
+        )
+        self._runtimes.resolve(runtimes)
+        self._router = Router(self._registry, self._runtimes)
 
         self._start_installs(clis, specs)
         self.machine_table.hold_handles()

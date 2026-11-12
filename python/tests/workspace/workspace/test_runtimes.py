@@ -261,7 +261,9 @@ async def test_a_capture_that_never_wins_is_logged(caplog):
 
 
 @pytest.mark.asyncio
-async def test_a_capture_a_route_policy_can_reach_is_not_logged(caplog):
+async def test_a_capture_is_logged_only_while_no_route_policy_can_reach_it(
+    caplog,
+):
     caplog.set_level(logging.WARNING, logger="mirage.workspace.workspace")
     ws = Workspace(
         {"/": RAMVFS()},
@@ -271,6 +273,13 @@ async def test_a_capture_a_route_policy_can_reach_is_not_logged(caplog):
     )
     try:
         assert [r.getMessage() for r in caplog.records] == []
+        ws.policies.place(None)
+        ws.add_runtime(Box("box", "python"))
+        said = [r.getMessage() for r in caplog.records]
+        assert said[0] == (
+            "runtime 'a' runs 'python' only when a route names it: "
+            "'box', listed before it, takes it"
+        )
     finally:
         await ws.close()
 

@@ -283,7 +283,7 @@ describe('shadowed captures', () => {
     }
   })
 
-  it('logs nothing for a capture a route policy can reach', async () => {
+  it('logs a capture only while no route policy can reach it', async () => {
     const said: string[] = []
     logger.warn = (message) => said.push(message)
     const ws = new Workspace(
@@ -296,6 +296,11 @@ describe('shadowed captures', () => {
     )
     try {
       expect(said).toEqual([])
+      ws.policies.place(null)
+      ws.addRuntime(new Box('box', 'python'))
+      expect(said[0]).toBe(
+        "runtime 'a' runs 'python' only when a route names it: 'box', listed before it, takes it",
+      )
     } finally {
       delete logger.warn
       await ws.close()

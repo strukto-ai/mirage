@@ -642,20 +642,19 @@ export class Workspace {
       (machine, cpu) => this.hostResources(machine, cpu),
     )
     this.wireMachines()
+    if (options.routePolicy !== undefined) {
+      this.registry.policies.place(new RoutePolicy(options.routePolicy, this.scriptPolicy))
+    }
     this.runtimeWorld = new Runtimes({
       registry: this.registry,
       entries: options.runtimes,
       binding: this.runtimeBinding,
       machines: this.machineTable,
-      routed: options.routePolicy !== undefined,
     })
     this.closers.push(() => this.runtimeWorld.close())
     this.closers.push(() => this.machineTable.close())
     this.closers.push(() => this.registry.clis.close())
     this.router = new Router(this.registry, this.runtimeWorld)
-    if (options.routePolicy !== undefined) {
-      this.registry.policies.place(new RoutePolicy(options.routePolicy, this.scriptPolicy))
-    }
     this.registry.bindClocks()
     this.machineTable.holdHandles()
   }
