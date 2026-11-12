@@ -25,9 +25,8 @@ import type {
 /**
  * One scope's saved configs: vfs, cli, runtime and store entries, policies
  * and templates. Every backend answers the same way: lists sort by name, an
- * entry's sealed values leave only through `revealEntry`, deleting an entry
- * wipes them, and a deleted template can be restored. A missing name raises
- * `ResourceError('not_found')`.
+ * entry's sealed values leave only through `revealEntry` and deleting an
+ * entry wipes them. A missing name raises `ResourceError('not_found')`.
  */
 export interface ResourceStore {
   readonly scope: string
@@ -56,6 +55,4 @@ export interface ResourceStore {
   createTemplate(template: TemplateInput): Promise<Template>
   putTemplate(template: TemplateInput): Promise<Template>
   deleteTemplate(name: string): Promise<void>
-  /** Bring back the template last deleted under `name`; a conflict while a live one has it. */
-  restoreTemplate(name: string): Promise<Template>
 }

@@ -866,8 +866,7 @@
                   "GET /v1/templates",
                   "POST /v1/templates",
                   "GET /v1/templates/{ref}",
-                  "DELETE /v1/templates/{ref}",
-                  "POST /v1/templates/{ref}/restore"
+                  "DELETE /v1/templates/{ref}"
                 ]
               },
               {

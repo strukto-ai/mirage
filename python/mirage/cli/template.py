@@ -36,7 +36,7 @@ from mirage.utils.yaml import dump_yaml, parse_yaml
 
 app = typer.Typer(
     no_args_is_help=True,
-    help="Saved workspace configs: create, list, get, delete, restore.",
+    help="Saved workspace configs: create, list, get, delete.",
 )
 
 
@@ -155,23 +155,10 @@ def get_cmd(
 def delete_cmd(
     name: str = typer.Argument(..., metavar="ID", help=ID_HELP),
 ) -> None:
-    """Delete a template; ``restore`` brings it back."""
+    """Delete a template."""
     with make_client() as client:
         client.ensure_running()
         r = client.request("DELETE", template_path(name))
     handle_response(r)
     header(f"deleted template {name}")
     emit({"deleted": name}, human=lambda d: f"Deleted template {name}.")
-
-
-@app.command("restore")
-def restore_cmd(
-    name: str = typer.Argument(..., metavar="ID", help=ID_HELP),
-) -> None:
-    """Bring back a deleted template."""
-    with make_client() as client:
-        client.ensure_running()
-        r = client.request("POST", f"{template_path(name)}/restore")
-    restored = handle_response(r)
-    header(f"restored template {name}")
-    emit(restored, human=as_yaml)

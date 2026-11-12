@@ -164,7 +164,7 @@ async def test_every_call_refuses_a_name_outside_the_rule(name):
         store.get_entry("vfs", name),
         store.delete_entry("vfs", name),
         store.delete_policy(name),
-        store.restore_template(name),
+        store.delete_template(name),
     ):
         with pytest.raises(ResourceError) as refused:
             await call
@@ -195,31 +195,6 @@ async def test_a_cancelled_delete_removes_record_and_secret_together():
     with pytest.raises(asyncio.CancelledError):
         await delete
     assert await store.list_entries("vfs") == []
-
-
-@pytest.mark.parametrize("call", ["delete_template", "restore_template"])
-@pytest.mark.asyncio
-async def test_a_cancelled_template_move_lands_in_one_folder(call):
-    records = SlowRecords()
-    store = RecordResourceStore("t", records, MemorySealer())
-    await store.create_template(TemplateInput(name="t", config={"a": 1}))
-    if call == "restore_template":
-        await store.delete_template("t")
-    records.started.clear()
-    moving = asyncio.ensure_future(getattr(store, call)("t"))
-    await records.started.wait()
-    moving.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await moving
-    live = [t.name for t in await store.list_templates()]
-    if call == "delete_template":
-        assert live == []
-        assert (await store.restore_template("t")).name == "t"
-    else:
-        assert live == ["t"]
-        with pytest.raises(ResourceError) as gone:
-            await store.restore_template("t")
-        assert gone.value.code == "not_found"
 
 
 @pytest.mark.asyncio

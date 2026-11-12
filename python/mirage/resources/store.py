@@ -18,12 +18,7 @@ from dataclasses import asdict
 
 from mirage.concurrency.limiter import settle
 from mirage.resources.base import ResourceStore
-from mirage.resources.constants import (
-    DELETED_TEMPLATES,
-    ENTRY_KINDS,
-    NAME,
-    NOUN,
-)
+from mirage.resources.constants import ENTRY_KINDS, NAME, NOUN
 from mirage.resources.errors import ResourceError
 from mirage.resources.refs import uses_of
 from mirage.resources.types import (
@@ -304,16 +299,12 @@ class RecordResourceStore(ResourceStore):
             if not await self._records.remove(POLICY, name):
                 raise not_found(POLICY, name)
 
-    async def _template_in(self, folder: str, name: str) -> Template | None:
-        check_name(TEMPLATE, name)
-        record = await self._records.read(folder, name)
-        return None if record is None else template_of(name, record)
-
     async def _live_template(self, name: str) -> Template:
-        template = await self._template_in(TEMPLATE, name)
-        if template is None:
+        check_name(TEMPLATE, name)
+        record = await self._records.read(TEMPLATE, name)
+        if record is None:
             raise not_found(TEMPLATE, name)
-        return template
+        return template_of(name, record)
 
     async def _templates(self) -> list[Template]:
         return [
@@ -356,45 +347,8 @@ class RecordResourceStore(ResourceStore):
         async with self._lock:
             return await self._save_template(template, replace=True)
 
-    async def _move_template(
-        self, template: Template, source: str, target: str
-    ) -> None:
-        """Write a template into ``target`` and remove it from ``source``
-        as one step a cancel does not split: a split would leave it both
-        live and deleted.
-
-        Args:
-            template (Template): the template.
-            source (str): the folder it leaves.
-            target (str): the folder it goes to.
-        """
-
-        async def move() -> None:
-            await self._records.write(target, template.name, asdict(template))
-            await self._records.remove(source, template.name)
-
-        moving = asyncio.ensure_future(move())
-        try:
-            await asyncio.shield(moving)
-        except asyncio.CancelledError:
-            await settle(moving)
-            raise
-
     async def delete_template(self, name: str) -> None:
         async with self._lock:
-            template = await self._live_template(name)
-            await self._move_template(template, TEMPLATE, DELETED_TEMPLATES)
-
-    async def restore_template(self, name: str) -> Template:
-        async with self._lock:
-            template = await self._template_in(DELETED_TEMPLATES, name)
-            if template is None:
-                raise ResourceError(
-                    "not_found", f"no deleted template named {name}"
-                )
-            if await self._records.read(TEMPLATE, name) is not None:
-                raise ResourceError(
-                    "conflict", f"a template named {name} exists again"
-                )
-            await self._move_template(template, DELETED_TEMPLATES, TEMPLATE)
-            return template
+            check_name(TEMPLATE, name)
+            if not await self._records.remove(TEMPLATE, name):
+                raise not_found(TEMPLATE, name)

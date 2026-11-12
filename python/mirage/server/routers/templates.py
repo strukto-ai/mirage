@@ -122,7 +122,7 @@ async def get_template(ref: str, request: Request) -> TemplateResponse:
 
 @router.delete("/{ref}", status_code=204)
 async def delete_template(ref: str, request: Request) -> Response:
-    """Delete a template; ``restore`` brings it back.
+    """Delete a template.
 
     Args:
         ref (str): the template's name.
@@ -133,11 +133,3 @@ async def delete_template(ref: str, request: Request) -> Response:
     except ResourceError as e:
         raise store_refusal(e) from e
     return Response(status_code=204)
-
-
-@router.post("/{ref}/restore", response_model=TemplateResponse)
-async def restore_template(ref: str, request: Request) -> TemplateResponse:
-    try:
-        return present(await request.app.state.resources.restore_template(ref))
-    except ResourceError as e:
-        raise store_refusal(e) from e

@@ -50,7 +50,7 @@ async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
 
 
 @pytest.mark.asyncio
-async def test_a_template_is_saved_listed_deleted_and_restored(client):
+async def test_a_template_is_saved_listed_and_deleted(client):
     r = await client.post(
         "/v1/templates",
         json={"name": "base", "description": "ram only", "config": RAM},
@@ -66,11 +66,7 @@ async def test_a_template_is_saved_listed_deleted_and_restored(client):
     assert (await client.get("/v1/templates/base")).json() == saved
     assert (await client.delete("/v1/templates/base")).status_code == 204
     assert (await client.get("/v1/templates/base")).status_code == 404
-    r = await client.post("/v1/templates/base/restore")
-    assert r.status_code == 200
-    assert r.json() == saved
-    r = await client.post("/v1/templates/base/restore")
-    assert r.status_code == 404
+    assert (await client.delete("/v1/templates/base")).status_code == 404
 
 
 @pytest.mark.asyncio
