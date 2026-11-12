@@ -167,9 +167,9 @@ Laufzeitumgebungen werden auf dieselbe Weise virtualisiert, und nicht nur für P
 
 Ein Profil legt fest, was eine Session ausführen und was sie sehen darf. Befehle werden durch anpassbare `allow`-, `ask`- und `deny`-Regeln gesteuert, Pfade durch `hide` und `show`, sodass eine verborgene Datei nicht bloß unlesbar ist, sondern in dem Dateisystem, das der Agent sieht, gar nicht existiert. Für alles, was diese Regeln nicht ausdrücken können, kann ein Profil ein Policy-Skript benennen, das bei jedem Befehl an der Schranke läuft und selbst mit allow, deny oder ask antwortet; wie jede Regel kann es jedoch nur einschränken und nie gewähren. Unabhängig davon kann ein Host eigene Policies bei der [Policy-Engine](https://docs.mirage.strukto.ai/home/policy/policies) registrieren, einem geordneten Stapel, den der Workspace bei jedem Befehl, jeder VFS-Operation und jedem Session-Schreibzugriff befragt. Siehe die [Policy-Dokumentation](https://docs.mirage.strukto.ai/home/policy/overview).
 
-## Authentifizierung
+## Dienst-Zugangsdaten
 
-Zugangsdaten und Authentifizierung binden die Speicher ein, in denen Secrets bereits liegen, darunter AWS Secrets Manager, 1Password und dotenv, sodass eine Umgebungsvariable in Mirage direkt zu Zugangsdaten aus einem davon aufgelöst werden kann.
+Dienst-Zugangsdaten binden die Speicher ein, in denen Secrets bereits liegen, darunter AWS Secrets Manager, 1Password und dotenv, sodass eine Umgebungsvariable in Mirage direkt zu Zugangsdaten aus einem davon aufgelöst werden kann.
 
 |                       | Quellen                                                                                                                                                                                                                                                                                                                                                    |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

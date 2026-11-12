@@ -167,9 +167,9 @@ Runtime được ảo hóa theo cùng cách, và không chỉ cho ngôn ngữ l�
 
 Profile quyết định một session được chạy gì và được thấy gì. Lệnh được chi phối bởi các quy tắc `allow`, `ask` và `deny` tùy chỉnh được, còn đường dẫn bởi `hide` và `show`, nên một tệp bị ẩn không chỉ là không đọc được mà còn không tồn tại trong hệ thống tệp mà agent thấy. Với những gì các quy tắc đó không diễn đạt được, profile có thể chỉ định một script chính sách chạy ở cổng kiểm soát của mọi lệnh và tự trả lời allow, deny hoặc ask, dù như mọi quy tắc khác nó chỉ có thể hạn chế chứ không bao giờ cấp quyền. Ngoài ra, ứng dụng chủ có thể đăng ký chính sách riêng trên [công cụ chính sách](https://docs.mirage.strukto.ai/home/policy/policies), một ngăn xếp có thứ tự mà workspace tham khảo ở mọi lệnh, mọi thao tác VFS và mọi lần ghi session. Xem [tài liệu chính sách](https://docs.mirage.strukto.ai/home/policy/overview).
 
-## Xác thực
+## Thông tin xác thực dịch vụ
 
-Thông tin xác thực và xác thực tích hợp với những kho đang chứa secret, gồm AWS Secrets Manager, 1Password và dotenv, nên một biến môi trường trong Mirage có thể phân giải thẳng tới thông tin xác thực lưu ở một trong số đó.
+Thông tin xác thực dịch vụ tích hợp với những kho đang chứa secret, gồm AWS Secrets Manager, 1Password và dotenv, nên một biến môi trường trong Mirage có thể phân giải thẳng tới thông tin xác thực lưu ở một trong số đó.
 
 |                  | Nguồn                                                                                                                                                                                                                                                                                                                                                      |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

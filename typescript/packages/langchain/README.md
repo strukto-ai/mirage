@@ -187,9 +187,9 @@ policies on the [policy engine](https://docs.mirage.strukto.ai/home/policy/polic
 ordered stack the workspace consults on every command, VFS op and session write. See
 the [policy docs](https://docs.mirage.strukto.ai/home/policy/overview).
 
-## Authentication
+## Service Credentials
 
-Credentials and authentication integrate with the stores secrets already live in,
+Service credentials integrate with the stores secrets already live in,
 including AWS Secrets Manager, 1Password and dotenv, so an environment variable
 in Mirage can resolve straight to a credential held in one of them.
 
