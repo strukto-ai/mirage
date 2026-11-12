@@ -289,11 +289,17 @@ describe('resolveAuthConfig config table', () => {
 
 describe('resolveAuthConfig fixed key sources', () => {
   const jwtTable = { auth_mode: 'jwt', jwt_alg: 'RS256' }
+  let keyDir: string
   let keyFile: string
 
   beforeEach(() => {
-    keyFile = join(mkdtempSync(join(tmpdir(), 'mir-auth-')), 'pub.pem')
+    keyDir = mkdtempSync(join(tmpdir(), 'mir-auth-'))
+    keyFile = join(keyDir, 'pub.pem')
     writeFileSync(keyFile, 'FILEKEY')
+  })
+
+  afterEach(() => {
+    rmSync(keyDir, { recursive: true, force: true })
   })
 
   it('reads the inline key from the table', () => {

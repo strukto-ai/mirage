@@ -14,7 +14,7 @@
 
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
-import { CONFIG_ENV_KEYS } from '@struktoai/mirage-server/auth/config'
+import { CONFIG_ENV_KEYS, JWT_KEY_ENVS } from '@struktoai/mirage-server/auth/config'
 import { defaultTokenFile, readTokenFile } from '@struktoai/mirage-server/auth/storage'
 import {
   ALLOWED_KEYS,
@@ -285,6 +285,7 @@ export function resolvedConfig(
 ): Record<string, [string, string]> {
   const home = mirageHome(env)
   const table = readDaemonTable(home)
+  const envKey = JWT_KEY_ENVS.some((name) => (env[name] ?? '').trim() !== '')
   const out: Record<string, [string, string]> = {}
   for (const key of [...ALLOWED_KEYS].sort(compareCodePoints)) {
     const envName = ENV_FOR_KEY[key]
@@ -292,6 +293,10 @@ export function resolvedConfig(
       const envValue = env[envName]
       if (envValue !== undefined && envValue !== '') {
         out[key] = [envValue, `env ${envName}`]
+        continue
+      }
+      if (envKey && JWT_KEY_ENVS.includes(envName)) {
+        out[key] = [defaultForKey(key, home), 'default']
         continue
       }
     }

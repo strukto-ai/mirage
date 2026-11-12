@@ -271,6 +271,24 @@ def test_resolved_config_reports_origins(monkeypatch, tmp_path):
     assert resolved["url"] == ("http://f:1", "file")
 
 
+def test_resolved_config_drops_file_keys_when_env_gives_the_jwt_key(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv(ENV_HOME, str(tmp_path))
+    monkeypatch.delenv("MIRAGE_JWT_PUBKEY", raising=False)
+    monkeypatch.setenv("MIRAGE_JWT_PUBKEY_FILE", "/env.pem")
+    (tmp_path / "config.toml").write_text(
+        '[daemon]\njwt_pubkey = "TABLE"\njwt_alg = "RS256"\n'
+    )
+    resolved = resolved_config()
+    assert resolved["jwt_pubkey_file"] == (
+        "/env.pem",
+        "env MIRAGE_JWT_PUBKEY_FILE",
+    )
+    assert resolved["jwt_pubkey"] == ("", "default")
+    assert resolved["jwt_alg"] == ("RS256", "file")
+
+
 def test_resolved_config_defaults_when_nothing_set(monkeypatch, tmp_path):
     monkeypatch.setenv(ENV_HOME, str(tmp_path))
     for name in (

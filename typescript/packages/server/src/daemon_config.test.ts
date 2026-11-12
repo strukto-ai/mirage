@@ -43,6 +43,12 @@ describe('parseDaemonTable', () => {
     expect(parseDaemonTable('[daemon]\nfoo = "a\\"b"\n').foo).toBe('a"b')
   })
 
+  it('refuses an escape that is not a Unicode scalar value', () => {
+    for (const bad of ['\\U00110000', '\\uD800']) {
+      expect(() => parseDaemonTable(`[daemon]\nk = "${bad}"\n`)).toThrow(DaemonConfigError)
+    }
+  })
+
   it('reads the escapes of a TOML basic string as tomllib does', () => {
     expect(parseDaemonTable('[daemon]\nk = "a\\nb\\tc\\r\\u00e9\\U0001F600\\\\n"\n').k).toBe(
       'a\nb\tc\r\u00e9\u{1F600}\\n',

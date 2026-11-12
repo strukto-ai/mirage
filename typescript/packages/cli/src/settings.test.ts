@@ -471,6 +471,22 @@ describe('resolvedConfig', () => {
     }
   })
 
+  it('drops the file key sources when env gives the jwt key', () => {
+    const home = mkdtempSync(join(tmpdir(), 'mirage-cli-resolved-'))
+    try {
+      writeFileSync(
+        join(home, 'config.toml'),
+        '[daemon]\njwt_pubkey = "TABLE"\njwt_alg = "RS256"\n',
+      )
+      const resolved = resolvedConfig({ MIRAGE_HOME: home, MIRAGE_JWT_PUBKEY_FILE: '/env.pem' })
+      expect(resolved.jwt_pubkey_file).toEqual(['/env.pem', 'env MIRAGE_JWT_PUBKEY_FILE'])
+      expect(resolved.jwt_pubkey).toEqual(['', 'default'])
+      expect(resolved.jwt_alg).toEqual(['RS256', 'file'])
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
   it('yields defaults when nothing is set', () => {
     const home = mkdtempSync(join(tmpdir(), 'mirage-cli-resolved-'))
     try {
