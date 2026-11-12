@@ -76,8 +76,10 @@ mirage shell -w demo -c "cat /data/missing.txt"
 
 ### The log entry
 
-`mirage workspace logs -w demo` lists one entry per line, newest first. This
-is the entry for the second line. `cwd` is where the line started. `mounts`
+In a terminal, `mirage workspace logs -w demo` prints a table of lines, newest
+first. Piped, it prints a JSON page whose `items` hold one entry per line.
+`mirage workspace logs -w demo | jq '.items[1]'` prints the entry for the
+second line. `cwd` is where the line started. `mounts`
 has the read that `wc` made. The `cd` is not in `mounts`, because checking
 that `/data` is a directory is a lookup.
 
@@ -178,7 +180,7 @@ read:
 | --- | --- |
 | <code style={{ whiteSpace: 'nowrap' }}>{'history'}</code> | The session's newest 500 lines, as bash's `history` lists them. |
 | <code style={{ whiteSpace: 'nowrap' }}>{'/.bash_history'}</code> | The session's newest 10,000 lines, as a file. [Policies](/home/policy/policies) read the logs from this file. |
-| <code style={{ whiteSpace: 'nowrap' }}>{'mirage workspace logs'}</code> | Entries for finished lines, newest first, one page at a time. <code style={{ whiteSpace: 'nowrap' }}>--jsonl</code> prints the records of every kept line, oldest first. See the [CLI reference](/home/access/cli). |
+| <code style={{ whiteSpace: 'nowrap' }}>{'mirage workspace logs'}</code> | Entries for finished lines, newest first, one page at a time. <code style={{ whiteSpace: 'nowrap' }}>--jsonl</code> prints the records of every finished line, oldest first. See the [CLI reference](/home/access/cli). |
 | <code style={{ whiteSpace: 'nowrap' }}>{'GET /v1/workspaces/{id}/logs'}</code> | The same pages over HTTP. See [List workspace logs](/api/operations/workspaces/list-workspace-logs). |
 | <code style={{ whiteSpace: 'nowrap' }}>{'ws.history()'}</code> | The `command` and `result` records from every session, oldest first, at most the newest 10,000. Pass `vfs=True` in Python, or `{ vfs: true }` in TypeScript, to add the `vfs` records. In Python it is a coroutine, so `await` it. |
 
@@ -404,41 +406,6 @@ and alerts.
 | <code style={{ whiteSpace: 'nowrap' }}>process</code> | When a process the line started ends | `process.pid`, `mirage.process.pid`, `process.parent_pid`, `process.group_leader.pid`, `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.id`, `mirage.machine.type`, `mirage.machine.name`, `mirage.machine.id`, `process.command_line`, `mirage.cwd`, `mirage.runtime`, `process.exit.code`, `mirage.signal`, `mirage.error` |
 
 </Accordion>
-
-### Spans for a program on a machine
-
-When a line runs a program on a [machine](/home/setup/machine/overview), its
-`process` span sits under the process that started it, so the trace is the
-line's process tree. Here `python3` runs on an E2B machine named `gpu`:
-
-```bash
-echo hi | python3 train.py | wc -l
-```
-
-```text
-command    echo hi | python3 train.py | wc -l
-└─ process     echo hi | python3 train.py | wc -l   host  my-laptop
-   ├─ process  echo hi                              host  my-laptop
-   ├─ process  python3 train.py                     e2b   gpu        pid 812
-   └─ process  wc -l                                host  my-laptop
-```
-
-The `python3` span names the machine three ways and carries both pids:
-
-```json
-{
-  "process.pid": 812,
-  "mirage.process.pid": 4194311,
-  "process.parent_pid": 4194305,
-  "process.command_line": "python3 train.py",
-  "mirage.machine.type": "e2b",
-  "mirage.machine.name": "gpu",
-  "mirage.machine.id": "ix5k2v0q8n1",
-  "mirage.runtime": "remote",
-  "host.id": "host:my-laptop",
-  "process.exit.code": 0
-}
-```
 
 ## Span attributes
 
