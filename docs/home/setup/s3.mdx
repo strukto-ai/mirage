@@ -58,6 +58,22 @@ S3VFS(S3Config(
 
 Leading slashes are stripped and a trailing slash is added automatically. `None` / `undefined` and empty strings both mean "no prefix." For browser security considerations, see the [TypeScript S3 setup doc](/typescript/setup/s3).
 
+## S3-compatible VFSes
+
+How `write: conditional` behaves depends on where the bucket is:
+
+- **AWS S3, and the VFSes built on it (R2, GCS, Wasabi and the rest):**
+  writes, copies and deletes all carry the condition. A provider that
+  ignores the condition on a copy or a delete runs it unconditioned.
+- **MinIO, and the `s3` VFS pointed at a non-AWS endpoint:** only writes
+  carry it. Mirage refuses anything that would copy or delete within the
+  mount (`cp`, `mv`, `rm`, `find -delete`) with `ENOTSUP`.
+- **A TypeScript browser mount signed by presigned URLs:** cannot declare
+  `write: conditional`.
+
+See [read and write behavior](/home/setup/vfs#read-and-write-behavior) for
+what a conditional write does.
+
 ## Content type of uploads
 
 A write carries no content type of its own, so the mount decides what S3 stores and serves back. Set `default_content_type` (`defaultContentType` in TypeScript) to stamp every upload with it. Unset, S3 picks its own default, and the browser's presigned PUT, which has to sign a type, sends `application/octet-stream`.
