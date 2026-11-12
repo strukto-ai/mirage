@@ -949,7 +949,7 @@ describe('E2BMachine output bytes', () => {
   }, 10_000)
 })
 
-/** A command that streams a line, then a tail with no newline, on stdout and on stderr. */
+/** A command that streams the pid line, then a line and a tail with no newline on stdout and on stderr. */
 class TailSandbox {
   readonly commands = {
     async run(
@@ -959,6 +959,7 @@ class TailSandbox {
         onStderr?: (text: string) => Promise<void>
       },
     ) {
+      await opts.onStderr?.(b64('\x1emirage-pid 9 1\n'))
       await opts.onStdout?.(b64('a').slice(0, 3))
       await opts.onStdout?.(`${b64('a').slice(3)}mirage: tail`)
       await opts.onStderr?.(b64('b').slice(0, 3))
