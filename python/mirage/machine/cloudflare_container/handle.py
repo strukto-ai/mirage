@@ -287,11 +287,19 @@ class ContainerMachine(MachineHandle, PipeTransportMixin):
         if self._exits != exits:
             cut.set()
 
+        async def status() -> int:
+            try:
+                # Shielded: a line let go stops waiting; the process's
+                # status is not its to cancel.
+                return await asyncio.shield(proc.exit_code)
+            except Exception as exc:
+                raise stopped(exc) from exc
+
         async def finish() -> RunResult:
             out, err, code = await asyncio.gather(
                 drain(proc.stdout, output),
                 drain(proc.stderr, errors),
-                proc.exit_code,
+                status(),
             )
             return RunResult(stdout=out, stderr=err, exit_code=code)
 
@@ -448,7 +456,9 @@ class ContainerMachine(MachineHandle, PipeTransportMixin):
 
         async def wait() -> None:
             try:
-                await asyncio.gather(drain(proc.stderr, keep), proc.exit_code)
+                await asyncio.gather(
+                    drain(proc.stderr, keep), asyncio.shield(proc.exit_code)
+                )
             except Exception as exc:
                 logger.debug(
                     "cloudflare_container: %s ended: %s", command, exc

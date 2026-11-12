@@ -54,6 +54,21 @@ async def sleep(proc: FakeProcess) -> int:
     return 0
 
 
+async def echo(proc: FakeProcess) -> int:
+    await proc.stdin.closed.wait()
+    proc.stdout.feed_data(bytes(proc.stdin.data))
+    await asyncio.Event().wait()
+    return 0
+
+
+async def lost(proc: FakeProcess) -> int:
+    raise ConnectionResetError("the connection to the relay closed")
+
+
+async def over_quota() -> None:
+    raise RuntimeError("monthly container time is used up")
+
+
 def boxed(**programs) -> tuple[FakeContainer, ContainerMachine]:
     box = FakeContainer(programs)
 
@@ -99,6 +114,15 @@ async def test_a_refused_exec_loses_the_connection_and_the_next_line_starts_agai
 
 
 @pytest.mark.asyncio
+async def test_a_status_lost_after_the_output_ended_loses_the_connection():
+    box, machine = boxed(lost=lost, cat=cat)
+    result = await asyncio.wait_for(_line(machine, "lost"), 5)
+    assert (result.exit_code, result.stderr) == (129, LOST)
+    assert (await _line(machine, "cat", b"x")).exit_code == 3
+    assert box.starts == 2
+
+
+@pytest.mark.asyncio
 async def test_a_container_that_exits_under_a_line_cuts_it_short():
     box, machine = boxed(sleep=sleep)
     running = asyncio.create_task(_line(machine, "sleep"))
@@ -126,11 +150,7 @@ async def test_a_cancelled_line_kills_its_process():
 @pytest.mark.asyncio
 async def test_fails_a_line_with_the_error_start_raised():
     box = FakeContainer()
-
-    async def start() -> None:
-        raise RuntimeError("monthly container time is used up")
-
-    machine = ContainerMachine("box", {}, box, start)
+    machine = ContainerMachine("box", {}, box, over_quota)
     with pytest.raises(RuntimeError, match="monthly container time"):
         await machine._ensure_connected()
     assert box.procs == []
@@ -165,12 +185,6 @@ def test_takes_no_image_instance_or_network():
 
 @pytest.mark.asyncio
 async def test_a_pipe_sends_its_writes_in_order_and_stops_with_term():
-    async def echo(proc: FakeProcess) -> int:
-        await proc.stdin.closed.wait()
-        proc.stdout.feed_data(bytes(proc.stdin.data))
-        await asyncio.Event().wait()
-        return 0
-
     box, machine = boxed(sftp=echo)
     pipe = await machine.open_pipe("sftp -e")
     pipe.writer.write(b"a")

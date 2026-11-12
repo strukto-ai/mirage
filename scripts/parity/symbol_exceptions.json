@@ -1778,9 +1778,6 @@
    "python_only": {
     "CLOSED": "Python raises the one lost-connection message from several places in its relay process; TypeScript builds it where the socket closes.",
     "RelayInput": "A Python process's stdin is an object with async write and close; TypeScript's is a WritableStream built in place."
-   },
-   "typescript_only": {
-    "Channel": "A TypeScript output stream is a ReadableStream fed through its controller, with a cancel the caller may call; Python's is an asyncio.StreamReader fed directly."
    }
   },
   "machine/cloudflare_container/types": {

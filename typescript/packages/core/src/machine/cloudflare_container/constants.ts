@@ -47,5 +47,9 @@ export const RELAY_TOKEN = 'MIRAGE_RELAY_TOKEN'
 export const STDOUT_CHANNEL = 1
 export const STDERR_CHANNEL = 2
 
+// How many bytes each direction of a relayed exec may have in flight before
+// the sender waits: output the client has not read, input the program has not taken.
+export const RELAY_WINDOW_BYTES = 1 << 20
+
 // How often a relay speaks on a quiet socket, so nothing between drops it as idle.
 export const RELAY_HEARTBEAT_SECONDS = 30

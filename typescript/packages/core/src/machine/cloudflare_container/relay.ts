@@ -17,6 +17,7 @@ import {
   RELAY_EXEC,
   RELAY_MONITOR,
   RELAY_START,
+  RELAY_WINDOW_BYTES,
   STDERR_CHANNEL,
   STDOUT_CHANNEL,
 } from './constants.ts'
@@ -54,40 +55,73 @@ export function bytesOf(data: unknown): Uint8Array | null {
   return null
 }
 
-/** One output stream of a relayed process, fed from its socket. */
+/**
+ * One output stream of a relayed process, fed from its socket. A chunk
+ * leaves the queue only when the reader asks for it, and `took` then tells
+ * the relay, which sends no more than `RELAY_WINDOW_BYTES` ahead of that.
+ */
 class Channel {
   readonly stream: ReadableStream<Uint8Array>
   done = false
-  private controller: ReadableStreamDefaultController<Uint8Array> | null = null
+  private readonly queue: Uint8Array[] = []
+  // How the stream ends once the queue drains: at its end, or with the lost connection.
+  private ending: Error | 'end' | null = null
+  private wake: (() => void) | null = null
 
-  constructor(private readonly finished: () => void) {
-    this.stream = new ReadableStream<Uint8Array>({
-      start: (controller) => {
-        this.controller = controller
+  constructor(
+    private readonly finished: () => void,
+    private readonly took: (bytes: number) => void,
+  ) {
+    this.stream = new ReadableStream<Uint8Array>(
+      {
+        pull: async (controller) => {
+          while (this.queue.length === 0 && this.ending === null)
+            await new Promise<void>((resolve) => {
+              this.wake = resolve
+            })
+          const chunk = this.queue.shift()
+          if (chunk !== undefined) {
+            controller.enqueue(chunk)
+            this.took(chunk.byteLength)
+            return
+          }
+          if (this.ending === 'end') controller.close()
+          else if (this.ending !== null) controller.error(this.ending)
+          this.end()
+        },
+        cancel: () => {
+          this.queue.length = 0
+          this.ending ??= 'end'
+          this.end()
+        },
       },
-      cancel: () => {
-        this.end()
-      },
-    })
+      { highWaterMark: 0 },
+    )
   }
 
   push(data: Uint8Array): void {
-    if (!this.done) this.controller?.enqueue(data)
+    if (this.ending !== null) return
+    this.queue.push(data)
+    this.rouse()
   }
 
   close(): void {
-    if (this.done) return
-    this.controller?.close()
-    this.end()
+    this.ending ??= 'end'
+    this.rouse()
   }
 
   fail(error: Error): void {
-    if (this.done) return
-    this.controller?.error(error)
-    this.end()
+    this.ending ??= error
+    this.rouse()
+  }
+
+  private rouse(): void {
+    this.wake?.()
+    this.wake = null
   }
 
   private end(): void {
+    if (this.done) return
     this.done = true
     this.finished()
   }
@@ -102,14 +136,27 @@ class Channel {
 class RelayProcess implements ExecProcess {
   readonly stdin: WritableStream<Uint8Array>
   readonly exitCode: Promise<number>
-  private readonly out = new Channel(() => {
-    this.settle()
-  })
-  private readonly err = new Channel(() => {
-    this.settle()
-  })
+  private readonly out = new Channel(
+    () => {
+      this.settle()
+    },
+    (bytes) => {
+      this.read(STDOUT_CHANNEL, bytes)
+    },
+  )
+  private readonly err = new Channel(
+    () => {
+      this.settle()
+    },
+    (bytes) => {
+      this.read(STDERR_CHANNEL, bytes)
+    },
+  )
   private exited = false
   private closed = false
+  // Bytes of stdin sent that the program has not taken, and the write waiting for room.
+  private untaken = 0
+  private room: (() => void) | null = null
   private resolveExit: (code: number) => void = () => undefined
   private rejectExit: (error: Error) => void = () => undefined
 
@@ -124,8 +171,13 @@ class RelayProcess implements ExecProcess {
       )
     })
     this.stdin = new WritableStream<Uint8Array>({
-      write: (chunk) => {
+      write: async (chunk) => {
         this.send(chunk.slice())
+        this.untaken += chunk.byteLength
+        while (!this.closed && this.untaken > RELAY_WINDOW_BYTES)
+          await new Promise<void>((resolve) => {
+            this.room = resolve
+          })
       },
       close: () => {
         this.control({ eof: true })
@@ -159,7 +211,10 @@ class RelayProcess implements ExecProcess {
     }
     const event = frameOf(data)
     if (event === null) return
-    if (event.closed === 'stdout' || event.closed === 'stderr')
+    if (typeof event.took === 'number') {
+      this.untaken -= event.took
+      if (this.untaken <= RELAY_WINDOW_BYTES) this.free()
+    } else if (event.closed === 'stdout' || event.closed === 'stderr')
       (event.closed === 'stdout' ? this.out : this.err).close()
     else if (typeof event.exit === 'number') {
       this.exited = true
@@ -171,6 +226,7 @@ class RelayProcess implements ExecProcess {
   /** The socket closed: whatever is still open lost its connection. */
   lost(error: Error = new Error('the connection to the relay closed')): void {
     this.closed = true
+    this.free()
     this.out.fail(error)
     this.err.fail(error)
     if (!this.exited) this.rejectExit(error)
@@ -183,6 +239,16 @@ class RelayProcess implements ExecProcess {
 
   private control(control: RelayControl): void {
     this.send(JSON.stringify(control))
+  }
+
+  /** Tell the relay the reader took `bytes` of `channel`, while there is a relay to tell. */
+  private read(channel: number, bytes: number): void {
+    if (!this.closed) this.control({ channel, read: bytes })
+  }
+
+  private free(): void {
+    this.room?.()
+    this.room = null
   }
 
   private settle(): void {
@@ -204,6 +270,7 @@ class RelayProcess implements ExecProcess {
  */
 export class RelayContainer implements Container {
   private readonly base: string
+  private readonly sockets = new Set<RelaySocket>()
 
   /**
    * @param url the relay route that names the container.
@@ -228,7 +295,7 @@ export class RelayContainer implements Container {
   }
 
   async exec(cmd: string[], options?: ExecOptions): Promise<ExecProcess> {
-    const socket = await this.openSocket(`${this.base}/${RELAY_EXEC}`)
+    const socket = await this.open(RELAY_EXEC)
     const proc = new RelayProcess(socket)
     return new Promise<ExecProcess>((resolve, reject) => {
       let started = false
@@ -258,7 +325,7 @@ export class RelayContainer implements Container {
   }
 
   async monitor(): Promise<void> {
-    const socket = await this.openSocket(`${this.base}/${RELAY_MONITOR}`)
+    const socket = await this.open(RELAY_MONITOR)
     return new Promise<void>((resolve, reject) => {
       socket.addEventListener('message', ({ data }) => {
         const event = frameOf(data)
@@ -278,6 +345,22 @@ export class RelayContainer implements Container {
       const request: RelayRequest = { token: this.token }
       socket.send(JSON.stringify(request))
     })
+  }
+
+  /** Close the sockets still open, so the relay hears each client go; the next call opens another. */
+  close(): Promise<void> {
+    for (const socket of this.sockets) socket.close()
+    this.sockets.clear()
+    return Promise.resolve()
+  }
+
+  private async open(call: string): Promise<RelaySocket> {
+    const socket = await this.openSocket(`${this.base}/${call}`)
+    this.sockets.add(socket)
+    socket.addEventListener('close', () => {
+      this.sockets.delete(socket)
+    })
+    return socket
   }
 
   // The network as two seams: tests substitute an in-memory relay here.
