@@ -35,7 +35,7 @@ from mirage.cli.credentials import (
 from mirage.cli.env import ENV_DAEMON_URL, ENV_TOKEN, ENV_WORKSPACE
 from mirage.cli.output import fail
 from mirage.server.auth import storage as auth_storage
-from mirage.server.auth.config import CONFIG_ENV_KEYS
+from mirage.server.auth.config import CONFIG_ENV_KEYS, JWT_KEY_ENVS
 from mirage.server.daemon_config import (
     ALLOWED_KEYS,
     DEFAULT_RATE_LIMITS,
@@ -331,19 +331,24 @@ def resolved_config() -> dict[str, tuple[str, str]]:
 
     Origin is ``"env <NAME>"``, ``"file"``, or ``"default"``, applying
     the same precedence the daemon and CLI use (env > file > default;
-    explicit per-call arguments are not represented here).
+    explicit per-call arguments are not represented here). The fixed
+    JWT key is one setting: when env gives it, neither ``jwt_pubkey``
+    nor ``jwt_pubkey_file`` in the file is in effect.
 
     Returns:
         dict[str, tuple[str, str]]: key to (effective value, origin).
     """
     home = mirage_home()
     table = read_daemon_table(home)
+    env_key = any(os.environ.get(name, "").strip() for name in JWT_KEY_ENVS)
     out: dict[str, tuple[str, str]] = {}
     for key in sorted(ALLOWED_KEYS):
         env_name = _ENV_FOR_KEY.get(key)
         env_value = os.environ.get(env_name) if env_name else None
         if env_value:
             out[key] = (env_value, f"env {env_name}")
+        elif env_key and env_name in JWT_KEY_ENVS:
+            out[key] = (_default_for_key(key), "default")
         elif str(table.get(key, "")) or (
             key == "rate_limits" and key in table
         ):

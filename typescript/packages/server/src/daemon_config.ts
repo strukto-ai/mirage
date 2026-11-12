@@ -122,7 +122,15 @@ function unescapeBasicString(body: string): string {
     /\\(?:u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8})|(.))/g,
     (whole, short?: string, long?: string, one?: string) => {
       const code = short ?? long
-      if (code !== undefined) return String.fromCodePoint(Number.parseInt(code, 16))
+      if (code !== undefined) {
+        const point = Number.parseInt(code, 16)
+        if (point > 0x10ffff || (point >= 0xd800 && point <= 0xdfff)) {
+          throw new DaemonConfigError(
+            `malformed config.toml: ${whole} is not a Unicode scalar value`,
+          )
+        }
+        return String.fromCodePoint(point)
+      }
       return (one !== undefined ? BASIC_ESCAPES[one] : undefined) ?? whole
     },
   )
