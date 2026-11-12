@@ -361,5 +361,33 @@ working directory.
 ## Sizes
 
 A size is a number of bytes, optionally followed by `K`, `M` or `G` and an
-optional `B`, in any case: `4096`, `512K`, `100MB`, `1g`. The suffixes are
-binary (`K` is 1024 bytes). Anything else is refused.
+optional `B`, in any case. The suffixes are binary: `K` is 1024 bytes.
+
+| Write | Bytes |
+| --- | --- |
+| `4096` | 4,096 |
+| `512K` | 524,288 |
+| `100MB` | 104,857,600 |
+| `1g` | 1,073,741,824 |
+
+Anything else is refused with an error naming the key, such as `1.5GB`,
+`100 MB`, `100MiB` or `1TB`.
+
+These keys take a size:
+
+```yaml workspace.yaml
+max_memory: 96MB
+max_env: 2MB
+max_body_bytes: 64MB
+cache:
+  type: ram
+  limit: 32MB
+mounts:
+  /scratch:
+    vfs: ram
+    config:
+      capacity: 100MB
+```
+
+So do the server's ceilings, in `~/.mirage/config.toml` (`max_memory = "64MB"`)
+or as environment variables (`MIRAGE_MAX_MEMORY=64MB`).
