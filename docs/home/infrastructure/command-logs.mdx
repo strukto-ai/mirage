@@ -8,8 +8,9 @@ Mirage records every line a session runs. A line is what you type, split the
 way bash splits it, so `cd /data; wc -l notes.txt` is one line. For each line,
 Mirage records the line, its exit code, the first 4096 characters of its
 stdout and stderr, and every read and every change it made to a mount, such
-as a write or a delete. Lookups such as `stat` and directory listings are not
-recorded.
+as a write or a delete. Most lookups, such as a `stat` of a file or directory
+and directory listings, are not recorded. Reading a symlink or an extended
+attribute is.
 
 Mirage keeps these records as command logs and serves them back to you, to
 the agent and to policies. If your process sets up an OpenTelemetry SDK,
