@@ -7,10 +7,9 @@ icon: clock-rotate-left
 Mirage records every line a session runs. A line is what you type, split the
 way bash splits it, so `cd /data; wc -l notes.txt` is one line. For each line,
 Mirage records the line, its exit code, the first 4096 characters of its
-stdout and stderr, and every read and every change it made to a mount, such
-as a write or a delete. Most lookups, such as a `stat` of a file or directory
-and directory listings, are not recorded. Reading a symlink or an extended
-attribute is.
+stdout and stderr, and the reads and writes it made to a mount, such as `wc`
+reading a file. Mirage does not record every mount call yet. A `stat`, a
+directory listing, a delete or a move may leave no record.
 
 Mirage keeps these records as command logs and serves them back to you, to
 the agent and to policies. If your process sets up an OpenTelemetry SDK,
@@ -46,7 +45,7 @@ Mirage also sends each line to your tracing backend as a trace.
 | Default | On | Off until your process sets up an OpenTelemetry SDK |
 | How to read them | `history`, `/.bash_history`, `mirage workspace logs`, the logs API and `ws.history()` | Your tracing tool |
 | Output kept | The first 4096 characters of stdout and stderr | The first 16 KiB of each by default |
-| Mount reads and changes | All of them | At most 1000 a line by default |
+| Mount calls | Every recorded call | At most 1000 a line by default |
 | Jobs and processes | Only the line that started them | A `job` or `process` span for each |
 | Several machines | Each machine keeps its own | All machines send to one backend |
 
@@ -115,8 +114,8 @@ line before.
 ### The raw records
 
 Underneath, Mirage stores each line as records linked by `parent`: a
-`command` record when the line starts, a `vfs` record for each read or
-change, and a `result` record when it ends.
+`command` record when the line starts, a `vfs` record for each recorded
+mount call, and a `result` record when it ends.
 `mirage workspace logs -w demo --jsonl` prints them, oldest first:
 
 ```json
@@ -125,7 +124,8 @@ change, and a `result` record when it ends.
 {"session":"01a1ce07-020a-7030-b097-92dc1f296149","timestamp":"2026-11-12T04:32:08.599Z","cwd":"/data","type":"result","parent":"line_01a1ce07-038a-7061-8dec-17d364f9ec2b","duration_ms":12,"exit_code":0,"stdout":"3 notes.txt\n","stderr":""}
 ```
 
-`ws.history()` returns the same records, with `timestamp` in epoch
+`await ws.history(vfs=True)` in Python, or `await ws.history({ vfs: true })`
+in TypeScript, returns the same records, with `timestamp` in epoch
 milliseconds instead of a date string.
 
 ### The trace
@@ -182,7 +182,7 @@ read:
 | <code style={{ whiteSpace: 'nowrap' }}>{'/.bash_history'}</code> | The session's newest 10,000 lines, as a file. [Policies](/home/policy/policies) read the logs from this file. |
 | <code style={{ whiteSpace: 'nowrap' }}>{'mirage workspace logs'}</code> | Entries for finished lines, newest first, one page at a time. <code style={{ whiteSpace: 'nowrap' }}>--jsonl</code> prints the records of every finished line, oldest first. See the [CLI reference](/home/access/cli). |
 | <code style={{ whiteSpace: 'nowrap' }}>{'GET /v1/workspaces/{id}/logs'}</code> | The same pages over HTTP. See [List workspace logs](/api/operations/workspaces/list-workspace-logs). |
-| <code style={{ whiteSpace: 'nowrap' }}>{'ws.history()'}</code> | The `command` and `result` records from every session, oldest first, at most the newest 10,000. Pass `vfs=True` in Python, or `{ vfs: true }` in TypeScript, to add the `vfs` records. In Python it is a coroutine, so `await` it. |
+| <code style={{ whiteSpace: 'nowrap' }}>{'ws.history()'}</code> | The `command` and `result` records from every session, oldest first, at most the newest 10,000. Pass `vfs=True` in Python, or `{ vfs: true }` in TypeScript, to add the `vfs` records. It is async in both languages, so `await` it. |
 
 `mirage shell --no-record` runs a line without logging it.
 
@@ -401,7 +401,7 @@ and alerts.
 | Span | Sent | Attributes |
 | --- | --- | --- |
 | <code style={{ whiteSpace: 'nowrap' }}>command</code> | When the line ends | `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.id`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.timestamp`, `mirage.duration_ms`, `mirage.stdout`, `mirage.stderr`, `mirage.vfs.dropped` |
-| <code style={{ whiteSpace: 'nowrap' }}>vfs.&lt;call&gt;</code> | For each read or change the line makes to a mount, such as `vfs.read` | `mirage.vfs.path`, `mirage.vfs.source`, `mirage.vfs.bytes`, `mirage.vfs.timestamp`, `mirage.vfs.duration_ms` |
+| <code style={{ whiteSpace: 'nowrap' }}>vfs.&lt;call&gt;</code> | For each recorded call the line makes to a mount, such as `vfs.read` | `mirage.vfs.path`, `mirage.vfs.source`, `mirage.vfs.bytes`, `mirage.vfs.timestamp`, `mirage.vfs.duration_ms` |
 | <code style={{ whiteSpace: 'nowrap' }}>job</code> | When an `&` job ends | `mirage.job.id`, `mirage.job.number`, `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.id`, `mirage.machine.type`, `mirage.machine.name`, `mirage.machine.id`, `process.pid`, `mirage.process.pid`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.signal` |
 | <code style={{ whiteSpace: 'nowrap' }}>process</code> | When a process the line started ends | `process.pid`, `mirage.process.pid`, `process.parent_pid`, `process.group_leader.pid`, `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.id`, `mirage.machine.type`, `mirage.machine.name`, `mirage.machine.id`, `process.command_line`, `mirage.cwd`, `mirage.runtime`, `process.exit.code`, `mirage.signal`, `mirage.error` |
 
@@ -419,7 +419,7 @@ and alerts.
 | <code style={{ whiteSpace: 'nowrap' }}>mirage.process.pid</code> | Mirage's own number for the process, the same as `process.pid` for a command Mirage runs itself. |
 | <code style={{ whiteSpace: 'nowrap' }}>mirage.cwd</code> | The directory the line started in. |
 | <code style={{ whiteSpace: 'nowrap' }}>mirage.timestamp</code> | The span's start, in milliseconds. It repeats the span's own time for tracers that can't set it, such as Cloudflare Workers custom spans. `mirage.duration_ms` does the same for its length. |
-| <code style={{ whiteSpace: 'nowrap' }}>mirage.vfs.timestamp</code> | When the read or change ended, in milliseconds. |
+| <code style={{ whiteSpace: 'nowrap' }}>mirage.vfs.timestamp</code> | When the mount call ended, in milliseconds. |
 
 Traces cover what runs on the workspace's machine and the runtimes it
 reaches. A program that a runtime runs on another host sends no spans of its
@@ -431,7 +431,7 @@ own.
 | --- | --- | --- |
 | <code style={{ whiteSpace: 'nowrap' }}>MIRAGE_TRACE_CONTENT_MAX_BYTES</code> | 16 KiB | How much of the output `mirage.stdout` and `mirage.stderr` each keep, as UTF-8 text. The default fits the 64 KB that a Cloudflare Workers span allows for all its attributes. |
 | <code style={{ whiteSpace: 'nowrap' }}>MIRAGE_TRACE_MAX_SPANS</code> | 1000 | The most `vfs.<call>` spans one line sends, so a `find` over a large tree sends at most that many. `mirage.vfs.dropped` counts the rest. Command logs keep all of them. |
-| <code style={{ whiteSpace: 'nowrap' }}>MIRAGE_TRACE_CAPTURE_CONTENT</code> | `true` | Set to `false` to keep output and mount reads and changes out of traces. `command` spans then carry no output, and Mirage sends no `vfs.<call>` spans. |
+| <code style={{ whiteSpace: 'nowrap' }}>MIRAGE_TRACE_CAPTURE_CONTENT</code> | `true` | Set to `false` to keep output and mount calls out of traces. `command` spans then carry no output, and Mirage sends no `vfs.<call>` spans. |
 
 ## Next steps
 
