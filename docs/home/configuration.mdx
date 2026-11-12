@@ -62,7 +62,7 @@ not change it. See [From a template](/home/access/cli#from-a-template).
 | `max_env` | Cap on each session's variables, functions and aliases, as a [size](#sizes): `2MB` by default, `null` for no cap. See [security limits](/home/security). |
 | `network` | Choose where the workspace's connections may go, described [below](#network). |
 | `system_time` | Start the workspace's clock at a set time, described [below](#system-time). |
-| `env` | Seed literal or managed environment variables, described below. |
+| `env` | Environment variables each session starts with, literal or fetched from a credential source. See [Credentials](/home/authentication#set-environment-variables). |
 | `secrets` | Declare named [credential sources](/home/authentication). |
 | `machines` | Name the [machines](/home/setup/machine/overview) programs can run on. |
 | `cache`, `index` | Configure cached file content and directory/stat metadata, described [below](#workspace-state-and-caches). |
@@ -304,7 +304,7 @@ clis:
 ```
 
 A `script` entry's `config` cannot hold a credential pointer. Read the
-credential from a managed `env` entry instead.
+credential from an [`env` pointer](/home/authentication#set-environment-variables) instead.
 
 ## Workspace state and caches
 
@@ -321,28 +321,6 @@ one in YAML, Python and TypeScript.
 A `cache` or `index` block needs a `type`. A `store` block without one keeps
 everything in memory. A `redis` type defaults `url` to
 `redis://localhost:6379/0`.
-
-## Environment and credential pointers
-
-A string sets a literal exported variable. A pointer fetches a credential
-instead of storing its value in YAML:
-
-```yaml
-env:
-  APP_ENV: production
-  API_TOKEN:
-    from: env
-    readonly: true
-```
-
-Here `API_TOKEN` comes from the Mirage process environment. Managed entries
-default `key` to the variable's name and are always exported. `readonly`
-prevents shell assignment and `unset`. Fetching is lazy on first reference;
-`fetch: eager` requests it before execution even when the line does not name it.
-
-Pointers inside mount or registered CLI configs require an explicit `key` and
-are resolved before the provider is constructed. See [Service credentials](/home/authentication)
-for `from`, `ref` and `key` examples.
 
 ## Values and paths
 
