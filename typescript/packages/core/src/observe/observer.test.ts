@@ -125,6 +125,20 @@ function decode(b: Uint8Array | undefined): string {
   return b === undefined ? '' : new TextDecoder().decode(b)
 }
 
+/** A span's kind and the command it stands for. Mirrors Python's `_span_name`. */
+function spanName(s: Seen): string {
+  return `${s.name} ${String(s.attributes['process.command_line'] ?? s.attributes['mirage.command'])}`
+}
+
+/** The machine a span names: its type, name and provider id. */
+function spanMachine(span: Seen | undefined): unknown[] {
+  return [
+    span?.attributes['mirage.machine.type'],
+    span?.attributes['mirage.machine.name'],
+    span?.attributes['mirage.machine.id'],
+  ]
+}
+
 describe('Observer', () => {
   afterEach(() => {
     trace.disable()
@@ -751,13 +765,8 @@ it('sends an ended job and process as spans', async () => {
     expect(sleep?.attributes['mirage.cwd']).toBe('/')
     const machine = ws.processTable.machine
     const host = machine.toString()
-    const where = (span: Seen | undefined): unknown[] => [
-      span?.attributes['mirage.machine.type'],
-      span?.attributes['mirage.machine.name'],
-      span?.attributes['mirage.machine.id'],
-    ]
     expect(sleep?.attributes['host.id']).toBe(host)
-    expect(where(sleep)).toEqual(['host', machine.name, machine.name])
+    expect(spanMachine(sleep)).toEqual(['host', machine.name, machine.name])
     const [command] = spans.filter((s) => s.name === 'command')
     expect(command?.attributes['mirage.line.id']).toBe(line?.id.value)
     expect(command?.attributes['host.id']).toBe(host)
@@ -771,7 +780,7 @@ it('sends an ended job and process as spans', async () => {
     expect(sleep?.parent).toEqual(job?.context)
     expect(job?.attributes['process.pid']).toBe(sleep?.attributes['process.pid'])
     expect(job?.attributes['host.id']).toBe(host)
-    expect(where(job)).toEqual(['host', machine.name, machine.name])
+    expect(spanMachine(job)).toEqual(['host', machine.name, machine.name])
     expect(job?.attributes['mirage.cwd']).toBe('/')
   } finally {
     await ws.close()
@@ -949,14 +958,12 @@ it("puts a nested job's process under its job", async () => {
     await ws.close()
     trace.disable()
   }
-  const name = (s: Seen): string =>
-    `${s.name} ${String(s.attributes['process.command_line'] ?? s.attributes['mirage.command'])}`
   const byId = new Map(spans.map((s) => [s.context.spanId, s]))
-  let span = spans.find((s) => name(s) === 'process train 1')
+  let span = spans.find((s) => spanName(s) === 'process train 1')
   const chain: string[] = []
   while (span?.parent !== undefined && byId.has(span.parent.spanId)) {
     span = byId.get(span.parent.spanId)
-    if (span !== undefined) chain.push(name(span))
+    if (span !== undefined) chain.push(spanName(span))
   }
   expect(chain).toEqual([
     'job train 1',
