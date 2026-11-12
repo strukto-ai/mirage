@@ -210,9 +210,13 @@ class Runtimes:
     def _install(
         self, entries: list[Runtime[Any]], bindings: dict[str, Runtime[Any]]
     ) -> None:
-        for capture, winner, shadowed in shadowed_captures(entries):
+        routed = self._registry.policies.has_placement()
+        for capture, winner, shadowed in (
+            [] if routed else shadowed_captures(entries)
+        ):
             logger.warning(
-                "runtime %r never runs %r: %r, listed before it, takes it",
+                "runtime %r runs %r only when a route names it: %r, "
+                "listed before it, takes it",
                 shadowed,
                 capture,
                 winner,

@@ -244,13 +244,42 @@ async def test_a_capture_that_never_wins_is_logged(caplog):
     try:
         ws.add_runtime(Box("box", "python3"))
         said = [r.getMessage() for r in caplog.records]
-        assert said == [
-            "runtime 'b' never runs 'python3': 'a', listed before it, takes it",
-            "runtime 'b' never runs 'python': 'a', listed before it, takes it",
-            "runtime 'a' never runs 'python3': 'box', listed before it, takes it",
-            "runtime 'b' never runs 'python3': 'box', listed before it, takes it",
-            "runtime 'b' never runs 'python': 'a', listed before it, takes it",
+        shadowed = [
+            ("b", "python3", "a"),
+            ("b", "python", "a"),
+            ("a", "python3", "box"),
+            ("b", "python3", "box"),
+            ("b", "python", "a"),
         ]
+        assert said == [
+            f"runtime '{entry}' runs '{capture}' only when a route names it: "
+            f"'{winner}', listed before it, takes it"
+            for entry, capture, winner in shadowed
+        ]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_capture_is_logged_only_while_no_route_policy_can_reach_it(
+    caplog,
+):
+    caplog.set_level(logging.WARNING, logger="mirage.workspace.workspace")
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[Engine("a"), Engine("b"), "workspace"],
+        route_policy=lambda ctx: "b" if "fast" in ctx.line else None,
+    )
+    try:
+        assert [r.getMessage() for r in caplog.records] == []
+        ws.policies.place(None)
+        ws.add_runtime(Box("box", "python"))
+        said = [r.getMessage() for r in caplog.records]
+        assert said[0] == (
+            "runtime 'a' runs 'python' only when a route names it: "
+            "'box', listed before it, takes it"
+        )
     finally:
         await ws.close()
 

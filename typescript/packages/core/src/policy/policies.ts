@@ -689,6 +689,11 @@ export class Policies {
     this.rescan()
   }
 
+  /** Whether a route policy is placed, which can name a runtime a capture listed earlier would otherwise take. */
+  hasPlacement(): boolean {
+    return this.placement !== null
+  }
+
   /**
    * True when any policy defines `method`. O(1); the op seam gates on it
    * so a workspace with no op policies pays nothing per VFS op.
