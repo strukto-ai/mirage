@@ -7,7 +7,8 @@ icon: gauge
 A line an agent writes can loop forever, start processes without end, or grow
 a variable until memory runs out. In Mirage it runs beside other agents'
 sessions, in one process or one isolate, so each of these would cost them too.
-Every limit below is on by default except `max_workspaces`, and each stops
+Every limit below is on by default except `max_workspaces` and `capacity`,
+and each stops
 its case the way bash and Linux would, with the same exit status.
 
 Three layers set them:
