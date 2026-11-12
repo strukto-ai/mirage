@@ -31,6 +31,7 @@ from mirage.cli.credentials import (
     write_login,
 )
 from mirage.cli.settings import DaemonSettings
+from mirage.server.auth import storage as auth_storage
 from mirage.server.daemon_config import DaemonConfigError
 from mirage.server.env import ENV_HOME
 
@@ -178,8 +179,9 @@ def test_a_remote_server_slow_to_answer_is_waited_for(tmp_path, monkeypatch):
 def test_a_local_daemon_busy_past_the_first_probe_is_waited_for(
     tmp_path, monkeypatch
 ):
-    # A daemon busy with other commands misses the half-second probe; it
-    # holds its port, so the command waits for it and spawns nothing.
+    # A daemon another command just spawned misses the half-second probe
+    # and writes its token meanwhile; it holds its port, so the command
+    # waits for it, spawns nothing and picks the token up.
     monkeypatch.setenv(ENV_HOME, str(tmp_path))
     spawned = []
     monkeypatch.setattr(
@@ -187,11 +189,17 @@ def test_a_local_daemon_busy_past_the_first_probe_is_waited_for(
         lambda *args, **kwargs: spawned.append(kwargs),
     )
     asked = []
+    written = []
 
     class Busy(BaseHTTPRequestHandler):
         def do_GET(self):
             asked.append(self.path)
             if len(asked) == 1:
+                written.append(
+                    auth_storage.ensure_token_file(
+                        auth_storage.default_token_file()
+                    )
+                )
                 time.sleep(1)
             self.send_response(200)
             self.end_headers()
@@ -205,6 +213,7 @@ def test_a_local_daemon_busy_past_the_first_probe_is_waited_for(
     try:
         with DaemonClient(DaemonSettings(url=url)) as client:
             client.ensure_running(allow_spawn=False)
+            assert client.settings.auth_token == written[0]
     finally:
         server.shutdown()
         server.server_close()
@@ -249,7 +258,22 @@ def test_a_daemon_that_lost_the_bind_waits_for_the_winner(
     # the winner, already listening, is still starting up.
     monkeypatch.setenv(ENV_HOME, str(tmp_path))
     monkeypatch.delenv("MIRAGE_DAEMON_PORT", raising=False)
-    monkeypatch.setattr("mirage.cli.client.subprocess.Popen", _GonePopen)
+    spawned = []
+
+    def popen(cmd, **kwargs):
+        spawned.append(cmd)
+        return _GonePopen(cmd)
+
+    monkeypatch.setattr("mirage.cli.client.subprocess.Popen", popen)
+    # The winner binds only after this command's first look at the port.
+    real = DaemonClient._listening
+    looked = []
+
+    def listening(self):
+        looked.append(True)
+        return len(looked) > 1 and real(self)
+
+    monkeypatch.setattr(DaemonClient, "_listening", listening)
     asked = []
 
     class Starting(BaseHTTPRequestHandler):
@@ -271,6 +295,7 @@ def test_a_daemon_that_lost_the_bind_waits_for_the_winner(
         server.shutdown()
         server.server_close()
     assert asked[-1] == "/v1/health" and len(asked) == 4
+    assert len(spawned) == 1
 
 
 def test_the_token_is_the_settings_own_else_the_login(tmp_path, monkeypatch):

@@ -179,6 +179,18 @@ class DaemonClient:
             deadline = time.monotonic() + startup_timeout
             while time.monotonic() < deadline:
                 if self.is_reachable(timeout=1.0):
+                    # The daemon another command spawned may have written
+                    # the token after these settings were read.
+                    if (
+                        not self.settings.auth_token
+                        and self.settings.login is None
+                    ):
+                        self.settings.auth_token = (
+                            auth_storage.read_token_file(
+                                auth_storage.default_token_file()
+                            )
+                            or ""
+                        )
                     return
                 time.sleep(0.1)
             raise DaemonUnreachable(
