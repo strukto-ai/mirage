@@ -111,7 +111,7 @@ describe('RecordResourceStore', () => {
         () => s.getEntry('vfs', name),
         () => s.deleteEntry('vfs', name),
         () => s.deletePolicy(name),
-        () => s.restoreTemplate(name),
+        () => s.deleteTemplate(name),
       ]) {
         await expect(call()).rejects.toMatchObject({ code: 'invalid' })
       }

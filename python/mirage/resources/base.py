@@ -30,8 +30,8 @@ class ResourceStore(ABC):
     """One scope's saved configs: vfs, cli, runtime and store entries,
     policies and templates. Every backend answers the same way: lists
     sort by name, an entry's sealed values leave only through
-    ``reveal_entry``, deleting an entry wipes them, and a deleted template
-    can be restored. A missing name raises ``ResourceError("not_found")``.
+    ``reveal_entry`` and deleting an entry wipes them. A missing name
+    raises ``ResourceError("not_found")``.
     """
 
     scope: str
@@ -137,14 +137,3 @@ class ResourceStore(ABC):
 
     @abstractmethod
     async def delete_template(self, name: str) -> None: ...
-
-    @abstractmethod
-    async def restore_template(self, name: str) -> Template:
-        """Bring back the template last deleted under ``name``.
-
-        Args:
-            name (str): the template's name.
-
-        Raises:
-            ResourceError: ``conflict`` while a live one has the name.
-        """

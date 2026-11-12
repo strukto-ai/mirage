@@ -121,12 +121,10 @@ def test_list_prints_json_piped_and_takes_no_output_flag(client):
     assert _invoke("get", "a", "-o", "json").exit_code == 2
 
 
-def test_delete_and_restore_name_the_template(client):
+def test_delete_names_the_template(client):
     assert _invoke("delete", "a b").exit_code == 0
-    assert _invoke("restore", "a b").exit_code == 0
     assert [c[:2] for c in client.calls] == [
         ("DELETE", "/v1/templates/a%20b"),
-        ("POST", "/v1/templates/a%20b/restore"),
     ]
 
 
@@ -182,7 +180,7 @@ def test_get_yaml_keeps_ambiguous_strings_strings(client, monkeypatch):
     assert parse_yaml(done.output)["config"] == saved["config"]
 
 
-@pytest.mark.parametrize("command", ["get", "delete", "restore"])
+@pytest.mark.parametrize("command", ["get", "delete"])
 def test_a_template_is_named_by_id(command):
     result = _invoke(command, "--help")
     assert result.exit_code == 0

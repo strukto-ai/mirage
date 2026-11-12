@@ -88,7 +88,5 @@ describe('filesResourceStore', () => {
     mkdirSync(join(dir, 'template'))
     writeFileSync(join(dir, 'template', 't.yaml'), 'name: t\nconfig: {since: 2020-01-01}\n')
     expect((await store.getTemplate('t')).config).toEqual({ since: '2020-01-01' })
-    await store.deleteTemplate('t')
-    expect((await store.restoreTemplate('t')).config).toEqual({ since: '2020-01-01' })
   })
 })

@@ -37,9 +37,6 @@ POLICY_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,59}\.py")
 # The source a config names a saved field through: {from: strukto, ref, key}.
 STRUKTO = "strukto"
 
-# The folder deleted templates wait in until restored.
-DELETED_TEMPLATES = ".deleted/template"
-
 NOUN: dict[ResourceKind, str] = {
     "vfs": "VFS",
     "cli": "CLI",

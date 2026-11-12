@@ -1448,7 +1448,6 @@
     "delete_template": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
     "get_template": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
     "list_templates": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
-    "restore_template": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
     "router": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp."
    },
    "typescript_only": {
@@ -1474,8 +1473,7 @@
     "create_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
     "list_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
     "get_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
-    "delete_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
-    "restore_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function."
+    "delete_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function."
    },
    "typescript_only": {
     "registerTemplateCommands": "Commander builds the template group in one function; Typer declares it as the module's app.",

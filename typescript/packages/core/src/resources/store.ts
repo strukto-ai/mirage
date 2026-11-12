@@ -14,7 +14,7 @@
 
 import { compareCodePoints } from '../utils/sort.ts'
 import type { ResourceStore } from './base.ts'
-import { DELETED_TEMPLATES, ENTRY_KINDS, NAME, NOUN } from './constants.ts'
+import { ENTRY_KINDS, NAME, NOUN } from './constants.ts'
 import { ResourceError } from './errors.ts'
 import { usesOf } from './refs.ts'
 import type {
@@ -256,16 +256,11 @@ export class RecordResourceStore implements ResourceStore {
     })
   }
 
-  private async templateIn(folder: string, name: string): Promise<Template | null> {
-    checkName(TEMPLATE, name)
-    const record = await this.records.read(folder, name)
-    return record === null ? null : templateOf(name, record)
-  }
-
   private async liveTemplate(name: string): Promise<Template> {
-    const template = await this.templateIn(TEMPLATE, name)
-    if (template === null) throw notFound(TEMPLATE, name)
-    return template
+    checkName(TEMPLATE, name)
+    const record = await this.records.read(TEMPLATE, name)
+    if (record === null) throw notFound(TEMPLATE, name)
+    return templateOf(name, record)
   }
 
   private async templates(): Promise<Template[]> {
@@ -307,23 +302,8 @@ export class RecordResourceStore implements ResourceStore {
 
   deleteTemplate(name: string): Promise<void> {
     return this.serial(async () => {
-      const template = await this.liveTemplate(name)
-      await this.records.write(DELETED_TEMPLATES, name, { ...template })
-      await this.records.remove(TEMPLATE, name)
-    })
-  }
-
-  restoreTemplate(name: string): Promise<Template> {
-    return this.serial(async () => {
-      const template = await this.templateIn(DELETED_TEMPLATES, name)
-      if (template === null)
-        throw new ResourceError('not_found', `no deleted template named ${name}`)
-      if ((await this.records.read(TEMPLATE, name)) !== null) {
-        throw new ResourceError('conflict', `a template named ${name} exists again`)
-      }
-      await this.records.write(TEMPLATE, name, { ...template })
-      await this.records.remove(DELETED_TEMPLATES, name)
-      return template
+      checkName(TEMPLATE, name)
+      if (!(await this.records.remove(TEMPLATE, name))) throw notFound(TEMPLATE, name)
     })
   }
 }

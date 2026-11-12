@@ -99,7 +99,3 @@ async def test_a_hand_edited_date_stays_a_string(tmp_path):
         "name: t\nconfig: {since: 2020-01-01}\n"
     )
     assert (await store.get_template("t")).config == {"since": "2020-01-01"}
-    await store.delete_template("t")
-    assert (await store.restore_template("t")).config == {
-        "since": "2020-01-01"
-    }

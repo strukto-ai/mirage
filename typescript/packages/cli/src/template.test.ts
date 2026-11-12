@@ -88,7 +88,7 @@ describe('mirage template', () => {
     const template = program.commands.find((c) => c.name() === 'template')
     const first = (name: string) =>
       template?.commands.find((c) => c.name() === name)?.registeredArguments[0]?.name()
-    expect(['get', 'delete', 'restore'].map(first)).toEqual(['id', 'id', 'id'])
+    expect(['get', 'delete'].map(first)).toEqual(['id', 'id'])
     expect(first('create')).toBe('name')
   })
 
