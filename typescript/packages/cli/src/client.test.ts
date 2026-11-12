@@ -18,6 +18,7 @@ import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { defaultTokenFile, ensureTokenFile } from '@struktoai/mirage-server/auth/storage'
 import { DaemonConfigError } from '@struktoai/mirage-server/daemon_config'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DaemonClient, DaemonUnreachable } from './client.ts'
@@ -92,12 +93,13 @@ describe('DaemonClient spawn wait', () => {
   let home: string
   let originalHome: string | undefined
   const gone = { exitCode: 3, signalCode: null } as unknown as ChildProcess
-  const spawned = (): void => {
-    vi.spyOn(
-      DaemonClient.prototype as unknown as { spawnDaemon: () => ChildProcess },
-      'spawnDaemon',
-    ).mockReturnValue(gone)
-  }
+  const spawned = () =>
+    vi
+      .spyOn(
+        DaemonClient.prototype as unknown as { spawnDaemon: () => ChildProcess },
+        'spawnDaemon',
+      )
+      .mockReturnValue(gone)
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'mirage-cli-client-'))
@@ -139,7 +141,12 @@ describe('DaemonClient spawn wait', () => {
     })
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
     const { port } = server.address() as AddressInfo
-    spawned()
+    const spawn = spawned()
+    // The winner binds only after this command's first look at the port.
+    vi.spyOn(
+      DaemonClient.prototype as unknown as { listening: () => Promise<boolean> },
+      'listening',
+    ).mockResolvedValueOnce(false)
     const client = new DaemonClient({
       context: 'local',
       url: `http://127.0.0.1:${String(port)}`,
@@ -152,6 +159,39 @@ describe('DaemonClient spawn wait', () => {
       await new Promise((resolve) => server.close(resolve))
     }
     expect([asked.length, asked.at(-1)]).toEqual([4, '/v1/health'])
+    expect(spawn).toHaveBeenCalledTimes(1)
+  })
+
+  it('waits for a local daemon busy past the first probe', async () => {
+    // Twin of test_a_local_daemon_busy_past_the_first_probe_is_waited_for.
+    let asked = 0
+    let written = ''
+    const server = createServer((_req, res) => {
+      asked += 1
+      if (asked === 1) written = ensureTokenFile(defaultTokenFile())
+      setTimeout(() => res.writeHead(200).end(), asked === 1 ? 1000 : 0)
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const { port } = server.address() as AddressInfo
+    const spawn = vi.spyOn(
+      DaemonClient.prototype as unknown as { spawnDaemon: () => ChildProcess },
+      'spawnDaemon',
+    )
+    const client = new DaemonClient({
+      context: 'local',
+      url: `http://127.0.0.1:${String(port)}`,
+      authToken: '',
+      idleGraceSeconds: 30,
+    })
+    try {
+      await client.ensureRunning({ allowSpawn: false })
+      expect(client.settings.authToken).toBe(written)
+    } finally {
+      server.closeAllConnections()
+      await new Promise((resolve) => server.close(resolve))
+    }
+    expect(asked).toBeGreaterThanOrEqual(2)
+    expect(spawn).not.toHaveBeenCalled()
   })
 })
 

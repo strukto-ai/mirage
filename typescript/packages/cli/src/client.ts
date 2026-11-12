@@ -18,8 +18,13 @@ import { existsSync, mkdirSync, openSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { connect } from 'node:net'
 import { join } from 'node:path'
+import { debuglog } from 'node:util'
 import { AuthMode } from '@struktoai/mirage-server/auth/config'
-import { defaultTokenFile, ensureTokenFile } from '@struktoai/mirage-server/auth/storage'
+import {
+  defaultTokenFile,
+  ensureTokenFile,
+  readTokenFile,
+} from '@struktoai/mirage-server/auth/storage'
 import { readDaemonTable, validateDaemonTable } from '@struktoai/mirage-server/daemon_config'
 import { mirageHome } from '@struktoai/mirage-server/paths'
 
@@ -28,6 +33,8 @@ import { LoginError, freshToken, loginCommand, loginPath, readLogin } from './cr
 import { isLocalUrl, loadDaemonSettings, type DaemonSettings } from './settings.ts'
 
 const REMOTE_PROBE_TIMEOUT_SECONDS = 10
+
+const logger = { debug: debuglog('mirage') }
 
 /** The daemon is down and may not be spawned, or a spawned one never answered. */
 export class DaemonUnreachable extends Error {
@@ -174,13 +181,14 @@ export class DaemonClient {
 
   /**
    * Ensure the daemon is reachable, optionally spawning it. `timeoutMs` is
-   * how long a spawned daemon has to answer `/v1/health`: a first start
-   * loads the whole server. A daemon that exits first ends the wait, unless
-   * another daemon already holds the port. A remote server has
-   * `REMOTE_PROBE_TIMEOUT_SECONDS` to answer `/v1/health`: a new connection
-   * over the internet, or a server woken from idle, can take seconds, where a
-   * local daemon answers at once or is not up. Mirrors Python's
-   * `ensure_running`.
+   * how long a daemon that holds the port, or the spawned one, has to answer
+   * `/v1/health`: a first start loads the whole server. A spawned daemon that
+   * exits first ends the wait, unless another daemon already holds the port.
+   * A remote server has `REMOTE_PROBE_TIMEOUT_SECONDS` to answer
+   * `/v1/health`: a new connection over the internet, or a server woken from
+   * idle, can take seconds. A local daemon answers at once unless it is busy
+   * or starting; one that holds its port is waited for, never reported
+   * unreachable or spawned beside. Mirrors Python's `ensure_running`.
    */
   async ensureRunning(opts: { allowSpawn?: boolean; timeoutMs?: number } = {}): Promise<void> {
     const allowSpawn = opts.allowSpawn ?? true
@@ -190,6 +198,23 @@ export class DaemonClient {
       throw new DaemonUnreachable(`daemon not reachable at ${this.settings.url}`)
     }
     if (await this.isReachable()) return
+    if (await this.listening()) {
+      const deadline = Date.now() + timeoutMs
+      while (Date.now() < deadline) {
+        if (await this.isReachable(1000)) {
+          // The daemon another command spawned may have written the token
+          // after these settings were read.
+          if (this.settings.authToken === '' && this.settings.login === undefined) {
+            this.settings.authToken = readTokenFile(defaultTokenFile()) ?? ''
+          }
+          return
+        }
+        await new Promise((r) => setTimeout(r, 100))
+      }
+      throw new DaemonUnreachable(
+        `daemon at ${this.settings.url} accepts connections but did not answer /v1/health within ${String(timeoutMs)}ms`,
+      )
+    }
     if (!allowSpawn) {
       throw new DaemonUnreachable(
         `daemon not reachable at ${this.settings.url}; run \`mirage workspace create CONFIG.yaml\` to spawn one`,
@@ -230,7 +255,7 @@ export class DaemonClient {
         done(false)
       })
       sock.once('error', (err) => {
-        console.debug(`nothing accepts on the daemon's port: ${String(err)}`)
+        logger.debug("nothing accepts on the daemon's port: %s", err)
         done(false)
       })
     })

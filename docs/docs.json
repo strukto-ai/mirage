@@ -337,7 +337,6 @@
               "home/infrastructure/namespace",
               "home/infrastructure/sessions",
               "home/infrastructure/command-logs",
-              "home/infrastructure/tracing",
               "home/infrastructure/jobs",
               "home/infrastructure/file-cache",
               "home/infrastructure/file-index"
