@@ -207,7 +207,9 @@ export function runtimeClass(
  *
  * Naming a runtime places a line's captured stages on it without
  * touching capability: only commands the runtime captures rebind,
- * everything else keeps its normal binding.
+ * everything else keeps its normal binding. The name is an entry's, or its
+ * runtime's (`remote` for `remote:gpu`) while the workspace has one entry
+ * of it; throws for `workspace`, no entry or several.
  */
 export function runtimeBindingsFor(
   entries: readonly Runtime[],
@@ -216,16 +218,21 @@ export function runtimeBindingsFor(
   if (name === 'workspace') {
     throw new Error(`'workspace' is the default executor, not a runtime you can select`)
   }
-  for (const entry of entries) {
-    if (entry.name === name) {
-      // Null prototype: captures are arbitrary command names.
-      const bindings: Record<string, Runtime> = Object.create(null) as Record<string, Runtime>
-      for (const command of entry.captures) bindings[command] = entry
-      return bindings
-    }
+  const cls = NAMED[name]
+  const exact = entries.filter((e) => e.name === name)
+  const found =
+    exact.length > 0 ? exact : entries.filter((e) => cls !== undefined && e instanceof cls)
+  const [entry] = found
+  if (found.length === 1 && entry !== undefined) {
+    // Null prototype: captures are arbitrary command names.
+    const bindings: Record<string, Runtime> = Object.create(null) as Record<string, Runtime>
+    for (const command of entry.captures) bindings[command] = entry
+    return bindings
   }
   const known = entries.map((e) => `'${e.name}'`).join(', ')
-  throw new Error(`unknown runtime: '${name}' (workspace runtimes: ${known})`)
+  throw new Error(
+    `${found.length > 0 ? 'ambiguous' : 'unknown'} runtime: '${name}' (workspace runtimes: ${known})`,
+  )
 }
 
 /**

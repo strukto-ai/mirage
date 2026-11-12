@@ -21,6 +21,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.js.base import JsRuntime
 from mirage.runtime.language import LanguageRuntime
+from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.python import LocalRuntime
 from mirage.runtime.python.base import PythonRuntime
@@ -183,6 +184,21 @@ def test_bind_commands_rejects_duplicate_names():
         bind_commands([LocalRuntime(), LocalRuntime()])
 
 
+def test_bind_commands_takes_a_remote_entry_per_machine():
+    a, b = RemoteRuntime(machine="a"), RemoteRuntime(["node"], machine="b")
+    assert [a.name, b.name, RemoteRuntime().name] == [
+        "remote:a",
+        "remote:b",
+        "remote",
+    ]
+    bindings = bind_commands([a, b])
+    assert (bindings["@external"], bindings["node"]) == (a, b)
+    with pytest.raises(
+        ValueError, match="duplicate runtime entry: 'remote:a'"
+    ):
+        bind_commands([a, RemoteRuntime(["node"], machine="a")])
+
+
 def test_every_runtime_declares_captures():
     for cls in NAMED.values():
         assert cls.captures or cls is WorkspaceRuntime
@@ -204,6 +220,20 @@ def test_runtime_bindings_for_maps_only_the_named_captures():
 def test_runtime_bindings_for_refuses_a_name_it_cannot_bind(name, refusal):
     with pytest.raises(ValueError, match=refusal):
         runtime_bindings_for([FakeRuntime(), WorkspaceRuntime()], name)
+
+
+def test_runtime_bindings_for_takes_a_runtimes_name_while_it_has_one_entry():
+    a, b = RemoteRuntime(machine="a"), RemoteRuntime(["node"], machine="b")
+    assert runtime_bindings_for([a, WorkspaceRuntime()], "remote") == {
+        "@external": a
+    }
+    assert runtime_bindings_for([a, b], "remote:b") == {"node": b}
+    with pytest.raises(
+        ValueError,
+        match=r"ambiguous runtime: 'remote' \(workspace runtimes: 'remote:a',"
+        r" 'remote:b'\)",
+    ):
+        runtime_bindings_for([a, b], "remote")
 
 
 class _LineRuntime(Runtime, LineExecutorMixin):

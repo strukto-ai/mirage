@@ -25,7 +25,7 @@ from mirage.execution.job.constants import HANGUP_EXIT_CODE
 from mirage.execution.machine.types import MachineProcess
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.types import ProcessUsage
-from mirage.execution.types import MachineId, MachinePid, MachineResources
+from mirage.execution.types import MachineName, MachinePid, MachineResources
 from mirage.io.types import ByteSource
 from mirage.machine.config import MachineConfig, check_mount_type
 from mirage.machine.constants import (
@@ -238,9 +238,9 @@ class MachineHandle:
             )
 
     @property
-    def id(self) -> MachineId:
-        """The machine's id, ``<provider>:<name>``."""
-        return MachineId(self.provider, self.name)
+    def machine(self) -> MachineName:
+        """The machine's name with its provider, ``<provider>:<name>``."""
+        return MachineName(self.provider, self.name)
 
     @property
     def instance(self) -> str:
@@ -396,11 +396,11 @@ class MachineHandle:
             await asyncio.shield(self.stop(tag, signum or 15))
             raise
         except ConnectionLostError as exc:
-            logger.debug("%s: connection lost", self.id, exc_info=True)
+            logger.debug("%s: connection lost", self.machine, exc_info=True)
             if runner is not None:
                 runner.program_signaled(HANGUP_EXIT_CODE - 128)
             await pid_line.finish()
-            said = f"mirage: {self.id}: connection lost\n".encode()
+            said = f"mirage: {self.machine}: connection lost\n".encode()
             done = RunResult(
                 stdout=exc.stdout,
                 stderr=(exc.stderr or b"") + bytes(kept[1]) + said,
@@ -482,7 +482,7 @@ class MachineHandle:
             try:
                 found = await self._read_status(status)
             except Exception as exc:
-                logger.debug("%s: run not read: %s", self.id, exc)
+                logger.debug("%s: run not read: %s", self.machine, exc)
                 continue
             if found is not None and found.exit_code is not None:
                 if not ended.done():
@@ -513,7 +513,7 @@ class MachineHandle:
             try:
                 found = await self._read_status(status)
             except Exception as exc:
-                logger.debug("%s: run not read: %s", self.id, exc)
+                logger.debug("%s: run not read: %s", self.machine, exc)
                 found = None
             if found is not None and found.pid is not None:
                 if found.started is not None:
@@ -542,7 +542,7 @@ class MachineHandle:
         ran = await self._connected_line(CHECK_LINE, CHECK_WAIT_SECONDS)
         if CHECK_MARK.encode() not in (ran.stdout or b""):
             raise RuntimeError(
-                f"{self.id}: check did not run: exit {ran.exit_code}"
+                f"{self.machine}: check did not run: exit {ran.exit_code}"
             )
         return ran.exit_code == 0
 
@@ -567,7 +567,7 @@ class MachineHandle:
             scan_line(workspace), SCAN_WAIT_SECONDS
         )
         if done.exit_code != 0:
-            raise RuntimeError(f"{self.id}: scan exited {done.exit_code}")
+            raise RuntimeError(f"{self.machine}: scan exited {done.exit_code}")
         rows, reports = _parse_scan(done.stdout, workspace)
         finishing: list[asyncio.Task[Any]] = []
         for tag, report in reports.items():
@@ -599,9 +599,9 @@ class MachineHandle:
             resources_line(cpu), RESOURCE_WAIT_SECONDS
         )
         if done.exit_code != 0:
-            raise RuntimeError(f"{self.id}: read exited {done.exit_code}")
+            raise RuntimeError(f"{self.machine}: read exited {done.exit_code}")
         return parse_resources(
-            (done.stdout or b"").decode(errors="replace"), str(self.id)
+            (done.stdout or b"").decode(errors="replace"), str(self.machine)
         )
 
     async def signal(self, target: str | MachinePid, signum: int) -> bool:
@@ -627,7 +627,7 @@ class MachineHandle:
         )
         if done.exit_code not in (0, NOT_RUNNING_STATUS):
             raise RuntimeError(
-                f"{self.id}: signal {signum} not sent: exit {done.exit_code}"
+                f"{self.machine}: signal {signum} not sent: exit {done.exit_code}"
             )
         return done.exit_code == 0
 
@@ -659,12 +659,14 @@ class MachineHandle:
                     None,
                 )
         except Exception:
-            logger.debug("%s: run %s not stopped", self.id, tag, exc_info=True)
+            logger.debug(
+                "%s: run %s not stopped", self.machine, tag, exc_info=True
+            )
             return False
         if done.exit_code not in (0, NOT_RUNNING_STATUS):
             logger.debug(
                 "%s: run %s not stopped: exit %d",
-                self.id,
+                self.machine,
                 tag,
                 done.exit_code,
             )
@@ -700,7 +702,7 @@ class MachineHandle:
             except Exception:
                 found = None
                 logger.debug(
-                    "%s: libfaketime probe failed", self.id, exc_info=True
+                    "%s: libfaketime probe failed", self.machine, exc_info=True
                 )
             if found is None or found.exit_code != 0:
                 # Unanswered: this run keeps the machine's clock, and a
@@ -708,7 +710,7 @@ class MachineHandle:
                 if found is not None:
                     logger.debug(
                         "%s: libfaketime probe exited %d",
-                        self.id,
+                        self.machine,
                         found.exit_code,
                     )
                 return
@@ -717,7 +719,7 @@ class MachineHandle:
             if self._faketime is None:
                 logger.debug(
                     "%s: no libfaketime, so programs run on its clock",
-                    self.id,
+                    self.machine,
                 )
 
     async def _remove_spent(self) -> None:
@@ -729,7 +731,7 @@ class MachineHandle:
                 remove_line(spent), MACHINE_STOP_WAIT_SECONDS
             )
         except Exception as exc:
-            logger.debug("%s: reports not removed: %s", self.id, exc)
+            logger.debug("%s: reports not removed: %s", self.machine, exc)
 
     async def _setup(self, line: str) -> RunResult:
         """Run one of Mirage's own lines on the machine: its environment,

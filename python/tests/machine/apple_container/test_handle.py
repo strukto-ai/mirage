@@ -189,7 +189,7 @@ def test_registers_under_the_config_name():
         "box", {"provider": "apple_container", "container": "box"}
     )
     assert isinstance(machine, AppleContainerMachine)
-    assert str(machine.id) == "apple_container:box"
+    assert str(machine.machine) == "apple_container:box"
 
 
 @pytest.mark.asyncio

@@ -43,10 +43,11 @@ export class JobId {
 }
 
 /**
- * Where a process runs: the provider that reaches the machine and the
- * machine's name there, written `docker:tools`.
+ * Where a process runs: the provider that reaches the machine and the name
+ * the workspace gave it, written `docker:tools`. What the provider calls the
+ * machine is its handle's `instance`.
  */
-export class MachineId {
+export class MachineName {
   constructor(
     readonly provider: string,
     readonly name: string,
@@ -56,11 +57,11 @@ export class MachineId {
     return `${this.provider}:${this.name}`
   }
 
-  /** The id `toString` wrote; throws when the text names no machine. */
-  static parse(text: string): MachineId {
+  /** The name `toString` wrote; throws when the text names no machine. */
+  static parse(text: string): MachineName {
     const at = text.indexOf(':')
-    if (at <= 0 || at === text.length - 1) throw new Error(`not a machine id: '${text}'`)
-    return new MachineId(text.slice(0, at), text.slice(at + 1))
+    if (at <= 0 || at === text.length - 1) throw new Error(`not a machine name: '${text}'`)
+    return new MachineName(text.slice(0, at), text.slice(at + 1))
   }
 }
 

@@ -5,7 +5,7 @@ import { newPauseGate, ProcessHandle, type ExecutionBind, type PauseGate } from 
 import type { Process, ProcessRunner } from './types.ts'
 import type { SessionProcesses } from './session.ts'
 import { HISTORY_MAX_RECORDS, HISTORY_SECONDS, LOCAL_MACHINE } from '../constants.ts'
-import { type LineId, type MachineId, type MachineResources, ProcessId } from '../types.ts'
+import { type LineId, type MachineName, type MachineResources, ProcessId } from '../types.ts'
 import { SIGCONT, SIGKILL, SIGSTOP } from '../../shell/constants.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { systemNow } from '../../utils/clock.ts'
@@ -56,14 +56,14 @@ export class ProcessTable {
    */
   sender: ((handle: ProcessHandle, signal: number) => Promise<boolean> | null) | null = null
   /** The machines the workspace runs programs on, by id as `ps` shows them. */
-  machineIds: (() => string[]) | null = null
+  machineNames: (() => string[]) | null = null
   /** What one of those machines holds now. */
   machineResources: ((machine: string, cpu: boolean) => Promise<MachineResources>) | null = null
   /**
    * What a machine's provider calls it, kept on each process that starts
    * there. The workspace sets it. Mirrors Python's `machine_instance`.
    */
-  machineInstance: ((machine: MachineId) => string) | null = null
+  machineInstance: ((machine: MachineName) => string) | null = null
 
   /**
    * @param workspaceId the workspace whose pids these are.
@@ -82,7 +82,7 @@ export class ProcessTable {
    */
   constructor(
     readonly workspaceId = '',
-    readonly machine: MachineId = LOCAL_MACHINE,
+    readonly machine: MachineName = LOCAL_MACHINE,
     private readonly bind: ExecutionBind = (run) => run(),
     private readonly changed?: () => void,
     private readonly now: () => number = systemNow,
@@ -134,7 +134,7 @@ export class ProcessTable {
     ignores?: ReadonlySet<number>
     pid?: number | null
     ownGroup?: boolean
-    machine?: MachineId | null
+    machine?: MachineName | null
     runtime?: string | null
     oneCommand?: boolean
     background?: boolean

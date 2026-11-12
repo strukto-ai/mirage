@@ -158,7 +158,7 @@ describe('SmolvmMachine', () => {
   it("registers under the config name 'smolvm'", () => {
     const machine = buildMachine('box', { provider: 'smolvm', machine: 'vm' })
     expect(machine).toBeInstanceOf(SmolvmMachine)
-    expect(String(machine.id)).toBe('smolvm:box')
+    expect(String(machine.machine)).toBe('smolvm:box')
   })
 })
 

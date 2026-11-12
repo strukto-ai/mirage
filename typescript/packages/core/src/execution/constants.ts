@@ -1,10 +1,10 @@
-import { MachineId } from './types.ts'
+import { MachineName } from './types.ts'
 
 /**
  * Where a process runs when nothing names its machine: the machine the
  * workspace itself runs on, before the host gives its name.
  */
-export const LOCAL_MACHINE = new MachineId('host', 'localhost')
+export const LOCAL_MACHINE = new MachineName('host', 'localhost')
 
 /** The ended records a table keeps: the newest of them, for at most an hour. */
 export const HISTORY_MAX_RECORDS = 1024

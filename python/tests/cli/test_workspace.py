@@ -26,6 +26,7 @@ from mirage.cli import workspace as workspace_cli
 from mirage.cli.workspace import (
     _format_jobs,
     _format_logs,
+    _format_machines,
     _format_processes,
     _format_workspace_explanation,
     _format_workspace_list,
@@ -499,6 +500,26 @@ def test_processes_read_as_one_row_per_process():
         ["3", "2", "docker:tools", "s1", "exited", "143", "cat"],
     ]
     assert _format_processes([]) == "No processes."
+
+
+def test_machines_read_with_their_name_and_their_providers_id():
+    lines = _format_machines(
+        [
+            {"type": "host", "name": "box", "id": "box", "state": "managed"},
+            {
+                "type": "e2b",
+                "name": "gpu",
+                "id": "i3k9x",
+                "state": "reachable",
+            },
+        ]
+    ).splitlines()
+    assert [line.split() for line in lines] == [
+        ["MACHINE", "ID", "STATE"],
+        ["host:box", "box", "managed"],
+        ["e2b:gpu", "i3k9x", "reachable"],
+    ]
+    assert _format_machines([]) == "No machines."
 
 
 def test_jobs_read_with_the_pid_each_runs_as():

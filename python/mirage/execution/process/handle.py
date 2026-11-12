@@ -15,7 +15,7 @@ from mirage.execution.process.types import (
     ProcessState,
     ProcessUsage,
 )
-from mirage.execution.types import MachineId, MachinePid
+from mirage.execution.types import MachineName, MachinePid
 from mirage.shell.constants import SIGTERM
 from mirage.utils.clock import system_now
 
@@ -182,7 +182,7 @@ class ProcessHandle:
 
     def take(
         self,
-        machine: MachineId | None,
+        machine: MachineName | None,
         runtime: str,
         instance: str | None = None,
     ) -> bool:
@@ -193,7 +193,7 @@ class ProcessHandle:
         does (``program_ignores``).
 
         Args:
-            machine (MachineId | None): where the program runs; None for
+            machine (MachineName | None): where the program runs; None for
                 the workspace's own machine.
             runtime (str): what runs it.
             instance (str | None): what ``machine``'s provider calls it.

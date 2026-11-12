@@ -30,6 +30,7 @@ import {
   shadowedCaptures,
 } from './table.ts'
 import { WorkspaceRuntime } from './workspace.ts'
+import { RemoteRuntime } from './machine/runtime.ts'
 import { MontyRuntime } from './python/monty/index.ts'
 import { PyodideRuntime } from './python/pyodide/runtime.ts'
 import { QuickJsRuntime } from './js/quickjs/runtime.ts'
@@ -226,6 +227,18 @@ describe('bindCommands', () => {
     )
   })
 
+  it('takes a remote entry per machine', () => {
+    const a = new RemoteRuntime({ machine: 'a' })
+    const b = new RemoteRuntime({ captures: ['node'], machine: 'b' })
+    expect([a.name, b.name, new RemoteRuntime().name]).toEqual(['remote:a', 'remote:b', 'remote'])
+    const bindings = bindCommands([a, b])
+    expect(bindings['@external']).toBe(a)
+    expect(bindings.node).toBe(b)
+    expect(() =>
+      bindCommands([a, new RemoteRuntime({ captures: ['node'], machine: 'a' })]),
+    ).toThrow(/duplicate runtime entry: 'remote:a'/)
+  })
+
   it('captures named after Object.prototype members bind like any other', () => {
     class ProtoRuntime extends Runtime {
       readonly name = 'proto'
@@ -287,6 +300,16 @@ describe('runtimeBindingsFor', () => {
     const fake = new FakeRuntime()
     const bindings = runtimeBindingsFor([fake, new WorkspaceRuntime()], 'fake')
     expect(bindings).toEqual({ python3: fake, 'made-up': fake })
+  })
+
+  it("takes a runtime's name while it has one entry", () => {
+    const a = new RemoteRuntime({ machine: 'a' })
+    const b = new RemoteRuntime({ captures: ['node'], machine: 'b' })
+    expect(runtimeBindingsFor([a, new WorkspaceRuntime()], 'remote')['@external']).toBe(a)
+    expect(runtimeBindingsFor([a, b], 'remote:b').node).toBe(b)
+    expect(() => runtimeBindingsFor([a, b], 'remote')).toThrow(
+      /ambiguous runtime: 'remote' \(workspace runtimes: 'remote:a', 'remote:b'\)/,
+    )
   })
 
   it.each<[string, RegExp]>([

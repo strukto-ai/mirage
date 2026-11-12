@@ -123,7 +123,7 @@ describe('DockerMachine', () => {
   it("registers under the config name 'docker'", () => {
     const machine = buildMachine('box', { provider: 'docker', container: 'cid-42' })
     expect(machine).toBeInstanceOf(DockerMachine)
-    expect(String(machine.id)).toBe('docker:box')
+    expect(String(machine.machine)).toBe('docker:box')
   })
 })
 

@@ -1,6 +1,6 @@
 import { WORKSPACE_MACHINE } from './constants.ts'
 import type { PathSpec } from '../../types.ts'
-import type { LineId, MachineId, MachinePid, ProcessId } from '../types.ts'
+import type { LineId, MachineName, MachinePid, ProcessId } from '../types.ts'
 
 export type ProcessState = 'running' | 'stopping' | 'exited'
 
@@ -40,7 +40,7 @@ export interface Process {
   readonly group: number
   readonly command: string
   readonly cwd: PathSpec
-  readonly machine: MachineId
+  readonly machine: MachineName
   readonly startedAt: number
   readonly runtime: string | null
   readonly machinePid: MachinePid | null

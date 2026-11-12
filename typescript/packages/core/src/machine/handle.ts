@@ -18,7 +18,7 @@ import { HANGUP_EXIT_CODE } from '../execution/job/constants.ts'
 import type { MachineProcess } from '../execution/machine/types.ts'
 import type { ProcessUsage } from '../execution/process/types.ts'
 import type { ProcessHandle } from '../execution/process/handle.ts'
-import { MachineId, type MachinePid, type MachineResources } from '../execution/types.ts'
+import { MachineName, type MachinePid, type MachineResources } from '../execution/types.ts'
 import type { ByteSource } from '../io/types.ts'
 import type { WorkspaceBinding } from '../runtime/binding.ts'
 import { coerceRuntimeConfig, type ConfigFields } from '../runtime/config.ts'
@@ -209,9 +209,9 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     checkMountType(this.provider, coerced.mountType)
   }
 
-  /** The machine's id, `<provider>:<name>`. */
-  get id(): MachineId {
-    return new MachineId(this.provider, this.name)
+  /** The machine's name with its provider, `<provider>:<name>`. */
+  get machine(): MachineName {
+    return new MachineName(this.provider, this.name)
   }
 
   /**
@@ -350,10 +350,10 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
         throw error
       }
       if (!(error instanceof ConnectionLostError)) throw error
-      logger.debug?.(`${String(this.id)}: connection lost: ${String(error)}`)
+      logger.debug?.(`${String(this.machine)}: connection lost: ${String(error)}`)
       runner?.programSignaled(HANGUP_EXIT_CODE - 128)
       await pidLine.finish()
-      const said = new TextEncoder().encode(`mirage: ${String(this.id)}: connection lost\n`)
+      const said = new TextEncoder().encode(`mirage: ${String(this.machine)}: connection lost\n`)
       done = {
         stdout: error.stdout,
         stderr: concat([error.stderr ?? new Uint8Array(), ...kept[1], said]),
@@ -439,7 +439,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
           return
         }
       } catch (error) {
-        if (!hasAborted(signal)) console.debug(`${this.id.toString()}: run not read:`, error)
+        if (!hasAborted(signal)) console.debug(`${this.machine.toString()}: run not read:`, error)
       }
     }
   }
@@ -468,7 +468,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       try {
         found = await this.readStatus(status)
       } catch (error) {
-        console.debug(`${this.id.toString()}: run not read:`, error)
+        console.debug(`${this.machine.toString()}: run not read:`, error)
       }
       if (found?.pid != null) {
         if (found.started !== null)
@@ -492,7 +492,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   async check(): Promise<boolean> {
     const ran = await this.connectedLine(CHECK_LINE, CHECK_WAIT_SECONDS)
     if (!new TextDecoder().decode(ran.stdout).includes(CHECK_MARK))
-      throw new Error(`${this.id.toString()}: check did not run: exit ${String(ran.exitCode)}`)
+      throw new Error(`${this.machine.toString()}: check did not run: exit ${String(ran.exitCode)}`)
     return ran.exitCode === 0
   }
 
@@ -512,7 +512,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   async status(workspace: string): Promise<MachineProcess[]> {
     const done = await this.connectedLine(scanLine(workspace), SCAN_WAIT_SECONDS)
     if (done.exitCode !== 0)
-      throw new Error(`${this.id.toString()}: scan exited ${String(done.exitCode)}`)
+      throw new Error(`${this.machine.toString()}: scan exited ${String(done.exitCode)}`)
     const [rows, reports] = parseScan(done.stdout, workspace)
     const finishing: Promise<unknown>[] = []
     for (const [tag, report] of reports) {
@@ -535,8 +535,8 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   async resources(cpu: boolean): Promise<MachineResources> {
     const done = await this.connectedLine(resourcesLine(cpu), RESOURCE_WAIT_SECONDS)
     if (done.exitCode !== 0)
-      throw new Error(`${this.id.toString()}: read exited ${String(done.exitCode)}`)
-    return parseResources(new TextDecoder().decode(done.stdout), this.id.toString())
+      throw new Error(`${this.machine.toString()}: read exited ${String(done.exitCode)}`)
+    return parseResources(new TextDecoder().decode(done.stdout), this.machine.toString())
   }
 
   /**
@@ -555,7 +555,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     const done = await this.connectedLine(signalLine(target, signum), MACHINE_STOP_WAIT_SECONDS)
     if (done.exitCode !== 0 && done.exitCode !== NOT_RUNNING_STATUS)
       throw new Error(
-        `${this.id.toString()}: signal ${String(signum)} not sent: exit ${String(done.exitCode)}`,
+        `${this.machine.toString()}: signal ${String(signum)} not sent: exit ${String(done.exitCode)}`,
       )
     return done.exitCode === 0
   }
@@ -589,12 +589,12 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       )
       if (done.exitCode !== 0 && done.exitCode !== NOT_RUNNING_STATUS) {
         console.debug(
-          `${this.id.toString()}: run ${tag} not stopped: exit ${String(done.exitCode)}`,
+          `${this.machine.toString()}: run ${tag} not stopped: exit ${String(done.exitCode)}`,
         )
       }
       return done.exitCode === 0
     } catch (error) {
-      console.debug(`${this.id.toString()}: run ${tag} not stopped: ${String(error)}`)
+      console.debug(`${this.machine.toString()}: run ${tag} not stopped: ${String(error)}`)
       return false
     }
   }
@@ -626,7 +626,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     try {
       await this.connectedLine(removeLine(spent), MACHINE_STOP_WAIT_SECONDS)
     } catch (error) {
-      console.debug(`${this.id.toString()}: reports not removed:`, error)
+      console.debug(`${this.machine.toString()}: reports not removed:`, error)
     }
   }
 
@@ -665,7 +665,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       probe = abortable(this.setup(faketimeProbe(), deadline), deadline).then((found) => {
         if (found.exitCode !== 0)
           throw new Error(
-            `${this.id.toString()}: libfaketime probe exited ${String(found.exitCode)}`,
+            `${this.machine.toString()}: libfaketime probe exited ${String(found.exitCode)}`,
           )
         return new TextDecoder().decode(found.stdout).trim() || null
       })

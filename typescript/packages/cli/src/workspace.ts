@@ -289,6 +289,8 @@ function formatProcesses(items: ProcessRecord[]): string {
 }
 
 interface MachineRecord {
+  type: string
+  name: string
   id: string
   state: string
 }
@@ -296,8 +298,8 @@ interface MachineRecord {
 function formatMachines(items: MachineRecord[]): string {
   if (items.length === 0) return 'No machines.'
   return formatTable(
-    ['MACHINE', 'STATE'],
-    items.map((m) => [m.id, m.state]),
+    ['MACHINE', 'ID', 'STATE'],
+    items.map((m) => [`${m.type}:${m.name}`, m.id, m.state]),
   )
 }
 

@@ -17,7 +17,7 @@ from mirage.execution.process.session import SessionProcesses
 from mirage.execution.process.types import Process, ProcessRunner, ProcessState
 from mirage.execution.types import (
     LineId,
-    MachineId,
+    MachineName,
     MachineResources,
     ProcessId,
 )
@@ -53,7 +53,7 @@ class ProcessTable:
 
     Args:
         workspace_id (str): the workspace whose pids these are.
-        machine (MachineId): where a process runs unless its caller
+        machine (MachineName): where a process runs unless its caller
             names another, the workspace's own machine.
         bind (ExecutionBind | None): runs each process under its host's
             execution context; None runs its body as supplied.
@@ -72,7 +72,7 @@ class ProcessTable:
     def __init__(
         self,
         workspace_id: str = "",
-        machine: MachineId = LOCAL_MACHINE,
+        machine: MachineName = LOCAL_MACHINE,
         bind: ExecutionBind | None = None,
         changed: Callable[[], None] | None = None,
         now: Callable[[], float] = system_now,
@@ -113,13 +113,13 @@ class ProcessTable:
         ) = None
         # The machines the workspace runs programs on, by id as ``ps``
         # shows them, and what one of them holds now.
-        self.machine_ids: Callable[[], list[str]] | None = None
+        self.machine_names: Callable[[], list[str]] | None = None
         self.machine_resources: (
             Callable[[str, bool], Awaitable[MachineResources]] | None
         ) = None
         # What a machine's provider calls it, kept on each process that
         # starts there. The workspace sets it.
-        self.machine_instance: Callable[[MachineId], str] | None = None
+        self.machine_instance: Callable[[MachineName], str] | None = None
 
     def start(
         self,
@@ -135,7 +135,7 @@ class ProcessTable:
         ignores: frozenset[int] = frozenset(),
         pid: int | None = None,
         own_group: bool = False,
-        machine: MachineId | None = None,
+        machine: MachineName | None = None,
         runtime: str | None = None,
         one_command: bool = False,
         program_ignores: frozenset[int] = frozenset(),
@@ -174,7 +174,7 @@ class ProcessTable:
                 None or when a live runner holds it.
             own_group (bool): lead a process group of its own, as
                 timeout's command does, instead of joining its parent's.
-            machine (MachineId | None): where its program runs; None for
+            machine (MachineName | None): where its program runs; None for
                 the table's machine.
             runtime (str | None): what Mirage runs its program with; None
                 for Mirage itself.

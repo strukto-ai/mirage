@@ -16,18 +16,22 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from mirage.execution.machine.types import Machine, MachineState
-from mirage.execution.types import MachineId
+from mirage.execution.types import MachineName
 from mirage.server.errors import ErrorCode, HttpError, loader_error
-from mirage.server.routers.processes import ProcessResponse, to_response
+from mirage.server.routers.processes import (
+    ProcessMachineResponse,
+    ProcessResponse,
+    to_response,
+)
 from mirage.server.routers.vfs import require_entry
 from mirage.server.schemas import Instant
 from mirage.utils.dates import ms_to_rfc3339
+from mirage.workspace.workspace import Workspace
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}/machines")
 
 
-class MachineResponse(BaseModel):
-    id: str
+class MachineResponse(ProcessMachineResponse):
     state: MachineState
     checked_at: Instant
 
@@ -40,9 +44,11 @@ class MachineDetailResponse(MachineResponse):
     processes: list[ProcessResponse]
 
 
-def _to_response(record: Machine) -> MachineResponse:
+def _to_response(record: Machine, ws: Workspace) -> MachineResponse:
     return MachineResponse(
-        id=str(record.id),
+        type=record.name.provider,
+        name=record.name.name,
+        id=ws.machine_table.instance(record.name),
         state=record.state,
         checked_at=ms_to_rfc3339(record.checked_at * 1000),
     )
@@ -59,32 +65,34 @@ async def list_machines(workspace_id: str, request: Request) -> MachineList:
 
     async def read() -> MachineList:
         return MachineList(
-            items=[_to_response(r) for r in await runner.ws.machines()]
+            items=[
+                _to_response(r, runner.ws) for r in await runner.ws.machines()
+            ]
         )
 
     return await runner.call(read())
 
 
-@router.get("/{machine_id}", response_model=MachineDetailResponse)
+@router.get("/{machine}", response_model=MachineDetailResponse)
 async def get_machine(
-    workspace_id: str, machine_id: str, request: Request
+    workspace_id: str, machine: str, request: Request
 ) -> MachineDetailResponse:
-    """One machine, by its id (``provider:name``), checked now, with the
+    """One machine, by its name (``provider:name``), checked now, with the
     processes the workspace keeps that ran on it. Run on the workspace's
     own loop."""
     runner = require_entry(request, workspace_id).runner
     try:
-        machine = MachineId.parse(machine_id)
+        where = MachineName.parse(machine)
     except ValueError as exc:
         raise loader_error(exc) from exc
 
     async def read() -> MachineDetailResponse | None:
-        found = await runner.ws.machines(machine)
+        found = await runner.ws.machines(where)
         if not found:
             return None
-        processes = await runner.ws.processes(machine=machine)
+        processes = await runner.ws.processes(machine=where)
         return MachineDetailResponse(
-            **_to_response(found[0]).model_dump(),
+            **_to_response(found[0], runner.ws).model_dump(),
             processes=[to_response(p, runner.ws) for p in processes],
         )
 

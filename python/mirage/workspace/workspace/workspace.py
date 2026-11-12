@@ -84,7 +84,7 @@ from mirage.execution.process.types import (
 from mirage.execution.types import (
     JobId,
     LineId,
-    MachineId,
+    MachineName,
     ProcessId,
 )
 from mirage.io import IOResult
@@ -453,7 +453,7 @@ class Workspace:
         # A line binds the system clock only once its process has started.
         self.process_table = ProcessTable(
             self._workspace_id,
-            MachineId("host", socket.gethostname()),
+            MachineName("host", socket.gethostname()),
             bind=run_as_process,
             changed=lambda: self.job_table.processes_changed(),
             now=lambda: (
@@ -620,7 +620,7 @@ class Workspace:
             store=stores.observe,
             clock=self._clock,
             workspace_id=self._workspace_id,
-            machine=str(self.process_table.machine),
+            machine=self.process_table.machine.name,
             processes=self.process_table.records,
             instance=lambda machine: self.machine_table.instance(machine),
         )
@@ -876,8 +876,8 @@ class Workspace:
         self.process_table.sender = lambda handle, signum: (
             self.machine_table.send(self.process_table, handle, signum)
         )
-        self.process_table.machine_ids = lambda: [
-            str(handle.id) for handle in self.machine_table.handles()
+        self.process_table.machine_names = lambda: [
+            str(handle.machine) for handle in self.machine_table.handles()
         ]
         self.process_table.machine_resources = self.machine_table.resources
         self.process_table.machine_instance = self.machine_table.instance
@@ -2829,7 +2829,7 @@ class Workspace:
         state: ProcessState | None = None,
         line_id: LineId | None = None,
         job_id: JobId | None = None,
-        machine: MachineId | None = None,
+        machine: MachineName | None = None,
     ) -> list[Process]:
         """The processes the workspace keeps, by pid: every live one,
         and the newest ended ones, as its store keeps them, so a daemon
@@ -2842,7 +2842,7 @@ class Workspace:
             line_id (LineId | None): only the processes this line ran.
             job_id (JobId | None): only the processes this job ran, its
                 own and every one under it, while a session lists it.
-            machine (MachineId | None): only the processes run there.
+            machine (MachineName | None): only the processes run there.
         """
         claimed = self.job_table.claimed
         if claimed:
@@ -2905,14 +2905,14 @@ class Workspace:
         return await self.job_table.store.get_process(process_id)
 
     async def machines(
-        self, machine: MachineId | None = None
+        self, machine: MachineName | None = None
     ) -> list[Machine]:
         """The machines the workspace runs programs on, each as a check
         of it finds it now: its own host first, which Mirage always
         manages, then every machine ``machines:`` names, checked at once.
 
         Args:
-            machine (MachineId | None): only this machine; None for every
+            machine (MachineName | None): only this machine; None for every
                 one.
         """
         host = self.process_table.machine

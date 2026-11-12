@@ -462,7 +462,7 @@ describe('configToWorkspaceArgs', () => {
       )
       const ssh = args.options.machines?.gpu
       expect(ssh).toBeInstanceOf(SSHMachine)
-      expect(String(ssh?.id)).toBe('ssh:gpu')
+      expect(String(ssh?.machine)).toBe('ssh:gpu')
       expect((ssh as SSHMachine).config.privateKey).toBe('key-from-env')
     } finally {
       vi.unstubAllEnvs()

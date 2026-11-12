@@ -279,8 +279,11 @@ def _format_processes(items: list[dict[str, Any]]) -> str:
 def _format_machines(items: list[dict[str, Any]]) -> str:
     if not items:
         return "No machines."
-    rows = [[item["id"], item["state"]] for item in items]
-    return format_table(["MACHINE", "STATE"], rows)
+    rows = [
+        [f"{item['type']}:{item['name']}", item["id"], item["state"]]
+        for item in items
+    ]
+    return format_table(["MACHINE", "ID", "STATE"], rows)
 
 
 def _list_records(

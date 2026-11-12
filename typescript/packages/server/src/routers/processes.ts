@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Process, ProcessState } from '@struktoai/mirage-core/execution/process/types'
-import { JobId, LineId, MachineId, ProcessId } from '@struktoai/mirage-core/execution/types'
+import { JobId, LineId, MachineName, ProcessId } from '@struktoai/mirage-core/execution/types'
 import type { RouteApp } from '../routes.ts'
 import { msToRfc3339 } from '@struktoai/mirage-core/utils/dates'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -44,7 +44,7 @@ interface MachinePidResponse {
   exited: number | null
 }
 
-interface ProcessMachineResponse {
+export interface ProcessMachineResponse {
   type: string
   name: string
   id: string
@@ -138,9 +138,9 @@ export function registerProcessesRoutes(
       if (deps.registry.visible(wsId, req.account) === null) {
         throw new WorkspaceMissing(wsId)
       }
-      let where: MachineId | null = null
+      let where: MachineName | null = null
       try {
-        where = machine !== undefined && machine !== '' ? MachineId.parse(machine) : null
+        where = machine !== undefined && machine !== '' ? MachineName.parse(machine) : null
       } catch (err) {
         throw new HttpError('invalid_value', 'machine must be provider:name', {
           param: 'machine',

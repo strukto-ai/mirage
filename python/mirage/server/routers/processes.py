@@ -16,7 +16,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from mirage.execution.process.types import Process, ProcessState
-from mirage.execution.types import JobId, LineId, MachineId, ProcessId
+from mirage.execution.types import JobId, LineId, MachineName, ProcessId
 from mirage.server.errors import ErrorCode, HttpError
 from mirage.server.routers.vfs import require_entry
 from mirage.server.schemas import Instant
@@ -128,7 +128,7 @@ async def list_processes(
     line = LineId(line_id) if line_id else None
     job = JobId(runner.ws.workspace_id, job_id) if job_id else None
     try:
-        where = MachineId.parse(machine) if machine else None
+        where = MachineName.parse(machine) if machine else None
     except ValueError as exc:
         raise HttpError(
             ErrorCode.INVALID_VALUE,

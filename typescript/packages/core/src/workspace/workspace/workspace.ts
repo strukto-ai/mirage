@@ -74,7 +74,7 @@ import type { ProcessId } from '../../execution/types.ts'
 import {
   type JobId,
   type LineId,
-  type MachineId,
+  type MachineName,
   type MachinePid,
   type MachineResources,
 } from '../../execution/types.ts'
@@ -521,7 +521,7 @@ export class Workspace {
       stores.observe,
       this.clock,
       this.wsId,
-      this.processTable.machine.toString(),
+      this.processTable.machine.name,
       () => this.processTable.records(),
       (machine) => this.machineTable.instance(machine),
     )
@@ -797,7 +797,8 @@ export class Workspace {
     this.processTable.scanner = () => this.machineTable.scan(this.processTable, this.workspaceId)
     this.processTable.sender = (handle, signum) =>
       this.machineTable.send(this.processTable, handle, signum)
-    this.processTable.machineIds = () => this.machineTable.handles().map((h) => h.id.toString())
+    this.processTable.machineNames = () =>
+      this.machineTable.handles().map((h) => h.machine.toString())
     this.processTable.machineResources = (machine, cpu) => this.machineTable.resources(machine, cpu)
     this.processTable.machineInstance = (machine) => this.machineTable.instance(machine)
   }
@@ -888,7 +889,7 @@ export class Workspace {
    * it runs here run. Core cannot name its host; Node's and the browser's
    * workspaces do.
    */
-  protected hostMachine(): MachineId {
+  protected hostMachine(): MachineName {
     return LOCAL_MACHINE
   }
 
@@ -1516,7 +1517,7 @@ export class Workspace {
       state?: ProcessState
       lineId?: LineId
       jobId?: JobId
-      machine?: MachineId
+      machine?: MachineName
     } = {},
   ): Promise<Process[]> {
     const claimed = this.jobTable.claimed
@@ -1573,11 +1574,11 @@ export class Workspace {
    * machine `machines:` names, checked at once; only `machine` when named.
    * Mirrors Python's `Workspace.machines`.
    */
-  async machines(machine?: MachineId): Promise<Machine[]> {
+  async machines(machine?: MachineName): Promise<Machine[]> {
     const host = this.processTable.machine
     const found: Machine[] =
       machine === undefined || machine.toString() === host.toString()
-        ? [{ id: host, state: 'managed', checkedAt: this.clock.now() }]
+        ? [{ name: host, state: 'managed', checkedAt: this.clock.now() }]
         : []
     return [
       ...found,

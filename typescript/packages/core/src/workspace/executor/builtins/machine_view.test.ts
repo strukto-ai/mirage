@@ -29,7 +29,7 @@ import {
 
 function table(...ids: string[]): ProcessTable {
   const processes = new ProcessTable({ workspaceId: 'w' } as never)
-  processes.machineIds = () => ids
+  processes.machineNames = () => ids
   return processes
 }
 

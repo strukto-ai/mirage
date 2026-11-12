@@ -21,7 +21,7 @@ from mirage.execution.constants import HISTORY_MAX_RECORDS, HISTORY_SECONDS
 from mirage.execution.line.types import Line, LineState
 from mirage.execution.process.types import Process
 from mirage.execution.ram import RAMExecutionStore
-from mirage.execution.types import LineId, MachineId, ProcessId
+from mirage.execution.types import LineId, MachineName, ProcessId
 from mirage.shell.console import Channel
 from mirage.types import PathSpec
 from mirage.workspace.record.types import generation_of
@@ -182,7 +182,7 @@ def _process(pid: int, session: str = "s") -> Process:
         group=pid,
         command="sleep 30",
         cwd=PathSpec.from_str_path("/"),
-        machine=MachineId("host", "box"),
+        machine=MachineName("host", "box"),
         started_at=1.0,
     )
 

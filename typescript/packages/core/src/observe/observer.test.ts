@@ -30,7 +30,7 @@ import type { RunResult } from '../runtime/types.ts'
 import type { Policy } from '../policy/base.ts'
 import { MountMode, PathSpec } from '../types.ts'
 import type { Process } from '../execution/process/types.ts'
-import { LineId, MachineId, ProcessId } from '../execution/types.ts'
+import { LineId, MachineName, ProcessId } from '../execution/types.ts'
 import { ManualClock } from '../utils/clock.ts'
 import { EVENT_COMMAND, LogEntry } from './log_entry.ts'
 import {
@@ -764,12 +764,11 @@ it('sends an ended job and process as spans', async () => {
     expect(sleep?.attributes['mirage.session.id']).toBe(line?.sessionId)
     expect(sleep?.attributes['mirage.cwd']).toBe('/')
     const machine = ws.processTable.machine
-    const host = machine.toString()
-    expect(sleep?.attributes['host.id']).toBe(host)
+    expect(sleep?.attributes['host.name']).toBe(machine.name)
     expect(spanMachine(sleep)).toEqual(['host', machine.name, machine.name])
     const [command] = spans.filter((s) => s.name === 'command')
     expect(command?.attributes['mirage.line.id']).toBe(line?.id.value)
-    expect(command?.attributes['host.id']).toBe(host)
+    expect(command?.attributes['host.name']).toBe(machine.name)
     expect(command?.attributes['mirage.machine.ids']).toBeUndefined()
     const [shell] = spans.filter(
       (s) =>
@@ -779,7 +778,7 @@ it('sends an ended job and process as spans', async () => {
     expect(job?.parent).toEqual(shell?.context)
     expect(sleep?.parent).toEqual(job?.context)
     expect(job?.attributes['process.pid']).toBe(sleep?.attributes['process.pid'])
-    expect(job?.attributes['host.id']).toBe(host)
+    expect(job?.attributes['host.name']).toBe(machine.name)
     expect(spanMachine(job)).toEqual(['host', machine.name, machine.name])
     expect(job?.attributes['mirage.cwd']).toBe('/')
   } finally {
@@ -815,7 +814,7 @@ class Box extends MachineHandle {
 }
 
 // Each job and process span names where its work ran, by the machine's
-// provider, its name and what its provider calls it, and `host.id` the host
+// provider, its name and what its provider calls it, and `host.name` the host
 // running Mirage.
 it("names the machine a span's work ran on", async () => {
   const spans = exported()
@@ -831,7 +830,6 @@ it("names the machine a span's work ran on", async () => {
     await ws.shell('train 1 & wait')
     await ws.shell('echo hi')
     await ws.shell('echo a\ntrain 2')
-    const host = ws.processTable.machine.toString()
     const name = ws.processTable.machine.name
     expect(
       spans.filter((s) => s.name === 'command').map((s) => s.attributes['mirage.machine.ids']),
@@ -844,7 +842,7 @@ it("names the machine a span's work ran on", async () => {
         s.attributes['mirage.machine.type'],
         s.attributes['mirage.machine.name'],
         s.attributes['mirage.machine.id'],
-        s.attributes['host.id'],
+        s.attributes['host.name'],
       ])
       .sort()
     const pids = new Map(
@@ -859,12 +857,12 @@ it("names the machine a span's work ran on", async () => {
     expect(pids.get('train 2')?.[1]).not.toBe(812)
     expect(pids.get('echo hi')?.[0]).toBe(pids.get('echo hi')?.[1])
     expect(ran).toEqual([
-      ['job', 'train 1', 'box', 'a', 'box-a', host],
-      ['process', 'echo a\ntrain 2', 'host', name, name, host],
-      ['process', 'echo hi', 'host', name, name, host],
-      ['process', 'train 1 & wait', 'host', name, name, host],
-      ['process', 'train 1', 'box', 'a', 'box-a', host],
-      ['process', 'train 2', 'box', 'a', 'box-a', host],
+      ['job', 'train 1', 'box', 'a', 'box-a', name],
+      ['process', 'echo a\ntrain 2', 'host', name, name, name],
+      ['process', 'echo hi', 'host', name, name, name],
+      ['process', 'train 1 & wait', 'host', name, name, name],
+      ['process', 'train 1', 'box', 'a', 'box-a', name],
+      ['process', 'train 2', 'box', 'a', 'box-a', name],
     ])
   } finally {
     await ws.close()
@@ -904,7 +902,7 @@ it('puts a child of a stopping parent under it', async () => {
     id: new ProcessId('w', 10),
     parent: null,
     command: '(train) &',
-    machine: new MachineId('host', 'h'),
+    machine: new MachineName('host', 'h'),
     startedAt: 1,
     runtime: null,
     state: 'stopping',
@@ -916,7 +914,7 @@ it('puts a child of a stopping parent under it', async () => {
     id: new ProcessId('w', 11),
     parent: 10,
     command: 'train',
-    machine: new MachineId('box', 'a'),
+    machine: new MachineName('box', 'a'),
     startedAt: 2,
     runtime: 'remote',
     state: 'exited',

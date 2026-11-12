@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import type { Context } from '../commands/config.ts'
 import { currentCaller } from '../context/session_context.ts'
 import type { Process } from '../execution/process/types.ts'
-import { MachineId } from '../execution/types.ts'
+import { MachineName } from '../execution/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { Runtime } from './base.ts'
@@ -92,8 +92,8 @@ class SeenRuntime extends Runtime implements ProcessExecutorMixin {
     super({}, ['probe', 'hold'])
   }
 
-  override get machine(): MachineId {
-    return new MachineId('box', 'b1')
+  override get machine(): MachineName {
+    return new MachineName('box', 'b1')
   }
 
   async runProcess(
@@ -142,7 +142,7 @@ describe('Runtime.execute', () => {
   // there; a child of its shell otherwise, the session's shell staying across
   // its lines, and of `find` and `xargs`, which fork each one.
   it('runs a program past the workspace as a process of its own', async () => {
-    const box = new MachineId('box', 'b1')
+    const box = new MachineName('box', 'b1')
     const [alone, line] = await seen('probe; echo $$')
     expect([alone.parent, alone.command, alone.machine, alone.runtime]).toEqual([
       Number(line),

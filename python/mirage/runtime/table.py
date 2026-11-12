@@ -184,22 +184,28 @@ def runtime_bindings_for(
 
     Args:
         entries (list[Runtime]): the workspace's ordered runtime world.
-        name (str): the workspace runtime entry to bind to.
+        name (str): the workspace runtime entry to bind to, or its
+            runtime's name (``remote`` for ``remote:gpu``) while the
+            workspace has one entry of it.
 
     Raises:
         ValueError: the name is workspace (captures nothing, so there is
-            nothing to rebind) or not a workspace entry.
+            nothing to rebind), no workspace entry or several.
     """
     if name == WorkspaceRuntime.name:
         raise ValueError(
             "'workspace' is the default executor, not a runtime you can select"
         )
-    for entry in entries:
-        if entry.name == name:
-            return {command: entry for command in entry.captures}
+    cls = NAMED.get(name)
+    found = [e for e in entries if e.name == name] or [
+        e for e in entries if cls is not None and isinstance(e, cls)
+    ]
+    if len(found) == 1:
+        return {command: found[0] for command in found[0].captures}
     known = ", ".join(repr(e.name) for e in entries)
     raise ValueError(
-        f"unknown runtime: {name!r} (workspace runtimes: {known})"
+        f"{'ambiguous' if found else 'unknown'} runtime: {name!r}"
+        f" (workspace runtimes: {known})"
     )
 
 

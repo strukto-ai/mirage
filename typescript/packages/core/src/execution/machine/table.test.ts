@@ -75,7 +75,7 @@ describe('MachineTable', () => {
       d: new Box('d', 1, false),
     })
     const found = await table.check(() => 7)
-    expect(found.map((m) => [m.id.toString(), m.state, m.checkedAt])).toEqual([
+    expect(found.map((m) => [m.name.toString(), m.state, m.checkedAt])).toEqual([
       ['box:a', 'managed', 7],
       ['box:b', 'reachable', 7],
       ['box:c', 'unreachable', 7],
@@ -86,7 +86,7 @@ describe('MachineTable', () => {
 
   it('checks the one machine it names', async () => {
     const table = new MachineTable({ a: new Box('a', 0), b: new Box('b', 0) })
-    expect((await table.check(() => 0, 'box:b')).map((m) => m.id.toString())).toEqual(['box:b'])
+    expect((await table.check(() => 0, 'box:b')).map((m) => m.name.toString())).toEqual(['box:b'])
     expect(await table.check(() => 0, 'box:z')).toEqual([])
   })
 })

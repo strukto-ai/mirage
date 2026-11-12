@@ -54,7 +54,7 @@ export function resources(
 export function tableOf(rows: readonly MachineResources[], ids?: readonly string[]): JobTable {
   const table = new JobTable()
   const byId = new Map(rows.map((row) => [row.machine, row]))
-  table.processes.machineIds = () => [...(ids ?? byId.keys())]
+  table.processes.machineNames = () => [...(ids ?? byId.keys())]
   table.processes.machineResources = (machine) => {
     const row = byId.get(machine)
     return row === undefined ? Promise.reject(new Error('down')) : Promise.resolve(row)

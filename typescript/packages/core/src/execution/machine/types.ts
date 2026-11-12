@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ProcessUsage } from '../process/types.ts'
-import type { MachineId } from '../types.ts'
+import type { MachineName } from '../types.ts'
 
 /**
  * How far Mirage reaches a machine, as its last check found it. Mirrors
@@ -33,7 +33,7 @@ export type MachineState = 'managed' | 'reachable' | 'unreachable'
  * `checkedAt` is when that check ran. Mirrors Python's `Machine`.
  */
 export interface Machine {
-  readonly id: MachineId
+  readonly name: MachineName
   readonly state: MachineState
   readonly checkedAt: number
 }

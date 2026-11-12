@@ -20,6 +20,7 @@ import type { ShellExplanation } from '@struktoai/mirage-core/policy/types'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
+import { runtimeBindingsFor } from '@struktoai/mirage-core/runtime/table'
 import { WorkspaceRuntime } from '@struktoai/mirage-core/runtime/workspace'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { errorResponse, HttpError, INTERNAL_MESSAGE, validationError } from '../errors.ts'
@@ -92,26 +93,28 @@ function checkPlacement(ws: Workspace, req: ShellRequest): void {
       { param: 'runtime' },
     )
   }
+  const runtimes = ws.runtimes()
   const named = [
     [
       'runtime',
       req.runtime,
-      ws
-        .runtimes()
+      runtimes
         .filter((runtime) => !(runtime instanceof WorkspaceRuntime))
         .map((runtime) => runtime.name),
     ],
     ['machine', req.machine, ws.machineTable.names()],
   ] as const
   for (const [param, given, names] of named) {
-    if (given !== undefined && !names.includes(given)) {
-      throw new HttpError(
-        'invalid_value',
-        names.length > 0
-          ? `${param} must be one of ${names.join(', ')}`
-          : `${param} must be unset: the workspace has no ${param}s`,
-        { param },
-      )
+    if (given === undefined || names.includes(given)) continue
+    const message =
+      names.length > 0
+        ? `${param} must be one of ${names.join(', ')}`
+        : `${param} must be unset: the workspace has no ${param}s`
+    if (param !== 'runtime') throw new HttpError('invalid_value', message, { param })
+    try {
+      runtimeBindingsFor(runtimes, given)
+    } catch (err) {
+      throw new HttpError('invalid_value', message, { param, cause: err })
     }
   }
 }

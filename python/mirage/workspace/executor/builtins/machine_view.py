@@ -140,7 +140,7 @@ def machine_scope(
     context = get_current_evaluation()
     frame = context.frame if context is not None else None
     routing = frame.routing if frame is not None else None
-    every = list(processes.machine_ids() if processes.machine_ids else [])
+    every = list(processes.machine_names() if processes.machine_names else [])
     host = str(processes.machine)
     if routing is not None and any(
         _reach_of(runtime) == "process"

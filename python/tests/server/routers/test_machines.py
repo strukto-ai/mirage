@@ -23,7 +23,8 @@ from mirage.server import build_app
 @pytest.mark.asyncio
 async def test_the_host_is_listed_and_read_with_its_processes():
     app = build_app(idle_grace_seconds=10.0)
-    host = f"host:{socket.gethostname()}"
+    name = socket.gethostname()
+    host = f"host:{name}"
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -40,7 +41,8 @@ async def test_the_host_is_listed_and_read_with_its_processes():
         r = await client.get(f"/v1/workspaces/{wid}/machines")
         assert r.status_code == 200, r.text
         [machine] = r.json()["items"]
-        assert (machine["id"], machine["state"]) == (host, "managed")
+        assert (machine["type"], machine["name"]) == ("host", name)
+        assert (machine["id"], machine["state"]) == (name, "managed")
         r = await client.get(f"/v1/workspaces/{wid}/machines/{host}")
         assert r.status_code == 200, r.text
         said = r.json()

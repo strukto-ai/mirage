@@ -22,7 +22,7 @@ from mirage.context.session_context import current_caller, run_as_process
 from mirage.execution.constants import LOCAL_MACHINE
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.types import Process, ProcessState
-from mirage.execution.types import MachineId, MachinePid, ProcessId
+from mirage.execution.types import MachineName, MachinePid, ProcessId
 from mirage.types import PathSpec
 
 
@@ -296,11 +296,11 @@ def test_a_runner_started_for_one_command_is_its_program_once():
     handle = ProcessHandle(_info(), _exits_3, lambda _pid: None)
     assert not handle.take(None, "docker")
     handle.one_command = True
-    assert handle.take(MachineId("docker", "tools"), "docker")
+    assert handle.take(MachineName("docker", "tools"), "docker")
     assert not handle.take(None, "local")
     record = handle.record
     assert (record.machine, record.runtime) == (
-        MachineId("docker", "tools"),
+        MachineName("docker", "tools"),
         "docker",
     )
     handle.set_machine_pid(MachinePid(41, 5.0))

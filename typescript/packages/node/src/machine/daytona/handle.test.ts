@@ -155,7 +155,7 @@ describe('DaytonaMachine', () => {
   it("registers under the config name 'daytona'", () => {
     const machine = buildMachine('box', { provider: 'daytona', sandboxId: 'sb-live' })
     expect(machine).toBeInstanceOf(DaytonaMachine)
-    expect(String(machine.id)).toBe('daytona:box')
+    expect(String(machine.machine)).toBe('daytona:box')
   })
 })
 

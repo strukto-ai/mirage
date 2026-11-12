@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { stderrStr, stdoutStr } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { SessionProfile } from '../../../../policy/profile.ts'
-import { MachineId } from '../../../../execution/types.ts'
+import { MachineName } from '../../../../execution/types.ts'
 import { JobTable } from '../../../../execution/job/index.ts'
 import { MountMode } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
@@ -251,7 +251,7 @@ it.each([false, true])('ps shows where a program runs (host %s)', async (host) =
       expect(process.take(null, 'local')).toBe(true)
       process.setMachinePid({ pid: 4242, started: 1 })
     } else {
-      expect(process.take(new MachineId('docker', 'tools'), 'docker')).toBe(true)
+      expect(process.take(new MachineName('docker', 'tools'), 'docker')).toBe(true)
     }
     const machine = host ? ws.processTable.machine.toString() : 'docker:tools'
     const own = stdoutStr(await ws.shell('ps', { sessionId: 's' })).split('\n')
