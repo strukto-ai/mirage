@@ -278,19 +278,24 @@ On a backend that supports it, `write: conditional` works like this:
 Under `unconditional`, a replacement or an append to an existing file is
 last-write-wins.
 
-### Files the session saw missing
+### When Mirage rewrites the whole file
 
-Under either policy, these writes fail if the session saw the file missing
-and someone else created it in the meantime:
+Some backends, such as object stores, cannot append, write at an offset or
+truncate in place. For these writes Mirage reads the whole file and writes
+it back:
 
-- an append, including an emulated one;
+- an append, including `cmd >> f` with nothing written;
 - a write at an offset;
 - a truncate to a nonzero size.
 
-The other writer's file keeps its bytes. A backend that cannot check this
-returns an unsupported-operation error. A plain replacement and a truncate
-to zero follow the mount's `write` policy instead. A backend that truncates
-with its own code, rather than Mirage's shared path, keeps its own behavior.
+If that read finds no file, the write back only creates the file, under
+either policy. It fails if someone else created the file between the read
+and the write, and that file keeps its bytes. A backend that cannot check
+this returns an unsupported-operation error.
+
+A backend with its own append, offset write or truncate, such as RAM, keeps
+its own behavior. A plain replacement and a truncate to zero follow the
+mount's `write` policy.
 
 ### S3-compatible stores
 
