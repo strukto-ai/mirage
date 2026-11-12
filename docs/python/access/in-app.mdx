@@ -47,7 +47,7 @@ One virtual terminal over the backends mounted at each prefix.
   The default session's id.
 </ResponseField>
 <ResponseField name="store" type="WorkspaceStateStore">
-  Where the workspace keeps its [state](/home/configuration#cache-index-and-store): symlinks and file attributes, command history, sessions and background jobs. In memory when unset. A store passed in is borrowed: close it after `ws.close()`, or pass `owns_store=True`.
+  Where the workspace keeps its [state](/home/infrastructure/overview#workspace-state): symlinks and file attributes, command logs, sessions and background jobs. In memory when unset. A store passed in is borrowed: close it after `ws.close()`, or pass `owns_store=True`.
 </ResponseField>
 
 See [Workspace configuration](/home/configuration) for YAML settings.
