@@ -59,11 +59,14 @@ export function bytesOf(data: unknown): Uint8Array | null {
  * One output stream of a relayed process, fed from its socket. A chunk
  * leaves the queue only when the reader asks for it, and `took` then tells
  * the relay, which sends no more than `RELAY_WINDOW_BYTES` ahead of that.
+ * A stream its reader cancelled takes everything still coming, so the
+ * program writing it never waits on a reader that has gone.
  */
 class Channel {
   readonly stream: ReadableStream<Uint8Array>
   done = false
   private readonly queue: Uint8Array[] = []
+  private cancelled = false
   // How the stream ends once the queue drains: at its end, or with the lost connection.
   private ending: Error | 'end' | null = null
   private wake: (() => void) | null = null
@@ -90,7 +93,10 @@ class Channel {
           this.end()
         },
         cancel: () => {
+          this.cancelled = true
+          const dropped = this.queue.reduce((sum, chunk) => sum + chunk.byteLength, 0)
           this.queue.length = 0
+          if (dropped > 0) this.took(dropped)
           this.ending ??= 'end'
           this.end()
         },
@@ -100,6 +106,10 @@ class Channel {
   }
 
   push(data: Uint8Array): void {
+    if (this.cancelled) {
+      this.took(data.byteLength)
+      return
+    }
     if (this.ending !== null) return
     this.queue.push(data)
     this.rouse()
