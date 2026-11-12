@@ -19,7 +19,7 @@ from dataclasses import replace
 
 import pytest
 from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
@@ -914,6 +914,18 @@ async def test_a_child_of_a_stopping_parent_goes_under_it(monkeypatch):
         assert spans[name].parent.span_id == context.span_id
 
 
+def _span_name(span: ReadableSpan) -> str:
+    """A span's kind and the command it stands for.
+
+    Args:
+        span (ReadableSpan): the span.
+    """
+    a = span.attributes or {}
+    return (
+        f"{span.name} {a.get('process.command_line', a.get('mirage.command'))}"
+    )
+
+
 # A job started inside a background subshell lives in that subshell's job
 # list; its process still goes under its job, and the job under the
 # subshell.
@@ -932,17 +944,12 @@ async def test_a_nested_jobs_process_goes_under_its_job(monkeypatch):
         await ws.close()
     spans = exporter.get_finished_spans()
     by_id = {s.context.span_id: s for s in spans if s.context is not None}
-
-    def name(span) -> str:
-        a = span.attributes or {}
-        return f"{span.name} {a.get('process.command_line', a.get('mirage.command'))}"
-
-    [train] = [s for s in spans if name(s) == "process train 1"]
+    [train] = [s for s in spans if _span_name(s) == "process train 1"]
     chain = []
     span = train
     while span.parent is not None and span.parent.span_id in by_id:
         span = by_id[span.parent.span_id]
-        chain.append(name(span))
+        chain.append(_span_name(span))
     assert chain == [
         "job train 1",
         "process (train 1 & wait)",
