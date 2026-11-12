@@ -187,3 +187,27 @@ async def test_output_waits_for_a_reader_that_falls_behind():
         assert await asyncio.wait_for(proc.exit_code, 5) == 0
         await relay.close()
     assert len(out) == 4 * RELAY_WINDOW_BYTES
+
+
+async def burst(proc: FakeProcess) -> int:
+    for _ in range(4 * RELAY_WINDOW_BYTES // CHUNK):
+        proc.stdout.feed_data(b"x" * CHUNK)
+        while len(proc.stdout._buffer) > CHUNK:
+            await asyncio.sleep(0.001)
+    return 0
+
+
+@pytest.mark.asyncio
+async def test_an_exact_read_past_the_window_completes():
+    box = FakeContainer({"burst": burst})
+    async with relay_server(box) as url:
+        relay = RelayContainer(url, TOKEN)
+        proc = await relay.exec(["burst"], {})
+        await proc.stdin.close()
+        whole = await asyncio.wait_for(
+            proc.stdout.readexactly(2 * RELAY_WINDOW_BYTES), 10
+        )
+        proc.release()
+        assert await asyncio.wait_for(proc.exit_code, 10) == 0
+        await relay.close()
+    assert len(whole) == 2 * RELAY_WINDOW_BYTES

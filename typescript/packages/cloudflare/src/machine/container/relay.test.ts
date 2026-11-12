@@ -429,6 +429,22 @@ describe('ContainerRelay limits', () => {
     expect(await proc.exitCode).toBe(0)
   })
 
+  it('keeps a program going after its reader cancelled the stream', async () => {
+    const chunk = new Uint8Array(64 * 1024)
+    const { relay } = relayed({
+      flood: async (proc) => {
+        for (let at = 0; at < (4 * RELAY_WINDOW_BYTES) / chunk.byteLength; at++)
+          await proc.out.write(chunk)
+        return 0
+      },
+    })
+    const proc = await new MemoryClient(relay).exec(['flood'])
+    await proc.stdin?.getWriter().close()
+    await proc.stdout?.cancel()
+    expect(await readAll(proc.stderr)).toEqual(new Uint8Array())
+    expect(await proc.exitCode).toBe(0)
+  })
+
   it('holds stdin back once the program has a window of it untaken', async () => {
     const { box, relay } = relayed({ sleep: () => new Promise<number>(() => undefined) })
     box.deaf = true

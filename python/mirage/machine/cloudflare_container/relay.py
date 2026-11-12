@@ -15,7 +15,8 @@
 import asyncio
 import json
 import logging
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Iterable
+from typing import SupportsIndex
 
 import aiohttp
 
@@ -68,8 +69,10 @@ def bytes_of(message: aiohttp.WSMessage) -> bytes | None:
 class Channel(asyncio.StreamReader):
     """One output stream of a relayed process, fed from its socket. Each
     ``read`` and ``readexactly``, the two calls its readers make, tells
-    the relay how many bytes it took, and the relay sends no more than
-    ``RELAY_WINDOW_BYTES`` ahead of that.
+    the relay how many bytes it took, a window's worth at most at a time,
+    and the relay sends no more than ``RELAY_WINDOW_BYTES`` ahead of that.
+    A stream ``discard`` let go takes everything still coming, so the
+    program writing it never waits on a reader that has gone.
 
     Args:
         took (Callable[[int], None]): told how many bytes a read took.
@@ -78,16 +81,44 @@ class Channel(asyncio.StreamReader):
     def __init__(self, took: Callable[[int], None]) -> None:
         super().__init__()
         self._took = took
+        self._unread = 0
+        self.discarding = False
+
+    def feed_data(self, data: Iterable[SupportsIndex]) -> None:
+        chunk = bytes(data)
+        if self.discarding:
+            self._took(len(chunk))
+            return
+        self._unread += len(chunk)
+        super().feed_data(chunk)
+
+    def discard(self) -> None:
+        """Let the stream go: what it holds and what comes later count
+        as taken."""
+        self.discarding = True
+        if self._unread:
+            self._took(self._unread)
+            self._unread = 0
+
+    def _ack(self, data: bytes) -> bytes:
+        if data and not self.discarding:
+            self._unread -= len(data)
+            self._took(len(data))
+        return data
 
     async def read(self, n: int = -1) -> bytes:
-        data = await super().read(n)
-        self._took(len(data))
-        return data
+        return self._ack(await super().read(n))
 
     async def readexactly(self, n: int) -> bytes:
-        data = await super().readexactly(n)
-        self._took(len(data))
-        return data
+        parts: list[bytes] = []
+        left = n
+        while left:
+            chunk = await super().read(min(left, RELAY_WINDOW_BYTES))
+            if not chunk:
+                raise asyncio.IncompleteReadError(b"".join(parts), n)
+            parts.append(self._ack(chunk))
+            left -= len(chunk)
+        return b"".join(parts)
 
 
 class RelayInput:
@@ -141,11 +172,11 @@ class RelayProcess:
         return self._stdin
 
     @property
-    def stdout(self) -> asyncio.StreamReader:
+    def stdout(self) -> Channel:
         return self._stdout
 
     @property
-    def stderr(self) -> asyncio.StreamReader:
+    def stderr(self) -> Channel:
         return self._stderr
 
     @property
@@ -158,6 +189,7 @@ class RelayProcess:
 
     def release(self) -> None:
         for channel in self._done:
+            self._reader(channel).discard()
             self._end(channel)
 
     def read(self) -> None:
@@ -196,8 +228,10 @@ class RelayProcess:
     def _take(self, message: aiohttp.WSMessage) -> None:
         if (data := bytes_of(message)) is not None:
             channel = data[0] if data else 0
-            if channel in self._done and not self._done[channel]:
-                self._reader(channel).feed_data(data[1:])
+            if channel in self._done:
+                reader = self._reader(channel)
+                if not self._done[channel] or reader.discarding:
+                    reader.feed_data(data[1:])
             return
         if message.type is not aiohttp.WSMsgType.TEXT:
             return
@@ -220,7 +254,7 @@ class RelayProcess:
         elif isinstance(stopped := event.get("stopped"), str):
             self._lost(ConnectionResetError(stopped))
 
-    def _reader(self, channel: int) -> asyncio.StreamReader:
+    def _reader(self, channel: int) -> Channel:
         return self._stdout if channel == STDOUT_CHANNEL else self._stderr
 
     def _end(self, channel: int) -> None:
