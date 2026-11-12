@@ -251,7 +251,8 @@ one in YAML, Python and TypeScript.
 | `index` | Directory listings and file metadata | [File Index](/home/infrastructure/file-index) |
 
 A `cache` or `index` block needs a `type`. A `store` block without one keeps
-everything in memory. A `redis` type defaults `url` to
+in memory every part that its `namespace`, `sessions`, `logs` or `execution`
+key does not move elsewhere. A `redis` type defaults `url` to
 `redis://localhost:6379/0`.
 
 ## Values and paths
@@ -299,5 +300,6 @@ mounts:
       capacity: 100MB
 ```
 
-So do the server's ceilings, in `~/.mirage/config.toml` (`max_memory = "64MB"`)
+So do the server's ceilings, in the `[daemon]` section of `~/.mirage/config.toml`
+(`max_memory = "64MB"`)
 or as environment variables (`MIRAGE_MAX_MEMORY=64MB`).

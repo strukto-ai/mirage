@@ -32,7 +32,7 @@ Three layers set them:
 | A command printing a huge result | [`command_limits`](/home/core/output-limits) `max_lines` | 2,000 lines for `cat`, `grep`, `rg`, `head` and `tail` | the output is cut, with a notice on stderr; the exit code is kept |
 | A walk over a huge mount | `command_limits` [`walk_limit`](/home/integration/walks#walk_limit) | set by each VFS | the walk stops at the limit |
 | A mount filling up | [`capacity`](/home/setup/vfs#mount-capacity) on a RAM, disk, Redis, OPFS or SQL mount | no cap | `Disk quota exceeded` |
-| The read cache growing | [`cache.limit`](/home/infrastructure/file-cache) | `32MB`, `512MB` on Redis | nothing; see File Cache |
+| The read cache growing | [`cache.limit`](/home/infrastructure/file-cache) | `32MB` in memory. Redis removes nothing at its `limit`: cap it with Redis's own `maxmemory` | nothing; see File Cache |
 | Deep recursion in functions, `source`, `eval` or `bash -c` | 32 levels | fixed; `FUNCNEST` can lower it | exit 1, `environment: line 1: f: maximum function nesting level exceeded (32)` |
 | Many sessions on one workspace | `max_sessions` | 16, or 4 on an edge runtime | HTTP 429 |
 | Many workspaces on one server | `max_workspaces` | no cap | HTTP 503 |
