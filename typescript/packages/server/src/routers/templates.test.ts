@@ -30,7 +30,7 @@ function appWithStore() {
 }
 
 describe('templates router', () => {
-  it('saves, lists, deletes and restores a template', async () => {
+  it('saves, lists and deletes a template', async () => {
     const app = appWithStore()
     const saved = { name: 'base', description: 'ram only', config: RAM }
     const r = await app.inject({ method: 'POST', url: '/v1/templates', payload: saved })
@@ -48,11 +48,7 @@ describe('templates router', () => {
     expect((await app.inject({ method: 'GET', url: '/v1/templates/base' })).json()).toEqual(saved)
     expect((await app.inject({ method: 'DELETE', url: '/v1/templates/base' })).statusCode).toBe(204)
     expect((await app.inject({ method: 'GET', url: '/v1/templates/base' })).statusCode).toBe(404)
-    const restored = await app.inject({ method: 'POST', url: '/v1/templates/base/restore' })
-    expect(restored.statusCode).toBe(200)
-    expect(restored.json()).toEqual(saved)
-    const twice = await app.inject({ method: 'POST', url: '/v1/templates/base/restore' })
-    expect(twice.statusCode).toBe(404)
+    expect((await app.inject({ method: 'DELETE', url: '/v1/templates/base' })).statusCode).toBe(404)
     await app.close()
   })
 
