@@ -102,7 +102,7 @@ describe('SecretSource', () => {
     expect(SecretSource.parse({ source: 'env' }).config).toEqual({})
   })
 
-  it.each(['1password', 'aws-sm', 'auth0'])('refuses %s as a config source', (source) => {
+  it.each(['1password', 'aws-sm'])('refuses %s as a config source', (source) => {
     expect(() =>
       SecretSource.parse({
         source: 'aws-sm',

@@ -23,6 +23,7 @@ from mirage.secrets.registry import register_secrets
 from mirage.secrets.sources import (
     config_value,
     fetched_values,
+    resolve_config_secrets,
     resolve_sources,
     resolve_sources_for,
 )
@@ -103,6 +104,19 @@ async def test_an_unknown_source_names_the_known_ones():
     with pytest.raises(SecretsError) as caught:
         await resolve_sources({"prod": SecretSource(source="nope", config={})})
     assert "unknown secrets source 'nope'" in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_an_undeclared_source_keeps_its_install_hint(monkeypatch):
+    # No `secrets:` block, so the source resolves on the first read.
+    monkeypatch.setitem(
+        registry.BUILTINS, "ghost", (DemoConfig, "mirage_no_such_sdk:fetch")
+    )
+    with pytest.raises(SecretsError) as caught:
+        await resolve_config_secrets(
+            {"token": {"from": "ghost", "ref": "r", "key": "k"}}
+        )
+    assert "pip install 'mirage-ai[ghost]'" in str(caught.value)
 
 
 @pytest.mark.asyncio

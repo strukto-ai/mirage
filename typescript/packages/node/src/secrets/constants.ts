@@ -32,8 +32,21 @@ registerSecrets('env', EnvConfig, async (config, ref) =>
 registerSecrets('dotenv', DotenvConfig, async (config, ref) =>
   (await import('./dotenv.ts')).fetchDotenv(config, ref),
 )
-registerSecrets('aws-sm', AWSSMConfig, async (config, ref) =>
-  (await import('./aws.ts')).fetchAwsSm(config, ref),
+registerSecrets(
+  'aws-sm',
+  AWSSMConfig,
+  async (config, ref) => (await import('./aws.ts')).fetchAwsSm(config, ref),
+  // The SDK is an optional peer too, refused below as 1password's is.
+  () => {
+    try {
+      createRequire(import.meta.url).resolve('@aws-sdk/client-secrets-manager')
+    } catch {
+      throw new SecretsError(
+        "the 'aws-sm' source needs its optional dependency (@aws-sdk/client-secrets-manager): " +
+          'npm install @aws-sdk/client-secrets-manager',
+      )
+    }
+  },
 )
 registerSecrets(
   '1password',

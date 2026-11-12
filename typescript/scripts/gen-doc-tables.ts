@@ -119,6 +119,11 @@ const PEER_FEATURES: readonly { feature: string; packages: readonly string[]; ne
     packages: ['e2b', '@daytonaio/sdk'],
     needs: 'The `e2b` and `daytona` machines.',
   },
+  {
+    feature: 'AWS Secrets Manager',
+    packages: ['@aws-sdk/client-secrets-manager'],
+    needs: 'The `aws-sm` secret source.',
+  },
   { feature: '1Password', packages: ['@1password/sdk'], needs: 'The `1password` secret source.' },
 ]
 
