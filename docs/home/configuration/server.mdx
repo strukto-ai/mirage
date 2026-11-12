@@ -17,6 +17,11 @@ Each setting comes from the first of these that sets it:
 2. Its environment variable, such as `MIRAGE_MAX_SESSIONS`.
 3. Its key in the `[daemon]` section of `~/.mirage/config.toml`.
 
+A server you start in code takes `idle_grace_seconds` only as an option
+(`idleGraceSeconds` in TypeScript); its default is `30`. `port`, `workers` and
+`worker_type` are only for `mirage daemon`: in code, you serve the app
+yourself.
+
 The Cloudflare app has no `config.toml`. It reads only the sign-in settings
 and the six ceilings, `max_workspaces` to `max_env`, from options or the
 Worker's variables. Its `max_sessions` defaults to `4`.
