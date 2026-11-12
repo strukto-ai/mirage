@@ -40,7 +40,7 @@ words can carry credentials or host paths; they stay in the server's logs.
 | `EIO` | Input/output error | `500` | The backend failed. |
 | `EBADF` | Bad file descriptor | `500` | A read from a closed or write-only descriptor. |
 | `NO_XATTR` | No data available | `404` | The attribute is not set. Python on macOS says `Attribute not found`. |
-| `STALE_WRITE` | changed since it was read; read it again before writing | `409` | A [conditional write](/home/configuration#read-and-write-policies) lost its condition. |
+| `STALE_WRITE` | changed since it was read; read it again before writing | `409` | A [conditional write](/home/setup/vfs#read-and-write-behavior) lost its condition. |
 
 Each surface carries the condition its own way:
 
