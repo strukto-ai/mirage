@@ -318,6 +318,7 @@ def routed(
     bindings: Mapping[str, RuntimeIdentity | None],
     runtime: str | None,
     machine: str | None,
+    inherited: str | None = None,
 ) -> RouteDecision[RuntimeIdentity]:
     """The decision a policy's route places a line or a command on.
 
@@ -333,10 +334,14 @@ def routed(
             own for a command.
         runtime (str | None): the runtime the route names.
         machine (str | None): the machine it names.
+        inherited (str | None): the machine of the placement the route
+            overlays, kept when the route names none.
 
     Raises:
-        ValueError: no entry has the runtime's name.
+        ValueError: no entry has the runtime's name, or no runtime it
+            places takes the machine (``check_route_machine``).
     """
+    check_route_machine(entries, runtime, machine)
     placed: dict[str, RuntimeIdentity | None] = dict(bindings)
     if runtime == WorkspaceRuntime.name:
         kept = [e for e in entries if WHOLE_LINE not in e.captures]
@@ -347,8 +352,44 @@ def routed(
     elif runtime is not None:
         placed.update(runtime_bindings_for(entries, runtime))
     return RouteDecision(
-        bindings=placed, fallback=catch_all(entries), machine=machine
+        bindings=placed,
+        fallback=catch_all(entries),
+        machine=machine or inherited,
     )
+
+
+def check_route_machine(
+    entries: list[Runtime[Any]], runtime: str | None, machine: str | None
+) -> None:
+    """Refuse a placement whose machine no runtime it places would run
+    on: only the remote runtime runs on a machine a line names, so a
+    named runtime has to be one, and a placement naming no runtime needs
+    one among the entries.
+
+    Args:
+        entries (list[Runtime]): the workspace's ordered runtimes.
+        runtime (str | None): the runtime the placement names.
+        machine (str | None): the machine it names.
+
+    Raises:
+        ValueError: the named runtime runs on its own machine, or no
+            entry is a remote runtime.
+    """
+    if machine is None:
+        return
+    if runtime is None or runtime == WorkspaceRuntime.name:
+        if not any(isinstance(e, RemoteRuntime) for e in entries):
+            raise ValueError(
+                f"machine {machine!r} takes the remote runtime, and the "
+                "workspace has none"
+            )
+        return
+    for entry in entries:
+        if entry.name == runtime and not isinstance(entry, RemoteRuntime):
+            raise ValueError(
+                f"runtime {runtime!r} runs on the workspace's machine; "
+                f"machine {machine!r} takes the remote runtime"
+            )
 
 
 def catch_all(entries: list[Runtime[Any]]) -> Runtime[Any] | None:

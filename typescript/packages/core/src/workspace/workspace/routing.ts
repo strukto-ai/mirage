@@ -28,7 +28,13 @@ import { opQuestion, sameOccurrence } from '../../policy/decisions.ts'
 import { agreed, commandRoute, settled } from '../../policy/policies.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { EXTERNAL_COMMANDS, WHOLE_LINE } from '../../runtime/constants.ts'
-import { catchAll, routed, runtimeBindingsFor, wholeLineRuntime } from '../../runtime/table.ts'
+import {
+  catchAll,
+  checkRouteMachine,
+  routed,
+  runtimeBindingsFor,
+  wholeLineRuntime,
+} from '../../runtime/table.ts'
 import { PathSpec } from '../../types.ts'
 import { PROGRAM_WRAPPERS } from '../lookup/constants.ts'
 import { mirageProgramAt, routedConsumer, wrapperRunsOutside } from '../lookup/lookup.ts'
@@ -210,7 +216,8 @@ export class Router {
    * Python's `Router._routed`.
    *
    * Throws:
-   *   RouteError: no entry or machine has the name.
+   *   RouteError: no entry or machine has the name, or the runtime does not
+   *   run on the machine.
    */
   private routed(route: Route): RouteDecision<Runtime> {
     this.knownMachine(route.machine)
@@ -287,7 +294,8 @@ export class Router {
         this.runtimes.entries,
         placed.bindings,
         answer.runtime,
-        answer.machine ?? placed.machine,
+        answer.machine,
+        placed.machine,
       ),
     )
   }
@@ -296,12 +304,7 @@ export class Router {
   private ownPlaced(one: Judged, line: RouteDecision<Runtime>): RouteDecision<Runtime> {
     const route = commandRoute(one.judgment.answers)
     if (route === null) return line
-    return routed(
-      this.runtimes.entries,
-      line.bindings,
-      route.runtime,
-      route.machine ?? line.machine,
-    )
+    return routed(this.runtimes.entries, line.bindings, route.runtime, route.machine, line.machine)
   }
 
   /**
@@ -396,7 +399,8 @@ export class Router {
         this.runtimes.entries,
         decision.bindings,
         route.runtime,
-        route.machine ?? decision.machine,
+        route.machine,
+        decision.machine,
       )
     } catch (caught) {
       throw new RouteError(caught instanceof Error ? caught.message : String(caught), {
@@ -453,13 +457,15 @@ export class Router {
    * command on its first capturer.
    *
    * Throws:
-   *   RouteError: no entry or machine has the name, or the runtime cannot be selected.
+   *   RouteError: no entry or machine has the name, the runtime cannot be
+   *   selected, or it does not run on the machine.
    */
   private placed(name: string | undefined, machine: string | undefined): RouteDecision<Runtime> {
     this.knownMachine(machine)
     let overlay: Record<string, Runtime>
     try {
       overlay = name === undefined ? {} : runtimeBindingsFor(this.runtimes.entries, name)
+      checkRouteMachine(this.runtimes.entries, name, machine)
     } catch (caught) {
       throw new RouteError(caught instanceof Error ? caught.message : String(caught), {
         cause: caught,

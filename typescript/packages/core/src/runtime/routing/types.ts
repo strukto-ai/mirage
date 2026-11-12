@@ -13,15 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ProfilePolicySpec } from '../../policy/profile.ts'
-import type { RouteContext } from '../../policy/types.ts'
+import type { Route, RouteContext } from '../../policy/types.ts'
 
 /**
  * What a route policy function answers: a runtime name places the line,
- * null leaves each command to its first capturer. Refusing a line is a
- * policy's (a preExecute Deny), not the router's. Mirrors the python
- * RouteVerdict.
+ * a Route places it on a runtime, a machine or both, null leaves each
+ * command to its first capturer. Refusing a line is a policy's (a
+ * preExecute Deny), not the router's. Mirrors the python RouteVerdict.
  */
-export type RouteVerdict = string | null
+export type RouteVerdict = string | Route | null
 
 /**
  * The route policy, answering "who takes this line?". In code: a
@@ -31,7 +31,10 @@ export type RouteVerdict = string | null
  * answer. Mirrors the python RouteRule.
  *
  * ```
- * routePolicy: (ctx) => (ctx.commands.some((c) => c.command === 'python3') ? 'monty' : null)
+ * routePolicy: (ctx) =>
+ *   ctx.line.includes('train.py')
+ *     ? { kind: 'route', runtime: 'remote', machine: 'gpu' }
+ *     : ctx.commands.some((c) => c.command === 'python3') ? 'monty' : null
  *
  * // workspace yaml: route.py next to the config file
  * // route_policy: {script: route.py, runtime: monty}

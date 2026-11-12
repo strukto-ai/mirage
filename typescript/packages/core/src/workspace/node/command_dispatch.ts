@@ -1008,7 +1008,8 @@ async function runArgv(
             registry.runtimeEntries,
             here.bindings,
             answer.runtime,
-            answer.machine ?? here.machine,
+            answer.machine,
+            here.machine,
           )
         } catch (caught) {
           throw new RouteError(caught instanceof Error ? caught.message : String(caught), {

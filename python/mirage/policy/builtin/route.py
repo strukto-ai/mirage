@@ -28,13 +28,14 @@ class RoutePolicy(Policy):
 
     The workspace compiles the configured callable or program into this
     built-in (``Policies.place``), so a route is one more
-    ``pre_execute`` answer. A callable answers a runtime name (a Route)
-    or None (silence). A program, ``{script, runtime}``, runs as a
-    profile's policy programs run and prints what a ``pre_execute``
-    program may answer. A mistake in either (any other answer, a
-    program that fails) raises ``RouteError`` to the caller rather than
-    failing closed, since a misconfigured route policy is the
-    deployment's to fix and not a refusal to show an agent.
+    ``pre_execute`` answer. A callable answers a runtime name, a Route
+    (a runtime, a machine or both) or None (silence). A program,
+    ``{script, runtime}``, runs as a profile's policy programs run and
+    prints what a ``pre_execute`` program may answer. A mistake in
+    either (any other answer, a program that fails) raises
+    ``RouteError`` to the caller rather than failing closed, since a
+    misconfigured route policy is the deployment's to fix and not a
+    refusal to show an agent.
 
     Args:
         route (RouteRule): the configured callable or program.
@@ -86,8 +87,11 @@ class RoutePolicy(Policy):
         verdict = await called if inspect.isawaitable(called) else called
         if verdict is None:
             return None
+        if isinstance(verdict, Route):
+            return verdict
         if isinstance(verdict, str) and verdict:
             return Route(verdict)
         raise RouteError(
-            f"route policy must answer a runtime name or None, got {verdict!r}"
+            "route policy must answer a runtime name, a Route or None, "
+            f"got {verdict!r}"
         )

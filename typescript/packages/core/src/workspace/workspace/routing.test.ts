@@ -112,6 +112,24 @@ class OnA implements Policy {
   }
 }
 
+class MontyOnB implements Policy {
+  preExecute(): Route {
+    return { kind: 'route', runtime: 'monty', machine: 'b' }
+  }
+}
+
+function withMonty(...policies: Policy[]): Workspace {
+  return new Workspace(
+    { '/': new RAMVFS() },
+    {
+      mode: MountMode.EXEC,
+      machines: { a: new Box('a'), b: new Box('b') },
+      runtimes: [new RemoteRuntime({ captures: ['hostname'], machine: 'a' }), 'monty', 'workspace'],
+      policies,
+    },
+  )
+}
+
 class HostnameOnMonty implements Policy {
   preCommand(ctx: CommandContext): Route | null {
     return ctx.command === 'hostname' ? { kind: 'route', runtime: 'monty' } : null
@@ -353,6 +371,52 @@ describe('routing on machines', () => {
         ['eval', ''],
         ['hostname', 'box:b'],
       ])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('refuses a route to a machine its runtime does not run on', async () => {
+    const refusal = "runtime 'monty' runs on the workspace's machine"
+    let ws = withMonty(new MontyOnB())
+    try {
+      await expect(ws.shell('hostname')).rejects.toThrow(RouteError)
+      await expect(ws.shell('hostname')).rejects.toThrow(refusal)
+    } finally {
+      await ws.close()
+    }
+    ws = withMonty()
+    try {
+      await expect(ws.shell('hostname', { runtime: 'monty', machine: 'b' })).rejects.toThrow(
+        refusal,
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('refuses a route to a machine when no remote runtime runs on one', async () => {
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { b: new Box('b') },
+        runtimes: ['monty', 'workspace'],
+        policies: [new OnB()],
+      },
+    )
+    try {
+      await expect(ws.shell('echo hi')).rejects.toThrow("machine 'b' takes the remote runtime")
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it("keeps the line's machine for a command routed to a local runtime", async () => {
+    const ws = withMonty(new HostnameOnMonty())
+    try {
+      const said = await ws.shell('hostname', { machine: 'b' })
+      expect([said.exitCode, DEC.decode(said.stdout)]).toEqual([0, 'b\n'])
     } finally {
       await ws.close()
     }
