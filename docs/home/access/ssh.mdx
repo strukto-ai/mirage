@@ -105,7 +105,7 @@ ssh-ed25519 AAAA... me
 
 | Option | Does |
 | --- | --- |
-| `mirage-profile` | Runs every login of the key under this [agent profile](/home/profiles). The server reads it, so a key cannot pick looser rules. |
+| `mirage-profile` | Runs every login of the key under this [session profile](/home/configuration/session). The server reads it, so a key cannot pick looser rules. |
 | `mirage-account` | Opens only the workspaces this [account](/home/access/http#accounts) created. Another account's workspace answers like a missing one. |
 
 On a [`jwt`](/home/access/http#jwt) server, each login reaches only its
