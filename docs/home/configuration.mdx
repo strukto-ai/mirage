@@ -80,7 +80,7 @@ Each mount key is an absolute virtual prefix, such as `/data`.
 | Key | Purpose |
 | --- | --- |
 | `vfs` | Required registered VFS name, such as `ram` or `s3`. |
-| `config` | Provider-specific fields from its [setup guide](/home/setup/vfs). |
+| `config` | Provider-specific fields from its [setup guide](/home/setup/vfs), including [`capacity`](/home/setup/vfs#mount-capacity) on RAM, disk, Redis, OPFS and SQL. |
 | `mode` | Override the workspace's access mode. |
 | `read`, `ttl` | Override the read policy. An explicit `read: bounded` requires `ttl` in positive whole seconds. |
 | `write` | Override the write policy with one the backend supports. |
@@ -96,31 +96,6 @@ Each mount key is an absolute virtual prefix, such as `/data`.
 | `fuse` | As a local folder through FUSE. |
 | `fskit` | As a local folder through FSKit, on macOS 15.4 or later. |
 | `nfs` | As a local folder through the operating system's NFS client. Mirage serves NFSv3 on a local port and runs the system `mount`, so nothing extra is installed. Linux and macOS; Linux needs root. Read-only. A VFS that cannot size a file without reading it still mounts, with a warning, but those files read as empty; use `fuse` for it. |
-
-## Capacity
-
-A RAM, disk, Redis, OPFS or SQL store takes `capacity` in its `config`, as a
-[size](#sizes):
-
-```yaml
-mounts:
-  /data:
-    vfs: ram
-    mode: write
-    config:
-      capacity: 100MB
-```
-
-A write past it fails with `EDQUOT` ("Disk quota exceeded", the same message
-for every store). Through a [FUSE folder](/home/setup/fuse), a program gets
-it when it syncs or closes the file. Stored data stays readable and
-removable, and `df` shows the capacity as the store's size.
-
-Two workspaces on one disk folder, Redis key prefix or OPFS directory each
-count only their own writes. A SQL store counts every file in its database,
-and SQL mounts handed one driver with the same `capacity` share one count. A
-RAM store's files also count against its workspace's `max_memory`, which
-refuses a write the same way.
 
 ## Network
 
