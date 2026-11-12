@@ -236,6 +236,17 @@ def test_runtime_bindings_for_takes_a_runtimes_name_while_it_has_one_entry():
         runtime_bindings_for([a, b], "remote")
 
 
+def test_runtime_bindings_for_takes_no_other_name_a_class_is_registered_as():
+    try:
+        register_runtime("cpython", FakeRuntime)
+        with pytest.raises(ValueError, match="unknown runtime: 'cpython'"):
+            runtime_bindings_for(
+                [FakeRuntime(), WorkspaceRuntime()], "cpython"
+            )
+    finally:
+        NAMED.pop("cpython", None)
+
+
 class _LineRuntime(Runtime, LineExecutorMixin):
     name = "boxy"
     captures = ("nvidia-smi",)

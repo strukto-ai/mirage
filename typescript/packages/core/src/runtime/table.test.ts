@@ -312,6 +312,13 @@ describe('runtimeBindingsFor', () => {
     )
   })
 
+  it('takes no other name a class is registered as', () => {
+    registerRuntime('cpython-alias', FakeRuntime)
+    expect(() =>
+      runtimeBindingsFor([new FakeRuntime(), new WorkspaceRuntime()], 'cpython-alias'),
+    ).toThrow(/unknown runtime: 'cpython-alias'/)
+  })
+
   it.each<[string, RegExp]>([
     ['workspace', /not a runtime you can select/],
     ['nope', /unknown runtime: 'nope' \(workspace runtimes: 'fake', 'workspace'\)/],

@@ -1285,7 +1285,7 @@ class InAppSteps:
         ws = self.workspaces[wid]
         if kind == "machines":
             return [
-                {"id": str(m.id), "state": m.state.value}
+                {"name": str(m.name), "state": m.state.value}
                 for m in await ws.machines()
             ]
         listed = {

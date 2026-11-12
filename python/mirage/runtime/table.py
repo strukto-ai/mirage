@@ -184,9 +184,9 @@ def runtime_bindings_for(
 
     Args:
         entries (list[Runtime]): the workspace's ordered runtime world.
-        name (str): the workspace runtime entry to bind to, or its
-            runtime's name (``remote`` for ``remote:gpu``) while the
-            workspace has one entry of it.
+        name (str): the workspace runtime entry to bind to, or the
+            part before its colon (``remote`` for ``remote:gpu``) while
+            the workspace has one such entry.
 
     Raises:
         ValueError: the name is workspace (captures nothing, so there is
@@ -196,9 +196,8 @@ def runtime_bindings_for(
         raise ValueError(
             "'workspace' is the default executor, not a runtime you can select"
         )
-    cls = NAMED.get(name)
     found = [e for e in entries if e.name == name] or [
-        e for e in entries if cls is not None and isinstance(e, cls)
+        e for e in entries if e.name.startswith(f"{name}:")
     ]
     if len(found) == 1:
         return {command: found[0] for command in found[0].captures}

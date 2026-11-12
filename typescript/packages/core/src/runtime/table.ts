@@ -207,9 +207,9 @@ export function runtimeClass(
  *
  * Naming a runtime places a line's captured stages on it without
  * touching capability: only commands the runtime captures rebind,
- * everything else keeps its normal binding. The name is an entry's, or its
- * runtime's (`remote` for `remote:gpu`) while the workspace has one entry
- * of it; throws for `workspace`, no entry or several.
+ * everything else keeps its normal binding. The name is an entry's, or the
+ * part before its colon (`remote` for `remote:gpu`) while the workspace has
+ * one such entry; throws for `workspace`, no entry or several.
  */
 export function runtimeBindingsFor(
   entries: readonly Runtime[],
@@ -218,10 +218,8 @@ export function runtimeBindingsFor(
   if (name === 'workspace') {
     throw new Error(`'workspace' is the default executor, not a runtime you can select`)
   }
-  const cls = NAMED[name]
   const exact = entries.filter((e) => e.name === name)
-  const found =
-    exact.length > 0 ? exact : entries.filter((e) => cls !== undefined && e instanceof cls)
+  const found = exact.length > 0 ? exact : entries.filter((e) => e.name.startsWith(`${name}:`))
   const [entry] = found
   if (found.length === 1 && entry !== undefined) {
     // Null prototype: captures are arbitrary command names.

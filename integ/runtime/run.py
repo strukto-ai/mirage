@@ -1506,7 +1506,11 @@ def _for_runtime(case: dict[str, Any], runtime: str) -> dict[str, Any] | None:
                 for name in (runtime, *case.get("also_machines", []))
             }
             entry = {**entry, "name": "remote", "machine": runtime}
-        world["runtimes"] = [entry, "workspace"]
+        world["runtimes"] = [
+            entry,
+            *({"name": "remote", **e} for e in case.get("also_entries", [])),
+            "workspace",
+        ]
     variant = {
         **case,
         "id": f"{case['id']}@{runtime}",
