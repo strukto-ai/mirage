@@ -402,3 +402,20 @@ async def test_a_command_routed_to_a_local_runtime_keeps_the_lines_machine():
         assert (said.exit_code, said.stdout) == (0, b"b\n")
     finally:
         await ws.close()
+
+
+class _HostnameOnMontyOnB(Policy):
+    def pre_command(self, ctx):
+        if ctx.command == "hostname":
+            return Route("monty", machine="b")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_explain_refuses_a_command_route_to_a_machine_as_a_route_error():
+    ws = _with_monty(_HostnameOnMontyOnB())
+    try:
+        with pytest.raises(RouteError, match="runs on the workspace's"):
+            await ws.explain("hostname")
+    finally:
+        await ws.close()

@@ -130,6 +130,12 @@ function withMonty(...policies: Policy[]): Workspace {
   )
 }
 
+class HostnameOnMontyOnB implements Policy {
+  preCommand(ctx: CommandContext): Route | null {
+    return ctx.command === 'hostname' ? { kind: 'route', runtime: 'monty', machine: 'b' } : null
+  }
+}
+
 class HostnameOnMonty implements Policy {
   preCommand(ctx: CommandContext): Route | null {
     return ctx.command === 'hostname' ? { kind: 'route', runtime: 'monty' } : null
@@ -417,6 +423,15 @@ describe('routing on machines', () => {
     try {
       const said = await ws.shell('hostname', { machine: 'b' })
       expect([said.exitCode, DEC.decode(said.stdout)]).toEqual([0, 'b\n'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('explains a command route to a machine its runtime does not run on as a RouteError', async () => {
+    const ws = withMonty(new HostnameOnMontyOnB())
+    try {
+      await expect(ws.explain('hostname')).rejects.toThrow(RouteError)
     } finally {
       await ws.close()
     }

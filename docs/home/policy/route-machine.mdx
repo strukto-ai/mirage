@@ -14,6 +14,7 @@ route policy picks the machine for each line.
 Run jobs on a CPU container by default, and GPU jobs on a GPU container:
 
 ```yaml
+mode: exec
 machines:
   box:
     provider: docker
@@ -60,7 +61,7 @@ Name `remote` as well.
 A route fails the line with a routing error when it names:
 
 - a machine that is not under `machines:`
-- a machine together with a runtime other than `remote`
+- a machine together with a runtime other than `remote` or `workspace`
 - a machine in a workspace that has no `remote` runtime
 
 ## One machine per session
@@ -69,6 +70,7 @@ A route fails the line with a routing error when it names:
 get its own machine:
 
 ```yaml
+mode: exec
 machines:
   alice:
     provider: docker
