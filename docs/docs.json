@@ -126,6 +126,14 @@
             ]
           },
           {
+            "group": "Configuration",
+            "pages": [
+              "home/configuration",
+              "home/authentication",
+              "home/security"
+            ]
+          },
+          {
             "group": "VFS",
             "pages": [
               "home/setup/vfs",
@@ -332,14 +340,6 @@
               "home/infrastructure/jobs",
               "home/infrastructure/file-cache",
               "home/infrastructure/file-index"
-            ]
-          },
-          {
-            "group": "Configuration",
-            "pages": [
-              "home/configuration",
-              "home/authentication",
-              "home/security"
             ]
           },
           {
