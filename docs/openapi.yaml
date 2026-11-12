@@ -206,17 +206,17 @@ paths:
                 created_at: '2026-11-07T00:00:00.000Z'
                 system_time: null
                 sessions:
-                - session_id: 01a1b425-ec80-7038-86e0-75b597344043
-                  cwd: /
-                - session_id: agent
-                  cwd: /
+                  - session_id: 01a1b425-ec80-7038-86e0-75b597344043
+                    cwd: /
+                  - session_id: agent
+                    cwd: /
                 mounts:
-                - prefix: /
-                  vfs: ram
-                  mode: write
-                  description: ''
-                  backend: workspace
-                  mountpoint: null
+                  - prefix: /
+                    vfs: ram
+                    mode: write
+                    description: ''
+                    backend: workspace
+                    mountpoint: null
                 internals: null
         '400':
           $ref: '#/components/responses/400'
@@ -389,17 +389,17 @@ paths:
                 created_at: '2026-11-07T00:00:00.000Z'
                 system_time: null
                 sessions:
-                - session_id: 01a1b425-ec80-7038-86e0-75b597344043
-                  cwd: /
-                - session_id: agent
-                  cwd: /
+                  - session_id: 01a1b425-ec80-7038-86e0-75b597344043
+                    cwd: /
+                  - session_id: agent
+                    cwd: /
                 mounts:
-                - prefix: /
-                  vfs: ram
-                  mode: write
-                  description: ''
-                  backend: workspace
-                  mountpoint: null
+                  - prefix: /
+                    vfs: ram
+                    mode: write
+                    description: ''
+                    backend: workspace
+                    mountpoint: null
                 internals: null
         '400':
           $ref: '#/components/responses/400'
@@ -701,13 +701,13 @@ paths:
                 $ref: '#/components/schemas/TemplateList'
               example:
                 items:
-                - name: demo
-                  description: One RAM mount
-                  config:
-                    mounts:
-                      /:
-                        vfs: ram
-                        mode: write
+                  - name: demo
+                    description: One RAM mount
+                    config:
+                      mounts:
+                        /:
+                          vfs: ram
+                          mode: write
         '401':
           $ref: '#/components/responses/401'
         '429':
@@ -1360,18 +1360,18 @@ paths:
                 $ref: '#/components/schemas/AskList'
               example:
                 items:
-                - id: 791070cdf81c
-                  session_id: agent
-                  command: rm
-                  argv:
-                  - /notes.txt
-                  cwd: /
-                  paths:
-                  - /notes.txt
-                  reason: Deletes need sign-off
-                  outcome: null
-                  scope: once
-                  note: ''
+                  - id: 791070cdf81c
+                    session_id: agent
+                    command: rm
+                    argv:
+                      - /notes.txt
+                    cwd: /
+                    paths:
+                      - /notes.txt
+                    reason: Deletes need sign-off
+                    outcome: null
+                    scope: once
+                    note: ''
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -1419,10 +1419,10 @@ paths:
                 session_id: agent
                 command: rm
                 argv:
-                - /notes.txt
+                  - /notes.txt
                 cwd: /
                 paths:
-                - /notes.txt
+                  - /notes.txt
                 reason: Deletes need sign-off
                 outcome: allow
                 scope: once
@@ -1926,9 +1926,9 @@ paths:
                 $ref: '#/components/schemas/MachineList'
               example:
                 items:
-                - id: host:my-laptop
-                  state: managed
-                  checked_at: '2026-11-07T00:00:05.000Z'
+                  - id: host:my-laptop
+                    state: managed
+                    checked_at: '2026-11-07T00:00:05.000Z'
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -1969,22 +1969,22 @@ paths:
                 state: managed
                 checked_at: '2026-11-07T00:00:05.000Z'
                 processes:
-                - pid: 4194305
-                  session_id: agent
-                  line_id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
-                  parent: null
-                  group: 4194305
-                  command: rm /notes.txt
-                  cwd: /
-                  machine: host:my-laptop
-                  runtime: null
-                  machine_pid: null
-                  state: exited
-                  started_at: '2026-11-07T00:00:04.000Z'
-                  ended_at: '2026-11-07T00:00:04.008Z'
-                  exit: 126
-                  signal: null
-                  error: null
+                  - pid: 4194305
+                    session_id: agent
+                    line_id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
+                    parent: null
+                    group: 4194305
+                    command: rm /notes.txt
+                    cwd: /
+                    machine: host:my-laptop
+                    runtime: null
+                    machine_pid: null
+                    state: exited
+                    started_at: '2026-11-07T00:00:04.000Z'
+                    ended_at: '2026-11-07T00:00:04.008Z'
+                    exit: 126
+                    signal: null
+                    error: null
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -4803,18 +4803,18 @@ paths:
                 $ref: '#/components/schemas/SavedEntryList'
               example:
                 items:
-                - id: assets
-                  name: assets
-                  kind: vfs
-                  type: s3
-                  builtin: false
-                  config:
-                    bucket: example-bucket
-                    region: us-east-1
-                  created_by: null
-                  created_at: null
-                  updated_at: null
-                  used_by: 1
+                  - id: assets
+                    name: assets
+                    kind: vfs
+                    type: s3
+                    builtin: false
+                    config:
+                      bucket: example-bucket
+                      region: us-east-1
+                    created_by: null
+                    created_at: null
+                    updated_at: null
+                    used_by: 1
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -5115,17 +5115,17 @@ paths:
                 $ref: '#/components/schemas/SavedEntryList'
               example:
                 items:
-                - id: github
-                  name: github
-                  kind: cli
-                  type: gh
-                  builtin: false
-                  config:
-                    repo: owner/repository
-                  created_by: null
-                  created_at: null
-                  updated_at: null
-                  used_by: 1
+                  - id: github
+                    name: github
+                    kind: cli
+                    type: gh
+                    builtin: false
+                    config:
+                      repo: owner/repository
+                    created_by: null
+                    created_at: null
+                    updated_at: null
+                    used_by: 1
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -5265,7 +5265,7 @@ paths:
                 created_at: null
                 updated_at: null
                 sealed:
-                - token
+                  - token
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -5393,18 +5393,18 @@ paths:
                 $ref: '#/components/schemas/SavedEntryList'
               example:
                 items:
-                - id: python
-                  name: python
-                  kind: runtime
-                  type: monty
-                  builtin: false
-                  config:
-                    max_memory: 128MB
-                  captures: []
-                  created_by: null
-                  created_at: null
-                  updated_at: null
-                  used_by: 1
+                  - id: python
+                    name: python
+                    kind: runtime
+                    type: monty
+                    builtin: false
+                    config:
+                      max_memory: 128MB
+                    captures: []
+                    created_by: null
+                    created_at: null
+                    updated_at: null
+                    used_by: 1
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -5656,17 +5656,17 @@ paths:
                 $ref: '#/components/schemas/SavedEntryList'
               example:
                 items:
-                - id: tools
-                  name: tools
-                  kind: machine
-                  type: docker
-                  builtin: false
-                  config:
-                    container: mirage-tools
-                  created_by: null
-                  created_at: null
-                  updated_at: null
-                  used_by: 1
+                  - id: tools
+                    name: tools
+                    kind: machine
+                    type: docker
+                    builtin: false
+                    config:
+                      container: mirage-tools
+                    created_by: null
+                    created_at: null
+                    updated_at: null
+                    used_by: 1
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -5898,7 +5898,7 @@ paths:
                 $ref: '#/components/schemas/PolicyList'
               example:
                 items:
-                - name: guard.py
+                  - name: guard.py
         '401':
           $ref: '#/components/responses/401'
         '429':
