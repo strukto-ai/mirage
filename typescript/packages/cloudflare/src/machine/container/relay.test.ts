@@ -21,9 +21,11 @@ import type {
   ExecProcess,
   RelaySocket,
 } from '@struktoai/mirage-core/machine/cloudflare_container/types'
+import { RELAY_WINDOW_BYTES } from '@struktoai/mirage-core/machine/cloudflare_container/constants'
+import { logger } from '@struktoai/mirage-core/machine/handle'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { concat } from '@struktoai/mirage-core/utils/bytes'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ContainerRelay, relayFetch, type RelayedContainer } from './relay.ts'
 
 const ENC = new TextEncoder()
@@ -99,6 +101,7 @@ class ScriptedProcess implements ExecProcess {
     readonly argv: readonly string[],
     readonly env: Record<string, string> | undefined,
     program: Program,
+    deaf = false,
   ) {
     const out = new TransformStream<Uint8Array, Uint8Array>()
     const err = new TransformStream<Uint8Array, Uint8Array>()
@@ -113,6 +116,8 @@ class ScriptedProcess implements ExecProcess {
     this.stdin = new WritableStream<Uint8Array>({
       write: (chunk) => {
         this.input = concat([this.input, chunk])
+        // A deaf program takes nothing past its first chunk.
+        return deaf ? new Promise<void>(() => undefined) : undefined
       },
       close: () => {
         this.inputClosed = true
@@ -127,7 +132,9 @@ class ScriptedProcess implements ExecProcess {
         }
       })
       const code = await Promise.race([program(this), killed])
-      await Promise.allSettled(writers.map((writer) => writer.close()))
+      for (const settled of await Promise.allSettled(writers.map((writer) => writer.close())))
+        if (settled.status === 'rejected')
+          logger.debug?.(`scripted process: output not closed: ${String(settled.reason)}`)
       return code
     })()
   }
@@ -144,6 +151,9 @@ class ScriptedContainer implements RelayedContainer {
   running = false
   starts = 0
   down: Error | null = null
+  // Each exec waits for `held` before it answers; a deaf one's program takes no input.
+  held: Promise<void> | null = null
+  deaf = false
   private exited: { resolve: () => void; reject: (error: Error) => void } | null = null
 
   constructor(private readonly programs: Record<string, Program> = {}) {}
@@ -153,8 +163,9 @@ class ScriptedContainer implements RelayedContainer {
     this.running = true
   }
 
-  exec(cmd: string[], options?: ExecOptions): Promise<ExecProcess> {
-    if (this.down !== null) return Promise.reject(this.down)
+  async exec(cmd: string[], options?: ExecOptions): Promise<ExecProcess> {
+    if (this.down !== null) throw this.down
+    await this.held
     let inner = cmd[2] === EXEC_PRELUDE ? cmd.slice(5) : cmd
     if (isRun(inner)) inner = inner.slice(7)
     const line = inner[0] === '/bin/sh' && inner[1] === '-c' ? (inner[2] ?? '') : inner.join(' ')
@@ -165,9 +176,9 @@ class ScriptedContainer implements RelayedContainer {
             return 0
           }
         : (this.programs[line.split(' ')[0] ?? ''] ?? (() => Promise.resolve(0)))
-    const proc = new ScriptedProcess(cmd, options?.env, program)
+    const proc = new ScriptedProcess(cmd, options?.env, program, this.deaf)
     this.procs.push(proc)
-    return Promise.resolve(proc)
+    return proc
   }
 
   monitor(): Promise<void> {
@@ -192,7 +203,7 @@ class MemoryRelay extends ContainerRelay<Record<string, string>> {
 
 /** A client that reaches `relay` in memory: its POSTs through the relay's fetch, its sockets paired. */
 class MemoryClient extends RelayContainer {
-  readonly sockets: MemorySocket[] = []
+  readonly opened: MemorySocket[] = []
 
   constructor(
     private readonly relay: MemoryRelay,
@@ -209,7 +220,7 @@ class MemoryClient extends RelayContainer {
 
   protected override openSocket(url: string): Promise<RelaySocket> {
     const [mine, theirs] = pair()
-    this.sockets.push(mine)
+    this.opened.push(mine)
     this.relay.serveSocket(url.split('/').at(-1) ?? '', theirs)
     return Promise.resolve(mine)
   }
@@ -283,7 +294,7 @@ describe('ContainerRelay with RelayContainer', () => {
     const { box, relay } = relayed({ sleep: () => new Promise<number>(() => undefined) })
     const client = new MemoryClient(relay)
     const proc = await client.exec(['sleep'])
-    client.sockets[0]?.close()
+    client.opened[0]?.close()
     await expect(proc.exitCode).rejects.toThrow('the connection to the relay closed')
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(box.procs[0]?.killed).toEqual([9])
@@ -344,6 +355,110 @@ describe('ContainerRelay with RelayContainer', () => {
     expect(result.exitCode).toBe(0)
     expect(box.starts).toBe(1)
     await machine.close()
+  })
+})
+
+describe('ContainerRelay limits', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('answers a browser preflight for start and lets any origin read its answer', async () => {
+    const { relay } = relayed()
+    const preflight = await relay.fetch(new Request(`${URL_BASE}/start`, { method: 'OPTIONS' }))
+    expect(preflight.status).toBe(204)
+    expect(preflight.headers.get('access-control-allow-headers')).toBe('authorization')
+    expect(preflight.headers.get('access-control-allow-methods')).toBe('POST')
+    const started = await relay.fetch(
+      new Request(`${URL_BASE}/start`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${TOKEN}` },
+      }),
+    )
+    expect(started.status).toBe(204)
+    expect(started.headers.get('access-control-allow-origin')).toBe('*')
+  })
+
+  it('kills a process whose client left while exec was starting', async () => {
+    const { box, relay } = relayed({ sleep: () => new Promise<number>(() => undefined) })
+    let answer: () => void = () => undefined
+    box.held = new Promise((resolve) => {
+      answer = resolve
+    })
+    const client = new MemoryClient(relay)
+    const asked = client.exec(['sleep'])
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    client.opened[0]?.close()
+    await expect(asked).rejects.toThrow('the relay closed the exec before it started')
+    answer()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(box.procs[0]?.killed).toEqual([9])
+  })
+
+  it('stops a monitor speaking once its client has gone', async () => {
+    vi.useFakeTimers()
+    const { relay } = relayed()
+    const [mine, theirs] = pair()
+    relay.serveSocket('monitor', theirs)
+    mine.send(JSON.stringify({ token: TOKEN }))
+    await vi.advanceTimersByTimeAsync(0)
+    const sent = vi.spyOn(theirs, 'send')
+    mine.close()
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(sent).not.toHaveBeenCalled()
+  })
+
+  it('reads no further ahead of a slow reader than its window', async () => {
+    const chunk = new Uint8Array(64 * 1024)
+    let written = 0
+    const { relay } = relayed({
+      flood: async (proc) => {
+        for (let at = 0; at < (4 * RELAY_WINDOW_BYTES) / chunk.byteLength; at++) {
+          await proc.out.write(chunk)
+          written += chunk.byteLength
+        }
+        return 0
+      },
+    })
+    const proc = await new MemoryClient(relay).exec(['flood'])
+    await proc.stdin?.getWriter().close()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(written).toBeLessThanOrEqual(2 * RELAY_WINDOW_BYTES)
+    const out = await readAll(proc.stdout)
+    expect(out.byteLength).toBe(4 * RELAY_WINDOW_BYTES)
+    expect(await proc.exitCode).toBe(0)
+  })
+
+  it('holds stdin back once the program has a window of it untaken', async () => {
+    const { box, relay } = relayed({ sleep: () => new Promise<number>(() => undefined) })
+    box.deaf = true
+    const proc = await new MemoryClient(relay).exec(['sleep'])
+    const input = proc.stdin?.getWriter()
+    const chunk = new Uint8Array(RELAY_WINDOW_BYTES / 4)
+    let sent = 0
+    const sending = (async () => {
+      for (let at = 0; at < 16; at++) {
+        await input?.write(chunk)
+        sent += 1
+      }
+    })()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(sent).toBeLessThanOrEqual(5)
+    proc.kill(9)
+    await proc.exitCode
+    void sending.catch(() => undefined)
+  })
+
+  it('closes its sockets, the exit watch among them, when the machine closes', async () => {
+    const { relay } = relayed()
+    const client = new MemoryClient(relay)
+    const machine = new ContainerMachine('box', {}, client, () => client.start())
+    const ctx: Context = { stdin: null, flags: {}, env: {}, cwd: PathSpec.fromStrPath('/') }
+    await machine.run(['true'], ctx, null, null, null)
+    expect(client.opened.some((socket) => !socket.closed)).toBe(true)
+    await (client as RelayContainer).close()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(client.opened.every((socket) => socket.closed)).toBe(true)
   })
 })
 

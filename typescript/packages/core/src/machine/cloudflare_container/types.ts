@@ -48,13 +48,15 @@ export interface RelayRequest {
 
 /**
  * What a relay sends as text. On an exec: `started` once the container
- * took it, or `stopped` when it refused; then `closed` as each output
- * stream ends and `exit` with the status. On a monitor: `exited` once the
- * container has, with its error or null. `refused` answers a bad token,
- * and `alive` keeps a quiet socket open.
+ * took it, or `stopped` when it refused; then `took` as the program takes
+ * each chunk of stdin, `closed` as each output stream ends and `exit` with
+ * the status. On a monitor: `exited` once the container has, with its
+ * error or null. `refused` answers a bad token, and `alive` keeps a quiet
+ * socket open.
  */
 export type RelayEvent =
   | { readonly started: true }
+  | { readonly took: number }
   | { readonly stopped: string }
   | { readonly closed: 'stdout' | 'stderr' }
   | { readonly exit: number }
@@ -62,8 +64,14 @@ export type RelayEvent =
   | { readonly refused: string }
   | { readonly alive: true }
 
-/** What a client sends as text after its request: the end of stdin, or a signal. */
-export type RelayControl = { readonly eof: true } | { readonly kill: number }
+/**
+ * What a client sends as text after its request: the end of stdin, a
+ * signal, or how many bytes of an output stream it has read.
+ */
+export type RelayControl =
+  | { readonly eof: true }
+  | { readonly kill: number }
+  | { readonly channel: number; readonly read: number }
 
 /** The part of a WebSocket both ends of a relay use: a browser's, Node's or workerd's. */
 export interface RelaySocket {

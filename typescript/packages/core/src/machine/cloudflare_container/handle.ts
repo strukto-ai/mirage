@@ -135,6 +135,7 @@ export class ContainerMachine extends MachineHandle<ContainerConfig> implements 
   private closing = false
   private readonly container: Container | undefined
   private readonly start: (() => Promise<void>) | undefined
+  private readonly relay: RelayContainer | null = null
 
   /**
    * @param name the machine's name, its key under `machines:`.
@@ -160,6 +161,7 @@ export class ContainerMachine extends MachineHandle<ContainerConfig> implements 
     requireId('cloudflare_container', 'url', url)
     requireId('cloudflare_container', 'token', token)
     const relay = new RelayContainer(url, token ?? '')
+    this.relay = relay
     this.container = relay
     this.start = () => relay.start()
   }
@@ -356,7 +358,8 @@ export class ContainerMachine extends MachineHandle<ContainerConfig> implements 
   /**
    * Unmount what the container was served, as any machine does, without
    * starting a container that has stopped: what a close would clean up
-   * there went with its disk.
+   * there went with its disk. The watch for its exit ends, and a relay
+   * closes its sockets; the next line connects again.
    */
   override async close(): Promise<void> {
     this.closing = true
@@ -364,6 +367,9 @@ export class ContainerMachine extends MachineHandle<ContainerConfig> implements 
       await super.close()
     } finally {
       this.closing = false
+      // A watch the close ends is no exit of the container.
+      this.exited = null
+      await this.relay?.close()
     }
   }
 

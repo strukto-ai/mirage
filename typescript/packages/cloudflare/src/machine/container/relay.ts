@@ -18,6 +18,7 @@ import {
   RELAY_MONITOR,
   RELAY_START,
   RELAY_TOKEN,
+  RELAY_WINDOW_BYTES,
   STDERR_CHANNEL,
   STDOUT_CHANNEL,
 } from '@struktoai/mirage-core/machine/cloudflare_container/constants'
@@ -34,6 +35,14 @@ import { concat } from '@struktoai/mirage-core/utils/bytes'
 
 const ENC = new TextEncoder()
 const PIPES = { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' } as const
+// The token is a bearer header, never a cookie, so a page on any origin may call start.
+const CORS = { 'access-control-allow-origin': '*' }
+const PREFLIGHT = {
+  ...CORS,
+  'access-control-allow-methods': 'POST',
+  'access-control-allow-headers': 'authorization',
+  'access-control-max-age': '86400',
+}
 
 /** A Durable Object's container: what `ContainerRelay` drives, and how it starts one. */
 export interface RelayedContainer extends Container {
@@ -137,16 +146,19 @@ export class ContainerRelay<Env = unknown> {
   async fetch(request: Request): Promise<Response> {
     const call = new URL(request.url).pathname.split('/').filter(Boolean).at(-1)
     if (call === RELAY_START) {
-      if (request.method !== 'POST') return new Response('start is a POST\n', { status: 405 })
+      if (request.method === 'OPTIONS')
+        return new Response(null, { status: 204, headers: PREFLIGHT })
+      if (request.method !== 'POST')
+        return new Response('start is a POST\n', { status: 405, headers: CORS })
       const bearer = request.headers.get('authorization')?.replace(/^Bearer /, '') ?? ''
       const refusal = this.refusal(bearer)
-      if (refusal !== null) return new Response(`${refusal}\n`, { status: 401 })
+      if (refusal !== null) return new Response(`${refusal}\n`, { status: 401, headers: CORS })
       try {
         await this.startContainer()
       } catch (error) {
-        return new Response(`${message(error)}\n`, { status: 500 })
+        return new Response(`${message(error)}\n`, { status: 500, headers: CORS })
       }
-      return new Response(null, { status: 204 })
+      return new Response(null, { status: 204, headers: CORS })
     }
     if (call !== RELAY_EXEC && call !== RELAY_MONITOR)
       return new Response(`no relay call ${String(call)}\n`, { status: 404 })
@@ -201,6 +213,9 @@ export class ContainerRelay<Env = unknown> {
   /** Tell `socket` once the container exits. */
   private watch(socket: RelaySocket): void {
     const quiet = heartbeat(socket)
+    socket.addEventListener('close', () => {
+      clearInterval(quiet)
+    })
     this.container()
       .monitor()
       .then(
@@ -217,8 +232,18 @@ export class ContainerRelay<Env = unknown> {
       })
   }
 
-  /** Run one exec for `socket`: its stdin from the socket's frames, its output and status back. */
+  /**
+   * Run one exec for `socket`: its stdin from the socket's frames, its
+   * output and status back. Each output stream sends at most
+   * `RELAY_WINDOW_BYTES` the client has not read, and each chunk of stdin
+   * the program took is acknowledged, so neither end holds more than that.
+   */
   private async exec(socket: RelaySocket, request: RelayRequest): Promise<void> {
+    // A client may go while exec is starting, before the listeners below exist.
+    const client = { left: false }
+    socket.addEventListener('close', () => {
+      client.left = true
+    })
     let proc: ExecProcess
     try {
       proc = await this.container().exec([...(request.argv ?? [])], {
@@ -230,7 +255,23 @@ export class ContainerRelay<Env = unknown> {
       socket.close()
       return
     }
+    if (client.left) {
+      kill(proc, 9)
+      return
+    }
     const state = { exited: false, gone: false, pumping: 2 }
+    // Read through a call: the socket's listeners change it while a pump waits.
+    const gone = (): boolean => state.gone
+    // Bytes each output stream sent that the client has not read, and who waits for room.
+    const unread = new Map<number, number>([
+      [STDOUT_CHANNEL, 0],
+      [STDERR_CHANNEL, 0],
+    ])
+    const room = new Map<number, () => void>()
+    const free = (channel: number): void => {
+      room.get(channel)?.()
+      room.delete(channel)
+    }
     const quiet = heartbeat(socket)
     const readers = [proc.stdout?.getReader(), proc.stderr?.getReader()]
     const input = proc.stdin?.getWriter()
@@ -251,16 +292,25 @@ export class ContainerRelay<Env = unknown> {
       const bytes = bytesOf(data)
       if (bytes !== null) {
         const chunk = bytes.slice()
-        write(() => input?.write(chunk))
+        write(async () => {
+          await input?.write(chunk)
+          say(socket, { took: chunk.byteLength })
+        })
         return
       }
       const control = frameOf(data)
       if (control?.eof === true) write(() => input?.close())
       else if (typeof control?.kill === 'number') kill(proc, control.kill)
+      else if (typeof control?.read === 'number' && typeof control.channel === 'number') {
+        const owed = (unread.get(control.channel) ?? 0) - control.read
+        unread.set(control.channel, owed)
+        if (owed <= RELAY_WINDOW_BYTES) free(control.channel)
+      }
     })
     socket.addEventListener('close', () => {
       state.gone = true
       clearInterval(quiet)
+      for (const channel of unread.keys()) free(channel)
       // A client gone before its process ended leaves nothing to read it.
       if (!state.exited) kill(proc, 9)
       for (const reader of readers) {
@@ -280,7 +330,13 @@ export class ContainerRelay<Env = unknown> {
           if (reader === undefined) break
           const { done, value } = await reader.read()
           if (done) break
-          if (!state.gone) socket.send(concat([Uint8Array.of(channel), value]))
+          if (gone()) continue
+          socket.send(concat([Uint8Array.of(channel), value]))
+          unread.set(channel, (unread.get(channel) ?? 0) + value.byteLength)
+          while (!gone() && (unread.get(channel) ?? 0) > RELAY_WINDOW_BYTES)
+            await new Promise<void>((resolve) => {
+              room.set(channel, resolve)
+            })
         }
         say(socket, { closed: name })
       } catch (error) {

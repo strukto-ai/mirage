@@ -15,7 +15,7 @@
 import asyncio
 import json
 import logging
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 
 import aiohttp
 
@@ -23,6 +23,7 @@ from mirage.machine.cloudflare_container.constants import (
     RELAY_EXEC,
     RELAY_MONITOR,
     RELAY_START,
+    RELAY_WINDOW_BYTES,
     STDERR_CHANNEL,
     STDOUT_CHANNEL,
 )
@@ -64,9 +65,35 @@ def bytes_of(message: aiohttp.WSMessage) -> bytes | None:
     return None
 
 
+class Channel(asyncio.StreamReader):
+    """One output stream of a relayed process, fed from its socket. Each
+    ``read`` and ``readexactly``, the two calls its readers make, tells
+    the relay how many bytes it took, and the relay sends no more than
+    ``RELAY_WINDOW_BYTES`` ahead of that.
+
+    Args:
+        took (Callable[[int], None]): told how many bytes a read took.
+    """
+
+    def __init__(self, took: Callable[[int], None]) -> None:
+        super().__init__()
+        self._took = took
+
+    async def read(self, n: int = -1) -> bytes:
+        data = await super().read(n)
+        self._took(len(data))
+        return data
+
+    async def readexactly(self, n: int) -> bytes:
+        data = await super().readexactly(n)
+        self._took(len(data))
+        return data
+
+
 class RelayInput:
     """A relayed process's stdin: each write a binary frame, its end an
-    ``eof``.
+    ``eof``. A write waits while more than ``RELAY_WINDOW_BYTES`` sent
+    are not yet taken by the program.
 
     Args:
         process (RelayProcess): the process the input belongs to.
@@ -77,6 +104,7 @@ class RelayInput:
 
     async def write(self, data: bytes) -> None:
         await self._process.send(bytes(data))
+        await self._process.room()
 
     async def close(self) -> None:
         await self._process.control({"eof": True})
@@ -95,8 +123,8 @@ class RelayProcess:
 
     def __init__(self, socket: aiohttp.ClientWebSocketResponse) -> None:
         self._socket = socket
-        self._stdout = asyncio.StreamReader()
-        self._stderr = asyncio.StreamReader()
+        self._stdout = Channel(lambda n: self._took(STDOUT_CHANNEL, n))
+        self._stderr = Channel(lambda n: self._took(STDERR_CHANNEL, n))
         self._exit_code: asyncio.Future[int] = (
             asyncio.get_running_loop().create_future()
         )
@@ -104,6 +132,9 @@ class RelayProcess:
         self._done = {STDOUT_CHANNEL: False, STDERR_CHANNEL: False}
         self._closed = False
         self._tasks: set[asyncio.Task[None]] = set()
+        # Bytes of stdin sent that the program has not taken.
+        self._untaken = 0
+        self._free = asyncio.Event()
 
     @property
     def stdin(self) -> RelayInput:
@@ -137,6 +168,17 @@ class RelayProcess:
         if self._closed:
             raise ConnectionResetError(CLOSED)
         await self._socket.send_bytes(data)
+        self._untaken += len(data)
+
+    async def room(self) -> None:
+        """Wait until the program has taken enough stdin for more."""
+        while not self._closed and self._untaken > RELAY_WINDOW_BYTES:
+            self._free.clear()
+            await self._free.wait()
+
+    def _took(self, channel: int, n: int) -> None:
+        if n and not self._closed:
+            self._spawn(self.control({"channel": channel, "read": n}))
 
     async def control(self, control: RelayControl) -> None:
         if self._closed:
@@ -162,7 +204,11 @@ class RelayProcess:
         event = frame_of(message.data)
         if event is None:
             return
-        if (closed := event.get("closed")) is not None:
+        if isinstance(took := event.get("took"), int):
+            self._untaken -= took
+            if self._untaken <= RELAY_WINDOW_BYTES:
+                self._free.set()
+        elif (closed := event.get("closed")) is not None:
             channel = STDOUT_CHANNEL if closed == "stdout" else STDERR_CHANNEL
             if not self._done[channel]:
                 self._reader(channel).feed_eof()
@@ -183,6 +229,7 @@ class RelayProcess:
 
     def _lost(self, error: Exception) -> None:
         self._closed = True
+        self._free.set()
         for channel, done in self._done.items():
             if not done:
                 self._reader(channel).set_exception(error)
@@ -208,7 +255,14 @@ class RelayProcess:
     def _spawn(self, work: Coroutine[None, None, None]) -> None:
         task = asyncio.create_task(work)
         self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        task.add_done_callback(self._settled)
+
+    def _settled(self, task: asyncio.Task[None]) -> None:
+        self._tasks.discard(task)
+        if not task.cancelled() and (exc := task.exception()) is not None:
+            logger.debug(
+                "cloudflare_container: a relay frame not sent: %s", exc
+            )
 
 
 class RelayContainer:

@@ -20,6 +20,7 @@ from mirage.machine.cloudflare_container import (
     ContainerMachine,
     RelayContainer,
 )
+from mirage.machine.cloudflare_container.constants import RELAY_WINDOW_BYTES
 from mirage.machine.cloudflare_container.relay import frame_of
 from tests.fixtures.cloudflare_container import (
     TOKEN,
@@ -40,6 +41,19 @@ async def cat(proc: FakeProcess) -> int:
 
 async def sleep(proc: FakeProcess) -> int:
     await asyncio.Event().wait()
+    return 0
+
+
+CHUNK = 65536
+WRITTEN: list[int] = []
+
+
+async def flood(proc: FakeProcess) -> int:
+    for _ in range(4 * RELAY_WINDOW_BYTES // CHUNK):
+        proc.stdout.feed_data(b"x" * CHUNK)
+        WRITTEN.append(CHUNK)
+        while len(proc.stdout._buffer) > CHUNK:
+            await asyncio.sleep(0.001)
     return 0
 
 
@@ -156,3 +170,20 @@ async def test_a_machine_built_from_a_url_runs_lines_through_the_relay():
         ODD,
     )
     assert box.starts == 1
+
+
+@pytest.mark.asyncio
+async def test_output_waits_for_a_reader_that_falls_behind():
+    WRITTEN.clear()
+    box = FakeContainer({"flood": flood})
+    async with relay_server(box) as url:
+        relay = RelayContainer(url, TOKEN)
+        proc = await relay.exec(["flood"], {})
+        await proc.stdin.close()
+        await asyncio.sleep(0.5)
+        held = sum(WRITTEN)
+        assert held <= 2 * RELAY_WINDOW_BYTES
+        out = await asyncio.wait_for(proc.stdout.read(), 10)
+        assert await asyncio.wait_for(proc.exit_code, 5) == 0
+        await relay.close()
+    assert len(out) == 4 * RELAY_WINDOW_BYTES

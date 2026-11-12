@@ -14,18 +14,22 @@
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
 from aiohttp import WSMsgType, web
 from aiohttp.test_utils import TestServer
 
+from mirage.machine.cloudflare_container.constants import RELAY_WINDOW_BYTES
 from mirage.machine.constants import (
     CHECK_LINE,
     CHECK_MARK,
     EXEC_PRELUDE,
     is_run,
 )
+
+logger = logging.getLogger(__name__)
 
 Program = Callable[["FakeProcess"], Awaitable[int]]
 
@@ -96,13 +100,17 @@ class FakeProcess:
         done, _ = await asyncio.wait(
             {work, signalled}, return_when=asyncio.FIRST_COMPLETED
         )
-        code = work.result() if work in done else 128 + self.killed[-1]
         for task in (work, signalled):
             task.cancel()
-        await asyncio.gather(work, signalled, return_exceptions=True)
+        await asyncio.wait({work, signalled})
         self.stdout.feed_eof()
         self.stderr.feed_eof()
-        self.exit_code.set_result(code)
+        if work not in done:
+            self.exit_code.set_result(128 + self.killed[-1])
+        elif (failure := work.exception()) is not None:
+            self.exit_code.set_exception(failure)
+        else:
+            self.exit_code.set_result(work.result())
 
     async def kill(self, signum: int = 15) -> None:
         self.killed.append(signum)
@@ -183,6 +191,8 @@ async def _exec(
         await ws.close()
         return
     exited = False
+    unread = {1: 0, 2: 0}
+    room = {1: asyncio.Event(), 2: asyncio.Event()}
     await ws.send_json({"started": True})
 
     async def pump(
@@ -190,6 +200,10 @@ async def _exec(
     ) -> None:
         while chunk := await reader.read(65536):
             await ws.send_bytes(bytes([channel]) + chunk)
+            unread[channel] += len(chunk)
+            while unread[channel] > RELAY_WINDOW_BYTES:
+                room[channel].clear()
+                await room[channel].wait()
         await ws.send_json({"closed": name})
 
     async def status() -> None:
@@ -205,23 +219,32 @@ async def _exec(
     ]
 
     async def finish() -> None:
-        await asyncio.gather(*tasks, return_exceptions=True)
+        for outcome in await asyncio.gather(*tasks, return_exceptions=True):
+            if isinstance(outcome, BaseException):
+                logger.debug("fake relay: %r", outcome)
         await ws.close()
 
     finishing = asyncio.create_task(finish())
     async for message in ws:
         if message.type is WSMsgType.BINARY:
             await proc.stdin.write(message.data)
+            await ws.send_json({"took": len(message.data)})
         elif message.type is WSMsgType.TEXT:
             control = json.loads(message.data)
             if control.get("eof"):
                 await proc.stdin.close()
             elif isinstance(control.get("kill"), int):
                 await proc.kill(control["kill"])
+            elif isinstance(control.get("read"), int):
+                unread[control["channel"]] -= control["read"]
+                if unread[control["channel"]] <= RELAY_WINDOW_BYTES:
+                    room[control["channel"]].set()
     if not exited:
         await proc.kill(9)
+    for event in room.values():
+        event.set()
     finishing.cancel()
-    await asyncio.gather(finishing, return_exceptions=True)
+    await asyncio.wait({finishing})
 
 
 def relay_app(box: FakeContainer) -> web.Application:
