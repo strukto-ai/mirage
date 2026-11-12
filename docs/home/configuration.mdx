@@ -13,9 +13,7 @@ workspace runs sessions.
 | [Workspace](/home/configuration/workspace) | Mounts, CLIs, runtimes, network, limits, and where state and caches live | `workspace.yaml`, or `Workspace(...)` in code |
 | [Session](/home/configuration/session) | What one session can run and see, and its own limits, network, `cwd` and `env` | A profile under `profiles` in `workspace.yaml`, which a session names when it starts |
 
-Limits can be set at all three levels. A profile can raise or lower the
-workspace's value, but never past the server's ceiling. See
-[Limits](/home/limits).
+Limits can be set at all three levels. See [Limits](/home/limits).
 
 Credentials for mounts, CLIs and machines, and environment variables, are on
 [Service Credentials](/home/credentials).

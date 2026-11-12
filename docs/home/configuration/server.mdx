@@ -43,9 +43,7 @@ and remove keys.
 ## Settings
 
 Each key's environment variable is `MIRAGE_` and the key in capitals:
-`max_sessions` is `MIRAGE_MAX_SESSIONS`. Two differ: `port`, in its row
-below, and `jwt_clock_skew`, on
-[Configure authentication](/home/access/http#jwt).
+`max_sessions` is `MIRAGE_MAX_SESSIONS`.
 
 | Key | Default |
 | --- | --- |
@@ -75,8 +73,8 @@ the server on this machine, its `local` context:
 
 - `url`, or `MIRAGE_DAEMON_URL`: `http://127.0.0.1:PORT`.
   `mirage login URL` adds another server.
-- `auth_token`, or `MIRAGE_TOKEN`: your [login](/home/access/cli#log-in), else
-  `~/.mirage/auth_token`.
+- `auth_token`, or `MIRAGE_TOKEN`: the token it sends. See
+  [Log in](/home/access/cli#log-in).
 
 The server's own token is `MIRAGE_AUTH_TOKEN`, else `~/.mirage/auth_token`. It
 has no key in `config.toml`. See
