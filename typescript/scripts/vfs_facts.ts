@@ -500,7 +500,7 @@ function refuses(node: ts.Node): boolean {
 /**
  * The registry file and table a `...REGISTRY` spread in a host's table
  * reads from: node and browser lay their own entries over core's, and node
- * and edge over core's `DIRECT_REGISTRY` too.
+ * and cloudflare over core's `DIRECT_REGISTRY` too.
  */
 function spreadRegistry(
   source: ts.SourceFile,

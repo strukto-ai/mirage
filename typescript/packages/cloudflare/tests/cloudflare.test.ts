@@ -40,7 +40,7 @@ async function run(
   lineSeconds?: number,
   redis?: { url: string; keyPrefix: string; clear?: boolean },
 ): Promise<Result[]> {
-  const response = await worker.fetch('http://edge.test/run', {
+  const response = await worker.fetch('http://cloudflare.test/run', {
     method: 'POST',
     body: JSON.stringify({
       lines,
@@ -170,7 +170,7 @@ describe('mirage in workerd', () => {
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
     const base = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`
     const fetched = async (path: string): Promise<unknown> => {
-      const response = await worker.fetch('http://edge.test/follow', {
+      const response = await worker.fetch('http://cloudflare.test/follow', {
         method: 'POST',
         body: JSON.stringify({ url: `${base}${path}`, allowed: ['127.0.0.1'] }),
       })
@@ -237,7 +237,7 @@ describe('mirage in workerd', () => {
   )
   for (const on of ['d1', 'object'] as const) {
     const sql = async (id: string, lines: readonly string[]): Promise<Result[]> => {
-      const response = await worker.fetch('http://edge.test/sql', {
+      const response = await worker.fetch('http://cloudflare.test/sql', {
         method: 'POST',
         body: JSON.stringify({ lines, on, id }),
       })

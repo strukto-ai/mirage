@@ -260,14 +260,14 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "mirage-gh-wasm"
-version = "0.0.9-alpha.1"
+version = "0.0.9-alpha.2"
 dependencies = [
  "mirage-rs",
 ]
 
 [[package]]
 name = "mirage-rs"
-version = "0.0.9-alpha.1"
+version = "0.0.9-alpha.2"
 dependencies = [
  "blake2",
  "byteorder",
@@ -296,7 +296,7 @@ dependencies = [
 
 [[package]]
 name = "mirage-rs-python"
-version = "0.0.9-alpha.1"
+version = "0.0.9-alpha.2"
 dependencies = [
  "mirage-rs",
  "pyo3",
@@ -304,14 +304,14 @@ dependencies = [
 
 [[package]]
 name = "mirage-rs-wasm"
-version = "0.0.9-alpha.1"
+version = "0.0.9-alpha.2"
 dependencies = [
  "mirage-rs",
 ]
 
 [[package]]
 name = "mirage-shell-wasm"
-version = "0.0.9-alpha.1"
+version = "0.0.9-alpha.2"
 dependencies = [
  "mirage-rs",
 ]

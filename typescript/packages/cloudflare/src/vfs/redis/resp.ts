@@ -184,10 +184,10 @@ interface Connection {
  * included, at the url node and python take.
  *
  * Commands are pipelined: each call writes at once and its replies come
- * back in order, so many calls in flight cost one round trip. An edge
- * runtime cancels a socket with the request that opened it, so each
- * request keeps its own connection, let go with the request; a host that
- * binds no request shares one.
+ * back in order, so many calls in flight cost one round trip. A Worker
+ * cancels a socket with the request that opened it, so each request
+ * keeps its own connection, let go with the request; a host that binds
+ * no request shares one.
  */
 export class RespClient {
   // The connection outside any incoming request, shared by every call.
@@ -291,9 +291,9 @@ export class RespClient {
   }
 
   /**
-   * Run commands as one pipeline: written together, answered in order. An
-   * edge isolate opens the socket past its fetch guard, so the network rule
-   * in force is asked here, before every pipeline: a connection one
+   * Run commands as one pipeline: written together, answered in order. A
+   * Workers isolate opens the socket past its fetch guard, so the network
+   * rule in force is asked here, before every pipeline: a connection one
    * workspace opened is not another's to use under a narrower rule.
    * Elsewhere this is a no-op.
    */
@@ -313,7 +313,7 @@ export class RespClient {
   /** Close this request's connection, or the shared one outside a request. */
   async close(): Promise<void> {
     // Another request's connection is let go: closing it from here is I/O
-    // an edge runtime refuses.
+    // a Worker refuses.
     const current = this.slot(currentRequest())
     this.shared = null
     this.perRequest = new WeakMap()

@@ -30,7 +30,7 @@ export {
   type D1DatabaseLike,
   type DurableObjectStorageLike,
 } from './sql.ts'
-export { createApp, type EdgeApp, type EdgeAppOptions } from './app.ts'
+export { createApp, type CloudflareApp, type CloudflareAppOptions } from './app.ts'
 export { Workspace } from './host.ts'
 export type { ContainerConfig } from '@struktoai/mirage-core/machine/cloudflare_container/config'
 export { ContainerMachine } from '@struktoai/mirage-core/machine/cloudflare_container/handle'

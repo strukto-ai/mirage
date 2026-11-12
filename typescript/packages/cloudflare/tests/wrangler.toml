@@ -15,7 +15,7 @@ cpu_ms = 60000
 
 [vars]
 MIRAGE_AUTH_MODE = "token"
-MIRAGE_AUTH_TOKEN = "edge-test-token"
+MIRAGE_AUTH_TOKEN = "cloudflare-test-token"
 MIRAGE_RELAY_TOKEN = "relay-test-token"
 
 # The sql mount's two Cloudflare drivers: a local D1 database, and a

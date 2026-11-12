@@ -2644,7 +2644,7 @@ wheels = [
 
 [[package]]
 name = "mirage-ai"
-version = "0.0.9a1"
+version = "0.0.9a2"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },

@@ -21,7 +21,7 @@ import { integRoot } from '../harness.ts'
 import { runId } from '../../../server/kit/typescript/tenant.ts'
 
 // The gws fake's world for a target, shared by the node adapter and the
-// edge battery: both open their mounts over the same seeded run.
+// Cloudflare battery: both open their mounts over the same seeded run.
 const GDRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder'
 
 // The gws fake's credential: a bearer as it is, and the one refresh token its

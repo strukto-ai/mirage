@@ -53,7 +53,7 @@ function endless(): ReadableStream<Uint8Array> {
 describe('WebRoutes', () => {
   it('refuses a body past the limit with no Content-Length before reading the rest', async () => {
     const response = await routes().fetch(
-      new Request('http://edge.test/echo', {
+      new Request('http://cloudflare.test/echo', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: endless(),
@@ -66,7 +66,7 @@ describe('WebRoutes', () => {
 
   it('ends an empty multipart upload', async () => {
     const response = await routes().fetch(
-      new Request('http://edge.test/upload', {
+      new Request('http://cloudflare.test/upload', {
         method: 'POST',
         headers: { 'content-type': 'multipart/form-data; boundary=x' },
       }),
@@ -77,7 +77,7 @@ describe('WebRoutes', () => {
 
   it('hands an octet-stream body to its route unread', async () => {
     const response = await routes().fetch(
-      new Request('http://edge.test/upload', {
+      new Request('http://cloudflare.test/upload', {
         method: 'POST',
         headers: { 'content-type': 'application/octet-stream' },
         body: 'abc',
@@ -88,7 +88,7 @@ describe('WebRoutes', () => {
   })
 
   it('answers a malformed path escape with 400', async () => {
-    const response = await routes().fetch(new Request('http://edge.test/items/%ZZ'), null)
+    const response = await routes().fetch(new Request('http://cloudflare.test/items/%ZZ'), null)
     expect([response.status, await response.json()]).toEqual([
       400,
       { error: { code: 'invalid_request', message: 'path is not percent-encoded' } },
@@ -97,7 +97,7 @@ describe('WebRoutes', () => {
 
   it('refuses a field named after an Object.prototype member as unknown', async () => {
     const response = await routes().fetch(
-      new Request('http://edge.test/doc', {
+      new Request('http://cloudflare.test/doc', {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ path: '/vfs.md', constructor: 0 }),
