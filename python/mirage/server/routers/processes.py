@@ -61,20 +61,19 @@ class ProcessList(BaseModel):
     items: list[ProcessResponse]
 
 
-def machine_response(
-    ws: Workspace, machine: MachineId
-) -> ProcessMachineResponse:
+def machine_response(ws: Workspace, record: Process) -> ProcessMachineResponse:
     """Where a process ran, as its spans name it: the machine's provider,
-    its name and what its provider calls it.
+    its name and what its provider called it then, else calls it now.
 
     Args:
         ws (Workspace): the workspace it ran in.
-        machine (MachineId): the machine.
+        record (Process): the process.
     """
+    machine = record.machine
     return ProcessMachineResponse(
         type=machine.provider,
         name=machine.name,
-        id=ws.machine_table.instance(machine),
+        id=record.machine_instance or ws.machine_table.instance(machine),
     )
 
 
@@ -87,7 +86,7 @@ def to_response(record: Process, ws: Workspace) -> ProcessResponse:
         group=record.group,
         command=record.command,
         cwd=record.cwd.virtual,
-        machine=machine_response(ws, record.machine),
+        machine=machine_response(ws, record),
         runtime=record.runtime,
         machine_pid=(
             MachinePidResponse(

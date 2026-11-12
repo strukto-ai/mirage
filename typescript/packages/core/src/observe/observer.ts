@@ -284,9 +284,8 @@ function later(a: number | null, b: number | null): number | null {
  * a runtime runs elsewhere starts no trace of its own there. `machine` is
  * the workspace's, `host.id` on its command, job and process spans;
  * `processes` gives the process records the workspace keeps, which a span
- * goes under, `jobs` the jobs it runs, whose processes go under their
- * spans, and `instance` what each machine's provider calls it,
- * `mirage.machine.id`.
+ * goes under, and `instance` what each machine's provider calls it,
+ * `mirage.machine.id` for a record that does not say.
  */
 export class Observer {
   private readonly _store: ObserverStore
@@ -312,7 +311,6 @@ export class Observer {
     private readonly workspaceId?: string,
     private readonly machine?: string,
     private readonly processes?: () => Process[],
-    private readonly jobs?: () => Job[],
     private readonly instance?: (machine: MachineId) => string,
   ) {
     this._store = store ?? new RAMObserverStore()
@@ -404,19 +402,34 @@ export class Observer {
     if (record.error !== null) span.setAttribute('mirage.error', record.error)
     const shown = record.machinePid?.pid ?? record.id.pid
     span.setAttribute('process.pid', shown)
+    for (const [key, value] of Object.entries(
+      this.machineAttributes(record.machine, record.machineInstance ?? null),
+    )) {
+      if (value !== undefined) span.setAttribute(key, value)
+    }
     this.shownPids.set(this.spanKey('process', line, record.id.pid), shown)
     this.endSpan(this.spanKey('process', line, record.id.pid), record.endedAt)
   }
 
   /**
-   * Send an ended job to OpenTelemetry as a `job` span: what it ran, where
-   * and as whom, and how it ended; `machine` is where its process ran.
-   * Mirrors Python's `trace_job`.
+   * Send a job to OpenTelemetry as a `job` span, opened as it starts, so its
+   * process goes under it, and closed as it ends: what it ran, where and as
+   * whom, and how it ended; `process` is its process's record, which names
+   * where its program runs once it does. Mirrors Python's `trace_job`.
    */
-  traceJob(record: Job, machine: MachineId): void {
+  traceJob(record: Job, process: Process | null): void {
     const line = record.line?.value ?? null
     if (!this.traced(line)) return
-    const span = this.jobSpan(record, machine)
+    const span = this.jobSpan(record, process)
+    if (record.endedAt === null) return
+    if (process !== null) {
+      span.setAttribute('process.pid', process.machinePid?.pid ?? process.id.pid)
+      for (const [key, value] of Object.entries(
+        this.machineAttributes(process.machine, process.machineInstance ?? null),
+      )) {
+        if (value !== undefined) span.setAttribute(key, value)
+      }
+    }
     if (record.exit !== null) span.setAttribute('mirage.exit_code', record.exit)
     if (record.signal !== null) span.setAttribute('mirage.signal', record.signal)
     this.endSpan(this.spanKey('job', line, record.pid ?? 0), record.endedAt)
@@ -433,14 +446,15 @@ export class Observer {
 
   /**
    * The attributes naming where a span's work ran: the machine's provider,
-   * its name and what its provider calls it. Mirrors Python's
+   * its name and what its provider calls it (`instance`, as the record kept
+   * it when the work started, else asked now). Mirrors Python's
    * `_machine_attributes`.
    */
-  private machineAttributes(machine: MachineId): Attributes {
+  private machineAttributes(machine: MachineId, instance: string | null = null): Attributes {
     return {
       'mirage.machine.type': machine.provider,
       'mirage.machine.name': machine.name,
-      'mirage.machine.id': this.instance === undefined ? machine.name : this.instance(machine),
+      'mirage.machine.id': instance ?? this.instance?.(machine) ?? machine.name,
     }
   }
 
@@ -471,7 +485,7 @@ export class Observer {
       if (found !== undefined) return found
       const parent = (this.processes?.() ?? []).find(
         (p) =>
-          p.id.pid === record.parent && (p.line?.value ?? null) === line && p.state === 'running',
+          p.id.pid === record.parent && (p.line?.value ?? null) === line && p.state !== 'exited',
       )
       if (parent !== undefined) return trace.setSpan(context.active(), this.processSpan(parent))
     }
@@ -490,16 +504,7 @@ export class Observer {
     const key = this.spanKey('process', line, record.id.pid)
     const open = this.openSpans.get(key)
     if (open !== undefined) return open
-    let under = this.contextOf(this.spanKey('job', line, record.id.pid))
-    if (under === undefined && this.jobs !== undefined) {
-      const job = this.jobs().find(
-        (j) => j.pid === record.id.pid && (j.line?.value ?? null) === line,
-      )
-      if (job !== undefined) {
-        under = trace.setSpan(context.active(), this.jobSpan(job, record.machine, record))
-      }
-    }
-    under ??= this.under(record)
+    const under = this.contextOf(this.spanKey('job', line, record.id.pid)) ?? this.under(record)
     const shown = record.machinePid?.pid ?? record.id.pid
     this.shownPids.set(this.spanKey('process', line, record.id.pid), shown)
     const attributes: Attributes = {
@@ -508,7 +513,7 @@ export class Observer {
       'process.command_line': record.command,
       'process.group_leader.pid':
         this.shownPids.get(this.spanKey('process', line, record.group)) ?? record.group,
-      ...this.machineAttributes(record.machine),
+      ...this.machineAttributes(record.machine, record.machineInstance ?? null),
       'mirage.workspace.id': record.id.workspaceId,
       'mirage.session.id': record.sessionId,
       'mirage.cwd': record.cwd.virtual,
@@ -523,19 +528,15 @@ export class Observer {
 
   /**
    * `record`'s span, opened the first time it is needed from its own start,
-   * under the span its process would go under; `process` is that process,
-   * when the caller has it. Mirrors Python's `_job_span`.
+   * under the span its process would go under. Mirrors Python's `_job_span`.
    */
-  private jobSpan(record: Job, machine: MachineId, process?: Process): Span {
+  private jobSpan(record: Job, process: Process | null): Span {
     const line = record.line?.value ?? null
     const key = this.spanKey('job', line, record.pid ?? 0)
     const open = this.openSpans.get(key)
     if (open !== undefined) return open
-    const found =
-      process ??
-      this.processes?.().find((p) => p.id.pid === record.pid && (p.line?.value ?? null) === line)
     let under: Context | undefined
-    if (found !== undefined) under = this.under(found)
+    if (process !== null) under = this.under(process)
     else if (line !== null) {
       const known = this.lineSpans.get(line)
       if (known !== undefined) under = trace.setSpanContext(context.active(), known)
@@ -544,13 +545,18 @@ export class Observer {
       'mirage.job.id': record.id.console,
       'mirage.job.number': record.number,
       'mirage.command': record.command,
-      ...this.machineAttributes(machine),
       'mirage.workspace.id': record.id.workspaceId,
       'mirage.session.id': record.sessionId,
       'mirage.cwd': record.cwd,
     }
+    if (process !== null) {
+      Object.assign(
+        attributes,
+        this.machineAttributes(process.machine, process.machineInstance ?? null),
+      )
+    }
     if (record.pid !== null) {
-      attributes['process.pid'] = found?.machinePid?.pid ?? record.pid
+      attributes['process.pid'] = process?.machinePid?.pid ?? record.pid
       attributes['mirage.process.pid'] = record.pid
     }
     return this.startSpan('job', key, line, attributes, under, record.startedAt)

@@ -306,7 +306,12 @@ class Runtime(ABC, Generic[E]):
         ):
             return await run()
         machine = self.machine_for(ctx)
-        if shell.take(machine, self.name):
+        instance = (
+            None
+            if machine is None or processes.machine_instance is None
+            else processes.machine_instance(machine)
+        )
+        if shell.take(machine, self.name, instance):
             return await run()
         line = ctx.flags.get("c")
         if kind == "line" and isinstance(line, str):

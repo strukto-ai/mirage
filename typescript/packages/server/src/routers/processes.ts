@@ -77,10 +77,16 @@ const STATES: readonly ProcessState[] = ['running', 'stopping', 'exited']
 
 /**
  * Where a process ran, as its spans name it: the machine's provider, its
- * name and what its provider calls it. Mirrors Python's `machine_response`.
+ * name and what its provider called it then, else calls it now. Mirrors
+ * Python's `machine_response`.
  */
-function machineResponse(ws: Workspace, machine: MachineId): ProcessMachineResponse {
-  return { type: machine.provider, name: machine.name, id: ws.machineTable.instance(machine) }
+function machineResponse(ws: Workspace, record: Process): ProcessMachineResponse {
+  const machine = record.machine
+  return {
+    type: machine.provider,
+    name: machine.name,
+    id: record.machineInstance ?? ws.machineTable.instance(machine),
+  }
 }
 
 export function toResponse(record: Process, ws: Workspace): ProcessResponse {
@@ -92,7 +98,7 @@ export function toResponse(record: Process, ws: Workspace): ProcessResponse {
     group: record.group,
     command: record.command,
     cwd: record.cwd.virtual,
-    machine: machineResponse(ws, record.machine),
+    machine: machineResponse(ws, record),
     runtime: record.runtime,
     machine_pid:
       record.machinePid === null

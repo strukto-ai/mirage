@@ -28,7 +28,9 @@ import { MachineHandle } from '../machine/handle.ts'
 import { RemoteRuntime } from '../runtime/machine/runtime.ts'
 import type { RunResult } from '../runtime/types.ts'
 import type { Policy } from '../policy/base.ts'
-import { MountMode } from '../types.ts'
+import { MountMode, PathSpec } from '../types.ts'
+import type { Process } from '../execution/process/types.ts'
+import { LineId, MachineId, ProcessId } from '../execution/types.ts'
 import { ManualClock } from '../utils/clock.ts'
 import { EVENT_COMMAND, LogEntry } from './log_entry.ts'
 import {
@@ -872,4 +874,95 @@ it('reads no process records for a line nobody traces', async () => {
   await obs.logCommand('true', 's', undefined, 'line_1')
   await obs.logResult(new IOResult({ exitCode: 0 }), [], 's', undefined, 'line_1')
   expect(reads).toBe(0)
+})
+
+// A process started under a parent that is stopping, as a killed job's
+// child still finishing, still goes under that parent's span.
+it('puts a child of a stopping parent under it', async () => {
+  const spans = exported()
+  const base = {
+    sessionId: 's',
+    line: new LineId('line_1'),
+    group: 10,
+    cwd: PathSpec.fromStrPath('/'),
+    machinePid: null,
+    signal: null,
+    error: null,
+    ancestors: [],
+  }
+  const shell: Process = {
+    ...base,
+    id: new ProcessId('w', 10),
+    parent: null,
+    command: '(train) &',
+    machine: new MachineId('host', 'h'),
+    startedAt: 1,
+    runtime: null,
+    state: 'stopping',
+    endedAt: null,
+    exit: null,
+  }
+  const child: Process = {
+    ...base,
+    id: new ProcessId('w', 11),
+    parent: 10,
+    command: 'train',
+    machine: new MachineId('box', 'a'),
+    startedAt: 2,
+    runtime: 'remote',
+    state: 'exited',
+    endedAt: 3,
+    exit: 143,
+  }
+  try {
+    const obs = new Observer(undefined, undefined, undefined, undefined, () => [shell, child])
+    await obs.logCommand('(train) &', 's', undefined, 'line_1')
+    obs.traceProcess(child)
+    obs.traceProcess({ ...shell, state: 'exited', endedAt: 4, exit: 143 })
+    await obs.logResult(new IOResult({ exitCode: 143 }), [], 's', undefined, 'line_1')
+    const named = new Map(
+      spans.map((s) => [(s.attributes['process.command_line'] as string | undefined) ?? s.name, s]),
+    )
+    expect(named.get('train')?.parent).toEqual(named.get('(train) &')?.context)
+    expect(named.get('(train) &')?.parent).toEqual(named.get('command')?.context)
+  } finally {
+    trace.disable()
+  }
+})
+
+// A job started inside a background subshell lives in that subshell's job
+// list; its process still goes under its job, and the job under the
+// subshell.
+it("puts a nested job's process under its job", async () => {
+  const spans = exported()
+  const ws = new Workspace(
+    { '/': new RAMVFS() },
+    {
+      mode: MountMode.EXEC,
+      machines: { a: new Box('a') },
+      runtimes: [new RemoteRuntime({ captures: ['train'], machine: 'a' })],
+    },
+  )
+  try {
+    await ws.shell('(train 1 & wait) & wait')
+  } finally {
+    await ws.close()
+    trace.disable()
+  }
+  const name = (s: Seen): string =>
+    `${s.name} ${String(s.attributes['process.command_line'] ?? s.attributes['mirage.command'])}`
+  const byId = new Map(spans.map((s) => [s.context.spanId, s]))
+  let span = spans.find((s) => name(s) === 'process train 1')
+  const chain: string[] = []
+  while (span?.parent !== undefined && byId.has(span.parent.spanId)) {
+    span = byId.get(span.parent.spanId)
+    if (span !== undefined) chain.push(name(span))
+  }
+  expect(chain).toEqual([
+    'job train 1',
+    'process (train 1 & wait)',
+    'job (train 1 & wait)',
+    'process (train 1 & wait) & wait',
+    'command (train 1 & wait) & wait',
+  ])
 })

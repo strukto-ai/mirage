@@ -21,6 +21,7 @@ import { materialize, type ByteSource } from '../io/types.ts'
 import { shellJoin } from '../shell/join.ts'
 import { ConnectionLostError } from './errors.ts'
 import { MachineHandle, PidLineFilter } from './handle.ts'
+import { concat } from '../utils/bytes.ts'
 import {
   PROCESS,
   FAKETIME_PROBE_SECONDS,
@@ -805,4 +806,47 @@ describe('PidLineFilter', () => {
     const big = 'e'.repeat(RUN_PID_HOLD + 1)
     expect(await filtered([ENC.encode(big), ENC.encode('!')], true)).toEqual([`${big}!`, []])
   })
+})
+
+// A box that writes the run's pid line as its wrapper would: on stderr when
+// its streams are apart, at the start of a joined stdout returned whole.
+class PidLineBox extends RecordingMachine {
+  joined = false
+
+  protected override async execArgv(
+    argv: readonly string[],
+    stdin: ByteSource | null,
+    env: Record<string, string>,
+    cwd: string,
+    output?: OutputFn | null,
+    errors?: OutputFn | null,
+  ): Promise<RunResult> {
+    const result = await super.execArgv(argv, stdin, env, cwd)
+    const line = new Uint8Array([...RUN_PID_MARK, ...ENC.encode('812 99\n')])
+    if (this.joined) return { stdout: concat([line, result.stdout]), stderr: null, exitCode: 0 }
+    await errors?.(line)
+    await output?.(new Uint8Array([...RUN_PID_MARK, ...ENC.encode('7 1\nmine\n')]))
+    return { stdout: new Uint8Array(), stderr: new Uint8Array(), exitCode: 0 }
+  }
+}
+
+// The wrapper's pid line comes on stderr, so a program's own stdout that
+// starts like it is left whole; an exec that returns its streams joined
+// brings the line at the start of stdout. Either way the first line gives
+// the program's pid.
+it.each([
+  [false, `${DEC.decode(RUN_PID_MARK)}7 1\nmine\n`],
+  [true, 'ran:train'],
+])('gives the program its pid from the first pid line (joined %s)', async (joined, stdout) => {
+  const box = new PidLineBox({ captures: ['train'] })
+  box.joined = joined
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, ...on(box) })
+  try {
+    const io = await ws.shell('train')
+    expect(DEC.decode(await materialize(io.stdout))).toBe(stdout)
+    const [program] = (await ws.processes()).filter((p) => p.runtime !== null)
+    expect([program?.machinePid?.pid, program?.machineInstance]).toEqual([812, 'box'])
+  } finally {
+    await ws.close()
+  }
 })

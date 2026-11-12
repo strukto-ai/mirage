@@ -180,7 +180,12 @@ class ProcessHandle:
         with self._lock:
             return self._program_signal
 
-    def take(self, machine: MachineId | None, runtime: str) -> bool:
+    def take(
+        self,
+        machine: MachineId | None,
+        runtime: str,
+        instance: str | None = None,
+    ) -> bool:
         """Take the runner as the program it was started for
         (``one_command``), which runs on ``machine`` with ``runtime``, as
         bash execs a stage's or a job's one program in place. Its record
@@ -191,6 +196,7 @@ class ProcessHandle:
             machine (MachineId | None): where the program runs; None for
                 the workspace's own machine.
             runtime (str): what runs it.
+            instance (str | None): what ``machine``'s provider calls it.
 
         Returns:
             bool: whether the runner was the program's to take; False
@@ -204,6 +210,11 @@ class ProcessHandle:
             self._record = replace(
                 self._record,
                 machine=machine or self._record.machine,
+                machine_instance=(
+                    self._record.machine_instance
+                    if machine is None
+                    else instance
+                ),
                 runtime=runtime,
             )
             self._tell()

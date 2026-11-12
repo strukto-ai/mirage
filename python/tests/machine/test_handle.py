@@ -682,3 +682,45 @@ async def test_a_stream_with_no_pid_line_keeps_every_byte():
     assert await _filtered([b"only err"], search=True) == (b"only err", [])
     big = b"e" * (RUN_PID_HOLD + 1)
     assert await _filtered([big, b"!"], search=True) == (big + b"!", [])
+
+
+class PidLineBox(RecordingMachine):
+    joined = False
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        result = await super()._exec_argv(
+            argv, stdin, env, cwd, output, errors
+        )
+        if self.joined:
+            return RunResult(
+                stdout=RUN_PID_MARK + b"812 99\n" + result.stdout,
+                stderr=None,
+                exit_code=0,
+            )
+        await errors(RUN_PID_MARK + b"812 99\n")
+        await output(RUN_PID_MARK + b"7 1\nmine\n")
+        return RunResult(stdout=b"", stderr=b"", exit_code=0)
+
+
+# The wrapper's pid line comes on stderr, so a program's own stdout that
+# starts like it is left whole; an exec that returns its streams joined
+# brings the line at the start of stdout. Either way the first line gives
+# the program's pid.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("joined", "stdout"),
+    [(False, RUN_PID_MARK + b"7 1\nmine\n"), (True, b"ran:train")],
+)
+async def test_the_pid_line_gives_the_programs_pid_once(joined, stdout):
+    box = PidLineBox(captures=("train",))
+    box.joined = joined
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
+    try:
+        io = await ws.shell("train")
+        assert await materialize(io.stdout) == stdout
+        [program] = [p for p in await ws.processes() if p.runtime]
+        assert program.machine_pid is not None
+        assert program.machine_pid.pid == 812
+        assert program.machine_instance == "box"
+    finally:
+        await ws.close()

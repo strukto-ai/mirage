@@ -117,6 +117,9 @@ class ProcessTable:
         self.machine_resources: (
             Callable[[str, bool], Awaitable[MachineResources]] | None
         ) = None
+        # What a machine's provider calls it, kept on each process that
+        # starts there. The workspace sets it.
+        self.machine_instance: Callable[[MachineId], str] | None = None
 
     def start(
         self,
@@ -238,6 +241,11 @@ class ProcessTable:
                     self._now(),
                     runtime,
                     ancestors=ancestry,
+                    machine_instance=(
+                        None
+                        if self.machine_instance is None
+                        else self.machine_instance(machine or self.machine)
+                    ),
                 ),
                 run,
                 lambda done: self._retire(done, handle),

@@ -86,7 +86,10 @@ it('lists a line and finds it by the id its result names', async () => {
       expect(shell?.command).toBe('sleep 30 & echo $!')
       const [child] = shell?.children ?? []
       expect([child?.pid, child?.parent]).toEqual([pid, shell?.pid])
-      const process = (await get(app, `/v1/workspaces/w/processes/${String(pid)}`)).body as object
+      const process = (await get(app, `/v1/workspaces/w/processes/${String(pid)}`)).body as Omit<
+        Node,
+        'children'
+      >
       expect({ ...process, children: [] }).toEqual(child)
       expect(child?.machine.type).toBe('host')
       expect(child?.machine.id).toBe(child?.machine.name)
