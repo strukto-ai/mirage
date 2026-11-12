@@ -147,15 +147,17 @@ class DaemonClient:
 
         A remote server has ``REMOTE_PROBE_TIMEOUT_SECONDS`` to answer
         ``/v1/health``: a new connection over the internet, or a server
-        woken from idle, can take seconds, where a local daemon answers
-        at once or is not up.
+        woken from idle, can take seconds. A local daemon answers at once
+        unless it is busy or starting; one that holds its port is waited
+        for, never reported unreachable or spawned beside.
 
         Args:
-            startup_timeout (float): seconds to wait for the spawned
-                daemon to answer ``/v1/health``. A first start imports the
-                whole server, and compiles it on a fresh install. A daemon
-                that exits first ends the wait, unless another daemon
-                already holds the port.
+            startup_timeout (float): seconds to wait for a daemon that
+                holds the port, or the spawned one, to answer
+                ``/v1/health``. A first start imports the whole server,
+                and compiles it on a fresh install. A spawned daemon that
+                exits first ends the wait, unless another daemon already
+                holds the port.
             allow_spawn (bool): if True and the daemon is unreachable
                 at a local URL, starts ``mirage.server.daemon:app``
                 detached. A remote URL never starts one.
@@ -173,6 +175,16 @@ class DaemonClient:
             )
         if self.is_reachable():
             return
+        if self._listening():
+            deadline = time.monotonic() + startup_timeout
+            while time.monotonic() < deadline:
+                if self.is_reachable(timeout=1.0):
+                    return
+                time.sleep(0.1)
+            raise DaemonUnreachable(
+                f"daemon at {self.settings.url} accepts connections but did "
+                f"not answer /v1/health within {startup_timeout:.1f}s"
+            )
         if not allow_spawn:
             raise DaemonUnreachable(
                 f"daemon not reachable at {self.settings.url}; "
