@@ -50,6 +50,7 @@ export class Runtimes {
   private readonly binding: WorkspaceBinding
   /** The machines a machine entry runs its programs on. */
   readonly machines: MachineTable
+  private readonly routed: boolean
   private readonly retiring = new Map<Runtime, Promise<void>>()
 
   constructor(init: {
@@ -59,10 +60,13 @@ export class Runtimes {
     binding: WorkspaceBinding
     /** The machines a machine entry runs on. */
     machines: MachineTable
+    /** The workspace has a route policy, which can name an entry a capture listed earlier would otherwise take. */
+    routed: boolean
   }) {
     this.registry = init.registry
     this.binding = init.binding
     this.machines = init.machines
+    this.routed = init.routed
     const entries: Runtime[] = (init.entries ?? DEFAULT_ENTRIES).map((entry) =>
       typeof entry === 'string' ? buildRuntime(entry) : entry,
     )
@@ -153,9 +157,9 @@ export class Runtimes {
   }
 
   private install(entries: readonly Runtime[], bindings: Record<string, Runtime>): void {
-    for (const [capture, winner, shadowed] of shadowedCaptures(entries)) {
+    for (const [capture, winner, shadowed] of this.routed ? [] : shadowedCaptures(entries)) {
       logger.warn?.(
-        `runtime '${shadowed}' never runs '${capture}': '${winner}', listed before it, takes it`,
+        `runtime '${shadowed}' runs '${capture}' only when a route names it: '${winner}', listed before it, takes it`,
       )
     }
     this.entries = entries

@@ -647,6 +647,7 @@ export class Workspace {
       entries: options.runtimes,
       binding: this.runtimeBinding,
       machines: this.machineTable,
+      routed: options.routePolicy !== undefined,
     })
     this.closers.push(() => this.runtimeWorld.close())
     this.closers.push(() => this.machineTable.close())

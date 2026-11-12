@@ -677,7 +677,10 @@ class Workspace:
         )
         self._wire_machines()
         self._runtimes = Runtimes(
-            self._registry, self._runtime_binding, self.machine_table
+            self._registry,
+            self._runtime_binding,
+            self.machine_table,
+            routed=route_policy is not None,
         )
         self._runtimes.resolve(runtimes)
         self._router = Router(self._registry, self._runtimes)
