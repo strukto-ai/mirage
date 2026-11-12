@@ -196,6 +196,36 @@ A ✓ means the VFS runs there. In a browser, some need a proxy or CORS:
 | [Langfuse](/home/setup/langfuse) | ✓ | ✓ | ✓ |
 | [Jaeger](/home/setup/jaeger) | ✓ | ✓ | — |
 
+## Mount capacity
+
+A RAM, disk, Redis, OPFS or SQL mount keeps the files itself, and takes
+`capacity` in its `config` to cap the bytes it holds, as a
+[size](/home/configuration#sizes):
+
+```yaml
+mounts:
+  /data:
+    vfs: ram
+    mode: write
+    config:
+      capacity: 100MB
+```
+
+A write past it fails with `EDQUOT` ("Disk quota exceeded", the same message
+for every VFS). Through a [FUSE folder](/home/setup/fuse), a program gets it
+when it syncs or closes the file. Stored data stays readable and removable,
+and `df` shows the capacity as the mount's size.
+
+What counts toward it depends on the VFS:
+
+- **Disk, Redis and OPFS:** two workspaces on one folder, key prefix or OPFS
+  directory each count only their own writes.
+- **SQL:** every file in the database counts, and SQL mounts handed one
+  driver with the same `capacity` share one count.
+- **RAM:** files also count against the workspace's
+  [`max_memory`](/home/core/output-limits#limit-a-workspaces-memory), which
+  refuses a write the same way.
+
 ## Add your own VFS
 
 To mount a service Mirage does not ship, [write a custom VFS](/home/setup/custom-vfs).

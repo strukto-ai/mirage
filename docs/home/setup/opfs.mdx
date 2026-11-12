@@ -21,6 +21,9 @@ await ws.shell('echo "hello" > /data/note.txt')
 await ws.close()
 ```
 
+Pass `capacity: '100MB'` to cap the bytes the directory holds; see
+[mount capacity](/home/setup/vfs#mount-capacity).
+
 The browser controls storage quotas and may remove data under storage
 pressure. See the [OPFS guide](/typescript/setup/opfs#storage-and-quotas) for
 checking usage and requesting persistent storage.
