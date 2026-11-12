@@ -186,6 +186,7 @@ Thông tin xác thực dịch vụ tích hợp với những kho đang chứa se
 ```bash
 uv add mirage-ai              # cài thư viện `mirage` và binary CLI `mirage`
 uv add 'mirage-ai[openai]'    # adapter OpenAI Agents; mỗi framework agent là một extra
+uv add 'mirage-ai[monty]'     # Monty, runtime Python trong tiến trình mà các ví dụ dùng
 ```
 
 ### TypeScript

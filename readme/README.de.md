@@ -186,6 +186,7 @@ Dienst-Zugangsdaten binden die Speicher ein, in denen Secrets bereits liegen, da
 ```bash
 uv add mirage-ai              # installiert die Bibliothek `mirage` und die CLI `mirage`
 uv add 'mirage-ai[openai]'    # OpenAI-Agents-Adapter; jedes Agent-Framework ist ein Extra
+uv add 'mirage-ai[monty]'     # Monty, die In-Process-Python-Laufzeitumgebung der Beispiele
 ```
 
 ### TypeScript

@@ -186,6 +186,7 @@ slack: Permission denied
 ```bash
 uv add mirage-ai              # `mirage` 라이브러리와 `mirage` CLI 바이너리를 설치
 uv add 'mirage-ai[openai]'    # OpenAI Agents 어댑터, 에이전트 프레임워크마다 별도 extra
+uv add 'mirage-ai[monty]'     # Monty, 예제가 쓰는 프로세스 내 Python 런타임
 ```
 
 ### TypeScript

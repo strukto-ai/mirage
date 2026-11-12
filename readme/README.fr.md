@@ -186,6 +186,7 @@ Les identifiants de service s'intègrent aux coffres où vivent déjà les secre
 ```bash
 uv add mirage-ai              # installe la bibliothèque `mirage` et le binaire CLI `mirage`
 uv add 'mirage-ai[openai]'    # adaptateur OpenAI Agents ; chaque framework d'agents est un extra
+uv add 'mirage-ai[monty]'     # Monty, le runtime Python en processus des exemples
 ```
 
 ### TypeScript

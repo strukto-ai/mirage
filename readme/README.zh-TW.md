@@ -186,6 +186,7 @@ Profile 決定一個工作階段可以執行什麼、可以看到什麼。命令
 ```bash
 uv add mirage-ai              # 安裝 `mirage` 函式庫和 `mirage` CLI 執行檔
 uv add 'mirage-ai[openai]'    # OpenAI Agents 介接器；每個 agent 框架是一個 extra
+uv add 'mirage-ai[monty]'     # Monty：範例所用的行程內 Python 執行環境
 ```
 
 ### TypeScript

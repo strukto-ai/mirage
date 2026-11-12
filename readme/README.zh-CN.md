@@ -186,6 +186,7 @@ Profile 决定一个会话可以运行什么、可以看到什么。命令由可
 ```bash
 uv add mirage-ai              # 安装 `mirage` 库和 `mirage` CLI 二进制
 uv add 'mirage-ai[openai]'    # OpenAI Agents 适配器；每个 agent 框架是一个 extra
+uv add 'mirage-ai[monty]'     # Monty：示例所用的进程内 Python 运行时
 ```
 
 ### TypeScript

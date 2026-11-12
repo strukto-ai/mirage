@@ -210,6 +210,7 @@ in Mirage can resolve straight to a credential held in one of them.
 ```bash
 uv add mirage-ai              # installs the `mirage` library and the `mirage` CLI binary
 uv add 'mirage-ai[openai]'    # OpenAI Agents adapter; each agent framework is an extra
+uv add 'mirage-ai[monty]'     # Monty, the in-process Python runtime the examples run on
 ```
 
 ### TypeScript
