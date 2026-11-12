@@ -158,6 +158,8 @@ export { MontyRuntime } from '@struktoai/mirage-core/runtime/python/monty/runtim
 export { RemoteRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
 export type { E2BConfig } from '@struktoai/mirage-core/machine/e2b/config'
 export { E2BMachine } from '@struktoai/mirage-core/machine/e2b/handle'
+export type { ContainerConfig } from '@struktoai/mirage-core/machine/cloudflare_container/config'
+export { ContainerMachine } from '@struktoai/mirage-core/machine/cloudflare_container/handle'
 export { BoxVFS } from '@struktoai/mirage-core/vfs/box/box'
 export type { BoxConfig } from '@struktoai/mirage-core/vfs/box/config'
 export { DropboxVFS } from '@struktoai/mirage-core/vfs/dropbox/dropbox'

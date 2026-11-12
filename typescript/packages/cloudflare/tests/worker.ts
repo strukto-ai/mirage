@@ -16,8 +16,12 @@ import { networkRule, runWithNetwork } from '@struktoai/mirage-core/io/network'
 import { Limit } from '@struktoai/mirage-core/types'
 import { DurableObject } from 'cloudflare:workers'
 import {
+  ContainerRelay,
   createApp,
   D1SqlDriver,
+  relayFetch,
+  type RelayedContainer,
+  type RelayNamespace,
   DurableObjectSqlDriver,
   MountMode,
   RAMVFS,
@@ -37,6 +41,7 @@ interface Env {
     idFromName(name: string): unknown
     get(id: unknown): { fetch(request: Request): Promise<Response> }
   }
+  readonly RELAY: RelayNamespace
 }
 
 interface SqlRun {
@@ -199,9 +204,52 @@ export class SqlObject extends DurableObject<Env> {
   }
 }
 
+/**
+ * A container that echoes: each exec copies its stdin to stdout, writes its
+ * argv to stderr and exits 7.
+ */
+function echoContainer(): RelayedContainer {
+  let running = false
+  return {
+    get running() {
+      return running
+    },
+    start() {
+      running = true
+    },
+    exec(cmd) {
+      if (!running) return Promise.reject(new Error('the container is not running'))
+      const io = new TransformStream<Uint8Array, Uint8Array>()
+      const err = new TransformStream<Uint8Array, Uint8Array>()
+      const errors = err.writable.getWriter()
+      const exitCode = (async () => {
+        await errors.write(new TextEncoder().encode(cmd.join(' ')))
+        await errors.close()
+        return 7
+      })()
+      return Promise.resolve({
+        stdin: io.writable,
+        stdout: io.readable,
+        stderr: err.readable,
+        exitCode,
+        kill: () => undefined,
+      })
+    },
+    monitor: () => new Promise<void>(() => undefined),
+  }
+}
+
+/** A relay over the echoing container, as a user's Durable Object would bind a real one. */
+export class EchoRelay extends ContainerRelay<Env> {
+  constructor(_state: unknown, env: Env) {
+    super({ container: echoContainer() }, env)
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const { pathname } = new URL(request.url)
+    if (pathname.startsWith('/relay/')) return relayFetch(request, env.RELAY)
     if (pathname === '/follow') return follow((await request.json()) as Follow)
     if (pathname === '/sftp') return sftpRead()
     if (pathname === '/machines') return Response.json(knownProviders())

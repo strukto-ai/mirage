@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { currentCaller } from '@struktoai/mirage-core/context/session_context'
-import { feed } from '@struktoai/mirage-core/io/stream'
-import type { ByteSource } from '@struktoai/mirage-core/io/types'
+import { currentCaller } from '../../context/session_context.ts'
+import { feed } from '../../io/stream.ts'
+import type { ByteSource } from '../../io/types.ts'
 import {
   CHECK_LINE,
   EXEC_PRELUDE,
@@ -25,17 +25,20 @@ import {
   isRun,
   runTag,
   stopSignal,
-} from '@struktoai/mirage-core/machine/constants'
-import { ConnectionLostError } from '@struktoai/mirage-core/machine/errors'
-import { MachineHandle, logger } from '@struktoai/mirage-core/machine/handle'
-import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/machine/mixin'
-import { registerMachine } from '@struktoai/mirage-core/machine/registry'
-import type { MachinePipe } from '@struktoai/mirage-core/machine/types'
-import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
-import { abortable, makeAbortError, settledWithin, sleep } from '@struktoai/mirage-core/utils/abort'
-import { concat } from '@struktoai/mirage-core/utils/bytes'
-import type { ContainerConfig } from './config.ts'
+} from '../constants.ts'
+import { ConnectionLostError } from '../errors.ts'
+import { MachineHandle, logger } from '../handle.ts'
+import { PIPE_TRANSPORT, type PipeTransport } from '../mixin.ts'
+import { registerMachine } from '../registry.ts'
+import type { MachinePipe } from '../types.ts'
+import type { OutputFn, RunResult } from '../../runtime/types.ts'
+import { abortable, makeAbortError, settledWithin, sleep } from '../../utils/abort.ts'
+import { concat } from '../../utils/bytes.ts'
+import type { ConfigFields } from '../../runtime/config.ts'
+import { requireId } from '../config.ts'
+import { CONTAINER_CONFIG_FIELDS, type ContainerConfig } from './config.ts'
 import {
+  BOTH,
   CHECK_POLL_SECONDS,
   CLOSING,
   NO_CONTAINER,
@@ -43,6 +46,7 @@ import {
   START_WAIT_SECONDS,
   STOPPED,
 } from './constants.ts'
+import { RelayContainer } from './relay.ts'
 import type { Container, ExecProcess } from './types.ts'
 
 const ENC = new TextEncoder()
@@ -100,23 +104,27 @@ async function drain(
 }
 
 /**
- * A Cloudflare Container, reached from the Durable Object that owns it.
+ * A Cloudflare Container: from the Durable Object that owns it, or from
+ * anywhere else through a `ContainerRelay`.
  *
- * The Durable Object hands in its own `ctx.container` and a `start` that
- * starts the container when it is not running; the image, instance type,
- * network and quota are that callback's, never config. Connecting calls
+ * In the Durable Object, the handle takes its own `ctx.container` and a
+ * `start` that starts the container when it is not running; the image,
+ * instance type, network and quota are that callback's, never config.
+ * Anywhere else, `url` and `token` name a relay route, which takes the
+ * same calls over the network (`RelayContainer`). Connecting calls
  * `start`, then waits for the container to answer the check line. Every
- * argv runs through `ctx.container.exec` under `EXEC_PRELUDE`, its stdin
+ * argv runs through the container's exec under `EXEC_PRELUDE`, its stdin
  * always piped and closed once the input ends, stdout and stderr as the
  * program wrote them. A `mountType` serves the workspace over one more exec
  * whose pipes carry SFTP.
  *
- * A handle built from config alone has no container and fails to connect,
- * saying how to build one. Once the container stops, a line it cut short
- * loses its connection (129), and the next line starts it again.
+ * A handle with neither fails to connect, saying how to build one. Once
+ * the container stops, a line it cut short loses its connection (129), and
+ * the next line starts it again.
  */
-export class ContainerMachine extends MachineHandle implements PipeTransport {
+export class ContainerMachine extends MachineHandle<ContainerConfig> implements PipeTransport {
   static override readonly provider = 'cloudflare_container'
+  static override readonly configFields: ConfigFields = CONTAINER_CONFIG_FIELDS
   readonly [PIPE_TRANSPORT] = true as const
   // Settles once the container the last connect reached has exited.
   private exited: Promise<void> | null = null
@@ -125,20 +133,35 @@ export class ContainerMachine extends MachineHandle implements PipeTransport {
   private exits = 0
   // Set while the workspace closes, when nothing starts a container.
   private closing = false
+  private readonly container: Container | undefined
+  private readonly start: (() => Promise<void>) | undefined
 
   /**
    * @param name the machine's name, its key under `machines:`.
-   * @param config the environment, and how the container sees the workspace.
+   * @param config the environment, how the container sees the workspace,
+   *   and outside its Durable Object the relay that reaches it.
    * @param container the Durable Object's own `ctx.container`.
    * @param start starts the container when it is not running.
    */
   constructor(
     name: string,
     config?: ContainerConfig,
-    private readonly container?: Container,
-    private readonly start?: () => Promise<void>,
+    container?: Container,
+    start?: () => Promise<void>,
   ) {
-    super(name, config)
+    super(name, config, ContainerMachine.configFields)
+    const { url, token } = this.config
+    if (url === undefined) {
+      this.container = container
+      this.start = start
+      return
+    }
+    if (container !== undefined) throw new Error(BOTH)
+    requireId('cloudflare_container', 'url', url)
+    requireId('cloudflare_container', 'token', token)
+    const relay = new RelayContainer(url, token ?? '')
+    this.container = relay
+    this.start = () => relay.start()
   }
 
   async connect(): Promise<void> {

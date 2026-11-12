@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Context } from '@struktoai/mirage-core/commands/config'
-import type { ByteSource } from '@struktoai/mirage-core/io/types'
+import type { Context } from '../../commands/config.ts'
+import type { ByteSource } from '../../io/types.ts'
 import {
   CHECK_LINE,
   CHECK_MARK,
@@ -23,20 +23,20 @@ import {
   PROCESS,
   isRun,
   stopLine,
-} from '@struktoai/mirage-core/machine/constants'
-import { ConnectionLostError } from '@struktoai/mirage-core/machine/errors'
-import { logger } from '@struktoai/mirage-core/machine/handle'
-import { buildMachine } from '@struktoai/mirage-core/machine/registry'
-import { OPEN } from '@struktoai/mirage-core/mount/constants'
-import '@struktoai/mirage-core/mount/sftp'
-import { RemoteRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
-import type { RunResult } from '@struktoai/mirage-core/runtime/types'
-import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
-import { concat } from '@struktoai/mirage-core/utils/bytes'
-import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
+} from '../constants.ts'
+import { ConnectionLostError } from '../errors.ts'
+import { logger } from '../handle.ts'
+import { buildMachine } from '../registry.ts'
+import { OPEN } from '../../mount/constants.ts'
+import '../../mount/sftp.ts'
+import { RemoteRuntime } from '../../runtime/machine/runtime.ts'
+import type { RunResult } from '../../runtime/types.ts'
+import { MountMode, PathSpec } from '../../types.ts'
+import { concat } from '../../utils/bytes.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { NOT_ANSWERING, START_WAIT_SECONDS, STOPPED } from './constants.ts'
+import { BOTH, NOT_ANSWERING, NO_CONTAINER, START_WAIT_SECONDS, STOPPED } from './constants.ts'
 import { ContainerMachine } from './handle.ts'
 import type { Container, ExecOptions, ExecProcess } from './types.ts'
 
@@ -658,12 +658,22 @@ describe('ContainerMachine connection', () => {
     expect(start).toHaveBeenCalledTimes(2)
   })
 
-  it('fails to connect without a container, saying how to build one', async () => {
+  it('fails to connect without a container or a relay, saying how to reach one', async () => {
     const built = buildMachine('box', { provider: 'cloudflare_container', mountType: 'ssh' })
     expect(built).toBeInstanceOf(ContainerMachine)
-    await expect(run(built as ContainerMachine, ['true'])).rejects.toThrow(
-      'cloudflare_container runs in the Durable Object that owns the container: ' +
-        'build it with new ContainerMachine(name, config, ctx.container, start)',
+    await expect(run(built as ContainerMachine, ['true'])).rejects.toThrow(NO_CONTAINER)
+  })
+
+  it('builds a relayed machine from config, which needs a token', () => {
+    const url = 'https://relay.example.workers.dev/box'
+    expect(
+      buildMachine('box', { provider: 'cloudflare_container', url, token: 't' }),
+    ).toBeInstanceOf(ContainerMachine)
+    expect(() => buildMachine('box', { provider: 'cloudflare_container', url })).toThrow(
+      'cloudflare_container config needs a nonblank token',
+    )
+    expect(() => new ContainerMachine('box', { url, token: 't' }, new FakeContainer())).toThrow(
+      BOTH,
     )
   })
 
