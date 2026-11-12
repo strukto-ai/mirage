@@ -108,7 +108,7 @@ while it runs, such as a `$( )` capture, a `read` value, a file read whole, a
 `jq -s` input or a Monty, Pyodide or QuickJS program's memory. Such an object must fit in what the RAM
 files leave. It is 96 MB unless the workspace sets it, and `None` (`null` in
 TypeScript and YAML) lifts it. The read cache keeps its own
-[limit](/home/configuration#cache-index-and-store). Commands running at the same moment can
+[limit](/home/infrastructure/file-cache). Commands running at the same moment can
 each take close to what is left, so it bounds each object, not their sum.
 
 <CodeGroup>

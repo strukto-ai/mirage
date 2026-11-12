@@ -1,5 +1,5 @@
 ---
-title: Workspace Configuration
+title: Overview
 description: Configure workspace.yaml mounts, commands, runtimes, profiles and credentials.
 icon: sliders
 ---
@@ -65,8 +65,8 @@ not change it. See [From a template](/home/access/cli#from-a-template).
 | `env` | Seed literal or managed environment variables, described below. |
 | `secrets` | Declare named [credential sources](/home/authentication). |
 | `machines` | Name the [machines](/home/setup/machine/overview) programs can run on. |
-| `cache`, `index` | Configure cached file content and directory/stat metadata, described [below](#cache-index-and-store). |
-| `store` | Configure workspace state, background jobs included, described [below](#cache-index-and-store). |
+| `cache`, `index` | Configure cached file content and directory/stat metadata, described [below](#workspace-state-and-caches). |
+| `store` | Configure workspace state, background jobs included, described [below](#workspace-state-and-caches). |
 | `io` | Set byte-queue capacity with `buffer_bytes`. |
 | `default_session_id`, `workspace_id` | Set explicit identifiers instead of generated ones. |
 
@@ -306,65 +306,21 @@ clis:
 A `script` entry's `config` cannot hold a credential pointer. Read the
 credential from a managed `env` entry instead.
 
-## Cache, index and store
+## Workspace state and caches
 
-Each block takes a `type`, and the other keys depend on it. A `redis` type
-defaults `url` to `redis://localhost:6379/0`.
+These keys set where a workspace keeps its own data and its copies of what it
+reads. See the [Infrastructure](/home/infrastructure/overview) pages for each
+one in YAML, Python and TypeScript.
 
-`cache` holds file content. `type` is `ram` (default) or `redis`.
-
-| Key | Default | Purpose |
+| Key | Holds | Details |
 | --- | --- | --- |
-| `limit` | `32MB`, `512MB` on Redis | Cache size, as a [size](#sizes). |
-| `max_drain_bytes` | 8 MiB or `limit`, whichever is smaller | Largest file a streamed read copies into the cache. Cannot exceed `limit`. |
-| `url`, `key_prefix` | the workspace's own keys | Redis only. Name one `key_prefix` in several workspaces to share their cache. |
+| `store` | Symlinks and file attributes, sessions, command logs and background jobs | [Namespace](/home/infrastructure/namespace), [Sessions](/home/infrastructure/sessions), [Command Logs](/home/infrastructure/command-logs), [Jobs](/home/infrastructure/jobs) |
+| `cache` | File content | [File Cache](/home/infrastructure/file-cache) |
+| `index` | Directory listings and file metadata | [File Index](/home/infrastructure/file-index) |
 
-`index` holds directory listings and file metadata. `type` is `ram` (default)
-or `redis`. A mount's own `index` replaces this block.
-
-| Key | Default | Purpose |
-| --- | --- | --- |
-| `ttl` | `600` | Seconds a listing stays cached. |
-| `url`, `key_prefix` | the workspace's own keys | Redis only. Name one `key_prefix` in several workspaces to share their index. |
-
-`store` holds workspace state: symlinks and file attributes, command logs,
-sessions, and background jobs with their output. `type` is `ram` (default),
-`disk` or `redis`, and sets the backend for all of them; each group key below
-moves one part to a backend of its own.
-
-| Key | Default | Purpose |
-| --- | --- | --- |
-| `root` | `~/.mirage/state` | The state directory for `disk`. With `redis`, command logs are written here. |
-| `url`, `key_prefix` | `mirage:` | Redis only. |
-| `namespace` | unset | A separate store block for symlinks and file attributes. |
-| `logs` | unset | A separate store block for [command logs](/home/infrastructure/command-logs). |
-| `sessions` | unset | A separate store block for sessions and workspace metadata. |
-| `execution` | unset | A separate store block for background jobs: each session's job list and each job's output, the processes the workspace runs and which instance runs them. |
-
-A group block takes the same keys as `store`, and each group takes only the
-types that can hold it:
-
-- `namespace`: `ram`, `disk` or `redis`.
-- `sessions`: `ram`, `disk`, `redis` or `s3`. `s3` takes the
-  [S3 config fields](/home/setup/s3), with `key_prefix` defaulting to `mirage/`.
-- `logs`: `ram` or `disk`.
-- `execution`: `ram` or `redis`. A `disk` store keeps its jobs in memory, and
-  Redis keeps a job's output for a day after its last write.
-
-Processes that build one workspace on a shared store are instances of it,
-and one of them runs its lines at a time, as described in
-[Shell](/home/core/shell#jobs-across-instances).
-[Infrastructure](/home/infrastructure/overview) shows each block in YAML, Python and
-TypeScript.
-
-```yaml
-store:
-  type: redis
-  url: redis://localhost:6379/0
-  sessions:
-    type: s3
-    bucket: my-mirage-state
-```
+A `cache` or `index` block needs a `type`. A `store` block without one keeps
+everything in memory. A `redis` type defaults `url` to
+`redis://localhost:6379/0`.
 
 ## Environment and credential pointers
 
