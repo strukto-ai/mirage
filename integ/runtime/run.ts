@@ -67,6 +67,7 @@ import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
 import { norm } from '@struktoai/mirage-core/utils/path'
+import { isPlainObject } from '@struktoai/mirage-core/utils/records'
 import {
   EXTERNAL_COMMANDS,
   PROCESS_EXECUTOR,
@@ -898,11 +899,12 @@ function camelizeKeys(obj: Record<string, unknown>): Record<string, unknown> {
 }
 
 // A machine entry as the JSON spells it, with Python's snake_case keys
-// camelized for the TS config classes, its sandbox block's too: the same
-// normalization the yaml loader applies.
+// camelized for the TS config classes, a host's sandbox block's too (a
+// microsandbox's `sandbox` is its name): the same normalization the yaml
+// loader applies.
 function machineSpec(spec: Record<string, unknown>): Record<string, unknown> {
   const out = camelizeKeys(expand(spec) as Record<string, unknown>)
-  if (out.sandbox !== undefined) out.sandbox = camelizeKeys(out.sandbox as Record<string, unknown>)
+  if (isPlainObject(out.sandbox)) out.sandbox = camelizeKeys(out.sandbox)
   return out
 }
 
