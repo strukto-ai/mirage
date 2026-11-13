@@ -41,7 +41,8 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { GoogleDriveVFS } from '../../vfs/gdrive/gdrive.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { runWithRecording, runWithRevisions } from '../../observe/context.ts'
+import { currentCaller, runWithCaller } from '../../context/session_context.ts'
+import { runWithRecording } from '../../observe/context.ts'
 import { driveFingerprint } from './fingerprint.ts'
 import { read, readFileVersioned } from './read.ts'
 import { statFromItem } from './readdir.ts'
@@ -209,8 +210,9 @@ describe('gdrive versioned reads', () => {
   it('a pinned path reads that revision, not live content', async () => {
     const enc = new TextEncoder()
     drive.downloadRevision.mockResolvedValue(enc.encode('pinned'))
-    const data = await runWithRevisions(new Map([['/data/f.txt', 'r1']]), () =>
-      readFileVersioned(drive, 'f1', '/data/f.txt', VERSIONED_ENTRY),
+    const data = await runWithCaller(
+      { ...currentCaller(), revisions: { map: new Map([['/data/f.txt', 'r1']]) } },
+      () => readFileVersioned(drive, 'f1', '/data/f.txt', VERSIONED_ENTRY),
     )
     expect(new TextDecoder().decode(data)).toBe('pinned')
     expect(drive.downloadRevision).toHaveBeenCalledWith('f1', 'r1', undefined)
@@ -536,13 +538,15 @@ describe('an unrecorded gdrive read', () => {
   it('stamps no entry token on a pinned read', async () => {
     // Pinned bytes are an old revision; the entry's md5 describes head.
     drive.downloadRevision.mockResolvedValue(BODY)
-    await runWithRevisions(new Map([['/gd/a.txt', 'r1']]), () =>
-      read(
-        makeAccessor(),
-        UNRECORDED_SPEC,
-        undefined,
-        row('file123', 'a.txt', 'gdrive/file', UNRECORDED_STAMP, { md5_checksum: BODY_MD5 }),
-      ),
+    await runWithCaller(
+      { ...currentCaller(), revisions: { map: new Map([['/gd/a.txt', 'r1']]) } },
+      () =>
+        read(
+          makeAccessor(),
+          UNRECORDED_SPEC,
+          undefined,
+          row('file123', 'a.txt', 'gdrive/file', UNRECORDED_STAMP, { md5_checksum: BODY_MD5 }),
+        ),
     )
     expect(UNRECORDED.records).toEqual([['/gd/a.txt', { fingerprint: null, revision: 'r1' }]])
     expect(drive.downloadFile).not.toHaveBeenCalled()

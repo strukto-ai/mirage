@@ -25,7 +25,6 @@ import {
   revisionFor,
   runWithRecording,
   runWithMountContext,
-  runWithRevisions,
   startOp,
   withMountContext,
 } from './context.ts'
@@ -219,17 +218,22 @@ describe('revisions context', () => {
   })
 
   it('revisionFor returns null when null is passed as the map', async () => {
-    await runWithRevisions(null, async () => {
+    await runWithCaller({ ...currentCaller(), revisions: { map: null } }, async () => {
       expect(revisionFor('/s3/a')).toBeNull()
     })
   })
 
-  it('runWithRevisions exposes the installed map; restores prior state after fn', async () => {
-    await runWithRevisions(
-      new Map([
-        ['/s3/a', 'v1'],
-        ['/s3/b', 'v2'],
-      ]),
+  it('a revisions frame exposes its installed map; restores prior state after fn', async () => {
+    await runWithCaller(
+      {
+        ...currentCaller(),
+        revisions: {
+          map: new Map([
+            ['/s3/a', 'v1'],
+            ['/s3/b', 'v2'],
+          ]),
+        },
+      },
       async () => {
         expect(revisionFor('/s3/a')).toBe('v1')
         expect(revisionFor('/s3/b')).toBe('v2')
@@ -239,10 +243,13 @@ describe('revisions context', () => {
     expect(revisionFor('/s3/a')).toBeNull()
   })
 
-  it('runWithRevisions works independently of runWithRecording', async () => {
-    await runWithRevisions(new Map([['/s3/a', 'v1']]), async () => {
-      expect(revisionFor('/s3/a')).toBe('v1')
-    })
+  it('a revisions frame works independently of runWithRecording', async () => {
+    await runWithCaller(
+      { ...currentCaller(), revisions: { map: new Map([['/s3/a', 'v1']]) } },
+      async () => {
+        expect(revisionFor('/s3/a')).toBe('v1')
+      },
+    )
   })
 })
 

@@ -2,6 +2,7 @@
 #[cfg(target_arch = "wasm32")]
 mod session;
 
+use mirage_rs::shell::SourceMap;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -31,10 +32,12 @@ struct Parsed {
     error_at: i32,
     status: u8,
     message: Vec<u8>,
+    message_tree: u32,
     names: Vec<u8>,
     extras: Vec<u32>,
     text: Vec<u8>,
     reread: Vec<u32>,
+    reread_tree: u32,
 }
 
 /// The trees parses kept, each until the host drops it, for the engine's
@@ -63,7 +66,10 @@ const NODE_WORDS: usize = 10;
 /// host's strings count: a character takes one unit, or two past the
 /// BMP, and a byte that starts no UTF-8 character one, as the host's text
 /// carries it. A character's later bytes stand at its end.
-fn utf16_offsets(source: &[u8]) -> Vec<u32> {
+fn utf16_offsets(source: &[u8]) -> SourceMap {
+    if source.is_ascii() {
+        return SourceMap::Identity(source.len() + 1);
+    }
     let mut offsets = Vec::with_capacity(source.len() + 1);
     let mut units = 0u32;
     let mut at = 0;
@@ -90,7 +96,7 @@ fn utf16_offsets(source: &[u8]) -> Vec<u32> {
         at += len;
     }
     offsets.push(units);
-    offsets
+    SourceMap::Packed(offsets)
 }
 
 /// Parse the args buffer's first `len` bytes as a shell program, the
@@ -98,7 +104,7 @@ fn utf16_offsets(source: &[u8]) -> Vec<u32> {
 /// extglob's pattern groups on when `extglob` is not 0.
 /// Its node table, `NODE_WORDS` words a node level by level, offsets and columns in
 /// UTF-16 units of the text the tree reads, is at `mirage_rs_shell_table` until
-/// the next parse: kind | field << 16 | flags << 24 (1 named),
+/// the next parse or dropping that tree: kind | field << 16 | flags << 24 (1 named),
 /// start, end, start row, start column, end row, end column, parent,
 /// first child, child count. Returns the node count. The rest of the parse
 /// is at `mirage_rs_shell_extras` and `mirage_rs_shell_text`, and the tree
@@ -117,9 +123,16 @@ pub extern "C" fn mirage_rs_shell_parse(len: usize, aliases_len: usize, extglob:
     };
     let tree = mirage_rs::shell::parse_with(source, &options);
     let utf16 = utf16_offsets(&tree.source);
-    let typed = utf16_offsets(source);
-    let column =
-        |offset: u32, bytes: u32| utf16[offset as usize] - utf16[(offset - bytes) as usize];
+    let typed;
+    let typed = if tree.offsets.is_identity() {
+        &utf16
+    } else {
+        typed = utf16_offsets(source);
+        &typed
+    };
+    let column = |offset: u32, bytes: u32| {
+        utf16.at(offset as usize) as u32 - utf16.at((offset - bytes) as usize) as u32
+    };
     PARSED.with_borrow_mut(|parsed| {
         parsed.table.clear();
         parsed.table.reserve(tree.nodes.len() * NODE_WORDS);
@@ -127,8 +140,8 @@ pub extern "C" fn mirage_rs_shell_parse(len: usize, aliases_len: usize, extglob:
             let flags = u32::from(node.named);
             parsed.table.extend_from_slice(&[
                 u32::from(node.kind) | u32::from(node.field) << 16 | flags << 24,
-                utf16[node.start as usize],
-                utf16[node.end as usize],
+                utf16.at(node.start as usize) as u32,
+                utf16.at(node.end as usize) as u32,
                 node.start_row,
                 column(node.start, node.start_column),
                 node.end_row,
@@ -140,13 +153,13 @@ pub extern "C" fn mirage_rs_shell_parse(len: usize, aliases_len: usize, extglob:
         }
         match &tree.error {
             Some(refusal) => {
-                parsed.error_at =
-                    i32::try_from(typed[refusal.at.min(source.len())]).unwrap_or(i32::MAX);
+                parsed.error_at = i32::try_from(typed.at(refusal.at.min(source.len())) as u32)
+                    .unwrap_or(i32::MAX);
                 parsed.status = refusal.status;
             }
             None => parsed.error_at = -1,
         }
-        extras(&tree, &utf16, &typed, parsed);
+        extras(&tree, &utf16, typed, parsed);
     });
     let count = tree.nodes.len();
     let handle = TREES.with_borrow_mut(|trees| {
@@ -173,10 +186,34 @@ pub extern "C" fn mirage_rs_shell_drop_tree(handle: u32) {
     TREES.with_borrow_mut(|trees| {
         trees.kept.remove(&handle);
     });
+    PARSED.with_borrow_mut(|parsed| {
+        if parsed.tree == handle {
+            parsed.tree = 0;
+            clear_scratch(&mut parsed.table);
+            clear_scratch(&mut parsed.extras);
+            clear_scratch(&mut parsed.text);
+        }
+        if parsed.message_tree == handle {
+            parsed.message_tree = 0;
+            clear_scratch(&mut parsed.message);
+        }
+        if parsed.reread_tree == handle {
+            parsed.reread_tree = 0;
+            clear_scratch(&mut parsed.reread);
+        }
+    });
+}
+
+fn clear_scratch<T>(buffer: &mut Vec<T>) {
+    buffer.clear();
+    if buffer.capacity() * std::mem::size_of::<T>() > 65536 {
+        *buffer = Vec::new();
+    }
 }
 
 /// Fill `extras` and `text`: a header of the source's byte length, the
-/// heredoc count and the count of nodes with an inlined text; then where
+/// heredoc count, the count of nodes with an inlined text, and the map length
+/// (zero for identity); then where
 /// each UTF-16 unit of the source came from in the line as typed, and its
 /// end; then per heredoc its `<` in the source, its `<<`, word end, body
 /// start and end in the line as typed, flags (1 quoted, 2 terminated, 4
@@ -186,7 +223,12 @@ pub extern "C" fn mirage_rs_shell_drop_tree(handle: u32) {
 /// such node its index and the byte length of its text. `text` holds the
 /// source, each heredoc's word, delimiter and body and each inlined text,
 /// in that order.
-fn extras(tree: &mirage_rs::shell::Tree, utf16: &[u32], typed: &[u32], parsed: &mut Parsed) {
+fn extras(
+    tree: &mirage_rs::shell::Tree,
+    utf16: &SourceMap,
+    typed: &SourceMap,
+    parsed: &mut Parsed,
+) {
     let inlined: Vec<(usize, Vec<u8>)> = if tree.closes.is_empty() {
         Vec::new()
     } else {
@@ -204,21 +246,30 @@ fn extras(tree: &mirage_rs::shell::Tree, utf16: &[u32], typed: &[u32], parsed: &
         count(tree.source.len()),
         count(tree.heredocs.len()),
         count(inlined.len()),
+        if tree.offsets.is_identity() {
+            0
+        } else {
+            count(utf16.at(tree.source.len()) + 1)
+        },
     ]);
     // Each unit a byte starts maps to where that byte came from.
-    for at in 0..tree.source.len() {
-        let origin = typed[tree.offsets[at]];
-        extras.extend((0..utf16[at + 1] - utf16[at]).map(|unit| origin + unit));
+    if !tree.offsets.is_identity() {
+        for at in 0..tree.source.len() {
+            let origin = typed.at(tree.offsets.at(at)) as u32;
+            extras.extend(
+                (0..utf16.at(at + 1) as u32 - utf16.at(at) as u32).map(|unit| origin + unit),
+            );
+        }
+        extras.push(typed.at(tree.offsets.at(tree.source.len())) as u32);
     }
-    extras.push(typed[tree.offsets[tree.source.len()]]);
     text.extend_from_slice(&tree.source);
     for heredoc in &tree.heredocs {
         extras.extend_from_slice(&[
-            utf16[heredoc.at],
-            typed[heredoc.operator],
-            typed[heredoc.word_end],
-            typed[heredoc.body_start],
-            typed[heredoc.end],
+            utf16.at(heredoc.at) as u32,
+            typed.at(heredoc.operator) as u32,
+            typed.at(heredoc.word_end) as u32,
+            typed.at(heredoc.body_start) as u32,
+            typed.at(heredoc.end) as u32,
             u32::from(heredoc.quoted)
                 | u32::from(heredoc.terminated) << 1
                 | u32::from(heredoc.dash) << 2,
@@ -307,6 +358,7 @@ pub extern "C" fn mirage_rs_shell_words(
         })
         .unwrap_or_default();
     PARSED.with_borrow_mut(|parsed| {
+        parsed.message_tree = handle;
         parsed.message = words;
         parsed.message.len()
     })
@@ -323,6 +375,7 @@ pub extern "C" fn mirage_rs_shell_reread(handle: u32, index: u32) -> usize {
         .map(|tree| mirage_rs::shell::reread_lines(&tree, index as usize))
         .unwrap_or_default();
     PARSED.with_borrow_mut(|parsed| {
+        parsed.reread_tree = handle;
         parsed.reread.clear();
         for (node, line, end) in lines {
             parsed.reread.extend_from_slice(&[node, line, end]);
@@ -371,4 +424,66 @@ pub extern "C" fn mirage_rs_shell_names() -> *const u8 {
 #[unsafe(no_mangle)]
 pub extern "C" fn mirage_rs_shell_names_len() -> usize {
     PARSED.with_borrow(|parsed| parsed.names.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dropping_oldest_tree_releases_later_diagnostic_scratch() {
+        let source = b"echo $(echo hi)";
+        ARGS.with_borrow_mut(|args| *args = source.to_vec());
+        mirage_rs_shell_parse(source.len(), 0, 1);
+        let older = mirage_rs_shell_tree();
+        ARGS.with_borrow_mut(|args| *args = b"echo newer".to_vec());
+        mirage_rs_shell_parse(10, 0, 1);
+        mirage_rs_shell_drop_tree(mirage_rs_shell_tree());
+        assert!(mirage_rs_shell_reread(older, 0) > 0);
+        mirage_rs_shell_words(older, 1, 0, 1, 1);
+        PARSED.with_borrow_mut(|parsed| {
+            parsed.reread.reserve(32768);
+            parsed.message = vec![b'x'; 131072];
+        });
+        mirage_rs_shell_drop_tree(older);
+        PARSED.with_borrow(|parsed| {
+            assert_eq!(parsed.reread.capacity(), 0);
+            assert_eq!(parsed.message.capacity(), 0);
+        });
+    }
+
+    #[test]
+    fn utf16_coordinates_include_non_bmp_and_invalid_bytes() {
+        let offsets = utf16_offsets(b"a\xc3\xa9\xf0\x9f\x98\x80\xff");
+        assert_eq!(
+            offsets.iter().collect::<Vec<_>>(),
+            [0, 1, 2, 2, 4, 4, 4, 4, 5]
+        );
+        assert!(utf16_offsets(b"echo x").is_identity());
+    }
+
+    #[test]
+    fn transformed_extras_map_units_and_drop_releases_scratch() {
+        ARGS.with_borrow_mut(|args| *args = "ec\\\nho é😀".as_bytes().to_vec());
+        mirage_rs_shell_parse(13, 0, 1);
+        let handle = mirage_rs_shell_tree();
+        PARSED.with_borrow(|parsed| {
+            assert_eq!(parsed.error_at, -1);
+            assert_eq!(parsed.extras[3], 9);
+            assert_eq!(&parsed.extras[4..13], &[0, 1, 4, 5, 6, 7, 8, 9, 10]);
+        });
+        let held = TREES.with_borrow(|trees| trees.kept[&handle].clone());
+        mirage_rs_shell_drop_tree(handle);
+        mirage_rs_shell_drop_tree(handle);
+        TREES.with_borrow(|trees| assert!(!trees.kept.contains_key(&handle)));
+        assert_eq!(held.source.as_slice(), "echo é😀".as_bytes());
+        PARSED.with_borrow(|parsed| assert!(parsed.text.is_empty() && parsed.extras.is_empty()));
+        let mut oversized = Vec::<u8>::with_capacity(1048576);
+        oversized.push(1);
+        clear_scratch(&mut oversized);
+        assert_eq!(oversized.capacity(), 0);
+        let mut small = Vec::<u8>::with_capacity(32);
+        clear_scratch(&mut small);
+        assert_eq!(small.capacity(), 32);
+    }
 }

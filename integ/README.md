@@ -489,7 +489,7 @@ remain covered by the same whole-host filters on both hosts.
 | generated document accessor/core/command/VFS modules and `workspace/documentation/` in either language                                       | fuse                              |
 | `vfs/capacity`, the `core/ram` writers (`dest`, `write`, `pwrite`, `truncate`, `copy`) and `vfs/ram/ram`, `vfs/ram/store` in either language | fuse                              |
 | Discord accessor/core/VFS modules; dispatcher, policy and runtime handle modules in either language                                          | fuse                              |
-| `rust/`, the shared command streams, date formatter, JSON validation, Lance SQL and jq both hosts run                                        | core, ts, data, database, runtime |
+| `rust/`, the shared command streams including colrm and envsubst, date formatter, JSON validation, Lance SQL and jq both hosts run           | core, ts, data, database, runtime |
 | `test_integ.yml`                                                                                                                             | every filter                      |
 
 Besides the README exclusions above, the runtime drop list is the only

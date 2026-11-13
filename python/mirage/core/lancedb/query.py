@@ -15,7 +15,6 @@
 from typing import cast
 
 import pyarrow as pa
-from lancedb.query import AsyncQuery
 
 from mirage.accessor.lancedb import LanceDBAccessor
 from mirage.core.lancedb.render import cell_text
@@ -73,34 +72,6 @@ async def table_exists(accessor: LanceDBAccessor, name: str) -> bool:
     return name in await list_tables(accessor)
 
 
-async def _kept_texts(
-    query: AsyncQuery, column: str, limit: int, keep: ValueTest
-) -> list[str]:
-    """The first ``limit`` values of ``column`` that pass ``keep``.
-
-    Streams the unbounded query batch by batch and stops at the cap, so
-    a scan past the head of the table costs one batch of memory.
-
-    Args:
-        query (AsyncQuery): the query, filtered and without a limit.
-        column (str): the selected column.
-        limit (int): how many kept values end the stream.
-        keep (ValueTest): the test on each value's text.
-    """
-    texts: list[str] = []
-    async for batch in await query.to_batches():
-        for row in batch.to_pylist():
-            value = row.get(column)
-            if value is None:
-                continue
-            text = cell_text(value)
-            if keep(text):
-                texts.append(text)
-                if len(texts) >= limit:
-                    return texts
-    return texts
-
-
 async def distinct_values(
     accessor: LanceDBAccessor,
     table: str,
@@ -120,7 +91,8 @@ async def distinct_values(
     at all (a head that is only the escape lead), and those rows would
     fill the cap and hide every match past it. A glob is a targeted
     request, so it pays a scan up to its matches where the plain
-    listing pays one window.
+    listing pays one window; the scan streams batch by batch and stops at
+    the cap, so going past the head of the table costs one batch of memory.
 
     Args:
         accessor (LanceDBAccessor): the mount's accessor.
@@ -145,8 +117,15 @@ async def distinct_values(
             for row in rows
             if row.get(column) is not None
         ]
-    else:
-        texts = await _kept_texts(query, column, limit, keep)
+        return sorted(set(texts))
+    texts = []
+    async for batch in await query.to_batches():
+        for row in batch.to_pylist():
+            value = row.get(column)
+            if value is not None and keep(text := cell_text(value)):
+                texts.append(text)
+                if len(texts) >= limit:
+                    return sorted(set(texts))
     return sorted(set(texts))
 
 

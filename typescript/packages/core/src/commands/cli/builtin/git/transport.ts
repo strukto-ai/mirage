@@ -62,13 +62,15 @@ export interface Advertisement {
   readonly symrefs?: ReadonlyMap<string, string>
 }
 
-/** Whether the receiver already holds an object. */
-export type Has = (oid: string) => Promise<boolean>
-
 /** A remote a fetch or clone reads from. */
 export interface Transport {
   advertise(): Promise<Advertisement>
-  fetchPack(wants: readonly string[], haves: readonly string[], has: Has): Promise<Uint8Array>
+  /** `has` says whether the receiver already holds an object. */
+  fetchPack(
+    wants: readonly string[],
+    haves: readonly string[],
+    has: (oid: string) => Promise<boolean>,
+  ): Promise<Uint8Array>
 }
 
 /** One pkt-line: four hex digits of length, then the payload. */
@@ -148,7 +150,7 @@ export function displayUrl(url: string): string {
 export async function missingObjects(
   repo: Repo,
   wants: readonly string[],
-  has: Has,
+  has: (oid: string) => Promise<boolean>,
 ): Promise<string[]> {
   const sending: string[] = []
   const boundary: string[] = []
@@ -249,7 +251,7 @@ export class LocalTransport implements Transport {
   async fetchPack(
     wants: readonly string[],
     _haves: readonly string[],
-    has: Has,
+    has: (oid: string) => Promise<boolean>,
   ): Promise<Uint8Array> {
     const oids = await missingObjects(this.repo, wants, has)
     if (!oids.length) return new Uint8Array()

@@ -3,16 +3,14 @@ export interface RunVariables {
   project: string
   run: string
 }
-export interface Named {
-  name: string
-}
 export interface RunUser {
   id: string
   name: string
   username: string | null
   email: string | null
 }
-export interface Run extends Named {
+export interface Run {
+  name: string
   id?: string | null
   displayName?: string | null
   state?: string | null
@@ -34,7 +32,8 @@ export interface Run extends Named {
   summaryMetrics?: string | Record<string, unknown>
   historyKeys?: { lastStep?: number; [key: string]: unknown } | null
 }
-export interface FileMetadata extends Named {
+export interface FileMetadata {
+  name: string
   sizeBytes: number | null
 }
 export interface RunFile extends FileMetadata {

@@ -37,7 +37,7 @@ import type { SessionState } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import { bodyAliases } from '../builtins/alias/alias.ts'
 import { isCountWord } from '../builtins/shared.ts'
-import type { ExecuteStringFn } from '../builtins/types.ts'
+import type { ExecuteFn } from '../../expand/types.ts'
 import { executeBody, returning } from '../control.ts'
 import { liftFunctionTraps, restoreFunctionTraps } from '../traps.ts'
 import type { ExecuteNodeFn } from './types.ts'
@@ -70,7 +70,7 @@ export async function runShellFunction(
   // body's output.
   sink?: JobConsole,
   // Runs a trap action as a line of the shell; null where nothing can.
-  executeFn: ExecuteStringFn | null = null,
+  executeFn: ExecuteFn | null = null,
 ): Promise<RedirectResult> {
   const session = context.session
   const cs = callStack ?? new CallStack(session.shellNesting)

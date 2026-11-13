@@ -33,11 +33,11 @@ def test_read_daemon_table_no_daemon_section(tmp_path):
 
 def test_read_daemon_table_reads_keys(tmp_path):
     (tmp_path / "config.toml").write_text(
-        '[daemon]\nurl = "http://h:1"\nsocket = "/tmp/s.sock"\n'
+        '[daemon]\nurl = "http://h:1"\nlogin_client_id = "mirage-cli"\n'
     )
     table = read_daemon_table(tmp_path)
     assert table["url"] == "http://h:1"
-    assert table["socket"] == "/tmp/s.sock"
+    assert table["login_client_id"] == "mirage-cli"
 
 
 def test_read_daemon_table_malformed_toml(tmp_path):

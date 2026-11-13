@@ -30,10 +30,8 @@ import {
 // (sheets read/write/append, docs write, the gmail helpers) stay
 // hand-written beside them in the tree.
 
-export type GwsService = 'drive' | 'docs' | 'sheets' | 'slides' | 'gmail' | 'calendar' | 'forms'
-
 export interface GwsMethod {
-  service: GwsService
+  service: 'drive' | 'docs' | 'sheets' | 'slides' | 'gmail' | 'calendar' | 'forms'
   resource: string
   method: string
   http: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
@@ -382,7 +380,7 @@ export function gwsMethodDescription(m: GwsMethod): string {
   return `${m.http} ${m.path} (Google ${m.service} API passthrough)`
 }
 
-export const SERVICE_BASES: Record<GwsService, (tm: TokenManager) => string> = {
+export const SERVICE_BASES: Record<GwsMethod['service'], (tm: TokenManager) => string> = {
   drive: driveBase,
   docs: docsBase,
   sheets: sheetsBase,

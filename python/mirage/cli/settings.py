@@ -219,7 +219,6 @@ def is_local_url(url: str) -> bool:
 class DaemonSettings:
     context: str = LOCAL
     url: str = DEFAULT_DAEMON_URL
-    socket: str = ""
     auth_token: str = ""
     idle_grace_seconds: float = 30.0
     login: Login | None = None
@@ -263,7 +262,6 @@ def load_daemon_settings(path: Path | None = None) -> DaemonSettings:
     settings = DaemonSettings(
         context=name,
         url=local_url(table) if local else context.url,
-        socket=str(table.get("socket", "")) if local else "",
         auth_token=str(table.get("auth_token", "")) if local else "",
         idle_grace_seconds=float(table.get("idle_grace_seconds", 30.0)),
     )
@@ -302,7 +300,6 @@ def _default_for_key(key: str) -> str:
         "jwt_clock_skew_seconds": "5",
         "jwt_authorized_parties": "",
         "login_client_id": "",
-        "socket": "",
         "auth_token": "",
         "idle_grace_seconds": "30",
         "graceful_timeout": "0",

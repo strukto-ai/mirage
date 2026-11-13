@@ -17,6 +17,12 @@ from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
+REFUSED = (
+    "error: The authentication token stays in Mirage configuration and is "
+    "never printed.\n"
+    "  hint: ntn commands use it directly.\n"
+)
+
 
 async def token(
     accessor: NotionAccessor,
@@ -24,5 +30,4 @@ async def token(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    secret = accessor.config.api_key.get_secret_value()
-    return f"{secret}\n".encode(), IOResult()
+    return None, IOResult(stderr=REFUSED.encode(), exit_code=1)

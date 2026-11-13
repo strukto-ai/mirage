@@ -15,7 +15,7 @@
 import { utf8Locale } from '../../../shell/bytes.ts'
 import { isStdin, operandLabel } from '../utils/stream.ts'
 import { stdinStream, stdinStat } from '../utils/stream.ts'
-import { guardInput } from '../utils/limit.ts'
+import { chunks } from '../../../io/cooperative.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { fsStrerror, isFsError, isWalkError, walkRefusal } from '../../../errors/fs.ts'
@@ -249,7 +249,7 @@ export async function grepGeneric(
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
   const operandStream = stdinStream(stream, ctx.stdin)
-  stream = (path) => guardInput(operandStream(path), ctx)
+  stream = (path) => chunks(operandStream(path), ctx.signal)
   const fl = new FlagView(ctx.flags, specOf('grep'))
   // GNU refuses a bad option value in its option loop, before it looks for a
   // pattern.
@@ -327,7 +327,7 @@ export async function grepGeneric(
   if (first === undefined) {
     try {
       // grep reads a descriptor it gives back to itself, unguarded.
-      const source = shared ?? guardInput(resolveSource(ctx.stdin), ctx)
+      const source = shared ?? chunks(resolveSource(ctx.stdin), ctx.signal)
       const label = f.label ?? GREP_STDIN_LABEL
       const show = f.withFilename && !f.noFilename
       return [owned(search(source, label, show, io, false, null, true)), io]

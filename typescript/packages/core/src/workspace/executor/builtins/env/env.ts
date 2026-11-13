@@ -23,7 +23,8 @@ import { ownRecord, type SessionState, varsFromEnv } from '../../../session/sess
 import { envSnapshot } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { fail, ok } from '../shared.ts'
-import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
+import type { BuiltinCall } from '../types.ts'
+import type { ExecuteFn } from '../../../expand/types.ts'
 import { ENV_HELP_HINT } from './constants.ts'
 
 function envError(message: string): RedirectResult {
@@ -158,7 +159,7 @@ export function envVars(
 }
 
 export async function handleEnv(
-  executeFn: ExecuteStringFn,
+  executeFn: ExecuteFn,
   args: string[],
   session: SessionState,
   stdin: ByteSource | null = null,

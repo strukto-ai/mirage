@@ -12,6 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
+from pymongo.asynchronous.database import AsyncDatabase
+
 from mirage.accessor.mongodb import MongoClientAccessor
 from mirage.vfs.gridfs.config import GridFSConfig
 
@@ -20,3 +24,6 @@ class GridFSAccessor(MongoClientAccessor):
     def __init__(self, config: GridFSConfig) -> None:
         super().__init__(config.uri, config.timeout)
         self.config = config
+
+    def db(self) -> AsyncDatabase[dict[str, Any]]:
+        return self.client[self.config.database]

@@ -18,7 +18,7 @@ import git from 'isomorphic-git'
 import { fsStrerror, isEacces, isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
 import { AmbiguousArgumentError, UnhashableFileError } from './errors.ts'
 import { entryMode } from './add.ts'
-import { EXECUTABLE_MODE, GITLINK_MODE, REGULAR_MODE, SYMLINK, SYMLINK_MODE } from './constants.ts'
+import { EXECUTABLE_MODE, GITLINK_MODE, REGULAR_MODE, SYMLINK } from './constants.ts'
 import { readIndex } from './index_file.ts'
 import { entryBytes } from './io.ts'
 import { visibleEntries } from './pathspec.ts'
@@ -47,15 +47,6 @@ const IGNORED = '!'
 // git gives up rather than answer differently.
 export const RENAME_THRESHOLD = 60
 const MAX_RENAME_FILES = 200
-// A regular file, as the mode's type bits spell it. Only these are scored for
-// similarity: a symlink is paired only with another symlink holding the same
-// bytes, since scoring one against a file would pair two unrelated things by
-// the bytes of a path.
-// What a mode says a path is, for pairing within one kind. Only the executable
-// bit separates the two regular modes, and git renames across it.
-const SYMLINK_KIND = 'symlink'
-const REGULAR_KIND = 'regular'
-
 // git spells an unmerged path by which of the three index stages it kept, keyed
 // here as (ancestor, ours, theirs). The pair is the porcelain XY, and the long
 // format's label follows from it.
@@ -75,10 +66,16 @@ const CONFLICT_CODES: Record<string, string> = {
  */
 type StagedRow = readonly [string, string | null, number]
 
-/** What a mode makes a path, for a rename pair that must not cross kinds. */
+/**
+ * What a mode makes a path, for a rename pair that must not cross kinds: the
+ * mode itself, but for the executable bit, which alone separates the two
+ * regular modes and which git renames across. Only a regular file is scored
+ * for similarity: a symlink is paired only with another symlink holding the
+ * same bytes, since scoring one against a file would pair two unrelated things
+ * by the bytes of a path.
+ */
 export function kindOf(mode: string): string {
-  if (mode === REGULAR_MODE || mode === EXECUTABLE_MODE) return REGULAR_KIND
-  return mode === SYMLINK_MODE ? SYMLINK_KIND : mode
+  return mode === EXECUTABLE_MODE ? REGULAR_MODE : mode
 }
 
 /**
@@ -230,7 +227,7 @@ export async function pairRenames(
   )
   const matchedNew = new Set(pairs.map(([fresh]) => fresh))
   const matchedOld = new Set(pairs.map(([, old]) => old))
-  const scored = (side: string[]): string[] => side.filter((p) => kinds.get(p) === REGULAR_KIND)
+  const scored = (side: string[]): string[] => side.filter((p) => kinds.get(p) === REGULAR_MODE)
   pairs.push(
     ...(await contentRenames(
       repo,
@@ -311,7 +308,7 @@ function conflictCodes(conflicts: ReadonlyMap<string, ConflictedEntry>): Map<str
  * executable file look changed.
  */
 function modeDiffers(entry: IndexEntry, info: FileStat): boolean {
-  if (info.mode === null || kindOf(entry.mode.toString(8)) !== REGULAR_KIND) return false
+  if (info.mode === null || kindOf(entry.mode.toString(8)) !== REGULAR_MODE) return false
   return Boolean(entry.mode & 0o100) !== Boolean(info.mode & 0o100)
 }
 

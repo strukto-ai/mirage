@@ -38,7 +38,8 @@ import { ExecutionNode } from '../../../types.ts'
 import { ended } from '../../control.ts'
 import { reportReaped, startShell } from '../../background.ts'
 import { clearTraps, finishShell } from '../../traps.ts'
-import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
+import type { BuiltinCall } from '../types.ts'
+import type { ExecuteFn } from '../../../expand/types.ts'
 import { BASH_LONG_OPTIONS, BASH_START_FLAGS, BASH_UNSUPPORTED_LONG_OPTIONS } from './constants.ts'
 import { readScriptFile, scriptError } from './script.ts'
 import type { BashArgs } from './types.ts'
@@ -146,7 +147,7 @@ export function parseBashArgs(args: string[]): BashArgs {
  */
 export async function handleBash(
   dispatch: DispatchFn,
-  executeFn: ExecuteStringFn,
+  executeFn: ExecuteFn,
   args: string[],
   context: EvaluationContext,
   stdin: ByteSource | null = null,

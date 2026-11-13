@@ -14,31 +14,34 @@
 
 import { NO_WRITE_OP, facts, parseFlags, shufGeneric } from '../../generic/shuf.ts'
 import { IOResult } from '../../../../io/types.ts'
+import type { CommandFn } from '../../../config.ts'
 import { type GenericCommand } from '../adapter.ts'
 import { commandFiles, resolveOrEmpty } from '../files.ts'
+
+const shuf: CommandFn = async (_accessor, paths, texts, ctx) => {
+  const parsed = parseFlags(ctx.flags)
+  if (parsed instanceof IOResult) return [null, parsed]
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
+  return shufGeneric(
+    resolved,
+    texts,
+    ctx,
+    files.read,
+    // Only `-o` writes, so a read-only backend still serves plain shuf.
+    // Requiring the write op up front would break every read-only backend.
+    (p, data) => {
+      if (!files.answers('write')) throw new Error(NO_WRITE_OP)
+      return files.write(p, data)
+    },
+    parsed,
+  )
+}
 
 export const BUILDER: GenericCommand = {
   name: 'shuf',
   facts: facts,
   write: true,
   read: true,
-  fn: async (_accessor, paths, texts, ctx) => {
-    const parsed = parseFlags(ctx.flags)
-    if (parsed instanceof IOResult) return [null, parsed]
-    const files = commandFiles(ctx, paths)
-    const resolved = await resolveOrEmpty(files, paths)
-    return shufGeneric(
-      resolved,
-      texts,
-      ctx,
-      files.read,
-      // Only `-o` writes, so a read-only backend still serves plain shuf.
-      // Requiring the write op up front would break every read-only backend.
-      (p, data) => {
-        if (!files.answers('write')) throw new Error(NO_WRITE_OP)
-        return files.write(p, data)
-      },
-      parsed,
-    )
-  },
+  fn: shuf,
 }

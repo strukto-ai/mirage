@@ -19,16 +19,11 @@ import type {
   simpleParser,
 } from 'mailparser'
 
-let parserPromise: Promise<typeof simpleParser> | null = null
-
 async function getParser(): Promise<typeof simpleParser> {
-  parserPromise ??= (async () => {
-    const mod = (await import('mailparser').catch(
-      missingPeer({ feature: 'parseRfc822', packageName: 'mailparser' }),
-    )) as unknown as { simpleParser: typeof simpleParser }
-    return mod.simpleParser
-  })()
-  return parserPromise
+  const mod = (await import('mailparser').catch(
+    missingPeer({ feature: 'parseRfc822', packageName: 'mailparser' }),
+  )) as unknown as { simpleParser: typeof simpleParser }
+  return mod.simpleParser
 }
 
 function parseAddress(a: MailparserEmailAddress | undefined) {

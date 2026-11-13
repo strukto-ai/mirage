@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VFSName } from '@struktoai/mirage-core/types'
-import { parseConfigWithSchema, redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { parseConfigWithSchema, redactedConfigDump } from '@struktoai/mirage-core/vfs/secrets'
 import { backendCommands } from '@struktoai/mirage-core/workspace/mount/backends'
 import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import { describe, expect, it, vi } from 'vitest'
@@ -65,7 +65,7 @@ describe('config normalization', () => {
 
   it('redacts the token', () => {
     const config = parseConfigWithSchema(DatabricksVolumeConfig, BASE_CONFIG)
-    const redacted = redactConfigWithSchema(DatabricksVolumeConfig, config)
+    const redacted = redactedConfigDump(DatabricksVolumeConfig, config)
     expect(redacted.token).toBe('<REDACTED>')
     expect(redacted.catalog).toBe('main')
   })

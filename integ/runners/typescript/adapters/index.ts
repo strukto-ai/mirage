@@ -1340,15 +1340,12 @@ async function openNotion(target: Target): Promise<Open> {
   let base = process.env.NOTION_URL ?? ''
   while (base.endsWith('/')) base = base.slice(0, -1)
   if (base === '') throw new Error('notion target requires NOTION_URL')
-  // The TOKEN is not minted per run, and notion is the only kit fake whose
-  // token cannot be. It is OBSERVABLE: `ntn auth token` prints the CLI's
-  // configured value without contacting the server at all, integ/cli/ntn.json
-  // pins that literal, and integ/ntn_conformance.ts asserts the same line
-  // against the real ntn binary configured with the same fixed token. A
-  // per-run token makes the battery print one value and the conformance run
-  // another, with one golden between them.
+  // The TOKEN is the one fixed token every notion run shares, the same one
+  // integ/ntn_conformance.ts hands the real ntn binary. No golden prints it:
+  // `ntn auth token` refuses, and `ntn whoami` names the workspace seeded on
+  // NotionMeta, not the token.
   //
-  // So the RUN separates the two hosts instead, riding the base URL as a
+  // The RUN separates the two hosts instead, riding the base URL as a
   // leading `/_run/<id>` segment. That is the only channel available here: the
   // mount hands this URL to NotionVFS and never sees the request, so a
   // header or a `?_run=` query would have to be threaded through the VFS.

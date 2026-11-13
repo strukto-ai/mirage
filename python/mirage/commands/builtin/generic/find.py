@@ -39,7 +39,6 @@ from mirage.rs.find import FindExpr, parse_find_expression
 from mirage.types import (
     FileStat,
     FileType,
-    FindType,
     Follow,
     LineFacts,
     PathSpec,
@@ -91,9 +90,6 @@ def parse_find_args(
             tree=expr.tree,
             depth_first=expr.depth_first,
         )
-    ftype: FindType | str | None = type
-    if type in (FindType.DIRECTORY.value, FindType.FILE.value):
-        ftype = FindType(type)
     words = [
         word
         for flag, value in (
@@ -110,7 +106,7 @@ def parse_find_args(
         name=name,
         iname=iname,
         path_pattern=path,
-        type=ftype,
+        type=type,
         min_size=limits.min_size,
         max_size=limits.max_size,
         mtime_min=limits.mtime_min,

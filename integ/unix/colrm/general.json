@@ -13,6 +13,32 @@
         "stdout": "abfgh\nab\nabcdefgh\nabc\na     b\na\na\nrc=1\nrc=1\nrc=1\nrc=1\n",
         "stderr": "colrm: first argument: 'x'\ncolrm: second argument: 'x'\ncolrm: first argument: '99999999999999999999': Numerical result out of range\ncolrm: fgetwc() failed: Invalid or incomplete multibyte or wide character\n"
       }
+    },
+    {
+      "id": "colrm_multibyte_controls",
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "printf 'a\u00e9\u4e2d\ud83d\ude42xyz\\n' | LC_ALL=C.UTF-8 colrm 2 3; printf 'a\\tb\\bcdef\\n' | colrm 2 3",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\ud83d\ude42xyz\na     b\bcdef\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "colrm_invalid_bytes_with_early_reader",
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "set -o pipefail; printf 'ab\\377' | LC_ALL=C colrm 3 | head -c 1",
+      "expect": {
+        "exit": 1,
+        "stdout": "a",
+        "stderr": "colrm: fgetwc() failed: Invalid or incomplete multibyte or wide character\n"
+      }
     }
   ]
 }

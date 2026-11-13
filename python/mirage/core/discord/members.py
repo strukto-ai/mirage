@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 from typing import Any, cast
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.core.discord.client import discord_get
+from mirage.core.discord.client import discord_request
 from mirage.core.discord.paginate import after_id_pages
 from mirage.core.hierarchy.readdir import held_pages
 
@@ -83,8 +83,9 @@ async def search_members(
     Returns:
         list[dict]: matching members.
     """
-    result = await discord_get(
+    result = await discord_request(
         accessor,
+        "GET",
         f"/guilds/{guild_id}/members/search",
         params={"query": query, "limit": limit},
     )

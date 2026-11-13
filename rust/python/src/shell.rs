@@ -3,7 +3,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyString};
-use streams::shell::{FIELDS, Heredoc, KINDS, Node, Options, Tree, field_id, reread_lines};
+use streams::shell::{
+    FIELDS, Heredoc, KINDS, Node, Options, SourceMap, Tree, field_id, reread_lines,
+};
 
 /// Gives each tree a number, so node ids differ across trees.
 static TREES: AtomicU64 = AtomicU64::new(0);
@@ -299,8 +301,26 @@ impl ShellNode {
     /// Where each byte of the tree's source came from in the line as
     /// typed, then the end.
     #[getter]
-    fn offsets(&self) -> Vec<usize> {
-        self.tree.offsets.clone()
+    fn offsets<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let builtins = py.import("builtins")?;
+        match &self.tree.offsets {
+            SourceMap::Identity(len) => builtins.getattr("range")?.call1((*len,)),
+            map => {
+                let (bytes, format): (Vec<u8>, &str) = match map {
+                    SourceMap::Packed(values) => {
+                        (values.iter().flat_map(|n| n.to_ne_bytes()).collect(), "I")
+                    }
+                    SourceMap::Wide(values) => {
+                        (values.iter().flat_map(|n| n.to_ne_bytes()).collect(), "N")
+                    }
+                    SourceMap::Identity(_) => unreachable!(),
+                };
+                builtins
+                    .getattr("memoryview")?
+                    .call1((PyBytes::new(py, &bytes),))?
+                    .call_method1("cast", (format,))
+            }
+        }
     }
 
     /// What bash warns of while it reads the tree's heredocs, each line

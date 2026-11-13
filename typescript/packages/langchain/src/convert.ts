@@ -13,17 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ExecuteResponse, FileInfo, GrepMatch } from 'deepagents'
-import type { PolicyDecision } from '@struktoai/mirage-core/types'
+import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
 import { withDecision } from '@struktoai/mirage-core/workspace/tools/io_text'
 
-interface IOLike {
-  stdoutText: string
-  stderrText: string
-  exitCode: number | null
-  decision?: PolicyDecision | null
-}
-
-export function ioToExecuteResponse(io: IOLike): ExecuteResponse {
+export function ioToExecuteResponse(io: ExecuteResult): ExecuteResponse {
   const stdout = io.stdoutText
   const stderr = io.stderrText
   let output = stdout
@@ -31,13 +24,13 @@ export function ioToExecuteResponse(io: IOLike): ExecuteResponse {
     output = stdout.length > 0 ? `${stdout}\n${stderr}` : stderr
   }
   return {
-    output: withDecision(output, io.decision ?? null),
+    output: withDecision(output, io.decision),
     exitCode: io.exitCode,
     truncated: false,
   }
 }
 
-export function ioToGrepMatches(io: IOLike): GrepMatch[] {
+export function ioToGrepMatches(io: ExecuteResult): GrepMatch[] {
   const stdout = io.stdoutText.trim()
   if (stdout.length === 0) return []
   const matches: GrepMatch[] = []
@@ -56,7 +49,7 @@ export function ioToGrepMatches(io: IOLike): GrepMatch[] {
   return matches
 }
 
-export function ioToFileInfos(io: IOLike): FileInfo[] {
+export function ioToFileInfos(io: ExecuteResult): FileInfo[] {
   const stdout = io.stdoutText.trim()
   if (stdout.length === 0) return []
   const infos: FileInfo[] = []

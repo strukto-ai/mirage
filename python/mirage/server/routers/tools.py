@@ -40,11 +40,6 @@ class ToolResponse(BaseModel):
     is_error: bool
 
 
-async def _caller_gone(request: Request) -> None:
-    while (await request.receive())["type"] != "http.disconnect":
-        pass
-
-
 async def call_tool(
     request: Request,
     workspace_id: str,
@@ -90,8 +85,13 @@ async def call_tool(
         raise HttpError(ErrorCode.NOT_FOUND, exc.args[0]) from exc
     if name not in await tools.offered():
         raise HttpError(ErrorCode.NOT_FOUND, f"tool {name} not found")
+
+    async def caller_gone() -> None:
+        while (await request.receive())["type"] != "http.disconnect":
+            pass
+
     call = asyncio.ensure_future(tools.call(name, arguments))
-    gone = asyncio.ensure_future(_caller_gone(request))
+    gone = asyncio.ensure_future(caller_gone())
     try:
         await asyncio.wait({call, gone}, return_when=asyncio.FIRST_COMPLETED)
     finally:

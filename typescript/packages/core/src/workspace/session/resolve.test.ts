@@ -19,10 +19,7 @@ import { PolicyError } from '../../policy/errors.ts'
 import { opRuling } from '../../policy/match/rule.ts'
 import { SessionProfile } from '../../policy/profile.ts'
 import { Outcome, Scope, type CommandRule, type VfsContext } from '../../policy/types.ts'
-import {
-  DEFAULT_PROCESS_PERMISSIONS,
-  parseProcessPermissions,
-} from '../../execution/process/config.ts'
+import { DEFAULT_PROCESS_PERMISSIONS, layerProcesses } from '../../execution/process/config.ts'
 import { VarAttr } from '../../shell/variable.ts'
 import { DEFAULT_VISIBILITY, MountMode, PathSpec } from '../../types.ts'
 import { pathVisible } from '../../utils/hidden.ts'
@@ -502,12 +499,10 @@ describe('workspace processes', () => {
   it("layers the profile's block over the workspace's", () => {
     const workspace = { list: 'workspace', max: 4 } as const
     const capped = compileProfile(SessionProfile({ processes: { max: 9 } }), '', workspace)
-    expect(capped.policies.processes).toEqual(
-      parseProcessPermissions({ list: 'workspace', max: 9 }),
-    )
+    expect(capped.policies.processes).toEqual(layerProcesses([{ list: 'workspace', max: 9 }]))
     expect(capped.visibility.processes).toBe('workspace')
     expect(compileProfile(null, '', workspace).policies.processes).toEqual(
-      parseProcessPermissions(workspace),
+      layerProcesses([workspace]),
     )
     expect(compileProfile(null).policies.processes).toEqual(DEFAULT_PROCESS_PERMISSIONS)
   })

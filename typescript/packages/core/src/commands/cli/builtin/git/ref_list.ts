@@ -20,6 +20,7 @@ import { fnmatch } from '../../../../utils/fnmatch.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
+import { FANOUT_LEN } from './constants.ts'
 import type { GitError } from './errors.ts'
 import { short } from './format.ts'
 import { configValues } from './fs.ts'
@@ -420,8 +421,6 @@ export function headRef(table: ReadonlyMap<string, string>): string | null {
   }
   return null
 }
-
-const FANOUT_LEN = 2
 
 /**
  * The shortest prefix of `oid` no other id shares, no shorter than `width`, the

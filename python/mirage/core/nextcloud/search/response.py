@@ -16,7 +16,6 @@ from mirage.core.nextcloud.search.types import (
     XmlElement,
 )
 from mirage.core.nextcloud.search.xml import dav
-from mirage.types import FindType
 
 
 def successful_status(status: str) -> bool:
@@ -99,7 +98,7 @@ def parse_response(response: XmlElement, target: SearchTarget) -> SearchEntry:
     folder = has_collection(properties)
     return SearchEntry(
         key=relative_path(href, target),
-        kind=FindType.DIRECTORY if folder else FindType.FILE,
+        kind="d" if folder else "f",
         size=None if folder else content_length(properties),
         modified=modified_text(find_text(properties, LAST_MODIFIED)),
     )

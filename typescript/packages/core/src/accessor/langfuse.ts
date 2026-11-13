@@ -14,16 +14,12 @@
 
 import { Accessor } from './base.ts'
 import type { LangfuseTransport } from '../core/langfuse/client.ts'
-
-export interface LangfuseAccessorConfig {
-  defaultTraceLimit?: number
-  defaultFromTimestamp?: string
-}
+import type { LangfuseConfig } from '../vfs/langfuse/config.ts'
 
 export class LangfuseAccessor extends Accessor {
   constructor(
     public readonly transport: LangfuseTransport,
-    public readonly config: LangfuseAccessorConfig = {},
+    public readonly config: Partial<LangfuseConfig> = {},
   ) {
     super()
   }

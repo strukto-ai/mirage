@@ -561,15 +561,15 @@ describe('mv re-anchors what the node table holds', () => {
           rawPath: 'dlink',
         }),
       ]
-      const prepared = await prepareMv(
+      const [prepared, early] = await prepareMv(
         ws.namespace,
         dispatchOf(ws),
         items,
         ['a', 'b', 'dlink'],
         '/data',
       )
-      expect(prepared.early).toBeNull()
-      const dst = prepared.items[prepared.items.length - 1]
+      expect(early).toBeNull()
+      const dst = prepared[prepared.length - 1]
       expect(dst instanceof PathSpec ? [dst.virtual, dst.rawPath] : null).toEqual([
         '/data/dst',
         'dlink',
@@ -588,15 +588,15 @@ describe('mv re-anchors what the node table holds', () => {
       await ws.shell('mkdir -p /data/dst; printf a > /data/a')
       await ws.shell('ln -s /data/a /data/l')
       const link = PathSpec.fromStrPath('/data/l')
-      const prepared = await prepareMv(
+      const [prepared, early] = await prepareMv(
         ws.namespace,
         dispatchOf(ws),
         [link, PathSpec.fromStrPath('/data/a'), PathSpec.fromStrPath('/data/dst')],
         ['/data/l', '/data/a', '/data/dst'],
         '/',
       )
-      expect(prepared.early).toBeNull()
-      expect(prepared.items).toContain(link)
+      expect(early).toBeNull()
+      expect(prepared).toContain(link)
       expect(ws.namespace.isLink('/data/dst/l')).toBe(false)
       expect(ws.namespace.isLink('/data/l')).toBe(true)
     } finally {
@@ -616,7 +616,7 @@ describe('mv re-anchors what the node table holds', () => {
           : real(op, path, ...rest)
       const items = [PathSpec.fromStrPath('/data/a'), PathSpec.fromStrPath('/data/b')]
       const prepared = await prepareMv(ws.namespace, refusing, items, ['/data/a', '/data/b'], '/')
-      expect(prepared).toEqual({ items, early: null })
+      expect(prepared).toEqual([items, null])
     } finally {
       await ws.close()
     }

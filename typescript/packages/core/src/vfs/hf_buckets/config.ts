@@ -14,7 +14,7 @@
 
 import { timeoutShape } from '../../core/api/config.ts'
 import type { RedactedSchema } from '../secrets.ts'
-import { parseConfigWithSchema, redactConfigWithSchema, secretStr, z } from '../secrets.ts'
+import { parseConfigWithSchema, redactedConfigDump, secretStr, z } from '../secrets.ts'
 
 export const HF_ENDPOINT = 'https://huggingface.co'
 
@@ -74,7 +74,7 @@ export const HfBucketsConfig = z.object({
 export function redactHfBucketsConfig(
   config: HfBucketsConfig,
 ): RedactedSchema<typeof HfBucketsConfig> {
-  return redactConfigWithSchema(HfBucketsConfig, {
+  return redactedConfigDump(HfBucketsConfig, {
     ...config,
     endpoint: config.endpoint ?? HF_ENDPOINT,
   })
@@ -139,7 +139,7 @@ export const HfRepoConfig = z.object({
 })
 
 export function redactHfRepoConfig(config: HfRepoConfig): RedactedSchema<typeof HfRepoConfig> {
-  return redactConfigWithSchema(HfRepoConfig, {
+  return redactedConfigDump(HfRepoConfig, {
     ...config,
     endpoint: config.endpoint ?? HF_ENDPOINT,
   })

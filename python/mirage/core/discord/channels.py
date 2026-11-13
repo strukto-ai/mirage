@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.core.discord.client import discord_get
+from mirage.core.discord.client import discord_request
 
 TEXT_CHANNEL_TYPES = (0, 5, 15)
 
@@ -37,7 +37,9 @@ async def list_channels_stream(
     Yields:
         list[dict]: filtered text-channel dicts.
     """
-    raw = await discord_get(accessor, f"/guilds/{guild_id}/channels")
+    raw = await discord_request(
+        accessor, "GET", f"/guilds/{guild_id}/channels"
+    )
     if not isinstance(raw, list):
         return
     yield [c for c in raw if c.get("type") in TEXT_CHANNEL_TYPES]

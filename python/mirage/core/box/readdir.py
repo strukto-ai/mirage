@@ -18,7 +18,6 @@ from mirage.accessor.box import BoxAccessor
 from mirage.core.box.api import absent_on_404, list_folder_items
 from mirage.core.box.constants import SHA1
 from mirage.core.box.fingerprint import token_of
-from mirage.core.box.resolve import root_id
 from mirage.errors.fs import enoent, enotdir
 from mirage.types import DirListing, FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
@@ -91,7 +90,7 @@ async def readdir(
     """
     target = path_spec.dir if path_spec.pattern else path_spec
     if not target.vfs_path.strip("/"):
-        folder_id = root_id(accessor)
+        folder_id = accessor.root_folder_id
     elif entry is None:
         raise enoent(path_spec.virtual)
     elif entry.type is not FileType.DIRECTORY:

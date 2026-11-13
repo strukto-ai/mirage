@@ -33,15 +33,14 @@ from mirage.shell.escapes import (
 )
 from mirage.shell.parse.constants import ALIAS_WORD_TYPES
 from mirage.shell.parse.program import ProgramNode
+from mirage.shell.types import NodeType as NT
 from mirage.shell.types import (
-    FunctionBody,
     PipelineStages,
     ProcessSubDirection,
     Redirect,
     RedirectKind,
     TSNodeLike,
 )
-from mirage.shell.types import NodeType as NT
 from mirage.utils.path import expand_tilde
 
 
@@ -1105,7 +1104,7 @@ def get_function_source(node: TSNodeLike) -> str:
         offsets = node.program.offsets
     else:
         original = getattr(root, "source_text", root.text) or b""
-        offsets = getattr(root, "offsets", tuple(range(len(original) + 1)))
+        offsets = getattr(root, "offsets", range(len(original) + 1))
     start = offsets[node.start_byte]
     end = _syntax_end(node, offsets)
     source = original[start:end]
@@ -1128,7 +1127,7 @@ def get_function_source(node: TSNodeLike) -> str:
 
 def parse_function(
     source: str, parse_fn: Callable[[str], TSNodeLike]
-) -> FunctionBody:
+) -> list[TSNodeLike]:
     """Parse one stored definition inside the caller's owned parse scope.
 
     Args:
@@ -1147,7 +1146,7 @@ def parse_function(
     return get_function_body(node)
 
 
-def get_function_body(node: TSNodeLike) -> FunctionBody:
+def get_function_body(node: TSNodeLike) -> list[TSNodeLike]:
     """Get function body commands.
 
     Returns the compound_statement's children list so multi-statement

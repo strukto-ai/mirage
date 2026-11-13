@@ -20,7 +20,7 @@ import { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
 import { isProgramInvocation, voiceName } from '../../context/session_context.ts'
-import type { ExecuteStringFn } from './builtins/types.ts'
+import type { ExecuteFn } from '../expand/types.ts'
 import type { SessionState } from '../session/session.ts'
 import type { ExecutionNode } from '../types.ts'
 import {
@@ -140,7 +140,7 @@ export function errTrapArmed(session: SessionState): boolean {
  * Python.
  */
 export async function runErrTrap(
-  executeFn: ExecuteStringFn | null,
+  executeFn: ExecuteFn | null,
   node: TSNodeLike,
   status: number,
   session: SessionState,
@@ -189,7 +189,7 @@ export async function runErrTrap(
  * wrote, for the caller to land; empty when none runs. Mirrors Python.
  */
 export async function runReturnTrap(
-  executeFn: ExecuteStringFn | null,
+  executeFn: ExecuteFn | null,
   session: SessionState,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
@@ -222,7 +222,7 @@ export async function runReturnTrap(
  * A syntax error in it leads with `bash: <name> trap: `.
  */
 async function runAction(
-  executeFn: ExecuteStringFn,
+  executeFn: ExecuteFn,
   action: string,
   name: string,
   session: SessionState,
@@ -274,7 +274,7 @@ async function runAction(
  * shell's own is set.
  */
 export async function runExitTrap(
-  executeFn: ExecuteStringFn | null,
+  executeFn: ExecuteFn | null,
   session: SessionState,
   status: number,
   stdin: ByteSource | null = null,
@@ -340,7 +340,7 @@ export async function runExitTrap(
  * `$( )`. Its EXIT action runs after what it wrote.
  */
 export async function finishShell(
-  executeFn: ExecuteStringFn | null,
+  executeFn: ExecuteFn | null,
   session: SessionState,
   io: IOResult,
   stdin: ByteSource | null = null,
@@ -363,7 +363,7 @@ export async function finishShell(
  * output and status on out to the boundary containing it.
  */
 export async function endShell(
-  executeFn: ExecuteStringFn | null,
+  executeFn: ExecuteFn | null,
   session: SessionState,
   stdin: ByteSource | null,
   callStack: CallStack | null,

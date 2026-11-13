@@ -368,8 +368,8 @@ export interface TSNodeLike {
   warnings?(head: string, first: number): string
   readonly sourceText?: string
   readonly inlined?: string | undefined
-  /** Where each UTF-16 unit of the text the tree reads came from in the line as typed, then its end. */
-  readonly offsets?: ArrayLike<number>
+  /** Where each UTF-16 unit of the text the tree reads came from in the line as typed, then its end. Undefined means identity. */
+  readonly offsets?: ArrayLike<number> | undefined
   /** Where bash refuses the tree's line, and the status. */
   readonly error?: {
     readonly index: number

@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Literal
 
-from mirage.types import FileStat, FindType
+from mirage.types import FileStat
 
 # find's row actions: -print, -print0, -ls and -delete.
 RowActionKind = Literal["print", "print0", "ls", "delete"]
@@ -317,7 +317,7 @@ class FindArgs:
     name: str | None = None
     iname: str | None = None
     path_pattern: str | None = None
-    type: FindType | str | None = None
+    type: str | None = None
     min_size: int | None = None
     max_size: int | None = None
     mtime_min: float | None = None

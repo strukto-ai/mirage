@@ -18,12 +18,7 @@ import { DiscordAccessor } from '../../accessor/discord.ts'
 import { DirListing, FileStat, FileType, PathSpec } from '../../types.ts'
 import { mountDiscord } from '../../../tests/workspace/fixtures/chat_fixture.ts'
 import type { Workspace } from '../../workspace/workspace/workspace.ts'
-import {
-  DiscordApiError,
-  type DiscordMethod,
-  type DiscordResponse,
-  type DiscordTransport,
-} from './client.ts'
+import { DiscordApiError, type DiscordMethod, type DiscordTransport } from './client.ts'
 import { dateRange, readdir } from './readdir.ts'
 import { snowflakeToDate } from './entry.ts'
 import { compactJsonBytes, jsonlBytes } from '../render/json.ts'
@@ -38,15 +33,14 @@ interface RecordedCall {
 class FakeDiscordTransport implements DiscordTransport {
   public readonly calls: RecordedCall[] = []
   constructor(
-    private readonly responder: (method: DiscordMethod, endpoint: string) => DiscordResponse = () =>
-      null,
+    private readonly responder: (method: DiscordMethod, endpoint: string) => unknown = () => null,
   ) {}
   call(
     method: DiscordMethod,
     endpoint: string,
     params?: Record<string, string | number>,
     body?: Record<string, unknown>,
-  ): Promise<DiscordResponse> {
+  ): Promise<unknown> {
     this.calls.push({
       method,
       endpoint,
@@ -73,7 +67,7 @@ async function statOf(ws: Workspace, path: string): Promise<FileStat> {
   return (await ws.dispatch('stat', path)) as FileStat
 }
 
-function api(answers: Record<string, DiscordResponse>): FakeDiscordTransport {
+function api(answers: Record<string, unknown>): FakeDiscordTransport {
   return new FakeDiscordTransport((_m, endpoint) => answers[endpoint] ?? null)
 }
 

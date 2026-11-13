@@ -1,5 +1,5 @@
 {
- "baseline": 1162,
+ "baseline": 983,
  "modules": {
   "secrets/aws": {
    "typescript_only": {
@@ -1004,8 +1004,7 @@
   },
   "types": {
    "python_only": {
-    "CheckFn": "Python names the PrimitiveMove.check_unlink callable type beside MoveFn, as a forward reference to PathSpec; TypeScript types the field inline.",
-    "ReadBytesFn": "The reader Python's materialized_read (commands/builtin/utils/operands) hands a generic body; TypeScript has no polymorphic reader to normalize, so nothing names the type there."
+    "CheckFn": "Python names the PrimitiveMove.check_unlink callable type beside MoveFn, as a forward reference to PathSpec; TypeScript types the field inline."
    },
    "typescript_only": {
     "LIMIT_FIELDS": "Limit.layered walks every field in order; Python reads them off the pydantic model's model_fields, a TypeScript class has no field list to walk."
@@ -1339,7 +1338,6 @@
   },
   "vfs/registry": {
    "typescript_only": {
-    "RAM_OPTIONS": "The TypeScript registry refuses unknown config keys against a per-backend key list, as DISK_OPTIONS does; Python's build_vfs reads the constructor's keywords.",
     "buildVfsFrom": "TypeScript splits its backends across core, node and browser, so each runtime's buildVfs is this one build over its own table; Python keeps every backend in one REGISTRY and needs no table parameter.",
     "DIRECT_REGISTRY": "The token-holding backends (vfs/direct) node and cloudflare add to core's table and the browser does not, since it reaches the same services through a proxy; Python has one host and one REGISTRY.",
     "CONFIG_SCHEMAS": "A TypeScript registry entry is a factory that imports its config schema inside, so the schemas sit beside it to be read without building a VFS; a Python entry names its config class, which resolve_entry reads.",

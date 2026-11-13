@@ -473,17 +473,6 @@ async function isDirectory(
   return row instanceof FileStat && row.type === FileType.DIRECTORY
 }
 
-function withTrailingSlash(spec: PathSpec): PathSpec {
-  return new PathSpec({
-    virtual: spec.virtual,
-    directory: spec.directory,
-    pattern: spec.pattern,
-    resolved: spec.resolved,
-    vfsPath: spec.vfsPath,
-    rawPath: `${spec.rawPath}/`,
-  })
-}
-
 function hasGlobstarSegment(item: PathSpec, access?: SessionAccess): boolean {
   return globParts(item.virtual, access).includes('**')
 }
@@ -647,8 +636,18 @@ export async function resolveGlobs(
           }
         } else {
           for (const p of resolved) {
-            const spelled = matchRaw(withPrefix, p)
-            result.push(dirsOnly ? withTrailingSlash(spelled) : spelled)
+            let spelled = matchRaw(withPrefix, p)
+            if (dirsOnly) {
+              spelled = new PathSpec({
+                virtual: spelled.virtual,
+                directory: spelled.directory,
+                pattern: spelled.pattern,
+                resolved: spelled.resolved,
+                vfsPath: spelled.vfsPath,
+                rawPath: `${spelled.rawPath}/`,
+              })
+            }
+            result.push(spelled)
           }
         }
       } catch (err) {

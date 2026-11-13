@@ -229,7 +229,7 @@ pub(super) fn parse(source: &[u8], options: &super::Options) -> Tree {
     let first = parse_pass(source, options, ended);
     let bodies = &first.bodies;
     if bodies.is_empty() {
-        let offsets = (0..=source.len()).collect();
+        let offsets = super::tree::SourceMap::Identity(source.len() + 1);
         return joined(
             source.to_vec(),
             first,
@@ -261,7 +261,7 @@ pub(super) fn parse(source: &[u8], options: &super::Options) -> Tree {
         pass,
         options,
         ended,
-        lowered.offsets,
+        lowered.offsets.into_iter().collect(),
         lowered.heredocs,
         closes,
         source,
@@ -277,7 +277,7 @@ fn joined(
     mut pass: Pass,
     options: &super::Options,
     ended: bool,
-    mut offsets: Vec<usize>,
+    mut offsets: super::tree::SourceMap,
     mut heredocs: Vec<super::lower::Heredoc>,
     mut closes: Vec<(usize, Vec<usize>)>,
     source: &[u8],
@@ -309,7 +309,7 @@ fn joined(
             (logical, places) = without(&text, &dropped);
             pass = parse_pass(&logical, options, ended);
         }
-        offsets = places.iter().map(|at| offsets[*at]).collect();
+        offsets = places.iter().map(|at| offsets.at(*at)).collect();
         for heredoc in &mut heredocs {
             heredoc.at -= dropped.partition_point(|&at| at < heredoc.at);
         }
@@ -319,8 +319,11 @@ fn joined(
         // others, its places in the line as typed.
         while !pass.bodies.is_empty() {
             let lowered = lower(&text, &pass.bodies);
-            let start = |at: usize| offsets[at.min(text.len())];
-            let end = |at: usize| at.checked_sub(1).map_or(offsets[0], |last| start(last) + 1);
+            let start = |at: usize| offsets.at(at.min(text.len()));
+            let end = |at: usize| {
+                at.checked_sub(1)
+                    .map_or(offsets.at(0), |last| start(last) + 1)
+            };
             let lines = super::lower::newlines(source) + usize::from(!source.ends_with(b"\n"));
             for heredoc in &mut heredocs {
                 if let Some(at) = lowered.offsets.iter().position(|at| *at == heredoc.at) {
@@ -345,7 +348,7 @@ fn joined(
                 (start(*close), opened.iter().map(|at| start(*at)).collect())
             }));
             heredocs.sort_by_key(|heredoc| heredoc.at);
-            offsets = lowered.offsets.iter().map(|at| offsets[*at]).collect();
+            offsets = lowered.offsets.iter().map(|at| offsets.at(*at)).collect();
             text = lowered.source;
             pass = parse_pass(&text, options, ended);
         }
@@ -358,7 +361,7 @@ fn joined(
         ..
     } = pass;
     let error = error.map(|fail| {
-        let to_source = |at: usize| offsets[at.min(text.len())];
+        let to_source = |at: usize| offsets.at(at.min(text.len()));
         let at = to_source(fail.at);
         let placed = fail.placed.as_deref().map(|placed| {
             Box::new(Placed {
@@ -389,7 +392,11 @@ fn joined(
         .map_or(text.len(), |child| child.start);
     root.end = text.len();
     let mut tree = lay_out(text, root, error);
-    tree.original = source.to_vec();
+    tree.original = if offsets.is_identity() {
+        tree.source.clone()
+    } else {
+        std::sync::Arc::new(source.to_vec())
+    };
     tree.offsets = offsets;
     tree.heredocs = heredocs;
     tree.closes = closes;

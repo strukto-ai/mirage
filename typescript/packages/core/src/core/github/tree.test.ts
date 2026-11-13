@@ -46,7 +46,7 @@ describe('github tree fetch', () => {
   it('excludes submodule gitlinks from the recursive tree', async () => {
     const { tree, truncated } = await fetchTree(transport(), 'acme', 'proj', 'main')
     expect(truncated).toBe(false)
-    expect(tree.map((e) => e.path)).toEqual(['main.py', 'src'])
+    expect(Object.keys(tree)).toEqual(['main.py', 'src'])
   })
 
   it('excludes submodule gitlinks from per-directory trees', async () => {

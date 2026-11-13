@@ -23,6 +23,12 @@ from dulwich.pack import Pack, PackData, load_pack_index_file, write_pack_index
 from dulwich.repo import BaseRepo
 
 from mirage.bridge.sync import run_async_from_sync
+from mirage.commands.cli.builtin.git.constants import (
+    FANOUT_LEN,
+    IDX_SUFFIX,
+    OBJECTS_DIR,
+    PACK_DIR,
+)
 from mirage.commands.cli.builtin.git.format import FULL_SHA, abbrev_length
 from mirage.commands.cli.builtin.git.io import (
     read_file,
@@ -35,11 +41,7 @@ from mirage.types import PathSpec
 from mirage.utils.remnants import entry_name
 from mirage.workspace.files import Files
 
-OBJECTS_DIR = "objects"
-PACK_DIR = "objects/pack"
-IDX_SUFFIX = ".idx"
 PACK_SUFFIX = ".pack"
-FANOUT_LEN = 2
 HEX_DIGITS = frozenset(b"0123456789abcdef")
 
 

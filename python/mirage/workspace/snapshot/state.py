@@ -1256,55 +1256,28 @@ def reusable_mounts(
     }
 
 
-def _saved_entry(mount_state: dict[str, Any]) -> VFSEntry | None:
-    """The registry entry a saved mount rebuilds through, or None.
-
-    The ``vfs_ref`` the registry built the mount from when one was
-    recorded (a registered name, or a colon reference, which is how a
-    mount declared as ``./wiki.py:WikiVFS`` comes back), else the
-    builtin entry whose class is exactly the saved class, else the VFS's
-    ``type``, the last locator a VFS constructed in code leaves. The
-    ref comes first because ``type`` is the class's ``name`` and a
-    subclass inherits it: an alias registered over a builtin, or a
-    script subclassing one, reports the builtin's type and rebuilt as
-    the builtin while the type was consulted first; for the same reason
-    a class constructed in code, which saves its own config under a
-    builtin's type when it keeps the builtin's name, rebuilds through the
-    entry whose class it is (matched by identity, after narrowing by
-    class name so only that candidate is imported), never the type's,
-    whose config class refuses keys it does not know. A recorded ref this
-    process cannot resolve is not a reason to fall back to that guess;
-    ``_saved_class`` imports the class the snapshot names as the last
-    resort, and the loader asks for an override when even that fails.
-
-    Args:
-        mount_state (dict[str, Any]): one captured ``mounts`` entry.
-    """
-    ref = mount_state.get(MountKey.VFS_REF)
-    if ref:
-        return resolve_entry(ref)
-    cls_path = mount_state[MountKey.VFS_CLASS]
-    mod_name, separator, cls_name = cls_path.rpartition(".")
-    if separator and mod_name != SCRIPT_MODULE_NAME:
-        for entry in REGISTRY.values():
-            path = entry.vfs_path
-            name = (
-                path.__name__
-                if isinstance(path, type)
-                else path.rsplit(":")[-1]
-            )
-            if name == cls_name:
-                cls = resolve_class(path)
-                if f"{cls.__module__}.{cls.__name__}" == cls_path:
-                    return entry
-    ptype = mount_state[MountKey.VFS_STATE].get(VFSStateKey.TYPE, "")
-    return resolve_entry(ptype) if ptype else None
-
-
 def _saved_class(
     mount_state: dict[str, Any],
 ) -> tuple[type | None, VFSEntry | None]:
     """The class a saved mount is rebuilt from, with its registry entry.
+
+    The entry is the one the ``vfs_ref`` the registry built the mount from
+    names when one was recorded (a registered name, or a colon reference,
+    which is how a mount declared as ``./wiki.py:WikiVFS`` comes back),
+    else the builtin entry whose class is exactly the saved class, else
+    the one the VFS's ``type`` names, the last locator a VFS constructed in
+    code leaves. The ref comes first because ``type`` is the class's
+    ``name`` and a subclass inherits it: an alias registered over a
+    builtin, or a script subclassing one, reports the builtin's type and
+    rebuilt as the builtin while the type was consulted first; for the
+    same reason a class constructed in code, which saves its own config
+    under a builtin's type when it keeps the builtin's name, rebuilds
+    through the entry whose class it is (matched by identity, after
+    narrowing by class name so only that candidate is imported), never
+    the type's, whose config class refuses keys it does not know. A
+    recorded ref this process cannot resolve is not a reason to fall back
+    to that guess; with no entry, the class the snapshot names is
+    imported as the last resort.
 
     ``(None, None)`` when this process cannot reach the class: it ran
     from a script file with no reference recorded, or its package is not
@@ -1314,12 +1287,29 @@ def _saved_class(
     Args:
         mount_state (dict[str, Any]): one captured ``mounts`` entry.
     """
-    entry = _saved_entry(mount_state)
-    if entry is not None:
-        return resolve_class(entry.vfs_path), entry
     cls_path = mount_state[MountKey.VFS_CLASS]
     mod_name, separator, cls_name = cls_path.rpartition(".")
-    if not separator or mod_name == SCRIPT_MODULE_NAME:
+    scripted = not separator or mod_name == SCRIPT_MODULE_NAME
+    ref = mount_state.get(MountKey.VFS_REF)
+    if ref:
+        entry = resolve_entry(ref)
+    else:
+        for candidate in () if scripted else REGISTRY.values():
+            path = candidate.vfs_path
+            name = (
+                path.__name__
+                if isinstance(path, type)
+                else path.rsplit(":")[-1]
+            )
+            if name == cls_name:
+                cls = resolve_class(path)
+                if f"{cls.__module__}.{cls.__name__}" == cls_path:
+                    return cls, candidate
+        ptype = mount_state[MountKey.VFS_STATE].get(VFSStateKey.TYPE, "")
+        entry = resolve_entry(ptype) if ptype else None
+    if entry is not None:
+        return resolve_class(entry.vfs_path), entry
+    if scripted:
         return None, None
     try:
         module = importlib.import_module(mod_name)

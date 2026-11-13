@@ -14,4 +14,6 @@
 
 import { GoogleApiAccessor } from './google_api.ts'
 
-export class GDriveAccessor extends GoogleApiAccessor {}
+export class GDriveAccessor extends GoogleApiAccessor {
+  rootDriveId?: string | null
+}

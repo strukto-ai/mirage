@@ -102,7 +102,7 @@ def secret_field_names(config: type[BaseModel] | BaseModel) -> list[str]:
     return [
         name
         for name, field in fields.items()
-        if _is_secret_annotation(field.annotation)
+        if _is_secret_type(field.annotation)
     ]
 
 
@@ -129,9 +129,9 @@ def has_redacted_secret(value: Any) -> bool:
     return False
 
 
-def _is_secret_annotation(annotation: Any) -> bool:
+def _is_secret_type(annotation: Any) -> bool:
     if annotation in (SecretStr, SecretBytes):
         return True
     if get_origin(annotation) is Callable:
         return True
-    return any(_is_secret_annotation(arg) for arg in get_args(annotation))
+    return any(_is_secret_type(arg) for arg in get_args(annotation))

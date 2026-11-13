@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 
 import { Accessor, NOOPAccessor } from '../../accessor/base.ts'
-import { CLI, type CLIAccessorFn, type CLIConfigModel } from '../../commands/cli/types.ts'
+import { CLI } from '../../commands/cli/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { DISCORD } from '../../commands/cli/builtin/discord/index.ts'
 import { GIT } from '../../commands/cli/builtin/git/index.ts'
@@ -65,8 +65,8 @@ class ClosingAccessor extends Accessor {
 }
 
 function tree(
-  configModel: CLIConfigModel | null = null,
-  accessor: CLIAccessorFn = (config) => new NOOPAccessor(config),
+  configModel: CLI['configModel'] = null,
+  accessor: CLI['accessor'] = (config) => new NOOPAccessor(config),
 ): CLI {
   return new CLI({
     configModel,

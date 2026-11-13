@@ -248,11 +248,14 @@ async function runAlias(
         const mapped = [...owners, new Set<string>()]
         session.aliasExpansion = {
           root: ast.id,
-          owners: Array.from(ast.offsets ?? [], (i) => {
-            const owner = mapped[i]
-            if (owner === undefined) throw new Error('alias source offset is out of bounds')
-            return owner
-          }),
+          owners:
+            ast.offsets === undefined
+              ? mapped
+              : Array.from(ast.offsets, (i) => {
+                  const owner = mapped[i]
+                  if (owner === undefined) throw new Error('alias source offset is out of bounds')
+                  return owner
+                }),
           names,
         }
         // The rewritten line is read from this node, so it runs as a line
@@ -394,15 +397,15 @@ async function stripLinks(
         ]
       }
     } else if (name === 'mv') {
-      const prepared = await prepareMv(
+      const [prepared, early] = await prepareMv(
         namespace.sessionLinks(session),
         dispatch,
         operands,
         argv.args,
         session.cwd,
       )
-      operands = prepared.items
-      if (prepared.early !== null) return [operands, linkErrors, prepared.early]
+      operands = prepared
+      if (early !== null) return [operands, linkErrors, early]
     }
   } catch (err) {
     if (err instanceof CycleError) {

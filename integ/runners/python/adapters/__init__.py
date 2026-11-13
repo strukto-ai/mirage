@@ -2063,15 +2063,12 @@ class NotionService:
     across both hosts. The token doubles as the workspace id, the way a real
     Notion integration token scopes you to one workspace.
 
-    The token is NOT minted per run, and notion is the only kit fake whose
-    token cannot be: it is observable. `ntn auth token` prints the CLI's
-    configured value without contacting the server, integ/cli/ntn.json pins
-    that literal, and integ/ntn_conformance.ts asserts the same line against
-    the real ntn binary, which it configures with this same fixed token. A
-    per-run token would make those two runs print different things with one
-    golden between them.
+    The token is the one fixed token every notion run shares, the same one
+    integ/ntn_conformance.ts hands the real ntn binary. No golden prints it:
+    `ntn auth token` refuses, and `ntn whoami` names the workspace seeded on
+    NotionMeta, not the token.
 
-    So the RUN is the axis that separates the hosts, and it rides the base URL
+    The RUN is the axis that separates the hosts, and it rides the base URL
     as a leading `/_run/<id>` segment. A header or a query parameter cannot do
     this job: the mount hands its base URL to the VFS and never sees the
     request again. With the run in the URL the two hosts keep the one shared

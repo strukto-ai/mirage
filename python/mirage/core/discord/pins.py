@@ -15,11 +15,7 @@
 from typing import Any, cast
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.core.discord.client import (
-    discord_delete,
-    discord_get,
-    discord_put,
-)
+from mirage.core.discord.client import discord_request
 
 PIN_PAGE_SIZE = 50
 
@@ -34,8 +30,8 @@ async def pin_message(
         channel_id (str): channel ID.
         message_id (str): message ID.
     """
-    await discord_put(
-        accessor, f"/channels/{channel_id}/messages/pins/{message_id}"
+    await discord_request(
+        accessor, "PUT", f"/channels/{channel_id}/messages/pins/{message_id}"
     )
 
 
@@ -49,8 +45,10 @@ async def unpin_message(
         channel_id (str): channel ID.
         message_id (str): message ID.
     """
-    await discord_delete(
-        accessor, f"/channels/{channel_id}/messages/pins/{message_id}"
+    await discord_request(
+        accessor,
+        "DELETE",
+        f"/channels/{channel_id}/messages/pins/{message_id}",
     )
 
 
@@ -68,8 +66,11 @@ async def list_pins(
     while True:
         page = cast(
             dict[str, Any],
-            await discord_get(
-                accessor, f"/channels/{channel_id}/messages/pins", params
+            await discord_request(
+                accessor,
+                "GET",
+                f"/channels/{channel_id}/messages/pins",
+                params,
             ),
         )
         items = page.get("items", [])

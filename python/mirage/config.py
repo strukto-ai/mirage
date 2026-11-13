@@ -629,7 +629,7 @@ def _rebase_code_ref(ref: str, base: Path) -> str:
     return f"{base / source}:{attr}"
 
 
-def _runtime_class(ref: str) -> type[Runtime[Any]]:
+def _load_runtime_class(ref: str) -> type[Runtime[Any]]:
     """Load the ``Runtime`` subclass a ``source:Class`` reference names.
 
     The runtime twin of the ``vfs:`` and ``cli:`` reference forms:
@@ -672,7 +672,7 @@ def _build_runtime_entries(
     out: list[Runtime[Any] | str] = []
     for i, entry in enumerate(entries):
         if isinstance(entry, str):
-            out.append(_runtime_class(entry)() if ":" in entry else entry)
+            out.append(_load_runtime_class(entry)() if ":" in entry else entry)
             continue
         options = dict(entry)
         name = options.pop("name", None)
@@ -685,7 +685,7 @@ def _build_runtime_entries(
             )
         try:
             out.append(
-                _runtime_class(name)(**options)
+                _load_runtime_class(name)(**options)
                 if ":" in name
                 else build_runtime(name, **options)
             )

@@ -12,15 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
+from typing import Any, cast
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.core.discord.client import (
-    discord_delete,
-    discord_patch,
-    discord_post,
-    discord_post_files,
-)
+from mirage.core.discord.client import discord_post_files, discord_request
 
 
 async def send_message(
@@ -49,7 +44,10 @@ async def send_message(
     endpoint = f"/channels/{channel_id}/messages"
     if file is not None:
         return await discord_post_files(accessor, endpoint, body, [file])
-    return await discord_post(accessor, endpoint, body)
+    return cast(
+        dict[str, Any],
+        await discord_request(accessor, "POST", endpoint, body=body),
+    )
 
 
 async def edit_message(
@@ -66,10 +64,14 @@ async def edit_message(
     Returns:
         dict: the updated message.
     """
-    return await discord_patch(
-        accessor,
-        f"/channels/{channel_id}/messages/{message_id}",
-        {"content": text},
+    return cast(
+        dict[str, Any],
+        await discord_request(
+            accessor,
+            "PATCH",
+            f"/channels/{channel_id}/messages/{message_id}",
+            body={"content": text},
+        ),
     )
 
 
@@ -83,8 +85,8 @@ async def delete_message(
         channel_id (str): channel ID.
         message_id (str): message ID.
     """
-    await discord_delete(
-        accessor, f"/channels/{channel_id}/messages/{message_id}"
+    await discord_request(
+        accessor, "DELETE", f"/channels/{channel_id}/messages/{message_id}"
     )
 
 
@@ -119,6 +121,9 @@ async def send_poll(
             "allow_multiselect": multiselect,
         }
     }
-    return await discord_post(
-        accessor, f"/channels/{channel_id}/messages", body
+    return cast(
+        dict[str, Any],
+        await discord_request(
+            accessor, "POST", f"/channels/{channel_id}/messages", body=body
+        ),
     )

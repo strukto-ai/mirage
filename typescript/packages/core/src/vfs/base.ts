@@ -34,7 +34,7 @@ import { methodName, vfsCall } from './call.ts'
 import type { StorageUsage } from './capacity.ts'
 import { WALK_LIMIT } from './constants.ts'
 import type { RedactedSchema } from './secrets.ts'
-import { redactConfigWithSchema } from './secrets.ts'
+import { redactedConfigDump } from './secrets.ts'
 import type { VFSStateBase } from './types.ts'
 import { type ConfigState, Effect, type Handed, Target } from './types.ts'
 
@@ -816,7 +816,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
 
   /** Snapshot a config-backed driver through its schema's secret markers. */
   configState<S extends z.ZodObject>(schema: S, config: unknown): ConfigState<RedactedSchema<S>> {
-    return { type: this.name, config: redactConfigWithSchema(schema, config) }
+    return { type: this.name, config: redactedConfigDump(schema, config) }
   }
 
   /**

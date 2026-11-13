@@ -24,7 +24,6 @@ from mirage.core.email._parse import parse_rfc822, parse_with_payloads
 
 logger = logging.getLogger(__name__)
 
-INTERNAL_DATE_KEY = "internal_date"
 # Metadata is asked for ahead of the body: a server may answer the items
 # in the order they were requested, and anything after BODY[] lands on
 # the line *behind* the literal, where the parsers below never look.
@@ -166,26 +165,6 @@ def _server_text(response: IMAPResponse) -> str:
     return f"{response.result} {text}".strip()
 
 
-async def select_folder(imap: IMAPClient, folder: str) -> None:
-    """Select a mailbox, failing loudly when it does not exist.
-
-    An unchecked SELECT leaves the session in AUTH state, and the next
-    command then fails with a raw protocol complaint ("command SEARCH
-    illegal in state AUTH") that names neither the mailbox nor the
-    problem.
-
-    Args:
-        imap (IMAPClient): the connected client.
-        folder (str): the mailbox to select.
-
-    Raises:
-        FileNotFoundError: the server refused the mailbox.
-    """
-    response = await imap.select(quote_string(folder))
-    if response.result != "OK":
-        raise MailboxNotFound(folder, _server_text(response))
-
-
 @asynccontextmanager
 async def lock_mailbox(
     accessor: EmailAccessor, folder: str
@@ -194,15 +173,23 @@ async def lock_mailbox(
 
     The connection has one selected mailbox, so a task that selected one
     keeps it until its last command; another waits instead of switching
-    the mailbox under it.
+    the mailbox under it. An unchecked SELECT would leave the session in
+    AUTH state, and the next command would then fail with a raw protocol
+    complaint ("command SEARCH illegal in state AUTH") that names neither
+    the mailbox nor the problem.
 
     Args:
         accessor (EmailAccessor): the account.
         folder (str): the mailbox to select.
+
+    Raises:
+        FileNotFoundError: the server refused the mailbox.
     """
     async with accessor.mailbox_lock:
         imap = await accessor.get_imap()
-        await select_folder(imap, folder)
+        response = await imap.select(quote_string(folder))
+        if response.result != "OK":
+            raise MailboxNotFound(folder, _server_text(response))
         yield imap
 
 
@@ -272,7 +259,7 @@ async def fetch_message(
     msg_dict = parse_rfc822(raw_bytes)
     msg_dict["uid"] = uid
     msg_dict["flags"] = flags
-    msg_dict[INTERNAL_DATE_KEY] = _internal_date_of(response)
+    msg_dict["internal_date"] = _internal_date_of(response)
     msg_dict["raw_size"] = len(raw_bytes)
     return msg_dict
 
@@ -552,7 +539,7 @@ def _parse_multi_fetch(
                 uids[len(results)] if len(results) < len(uids) else ""
             )
             msg_dict["flags"] = current_flags
-            msg_dict[INTERNAL_DATE_KEY] = current_internal
+            msg_dict["internal_date"] = current_internal
             msg_dict["raw_size"] = len(item)
             results.append(msg_dict)
             current_uid = None

@@ -12,17 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { GitHubTreeItem } from './client.ts'
-
-export function makeTreeEntry(item: GitHubTreeItem): TreeEntry {
-  return {
-    path: item.path,
-    type: item.type,
-    sha: item.sha,
-    size: item.size ?? null,
-  }
-}
-
 export interface TreeEntry {
   path: string
   type: string

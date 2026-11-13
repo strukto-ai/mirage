@@ -16,16 +16,12 @@ import type { JsonObject } from '../../types.ts'
 import {
   asArray,
   asObject,
+  pickBoolOrNull,
   pickString as pickStringOrNull,
   stringOf as strOf,
 } from '../../utils/records.ts'
 import { formatSegment } from './pathing.ts'
 import { blocksToMarkdown } from './render.ts'
-
-function boolOf(record: JsonObject, key: string): boolean {
-  const value = record[key]
-  return typeof value === 'boolean' ? value : false
-}
 
 function joinTitleFragments(fragments: unknown[]): string {
   let out = ''
@@ -127,7 +123,7 @@ function pageFields(page: JsonObject): PageFields {
     last_edited_time: strOf(page, 'last_edited_time'),
     parent_type: parentType,
     parent_id: parentId,
-    archived: boolOf(page, 'archived'),
+    archived: pickBoolOrNull(page, 'archived') ?? false,
     created_by: strOf(asObject(page.created_by), 'id'),
     last_edited_by: strOf(asObject(page.last_edited_by), 'id'),
     properties: asObject(page.properties),
@@ -160,7 +156,7 @@ export function normalizeRow(page: JsonObject) {
 
 export function normalizeDatabase(database: JsonObject) {
   const archived =
-    database.archived !== undefined ? boolOf(database, 'archived') : boolOf(database, 'in_trash')
+    pickBoolOrNull(database, database.archived !== undefined ? 'archived' : 'in_trash') ?? false
   return {
     database_id: strOf(database, 'id'),
     title: extractDatabaseTitle(database),
@@ -169,16 +165,14 @@ export function normalizeDatabase(database: JsonObject) {
     last_edited_time: pickStringOrNull(database, 'last_edited_time'),
     parent: asObject(database.parent),
     archived,
-    is_inline: boolOf(database, 'is_inline'),
+    is_inline: pickBoolOrNull(database, 'is_inline') ?? false,
     data_sources: asArray(database.data_sources),
   }
 }
 
 export function normalizeDataSource(dataSource: JsonObject) {
   const archived =
-    dataSource.archived !== undefined
-      ? boolOf(dataSource, 'archived')
-      : boolOf(dataSource, 'in_trash')
+    pickBoolOrNull(dataSource, dataSource.archived !== undefined ? 'archived' : 'in_trash') ?? false
   return {
     data_source_id: strOf(dataSource, 'id'),
     database_id: strOf(asObject(dataSource.parent), 'database_id'),

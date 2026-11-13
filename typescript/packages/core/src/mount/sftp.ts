@@ -70,7 +70,6 @@ function handleKey(handle: Uint8Array): string {
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-const NO_ATTRS = {} as Attributes
 
 interface OpenFile {
   kind: 'file'
@@ -339,7 +338,7 @@ export class MirageSFTPServer {
   private async realpath(id: number, path: string): Promise<void> {
     await this.mount()
     const p = workspacePath(path)
-    this.sftp.name(id, [{ filename: p, longname: p, attrs: NO_ATTRS }])
+    this.sftp.name(id, [{ filename: p, longname: p, attrs: {} as Attributes }])
   }
 
   private async stat(id: number, path: string, follow: boolean): Promise<void> {
@@ -457,7 +456,7 @@ export class MirageSFTPServer {
   private async readlink(id: number, path: string): Promise<void> {
     const core = await this.mount()
     const target = await core.readlink(workspacePath(path))
-    this.sftp.name(id, [{ filename: target, longname: target, attrs: NO_ATTRS }])
+    this.sftp.name(id, [{ filename: target, longname: target, attrs: {} as Attributes }])
   }
 
   private async exit(): Promise<void> {

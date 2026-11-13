@@ -4,7 +4,7 @@ from opendal.types import EntryMode
 from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.core.nextcloud.search import search_files
 from mirage.errors.fs import enoent
-from mirage.types import FileStat, FileType, FindType, PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import raw_path_of
 
@@ -57,7 +57,7 @@ async def tree(
     for entry in found:
         if not entry.key.startswith(lead):
             continue
-        folder = entry.kind is FindType.DIRECTORY
+        folder = entry.kind == "d"
         if not folder and entry.size is None:
             return None
         name = entry.key.rsplit("/", 1)[-1]

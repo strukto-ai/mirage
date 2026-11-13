@@ -56,10 +56,8 @@ export const FREE_BUSY_ROLE = 'freeBusyReader'
 // The text Calendar's search reads that the listing does not keep.
 const SEARCHED_FIELDS: readonly string[] = ['summary', 'description', 'location']
 
-export type CalendarEntryRow = Record<string, JsonValue>
-
 /** Render the per-calendar metadata file. */
-export function calendarPayload(entry: CalendarEntryRow, tz: string): Uint8Array {
+export function calendarPayload(entry: Record<string, JsonValue>, tz: string): Uint8Array {
   return compactJsonBytes({
     id: entry.id ?? null,
     summary: entry.summary ?? null,
@@ -83,9 +81,9 @@ export function normalize(path: PathSpec): [string, string, string] {
 /** Map each calendar's directory name to its calendarList entry. */
 export async function calendarIndex(
   accessor: GCalAccessor,
-): Promise<Map<string, CalendarEntryRow>> {
+): Promise<Map<string, Record<string, JsonValue>>> {
   const rows = await accessor.calendar.listCalendars(accessor.config.minAccessRole)
-  const out = new Map<string, CalendarEntryRow>()
+  const out = new Map<string, Record<string, JsonValue>>()
   for (const row of rows) {
     const calId = row.id
     if (typeof calId !== 'string' || calId === '') continue
@@ -110,7 +108,7 @@ export async function calendarIndex(
  */
 export function bucketZone(
   accessor: GCalAccessor,
-  calendars: Map<string, CalendarEntryRow>,
+  calendars: Map<string, Record<string, JsonValue>>,
 ): string {
   const pinned = accessor.config.timeZone
   if (pinned !== undefined && pinned !== '') return pinned
@@ -195,7 +193,7 @@ export function scopedBucket(
  * entity, a hyphenated or non-ASCII word), which the search may split
  * otherwise than grep -w. Mirrors Python's `unsearched_text`.
  */
-export function unsearchedText(event: CalendarEntryRow): string {
+export function unsearchedText(event: Record<string, JsonValue>): string {
   const rest = Object.fromEntries(
     Object.entries(event).map(([key, value]) => [
       key,
@@ -221,7 +219,7 @@ export function unsearchedText(event: CalendarEntryRow): string {
  * text Calendar's search does not read (`unsearchedText`), for grep.
  */
 function eventEntries(
-  events: CalendarEntryRow[],
+  events: Record<string, JsonValue>[],
   days: readonly string[],
   tz: string,
   freeBusy: boolean,

@@ -13,11 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { AirtableAccessor } from '../../accessor/airtable.ts'
+import type { JsonObject } from '../../types.ts'
 import { apiRequest, type RetryPolicy, type ErrorOf } from '../api/client.ts'
 import { cursorItems, cursorPages, offsetCursor, type PageShape } from '../api/paginate.ts'
 import { MAX_BATCH, META_KEY, PAGE_SIZE, WEBHOOK_PAGE_SIZE } from './constants.ts'
 import { AirtableApiError, errorParts } from './errors.ts'
-import { asRow, asRows, type Row } from './normalize.ts'
+import { asRow, asRows } from './normalize.ts'
 
 export const BASES: PageShape = { itemsKey: 'bases', nextCursor: offsetCursor }
 export const RECORDS: PageShape = { itemsKey: 'records', nextCursor: offsetCursor }
@@ -122,14 +123,14 @@ async function page(
   path: string,
   params: Record<string, string | number>,
   cursor: string | null,
-): Promise<Row> {
+): Promise<JsonObject> {
   return asRow(
     await get(accessor, path, cursor !== null ? { ...params, offset: cursor } : params, paceKey),
   )
 }
 
 /** Every base the token reaches, narrowed to the configured `baseIds`. */
-export async function listBases(accessor: AirtableAccessor): Promise<Row[]> {
+export async function listBases(accessor: AirtableAccessor): Promise<JsonObject[]> {
   const bases = await cursorItems(
     (cursor) => page(accessor, META_KEY, '/meta/bases', {}, cursor),
     undefined,
@@ -140,7 +141,10 @@ export async function listBases(accessor: AirtableAccessor): Promise<Row[]> {
 }
 
 /** A base's schema: its tables with their fields and views. */
-export async function listTables(accessor: AirtableAccessor, baseId: string): Promise<Row[]> {
+export async function listTables(
+  accessor: AirtableAccessor,
+  baseId: string,
+): Promise<JsonObject[]> {
   const data = await get(accessor, `/meta/bases/${segment(baseId)}/tables`, undefined, baseId)
   return asRows(asRow(data).tables)
 }
@@ -154,7 +158,10 @@ export async function listTables(accessor: AirtableAccessor, baseId: string): Pr
  * stops after that many records, both on the wire and in the collector.
  */
 /** A base's webhooks, each with `cursorForNextPayload`. Mirrors Python `list_webhooks`. */
-export async function listWebhooks(accessor: AirtableAccessor, baseId: string): Promise<Row[]> {
+export async function listWebhooks(
+  accessor: AirtableAccessor,
+  baseId: string,
+): Promise<JsonObject[]> {
   const data = await get(accessor, `/bases/${segment(baseId)}/webhooks`, undefined, baseId)
   return asRows(asRow(data).webhooks)
 }
@@ -169,7 +176,7 @@ export async function webhookPayloads(
   baseId: string,
   webhookId: string,
   cursor: number | null,
-): Promise<Row> {
+): Promise<JsonObject> {
   const params: Record<string, string | number> = { limit: WEBHOOK_PAGE_SIZE }
   if (cursor !== null) params.cursor = cursor
   const path = `/bases/${segment(baseId)}/webhooks/${segment(webhookId)}`
@@ -181,7 +188,7 @@ export async function listRecords(
   baseId: string,
   tableId: string,
   options: { view?: string; formula?: string; maxRecords?: number } = {},
-): Promise<Row[]> {
+): Promise<JsonObject[]> {
   const params = recordParams(options)
   const path = tablePath(baseId, tableId)
   const found = await cursorItems(
@@ -202,7 +209,7 @@ export async function* recordPages(
   baseId: string,
   tableId: string,
   options: { view?: string; maxRecords?: number } = {},
-): AsyncGenerator<Row[], void> {
+): AsyncGenerator<JsonObject[], void> {
   const params = recordParams(options)
   const path = tablePath(baseId, tableId)
   for await (const found of cursorPages(
@@ -230,7 +237,7 @@ export async function getRecord(
   baseId: string,
   tableId: string,
   recordId: string,
-): Promise<Row> {
+): Promise<JsonObject> {
   return asRow(await get(accessor, recordPath(baseId, tableId, recordId), undefined, baseId))
 }
 
@@ -239,12 +246,12 @@ async function* write(
   method: string,
   baseId: string,
   tableId: string,
-  rows: readonly Row[],
+  rows: readonly JsonObject[],
   typecast: boolean | undefined,
-): AsyncGenerator<Row[]> {
+): AsyncGenerator<JsonObject[]> {
   const path = tablePath(baseId, tableId)
   for (const batch of batches(rows)) {
-    const body: Row = { records: batch }
+    const body: JsonObject = { records: batch }
     if (typecast === true) body.typecast = true
     const data = await request(accessor, method, path, baseId, { json: body, retry: WRITE_RETRY })
     yield asRows(asRow(data).records)
@@ -262,9 +269,9 @@ export function createRecords(
   accessor: AirtableAccessor,
   baseId: string,
   tableId: string,
-  cells: readonly Row[],
+  cells: readonly JsonObject[],
   options: { typecast?: boolean } = {},
-): AsyncGenerator<Row[]> {
+): AsyncGenerator<JsonObject[]> {
   const rows = cells.map((fields) => ({ fields }))
   return write(accessor, 'POST', baseId, tableId, rows, options.typecast)
 }
@@ -278,9 +285,9 @@ export function updateRecords(
   accessor: AirtableAccessor,
   baseId: string,
   tableId: string,
-  updates: readonly (readonly [string, Row])[],
+  updates: readonly (readonly [string, JsonObject])[],
   options: { typecast?: boolean } = {},
-): AsyncGenerator<Row[]> {
+): AsyncGenerator<JsonObject[]> {
   const rows = updates.map(([id, fields]) => ({ id, fields }))
   return write(accessor, 'PATCH', baseId, tableId, rows, options.typecast)
 }
@@ -295,7 +302,7 @@ export async function* deleteRecords(
   baseId: string,
   tableId: string,
   recordIds: readonly string[],
-): AsyncGenerator<Row[]> {
+): AsyncGenerator<JsonObject[]> {
   const path = tablePath(baseId, tableId)
   for (const batch of batches(recordIds)) {
     const query = new URLSearchParams(batch.map((id) => ['records[]', id])).toString()
@@ -310,7 +317,7 @@ export async function listComments(
   baseId: string,
   tableId: string,
   recordId: string,
-): Promise<Row[]> {
+): Promise<JsonObject[]> {
   const path = `${recordPath(baseId, tableId, recordId)}/comments`
   const found = await cursorItems(
     (cursor) => page(accessor, baseId, path, { pageSize: PAGE_SIZE }, cursor),
@@ -327,7 +334,7 @@ export async function createComment(
   tableId: string,
   recordId: string,
   text: string,
-): Promise<Row> {
+): Promise<JsonObject> {
   return asRow(
     await request(accessor, 'POST', `${recordPath(baseId, tableId, recordId)}/comments`, baseId, {
       json: { text },

@@ -103,7 +103,7 @@ from mirage.server.rpc.http import register_rpc_routes
 from mirage.server.ssh.config import SSHConfig, resolve_ssh_config
 from mirage.server.ssh.constants import SERVER_MODULE
 from mirage.server.ssh.errors import SSHConfigError
-from mirage.server.ssh.types import SSHListener, StartSSH
+from mirage.server.ssh.types import SSHListener
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.record.disk import DiskRecordClient
 
@@ -255,8 +255,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ssh_port is set but the SSH server needs asyncssh; install "
                 "the ssh extra (pip install 'mirage-ai[ssh]')"
             ) from exc
-        start: StartSSH = getattr(module, attr)
-        listener = await start(app.state.registry, config)
+        listener = await getattr(module, attr)(app.state.registry, config)
     app.state.ssh = listener
     if app.state.pid_file is not None:
         await run_blocking(_write_pid_file, app.state.pid_file)

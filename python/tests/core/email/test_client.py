@@ -26,10 +26,10 @@ from mirage.core.email.client import (
     list_folder_entries,
     list_folders,
     list_message_uids,
+    lock_mailbox,
     parse_folder_line,
     quote_string,
     read_quoted,
-    select_folder,
 )
 from mirage.core.email.config import EmailConfig
 
@@ -160,13 +160,16 @@ def test_an_atom_sent_mailbox_survives_into_resolution():
 
 
 @pytest.mark.asyncio
-async def test_select_quotes_a_mailbox_holding_a_space():
+async def test_select_quotes_a_mailbox_holding_a_space(accessor):
     mock_imap = AsyncMock()
     selected = MagicMock()
     selected.result = "OK"
     mock_imap.select.return_value = selected
+    accessor._imap = mock_imap
+    accessor._imap.protocol = True
 
-    await select_folder(mock_imap, "[Gmail]/Sent Mail")
+    async with lock_mailbox(accessor, "[Gmail]/Sent Mail"):
+        pass
     mock_imap.select.assert_awaited_once_with('"[Gmail]/Sent Mail"')
 
 

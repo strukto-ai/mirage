@@ -19,12 +19,7 @@ from yarl import URL
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.core.api.errors import ApiError
-from mirage.core.discord.client import (
-    discord_delete,
-    discord_get,
-    discord_post,
-    discord_put,
-)
+from mirage.core.discord.client import discord_request
 from mirage.core.discord.config import DiscordConfig
 
 BASE = "https://discord.com/api/v10"
@@ -37,11 +32,11 @@ async def accessor():
 
 
 @pytest.mark.asyncio
-async def test_discord_get_success(accessor):
+async def test_a_get_success(accessor):
     url = f"{BASE}/guilds/123/channels"
     with aioresponses() as m:
         m.get(url, payload=[{"id": "123", "name": "general"}])
-        result = await discord_get(accessor, "/guilds/123/channels")
+        result = await discord_request(accessor, "GET", "/guilds/123/channels")
         sent = m.requests[("GET", URL(url))]
     assert result == [{"id": "123", "name": "general"}]
     assert len(sent) == 1
@@ -49,25 +44,28 @@ async def test_discord_get_success(accessor):
 
 
 @pytest.mark.asyncio
-async def test_discord_get_rate_limited(accessor):
+async def test_a_get_rate_limited(accessor):
     url = f"{BASE}/users/@me/guilds"
     with aioresponses() as m:
         for _ in range(3):
             m.get(url, status=429, payload={"retry_after": 0.001})
         with pytest.raises(ApiError, match="Rate limited after 3") as raised:
-            await discord_get(accessor, "/users/@me/guilds")
+            await discord_request(accessor, "GET", "/users/@me/guilds")
         assert raised.value.status == 429
         # two waits, three requests, then the error surfaces
         assert len(m.requests[("GET", URL(url))]) == 3
 
 
 @pytest.mark.asyncio
-async def test_discord_post_success(accessor):
+async def test_a_post_success(accessor):
     url = f"{BASE}/channels/C001/messages"
     with aioresponses() as m:
         m.post(url, payload={"id": "msg1", "content": "hello"})
-        result = await discord_post(
-            accessor, "/channels/C001/messages", body={"content": "hello"}
+        result = await discord_request(
+            accessor,
+            "POST",
+            "/channels/C001/messages",
+            body={"content": "hello"},
         )
         sent = m.requests[("POST", URL(url))]
     assert result["id"] == "msg1"
@@ -75,42 +73,47 @@ async def test_discord_post_success(accessor):
 
 
 @pytest.mark.asyncio
-async def test_discord_post_rate_limited_raises_without_retrying(accessor):
+async def test_a_post_rate_limited_raises_without_retrying(accessor):
     url = f"{BASE}/channels/C001/messages"
     with aioresponses() as m:
         m.post(url, status=429, payload={"retry_after": 2.5})
         with pytest.raises(ApiError, match="retry after 2.5s") as raised:
-            await discord_post(accessor, "/channels/C001/messages", body={})
+            await discord_request(
+                accessor, "POST", "/channels/C001/messages", body={}
+            )
         assert raised.value.status == 429
         assert len(m.requests[("POST", URL(url))]) == 1
 
 
 @pytest.mark.asyncio
-async def test_discord_get_error_carries_the_status(accessor):
+async def test_a_get_error_carries_the_status(accessor):
     # readdir classifies on the error's status.
     url = f"{BASE}/guilds/999"
     with aioresponses() as m:
         m.get(url, status=404, payload={"message": "Unknown Guild"})
         with pytest.raises(ApiError) as exc:
-            await discord_get(accessor, "/guilds/999")
+            await discord_request(accessor, "GET", "/guilds/999")
     assert exc.value.status == 404
 
 
 @pytest.mark.asyncio
-async def test_discord_put_and_delete_return_nothing(accessor):
+async def test_a_put_and_a_delete_return_nothing(accessor):
     put_url = f"{BASE}/channels/C001/messages/m1/reactions/%F0%9F%91%8D/@me"
     delete_url = f"{BASE}/channels/C001/messages/m1"
     with aioresponses() as m:
         m.put(put_url, status=204)
         m.delete(delete_url, status=200, payload={"id": "m1"})
         assert (
-            await discord_put(
+            await discord_request(
                 accessor,
+                "PUT",
                 "/channels/C001/messages/m1/reactions/%F0%9F%91%8D/@me",
             )
             is None
         )
         assert (
-            await discord_delete(accessor, "/channels/C001/messages/m1")
+            await discord_request(
+                accessor, "DELETE", "/channels/C001/messages/m1"
+            )
             is None
         )

@@ -15,7 +15,7 @@
 from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.discord.client import discord_get
+from mirage.core.discord.client import discord_request
 from mirage.core.render.json import compact_json_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -29,5 +29,5 @@ async def server_info(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags, ctx.spec)
     guild = fl.as_str("guild") or ""
-    result = await discord_get(accessor, f"/guilds/{guild}")
+    result = await discord_request(accessor, "GET", f"/guilds/{guild}")
     return compact_json_bytes(result), IOResult()

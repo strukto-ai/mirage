@@ -31,13 +31,13 @@ ACCESSOR = DiscordAccessor(DiscordConfig(token="bot-token"))
 @pytest.mark.asyncio
 async def test_send_message_posts_content():
     with patch(
-        "mirage.core.discord.post.discord_post",
+        "mirage.core.discord.post.discord_request",
         new_callable=AsyncMock,
         return_value={"id": "M1"},
     ) as post:
         await send_message(ACCESSOR, "C1", "hello")
     post.assert_awaited_once_with(
-        ACCESSOR, "/channels/C1/messages", {"content": "hello"}
+        ACCESSOR, "POST", "/channels/C1/messages", body={"content": "hello"}
     )
 
 
@@ -60,15 +60,16 @@ async def test_send_message_with_a_file_posts_multipart():
 @pytest.mark.asyncio
 async def test_send_message_with_reference():
     with patch(
-        "mirage.core.discord.post.discord_post",
+        "mirage.core.discord.post.discord_request",
         new_callable=AsyncMock,
         return_value={"id": "M2"},
     ) as post:
         await send_message(ACCESSOR, "C1", "re", "M1")
     post.assert_awaited_once_with(
         ACCESSOR,
+        "POST",
         "/channels/C1/messages",
-        {
+        body={
             "content": "re",
             "message_reference": {"message_id": "M1"},
         },
@@ -78,29 +79,34 @@ async def test_send_message_with_reference():
 @pytest.mark.asyncio
 async def test_edit_message_patches_content():
     with patch(
-        "mirage.core.discord.post.discord_patch",
+        "mirage.core.discord.post.discord_request",
         new_callable=AsyncMock,
         return_value={"id": "M1"},
     ) as patch_fn:
         await edit_message(ACCESSOR, "C1", "M1", "edited")
     patch_fn.assert_awaited_once_with(
-        ACCESSOR, "/channels/C1/messages/M1", {"content": "edited"}
+        ACCESSOR,
+        "PATCH",
+        "/channels/C1/messages/M1",
+        body={"content": "edited"},
     )
 
 
 @pytest.mark.asyncio
 async def test_delete_message_deletes():
     with patch(
-        "mirage.core.discord.post.discord_delete", new_callable=AsyncMock
+        "mirage.core.discord.post.discord_request", new_callable=AsyncMock
     ) as delete_fn:
         await delete_message(ACCESSOR, "C1", "M1")
-    delete_fn.assert_awaited_once_with(ACCESSOR, "/channels/C1/messages/M1")
+    delete_fn.assert_awaited_once_with(
+        ACCESSOR, "DELETE", "/channels/C1/messages/M1"
+    )
 
 
 @pytest.mark.asyncio
 async def test_send_poll_shapes_the_poll_object():
     with patch(
-        "mirage.core.discord.post.discord_post",
+        "mirage.core.discord.post.discord_request",
         new_callable=AsyncMock,
         return_value={"id": "M3"},
     ) as post:
@@ -112,7 +118,7 @@ async def test_send_poll_shapes_the_poll_object():
             duration_hours=48,
             multiselect=True,
         )
-    body = post.await_args.args[2]
+    body = post.await_args.kwargs["body"]
     assert body == {
         "poll": {
             "question": {"text": "Lunch?"},

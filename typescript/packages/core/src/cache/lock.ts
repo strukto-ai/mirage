@@ -14,10 +14,6 @@
 
 import { hasAborted, makeAbortError } from '../utils/abort.ts'
 
-interface Waiter {
-  enter: () => void
-}
-
 /** One caller's hold on a `KeyLock` key. Mirrors Python's KeyHold. */
 export interface KeyHold {
   /** Let the key go while `fn` runs, then wait for it again. */
@@ -25,7 +21,7 @@ export interface KeyHold {
 }
 
 export class KeyLock {
-  private readonly queues = new Map<string, Set<Waiter>>()
+  private readonly queues = new Map<string, Set<() => void>>()
 
   async withLock<T>(
     key: string,
@@ -69,19 +65,17 @@ export class KeyLock {
 
   /** The key's queue: taken at once when the key is free, else once its
    * holder hands it over. */
-  private enter(key: string, signal?: AbortSignal): Set<Waiter> | Promise<Set<Waiter>> {
+  private enter(key: string, signal?: AbortSignal): Set<() => void> | Promise<Set<() => void>> {
     const queue = this.queues.get(key)
     if (queue === undefined) {
-      const held = new Set<Waiter>()
+      const held = new Set<() => void>()
       this.queues.set(key, held)
       return held
     }
-    return new Promise<Set<Waiter>>((resolve, reject) => {
-      const waiter: Waiter = {
-        enter: () => {
-          signal?.removeEventListener('abort', onAbort)
-          resolve(queue)
-        },
+    return new Promise<Set<() => void>>((resolve, reject) => {
+      const waiter = (): void => {
+        signal?.removeEventListener('abort', onAbort)
+        resolve(queue)
       }
       const onAbort = (): void => {
         queue.delete(waiter)
@@ -92,11 +86,11 @@ export class KeyLock {
     })
   }
 
-  private leave(key: string, queue: Set<Waiter>): void {
+  private leave(key: string, queue: Set<() => void>): void {
     const next = queue.values().next().value
     if (next !== undefined) {
       queue.delete(next)
-      next.enter()
+      next()
     } else if (this.queues.get(key) === queue) {
       this.queues.delete(key)
     }

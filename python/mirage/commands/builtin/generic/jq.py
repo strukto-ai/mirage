@@ -46,7 +46,6 @@ from mirage.rs.stream import (
     open_stream,
     serve_requests,
 )
-from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import byte_view
 from mirage.types import LINK_TARGET_KEY, JsonValue, PathSpec, ReadStreamFn
 from mirage.utils.clock import system_now
@@ -536,70 +535,24 @@ async def jq_generic(
     ctx: Context,
     stream: ReadStreamFn,
 ) -> tuple[ByteSource | None, IOResult]:
-    """Full-command jq entry; mirrors jqGeneric's (paths, texts, ctx).
+    """Run one jq invocation; mirrors jqGeneric's (paths, texts, ctx).
 
-    The dispatcher-facing seam, so the builder stays wiring. It hands the
-    flag bag on whole: the bag records the order the flags were typed in,
-    which read_options reads and keywords would lose.
-    """
-    return await _jq(
-        paths,
-        texts,
-        ctx.flags,
-        stream,
-        ctx.stdin,
-        dispatch_of(ctx),
-        ctx.env,
-        ctx.cwd,
-        links_of(ctx),
-    )
-
-
-async def jq(
-    paths: list[PathSpec],
-    *texts: str,
-    stream: ReadStreamFn,
-    stdin: ByteSource | None = None,
-    dispatch: DispatchFn | None = None,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    """jq over keyword flags, the historical shape; keywords keep no record
-    of the order they were typed in (see jq_generic)."""
-    return await _jq(paths, texts, flags, stream, stdin, dispatch, None, None)
-
-
-async def _jq(
-    paths: list[PathSpec],
-    texts: Sequence[str],
-    flags: Mapping[str, FlagValue],
-    stream: ReadStreamFn,
-    stdin: ByteSource | None,
-    dispatch: DispatchFn | None,
-    env: Mapping[str, str] | None,
-    cwd: PathSpec | None,
-    links: LinkView | None = None,
-) -> tuple[ByteSource | None, IOResult]:
-    """Run one jq invocation.
+    The flag bag is read whole: it records the order the flags were typed
+    in, which read_options reads. The session's exported environment is
+    what `$ENV` and `env` read in place of jq's process environment, and
+    whose `TZ` local time reads; its working directory is what
+    `get_prog_origin` answers without -f.
 
     Args:
         paths (list[PathSpec]): the input operands.
-        texts (Sequence[str]): the text operands, program first unless -f
+        texts (list[str]): the text operands, program first unless -f
             gave it.
-        flags (Mapping[str, FlagValue]): the flag bag.
+        ctx (Context): the invocation's context.
         stream (ReadStreamFn): chunk reader for one path.
-        stdin (ByteSource | None): the invocation's stdin.
-        dispatch (DispatchFn | None): the dispatcher a flag's file is read
-            through.
-        env (Mapping[str, str] | None): the session's exported
-            environment, which `$ENV` and `env` read in place of jq's
-            process environment, and whose `TZ` local time reads.
-        cwd (PathSpec | None): the session's working directory, which
-            `get_prog_origin` answers without -f.
-        links (LinkView | None): the namespace's symlink facts, which a
-            search path resolves through.
     """
-    fl = FlagView(flags, spec=SPECS["jq"])
-    read_input = stdin_stream(stream, stdin)
+    env, dispatch = ctx.env, dispatch_of(ctx)
+    fl = FlagView(ctx.flags, spec=SPECS["jq"])
+    read_input = stdin_stream(stream, ctx.stdin)
 
     async def read_flag_file(path: PathSpec) -> bytes:
         # -f, --rawfile and --slurpfile route nothing (the executor's
@@ -637,12 +590,12 @@ async def _jq(
         origin: str | None = posixpath.dirname(program_file.virtual)
     else:
         expression = program_file
-        origin = None if cwd is None else cwd.virtual
+        origin = ctx.cwd.virtual
     env_text = json.dumps(dict(env or {}))
     zone = local_zone(env)
     operands = list(paths)
     names = [input_name(path) for path in operands]
-    if not operands and stdin is not None:
+    if not operands and ctx.stdin is not None:
         operands.append(PathSpec.from_str_path("/dev/stdin"))
         names.append(STDIN_NAME)
     try:
@@ -651,17 +604,16 @@ async def _jq(
         # reading the program as typed, so its lines and columns are jq's.
         # The run compiles it again when it starts, so nothing is held
         # open for a stream no one reads.
-        working = None if cwd is None else cwd.virtual
-        table = _link_table(expression, options, links)
+        table = _link_table(expression, options, links_of(ctx))
         options = {
             **options,
-            "cwd": working,
+            "cwd": ctx.cwd.virtual,
             "links": table,
             "linked": await link_modules(
                 expression,
                 options,
                 origin,
-                working,
+                ctx.cwd.virtual,
                 (env or {}).get("HOME"),
                 read_flag_file,
                 table,
@@ -688,4 +640,4 @@ async def _jq(
     return run_outputs(config, inputs, io), io
 
 
-__all__ = ["jq"]
+__all__ = ["jq_generic"]

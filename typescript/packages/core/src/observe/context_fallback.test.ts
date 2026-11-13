@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { record, revisionFor, runWithRecording, runWithRevisions, startOp } from './context.ts'
+import { currentCaller, runWithCaller } from '../context/session_context.ts'
+import { record, revisionFor, runWithRecording, startOp } from './context.ts'
 import type * as asyncContextModule from '../utils/async_context.ts'
 
 // The browser-runtime branch under node's test runner: the real
@@ -47,12 +48,12 @@ describe('revision pins on the fallback storage', () => {
     const [holdPinned, releasePinned] = gate()
     const [holdNull, releaseNull] = gate()
     let beneathNull: string | null = null
-    const pinned = runWithRevisions(pins, async () => {
+    const pinned = runWithCaller({ ...currentCaller(), revisions: { map: pins } }, async () => {
       await holdPinned
       beneathNull = revisionFor('/s3/report.json')
       releaseNull()
     })
-    const unpinned = runWithRevisions(null, async () => {
+    const unpinned = runWithCaller({ ...currentCaller(), revisions: { map: null } }, async () => {
       releasePinned()
       await holdNull
     })

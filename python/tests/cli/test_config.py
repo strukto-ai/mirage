@@ -42,9 +42,9 @@ def test_config_list(monkeypatch, tmp_path):
 
 def test_config_unset(monkeypatch, tmp_path):
     _isolate_home(monkeypatch, tmp_path)
-    runner.invoke(app, ["set", "socket", "/tmp/s.sock"])
-    runner.invoke(app, ["unset", "socket"])
-    r = runner.invoke(app, ["get", "socket"])
+    runner.invoke(app, ["set", "login_client_id", "mirage-cli"])
+    runner.invoke(app, ["unset", "login_client_id"])
+    r = runner.invoke(app, ["get", "login_client_id"])
     assert r.exit_code != 0
 
 

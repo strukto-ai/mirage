@@ -15,72 +15,75 @@
 import type { PathSpec } from '../../../types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
+import { openStream, closeStream } from '../../../rs/stream.ts'
+import { chunks } from '../../../io/cooperative.ts'
+import { YieldBudget } from '../../../io/yield_budget.ts'
 import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { resolveSource } from '../utils/stream.ts'
-import { byteView, fromByteView } from '../../../shell/bytes.ts'
+import { byteView } from '../../../shell/bytes.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 
-const ENC = new TextEncoder()
-// How much of an unfinished reference is held for the next chunk; past this a
-// name is no name anyone wrote, and it passes as text.
-const MAX_HELD = 64 * 1024
-const MISSING = ENC.encode('envsubst: missing arguments\n')
-const TOO_MANY = ENC.encode('envsubst: too many arguments\n')
-const REFERENCE = /\$(?:([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)\})/g
-const UNFINISHED = /^\$\{?[A-Za-z0-9_]*$/
-
-function names(shellFormat: string): string[] {
-  return [...shellFormat.matchAll(REFERENCE)].map((found) => found[1] ?? found[2] ?? '')
-}
-
-function replacer(
-  env: Readonly<Record<string, string>>,
-  allowed: ReadonlySet<string> | null,
-): (text: string) => string {
-  return (text) =>
-    text.replace(REFERENCE, (whole: string, plain?: string, braced?: string) => {
-      const name = plain ?? braced ?? ''
-      if (allowed !== null && !allowed.has(name)) return whole
-      return byteView(env[name] ?? '')
-    })
-}
-
 async function* substituted(
-  source: AsyncIterable<Uint8Array>,
-  replace: (text: string) => string,
+  source: Uint8Array | AsyncIterable<Uint8Array>,
+  args: string[],
+  variables: boolean,
+  env: Readonly<Record<string, string>>,
 ): AsyncGenerator<Uint8Array> {
-  let held = ''
-  for await (const chunk of source) {
-    const data = held + byteView(chunk)
-    const at = data.lastIndexOf('$')
-    const keep = at >= 0 && data.length - at <= MAX_HELD && UNFINISHED.test(data.slice(at))
-    held = keep ? data.slice(at) : ''
-    const done = keep ? data.slice(0, at) : data
-    if (done !== '') yield fromByteView(replace(done))
+  const stream = await openStream('envsubst', {
+    args,
+    variables,
+    names: Object.keys(env).map((name) => byteView(name)),
+  })
+  const budget = new YieldBudget()
+  async function* progress(first: Uint8Array): AsyncGenerator<Uint8Array> {
+    let output = first
+    for (;;) {
+      if (output.length) yield output
+      await budget.run()
+      if (stream.busy()) {
+        output = stream.drain()
+        continue
+      }
+      const request = stream.request()
+      if (request === null) return
+      const [header] = request
+      const names = header.names
+      if (header.op !== 'env' || !Array.isArray(names))
+        throw new Error('invalid environment binding request')
+      const values: [string, string][] = []
+      for (const name of names) {
+        if (typeof name !== 'string') throw new Error('invalid environment binding name')
+        values.push([name, byteView(env[name] ?? '')])
+      }
+      output = stream.respond({ env: Object.fromEntries(values) }, new Uint8Array())
+    }
   }
-  if (held !== '') yield fromByteView(replace(held))
+  try {
+    for await (const chunk of chunks(source)) yield* progress(stream.feed(chunk))
+    yield* progress(stream.finish())
+  } finally {
+    await closeStream(stream)
+  }
 }
 
-// Replace $NAME and ${NAME} on standard input; a SHELL-FORMAT operand limits
-// which names, and -v lists a format's names. Pinned against gettext-runtime
-// 0.23.1.
 function envsubst(
   _accessor: Accessor,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): CommandFnResult {
-  if (texts.length > 1) return [null, new IOResult({ exitCode: 1, stderr: TOO_MANY })]
-  const fl = new FlagView(ctx.flags, specOf('envsubst'))
-  const picked = texts[0] === undefined ? null : byteView(texts[0])
-  if (fl.asBool('variables')) {
-    if (picked === null) return [null, new IOResult({ exitCode: 1, stderr: MISSING })]
-    const lines = names(picked).map((name) => `${name}\n`)
-    return [lines.length > 0 ? fromByteView(lines.join('')) : null, new IOResult()]
-  }
-  const allowed = picked === null ? null : new Set(names(picked))
-  return [substituted(resolveSource(ctx.stdin), replacer(ctx.env ?? {}, allowed)), new IOResult()]
+  const variables = new FlagView(ctx.flags, specOf('envsubst')).asBool('variables')
+  const env = variables ? {} : { ...ctx.env }
+  return [
+    substituted(
+      variables ? new Uint8Array() : resolveSource(ctx.stdin),
+      texts.map((text) => byteView(text)),
+      variables,
+      env,
+    ),
+    new IOResult(),
+  ]
 }
 
 export const GENERAL_ENVSUBST = command({

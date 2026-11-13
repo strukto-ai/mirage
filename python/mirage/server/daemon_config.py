@@ -19,7 +19,6 @@ from typing import Any
 ALLOWED_KEYS = frozenset(
     {
         "url",
-        "socket",
         "auth_token",
         "auth_mode",
         "allowed_hosts",

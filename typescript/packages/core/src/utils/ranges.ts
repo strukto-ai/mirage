@@ -122,24 +122,6 @@ function errorFields(err: unknown): {
 }
 
 /**
- * Whether an error means "that window runs past the end of the object".
- *
- * OpenDAL's node binding takes an exact byte range and refuses to return
- * fewer bytes than asked for, where a POSIX read simply comes back short.
- * Python is not affected: its binding opens a file object, and `f.read(n)`
- * stops at EOF like any file. The two OpenDAL-backed node backends (hf and
- * nextcloud) therefore retry the read unbounded and take the window
- * themselves; the predicate lives here beside the 416 one rather than in
- * both of them.
- *
- * @param err whatever the reader threw
- */
-export function isShortRangeRefusal(err: unknown): boolean {
-  const { message } = errorFields(err)
-  return /got too little data/i.test(message) || /reader got too little/i.test(message)
-}
-
-/**
  * Whether an error means "that byte window starts past the end of the object".
  *
  * A POSIX read at or past EOF returns zero bytes; an HTTP store answers 416

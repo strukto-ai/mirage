@@ -1,9 +1,7 @@
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TypeAlias
+from typing import Literal, TypeAlias
 from xml.etree import ElementTree
-
-from mirage.types import FindType
 
 XmlElement: TypeAlias = ElementTree.Element
 
@@ -27,7 +25,7 @@ class Property:
 @dataclass(frozen=True, slots=True)
 class SearchEntry:
     key: str
-    kind: FindType
+    kind: Literal["f", "d"]
     size: int | None
     modified: str | None
 

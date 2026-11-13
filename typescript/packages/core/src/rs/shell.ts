@@ -105,8 +105,8 @@ export class ShellTree {
 
   constructor(
     /** The line as typed. */
-    readonly original: string,
-    readonly table: Uint32Array,
+    private originalText: string,
+    private nodeTable: Uint32Array,
     /** The engine's own copy of the tree, which a shell's tasks expand nodes of. */
     readonly handle: number,
     /**
@@ -117,12 +117,37 @@ export class ShellTree {
       readonly index: number
       readonly status: number
     } | null,
-    private readonly extras: ReturnType<typeof readExtras>,
+    private extras: ReturnType<typeof readExtras>,
   ) {
-    kept.register(this, handle)
+    kept.register(this, handle, this)
+  }
+
+  private released = false
+
+  check(): void {
+    if (this.released) throw new Error('shell tree is released')
+  }
+
+  dispose(): void {
+    if (this.released) return
+    this.released = true
+    kept.unregister(this)
+    instance().mirage_rs_shell_drop_tree(this.handle)
+    this.originalText = ''
+    this.nodeTable = new Uint32Array()
+    this.extras = { source: '', offsets: undefined, heredocs: [], inlined: new Map() }
+  }
+
+  get original(): string {
+    return this.originalText
+  }
+
+  get table(): Uint32Array {
+    return this.nodeTable
   }
 
   get rootNode(): ShellTreeNode {
+    this.check()
     return new ShellTreeNode(this, 0)
   }
 
@@ -130,7 +155,7 @@ export class ShellTree {
     return this.extras.source
   }
 
-  get offsets(): Uint32Array {
+  get offsets(): Uint32Array | undefined {
     return this.extras.offsets
   }
 
@@ -152,10 +177,12 @@ export class ShellTree {
    * (`utf8`).
    */
   refusal(head: string, first: number, utf8: boolean): string {
+    this.check()
     return this.error === null ? '' : this.words(0, head, first, utf8)
   }
 
   private words(what: number, head: string, first: number, utf8: boolean): string {
+    this.check()
     const wasm = instance()
     const bytes = encodeText(head)
     bytesAt(wasm, wasm.mirage_rs_args(bytes.byteLength), bytes.byteLength).set(bytes)
@@ -164,6 +191,7 @@ export class ShellTree {
   }
 
   inlined(index: number): string | undefined {
+    this.check()
     return this.extras.inlined.get(index)
   }
 
@@ -172,6 +200,7 @@ export class ShellTree {
    * it, by id: the line `$LINENO` numbers it by and the line it ends on, from 0.
    */
   rereadLines(index: number): Map<number, readonly [number, number]> {
+    this.check()
     const wasm = instance()
     const len = wasm.mirage_rs_shell_reread(this.handle, index)
     const numbers = new Uint32Array(wasm.memory.buffer, wasm.mirage_rs_shell_reread_lines(), len)
@@ -191,15 +220,16 @@ export class ShellTree {
    * heredocs it folded. Mirrors the parser's `Tree::typed`.
    */
   typed(start: number, end: number): string {
+    this.check()
     const { offsets, original } = this
-    const to = Math.min((offsets[end - 1] ?? 0) + 1, original.length)
-    const from = Math.min(offsets[start] ?? 0, to)
+    const to = Math.min((offsets?.[end - 1] ?? end - 1) + 1, original.length)
+    const from = Math.min(offsets?.[start] ?? start, to)
     const kept = new Uint8Array(to - from)
     const keep = (a: number, b: number): void => {
       for (let at = Math.max(a, from); at < Math.min(b, to); at++) kept[at - from] = 1
     }
     for (let index = start; index < end; index++) {
-      const at = offsets[index] ?? 0
+      const at = offsets?.[index] ?? index
       keep(at, at + 1)
     }
     for (const heredoc of this.heredocs) {
@@ -230,9 +260,14 @@ export class ShellTree {
  */
 export class ShellTreeNode implements ShellNode {
   constructor(
-    readonly tree: ShellTree,
+    private readonly owner: ShellTree,
     readonly index: number,
   ) {}
+
+  get tree(): ShellTree {
+    this.owner.check()
+    return this.owner
+  }
 
   private word(offset: number): number {
     return this.tree.table[this.index * WORDS + offset] ?? 0
@@ -309,6 +344,7 @@ export class ShellTreeNode implements ShellNode {
   }
 
   child(index: number): ShellTreeNode | null {
+    this.owner.check()
     return index >= 0 && index < this.childCount ? this.at(this.word(8) + index) : null
   }
 
@@ -320,6 +356,7 @@ export class ShellTreeNode implements ShellNode {
   }
 
   childForFieldName(name: string): ShellTreeNode | null {
+    this.owner.check()
     const field = fields.indexOf(name) + 1
     if (field === 0) return null
     return this.children.find((child) => ((child.word(0) >>> 16) & 0xff) === field) ?? null
@@ -354,7 +391,7 @@ export class ShellTreeNode implements ShellNode {
   }
 
   /** Where each UTF-16 unit of the tree's source came from in the line as typed, then its end. */
-  get offsets(): Uint32Array {
+  get offsets(): Uint32Array | undefined {
     return this.tree.offsets
   }
 
@@ -413,25 +450,28 @@ export function parseShell(
   const at = wasm.mirage_rs_shell_error_at()
   let error: ShellTree['error'] = null
   if (at >= 0) error = { index: at, status: wasm.mirage_rs_shell_status() }
-  const extras = readExtras(wasm)
+  const extras = readExtras(wasm, source)
   return new ShellTree(source, table, wasm.mirage_rs_shell_tree(), error, extras)
 }
 
 /** The parse's extras, laid out as `mirage_rs_shell_extras` describes them. */
 /** What a parse says of the line beyond its nodes. */
-export function readExtras(wasm: Exports) {
+export function readExtras(wasm: Exports, original?: string) {
   const words = new Uint32Array(
     wasm.memory.buffer,
     wasm.mirage_rs_shell_extras(),
     wasm.mirage_rs_shell_extras_len(),
   ).slice()
-  const text = bytesAt(wasm, wasm.mirage_rs_shell_text(), wasm.mirage_rs_shell_text_len()).slice()
-  const [sourceBytes = 0, heredocCount = 0, inlinedCount = 0] = words
+  const text = bytesAt(wasm, wasm.mirage_rs_shell_text(), wasm.mirage_rs_shell_text_len())
+  const [sourceBytes = 0, heredocCount = 0, inlinedCount = 0, mapCount = 0] = words
   let at = sourceBytes
   const next = (bytes: number): string => decodeText(text.subarray(at, (at += bytes)))
-  const source = decodeText(text.subarray(0, sourceBytes))
-  let word = 3
-  const offsets = words.subarray(word, (word += source.length + 1))
+  const source =
+    mapCount === 0 && original !== undefined && !SURROGATE.test(original)
+      ? original
+      : decodeText(text.subarray(0, sourceBytes))
+  let word = 4
+  const offsets = mapCount === 0 ? undefined : words.subarray(word, (word += mapCount))
   const heredocs: Heredoc[] = []
   for (let index = 0; index < heredocCount; index += 1, word += 11) {
     const [atSource = 0, operatorStart = 0, wordEnd = 0, bodyStart = 0, end = 0, flags = 0] =
