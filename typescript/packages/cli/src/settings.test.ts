@@ -284,8 +284,8 @@ describe('config writer', () => {
   it('unsetConfig leaves exactly one trailing newline', () => {
     const { dir, path } = tmpConfigPath()
     try {
-      writeFileSync(path, '[daemon]\nurl = "http://old:1"\nsocket = "/tmp/s"\n')
-      unsetConfig('socket', path)
+      writeFileSync(path, '[daemon]\nurl = "http://old:1"\nlogin_client_id = "mirage-cli"\n')
+      unsetConfig('login_client_id', path)
       expect(readFileSync(path, 'utf-8')).toBe('[daemon]\nurl = "http://old:1"\n')
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -339,8 +339,8 @@ describe('config writer', () => {
   it('round-trips a backslash-containing value through setConfig/getConfig', () => {
     const { dir, path } = tmpConfigPath()
     try {
-      setConfig('socket', 'C:\\pipes\\mirage', path)
-      expect(getConfig('socket', path)).toBe('C:\\pipes\\mirage')
+      setConfig('jwt_pubkey_file', 'C:\\keys\\mirage.pem', path)
+      expect(getConfig('jwt_pubkey_file', path)).toBe('C:\\keys\\mirage.pem')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -427,8 +427,8 @@ describe('config writer hardening', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-config-'))
     try {
       const path = join(dir, 'config.toml')
-      writeFileSync(path, '[daemon]\nurl = "http://a:1"\nsocket = "/tmp/s"\n')
-      unsetConfig('socket', path)
+      writeFileSync(path, '[daemon]\nurl = "http://a:1"\nlogin_client_id = "mirage-cli"\n')
+      unsetConfig('login_client_id', path)
       expect(statSync(path).mode & 0o777).toBe(0o600)
     } finally {
       rmSync(dir, { recursive: true, force: true })

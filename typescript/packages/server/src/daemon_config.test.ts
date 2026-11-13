@@ -36,7 +36,9 @@ describe('parseDaemonTable', () => {
   })
 
   it('unescapes backslashes in quoted values', () => {
-    expect(parseDaemonTable('[daemon]\nsocket = "C:\\\\pipes"\n').socket).toBe('C:\\pipes')
+    expect(parseDaemonTable('[daemon]\njwt_pubkey_file = "C:\\\\keys"\n').jwt_pubkey_file).toBe(
+      'C:\\keys',
+    )
   })
 
   it('unescapes escaped quotes in quoted values', () => {
@@ -64,8 +66,8 @@ describe('readDaemonTable', () => {
 
   it('reads [daemon] keys, stripping quotes', () => {
     const home = mkdtempSync(join(tmpdir(), 'mir-'))
-    writeFileSync(join(home, 'config.toml'), '[daemon]\nsocket = "/tmp/s.sock"\n')
-    expect(readDaemonTable(home).socket).toBe('/tmp/s.sock')
+    writeFileSync(join(home, 'config.toml'), '[daemon]\nlogin_client_id = "mirage-cli"\n')
+    expect(readDaemonTable(home).login_client_id).toBe('mirage-cli')
   })
 })
 

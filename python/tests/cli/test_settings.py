@@ -144,8 +144,8 @@ def test_load_daemon_settings_reads_config_under_mirage_home(
 
 def test_set_config_creates_file(tmp_path):
     p = tmp_path / "config.toml"
-    set_config("socket", "/tmp/s.sock", path=p)
-    assert get_config("socket", path=p) == "/tmp/s.sock"
+    set_config("login_client_id", "mirage-cli", path=p)
+    assert get_config("login_client_id", path=p) == "mirage-cli"
     assert "[daemon]" in p.read_text()
 
 
@@ -160,27 +160,27 @@ def test_set_config_updates_existing_key(tmp_path):
 def test_set_config_preserves_comments_and_other_keys(tmp_path):
     p = tmp_path / "config.toml"
     p.write_text('[daemon]\n# keep me\nurl = "http://a:1"\n')
-    set_config("socket", "/tmp/s.sock", path=p)
+    set_config("login_client_id", "mirage-cli", path=p)
     text = p.read_text()
     assert "# keep me" in text
     assert 'url = "http://a:1"' in text
-    assert get_config("socket", path=p) == "/tmp/s.sock"
+    assert get_config("login_client_id", path=p) == "mirage-cli"
 
 
 def test_unset_config_removes_key(tmp_path):
     p = tmp_path / "config.toml"
-    set_config("socket", "/tmp/s.sock", path=p)
-    unset_config("socket", path=p)
-    assert get_config("socket", path=p) is None
+    set_config("login_client_id", "mirage-cli", path=p)
+    unset_config("login_client_id", path=p)
+    assert get_config("login_client_id", path=p) is None
 
 
 def test_list_config_returns_written_keys(tmp_path):
     p = tmp_path / "config.toml"
     set_config("url", "http://a:1", path=p)
-    set_config("socket", "/tmp/s.sock", path=p)
+    set_config("login_client_id", "mirage-cli", path=p)
     assert list_config(path=p) == {
         "url": "http://a:1",
-        "socket": "/tmp/s.sock",
+        "login_client_id": "mirage-cli",
     }
 
 
@@ -244,8 +244,10 @@ def test_set_config_chmods_0600(tmp_path):
 
 def test_unset_config_chmods_0600(tmp_path):
     p = tmp_path / "config.toml"
-    p.write_text('[daemon]\nurl = "http://a:1"\nsocket = "/tmp/s"\n')
-    unset_config("socket", path=p)
+    p.write_text(
+        '[daemon]\nurl = "http://a:1"\nlogin_client_id = "mirage-cli"\n'
+    )
+    unset_config("login_client_id", path=p)
     assert (p.stat().st_mode & 0o777) == 0o600
 
 

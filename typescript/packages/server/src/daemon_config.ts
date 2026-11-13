@@ -18,7 +18,6 @@ import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 
 export const ALLOWED_KEYS: ReadonlySet<string> = new Set([
   'url',
-  'socket',
   'auth_token',
   'auth_mode',
   'allowed_hosts',
