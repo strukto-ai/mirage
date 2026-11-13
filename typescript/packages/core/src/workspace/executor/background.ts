@@ -80,7 +80,7 @@ import {
 } from './statement.ts'
 import { inheritTraps } from './traps.ts'
 import { descriptorName, ForkRoute } from './builtins/exec/index.ts'
-import { TO_STDERR, TO_STDOUT } from './builtins/exec/constants.ts'
+import { CLOSED, TO_STDERR, TO_STDOUT } from './builtins/exec/constants.ts'
 import { sessionOf } from './builtins/jobspec.ts'
 
 // Opt in by assigning a debug sink, as Python's module logger is off until
@@ -196,31 +196,35 @@ class JobCopy extends JobConsole {
 
 /**
  * The streams a job started from `node` writes, by descriptor, as its shell
- * hands them on: its stdout and stderr where an `exec` left them (`exec
- * 2>&1` crosses stderr over) and the copies the shell holds (`3>&1`), after
- * the job's own redirects (`sleep 9 >/dev/null &`). A stream sent to a file
- * or closed is gone.
+ * hands them on, each with what its descriptor names (`descriptorName`): its
+ * stdout and stderr where an `exec` left them (`exec 2>&1` crosses stderr
+ * over) and the copies the shell holds (`3>&1`), after the job's own
+ * redirects (`sleep 9 >/dev/null &`), a copy naming what it copies. A stream
+ * sent to a file or closed is gone.
  */
 export function jobStreams(
   node: TSNodeLike,
   session: SessionState,
-): Map<number, Channel | OwnedStream> {
+): Map<number, [string, Channel | OwnedStream]> {
   const terminal = new Map<string, Channel>([
     [TO_STDOUT, Channel.STDOUT],
     [TO_STDERR, Channel.STDERR],
   ])
-  const fds = new Map<number, Channel | OwnedStream | null>()
-  for (const fd of [1, 2]) fds.set(fd, terminal.get(descriptorName(session, fd)) ?? null)
+  const fds = new Map<number, [string, Channel | OwnedStream | null]>()
+  for (const fd of [1, 2]) {
+    const name = descriptorName(session, fd)
+    fds.set(fd, [name, terminal.get(name) ?? null])
+  }
   for (const [fd, descriptor] of session.descriptors)
-    if (fd > 2) fds.set(fd, descriptor.stream ?? null)
+    if (fd > 2) fds.set(fd, [descriptor.identity, descriptor.stream ?? null])
   if (nodeKind(node) === NodeKind.REDIRECT)
     for (const r of getRedirects(node)[1]) {
       if (r.target === FD_CLOSE) fds.delete(r.fd)
-      else if (typeof r.target === 'number') fds.set(r.fd, fds.get(r.target) ?? null)
-      else for (const fd of r.fd === FD_BOTH ? [1, 2] : [r.fd]) fds.set(fd, null)
+      else if (typeof r.target === 'number') fds.set(r.fd, fds.get(r.target) ?? [CLOSED, null])
+      else for (const fd of r.fd === FD_BOTH ? [1, 2] : [r.fd]) fds.set(fd, [CLOSED, null])
     }
-  const streams = new Map<number, Channel | OwnedStream>()
-  for (const [fd, stream] of fds) if (stream !== null) streams.set(fd, stream)
+  const streams = new Map<number, [string, Channel | OwnedStream]>()
+  for (const [fd, [name, stream]] of fds) if (stream !== null) streams.set(fd, [name, stream])
   return streams
 }
 
@@ -232,13 +236,12 @@ export function jobStreams(
 export function captureHold(
   waits: JobWaits,
   start: JobConsole,
-  streams: ReadonlyMap<number, Channel | OwnedStream>,
-  session: SessionState,
+  streams: ReadonlyMap<number, [string, Channel | OwnedStream]>,
   ended: () => Promise<void>,
 ): Hold | null {
   const named = new Set<string>()
-  for (const [fd, stream] of streams)
-    if (waits.reaches(start, new Set([stream]))) named.add(descriptorName(session, fd))
+  for (const [name, stream] of streams.values())
+    if (waits.reaches(start, new Set([stream]))) named.add(name)
   return named.size === 0 ? null : waits.add(ended, named)
 }
 
@@ -824,7 +827,7 @@ export async function handleBackground(
   const hold =
     session.jobWaits === null
       ? null
-      : captureHold(session.jobWaits, output, jobStreams(left, session), session, () =>
+      : captureHold(session.jobWaits, output, jobStreams(left, session), () =>
           job.console.waitFinished(),
         )
   if (hold !== null) bgSession.holds.push(hold)

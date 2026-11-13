@@ -714,6 +714,20 @@ describe('a job keeps the descriptors it started with', () => {
     }
   })
 
+  it.each([
+    '{ exec 4>/dev/null; sleep .1; echo held >&3; } 3>&1 >/dev/null &',
+    '{ exec 0>&1 >/dev/null; sleep .1; echo held >&0; } &',
+    '{ { exec >/dev/null; } >/dev/null; sleep .1; echo held; } &',
+  ])('a capture waits for a job still writing into it: %s', async (job) => {
+    const ws = buildWs()
+    try {
+      const io = await ws.shell(`x=$( ${job} ); echo "[$x]"`)
+      expect(io.stdoutText).toBe('[held]\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('a capture waits for a job whose subshell closed only its copy', async () => {
     const ws = buildWs()
     try {

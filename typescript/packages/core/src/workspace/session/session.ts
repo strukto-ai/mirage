@@ -494,6 +494,10 @@ export class SessionState {
   // The captures this shell holds open as a child of the shell that started
   // it, which its `exec` lets go of; a fork starts with none.
   holds: Hold[] = []
+  // What the descriptors a running redirect of this shell shadows point at,
+  // which it puts back when it ends: they stay open meanwhile, as bash keeps
+  // a copy of each, so a capture they lead into stays held.
+  shadowed: string[] = []
   // A per-call line's jobs, which a callback in it reaches; null otherwise.
   jobTable: JobTable | null = null
   shellOptions: Record<string, boolean>

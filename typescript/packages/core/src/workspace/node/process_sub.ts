@@ -156,7 +156,7 @@ export class ProcessSubScope {
     const hold =
       session.jobWaits === null
         ? null
-        : captureHold(session.jobWaits, jobs, streams, session, () => child.task)
+        : captureHold(session.jobWaits, jobs, streams, () => child.task)
     if (hold !== null) holds.push(hold)
     // A `<( )` the command reads has started before the command does, as bash
     // forks it, so the command's program knows the process writing the path.

@@ -158,7 +158,7 @@ class ProcessSubScope:
             async def ended() -> None:
                 await asyncio.wait((task,))
 
-            hold = capture_hold(waits, jobs, streams, session, ended)
+            hold = capture_hold(waits, jobs, streams, ended)
             if hold is not None:
                 holds.append(hold)
         # A `<( )` the command reads starts first, as bash forks it, so

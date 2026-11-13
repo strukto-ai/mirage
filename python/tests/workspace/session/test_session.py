@@ -53,6 +53,7 @@ TRANSIENT_FIELDS = (
     "_line_open",
     "terminal",
     "holds",
+    "shadowed",
     "_alias_expansion",
     "status_writer",
     "_borrowed",

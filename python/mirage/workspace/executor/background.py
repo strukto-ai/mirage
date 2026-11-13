@@ -96,6 +96,7 @@ from mirage.workspace.executor.builtins.exec import (
     descriptor_name,
 )
 from mirage.workspace.executor.builtins.exec.constants import (
+    CLOSED,
     TO_STDERR,
     TO_STDOUT,
 )
@@ -236,41 +237,47 @@ async def _send_stderr(sink: JobConsole, io: IOResult) -> None:
 
 def job_streams(
     node: TSNodeLike, session: SessionState
-) -> dict[int, Channel | OwnedStream]:
+) -> dict[int, tuple[str, Channel | OwnedStream]]:
     """The streams a job started from ``node`` writes, by descriptor, as
-    its shell hands them on: its stdout and stderr where an ``exec`` left
+    its shell hands them on, each with what its descriptor names
+    (``descriptor_name``): its stdout and stderr where an ``exec`` left
     them (``exec 2>&1`` crosses stderr over) and the copies the shell
     holds (``3>&1``), after the job's own redirects (``sleep 9 >/dev/null
-    &``). A stream sent to a file or closed is gone.
+    &``), a copy naming what it copies. A stream sent to a file or closed
+    is gone.
 
     Args:
         node (TSNodeLike): the backgrounded command.
         session (SessionState): the shell that starts it.
     """
     terminal = {TO_STDOUT: Channel.STDOUT, TO_STDERR: Channel.STDERR}
-    fds: dict[int, Channel | OwnedStream | None] = {
-        fd: terminal.get(descriptor_name(session, fd)) for fd in (1, 2)
-    }
+    fds: dict[int, tuple[str, Channel | OwnedStream | None]] = {}
+    for fd in (1, 2):
+        name = descriptor_name(session, fd)
+        fds[fd] = (name, terminal.get(name))
     for fd, descriptor in session.descriptors.items():
         if fd > 2:
-            fds[fd] = descriptor.stream
+            fds[fd] = (descriptor.identity, descriptor.stream)
     if node_kind(node) == NodeKind.REDIRECT:
         for r in get_redirects(node)[1]:
             if r.target == FD_CLOSE:
                 fds.pop(r.fd, None)
             elif isinstance(r.target, int):
-                fds[r.fd] = fds.get(r.target)
+                fds[r.fd] = fds.get(r.target, (CLOSED, None))
             else:
                 for fd in (1, 2) if r.fd == FD_BOTH else (r.fd,):
-                    fds[fd] = None
-    return {fd: stream for fd, stream in fds.items() if stream is not None}
+                    fds[fd] = (CLOSED, None)
+    return {
+        fd: (name, stream)
+        for fd, (name, stream) in fds.items()
+        if stream is not None
+    }
 
 
 def capture_hold(
     waits: JobWaits,
     start: JobConsole,
-    streams: dict[int, Channel | OwnedStream],
-    session: SessionState,
+    streams: dict[int, tuple[str, Channel | OwnedStream]],
     ended: Callable[[], Awaitable[None]],
 ) -> Hold | None:
     """Count a child in the capture one of its streams leads into, held
@@ -280,14 +287,13 @@ def capture_hold(
     Args:
         waits (JobWaits): the capture's waits.
         start (JobConsole): where the child writes.
-        streams (dict[int, Channel | OwnedStream]): what it writes, by
-            descriptor (``job_streams``).
-        session (SessionState): the shell that starts it.
+        streams (dict[int, tuple[str, Channel | OwnedStream]]): what it
+            writes, by descriptor, with what each names (``job_streams``).
         ended (Callable[[], Awaitable[None]]): returns once it has ended.
     """
     named = frozenset(
-        descriptor_name(session, fd)
-        for fd, stream in streams.items()
+        name
+        for name, stream in streams.values()
         if waits.reaches(start, {stream})
     )
     return waits.add(ended, named) if named else None
@@ -960,7 +966,6 @@ async def handle_background(
             waits,
             output,
             job_streams(left, session),
-            session,
             job.console.wait_finished,
         )
     )

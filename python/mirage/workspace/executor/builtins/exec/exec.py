@@ -486,7 +486,8 @@ def descriptor_name(session: SessionState, fd: int) -> str:
 
 def _settle_holds(session: SessionState) -> None:
     """Let go of each capture the shell holds open as a child once none
-    of its descriptors leads into it any more (``exec 2>/dev/null``).
+    of its descriptors leads into it any more (``exec 2>/dev/null``): fd
+    0 too (``exec 0>&1``), and the ones a running redirect shadows.
 
     Args:
         session (SessionState): the shell, its descriptors just rebound.
@@ -495,9 +496,9 @@ def _settle_holds(session: SessionState) -> None:
         return
     named = {
         descriptor_name(session, fd)
-        for fd in {FD_STDOUT, FD_STDERR, *session.descriptors}
-        if fd > FD_STDIN
+        for fd in {FD_STDIN, FD_STDOUT, FD_STDERR, *session.descriptors}
     }
+    named.update(session.shadowed)
     for hold in session.holds:
         hold.settle(named)
 

@@ -106,17 +106,19 @@ class JobWaits:
         hold = Hold(named)
 
         async def held() -> None:
-            waiting = (
-                asyncio.ensure_future(ended()),
-                asyncio.ensure_future(hold.released.wait()),
-            )
+            finished = asyncio.ensure_future(ended())
+            released = asyncio.ensure_future(hold.released.wait())
             try:
                 await asyncio.wait(
-                    waiting, return_when=asyncio.FIRST_COMPLETED
+                    (finished, released), return_when=asyncio.FIRST_COMPLETED
                 )
             finally:
-                for waiter in waiting:
-                    waiter.cancel()
+                released.cancel()
+                if not finished.done():
+                    finished.cancel()
+            # A wait that failed fails the join, as before the hold.
+            if finished.done():
+                finished.result()
 
         self.ends.append(held)
         return hold

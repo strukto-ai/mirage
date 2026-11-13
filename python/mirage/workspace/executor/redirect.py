@@ -76,7 +76,10 @@ from mirage.utils.path import CycleError, ends_at_dot, owner_prefix
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.background import drained, pump
 from mirage.workspace.executor.builtins import _to_scope
-from mirage.workspace.executor.builtins.exec import route_rebound
+from mirage.workspace.executor.builtins.exec import (
+    descriptor_name,
+    route_rebound,
+)
 from mirage.workspace.executor.builtins.exec.constants import (
     CLOSED,
     EXEC_STREAM_UNBOUND,
@@ -1544,6 +1547,7 @@ async def _handle_redirect(
     claimed = {
         fd for r in redirects for fd in ([1, 2] if r.fd == FD_BOTH else [r.fd])
     }
+    shadowed = [descriptor_name(session, fd) for fd in claimed]
     session.descriptors = dict(saved)
     recorder.session = session
     recorder.claimed = frozenset(
@@ -1600,6 +1604,8 @@ async def _handle_redirect(
     held = {field: getattr(session, field) for field in unbound}
     for field, value in unbound.items():
         setattr(session, field, value)
+    depth = len(session.shadowed)
+    session.shadowed.extend(shadowed)
     cancelled: asyncio.CancelledError | CommandTimeoutError | None = None
     try:
         if command is None:
@@ -1653,6 +1659,7 @@ async def _handle_redirect(
             await recorder.abort()
         for field, value in held.items():
             setattr(session, field, value)
+        del session.shadowed[depth:]
         reset_caller(enclosing)
         leave()
         session.job_output = job_output

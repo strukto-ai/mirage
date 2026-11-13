@@ -192,14 +192,15 @@ export function descriptorName(session: SessionState, fd: number): string {
 
 /**
  * Let go of each capture the shell holds open as a child once none of its
- * descriptors leads into it any more (`exec 2>/dev/null`). Mirrors
- * Python's _settle_holds.
+ * descriptors leads into it any more (`exec 2>/dev/null`): fd 0 too (`exec
+ * 0>&1`), and the ones a running redirect shadows. Mirrors Python's
+ * _settle_holds.
  */
 function settleHolds(session: SessionState): void {
   if (session.holds.length === 0) return
-  const named = new Set<string>()
-  for (const fd of new Set([FD_STDOUT, FD_STDERR, ...session.descriptors.keys()]))
-    if (fd > FD_STDIN) named.add(descriptorName(session, fd))
+  const named = new Set<string>(session.shadowed)
+  for (const fd of new Set([FD_STDIN, FD_STDOUT, FD_STDERR, ...session.descriptors.keys()]))
+    named.add(descriptorName(session, fd))
   for (const hold of session.holds) hold.settle(named)
 }
 

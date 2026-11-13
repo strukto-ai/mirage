@@ -79,7 +79,7 @@ import {
   OPEN_FOR_READ_WRITE,
   OPEN_FOR_READING,
 } from './builtins/exec/constants.ts'
-import { routeRebound } from './builtins/exec/index.ts'
+import { descriptorName, routeRebound } from './builtins/exec/index.ts'
 import { toScope } from './builtins/scope.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, isUnwinding, takeStderr, takeStdout, type Unwinding } from './control.ts'
@@ -1227,6 +1227,7 @@ async function runRedirects(
   let io = new IOResult()
   const saved = session.descriptors
   const claimed = new Set(redirects.flatMap((r) => (r.fd === FD_BOTH ? [1, 2] : [r.fd])))
+  const shadowed = [...claimed].map((fd) => descriptorName(session, fd))
   recorder.session = session
   recorder.claimed = new Set(
     [...claimed].flatMap((fd) => (fd === 1 ? [Channel.STDOUT] : fd === 2 ? [Channel.STDERR] : [])),
@@ -1255,6 +1256,8 @@ async function runRedirects(
     Object.keys(unbound).map((field) => [field, session[field as keyof typeof unbound]]),
   )
   Object.assign(session, unbound)
+  const depth = session.shadowed.length
+  session.shadowed.push(...shadowed)
   try {
     const given = inputs.get(0) ?? null
     if (command === null) {
@@ -1313,6 +1316,7 @@ async function runRedirects(
   } finally {
     if (cancelled === null) await recorder.abort()
     Object.assign(session, held)
+    session.shadowed.length = depth
     leave()
     session.jobOutput = jobOutput
     for (const file of files) file.emit = null

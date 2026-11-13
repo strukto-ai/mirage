@@ -483,10 +483,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "x=$( (sleep 1; echo j >&3) 3>&1 >/dev/null & echo r); echo \"$x\"",
+      "command": "x=$( (sleep 1; echo j >&3) 3>&1 >/dev/null & echo r); echo \"$x\"; y=$( { exec 4>/dev/null; sleep .1; echo a >&3; } 3>&1 >/dev/null & ); z=$( { exec 0>&1 >/dev/null; sleep .1; echo b >&0; } & ); w=$( { { exec >/dev/null; } >/dev/null; sleep .1; echo c; } & ); echo \"$y$z$w\"",
       "expect": {
         "exit": 0,
-        "stdout": "r\nj\n",
+        "stdout": "r\nj\nabc\n",
         "stderr": ""
       }
     },

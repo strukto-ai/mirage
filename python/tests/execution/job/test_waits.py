@@ -92,3 +92,15 @@ def test_a_hold_stays_while_a_copy_still_names_the_stream():
     hold = Hold(frozenset({"&1"}))
     hold.settle({"/dev/null", "&2", "&1"})
     assert not hold.released.is_set()
+
+
+@pytest.mark.asyncio
+async def test_join_fails_when_waiting_for_a_child_fails():
+    waits = JobWaits(JobOutput(JobConsole()))
+
+    async def broken() -> None:
+        raise ConnectionError("store lost")
+
+    waits.add(broken, frozenset({"&1"}))
+    with pytest.raises(ConnectionError):
+        await asyncio.wait_for(waits.join(JobConsole()), 5)

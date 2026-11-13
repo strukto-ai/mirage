@@ -1164,3 +1164,21 @@ async def test_a_capture_waits_for_a_job_whose_subshell_closed_only_its_copy():
         assert await res.materialize_stdout() == b"[held]\n"
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "job",
+    [
+        "{ exec 4>/dev/null; sleep .1; echo held >&3; } 3>&1 >/dev/null &",
+        "{ exec 0>&1 >/dev/null; sleep .1; echo held >&0; } &",
+        "{ { exec >/dev/null; } >/dev/null; sleep .1; echo held; } &",
+    ],
+)
+async def test_a_capture_waits_for_a_job_still_writing_into_it(job):
+    ws = _workspace()
+    try:
+        res = await ws.shell(f'x=$( {job} ); echo "[$x]"')
+        assert await res.materialize_stdout() == b"[held]\n"
+    finally:
+        await ws.close()

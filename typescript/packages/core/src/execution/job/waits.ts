@@ -91,7 +91,17 @@ export class JobWaits {
    */
   add(ended: () => Promise<void>, named: ReadonlySet<string>): Hold {
     const hold = new Hold(named)
-    this.ends.push(() => Promise.race([ended(), hold.released]))
+    this.ends.push(() => {
+      const finished = ended()
+      // A wait that fails before the child lets go fails the join; one that
+      // fails after is no longer the capture's.
+      void hold.released.then(() =>
+        finished.catch((error: unknown) => {
+          console.debug('waiting for a child that let go failed', error)
+        }),
+      )
+      return Promise.race([finished, hold.released])
+    })
     return hold
   }
 

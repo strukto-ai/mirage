@@ -100,6 +100,12 @@ describe('JobWaits', () => {
     expect(released).toBe(false)
   })
 
+  it('fails the join when waiting for a child fails', async () => {
+    const waits = new JobWaits(new JobOutput(new JobConsole()))
+    waits.add(() => Promise.reject(new Error('store lost')), new Set(['&1']))
+    await expect(waits.join(new JobConsole())).rejects.toThrow('store lost')
+  })
+
   it('hands what the other jobs write on to the caller once it ends', async () => {
     const capture = new JobOutput(new JobConsole())
     const rest = new JobConsole()
