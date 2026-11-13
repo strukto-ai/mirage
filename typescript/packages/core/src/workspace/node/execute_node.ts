@@ -788,6 +788,8 @@ export async function executeNode(
 ): Promise<RedirectResult> {
   const session = context.session
   if (endsShell) {
+    if (node.type === NT.REDIRECTED_STATEMENT)
+      context.frame.ending = getRedirects(node)[0]?.id ?? null
     const { signal, lineHandle } = deps
     const executeFn: ExecuteFn = (cmd, opts) =>
       deps.executeFn(cmd, {

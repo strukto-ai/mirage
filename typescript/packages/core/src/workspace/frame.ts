@@ -46,6 +46,10 @@ export class ExecutionFrame {
   // The pipe a pipeline stage reads, which a program the stage starts reads
   // too while its standard input is still that pipe.
   stdin: ByteSource | null = null
+  // The id of the command a job runs as a whole, whose redirects its shell
+  // never puts back: it ends with the command, so bash keeps no copy of what
+  // they replace.
+  ending: number | null = null
 
   fork(): ExecutionFrame {
     const child = new ExecutionFrame()

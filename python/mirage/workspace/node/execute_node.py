@@ -858,6 +858,9 @@ async def execute_node(
     # runs its EXIT action when the node ends, its evaluator bound the
     # way `_execute_node` binds it for the node's own lines.
     if ends_shell:
+        if node.type == NT.REDIRECTED_STATEMENT:
+            whole = get_redirects(node)[0]
+            context.frame.ending = None if whole is None else whole.id
         return await end_shell(
             partial(
                 execute_fn,

@@ -702,6 +702,7 @@ describe('a job keeps the descriptors it started with', () => {
   it.each([
     '{ exec >/dev/null; sleep .3; touch /m/held; } &',
     '(exec >/dev/null; sleep .3; touch /m/held) &',
+    '{ exec >/dev/null 2>&1; sleep .3; touch /m/held; } 2>&1 >/dev/null &',
   ])('a capture lets go of a job that closed its stdout: %s', async (job) => {
     const ws = buildWs()
     try {

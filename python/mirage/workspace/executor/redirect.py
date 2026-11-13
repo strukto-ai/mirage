@@ -1547,7 +1547,13 @@ async def _handle_redirect(
     claimed = {
         fd for r in redirects for fd in ([1, 2] if r.fd == FD_BOTH else [r.fd])
     }
-    shadowed = [descriptor_name(session, fd) for fd in claimed]
+    # What the claimed descriptors pointed at stays open under the
+    # redirect, unless the shell ends with the command (a job's own).
+    shadowed = (
+        []
+        if command is not None and context.frame.ending == command.id
+        else [descriptor_name(session, fd) for fd in claimed]
+    )
     session.descriptors = dict(saved)
     recorder.session = session
     recorder.claimed = frozenset(

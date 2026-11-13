@@ -1140,6 +1140,7 @@ async def test_a_job_keeps_the_stream_its_shell_had_when_it_started(
     [
         "{ exec >/dev/null; sleep .3; touch /m/held; } &",
         "(exec >/dev/null; sleep .3; touch /m/held) &",
+        "{ exec >/dev/null 2>&1; sleep .3; touch /m/held; } 2>&1 >/dev/null &",
     ],
 )
 async def test_a_capture_lets_go_of_a_job_that_closed_its_stdout(job):

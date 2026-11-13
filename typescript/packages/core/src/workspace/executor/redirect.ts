@@ -1227,7 +1227,12 @@ async function runRedirects(
   let io = new IOResult()
   const saved = session.descriptors
   const claimed = new Set(redirects.flatMap((r) => (r.fd === FD_BOTH ? [1, 2] : [r.fd])))
-  const shadowed = [...claimed].map((fd) => descriptorName(session, fd))
+  // What the claimed descriptors pointed at stays open under the redirect,
+  // unless the shell ends with the command (a job's own).
+  const shadowed =
+    command !== null && context.frame.ending === command.id
+      ? []
+      : [...claimed].map((fd) => descriptorName(session, fd))
   recorder.session = session
   recorder.claimed = new Set(
     [...claimed].flatMap((fd) => (fd === 1 ? [Channel.STDOUT] : fd === 2 ? [Channel.STDERR] : [])),

@@ -413,11 +413,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "x=$( (sleep 1; echo late) >&2 & echo ready); echo \"got $x\" >&2; sleep 2; y=$( { exec >/dev/null; sleep .3; touch {mount}/job-held; } & ); [ -e {mount}/job-held ] && echo waited >&2 || echo closed >&2; sleep .5; rm -f {mount}/job-held",
+      "command": "x=$( (sleep 1; echo late) >&2 & echo ready); echo \"got $x\" >&2; sleep 2; y=$( { exec >/dev/null; sleep .3; touch {mount}/job-held; } & ); [ -e {mount}/job-held ] && echo waited >&2 || echo closed >&2; sleep .5; rm -f {mount}/job-held; z=$( { exec >/dev/null 2>&1; sleep .3; touch {mount}/job-held; } 2>&1 >/dev/null & ); [ -e {mount}/job-held ] && echo waited >&2 || echo closed >&2; sleep .5; rm -f {mount}/job-held",
       "expect": {
         "exit": 0,
         "stdout": "",
-        "stderr": "got ready\nlate\nclosed\n"
+        "stderr": "got ready\nlate\nclosed\nclosed\n"
       }
     },
     {
