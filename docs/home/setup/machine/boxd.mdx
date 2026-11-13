@@ -1,0 +1,155 @@
+---
+title: boxd
+icon: /images/boxd-logo.svg
+description: Run captured programs on a boxd machine you created.
+---
+
+The `boxd` machine provider reaches a [boxd](https://boxd.sh?ref=mirage)
+machine, by ID, and the `remote` runtime runs captured programs on it. A boxd
+machine is a full Ubuntu VM with its own kernel and a persistent disk. You
+create the machine; Mirage only runs programs on it. Python and Node.
+
+## Installation
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```bash
+    pip install 'mirage-ai[boxd]'
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```bash
+    pnpm add @boxd-sh/sdk
+    ```
+  </Tab>
+</Tabs>
+
+Set `api_key` in the config, as a value or a
+[credential pointer](/home/credentials#pointer-fields), or `BOXD_API_KEY`.
+Set `region` (`fra` or `nyc`) to the machine's region, or `BOXD_REGION`;
+without either, the SDK looks in your account's default region.
+
+Create the machine with the [boxd CLI](https://docs.boxd.sh/cli/commands?ref=mirage),
+the console or the SDK, and pass its ID as `machine_id`:
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from boxd import AsyncBoxd
+
+    boxd = AsyncBoxd(region="fra")
+    machine = await boxd.machines.create("mirage-box", isolated=True)
+    await boxd.machines.wait_until_ready(machine.id)
+    print(machine.id)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { Boxd } from '@boxd-sh/sdk'
+
+    const boxd = new Boxd({ region: 'fra' })
+    const machine = await boxd.machines.create({ name: 'mirage-box', isolated: true })
+    await boxd.machines.waitUntilReady(machine.id)
+    console.log(machine.id)
+    ```
+  </Tab>
+</Tabs>
+
+`isolated` keeps the machine off your organization's private network and out
+of reach of its credentials, which suits programs an agent writes.
+
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/runtime/overview#captures):
+every program Mirage does not have itself. Name `@python` to run
+Python on the machine too.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import RAMVFS, MountMode, Workspace
+    from mirage.runtime.machine import RemoteRuntime
+
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={
+            "box": {
+                "provider": "boxd",
+                "machine_id": "machine-id",
+                "region": "fra",
+            }
+        },
+        runtimes=[RemoteRuntime(["@python", "@external"], machine="box")],
+    )
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, RemoteRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: {
+          box: { provider: 'boxd', machineId: 'machine-id', region: 'fra' },
+        },
+        runtimes: [new RemoteRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+      },
+    )
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    mode: exec
+    machines:
+      box:
+        provider: boxd
+        machine_id: ${BOXD_MACHINE_ID}
+        region: fra
+    runtimes:
+      - name: remote
+        captures: ["@python", "@external"]
+        machine: box
+    mounts:
+      /data:
+        vfs: ram
+    ```
+  </Tab>
+</Tabs>
+
+## Connecting the workspace
+
+boxd takes no `mount_type`. Put the files the programs need on the machine
+yourself, or pass them in on stdin.
+
+## The machine's lifetime
+
+The machine is yours: Mirage never creates, starts, stops or deletes it, and
+closing the workspace leaves it as it is. A machine in standby or hibernated
+wakes on the first line. A machine's processes and disk survive between
+lines, so a background job started with `nohup` keeps running.
+
+Once the machine is stopped or deleted, a line exits 1, and its error names
+the fix:
+
+```text
+machine 2c95f55f-... is not running: it was stopped; start it (`boxd machine start`) and run the line again
+```
+
+A line that is running when the connection to the machine drops exits 129.
+The next line connects again.
+
+## Notes
+
+- Output comes back as the program wrote it, binary included, with stdout
+  and stderr apart.
+- Piped input reaches the program as it is read. Without piped input, stdin
+  starts closed.
+- Commands run concurrently, each with its own input and output.
+- A Mirage [timeout](/home/setup/machine/overview#timeouts) stops every
+  process of that run.
+- Size, region, networking and the machine's idle timers stay boxd settings.

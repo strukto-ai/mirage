@@ -24,6 +24,7 @@ from mirage.machine.handle import MachineHandle
 # holds module paths and imports the class only when a machine is built.
 MACHINE_MODULES: dict[str, str] = {
     "apple_container": "mirage.machine.apple_container:AppleContainerMachine",
+    "boxd": "mirage.machine.boxd:BoxdMachine",
     "cloudflare_container": "mirage.machine.cloudflare_container:ContainerMachine",
     "daytona": "mirage.machine.daytona:DaytonaMachine",
     "docker": "mirage.machine.docker:DockerMachine",

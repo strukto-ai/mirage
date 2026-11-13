@@ -380,6 +380,28 @@
     "SandboxNotRunningException": "Python's guarded SDK import names each class it uses; TypeScript loads the e2b module and reads SandboxNotRunningError off it."
    }
   },
+  "machine/boxd/config": {
+   "typescript_only": {
+    "BOXD_CONFIG_FIELDS": "A TypeScript runtime lists the keys its config takes, each with its type, so an unknown key fails loud at construction and a saved runtime's form is typed; Python reads both off the config dataclass."
+   }
+  },
+  "machine/boxd/handle": {
+   "typescript_only": {
+    "drain": "TypeScript's exec stream hands stdout and stderr over as two async iterables, each drained into its sink; Python's yields both from one iterator, read inline."
+   }
+  },
+  "machine/boxd/sdk": {
+   "python_only": {
+    "APIConnectionError": "Python's guarded SDK import names each class it uses; TypeScript loads the @boxd-sh/sdk module and reads APIConnectionError off it.",
+    "AsyncBoxd": "Python's guarded SDK import names each class it uses; TypeScript loads the @boxd-sh/sdk module and reads Boxd off it.",
+    "ConflictError": "Python's guarded SDK import names each class it uses; TypeScript loads the @boxd-sh/sdk module and reads ConflictError off it.",
+    "NotFoundError": "Python's guarded SDK import names each class it uses; TypeScript loads the @boxd-sh/sdk module and reads NotFoundError off it."
+   },
+   "typescript_only": {
+    "BoxdSdk": "TypeScript loads the optional peer at the runtime boundary, typed as the module; Python imports it when the module loads, behind a guard.",
+    "loadSdk": "TypeScript loads the optional peer at the runtime boundary, typed as the module; Python imports it when the module loads, behind a guard."
+   }
+  },
   "machine/ssh/sdk": {
    "python_only": {
     "DisconnectError": "asyncssh raises its own error when a connection drops mid-line, which the handle maps to a lost connection; ssh2 reports the same drop as a channel that closed with no exit status, so TypeScript names no error class."
