@@ -16,6 +16,7 @@ import type { ProcessPermissions } from '../process/config.ts'
 import type { ProcessHandle } from '../process/handle.ts'
 import { ProcessTable } from '../process/table.ts'
 import { shownMachine } from '../process/types.ts'
+import { currentRequest } from '../../io/web/request.ts'
 import { PathSpec } from '../../types.ts'
 import { JobConsole } from '../../shell/console/index.ts'
 import {
@@ -899,8 +900,22 @@ export class JobTable {
     for (const [child, process] of [...this.substitutions]) {
       const { record } = process
       if (record.sessionId === sessionId && record.parent === shell && (pid ?? child) === child)
-        await process.join()
+        await this.substitutionEnded(process)
     }
+  }
+
+  /**
+   * Wait for a substitution's process to end. On an edge runtime the request
+   * that runs it may not be the one waiting, and a wake from that one would
+   * run this waiter inside it, so the waiter looks on its own timer instead,
+   * every 10 ms, as a polled `BytePipe` does.
+   */
+  private async substitutionEnded(process: ProcessHandle): Promise<void> {
+    if (currentRequest() === null) {
+      await process.join()
+      return
+    }
+    while (process.record.endedAt === null) await new Promise((resolve) => setTimeout(resolve, 10))
   }
 
   /**
