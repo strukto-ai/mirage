@@ -998,7 +998,7 @@ async def test_sleep_pauses_a_sandbox_a_connect_under_way_at_close_reached():
     machine = E2BMachine(
         "box", config={"sandbox_id": "sb-live", "on_sleep": "pause"}
     )
-    connecting = asyncio.ensure_future(machine._ensure_connected())
+    connecting = asyncio.ensure_future(machine.ensure_connected())
     await asyncio.sleep(0)
     await machine.close()
     await connecting
