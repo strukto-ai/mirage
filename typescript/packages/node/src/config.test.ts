@@ -1308,6 +1308,37 @@ describe('machines runtime: reference', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  it('keeps a referenced runtime on a copy, and refuses a sandbox on it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-rt-'))
+    writeFileSync(join(dir, 'box.mjs'), BOX)
+    writeFileSync(
+      join(dir, 'ws.yaml'),
+      'mounts:\n  /data:\n    vfs: ram\n' +
+        'machines:\n  gpu: {provider: in_process, runtime: ./box.mjs:EchoBox}\n',
+    )
+    const args = await configToWorkspaceArgs(loadWorkspaceConfigFile(join(dir, 'ws.yaml')))
+    const ws = new Workspace(args.mounts, args.options)
+    const copied = await ws.copy()
+    try {
+      expect(copied.engines().map((r) => r.name)).toEqual(['gpu', 'workspace'])
+      const run = await copied.shell('nvidia-smi -L')
+      expect(new TextDecoder().decode(run.stdout)).toMatch(/^box:/)
+    } finally {
+      await copied.close()
+      await ws.close()
+    }
+    writeFileSync(
+      join(dir, 'ws.yaml'),
+      'mounts:\n  /data:\n    vfs: ram\n' +
+        'machines:\n  gpu:\n    provider: in_process\n    runtime: ./box.mjs:EchoBox\n' +
+        '    sandbox: {fs_writable: [/tmp]}\n',
+    )
+    await expect(
+      configToWorkspaceArgs(loadWorkspaceConfigFile(join(dir, 'ws.yaml'))),
+    ).rejects.toThrow("machine 'gpu': only a host takes a sandbox")
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   it('refuses an unknown entry key on a referenced runtime', async () => {
     // A referenced class takes the entry's other keys as its config, so a
     // typo fails the way it does for a builtin runtime instead of leaving

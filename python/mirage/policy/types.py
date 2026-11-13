@@ -867,9 +867,7 @@ class RouteContext:
         [p.virtual for p in ctx.commands[1].paths] == ["/data/process.py"]
         ctx.session.cwd() == "/data"
 
-    A script gets the same as plain data (``script_context``), with
-    ``ctx["runtime"]`` naming the runtime when a runtime's own
-    ``script:`` is asked.
+    A script gets the same as plain data (``script_context``).
 
     Args:
         line (str): the line as typed.

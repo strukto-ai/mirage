@@ -443,10 +443,7 @@ export class MachineTable {
     const placed = processes
       .live()
       .filter(
-        (p) =>
-          p.record.sessionId === session &&
-          !p.record.program &&
-          p.record.machinePid !== null,
+        (p) => p.record.sessionId === session && !p.record.program && p.record.machinePid !== null,
       ).length
     if (placed >= MAX_PROCESSES) {
       console.debug(

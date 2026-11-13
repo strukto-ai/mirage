@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "id": "runtime_arg_per_line",
+      "id": "machine_arg_per_line",
       "world": {
         "machines": {
           "monty": {
@@ -81,7 +81,7 @@
       ]
     },
     {
-      "id": "add_runtime_local",
+      "id": "add_machine_local",
       "world": {
         "machines": {
           "monty": {
@@ -120,7 +120,7 @@
       ]
     },
     {
-      "id": "add_runtime_monty",
+      "id": "add_machine_monty",
       "hosts": [
         "typescript"
       ],
@@ -194,7 +194,7 @@
       ]
     },
     {
-      "id": "runtime_arg_uncaptured_inert",
+      "id": "machine_arg_uncaptured_inert",
       "world": {
         "machines": {
           "monty": {
@@ -246,7 +246,7 @@
       ]
     },
     {
-      "id": "runtime_arg_workspace_refused",
+      "id": "machine_arg_workspace_refused",
       "world": {
         "machines": {
           "monty": {
@@ -422,7 +422,7 @@
       ]
     },
     {
-      "id": "policy_verdict_places_runtime",
+      "id": "policy_verdict_places_machine",
       "world": {
         "machines": {
           "monty": {

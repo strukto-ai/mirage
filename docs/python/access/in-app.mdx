@@ -248,7 +248,7 @@ One session's handle, from [`ws.session`](#ws-session). Every call on it runs un
 ```python
 await session.shell(
     command, stdin=None, cwd=None, env=None,
-    cancel=None, record=True, runtime=None, stream=False,
+    cancel=None, record=True, stream=False, machine=None,
 ) -> IOResult | ShellExecution
 ```
 
@@ -269,8 +269,8 @@ Runs a shell line as the session. With `stream=False`, it collects the execution
 <ResponseField name="record" type="bool" default="True">
   `False` keeps the line out of history.
 </ResponseField>
-<ResponseField name="runtime" type="str">
-  Run the line on this workspace [runtime](/home/setup/runtime/overview) entry, by name, instead of the one routing picks.
+<ResponseField name="machine" type="str">
+  Run the commands this workspace [machine](/home/setup/machine/overview) captures on it, by name, instead of where routing puts them. Raises `ValueError` for a name the workspace does not have.
 </ResponseField>
 
 <Expandable title="IOResult">

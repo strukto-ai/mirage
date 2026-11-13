@@ -8385,10 +8385,14 @@ components:
           description: The runtime an `in_process` machine runs, such as quickjs, or a
             `source:Class` reference.
         sandbox:
-          type: object
+          type:
+            - object
+            - string
           additionalProperties: true
-          description: Paths a `host` machine's programs may read and write, which confines
-            them.
+          description: For a `host` machine, the paths its programs may read and write, which
+            confines them; for microsandbox, the name of the running sandbox.
+      required:
+        - provider
       additionalProperties: true
     ExplainNode:
       type: object

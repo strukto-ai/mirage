@@ -89,11 +89,6 @@ def known_runtimes() -> list[str]:
     return sorted(NAMED)
 
 
-# The default world when no runtimes list is given: the builtin command
-# engine alone, as TypeScript's, so an interpreter runs only where the
-# config names one (integ/runtime/routing/defaults.json pins it).
-DEFAULT_ENTRIES: tuple[str, ...] = (WorkspaceRuntime.name,)
-
 # TypeScript-only engine names a cross-language config may carry.
 RUNTIME_HINTS: dict[str, str] = {
     "pyodide": (
@@ -152,7 +147,8 @@ def build_entry(
 
     Raises:
         ValueError: ``workspace`` for anything but the shell, an engine
-            its provider does not run, or what ``build_machine`` refuses.
+            its provider does not run, a ``sandbox`` that is not a
+            mapping, or what ``build_machine`` refuses.
     """
     if isinstance(spec, Runtime):
         runtime = spec
@@ -169,6 +165,8 @@ def build_entry(
         provider = fields.pop("provider")
         captures = fields.pop("captures", None)
         sandbox = fields.pop("sandbox", None)
+        if "sandbox" in spec and not isinstance(sandbox, Mapping):
+            raise ValueError(f"machine {name!r}: sandbox must be a mapping")
         cls = _runtime_for(
             name, provider, fields.pop("runtime", None), sandbox
         )
@@ -191,7 +189,7 @@ def build_entry(
 def _runtime_for(
     name: str,
     provider: str,
-    runtime: str | None,
+    runtime: str | type[Runtime[Any]] | None,
     sandbox: Mapping[str, Any] | None,
 ) -> type[Runtime[Any]]:
     """The runtime an engine provider's entry runs.
@@ -199,7 +197,8 @@ def _runtime_for(
     Args:
         name (str): the entry's name, for the message.
         provider (str): ``in_process``, ``worker`` or ``host``.
-        runtime (str | None): the entry's ``runtime``.
+        runtime (str | type[Runtime] | None): the entry's ``runtime``: a
+            registered name, a ``source:Class`` reference, or the class.
         sandbox (Mapping[str, Any] | None): the entry's ``sandbox``.
 
     Raises:
@@ -223,6 +222,12 @@ def _runtime_for(
         return MontyRuntime
     if runtime is None:
         return WorkspaceRuntime
+    if isinstance(runtime, type):
+        if not issubclass(runtime, Runtime):
+            raise ValueError(
+                f"machine {name!r}: its runtime is not a Runtime subclass"
+            )
+        return runtime
     if ":" in runtime:
         loaded = load_attr(runtime)
         if not (isinstance(loaded, type) and issubclass(loaded, Runtime)):
@@ -352,7 +357,7 @@ def machine_bindings_for(
         repr(e.name) for e in entries if e.name != WorkspaceRuntime.name
     )
     raise ValueError(
-        f"unknown machine: {name!r} (workspace machines: {known})"
+        f"unknown machine: {name!r} (workspace machines: {known or 'none'})"
     )
 
 

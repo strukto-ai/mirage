@@ -78,14 +78,13 @@ ws = Workspace(
             "commands": {"deny": ["slack send-message", "curl"]},
         },
     },
-    # le bac à sable e2b est une machine ; le runtime remote y exécute les programmes
-    machines={"box": {"provider": "e2b", "sandbox_id": sandbox_id, "mount_type": "ssh"}},
-    runtimes=[
-        MontyRuntime(captures=["python", "python3"]),
-        RemoteRuntime(captures=["python", "python3"], machine="box"),
-    ],
+    # python tourne sur monty dans un worker, ou dans le bac à sable e2b
+    machines={
+        "py": {"provider": "worker"},
+        "box": {"provider": "e2b", "sandbox_id": sandbox_id, "mount_type": "ssh", "captures": ["python", "python3"]},
+    },
     # route le calcul sous-jacent : les lignes numpy tournent sur la machine, le reste sur monty
-    route_policy=lambda ctx: "remote" if "numpy" in ctx.line else None,
+    route_policy=lambda ctx: "box" if "numpy" in ctx.line else None,
 )
 
 # ajoute un agent qui utilise le profil analyst
@@ -269,11 +268,11 @@ npm install @struktoai/mirage-node @pydantic/monty express
 
 ```ts
 import express from 'express'
-import { MontyRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
   { '/work': new RAMVFS() },
-  { mode: MountMode.EXEC, runtimes: [new MontyRuntime({ captures: ['python', 'python3'] })] },
+  { mode: MountMode.EXEC, machines: { py: { provider: 'worker' } } },
 )
 const app = express()
 app.use(express.json())

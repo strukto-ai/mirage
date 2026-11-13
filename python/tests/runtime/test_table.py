@@ -27,7 +27,6 @@ from mirage.runtime.python import LocalRuntime
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.table import (
     BUILTIN_RUNTIMES,
-    DEFAULT_ENTRIES,
     NAMED,
     bind_commands,
     build_entry,
@@ -72,10 +71,6 @@ class DirectEngine(LanguageRuntime):
 
     async def interpret(self, engine, program, ctx) -> RunResult:
         return RunResult(stdout=b"", stderr=None, exit_code=0)
-
-
-def test_default_world_is_the_workspace_alone():
-    assert DEFAULT_ENTRIES == ("workspace",)
 
 
 @pytest.mark.parametrize(
@@ -217,6 +212,11 @@ def test_machine_bindings_for_refuses_a_name_it_cannot_bind(name, refusal):
         machine_bindings_for([FakeRuntime(), WorkspaceRuntime()], name)
 
 
+def test_machine_bindings_for_says_none_when_there_is_no_machine():
+    with pytest.raises(ValueError, match=r"\(workspace machines: none\)"):
+        machine_bindings_for([WorkspaceRuntime()], "nope")
+
+
 def test_machine_bindings_for_takes_no_name_a_class_is_registered_as():
     try:
         register_runtime("cpython", FakeRuntime)
@@ -234,6 +234,7 @@ def test_machine_bindings_for_takes_no_name_a_class_is_registered_as():
         ({"provider": "worker"}, "MontyRuntime"),
         ({"provider": "host"}, "LocalRuntime"),
         ({"provider": "host", "sandbox": {}}, "SandlockRuntime"),
+        ({"provider": "in_process", "runtime": FakeRuntime}, "FakeRuntime"),
         ({"provider": "in_process"}, None),
     ],
 )
@@ -254,8 +255,11 @@ def test_build_entry_builds_the_runtime_its_provider_runs(spec, cls):
         ("py", {"provider": "in_process", "runtime": "monty"}, "on worker"),
         ("py", {"provider": "host", "runtime": "monty"}, "not a runtime"),
         ("py", {"provider": "worker", "sandbox": {}}, "only a host"),
+        ("py", {"provider": "host", "sandbox": None}, "must be a mapping"),
         ("workspace", {"provider": "worker"}, "the shell's machine name"),
         ("py", {"provider": "in_process", "runtime": "ghost"}, "unknown"),
+        ("py", {"provider": "in_process", "runtime": "remote"}, "provider"),
+        ("py", {"provider": "in_process", "runtime": dict}, "not a Runtime"),
     ],
 )
 def test_build_entry_refuses_what_its_provider_does_not_run(
@@ -309,13 +313,6 @@ def test_workspace_runtime_is_a_pure_routing_marker():
 
 def test_workspace_runtime_reach_is_workspace():
     assert WorkspaceRuntime.reach == "workspace"
-
-
-def test_default_world_reaches_only_the_workspace():
-    # The default world's sandbox story rests on every entry keeping
-    # its effects behind the workspace gate; `local` (process reach)
-    # is deliberately not a default entry.
-    assert all(NAMED[name].reach == "workspace" for name in DEFAULT_ENTRIES)
 
 
 def test_register_runtime_makes_a_host_class_buildable_by_name():

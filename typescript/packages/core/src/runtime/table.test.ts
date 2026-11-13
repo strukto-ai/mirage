@@ -24,7 +24,6 @@ import {
   buildEntry,
   buildRuntime,
   builtFrom,
-  DEFAULT_ENTRIES,
   knownRuntimes,
   machineBindingsFor,
   registerRuntime,
@@ -116,10 +115,6 @@ describe('runtime table', () => {
     expect([...new PyodideRuntime().captures]).toEqual(['python3', 'python'])
     expect([...new QuickJsRuntime().captures]).toEqual(['node', 'js'])
     expect([...new MontyRuntime({ captures: ['only'] }).captures]).toEqual(['only'])
-  })
-
-  it('the default world is the workspace alone', () => {
-    expect(DEFAULT_ENTRIES).toEqual(['workspace'])
   })
 
   it('buildRuntime builds pyodide by name', () => {
@@ -291,6 +286,12 @@ describe('machineBindingsFor', () => {
     )
   })
 
+  it('says none when there is no machine', () => {
+    expect(() => machineBindingsFor([new WorkspaceRuntime()], 'nope')).toThrow(
+      /\(workspace machines: none\)/,
+    )
+  })
+
   it('takes no name a class is registered as', () => {
     registerRuntime('cpython-alias', FakeRuntime)
     expect(() =>
@@ -303,6 +304,7 @@ describe('buildEntry', () => {
   it.each<[Record<string, unknown>, string]>([
     [{ provider: 'worker' }, 'MontyRuntime'],
     [{ provider: 'in_process', runtime: 'quickjs' }, 'QuickJsRuntime'],
+    [{ provider: 'in_process', runtime: FakeRuntime }, 'FakeRuntime'],
   ])('builds the runtime its provider runs: %j', (spec, cls) => {
     const [handle, runtime] = buildEntry('py', spec)
     expect([handle, runtime.constructor.name, runtime.name]).toEqual([null, cls, 'py'])
@@ -314,9 +316,12 @@ describe('buildEntry', () => {
     ['py', { provider: 'in_process', runtime: 'monty' }, /on worker/],
     ['py', { provider: 'host', runtime: 'monty' }, /not a runtime/],
     ['py', { provider: 'worker', sandbox: {} }, /only a host/],
+    ['py', { provider: 'host', sandbox: null }, /must be a mapping/],
     ['workspace', { provider: 'worker' }, /the shell's machine name/],
     ['py', { provider: 'in_process' }, /the shell's machine name/],
     ['py', { provider: 'in_process', runtime: 'ghost' }, /unknown/],
+    ['py', { provider: 'in_process', runtime: 'remote' }, /provider/],
+    ['py', { provider: 'in_process', runtime: Object }, /not a Runtime/],
   ])('refuses what its provider does not run: %s %j', (name, spec, refusal) => {
     expect(() => buildEntry(name, spec)).toThrow(refusal)
   })

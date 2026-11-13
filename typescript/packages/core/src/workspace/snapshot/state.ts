@@ -275,8 +275,8 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
  *
  * Throws when the captured script names a language no runtime can
  * speak. The value comes from a file, so it is checked here rather than
- * carried to the selector, which would report the world's runtimes for
- * a language that never existed.
+ * carried to the selector, which would report the workspace's machines
+ * for a language that never existed.
  */
 function cliSpecFromEntry(entry: CLISnapshot): string | CLI {
   const source = entry.mcp

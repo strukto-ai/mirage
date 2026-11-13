@@ -122,23 +122,11 @@ export abstract class Runtime<E = unknown> {
   }
 
   /**
-   * The name a refusal of one run speaks in: the runtime's. Mirrors
+   * The name a refusal of its runs speaks in: the runtime's. Mirrors
    * Python's `Runtime.refusal_name`.
-   *
-   * @param _ctx the run's context.
    */
-  refusalName(_ctx: Context): string {
+  get refusalName(): string {
     return this.name
-  }
-
-  /**
-   * The machine one run of this runtime goes to: its own (`machine`),
-   * whatever the run's route names. Mirrors Python's `Runtime.machine_for`.
-   *
-   * @param _ctx the run's context.
-   */
-  machineFor(_ctx: Context): MachineName | null {
-    return this.machine
   }
 
   /** Whether workspace file mutations already invalidate through dispatch. */
@@ -189,13 +177,9 @@ export abstract class Runtime<E = unknown> {
       const kind = opts.kind ?? 'code'
       const capture = this.binding?.capture()
       const restricted = capture?.restrictedMounts ?? []
-      if (
-        this.reach !== 'workspace' &&
-        restricted.length > 0 &&
-        !this.servesSession(restricted, ctx)
-      )
+      if (this.reach !== 'workspace' && restricted.length > 0 && !this.servesSession(restricted))
         return refusedRun(
-          this.refusalName(ctx),
+          this.refusalName,
           "runtime cannot enforce this session's file restrictions",
         )
       // A process on this machine opens its connections around the gateway,
@@ -204,10 +188,7 @@ export abstract class Runtime<E = unknown> {
       if (this.reach === 'process') {
         for (const egress of liveEgress()) {
           if (egress.rule !== null || (await egress.hooked))
-            return refusedRun(
-              this.refusalName(ctx),
-              "runtime cannot enforce this workspace's network",
-            )
+            return refusedRun(this.refusalName, "runtime cannot enforce this workspace's network")
         }
       }
       const engine = await this.engine()
@@ -262,7 +243,7 @@ export abstract class Runtime<E = unknown> {
     const { process: shell, session, evaluation } = currentCaller()
     if (this.reach === 'workspace' || processes === null || shell == null || session == null)
       return run(ctx)
-    const machine = this.machineFor(ctx)
+    const machine = this.machine
     const instance = machine === null ? null : (processes.machineInstance?.(machine) ?? null)
     const line = ctx.flags.c
     const command =
@@ -417,9 +398,8 @@ export abstract class Runtime<E = unknown> {
    * Whether every restricted mount is served through this caller's gate.
    *
    * @param _restrictedMounts the mounts the session restricts.
-   * @param _ctx the run's context.
    */
-  protected servesSession(_restrictedMounts: readonly string[], _ctx: Context): boolean {
+  protected servesSession(_restrictedMounts: readonly string[]): boolean {
     return false
   }
 

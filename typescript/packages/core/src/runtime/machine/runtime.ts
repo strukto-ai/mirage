@@ -132,12 +132,12 @@ export class RemoteRuntime
   }
 
   /**
-   * The machine one run goes to.
+   * The machine every run goes to.
    *
    * Throws:
    *   Error: the runtime is not in a workspace.
    */
-  handle(_ctx: Context): MachineHandle {
+  handle(): MachineHandle {
     if (this.machines === null) throw new Error(`${this.name}: runtime is not in a workspace`)
     return this.machines.get(this.defaultMachine)
   }
@@ -147,26 +147,21 @@ export class RemoteRuntime
     return this.machines.get(this.defaultMachine).machine
   }
 
-  override machineFor(ctx: Context): MachineName | null {
-    return this.handle(ctx).machine
-  }
-
   /**
-   * The provider of the machine the run goes to, as a refusal of its mounts
+   * The provider of the machine its runs go to, as a refusal of its mounts
    * names it; the runtime's name before it is bound.
    */
-  override refusalName(_ctx: Context): string {
+  override get refusalName(): string {
     if (this.machines === null) return this.name
     return this.machines.get(this.defaultMachine).provider
   }
 
   override get fileEffectsDispatched(): boolean {
-    const handles = this.machines?.handles() ?? []
-    return handles.length > 0 && handles.every((h) => h.fileEffectsDispatched(this.binding))
+    return this.machines !== null && this.handle().fileEffectsDispatched(this.binding)
   }
 
-  protected override servesSession(restrictedMounts: readonly string[], ctx: Context): boolean {
-    return this.handle(ctx).servesSession(restrictedMounts)
+  protected override servesSession(restrictedMounts: readonly string[]): boolean {
+    return this.handle().servesSession(restrictedMounts)
   }
 
   /**
@@ -193,7 +188,7 @@ export class RemoteRuntime
     errors?: OutputFn,
   ): Promise<RunResult> {
     const line = ctx.flags.c
-    return this.handle(ctx).run(
+    return this.handle().run(
       ['/bin/sh', '-c', typeof line === 'string' ? line : ''],
       ctx,
       this.binding,
@@ -216,7 +211,7 @@ export class RemoteRuntime
     output: OutputFn | undefined,
     errors?: OutputFn,
   ): Promise<RunResult> {
-    const handle = this.handle(ctx)
+    const handle = this.handle()
     const env = { ...handle.config.env }
     const { evaluation } = currentCaller()
     const reads = new Set(

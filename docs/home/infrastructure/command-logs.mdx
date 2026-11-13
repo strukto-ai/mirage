@@ -395,7 +395,7 @@ and alerts.
 | <code style={{ whiteSpace: 'nowrap' }}>shell</code> | When a typed line ends | `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.name`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.timestamp`, `mirage.duration_ms`, `mirage.stdout`, `mirage.stderr` |
 | <code style={{ whiteSpace: 'nowrap' }}>vfs.&lt;call&gt;</code> | For each call your code makes to a mount itself, through `ws.vfs` or a FUSE mount, such as `vfs.read` | `mirage.vfs.path`, `mirage.vfs.source`, `mirage.vfs.bytes`, `mirage.vfs.timestamp`, `mirage.vfs.duration_ms`, `mirage.session.id`, `mirage.workspace.id`, `host.name` |
 | <code style={{ whiteSpace: 'nowrap' }}>job</code> | When an `&` job ends | `mirage.job.id`, `mirage.job.number`, `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.name`, `mirage.machine.type`, `mirage.machine.name`, `mirage.machine.id`, `process.pid`, `mirage.process.pid`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.signal` |
-| <code style={{ whiteSpace: 'nowrap' }}>process</code> | When a process the line started ends | `process.pid`, `mirage.process.pid`, `process.parent_pid`, `process.group_leader.pid`, `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.name`, `mirage.machine.type`, `mirage.machine.name`, `mirage.machine.id`, `process.command_line`, `mirage.cwd`, `mirage.runtime`, `process.exit.code`, `mirage.signal`, `mirage.error`, and a link to each process it read from, with `mirage.input` |
+| <code style={{ whiteSpace: 'nowrap' }}>process</code> | When a process the line started ends | `process.pid`, `mirage.process.pid`, `process.parent_pid`, `process.group_leader.pid`, `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.name`, `mirage.machine.type`, `mirage.machine.name`, `mirage.machine.id`, `process.command_line`, `mirage.cwd`, `process.exit.code`, `mirage.signal`, `mirage.error`, and a link to each process it read from, with `mirage.input` |
 
 </Accordion>
 
@@ -414,9 +414,8 @@ and alerts.
 | <code style={{ whiteSpace: 'nowrap' }}>mirage.vfs.timestamp</code> | When the mount call ended, in milliseconds. |
 | <code style={{ whiteSpace: 'nowrap' }}>mirage.input</code> | On a link from a `process` span to the process whose output it read: `stdin` for the stage before it in a pipe, the `/dev/fd` path a `<(...)` gave it, such as `/dev/fd/63`, or `argv` for a `$(...)` in its arguments. |
 
-Traces cover what runs on the workspace's machine and the runtimes it
-reaches. A program that a runtime runs on another host sends no spans of its
-own.
+Traces cover what runs in the workspace and on its machines. A program that a
+machine runs on another host sends no spans of its own.
 
 ## Trace limits
 

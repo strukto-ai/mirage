@@ -119,9 +119,11 @@ export function checkConfig(config: unknown): WorkspaceConfig {
     }
   }
   const cfg = loadWorkspaceConfig(fields, null)
-  for (const entry of Object.values(cfg.machines ?? {})) {
+  for (const [name, entry] of Object.entries(cfg.machines ?? {})) {
     if (Object.hasOwn(entry, 'initModule')) {
-      throw new Error('runtime initModule is only allowed in operator-owned configuration')
+      throw new Error(
+        `machine '${name}': init_module is only allowed in operator-owned configuration`,
+      )
     }
   }
   return cfg

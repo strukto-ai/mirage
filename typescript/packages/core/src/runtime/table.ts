@@ -14,6 +14,7 @@
 
 import { MachineHandle } from '../machine/handle.ts'
 import { buildMachine } from '../machine/registry.ts'
+import { isPlainObject } from '../utils/records.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 import { Runtime } from './base.ts'
 import type { RuntimeOptions } from './config.ts'
@@ -53,13 +54,6 @@ const NAMED: Record<
   },
 )
 
-/**
- * The default world when no machines are given: the shell alone, as
- * Python's, so an interpreter runs only where the config names one
- * (integ/runtime/routing/defaults.json pins it).
- */
-export const DEFAULT_ENTRIES: readonly string[] = ['workspace']
-
 // The runtimes @struktoai/mirage-node registers when it is imported.
 const NODE_RUNTIMES: readonly string[] = ['local', 'sandlock']
 
@@ -96,6 +90,7 @@ const PLACED: Record<string, string> = Object.assign(
     monty: WORKER,
     local: HOST,
     sandlock: HOST,
+    remote: 'a machine provider',
     workspace: IN_PROCESS,
   },
 )
@@ -109,6 +104,10 @@ export function placeRuntime(name: string, provider: string): void {
   if (provider === IN_PROCESS) Reflect.deleteProperty(PLACED, name)
   else PLACED[name] = provider
 }
+
+/** A runtime class, as the registry holds one. */
+type RuntimeClass = (new (options?: RuntimeOptions<never>) => Runtime) &
+  Pick<typeof Runtime, 'configFields'>
 
 /** What a `machines:` entry may be: a machine handle, a runtime, or the entry as config spells it. */
 export type MachineSpec = MachineHandle | Runtime | Record<string, unknown>
@@ -166,14 +165,16 @@ export function builtFrom(runtime: Runtime): Record<string, unknown> | undefined
  * what it captures there. A machine provider (docker, ssh, ...) builds its
  * handle and the remote runtime that runs its `captures` through it. An
  * engine provider builds the runtime alone: `in_process` the one its
- * `runtime` names (none for the shell, which only `workspace` may be),
+ * `runtime` names (a registered name, or a class a `source:Class` reference
+ * loaded; none for the shell, which only `workspace` may be),
  * `worker` monty, `host` the host's own programs, confined by sandlock when a
  * `sandbox` block grants paths. The entry's other keys are the runtime's
  * config. Mirrors Python's `build_entry`.
  *
  * Throws:
  *   Error: `workspace` for anything but the shell, a runtime its provider
- *   does not run, or what `buildMachine` refuses.
+ *   does not run, a `sandbox` that is not a mapping, or what `buildMachine`
+ *   refuses.
  */
 export function buildEntry(name: string, spec: MachineSpec): [MachineHandle | null, Runtime] {
   let runtime: Runtime
@@ -186,13 +187,15 @@ export function buildEntry(name: string, spec: MachineSpec): [MachineHandle | nu
     return [handle, new RemoteRuntime(name, captures === undefined ? {} : { captures })]
   } else {
     const { provider, captures, sandbox, runtime: named, ...fields } = spec
+    if (sandbox !== undefined && !isPlainObject(sandbox))
+      throw new Error(`machine '${name}': sandbox must be a mapping`)
     const cls = runtimeFor(
       name,
       provider as string,
-      named as string | undefined,
-      sandbox as Record<string, unknown> | undefined,
+      named as string | RuntimeClass | undefined,
+      sandbox,
     )
-    const config = { ...fields, ...(sandbox as Record<string, unknown> | undefined) }
+    const config = { ...fields, ...sandbox }
     runtime = new cls({
       ...(captures === undefined ? {} : { captures: captures as string[] }),
       ...(Object.keys(config).length > 0 ? { config: config as never } : {}),
@@ -208,9 +211,9 @@ export function buildEntry(name: string, spec: MachineSpec): [MachineHandle | nu
 function runtimeFor(
   name: string,
   provider: string,
-  runtime: string | undefined,
+  runtime: string | RuntimeClass | undefined,
   sandbox: Record<string, unknown> | undefined,
-): (new (options?: RuntimeOptions<never>) => Runtime) & Pick<typeof Runtime, 'configFields'> {
+): RuntimeClass {
   if (sandbox !== undefined && provider !== HOST)
     throw new Error(`machine '${name}': only a host takes a sandbox`)
   if (provider === HOST) {
@@ -219,13 +222,20 @@ function runtimeFor(
     return runtimeClass(sandbox !== undefined ? 'sandlock' : 'local')
   }
   if (provider === WORKER) {
-    if (runtime !== undefined && runtime !== 'monty')
-      throw new Error(`machine '${name}': a worker runs 'monty', not '${runtime}'`)
+    if (runtime !== undefined && runtime !== 'monty') {
+      const named = typeof runtime === 'function' ? runtime.name : runtime
+      throw new Error(`machine '${name}': a worker runs 'monty', not '${named}'`)
+    }
     if (PLACED.monty !== WORKER)
       throw new Error(`machine '${name}': monty runs in process here, not on a worker`)
     return runtimeClass('monty')
   }
   if (runtime === undefined) return WorkspaceRuntime
+  if (typeof runtime === 'function') {
+    if (!(runtime.prototype instanceof Runtime))
+      throw new Error(`machine '${name}': its runtime is not a Runtime subclass`)
+    return runtime
+  }
   const placed = PLACED[runtime]
   if (placed !== undefined)
     throw new Error(`machine '${name}': '${runtime}' runs on ${placed}, not ${IN_PROCESS}`)
@@ -234,7 +244,7 @@ function runtimeFor(
 
 /** Every runtime an `in_process` machine may name. */
 export function inProcessRuntimes(): string[] {
-  return knownRuntimes().filter((name) => !(name in PLACED) && name !== 'remote')
+  return knownRuntimes().filter((name) => !(name in PLACED))
 }
 
 /**
@@ -306,7 +316,7 @@ export function machineBindingsFor(
     .filter((e) => e.name !== 'workspace')
     .map((e) => `'${e.name}'`)
     .join(', ')
-  throw new Error(`unknown machine: '${name}' (workspace machines: ${known})`)
+  throw new Error(`unknown machine: '${name}' (workspace machines: ${known || 'none'})`)
 }
 
 /**

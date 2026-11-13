@@ -115,7 +115,8 @@ async function loadRuntimeClass(
 /**
  * Turn the `machines:` block into each machine: its handle, or the
  * runtime an engine provider runs. An `in_process` entry's `runtime` may
- * be a `source:Class` reference, loaded here, since loading is async.
+ * be a `source:Class` reference, loaded here, since loading is async, and
+ * handed to `buildEntry` as its class.
  * Mirrors `_build_machines` in `mirage/config.py`.
  *
  * @param machines each entry by name: its `provider`, what it captures and how to reach it.
@@ -130,14 +131,11 @@ async function buildMachines(
   for (const [name, entry] of Object.entries(machines)) {
     const read = await resolveConfigSecrets(entry, sources, `machines.${name}`)
     try {
-      const { provider, captures, runtime: ref, ...fields } = read
-      let spec: MachineHandle | Runtime | Record<string, unknown> = read
-      if (provider === IN_PROCESS && typeof ref === 'string' && ref.includes(':')) {
-        spec = new (await loadRuntimeClass(ref, host))({
-          ...(captures === undefined ? {} : { captures: captures as string[] }),
-          ...(Object.keys(fields).length > 0 ? { config: fields as never } : {}),
-        })
-      }
+      const ref = read.runtime
+      const spec =
+        read.provider === IN_PROCESS && typeof ref === 'string' && ref.includes(':')
+          ? { ...read, runtime: await loadRuntimeClass(ref, host) }
+          : read
       const [handle, runtime] = buildEntry(name, spec)
       out[name] = handle ?? runtime
     } catch (err) {

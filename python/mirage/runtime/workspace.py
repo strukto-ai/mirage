@@ -28,8 +28,8 @@ class WorkspaceRuntime(Runtime[Any]):
     catch-all. Passing explicit captures flips it into an ordinary
     capturer: the workspace serves exactly those commands and anything
     unclaimed exits 126. Required: every workspace world contains
-    exactly one, appended automatically when the runtimes list omits
-    it; pass your own instance to customize it.
+    exactly one, appended automatically when its machines omit it;
+    pass your own instance as the ``workspace`` machine to customize it.
 
     It is a pure routing marker, so it carries no capability mixin: a
     line resolved to workspace runs on the workspace executor inline, the

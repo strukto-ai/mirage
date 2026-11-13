@@ -157,11 +157,8 @@ class RemoteRuntime(
         machines.get(self.default_machine)
         self._machines = machines
 
-    def handle(self, ctx: Context) -> MachineHandle:
-        """The machine one run goes to.
-
-        Args:
-            ctx (Context): the run's context.
+    def handle(self) -> MachineHandle:
+        """The machine every run goes to.
 
         Raises:
             ValueError: the runtime is not in a workspace.
@@ -176,11 +173,9 @@ class RemoteRuntime(
             return None
         return self._machines.get(self.default_machine).machine
 
-    def machine_for(self, ctx: Context) -> MachineName | None:
-        return self.handle(ctx).machine
-
-    def refusal_name(self, ctx: Context) -> str:
-        """The provider of the machine the run goes to, as a refusal of
+    @property
+    def refusal_name(self) -> str:
+        """The provider of the machine its runs go to, as a refusal of
         its mounts names it; the runtime's name before it is bound."""
         if self._machines is None:
             return self.name
@@ -188,15 +183,13 @@ class RemoteRuntime(
 
     @property
     def file_effects_dispatched(self) -> bool:
-        handles = self._machines.handles() if self._machines else []
-        return bool(handles) and all(
-            h.file_effects_dispatched(self._binding) for h in handles
+        return (
+            self._machines is not None
+            and self.handle().file_effects_dispatched(self._binding)
         )
 
-    def _serves_session(
-        self, restricted_mounts: tuple[str, ...], ctx: Context
-    ) -> bool:
-        return self.handle(ctx).serves_session(restricted_mounts)
+    def _serves_session(self, restricted_mounts: tuple[str, ...]) -> bool:
+        return self.handle().serves_session(restricted_mounts)
 
     async def run_line(
         self,
@@ -224,7 +217,7 @@ class RemoteRuntime(
             errors (OutputFn | None): receives stderr as it arrives.
         """
         line = ctx.flags.get("c")
-        return await self.handle(ctx).run(
+        return await self.handle().run(
             ("/bin/sh", "-c", line if isinstance(line, str) else ""),
             ctx,
             self._binding,
@@ -254,7 +247,7 @@ class RemoteRuntime(
             output (OutputFn | None): receives stdout as it arrives.
             errors (OutputFn | None): receives stderr as it arrives.
         """
-        handle = self.handle(ctx)
+        handle = self.handle()
         env = dict(handle.config.env)
         evaluation = current_caller().evaluation
         reads = (

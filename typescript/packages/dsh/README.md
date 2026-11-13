@@ -77,14 +77,13 @@ ws = Workspace(
             "commands": {"deny": ["slack send-message", "curl"]},
         },
     },
-    # The e2b sandbox is a machine; the remote runtime runs programs on it
-    machines={"box": {"provider": "e2b", "sandbox_id": sandbox_id, "mount_type": "ssh"}},
-    runtimes=[
-        MontyRuntime(captures=["python", "python3"]),
-        RemoteRuntime(captures=["python", "python3"], machine="box"),
-    ],
+    # python runs on monty in a worker, or on the e2b sandbox
+    machines={
+        "py": {"provider": "worker"},
+        "box": {"provider": "e2b", "sandbox_id": sandbox_id, "mount_type": "ssh", "captures": ["python", "python3"]},
+    },
     # route the underlying computation: numpy lines run on the machine, the rest on monty
-    route_policy=lambda ctx: "remote" if "numpy" in ctx.line else None,
+    route_policy=lambda ctx: "box" if "numpy" in ctx.line else None,
 )
 
 # Add an agent using the analyst profile
@@ -303,11 +302,11 @@ npm install @struktoai/mirage-node @pydantic/monty express
 
 ```ts
 import express from 'express'
-import { MontyRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
   { '/work': new RAMVFS() },
-  { mode: MountMode.EXEC, runtimes: [new MontyRuntime({ captures: ['python', 'python3'] })] },
+  { mode: MountMode.EXEC, machines: { py: { provider: 'worker' } } },
 )
 const app = express()
 app.use(express.json())

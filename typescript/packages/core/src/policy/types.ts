@@ -661,9 +661,7 @@ export interface CommandContext {
  * order, nested ones included, each read as the gate that runs it will
  * read it: its words expanded where the text alone says what they are,
  * its paths resolved; a command whose name only the run expands is left
- * out. A script gets the same as plain data (`scriptContext`), with
- * `ctx.runtime` naming the runtime when a runtime's own `script:` is
- * asked.
+ * out. A script gets the same as plain data (`scriptContext`).
  *
  * For `cat /data/logs.txt | python3 process.py` typed in `/data`:
  *

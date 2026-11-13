@@ -765,7 +765,7 @@ describe('workspaces router', () => {
         expect(res.json()).toEqual({
           error: {
             code: 'invalid_request',
-            message: 'runtime initModule is only allowed in operator-owned configuration',
+            message: "machine 'py': init_module is only allowed in operator-owned configuration",
           },
         })
         const list = await app.inject({ method: 'GET', url: '/v1/workspaces', headers })

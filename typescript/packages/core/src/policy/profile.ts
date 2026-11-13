@@ -194,8 +194,8 @@ export interface SessionProfile {
  * `script` is the path form the config loader accepts and loads; code
  * passes the loaded ScriptSource, so a path still spelled as a string
  * when the workspace reads it means the config layer never saw it.
- * `runtime` is a name, or `{name, config}` for one that needs settings,
- * the shape a `runtimes` entry has. Monty when the program names none;
+ * `runtime` is a name, or `{name, config}` for one that needs settings.
+ * Monty when the program names none;
  * without `@pydantic/monty` installed, such a program fails closed with
  * the package's install hint. `env` is the variables the program runs
  * with beside `MIRAGE_POLICY_CTX`, on any runtime: a literal, or a
