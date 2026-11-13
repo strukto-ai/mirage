@@ -133,8 +133,9 @@ function heldConsoles(fields: RecordFields | null): Set<string> {
  */
 export class JobTable {
   private readonly substitutions = new Map<number, ProcessHandle>()
-  // The edge-runtime request each substitution started in.
-  private readonly substitutionRequests = new WeakMap<ProcessHandle, IncomingRequest>()
+  // The substitutions each edge-runtime request started that still run, on
+  // the plane, so a request finds the ones its child shells started too.
+  private readonly requestSubstitutions = new WeakMap<IncomingRequest, Set<ProcessHandle>>()
   store: ExecutionStore
   // The id of the daemon this table runs on, which its lease names.
   readonly daemon: string
@@ -882,11 +883,16 @@ export class JobTable {
     const pid = process.record.id.pid
     this.substitutions.set(pid, process)
     const request = currentRequest()
-    if (request !== null) this.substitutionRequests.set(process, request)
+    let started: Set<ProcessHandle> | undefined
+    if (request !== null) {
+      started = this.plane.requestSubstitutions.get(request) ?? new Set()
+      this.plane.requestSubstitutions.set(request, started.add(process))
+    }
     // Its table runs the hook that tracks it just before starting it, so it
     // has something to join a microtask later.
     queueMicrotask(() => {
       void process.join().then((record) => {
+        started?.delete(process)
         if (this.substitutions.get(pid) !== process) return
         this.substitutions.delete(pid)
         if (record.exit !== null)
@@ -909,20 +915,21 @@ export class JobTable {
       // On an edge runtime a substitution an earlier request started cannot
       // end once that request has answered, and a wake from one still live
       // would run this waiter inside it: a request waits for its own only.
-      if (request !== null && this.substitutionRequests.get(process) !== request) continue
+      if (request !== null && this.plane.requestSubstitutions.get(request)?.has(process) !== true)
+        continue
       await process.join()
     }
   }
 
   /**
-   * Wait for the substitutions `request` started to end. On an edge runtime
-   * one still running once its request has answered never ends, so the
-   * request waits for them first.
+   * Wait for the substitutions `request` started to end, in child shells
+   * (`( )`, `$( )`) too. On an edge runtime one still running once its
+   * request has answered never ends, so the request waits for them first.
    */
   async joinRequest(request: IncomingRequest): Promise<void> {
-    for (const process of [...this.substitutions.values()]) {
-      if (this.substitutionRequests.get(process) === request) await process.join()
-    }
+    // One started while this waits is still reached: the loop reads the set
+    // as it changes.
+    for (const process of this.plane.requestSubstitutions.get(request) ?? []) await process.join()
   }
 
   /**
