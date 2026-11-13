@@ -36,21 +36,3 @@ export interface PipeTransport {
 export function isPipeTransport<T extends object>(machine: T): machine is T & PipeTransport {
   return (machine as Partial<PipeTransport>)[PIPE_TRANSPORT] === true
 }
-
-/** The nominal sleep brand (Python's SleepableMixin). */
-export const SLEEPABLE: unique symbol = Symbol.for('mirage.sleepable')
-
-/**
- * A machine a workspace can put to sleep when it lets go of it: what sleep
- * does is the provider's, and a machine without this is only disconnected.
- */
-export interface Sleepable {
-  readonly [SLEEPABLE]: true
-  /** Put the machine to sleep when its workspace sleeps: what that does is the provider's; the next connect brings it back. */
-  sleep(): Promise<void>
-}
-
-/** Whether this machine can be put to sleep. */
-export function isSleepable<T extends object>(machine: T): machine is T & Sleepable {
-  return (machine as Partial<Sleepable>)[SLEEPABLE] === true
-}

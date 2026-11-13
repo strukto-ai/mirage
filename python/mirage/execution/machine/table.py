@@ -35,7 +35,6 @@ from mirage.execution.types import (
     ProcessId,
 )
 from mirage.machine.handle import MachineHandle
-from mirage.machine.mixin import SleepableMixin
 from mirage.machine.registry import build_machine
 from mirage.shell.constants import CONTINUE_SIGNALS, STOP_SIGNALS
 from mirage.workspace.record.types import RecordFields
@@ -613,24 +612,23 @@ class MachineTable:
                 del self._found[key]
                 gone.set()
 
-    async def close(self, sleep: bool = False) -> None:
+    async def close(self, pause: bool = False) -> None:
         """Close every handle: unmount what each was served, and let go
-        of it for another workspace. With ``sleep``, each sleepable handle
-        this table held is then put to sleep, held until it has slept so
-        no other workspace takes it first; a handle whose close failed
-        still sleeps.
+        of it for another workspace. With ``pause``, each handle this
+        table held is then paused, held until it has paused so no other
+        workspace takes it first; a handle whose close failed is still
+        paused.
 
         Args:
-            sleep (bool): put each sleepable handle to sleep after
-                closing it.
+            pause (bool): pause each handle after closing it.
         """
         held = [
             handle
             for handle in self._handles.values()
             if (ref := _HOLDERS.get(handle)) is not None and ref() is self
         ]
-        if sleep:
-            results = await asyncio.shield(self._close_then_sleep(held))
+        if pause:
+            results = await asyncio.shield(self._close_then_pause(held))
         else:
             for handle in held:
                 _HOLDERS.pop(handle, None)
@@ -646,12 +644,12 @@ class MachineTable:
                 else BaseExceptionGroup("machine close failed", failures)
             )
 
-    async def _close_then_sleep(
+    async def _close_then_pause(
         self, held: list[MachineHandle]
     ) -> list[BaseException | None]:
-        """Close every handle and sleep the sleepable ones this table
-        held, once the signals still queued for its machines have run, so
-        none reaches a machine after it sleeps; the handles stay held
+        """Close every handle and pause the ones this table held, once the
+        signals still queued for its machines have run, so none reaches a
+        machine after it pauses; the handles stay held
         until then. Shielded by ``close``, so a caller's cancel never
         leaves its machines awake.
 
@@ -668,11 +666,7 @@ class MachineTable:
                 return_exceptions=True,
             )
             results += await asyncio.gather(
-                *(
-                    handle.sleep()
-                    for handle in held
-                    if isinstance(handle, SleepableMixin)
-                ),
+                *(handle.pause() for handle in held),
                 return_exceptions=True,
             )
             return results

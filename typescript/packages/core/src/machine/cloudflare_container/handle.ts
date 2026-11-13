@@ -28,7 +28,7 @@ import {
 } from '../constants.ts'
 import { ConnectionLostError } from '../errors.ts'
 import { MachineHandle, logger } from '../handle.ts'
-import { PIPE_TRANSPORT, SLEEPABLE, type PipeTransport, type Sleepable } from '../mixin.ts'
+import { PIPE_TRANSPORT, type PipeTransport } from '../mixin.ts'
 import { registerMachine } from '../registry.ts'
 import type { MachinePipe } from '../types.ts'
 import type { OutputFn, RunResult } from '../../runtime/types.ts'
@@ -43,7 +43,6 @@ import {
   CLOSING,
   NO_CONTAINER,
   NOT_ANSWERING,
-  SLEEP_RELAY,
   START_WAIT_SECONDS,
   STOPPED,
 } from './constants.ts'
@@ -119,23 +118,14 @@ async function drain(
  * program wrote them. A `mountType` serves the workspace over one more exec
  * whose pipes carry SFTP.
  *
- * In the Durable Object the host may also give a `sleep` hook, which
- * `Workspace.sleep()` runs after the handle closes: the host decides what
- * sleep keeps and stops the container. A relay's container is the user's,
- * so it takes no hook and sleep only disconnects it.
- *
  * A handle with neither fails to connect, saying how to build one. Once
  * the container stops, a line it cut short loses its connection (129), and
  * the next line starts it again.
  */
-export class ContainerMachine
-  extends MachineHandle<ContainerConfig>
-  implements PipeTransport, Sleepable
-{
+export class ContainerMachine extends MachineHandle<ContainerConfig> implements PipeTransport {
   static override readonly provider = 'cloudflare_container'
   static override readonly configFields: ConfigFields = CONTAINER_CONFIG_FIELDS
   readonly [PIPE_TRANSPORT] = true as const
-  readonly [SLEEPABLE] = true as const
   // Settles once the container the last connect reached has exited.
   private exited: Promise<void> | null = null
   // What each exec still running is told when the container exits, and how many exits there have been.
@@ -143,11 +133,8 @@ export class ContainerMachine
   private exits = 0
   // Set while the workspace closes, when nothing starts a container.
   private closing = false
-  // The connect a close found under way, for the sleep after it.
-  private starting: Promise<void> | null = null
   private readonly container: Container | undefined
   private readonly start: (() => Promise<void>) | undefined
-  private readonly sleepHook: (() => Promise<void>) | undefined
   private readonly relay: RelayContainer | null = null
 
   /**
@@ -156,26 +143,21 @@ export class ContainerMachine
    *   and outside its Durable Object the relay that reaches it.
    * @param container the Durable Object's own `ctx.container`.
    * @param start starts the container when it is not running.
-   * @param sleep what `Workspace.sleep()` does to the container once the
-   *   handle has closed, in the Durable Object only.
    */
   constructor(
     name: string,
     config?: ContainerConfig,
     container?: Container,
     start?: () => Promise<void>,
-    sleep?: () => Promise<void>,
   ) {
     super(name, config, ContainerMachine.configFields)
     const { url, token } = this.config
     if (url === undefined) {
       this.container = container
       this.start = start
-      this.sleepHook = sleep
       return
     }
     if (container !== undefined) throw new Error(BOTH)
-    if (sleep !== undefined) throw new Error(SLEEP_RELAY)
     requireId('cloudflare_container', 'url', url)
     requireId('cloudflare_container', 'token', token)
     const relay = new RelayContainer(url, token ?? '')
@@ -395,7 +377,6 @@ export class ContainerMachine
    * closes its sockets; the next line connects again.
    */
   override async close(): Promise<void> {
-    this.starting = this.connecting
     this.closing = true
     try {
       await super.close()
@@ -405,23 +386,6 @@ export class ContainerMachine
       this.exited = null
       await this.relay?.close()
     }
-  }
-
-  /**
-   * Run the host's sleep hook, if it gave one; without one, sleep only
-   * disconnects. A start under way at close boots the container, so the
-   * hook follows it, or a start stalled past `START_WAIT_SECONDS`.
-   */
-  async sleep(): Promise<void> {
-    const starting = this.starting
-    this.starting = null
-    if (this.sleepHook === undefined) return
-    if (starting !== null && !(await settledWithin(starting, START_WAIT_SECONDS))) {
-      logger.debug?.(
-        `cloudflare_container: a start still under way after ${String(START_WAIT_SECONDS)}s; sleeping anyway`,
-      )
-    }
-    await this.sleepHook()
   }
 
   async openPipe(command: string): Promise<MachinePipe> {

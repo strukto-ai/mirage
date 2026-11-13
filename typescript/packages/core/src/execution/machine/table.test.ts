@@ -16,7 +16,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { CHECK_LINE, CHECK_MARK } from '../../machine/constants.ts'
 import type * as machineConstants from '../../machine/constants.ts'
 import { MachineHandle } from '../../machine/handle.ts'
-import { SLEEPABLE, type Sleepable } from '../../machine/mixin.ts'
 import { RemoteRuntime } from '../../runtime/machine/runtime.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
@@ -858,19 +857,18 @@ describe('MachineTable scans', () => {
 })
 
 /**
- * A box that can sleep, recording its close and sleep in `log`; `failClose`
- * and `failSleep` make either refuse, and `refused` is why another table
- * could not take it while it slept, or null if it could.
+ * A box that can pause, recording its close and pause in `log`; `failClose`
+ * and `failPause` make either refuse, and `refused` is why another table
+ * could not take it while it paused, or null if it could.
  */
-class Napper extends Box implements Sleepable {
-  readonly [SLEEPABLE] = true as const
+class Napper extends Box {
   refused: string | null = null
 
   constructor(
     name: string,
     readonly log: string[],
     readonly failClose = false,
-    readonly failSleep = false,
+    readonly failPause = false,
   ) {
     super(name, 0)
   }
@@ -881,29 +879,29 @@ class Napper extends Box implements Sleepable {
     if (this.failClose) throw new Error(`close ${this.name} failed`)
   }
 
-  sleep(): Promise<void> {
-    this.log.push(`sleep ${this.name}`)
+  override pause(): Promise<void> {
+    this.log.push(`pause ${this.name}`)
     try {
       new MachineTable({ [this.name]: this })
     } catch (error) {
       this.refused = (error as Error).message
     }
-    return this.failSleep
-      ? Promise.reject(new Error(`sleep ${this.name} failed`))
+    return this.failPause
+      ? Promise.reject(new Error(`pause ${this.name} failed`))
       : Promise.resolve()
   }
 }
 
-describe('MachineTable sleep', () => {
-  it('closes every handle, then sleeps the ones that can', async () => {
+describe('MachineTable pause', () => {
+  it('closes every handle, then pauses each one it held', async () => {
     const log: string[] = []
     const table = new MachineTable({ a: new Napper('a', log), b: new Box('b', 0) })
     table.holdHandles()
     await table.close(true)
-    expect(log).toEqual(['close a', 'sleep a'])
+    expect(log).toEqual(['close a', 'pause a'])
   })
 
-  it('sleeps nothing on a plain close', async () => {
+  it('pauses nothing on a plain close', async () => {
     const log: string[] = []
     const table = new MachineTable({ a: new Napper('a', log) })
     table.holdHandles()
@@ -911,15 +909,15 @@ describe('MachineTable sleep', () => {
     expect(log).toEqual(['close a'])
   })
 
-  it('still sleeps a handle whose close failed, and raises the close', async () => {
+  it('still pauses a handle whose close failed, and raises the close', async () => {
     const log: string[] = []
     const table = new MachineTable({ a: new Napper('a', log, true) })
     table.holdHandles()
     await expect(table.close(true)).rejects.toThrow('close a failed')
-    expect(log).toEqual(['close a', 'sleep a'])
+    expect(log).toEqual(['close a', 'pause a'])
   })
 
-  it('raises every failure when a close and a sleep both fail', async () => {
+  it('raises every failure when a close and a pause both fail', async () => {
     const log: string[] = []
     const table = new MachineTable({
       a: new Napper('a', log, true),
@@ -930,11 +928,11 @@ describe('MachineTable sleep', () => {
     expect(failure).toBeInstanceOf(AggregateError)
     expect((failure as AggregateError).errors.map((e: Error) => e.message).sort()).toEqual([
       'close a failed',
-      'sleep b failed',
+      'pause b failed',
     ])
   })
 
-  it('sleeps no handle another workspace has taken since it let go', async () => {
+  it('pauses no handle another workspace has taken since it let go', async () => {
     const log: string[] = []
     const a = new Napper('a', log)
     const first = new MachineTable({ a })
@@ -945,18 +943,18 @@ describe('MachineTable sleep', () => {
     expect(log).toEqual(['close a', 'close a'])
   })
 
-  it('lets go of its handles when a sleep throws before it returns a promise', async () => {
+  it('lets go of its handles when a pause throws before it returns a promise', async () => {
     const a = new Napper('a', [])
-    a.sleep = () => {
-      throw new Error('sleep threw')
+    a.pause = () => {
+      throw new Error('pause threw')
     }
     const table = new MachineTable({ a })
     table.holdHandles()
-    await expect(table.close(true)).rejects.toThrow('sleep threw')
+    await expect(table.close(true)).rejects.toThrow('pause threw')
     expect(() => new MachineTable({ a })).not.toThrow()
   })
 
-  it('waits for the signals queued for its machines before it sleeps them', async () => {
+  it('waits for the signals queued for its machines before it pauses them', async () => {
     const log: string[] = []
     const table = new MachineTable({ a: new Napper('a', log) })
     table.holdHandles()
@@ -970,10 +968,10 @@ describe('MachineTable sleep', () => {
     expect(log).toEqual([])
     release()
     await closing
-    expect(log).toEqual(['close a', 'sleep a'])
+    expect(log).toEqual(['close a', 'pause a'])
   })
 
-  it('holds a handle until it has slept, then lets another workspace take it', async () => {
+  it('holds a handle until it has paused, then lets another workspace take it', async () => {
     const a = new Napper('a', [])
     const table = new MachineTable({ a })
     table.holdHandles()

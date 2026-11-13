@@ -23,7 +23,6 @@ from mirage.execution.process.table import ProcessTable
 from mirage.execution.types import MachinePid
 from mirage.machine.constants import CHECK_LINE, CHECK_MARK
 from mirage.machine.handle import MachineHandle
-from mirage.machine.mixin import SleepableMixin
 from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.types import RunResult
 from mirage.types import MountMode
@@ -829,9 +828,9 @@ async def test_a_workspace_that_fails_to_build_holds_no_machine():
     ).close()
 
 
-class _Napper(_Box, SleepableMixin):
-    """A box that can sleep, recording its close and sleep in ``log``;
-    ``refused`` is why another table could not take it while it slept,
+class _Napper(_Box):
+    """A box that can pause, recording its close and pause in ``log``;
+    ``refused`` is why another table could not take it while it paused,
     or None if it could."""
 
     def __init__(
@@ -839,13 +838,13 @@ class _Napper(_Box, SleepableMixin):
         name: str,
         log: list[str],
         fail_close: bool = False,
-        fail_sleep: bool = False,
+        fail_pause: bool = False,
         gate: asyncio.Event | None = None,
     ) -> None:
         super().__init__(name, 0)
         self.log = log
         self.fail_close = fail_close
-        self.fail_sleep = fail_sleep
+        self.fail_pause = fail_pause
         self.gate = gate
         self.refused: str | None = None
 
@@ -855,30 +854,30 @@ class _Napper(_Box, SleepableMixin):
         if self.fail_close:
             raise RuntimeError(f"close {self.name} failed")
 
-    async def sleep(self) -> None:
-        self.log.append(f"sleep {self.name}")
+    async def pause(self) -> None:
+        self.log.append(f"pause {self.name}")
         try:
             MachineTable({self.name: self})
         except ValueError as exc:
             self.refused = str(exc)
         if self.gate is not None:
             await self.gate.wait()
-            self.log.append(f"slept {self.name}")
-        if self.fail_sleep:
-            raise RuntimeError(f"sleep {self.name} failed")
+            self.log.append(f"paused {self.name}")
+        if self.fail_pause:
+            raise RuntimeError(f"pause {self.name} failed")
 
 
 @pytest.mark.asyncio
-async def test_a_sleeping_close_closes_every_handle_then_sleeps_those_that_can():
+async def test_a_pausing_close_closes_every_handle_then_pauses_each_it_held():
     log: list[str] = []
     table = MachineTable({"a": _Napper("a", log), "b": _Box("b", 0)})
     table.hold_handles()
-    await table.close(sleep=True)
-    assert log == ["close a", "sleep a"]
+    await table.close(pause=True)
+    assert log == ["close a", "pause a"]
 
 
 @pytest.mark.asyncio
-async def test_a_plain_close_sleeps_nothing():
+async def test_a_plain_close_pauses_nothing():
     log: list[str] = []
     table = MachineTable({"a": _Napper("a", log)})
     table.hold_handles()
@@ -887,35 +886,35 @@ async def test_a_plain_close_sleeps_nothing():
 
 
 @pytest.mark.asyncio
-async def test_a_handle_whose_close_failed_still_sleeps():
+async def test_a_handle_whose_close_failed_is_still_paused():
     log: list[str] = []
     table = MachineTable({"a": _Napper("a", log, fail_close=True)})
     table.hold_handles()
     with pytest.raises(RuntimeError, match="close a failed"):
-        await table.close(sleep=True)
-    assert log == ["close a", "sleep a"]
+        await table.close(pause=True)
+    assert log == ["close a", "pause a"]
 
 
 @pytest.mark.asyncio
-async def test_a_failed_close_and_a_failed_sleep_are_both_raised():
+async def test_a_failed_close_and_a_failed_pause_are_both_raised():
     log: list[str] = []
     table = MachineTable(
         {
             "a": _Napper("a", log, fail_close=True),
-            "b": _Napper("b", log, fail_sleep=True),
+            "b": _Napper("b", log, fail_pause=True),
         }
     )
     table.hold_handles()
     with pytest.raises(BaseExceptionGroup) as raised:
-        await table.close(sleep=True)
+        await table.close(pause=True)
     assert sorted(str(e) for e in raised.value.exceptions) == [
         "close a failed",
-        "sleep b failed",
+        "pause b failed",
     ]
 
 
 @pytest.mark.asyncio
-async def test_a_sleeping_close_sleeps_no_handle_another_table_took():
+async def test_a_pausing_close_pauses_no_handle_another_table_took():
     log: list[str] = []
     a = _Napper("a", log)
     first = MachineTable({"a": a})
@@ -923,7 +922,7 @@ async def test_a_sleeping_close_sleeps_no_handle_another_table_took():
     await first.close()
     again = MachineTable({"a": a})
     again.hold_handles()
-    await first.close(sleep=True)
+    await first.close(pause=True)
     assert log == ["close a", "close a"]
 
 
@@ -932,38 +931,38 @@ async def test_a_handle_is_held_until_it_has_slept():
     a = _Napper("a", [])
     table = MachineTable({"a": a})
     table.hold_handles()
-    await table.close(sleep=True)
+    await table.close(pause=True)
     assert a.refused == "machine 'a' is already in another workspace"
     MachineTable({"a": a})
 
 
 @pytest.mark.asyncio
-async def test_a_cancelled_sleeping_close_still_sleeps_its_machines():
+async def test_a_cancelled_pausing_close_still_pauses_its_machines():
     log: list[str] = []
     gate = asyncio.Event()
     table = MachineTable({"a": _Napper("a", log, gate=gate)})
     table.hold_handles()
-    closing = asyncio.ensure_future(table.close(sleep=True))
-    while "sleep a" not in log:
+    closing = asyncio.ensure_future(table.close(pause=True))
+    while "pause a" not in log:
         await asyncio.sleep(0)
     closing.cancel()
     gate.set()
     for _ in range(20):
         await asyncio.sleep(0)
-    assert log == ["close a", "sleep a", "slept a"]
+    assert log == ["close a", "pause a", "paused a"]
 
 
 @pytest.mark.asyncio
-async def test_a_sleeping_close_waits_for_the_signals_queued_for_its_machines():
+async def test_a_pausing_close_waits_for_the_signals_queued_for_its_machines():
     log: list[str] = []
     table = MachineTable({"a": _Napper("a", log)})
     table.hold_handles()
     signal = table._signaling["box:a"]
     await signal.acquire()
-    closing = asyncio.ensure_future(table.close(sleep=True))
+    closing = asyncio.ensure_future(table.close(pause=True))
     for _ in range(5):
         await asyncio.sleep(0)
     assert log == []
     signal.release()
     await closing
-    assert log == ["close a", "sleep a"]
+    assert log == ["close a", "pause a"]

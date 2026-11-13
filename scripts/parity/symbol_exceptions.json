@@ -387,16 +387,12 @@
   },
   "machine/mixin": {
    "python_only": {
-    "PipeTransportMixin": "Python detects the pipe transport by mixin inheritance; TypeScript uses a nominal symbol, interface and type guard.",
-    "SleepableMixin": "Python detects a sleepable machine by mixin inheritance; TypeScript uses a nominal symbol, interface and type guard."
+    "PipeTransportMixin": "Python detects the pipe transport by mixin inheritance; TypeScript uses a nominal symbol, interface and type guard."
    },
    "typescript_only": {
     "PIPE_TRANSPORT": "Nominal TypeScript pipe transport corresponds to the Python PipeTransportMixin.",
     "PipeTransport": "Nominal TypeScript pipe transport corresponds to the Python PipeTransportMixin.",
-    "isPipeTransport": "Nominal TypeScript pipe transport corresponds to the Python PipeTransportMixin.",
-    "SLEEPABLE": "Nominal TypeScript sleep capability corresponds to the Python SleepableMixin.",
-    "Sleepable": "Nominal TypeScript sleep capability corresponds to the Python SleepableMixin.",
-    "isSleepable": "Nominal TypeScript sleep capability corresponds to the Python SleepableMixin."
+    "isPipeTransport": "Nominal TypeScript pipe transport corresponds to the Python PipeTransportMixin."
    }
   },
   "machine/program": {

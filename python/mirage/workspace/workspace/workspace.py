@@ -1957,10 +1957,9 @@ class Workspace:
             )
 
     async def sleep(self) -> None:
-        """Close the workspace as ``close`` does, then put each machine
-        that can sleep to sleep: an E2B sandbox whose config says
-        ``on_sleep: pause``, or a container whose host gave a sleep hook.
-        Other machines are only disconnected, and the state is kept.
+        """Close the workspace as ``close`` does, then pause each machine:
+        an E2B sandbox whose config says ``on_sleep: pause`` is paused,
+        and other machines are only disconnected. The state is kept.
 
         Raises:
             RuntimeError: the workspace was closed first, which let its
@@ -1994,8 +1993,7 @@ class Workspace:
                 sync ``with`` block is exiting inside; its runners are
                 cancelled but not joined, and a metadata write there is
                 not waited for, since neither can run until this returns.
-            sleep (bool): put each machine that can sleep to sleep once
-                it is closed.
+            sleep (bool): pause each machine once it is closed.
         """
         # Stop lifecycle mutations before teardown yields or captures its
         # close lists. Keep _closed separate so runtime journals can still
@@ -2064,8 +2062,7 @@ class Workspace:
             drop_state (bool): delete the workspace's state too.
             blocked_loop (asyncio.AbstractEventLoop | None): the loop a
                 sync ``with`` block is exiting inside.
-            sleep (bool): put each machine that can sleep to sleep once
-                it is closed.
+            sleep (bool): pause each machine once it is closed.
         """
         return CloseDeps(
             sessions=self._session_mgr,
@@ -2077,7 +2074,7 @@ class Workspace:
                 self._diff_pool.close,
                 self._script_policy.close,
                 self._runtimes.close,
-                partial(self.machine_table.close, sleep=sleep),
+                partial(self.machine_table.close, pause=sleep),
                 self._registry.clis.close,
             ],
             job_table=self.job_table,

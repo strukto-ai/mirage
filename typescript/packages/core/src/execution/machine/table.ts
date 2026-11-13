@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MachineHandle } from '../../machine/handle.ts'
-import { isSleepable } from '../../machine/mixin.ts'
 import { buildMachine } from '../../machine/registry.ts'
 import { MAX_PROCESSES } from '../process/constants.ts'
 import { CONTINUE_SIGNALS, STOP_SIGNALS } from '../../shell/constants.ts'
@@ -506,16 +505,16 @@ export class MachineTable {
 
   /**
    * Close every handle: unmount what each was served, and let go of it for
-   * another workspace. With `sleep`, each sleepable handle this table held
-   * is then put to sleep, held until it has slept so no other workspace
-   * takes it first; a handle whose close failed still sleeps.
+   * another workspace. With `pause`, each handle this table held is then
+   * paused, held until it has paused so no other workspace takes it first;
+   * a handle whose close failed is still paused.
    *
-   * @param sleep put each sleepable handle to sleep after closing it.
+   * @param pause pause each handle after closing it.
    */
-  async close(sleep = false): Promise<void> {
+  async close(pause = false): Promise<void> {
     const held = this.handles().filter((handle) => HOLDERS.get(handle) === this)
     let results: PromiseSettledResult<void>[]
-    if (sleep) results = await this.closeThenSleep(held)
+    if (pause) results = await this.closeThenPause(held)
     else {
       for (const handle of held) HOLDERS.delete(handle)
       results = await Promise.allSettled(this.handles().map(async (h) => h.close()))
@@ -525,17 +524,15 @@ export class MachineTable {
     if (failures.length > 1) throw new AggregateError(failures, 'machine close failed')
   }
   /**
-   * Close every handle and sleep the sleepable ones this table held, once
-   * the signals still queued for its machines have run, so none reaches a
-   * machine after it sleeps; the handles stay held until then.
+   * Close every handle and pause the ones this table held, once the
+   * signals still queued for its machines have run, so none reaches a
+   * machine after it pauses; the handles stay held until then.
    */
-  private async closeThenSleep(held: MachineHandle[]): Promise<PromiseSettledResult<void>[]> {
+  private async closeThenPause(held: MachineHandle[]): Promise<PromiseSettledResult<void>[]> {
     await Promise.allSettled(this.signaling.values())
     try {
       const results = await Promise.allSettled(this.handles().map(async (h) => h.close()))
-      results.push(
-        ...(await Promise.allSettled(held.filter(isSleepable).map(async (h) => h.sleep()))),
-      )
+      results.push(...(await Promise.allSettled(held.map(async (h) => h.pause()))))
       return results
     } finally {
       for (const handle of held) HOLDERS.delete(handle)

@@ -36,7 +36,6 @@ from mirage.execution.job import JobState
 from mirage.execution.ram import RAMExecutionStore
 from mirage.io import IOResult
 from mirage.machine.handle import MachineHandle
-from mirage.machine.mixin import SleepableMixin
 from mirage.runtime.base import Runtime
 from mirage.runtime.python.host.fs import HostFs
 from mirage.runtime.python.host.open import make_open
@@ -1677,8 +1676,8 @@ async def test_execution_cleanup_failure_still_stops_diff_pool_and_other_resourc
     assert not ws._diff_pool._entries
 
 
-class _Napper(MachineHandle, SleepableMixin):
-    """A machine that can sleep, recording its close and sleep in
+class _Napper(MachineHandle):
+    """A machine that can pause, recording its close and pause in
     ``log``."""
 
     provider = "napper"
@@ -1697,34 +1696,34 @@ class _Napper(MachineHandle, SleepableMixin):
         await super().close()
         self.log.append("close")
 
-    async def sleep(self) -> None:
-        self.log.append("sleep")
+    async def pause(self) -> None:
+        self.log.append("pause")
 
 
 class _Insomniac(_Napper):
-    """A machine whose sleep is refused, as a busy E2B node refuses a
+    """A machine whose pause is refused, as a busy E2B node refuses a
     pause."""
 
-    async def sleep(self) -> None:
-        self.log.append("sleep")
+    async def pause(self) -> None:
+        self.log.append("pause")
         raise RuntimeError("pause refused")
 
 
 @pytest.mark.asyncio
-async def test_sleep_raises_a_machines_failed_sleep():
+async def test_sleep_raises_a_machines_failed_pause():
     box = _Insomniac("box")
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box})
     with pytest.raises(RuntimeError, match="pause refused"):
         await ws.sleep()
-    assert box.log == ["close", "sleep"]
+    assert box.log == ["close", "pause"]
 
 
 @pytest.mark.asyncio
-async def test_sleep_closes_the_workspace_then_puts_its_machines_to_sleep():
+async def test_sleep_closes_the_workspace_then_pauses_its_machines():
     box = _Napper("box")
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box})
     await ws.sleep()
-    assert box.log == ["close", "sleep"]
+    assert box.log == ["close", "pause"]
 
 
 @pytest.mark.asyncio

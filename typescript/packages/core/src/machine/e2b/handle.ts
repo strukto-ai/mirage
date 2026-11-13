@@ -17,7 +17,7 @@ import type { ByteSource } from '../../io/types.ts'
 import { abortable } from '../../utils/abort.ts'
 import { currentCaller } from '../../context/session_context.ts'
 import { MachineHandle, logger } from '../handle.ts'
-import { PIPE_TRANSPORT, SLEEPABLE, type PipeTransport, type Sleepable } from '../mixin.ts'
+import { PIPE_TRANSPORT, type PipeTransport } from '../mixin.ts'
 import { registerMachine } from '../registry.ts'
 import type { MachinePipe } from '../types.ts'
 import type { OutputFn, PipeWriter, RunResult } from '../../runtime/types.ts'
@@ -145,14 +145,13 @@ class PtyWriter implements PipeWriter {
  * cut short loses its connection (129) with the same advice; the next line
  * connects again.
  */
-export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTransport, Sleepable {
+export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTransport {
   static override readonly configFields: ConfigFields = E2B_CONFIG_FIELDS
   readonly [PIPE_TRANSPORT] = true as const
-  readonly [SLEEPABLE] = true as const
   static override readonly provider = 'e2b'
   private sdk: E2bSdk | null = null
   private sandbox: Sandbox | null = null
-  // Set by a connect that reached the sandbox; close hands it to `pausable` for the sleep after.
+  // Set by a connect that reached the sandbox; close hands it to `pausable` for the pause after.
   private reached = false
   private pausable = false
 
@@ -196,12 +195,7 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
   }
 
   /**
-   * Pause the sandbox when the config says `onSleep: 'pause'` and the
-   * workspace that just closed reached it, keeping its disk and memory; the
-   * next connect resumes it. A sandbox already gone has nothing to pause.
-   */
-  /**
-   * Close as any machine does, letting the sleep after it pause only what
+   * Close as any machine does, so the pause after it touches only a sandbox
    * this workspace reached; a connect still under way settles first.
    */
   override async close(): Promise<void> {
@@ -211,7 +205,12 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
     await super.close()
   }
 
-  async sleep(): Promise<void> {
+  /**
+   * Pause the sandbox when the config says `onSleep: 'pause'` and the
+   * workspace that just closed reached it, keeping its disk and memory; the
+   * next connect resumes it. A sandbox already gone has nothing to pause.
+   */
+  override async pause(): Promise<void> {
     const pausable = this.pausable
     this.pausable = false
     if (this.config.onSleep !== 'pause' || !pausable) return

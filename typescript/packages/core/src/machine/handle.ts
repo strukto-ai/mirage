@@ -752,6 +752,15 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       this.disconnected()
     }
   }
+
+  /**
+   * Pause the machine after its workspace closed for sleep. A provider that
+   * can pause overrides this, and its next connect resumes the machine; by
+   * default the machine is only disconnected.
+   */
+  pause(): Promise<void> {
+    return Promise.resolve()
+  }
 }
 
 /** A run's report from its two lines (`RUN_WRAPPER`), null when it wrote nothing yet. */

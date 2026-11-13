@@ -248,20 +248,18 @@ state.
 
 ## Sleep
 
-`workspace.sleep()` closes the workspace as `close()` does, then puts each
-machine that can sleep to sleep. What sleep does is the provider's:
+`workspace.sleep()` closes the workspace as `close()` does, then pauses each
+machine. What a pause does is the provider's:
 
 | Machine | `sleep()` does |
 | --- | --- |
 | E2B with `on_sleep: pause` | Pauses the sandbox, keeping its disk and memory; the next line resumes it |
 | E2B without `on_sleep` | Nothing: the sandbox keeps running, as after `close()` |
-| Cloudflare container in a Durable Object | Calls the sleep function the Durable Object gave the handle, such as one that destroys the container |
-| Cloudflare container through a relay | Nothing: it is the relay owner's |
 | Every other machine | Nothing: it is only disconnected |
 
-A machine sleeps after it is closed, so its mounts are unmounted while it
-still runs, and it sleeps even when its close failed. A workspace closed with
-`close()` first refuses `sleep()`, since its machines were let go awake.
+A machine is paused after it is closed, so its mounts are unmounted while it
+still runs, and it is paused even when its close failed. A workspace closed
+with `close()` first refuses `sleep()`, since its machines were let go awake.
 
 ## The machine image
 

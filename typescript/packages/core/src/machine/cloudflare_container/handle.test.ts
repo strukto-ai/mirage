@@ -28,7 +28,6 @@ import { ConnectionLostError } from '../errors.ts'
 import { logger } from '../handle.ts'
 import { buildMachine } from '../registry.ts'
 import { OPEN } from '../../mount/constants.ts'
-import { settledWithin } from '../../utils/abort.ts'
 import '../../mount/sftp.ts'
 import { RemoteRuntime } from '../../runtime/machine/runtime.ts'
 import type { RunResult } from '../../runtime/types.ts'
@@ -37,15 +36,7 @@ import { concat } from '../../utils/bytes.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  BOTH,
-  NOT_ANSWERING,
-  NO_CONTAINER,
-  SLEEP_RELAY,
-  START_WAIT_SECONDS,
-  STOPPED,
-} from './constants.ts'
-import { isSleepable } from '../mixin.ts'
+import { BOTH, NOT_ANSWERING, NO_CONTAINER, START_WAIT_SECONDS, STOPPED } from './constants.ts'
 import { ContainerMachine } from './handle.ts'
 import type { Container, ExecOptions, ExecProcess } from './types.ts'
 
@@ -866,103 +857,5 @@ describe('ContainerMachine in a workspace', () => {
     } finally {
       await ws.close()
     }
-  })
-})
-
-describe('ContainerMachine sleep', () => {
-  it('runs the host’s sleep hook once, after close', async () => {
-    const box = new FakeContainer()
-    const order: string[] = []
-    const machine = new ContainerMachine(
-      'box',
-      {},
-      box,
-      () => Promise.resolve(),
-      () => {
-        order.push('sleep')
-        return Promise.resolve()
-      },
-    )
-    expect(isSleepable(machine)).toBe(true)
-    await machine.close()
-    order.push('closed')
-    await machine.sleep()
-    expect(order).toEqual(['closed', 'sleep'])
-  })
-
-  it('sleeps only after a start under way at close comes up', async () => {
-    const gate = deferred<undefined>()
-    const order: string[] = []
-    const machine = new ContainerMachine(
-      'box',
-      {},
-      new FakeContainer(),
-      async () => {
-        await gate.promise
-        order.push('started')
-      },
-      () => {
-        order.push('sleep')
-        return Promise.resolve()
-      },
-    )
-    const connecting = machine.ensureConnected()
-    const slept = machine.close().then(() => machine.sleep())
-    await new Promise((resolve) => setTimeout(resolve, 10))
-    gate.resolve(undefined)
-    await Promise.all([connecting, slept])
-    expect(order).toEqual(['started', 'sleep'])
-  })
-
-  it('closes without waiting for a start that never answers', async () => {
-    const machine = new ContainerMachine(
-      'box',
-      {},
-      new FakeContainer(),
-      () => new Promise(() => undefined),
-    )
-    void machine.ensureConnected()
-    expect(await settledWithin(machine.close(), 1)).toBe(true)
-  })
-
-  it('sleeps after the start’s wait when a start never answers', async () => {
-    vi.useFakeTimers()
-    try {
-      const order: string[] = []
-      const machine = new ContainerMachine(
-        'box',
-        {},
-        new FakeContainer(),
-        () => new Promise(() => undefined),
-        () => {
-          order.push('sleep')
-          return Promise.resolve()
-        },
-      )
-      void machine.ensureConnected()
-      await machine.close()
-      const slept = machine.sleep()
-      await vi.advanceTimersByTimeAsync((START_WAIT_SECONDS + 1) * 1000)
-      await slept
-      expect(order).toEqual(['sleep'])
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('does nothing on sleep without a hook', async () => {
-    const { machine, start } = boxed()
-    await machine.sleep()
-    expect(start).not.toHaveBeenCalled()
-  })
-
-  it('refuses a sleep hook for a relay’s container', () => {
-    const url = 'https://relay.example.workers.dev/box'
-    expect(
-      () =>
-        new ContainerMachine('box', { url, token: 't' }, undefined, undefined, () =>
-          Promise.resolve(),
-        ),
-    ).toThrow(SLEEP_RELAY)
   })
 })

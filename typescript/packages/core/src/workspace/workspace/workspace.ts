@@ -304,7 +304,7 @@ export class Workspace {
   private closing: Promise<void> | null = null
   private metaWrite: Promise<void> | null = null
   private stateDropped = false
-  // Whether the close that ran put the machines to sleep (`sleep`).
+  // Whether the close that ran paused the machines (`sleep`).
   private machinesSlept = false
   // The stores this workspace's state lives in, whether the state store
   // built them or the caller passed one in directly: delete clears these,
@@ -2806,11 +2806,10 @@ export class Workspace {
   }
 
   /**
-   * Close the workspace as `close` does, then put each machine that can
-   * sleep to sleep: an E2B sandbox whose config says `onSleep: 'pause'`, or
-   * a container whose host gave a sleep hook. Other machines are only
-   * disconnected, and the state is kept. Throws when the workspace was
-   * closed first: its machines were let go awake.
+   * Close the workspace as `close` does, then pause each machine: an E2B
+   * sandbox whose config says `onSleep: 'pause'` is paused, and other
+   * machines are only disconnected. The state is kept. Throws when the
+   * workspace was closed first: its machines were let go awake.
    */
   async sleep(): Promise<void> {
     this.closing ??= this.runClose(false, true)

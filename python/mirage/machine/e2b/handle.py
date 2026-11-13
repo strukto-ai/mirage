@@ -41,7 +41,7 @@ from mirage.machine.e2b.constants import (
 )
 from mirage.machine.errors import ConnectionLostError
 from mirage.machine.handle import MachineHandle
-from mirage.machine.mixin import PipeTransportMixin, SleepableMixin
+from mirage.machine.mixin import PipeTransportMixin
 from mirage.machine.types import MachinePipe
 from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.types import OutputFn, RunResult
@@ -127,7 +127,7 @@ class PtyWriter:
                 return
 
 
-class E2BMachine(MachineHandle, PipeTransportMixin, SleepableMixin):
+class E2BMachine(MachineHandle, PipeTransportMixin):
     """A running E2B sandbox, reached through its SDK.
 
     You create the sandbox yourself (`e2b sandbox spawn` or the SDK);
@@ -159,7 +159,7 @@ class E2BMachine(MachineHandle, PipeTransportMixin, SleepableMixin):
 
     _sandbox: Any = None
     # Set by a connect that reached the sandbox; close hands it to
-    # ``_pausable`` for the sleep after.
+    # ``_pausable`` for the pause after.
     _reached: bool = False
     _pausable: bool = False
 
@@ -186,8 +186,8 @@ class E2BMachine(MachineHandle, PipeTransportMixin, SleepableMixin):
         self._reached = True
 
     async def close(self) -> None:
-        """Close as any machine does, letting the sleep after it pause only
-        what this workspace reached; a connect still under way settles
+        """Close as any machine does, so the pause after it touches only a
+        sandbox this workspace reached; a connect still under way settles
         first."""
         async with self._connect_lock:
             pass
@@ -195,7 +195,7 @@ class E2BMachine(MachineHandle, PipeTransportMixin, SleepableMixin):
         self._reached = False
         await super().close()
 
-    async def sleep(self) -> None:
+    async def pause(self) -> None:
         """Pause the sandbox when the config says ``on_sleep: pause`` and
         the workspace that just closed reached it, keeping its disk and
         memory; the next connect resumes it. A sandbox already gone has

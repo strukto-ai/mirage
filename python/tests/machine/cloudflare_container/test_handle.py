@@ -21,11 +21,9 @@ from mirage.machine.cloudflare_container import ContainerMachine
 from mirage.machine.cloudflare_container.constants import (
     BOTH,
     NO_CONTAINER,
-    SLEEP_RELAY,
     STOPPED,
 )
 from mirage.machine.constants import CHECK_LINE, EXEC_PRELUDE, PROCESS
-from mirage.machine.mixin import SleepableMixin
 from mirage.machine.registry import build_machine
 from mirage.types import PathSpec
 from tests.fixtures.cloudflare_container import FakeContainer, FakeProcess
@@ -195,103 +193,3 @@ async def test_a_pipe_sends_its_writes_in_order_and_stops_with_term():
     assert await asyncio.wait_for(pipe.reader.readexactly(2), 5) == b"ab"
     await pipe.stop()
     assert box.ran("sftp -e").killed == [15]
-
-
-async def _nothing() -> None:
-    return None
-
-
-@pytest.mark.asyncio
-async def test_sleep_runs_the_hosts_hook_once_after_close():
-    order: list[str] = []
-
-    async def sleep() -> None:
-        order.append("sleep")
-
-    machine = ContainerMachine("box", {}, FakeContainer(), _nothing, sleep)
-    assert isinstance(machine, SleepableMixin)
-    await machine.close()
-    order.append("closed")
-    await machine.sleep()
-    assert order == ["closed", "sleep"]
-
-
-@pytest.mark.asyncio
-async def test_sleep_waits_for_a_start_under_way_at_close():
-    box = FakeContainer()
-    gate = asyncio.Event()
-    order: list[str] = []
-
-    async def start() -> None:
-        await gate.wait()
-        box.start()
-        order.append("started")
-
-    async def sleep() -> None:
-        order.append("sleep")
-
-    machine = ContainerMachine("box", {}, box, start, sleep)
-
-    async def close_then_sleep() -> None:
-        await machine.close()
-        await machine.sleep()
-
-    connecting = asyncio.create_task(machine.ensure_connected())
-    await asyncio.sleep(0)
-    slept = asyncio.create_task(close_then_sleep())
-    await asyncio.sleep(0.01)
-    gate.set()
-    await asyncio.gather(connecting, slept)
-    assert order == ["started", "sleep"]
-
-
-async def _never() -> None:
-    await asyncio.Event().wait()
-
-
-@pytest.mark.asyncio
-async def test_close_does_not_wait_for_a_start_that_never_answers():
-    machine = ContainerMachine("box", {}, FakeContainer(), _never)
-    connecting = asyncio.create_task(machine.ensure_connected())
-    await asyncio.sleep(0)
-    try:
-        await asyncio.wait_for(machine.close(), 1)
-    finally:
-        connecting.cancel()
-        await asyncio.gather(connecting, return_exceptions=True)
-
-
-@pytest.mark.asyncio
-async def test_sleep_gives_up_on_a_start_that_never_answers(monkeypatch):
-    monkeypatch.setattr(
-        "mirage.machine.cloudflare_container.handle.START_WAIT_SECONDS", 0.05
-    )
-    order: list[str] = []
-
-    async def sleep() -> None:
-        order.append("sleep")
-
-    machine = ContainerMachine("box", {}, FakeContainer(), _never, sleep)
-    connecting = asyncio.create_task(machine.ensure_connected())
-    await asyncio.sleep(0)
-    try:
-        await asyncio.wait_for(machine.close(), 1)
-        await asyncio.wait_for(machine.sleep(), 1)
-    finally:
-        connecting.cancel()
-        await asyncio.gather(connecting, return_exceptions=True)
-    assert order == ["sleep"]
-
-
-@pytest.mark.asyncio
-async def test_sleep_does_nothing_without_a_hook():
-    _, machine = boxed()
-    await machine.sleep()
-
-
-def test_a_relays_container_takes_no_sleep_hook():
-    url = "https://relay.example.workers.dev/box"
-    with pytest.raises(ValueError, match=SLEEP_RELAY):
-        ContainerMachine(
-            "box", {"url": url, "token": "t"}, None, None, _nothing
-        )

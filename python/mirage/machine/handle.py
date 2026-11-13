@@ -827,6 +827,11 @@ class MachineHandle:
         finally:
             self._disconnected()
 
+    async def pause(self) -> None:
+        """Pause the machine after its workspace closed for sleep. A
+        provider that can pause overrides this, and its next connect
+        resumes the machine; by default the machine is only disconnected."""
+
 
 def _parse_status(first: str, second: str) -> RunStatus | None:
     """A run's report from its two lines (``RUN_WRAPPER``), None when it
