@@ -71,6 +71,11 @@ server as a CLI. The mount is pinned to the commit the pull request merged
 as, so `/repo` holds the code as merged. To review your own repository,
 change `owner`, `repo` and `ref`, and the `repo` of `gh`.
 
+Before you start the server, set `GITHUB_TOKEN` to a token that can read
+public repositories. [GitHub](/home/setup/github) says how to create one.
+The server uses it for `gh` and for the mount, and the agent cannot read it
+from the terminal.
+
 <Tabs>
   <Tab title="FastAPI" icon="/images/python-logo.svg">
     ```python app.py
@@ -185,11 +190,6 @@ change `owner`, `repo` and `ref`, and the `repo` of `gh`.
     ```
   </Tab>
 </Tabs>
-
-Before you start the server, set `GITHUB_TOKEN` to a token that can read
-public repositories. [GitHub](/home/setup/github) says how to create one.
-The server uses it for `gh` and for the mount, and the agent cannot read it
-from the terminal.
 
 ## Usage
 

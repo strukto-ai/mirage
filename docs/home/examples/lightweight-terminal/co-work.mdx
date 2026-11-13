@@ -77,6 +77,31 @@ This is the server from the
 [Overview](/home/examples/lightweight-terminal#server) with one addition: it
 registers `himalaya`, `gws` and `slack`, each with one account.
 
+To run this page you need three accounts: a mailbox the agent reads and sends
+from over IMAP and SMTP, a Google account with Calendar access that can see
+both interviewers' free and busy times, and a Slack bot that is a member of the
+hiring channel. [Email](/home/setup/email), [Google](/home/setup/google) and
+[Slack](/home/setup/slack) show how to get each credential. The server reads
+them from environment variables, and
+[Service Credentials](/home/service-credentials) shows how to keep them in a
+secret store instead:
+
+```bash
+export IMAP_HOST=imap.example.com SMTP_HOST=smtp.example.com
+export EMAIL_USERNAME=recruiting@example.com EMAIL_PASSWORD=your-app-password
+export EMAIL_SENT_FOLDER=Sent
+export GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... GOOGLE_REFRESH_TOKEN=...
+export SLACK_BOT_TOKEN=xoxb-...
+```
+
+`EMAIL_SENT_FOLDER` names the folder the account keeps sent mail in: `Sent`
+on most servers, `[Gmail]/Sent Mail` on Gmail and `Sent Items` on Exchange.
+`himalaya` saves each sent message there. The ports, the TLS switch and the
+two API addresses default to the services' own. Set them only for a
+self-hosted mail server or a proxy. A terminal has its own environment, not
+the server's, so the agent uses the three accounts without seeing their
+credentials.
+
 <Tabs>
   <Tab title="FastAPI" icon="/images/python-logo.svg">
     ```python app.py
@@ -196,31 +221,6 @@ registers `himalaya`, `gws` and `slack`, each with one account.
     ```
   </Tab>
 </Tabs>
-
-To run this page you need three accounts: a mailbox the agent reads and sends
-from over IMAP and SMTP, a Google account with Calendar access that can see
-both interviewers' free and busy times, and a Slack bot that is a member of the
-hiring channel. [Email](/home/setup/email), [Google](/home/setup/google) and
-[Slack](/home/setup/slack) show how to get each credential. The server reads
-them from environment variables, and
-[Service Credentials](/home/service-credentials) shows how to keep them in a
-secret store instead:
-
-```bash
-export IMAP_HOST=imap.example.com SMTP_HOST=smtp.example.com
-export EMAIL_USERNAME=recruiting@example.com EMAIL_PASSWORD=your-app-password
-export EMAIL_SENT_FOLDER=Sent
-export GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... GOOGLE_REFRESH_TOKEN=...
-export SLACK_BOT_TOKEN=xoxb-...
-```
-
-`EMAIL_SENT_FOLDER` names the folder the account keeps sent mail in: `Sent`
-on most servers, `[Gmail]/Sent Mail` on Gmail and `Sent Items` on Exchange.
-`himalaya` saves each sent message there. The ports, the TLS switch and the
-two API addresses default to the services' own. Set them only for a
-self-hosted mail server or a proxy. A terminal has its own environment, not
-the server's, so the agent uses the three accounts without seeing their
-credentials.
 
 The output below comes from sample data, so yours will differ.
 
