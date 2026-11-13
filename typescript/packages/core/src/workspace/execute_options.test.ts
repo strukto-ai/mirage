@@ -968,3 +968,30 @@ describe('execute({ sink }): streaming output to a console', () => {
     await ws.close()
   })
 })
+
+it.each([
+  ['f() {\n printf \'%s\\n\' "$LINENO"\n}\n', '2\n'],
+  ["f() { cat <<E\n$(printf 'é😀')\nE\n}\n", 'é😀\n'],
+  ["f() { cat <<'E'\n$LINENO\nE\n}\n", '$LINENO\n'],
+])('runs a function after defining program release %s', async (definition, expected) => {
+  const ws = makeWs()
+  try {
+    expect((await ws.shell(definition)).exitCode).toBe(0)
+    const result = await ws.shell('f')
+    expect(result.exitCode).toBe(0)
+    expect(stdoutStr(result)).toBe(expected)
+  } finally {
+    await ws.close()
+  }
+})
+
+it('uses original source for LINENO after a continuation', async () => {
+  const ws = makeWs()
+  try {
+    const result = await ws.shell('echo é\\\n😀\nprintf \'%s\\n\' "$LINENO"')
+    expect(result.exitCode).toBe(0)
+    expect(stdoutStr(result)).toBe('é😀\n3\n')
+  } finally {
+    await ws.close()
+  }
+})

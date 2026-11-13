@@ -660,19 +660,79 @@ fn single_quoted(value: &[u8], out: &mut Vec<u8>) {
     out.push(b'\'');
 }
 
+/// Positions in the typed input. Unchanged text needs only its length.
+#[derive(Debug, Clone)]
+pub enum SourceMap {
+    Identity(usize),
+    Packed(Vec<u32>),
+    Wide(Vec<usize>),
+}
+
+impl SourceMap {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Identity(len) => *len,
+            Self::Packed(values) => values.len(),
+            Self::Wide(values) => values.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn is_identity(&self) -> bool {
+        matches!(self, Self::Identity(_))
+    }
+
+    pub fn at(&self, index: usize) -> usize {
+        match self {
+            Self::Identity(len) => {
+                assert!(index < *len);
+                index
+            }
+            Self::Packed(values) => values[index] as usize,
+            Self::Wide(values) => values[index],
+        }
+    }
+
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = usize> + '_ {
+        (0..self.len()).map(|index| self.at(index))
+    }
+}
+
+impl FromIterator<usize> for SourceMap {
+    fn from_iter<T: IntoIterator<Item = usize>>(iter: T) -> Self {
+        let mut iter = iter.into_iter();
+        let mut values = Vec::with_capacity(iter.size_hint().0);
+        while let Some(value) = iter.next() {
+            match u32::try_from(value) {
+                Ok(value) => values.push(value),
+                Err(_) => {
+                    let mut wide: Vec<usize> = values.into_iter().map(|n| n as usize).collect();
+                    wide.push(value);
+                    wide.extend(iter);
+                    return Self::Wide(wide);
+                }
+            }
+        }
+        Self::Packed(values)
+    }
+}
+
 /// A parsed program.
 #[derive(Debug, Clone)]
 pub struct Tree {
     /// What the nodes read: the line with its heredoc bodies folded in
     /// and its line continuations dropped.
-    pub source: Vec<u8>,
+    pub source: std::sync::Arc<Vec<u8>>,
     pub nodes: Vec<Node>,
     /// What bash reports of the line when it refuses it.
     pub error: Option<Refusal>,
     /// The line as typed.
-    pub original: Vec<u8>,
+    pub original: std::sync::Arc<Vec<u8>>,
     /// Where each byte of `source` came from in `original`, then the end.
-    pub offsets: Vec<usize>,
+    pub offsets: SourceMap,
     /// The heredocs folded into `source`, in its order.
     pub heredocs: Vec<super::lower::Heredoc>,
     /// Each substitution that closes with heredocs opened inside still to
@@ -764,11 +824,11 @@ pub(crate) fn lay_out(source: Vec<u8>, mut root: Syn, error: Option<Refusal>) ->
         }
     }
     Tree {
-        source,
+        source: std::sync::Arc::new(source),
         nodes,
         error,
-        original: Vec::new(),
-        offsets: Vec::new(),
+        original: std::sync::Arc::default(),
+        offsets: SourceMap::Identity(0),
         heredocs: Vec::new(),
         closes: Vec::new(),
     }

@@ -161,7 +161,8 @@ describe('the text a tree reads', () => {
     const root = parseShell(command).rootNode
     const errors = root.children.filter((node) => node.type === 'ERROR')
     expect(errors).toHaveLength(1)
-    expect(root.offsets[errors[0]?.startIndex ?? -1]).toBe(command.lastIndexOf('fi'))
+    const at = errors[0]?.startIndex ?? -1
+    expect(root.offsets?.[at] ?? at).toBe(command.lastIndexOf('fi'))
   })
 })
 
@@ -290,4 +291,18 @@ describe('Shell', () => {
     expect(result).toEqual(['host', 'the host failed'])
     expect(shell.get('x')).toBeNull()
   })
+})
+
+it.each([
+  ['echo \ud800', 'echo �'],
+  ['echo \udc00', 'echo �'],
+  ['echo \udd00', 'echo �'],
+  ['echo \udcff', 'echo \udcff'],
+  ['echo 😀', 'echo 😀'],
+])('preserves encoded source semantics for %j', (input, expected) => {
+  const tree = parseShell(input)
+  expect(tree.source).toBe(expected)
+  expect(tree.rootNode.children[0]?.text).toBe(expected)
+  expect(tree.rootNode.sourceText).toBe(input)
+  tree.dispose()
 })
