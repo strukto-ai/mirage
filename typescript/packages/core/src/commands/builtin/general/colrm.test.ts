@@ -13,11 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { IOResult } from '../../../io/types.ts'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
-import { removed } from './colrm.ts'
 
 // Pinned on util-linux 2.41.5.
 describe('colrm', () => {
@@ -65,11 +63,14 @@ describe('colrm across chunks', () => {
     [[[0x61, 0xc3]], 2, null, [0x61], 0],
     [[[0x61, 0xc3], [0x62]], 2, null, [0x61], 1],
   ])('%j', async (parts, start, stop, stdout, code) => {
-    const io = new IOResult()
-    const out: number[] = []
-    const source = arriving(parts.map((part) => Uint8Array.from(part)))
-    for await (const chunk of removed(source, start, stop, true, io)) out.push(...chunk)
-    expect(out).toEqual(stdout)
+    const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
+    const args = stop === null ? `${String(start)}` : `${String(start)} ${String(stop)}`
+    const io = await ws.shell(`colrm ${args}`, {
+      stdin: arriving(parts.map((part) => Uint8Array.from(part))),
+      env: { LC_ALL: 'C.UTF-8' },
+    })
+    expect([...io.stdout]).toEqual(stdout)
     expect(io.exitCode).toBe(code)
+    await ws.close()
   })
 })

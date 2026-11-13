@@ -33,3 +33,40 @@ describe('envsubst', () => {
     expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual([stdout, stderr, code])
   })
 })
+
+it('preserves references split at every byte and raw environment values', async () => {
+  const data = Uint8Array.from([...new TextEncoder().encode('${X} / $X / $MISSING / ${ / '), 255])
+  const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
+  for (let split = 0; split <= data.length; split++) {
+    async function* source() {
+      await Promise.resolve()
+      yield data.subarray(0, split)
+      yield data.subarray(split)
+    }
+    const io = await ws.shell('envsubst', { stdin: source(), env: { X: '\udcff' } })
+    expect([...io.stdout]).toEqual([
+      255, 32, 47, 32, 255, 32, 47, 32, 32, 47, 32, 36, 123, 32, 47, 32, 255,
+    ])
+    expect(io.exitCode).toBe(0)
+  }
+  await ws.close()
+})
+
+it('drains large expansions and lists variables without reading stdin', async () => {
+  const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
+  const io = await ws.shell('envsubst', {
+    stdin: new TextEncoder().encode('${X}'),
+    env: { X: 'z'.repeat(100000) },
+  })
+  expect(io.stdoutText).toBe('z'.repeat(100000))
+  let reads = 0
+  async function* source() {
+    await Promise.resolve()
+    reads++
+    yield new Uint8Array()
+  }
+  const listed = await ws.shell("envsubst -v '$X ${Y} $X'", { stdin: source() })
+  expect(listed.stdoutText).toBe('X\nY\nX\n')
+  expect(reads).toBe(0)
+  await ws.close()
+})

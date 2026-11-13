@@ -8,6 +8,7 @@ mod cat;
 #[cfg(feature = "gh")]
 pub mod cli;
 mod cmp;
+mod colrm;
 mod column;
 mod comm;
 mod compress;
@@ -20,6 +21,7 @@ mod diff;
 mod digest;
 mod document;
 mod du;
+mod envsubst;
 mod expand;
 mod expr;
 mod file;
@@ -403,12 +405,14 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "bc" => bc::open(config),
         "cmp" => cmp::open(config),
         "column" => column::open(config),
+        "colrm" => colrm::open(config),
         "comm" => comm::open(config),
         "compress" => compress::open(config),
         "csplit" => split::csplit::open(config),
         "cut" => cut::open(config),
         "digest" => digest::open(config),
         "expand" => expand::open_expand(config),
+        "envsubst" => envsubst::open(config),
         "file" => file::open(config),
         "fmt" => reflow::open(config),
         "fold" => fold::open(config),
