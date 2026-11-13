@@ -215,10 +215,9 @@ What a terminal costs depends on what it is doing:
   Python share the server's CPU, so each takes longer as more run together.
   A command that needs a core to itself belongs on a machine: see
   [Runtime Routing](/home/examples/runtime-routing).
-- **Files in a memory mount are the server's memory.** The authentication
-  log in [Alert Triage](/home/examples/lightweight-terminal/alert-triage) is
-  2 MB that the server holds. For data you do not want in memory, mount storage: see
-  [VFS](/home/setup/vfs).
+- **Files in a memory mount are the server's memory.** A 2 MB log in a
+  memory mount is 2 MB that the server holds. For data you do not want in
+  memory, mount storage: see [VFS](/home/setup/vfs).
 
 Press each button to see four terminals run a command at the same moment:
 
@@ -366,10 +365,6 @@ the terminal.
   </Card>
   <Card title="Co-Work" icon="users" href="/home/examples/lightweight-terminal/co-work">
     Schedule candidate interviews from an inbox, a calendar and Slack.
-  </Card>
-  <Card title="Alert Triage" icon="bell" href="/home/examples/lightweight-terminal/alert-triage">
-    Forty agents triage alerts in a terminal each, and a lead agent reads
-    their verdicts from a shared bucket.
   </Card>
   <Card title="Release Notes" icon="scroll" href="/home/examples/lightweight-terminal/release-notes">
     Turn a week of merged work into release notes.

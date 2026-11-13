@@ -1,4 +1,4 @@
-export const UseCaseTerminal = ({ services, steps, extras = [], fanout = null, reads = "The agent reads and writes", terminal = "Runs in one terminal", server = "on a Mirage server of its own, or embedded in your agent's server" }) => {
+export const UseCaseTerminal = ({ services, steps, extras = [], reads = "The agent reads and writes", terminal = "Runs in one terminal", server = "on a Mirage server of its own, or embedded in your agent's server" }) => {
   const [pos, setPos] = useState({ step: steps.length, chars: 0, output: true })
 
   useEffect(() => {
@@ -39,8 +39,6 @@ export const UseCaseTerminal = ({ services, steps, extras = [], fanout = null, r
 
   const running = pos.step < steps.length && pos.output ? steps[pos.step].cli : null
   const typing = pos.step < steps.length ? steps[pos.step].cli : null
-  const fanStep = steps.findIndex((step) => step.fanout)
-  const fanState = fanStep < 0 || pos.step > fanStep ? "done" : pos.step === fanStep && pos.output ? "filling" : "empty"
   const flow = (service) => {
     const step = pos.step < steps.length ? steps[pos.step] : null
     return (step && step.cli === service.cli && step.dir) || service.dir || "in"
@@ -75,11 +73,6 @@ export const UseCaseTerminal = ({ services, steps, extras = [], fanout = null, r
         .use-case-terminal .uct-extra.uct-on { background-color: var(--uct-accent); color: #fff; }
         .use-case-terminal .uct-none { display: flex; flex-direction: column; gap: 2px; }
         .use-case-terminal .uct-none-name { white-space: nowrap; }
-        .use-case-terminal .uct-fan { display: grid; grid-template-columns: repeat(20, minmax(0, 1fr)); gap: 3px; }
-        .use-case-terminal .uct-cell { aspect-ratio: 1; border-radius: 2px; border: 1px solid var(--uct-line); }
-        .use-case-terminal .uct-fan.uct-done .uct-cell { background: var(--uct-accent); border-color: var(--uct-accent); }
-        .use-case-terminal .uct-fan.uct-filling .uct-cell { animation: uct-fill .2s ease-out both; }
-        @keyframes uct-fill { from { background: transparent; } to { background: var(--uct-accent); border-color: var(--uct-accent); } }
         @media (min-width: 640px) {
           .use-case-terminal .uct-grid {
             grid-template-columns: minmax(0, 1fr) 56px minmax(0, 1.75fr);
@@ -160,16 +153,6 @@ export const UseCaseTerminal = ({ services, steps, extras = [], fanout = null, r
               })}
             </div>
           </div>
-          {fanout && (
-            <div className="mt-2">
-              <div className="mb-1 text-xs text-zinc-500 dark:text-zinc-400">{fanout.label}</div>
-              <div className={"uct-fan uct-" + fanState}>
-                {Array.from({ length: fanout.count }, (_, index) => (
-                  <span key={index} className="uct-cell" style={{ animationDelay: index * 25 + "ms" }} />
-                ))}
-              </div>
-            </div>
-          )}
           {extras.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {extras.map((extra) => (
