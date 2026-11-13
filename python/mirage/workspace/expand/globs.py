@@ -69,6 +69,8 @@ class GlobOptions:
         globstar (bool): a `**` segment matches zero or more directory
             levels instead of reading as `*`.
         extglob (bool): expand extended groups before dispatching a command.
+        ignore (tuple[str, ...]): the GLOBIGNORE patterns, each matched
+            against a whole spelled match.
     """
 
     nullglob: bool = False
@@ -101,10 +103,10 @@ def glob_options(session: SessionState) -> GlobOptions:
         nullglob=session.shopts.get("nullglob", SHOPT_DEFAULTS["nullglob"]),
         failglob=session.shopts.get("failglob", SHOPT_DEFAULTS["failglob"]),
         globstar=session.shopts.get("globstar", SHOPT_DEFAULTS["globstar"]),
+        extglob=session.shopts.get("extglob", SHOPT_DEFAULTS["extglob"]),
         ignore=tuple(
             filter(None, visible_env(session).get("GLOBIGNORE", "").split(":"))
         ),
-        extglob=session.shopts.get("extglob", SHOPT_DEFAULTS["extglob"]),
     )
 
 
@@ -576,7 +578,13 @@ def _match_raw(item: PathSpec, match: PathSpec) -> PathSpec:
 
 
 def _ignored(spelling: str, options: GlobOptions) -> bool:
-    """Match GLOBIGNORE against the components of the complete spelling."""
+    """Whether a GLOBIGNORE pattern matches a spelled match, component
+    by component.
+
+    Args:
+        spelling (str): the match as the word spells it.
+        options (GlobOptions): the expansion options, with the patterns.
+    """
     parts = spelling.split("/")
     for pattern in options.ignore:
         pats = glob_parts(pattern)

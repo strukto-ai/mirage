@@ -1117,16 +1117,17 @@ export class SessionState {
     return data
   }
 
-  /**
-   * The session's record; `variables` false leaves out the keys the variables
-   * fill, for a flush that compares their store's version instead of reading
-   * them.
-   */
+  /** Apply the `dotglob` setting the last write to GLOBIGNORE made. */
   syncShopts(): void {
     const dotglob = this.vars.shell.takeDotglob()
     if (dotglob !== null) this.shopts.dotglob = dotglob
   }
 
+  /**
+   * The session's record; `variables` false leaves out the keys the variables
+   * fill, for a flush that compares their store's version instead of reading
+   * them.
+   */
   toDict(variables = true): Record<string, unknown> {
     const data: Record<string, unknown> = {
       session_id: this.sessionId,

@@ -196,7 +196,7 @@ class Shell:
         pipe_status: Sequence[int],
         function_names: Sequence[Text] | None,
         call_lines: Sequence[int],
-        source_files: Sequence[str] = ...,
+        source_files: Sequence[Text],
         paren: bool,
         memory_room: int | None,
         line: int,

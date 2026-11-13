@@ -68,6 +68,7 @@ pub const RANDOM: &str = "RANDOM";
 pub const LINENO: &str = "LINENO";
 pub const BASHPID: &str = "BASHPID";
 pub const BASH_LINENO: &str = "BASH_LINENO";
+pub const BASH_SOURCE: &str = "BASH_SOURCE";
 pub const PIPESTATUS: &str = "PIPESTATUS";
 /// The stored attribute letters, in print order.
 pub fn letters(attrs: u8) -> String {
@@ -282,7 +283,7 @@ impl Store {
                     .map(|status| status.to_string().into_bytes()),
             ),
             ("FUNCNAME", Some(names)) => Indexed::dense(names.iter().cloned()),
-            ("BASH_SOURCE", _) => Indexed::dense(self.source_files.iter().cloned()),
+            (BASH_SOURCE, _) => Indexed::dense(self.source_files.iter().cloned()),
             (BASH_LINENO, _) => Indexed::dense(
                 self.call_lines
                     .iter()
@@ -306,7 +307,7 @@ impl Store {
             "PIPESTATUS",
             "FUNCNAME",
             BASH_LINENO,
-            "BASH_SOURCE",
+            BASH_SOURCE,
         ]
         .into_iter()
         .filter(|&name| {
@@ -346,7 +347,8 @@ impl Store {
         self.stamp = fresh_stamp();
     }
 
-    /// Consume the shell-option change caused by the latest GLOBIGNORE assignment.
+    /// The `dotglob` setting the last write to GLOBIGNORE made, once: a
+    /// non-empty value turns it on and `unset` turns it off.
     pub fn take_dotglob(&mut self) -> Option<bool> {
         self.pending_dotglob
             .take()

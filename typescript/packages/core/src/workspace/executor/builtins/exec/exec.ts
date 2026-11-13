@@ -39,6 +39,7 @@ import {
   FileInput,
   Inherited,
   Recorder,
+  redirectOperations,
   unsupportedDescriptor,
 } from '../../../../shell/descriptors.ts'
 import { ExitSignal } from '../../../../shell/errors.ts'
@@ -374,7 +375,7 @@ async function install(
 ): Promise<Uint8Array | null> {
   for (const raw of redirects) {
     const redirect = expand === undefined ? raw : await expand(raw)
-    for (const operation of redirect.operations()) {
+    for (const operation of redirectOperations(redirect)) {
       const error = await installDescriptor(owned, dispatch, session, operation, stdin)
       if (error !== null) return error
     }

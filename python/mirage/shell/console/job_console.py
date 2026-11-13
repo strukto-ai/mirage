@@ -56,7 +56,13 @@ class JobConsole:
         return self._process
 
     def pipe_for(self, channel: Channel) -> BytePipe | None:
-        """Return the pipe consuming this channel, if any, for stream backpressure."""
+        """The pipe that reads what this console takes on ``channel``,
+        which a writer drains to keep pace with its reader; None when no
+        pipe reads it.
+
+        Args:
+            channel (Channel): the stream written.
+        """
         return None
 
     def bind_process(self, process: str) -> None:

@@ -65,9 +65,11 @@ export interface GlobOptions {
   failglob: boolean
   globstar: boolean
   extglob: boolean
+  // The GLOBIGNORE patterns, each matched against a whole spelled match.
   ignore?: readonly string[]
 }
 
+/** Whether a GLOBIGNORE pattern matches a spelled match, component by component. */
 function ignored(spelling: string, options: GlobOptions): boolean {
   const parts = spelling.split('/')
   return (
@@ -85,11 +87,11 @@ export function globOptions(session: SessionState): GlobOptions {
   session.syncShopts()
   return {
     access: sessionAccess(session),
-    ignore: (visibleEnv(session).GLOBIGNORE ?? '').split(':').filter(Boolean),
     nullglob: session.shopts.nullglob ?? SHOPT_DEFAULTS.get('nullglob') ?? false,
     failglob: session.shopts.failglob ?? SHOPT_DEFAULTS.get('failglob') ?? false,
     globstar: session.shopts.globstar ?? SHOPT_DEFAULTS.get('globstar') ?? false,
     extglob: session.shopts.extglob ?? SHOPT_DEFAULTS.get('extglob') ?? false,
+    ignore: (visibleEnv(session).GLOBIGNORE ?? '').split(':').filter(Boolean),
   }
 }
 

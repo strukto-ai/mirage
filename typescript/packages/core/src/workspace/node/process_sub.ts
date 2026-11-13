@@ -39,6 +39,7 @@ class SubstitutionConsole extends JobConsole {
   ) {
     super()
   }
+
   override pipeFor(channel: Channel): BytePipe | null {
     return channel === Channel.STDOUT && this.endpoint.readable
       ? this.endpoint.pipe

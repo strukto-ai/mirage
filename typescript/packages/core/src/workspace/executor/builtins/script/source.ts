@@ -33,6 +33,11 @@ import type { BuiltinCall } from '../types.ts'
 import type { ExecuteFn } from '../../../expand/types.ts'
 import { readScriptText, scriptError } from './script.ts'
 
+/**
+ * The file `source` reads, as `BASH_SOURCE` names it, and its text: a name
+ * with no slash is looked up on PATH first under `sourcepath`, then, outside
+ * posix mode, in the working directory. Mirrors Python's `_source_file`.
+ */
 async function sourceFile(
   dispatch: DispatchFn,
   session: SessionState,
@@ -60,12 +65,12 @@ async function sourceFile(
 /**
  * Read a script file and execute it in the calling shell, `name` (`source`
  * or `.`) as typed. A sourced file is the caller, so whatever it sets stays
- * set. With arguments the file gets its own parameters. Outside a function
- * an explicit `set --` replaces the caller's parameters too.
- * It runs in a frame of its own, which `return` ends,
- * `FUNCNAME` names `source` and the RETURN action runs in as it returns; a
- * `break` in it ends a caller's loop. An empty name fails as a missing file
- * does, and bash blames a file it cannot read on itself, not the builtin.
+ * set; arguments replace `$1..$#` while it runs, and a `set --` in it outside
+ * a function replaces the caller's too. It runs in a frame of its own, which
+ * `return` ends, `FUNCNAME` names `source` and the RETURN action runs in as it
+ * returns; a `break` in it ends a caller's loop. An empty name fails as a
+ * missing file does, and bash blames a file it cannot read on itself, not the
+ * builtin.
  */
 export async function handleSource(
   dispatch: DispatchFn,

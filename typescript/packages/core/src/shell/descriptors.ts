@@ -22,7 +22,7 @@ import { SharedInput } from '../io/async_line_iterator.ts'
 import { type Channel, JobConsole, type OwnedStream, Terminal } from './console/index.ts'
 import type { PathSpec } from '../types.ts'
 import { ebadf } from '../errors/fs.ts'
-import { RedirectKind, type Redirect } from './types.ts'
+import { Redirect, RedirectKind } from './types.ts'
 import { encodeText } from './bytes.ts'
 
 /**
@@ -47,6 +47,18 @@ export function unsupportedDescriptor(redirects: readonly Redirect[]): number | 
     }
   }
   return null
+}
+
+/**
+ * The descriptor operations a redirect makes, in order: a move (`3>&4-`)
+ * duplicates its source, then closes it.
+ */
+export function redirectOperations(redirect: Redirect): readonly Redirect[] {
+  if (!redirect.move) return [redirect]
+  return [
+    redirect,
+    new Redirect({ fd: redirect.target as number, target: FD_CLOSE, kind: redirect.kind }),
+  ]
 }
 
 /** Bash's error for a closed descriptor, in the running shell's voice. */

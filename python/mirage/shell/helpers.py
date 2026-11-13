@@ -690,20 +690,6 @@ def _parse_file_redirect(child: TSNodeLike) -> Redirect:
             target_node = c
             break
 
-    if (
-        op in _DUP_OPERATORS
-        and isinstance(target, str)
-        and target.endswith("-")
-        and target[:-1].isascii()
-        and target[:-1].isdecimal()
-    ):
-        reading = op == NT.REDIRECT_DUP_IN
-        return Redirect(
-            fd=(FD_STDIN if reading else FD_STDOUT) if fd is None else fd,
-            target=int(target[:-1]),
-            kind=RedirectKind.STDIN if reading else RedirectKind.STDOUT,
-            move=True,
-        )
     document = getattr(child, "heredoc", None)
     if document is not None:
         fails = document.deferred
@@ -720,8 +706,18 @@ def _parse_file_redirect(child: TSNodeLike) -> Redirect:
 
     if op in _DUP_OPERATORS and dup_fd is None and target_node is not None:
         reading = op == NT.REDIRECT_DUP_IN
+        if fd is None:
+            fd = FD_STDIN if reading else FD_STDOUT
+        source = str(target).removesuffix("-")
+        if source != target and source.isascii() and source.isdecimal():
+            return Redirect(
+                fd=fd,
+                target=int(source),
+                kind=RedirectKind.STDIN if reading else RedirectKind.STDOUT,
+                move=True,
+            )
         return Redirect(
-            fd=(FD_STDIN if reading else FD_STDOUT) if fd is None else fd,
+            fd=fd,
             target=target,
             target_node=target_node,
             kind=RedirectKind.DUP_INPUT

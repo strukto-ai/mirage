@@ -47,7 +47,15 @@ from mirage.workspace.types import ExecutionNode
 async def _source_file(
     dispatch: DispatchFn, session: SessionState, path: str | PathSpec
 ) -> tuple[str, str]:
-    """Read the first file on PATH for a bare operand with sourcepath enabled."""
+    """The file ``source`` reads, as ``BASH_SOURCE`` names it, and its
+    text: a name with no slash is looked up on PATH first under
+    ``sourcepath``, then, outside posix mode, in the working directory.
+
+    Args:
+        dispatch (DispatchFn): op dispatcher, used to read the file.
+        session (SessionState): shell session state.
+        path (str | PathSpec): the operand as typed.
+    """
     name = word_text(path)
     if "/" not in name and session.shopts.get("sourcepath", True):
         search = visible_env(session).get("PATH")
@@ -89,11 +97,11 @@ async def handle_source(
 
     Unlike a nested shell, a sourced file *is* the caller, so whatever
     it sets stays set: `source f` where f runs `set -x` leaves the
-    caller tracing. It runs in a frame of its own,
-    which ``return`` ends, ``FUNCNAME`` names ``source`` and the RETURN
-    action runs in as it returns; a ``break`` in it ends a caller's loop.
-    An empty name fails as a missing file does, and bash blames a file it
-    cannot read on itself, not the builtin.
+    caller tracing. It runs in a frame of its own, which ``return``
+    ends, ``FUNCNAME`` names ``source`` and the RETURN action runs in as
+    it returns; a ``break`` in it ends a caller's loop. An empty name
+    fails as a missing file does, and bash blames a file it cannot read
+    on itself, not the builtin.
 
     Args:
         dispatch (DispatchFn): op dispatcher, used to read the file.
@@ -101,11 +109,10 @@ async def handle_source(
         path (str | PathSpec): the script to source.
         session (SessionState): shell session state.
         args (list[str] | None): positional parameters to expose to the
-            script. When given they replace ``$1..$#`` for the duration
-            of the source. Outside a function, an explicit ``set --``
-            replaces the caller's parameters too. When omitted the
-            parameters in scope are the script's, and
-            a ``shift`` or ``set --`` in it changes them.
+            script, which replace ``$1..$#`` while it runs; a ``set --``
+            in it outside a function replaces the caller's too. When
+            omitted the parameters in scope are the script's, and a
+            ``shift`` or ``set --`` in it changes them.
         stdin (ByteSource | None): the caller's standard input, which
             the script's statements read in turn.
         call_stack (CallStack | None): the caller's frames, which the

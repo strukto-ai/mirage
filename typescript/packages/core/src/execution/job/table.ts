@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ProcessPermissions } from '../process/config.ts'
-import { WORKSPACE_MACHINE } from '../process/constants.ts'
 import type { ProcessHandle } from '../process/handle.ts'
 import { ProcessTable } from '../process/table.ts'
+import { shownMachine } from '../process/types.ts'
 import { PathSpec } from '../../types.ts'
 import { JobConsole } from '../../shell/console/index.ts'
 import {
@@ -870,19 +870,27 @@ export class JobTable {
       kept.delete(pid)
   }
 
-  /** Make the substitution's process waitable only from the shell that started it. */
+  /**
+   * Keep how a process substitution ends under its pid, which a `wait` from
+   * the session that started it answers. Mirrors Python's
+   * `track_substitution`.
+   */
   trackSubstitution(process: ProcessHandle): void {
     const pid = process.record.id.pid
     this.substitutions.set(pid, process)
+    // Its table runs the hook that tracks it just before starting it, so it
+    // has something to join a microtask later.
     queueMicrotask(() => {
       void process.join().then((record) => {
-        if (!this.substitutions.delete(pid)) return
+        if (this.substitutions.get(pid) !== process) return
+        this.substitutions.delete(pid)
         if (record.exit !== null)
-          this.saveStatus(record.sessionId, pid, WORKSPACE_MACHINE, record.exit)
+          this.saveStatus(record.sessionId, pid, shownMachine(record), record.exit)
       })
     })
   }
 
+  /** Wait until the session's process substitution `pid` ends, or each of them without one. */
   async waitSubstitution(sessionId: string, pid?: number): Promise<void> {
     if (pid !== undefined) {
       const process = this.substitutions.get(pid)
@@ -894,6 +902,11 @@ export class JobTable {
     }
   }
 
+  /**
+   * Drop how the jobs that left the list ended, as a bare `wait` does, which
+   * leaves bash nothing to answer for their pids. Mirrors Python's
+   * `forget_statuses`.
+   */
   forgetStatuses(sessionId = ''): void {
     this.statuses.delete(sessionId)
   }

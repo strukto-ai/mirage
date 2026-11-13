@@ -113,6 +113,9 @@ export const RedirectKind = Object.freeze({
   STDERR_TO_STDOUT: 'stderr_to_stdout',
   HEREDOC: 'heredoc',
   HERESTRING: 'herestring',
+  // `N<&word` and `N>&word` before the word expands: a number duplicates and
+  // `-` closes; `>&word` on descriptor 1 is bash's other spelling of
+  // `&>word`, and any other word is AMBIGUOUS.
   DUP_INPUT: 'dup_input',
   DUP_OUTPUT: 'dup_output',
   // `N>&word` with a word that is neither a number nor `-` on a
@@ -135,6 +138,7 @@ export class Redirect {
   readonly kind: RedirectKind
   readonly append: boolean
   readonly clobber: boolean
+  // `N>&M-` or `N<&M-`, which closes descriptor M once N duplicates it.
   readonly move: boolean
   readonly expandVars: boolean
   /**
@@ -162,12 +166,6 @@ export class Redirect {
     this.move = init.move ?? false
     this.expandVars = init.expandVars ?? true
     this.deferred = init.deferred ?? null
-  }
-
-  operations(): readonly Redirect[] {
-    return this.move
-      ? [this, new Redirect({ fd: this.target as number, target: -1, kind: this.kind })]
-      : [this]
   }
 }
 

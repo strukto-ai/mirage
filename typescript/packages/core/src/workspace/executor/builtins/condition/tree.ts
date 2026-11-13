@@ -121,11 +121,9 @@ async function evalCondBinary(
   // == and != always fnmatch: the builder already rendered the right
   // side into the glob dialect, quoted segments escaped, so a
   // wholly-literal pattern matches exactly itself.
-  if (node.op === '=' || node.op === '==') {
-    return fnmatch(node.left, node.right, true, false, ctx.session.shopts.nocasematch ?? false)
-  }
-  if (node.op === '!=') {
-    return !fnmatch(node.left, node.right, true, false, ctx.session.shopts.nocasematch ?? false)
+  if (node.op === '=' || node.op === '==' || node.op === '!=') {
+    const nocase = ctx.session.shopts.nocasematch ?? false
+    return fnmatch(node.left, node.right, true, false, nocase) !== (node.op === '!=')
   }
   if (node.op === '<') return compareCodePoints(node.left, node.right) < 0
   if (node.op === '>') return compareCodePoints(node.left, node.right) > 0

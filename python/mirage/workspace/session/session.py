@@ -708,7 +708,7 @@ class SessionState:
         return data
 
     def sync_shopts(self) -> None:
-        """Apply the option change made by a write to GLOBIGNORE."""
+        """Apply the ``dotglob`` setting a write to GLOBIGNORE made."""
         dotglob = self.vars.shell.take_dotglob()
         if dotglob is not None:
             self.shopts["dotglob"] = dotglob

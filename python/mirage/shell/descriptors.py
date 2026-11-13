@@ -60,6 +60,21 @@ def unsupported_descriptor(redirects: Iterable[Redirect]) -> int | None:
     return None
 
 
+def redirect_operations(redirect: Redirect) -> tuple[Redirect, ...]:
+    """The descriptor operations a redirect makes, in order: a move
+    (`3>&4-`) duplicates its source, then closes it.
+
+    Args:
+        redirect (Redirect): the expanded redirect.
+    """
+    if not redirect.move:
+        return (redirect,)
+    return (
+        redirect,
+        Redirect(fd=redirect.target, target=FD_CLOSE, kind=redirect.kind),
+    )
+
+
 def bad_descriptor_line(fd: int | str) -> bytes:
     """Bash's error for a closed descriptor, in the running shell's voice.
 

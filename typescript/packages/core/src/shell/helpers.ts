@@ -579,20 +579,6 @@ function parseFileRedirect(child: TSNodeLike): Redirect {
     }
   }
 
-  if (
-    op !== null &&
-    DUP_OPERATORS.has(op) &&
-    typeof target === 'string' &&
-    /^[0-9]+-$/.test(target)
-  ) {
-    const reading = op === NT.REDIRECT_DUP_IN
-    return new Redirect({
-      fd: fd ?? (reading ? FD_STDIN : FD_STDOUT),
-      target: Number(target.slice(0, -1)),
-      kind: reading ? RedirectKind.STDIN : RedirectKind.STDOUT,
-      move: true,
-    })
-  }
   if (child.heredoc !== undefined) {
     return new Redirect({
       fd: fd ?? 0,
@@ -605,8 +591,18 @@ function parseFileRedirect(child: TSNodeLike): Redirect {
   }
   if (op !== null && DUP_OPERATORS.has(op) && dupFd === null && targetNode !== null) {
     const reading = op === NT.REDIRECT_DUP_IN
+    fd ??= reading ? FD_STDIN : FD_STDOUT
+    const moved = /^([0-9]+)-$/.exec(String(target))
+    if (moved !== null) {
+      return new Redirect({
+        fd,
+        target: Number(moved[1]),
+        kind: reading ? RedirectKind.STDIN : RedirectKind.STDOUT,
+        move: true,
+      })
+    }
     return new Redirect({
-      fd: fd ?? (reading ? FD_STDIN : FD_STDOUT),
+      fd,
       target,
       targetNode,
       kind: reading ? RedirectKind.DUP_INPUT : RedirectKind.DUP_OUTPUT,

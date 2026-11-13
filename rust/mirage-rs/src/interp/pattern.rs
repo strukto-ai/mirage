@@ -79,7 +79,7 @@ const COMPILED_KEPT: usize = 16;
 /// is not kept, so what the shell keeps stays small.
 const FEED_UNITS: usize = 4096;
 
-/// A compiled pattern kept: its units, whether extglob read them, and the
+/// A compiled pattern kept: the pattern, whether extglob read it, and the
 /// matcher.
 type Kept = (Pattern, bool, Box<dyn Stream>);
 

@@ -1,7 +1,9 @@
 //! The lines `declare -p` and a bare `set` print for a variable.
 
 use super::quote;
-use crate::vars::{BASH_LINENO, BASHPID, INTEGER, LINENO, RANDOM, Store, UNASSIGNED, Value, Var};
+use crate::vars::{
+    BASH_LINENO, BASH_SOURCE, BASHPID, INTEGER, LINENO, RANDOM, Store, UNASSIGNED, Value, Var,
+};
 
 /// The bytes a bare `set` single-quotes a value for.
 const SET_QUOTED: &[u8] = b" \t\n'\"\\|&;()<>!{}*[?]^$`";
@@ -10,7 +12,7 @@ const SET_QUOTED: &[u8] = b" \t\n'\"\\|&;()<>!{}*[?]^$`";
 const COMPUTED: [&str; 7] = [
     BASHPID,
     BASH_LINENO,
-    "BASH_SOURCE",
+    BASH_SOURCE,
     "FUNCNAME",
     LINENO,
     "PIPESTATUS",
@@ -104,7 +106,7 @@ pub fn computed(vars: &Store, name: &str) -> Option<Var> {
                 managed: None,
             });
         }
-        "BASH_SOURCE" if !vars.source_files.is_empty() => (Value::Indexed(vars.special(name)?), 0),
+        BASH_SOURCE if !vars.source_files.is_empty() => (Value::Indexed(vars.special(name)?), 0),
         BASH_LINENO => (Value::Indexed(vars.special(name)?), 0),
         "PIPESTATUS" | "FUNCNAME" => {
             let array = vars.special(name)?;

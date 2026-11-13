@@ -158,20 +158,14 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
     # == and != always fnmatch: the builder already rendered the right
     # side into the glob dialect, quoted segments escaped, so a
     # wholly-literal pattern matches exactly itself.
-    if node.op in ("=", "=="):
-        return fnmatch(
+    if node.op in ("=", "==", "!="):
+        matched = fnmatch(
             node.left,
             node.right,
             extglob=True,
             nocase=ctx.session.shopts.get("nocasematch", False),
         )
-    if node.op == "!=":
-        return not fnmatch(
-            node.left,
-            node.right,
-            extglob=True,
-            nocase=ctx.session.shopts.get("nocasematch", False),
-        )
+        return matched != (node.op == "!=")
     if node.op == "<":
         return node.left < node.right
     if node.op == ">":

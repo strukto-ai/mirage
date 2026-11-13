@@ -33,13 +33,17 @@ export class JobConsole {
   private finishedFlag: boolean
   private boundProcess: string | null = null
 
-  pipeFor(_channel: Channel): BytePipe | null {
-    return null
-  }
-
   /** The id of the process whose output this is, as text. */
   get process(): string | null {
     return this.boundProcess
+  }
+
+  /**
+   * The pipe that reads what this console takes on `channel`, which a writer
+   * drains to keep pace with its reader; null when no pipe reads it.
+   */
+  pipeFor(_channel: Channel): BytePipe | null {
+    return null
   }
 
   /** Associate this job's output with its one managed process, by its id as text. */

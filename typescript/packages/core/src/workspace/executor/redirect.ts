@@ -52,6 +52,7 @@ import {
   FileInput,
   Inherited,
   Recorder,
+  redirectOperations,
   unreadableStdin,
   unsupportedDescriptor,
   type Descriptor,
@@ -1177,11 +1178,11 @@ async function runRedirects(
     guard === undefined ? stdin : await redirectStdin(dispatch, redirects, context, stdin)
   for (const raw of redirects) {
     const r = expand === undefined ? raw : await expand(raw)
-    expanded.push(...r.operations())
+    expanded.push(...redirectOperations(r))
     const refused = unusable(r)
     if (refused !== null) return opened.failed(refused)
     if (typeof r.target === 'number') {
-      for (const operation of r.operations()) {
+      for (const operation of redirectOperations(r)) {
         const bad = duplicate(opened, operation, operation.target as number)
         if (bad !== null) return opened.failed(shellFailure(badDescriptorLine(bad)))
       }

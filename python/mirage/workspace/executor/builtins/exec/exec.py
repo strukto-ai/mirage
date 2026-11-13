@@ -49,6 +49,7 @@ from mirage.shell.descriptors import (
     Inherited,
     Recorder,
     bad_descriptor_line,
+    redirect_operations,
     unsupported_descriptor,
 )
 from mirage.shell.errors import ExitSignal
@@ -231,7 +232,7 @@ async def _install(
     for redirect in redirects:
         if expand is not None:
             redirect = await expand(redirect)
-        for operation in redirect.operations():
+        for operation in redirect_operations(redirect):
             error = await _install_descriptor(
                 owned, dispatch, session, operation, stdin
             )

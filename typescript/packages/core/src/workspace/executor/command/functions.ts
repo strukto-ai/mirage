@@ -144,9 +144,10 @@ export async function runShellFunction(
   }
   session.lineRow = site?.row ?? 0
   session.lineRows = site === undefined ? null : calledLines(site.lines, body)
+  const parseName = site?.name ?? 'environment'
+  session.parseName = parseName
   const outerSources = session.sourceFiles
-  session.sourceFiles = [site?.name ?? 'environment', ...outerSources]
-  session.parseName = site?.name ?? 'environment'
+  session.sourceFiles = [parseName, ...outerSources]
   session.aliasView = site?.aliases ?? null
   // Its commands stand under the definition's place, on a hand-off of
   // their own as every re-parse does, so two definitions of one text each

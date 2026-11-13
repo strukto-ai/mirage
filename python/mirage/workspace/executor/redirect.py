@@ -63,6 +63,7 @@ from mirage.shell.descriptors import (
     StreamOwner,
     bad_descriptor_line,
     deliver,
+    redirect_operations,
     unreadable_stdin,
     unsupported_descriptor,
 )
@@ -1498,12 +1499,12 @@ async def _handle_redirect(
     )
     for raw in redirects:
         r = await expand(raw) if expand is not None else raw
-        expanded.extend(r.operations())
+        expanded.extend(redirect_operations(r))
         unusable = _unusable(r)
         if unusable is not None:
             return await opened.failed(unusable)
         if isinstance(r.target, int):
-            for operation in r.operations():
+            for operation in redirect_operations(r):
                 bad = _duplicate(opened, operation, operation.target)
                 if bad is not None:
                     return await opened.failed(

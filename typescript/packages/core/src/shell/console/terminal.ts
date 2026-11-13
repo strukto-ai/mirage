@@ -35,9 +35,6 @@ export class Terminal extends JobConsole {
   chunks: [Channel, Uint8Array, boolean][] = []
   held = 0
   reader: JobConsole | null = null
-  override pipeFor(channel: Channel): BytePipe | null {
-    return this.reader?.pipeFor(channel) ?? null
-  }
   readonly jobs: JobOutput = new JobOutput(new JobSide(this))
   ended = 0
   attaching: Promise<void> | null = null
@@ -87,6 +84,10 @@ export class Terminal extends JobConsole {
       this.errPrefix = prefix
       this.errPrefixSize = size + part.byteLength
     }
+  }
+
+  override pipeFor(channel: Channel): BytePipe | null {
+    return this.reader?.pipeFor(channel) ?? null
   }
 
   /** Take what the line wrote. */

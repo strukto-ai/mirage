@@ -886,21 +886,27 @@ class JobTable:
             del kept[pid]
 
     def track_substitution(self, process: ProcessHandle) -> None:
-        record = process.record
-        self._substitutions[(record.session_id, record.pid)] = process
+        """Keep how a process substitution ends under its pid, which a
+        ``wait`` from the session that started it answers.
+
+        Args:
+            process (ProcessHandle): the substitution's process.
+        """
+        session_id, pid = process.record.session_id, process.record.pid
+        self._substitutions[(session_id, pid)] = process
 
         def finished(_: asyncio.Task[int]) -> None:
-            if (
-                self._substitutions.pop((record.session_id, record.pid), None)
-                is not process
-            ):
+            if self._substitutions.get((session_id, pid)) is not process:
                 return
-            status = process.record.exit
-            if status is not None:
+            del self._substitutions[(session_id, pid)]
+            ended = process.record
+            if ended.exit is not None:
                 self._save_status(
-                    record.session_id, record.pid, record.shown_machine, status
+                    session_id, pid, ended.shown_machine, ended.exit
                 )
 
+        # Its table runs the hook that tracks it just before starting it,
+        # so its task is there a turn later.
         asyncio.get_running_loop().call_soon(
             lambda: process.task.add_done_callback(finished)
         )
@@ -908,6 +914,13 @@ class JobTable:
     async def wait_substitution(
         self, session_id: str, pid: int | None = None
     ) -> None:
+        """Wait until the session's process substitution ``pid`` ends, or
+        each of them without one.
+
+        Args:
+            session_id (str): the session that started them.
+            pid (int | None): the substitution's pid; None for every one.
+        """
         if pid is not None:
             process = self._substitutions.get((session_id, pid))
             if process is not None:
