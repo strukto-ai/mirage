@@ -183,11 +183,7 @@ export async function resolveCommit(repo: Repo, revision: string): Promise<strin
   const [base, ops] = splitOperators(revision)
   const named = await namedObject(repo, base, revision)
   // A tag names a tag object, not the commit under it; peel until it is one.
-  const start = await unwrapped(
-    repo,
-    { oid: named, type: await typeOf(repo, named, revision) },
-    revision,
-  )
+  const start = await unwrapped(repo, await objectById(repo, named, revision), revision)
   if (start.type !== COMMIT) throw new AmbiguousArgumentError(revision)
   let oid = start.oid
   for (const op of ops) {
@@ -528,10 +524,10 @@ export async function noteAmbiguity(repo: Repo, name: string): Promise<void> {
   }
 }
 
-/** The type isomorphic-git records for one object id. */
-async function typeOf(repo: Repo, oid: string, revision: string): Promise<string> {
+/** Load one object by id, or report the revision as unknown. */
+async function objectById(repo: Repo, oid: string, revision: string): Promise<GitObject> {
   try {
-    return (await rawObject(repo, oid)).type
+    return { oid, type: (await rawObject(repo, oid)).type }
   } catch (err) {
     if (err instanceof Errors.NotFoundError) throw new AmbiguousArgumentError(revision)
     throw err
@@ -563,7 +559,7 @@ export async function unwrapped(
   const tagged = type === TAG
   while (type === TAG) {
     oid = (await git.readTag({ ...repoArgs(repo), oid })).tag.object
-    type = await typeOf(repo, oid, revision)
+    type = (await objectById(repo, oid, revision)).type
   }
   if (tagged && (await located(repo, { oid, type })) === null)
     throw new AmbiguousArgumentError(revision)
@@ -734,14 +730,14 @@ export async function tagObject(repo: Repo, stem: string): Promise<GitObject | n
       throw missed
     }
   }
-  let type: string
+  let found: GitObject
   try {
-    type = await typeOf(repo, oid, stem)
+    found = await objectById(repo, oid, stem)
   } catch (err) {
     if (err instanceof AmbiguousArgumentError) return null
     throw err
   }
-  return type === TAG ? { oid, type } : null
+  return found.type === TAG ? found : null
 }
 
 /**
@@ -975,7 +971,7 @@ export async function resolveObject(repo: Repo, revision: string): Promise<GitOb
   // own rule and costs nothing here. A base that names nothing fails naming the
   // whole revision, as git's does.
   const named = await namedObject(repo, ops.length === 0 ? revision : base, revision)
-  let obj: GitObject = { oid: named, type: await typeOf(repo, named, revision) }
+  let obj = await objectById(repo, named, revision)
   // An id, or a ref pointing past every commit, names an object with no place:
   // it is shown where the session sees it, else names nothing.
   if ((await located(repo, obj)) === null) throw new AmbiguousArgumentError(revision)

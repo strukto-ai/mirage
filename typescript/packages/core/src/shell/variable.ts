@@ -103,12 +103,10 @@ export interface ShellVar {
   readonly managed?: ManagedRef
 }
 
-const NO_ATTRS: ReadonlySet<VarAttr> = new Set()
-
 /** Build a variable record. */
 export function makeVar(
   value: ShellValue | null = null,
-  attrs: ReadonlySet<VarAttr> = NO_ATTRS,
+  attrs: ReadonlySet<VarAttr> = new Set(),
 ): ShellVar {
   return { value, attrs }
 }

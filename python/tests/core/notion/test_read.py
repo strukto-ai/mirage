@@ -38,7 +38,7 @@ class Replies:
         self.responses = responses
         self.calls = []
 
-    async def post(self, accessor, path, body):
+    async def post(self, accessor, method, path, body):
         assert path == "/data_sources/ds/query"
         self.calls.append(dict(body))
         cursor = body.get("start_cursor")
@@ -82,7 +82,7 @@ async def index_for(path, index):
 @pytest.fixture
 def replies(monkeypatch):
     replies = Replies(STREAM["responses"])
-    monkeypatch.setattr(pages_mod, "notion_post", replies.post)
+    monkeypatch.setattr(pages_mod, "notion_request", replies.post)
     return replies
 
 
@@ -159,7 +159,7 @@ async def test_stream_does_not_hide_page_errors(
     monkeypatch, path, parent, case
 ):
     replies = Replies(case["responses"])
-    monkeypatch.setattr(pages_mod, "notion_post", replies.post)
+    monkeypatch.setattr(pages_mod, "notion_request", replies.post)
     with pytest.raises(
         (NotionAPIError, PaginationStalledError),
         match=case["error"]["message"],
@@ -189,7 +189,7 @@ async def test_stream_does_not_hide_page_errors(
 @pytest.mark.asyncio
 async def test_empty_rows_stream_has_no_bytes(monkeypatch, path, parent):
     replies = Replies([{"results": [], "has_more": False}])
-    monkeypatch.setattr(pages_mod, "notion_post", replies.post)
+    monkeypatch.setattr(pages_mod, "notion_request", replies.post)
     assert (
         await materialize(
             READ.read_stream(
@@ -207,11 +207,11 @@ async def test_empty_rows_stream_has_no_bytes(monkeypatch, path, parent):
 async def test_metadata_stream_falls_back_to_a_full_read(
     monkeypatch, replies, path, parent
 ):
-    async def get(accessor, endpoint):
+    async def get(accessor, method, endpoint):
         assert endpoint == "/data_sources/ds"
         return {"id": "ds", "title": [], "properties": {}}
 
-    monkeypatch.setattr(pages_mod, "notion_get", get)
+    monkeypatch.setattr(pages_mod, "notion_request", get)
     metadata = PathSpec(
         virtual=path.virtual.replace("rows.jsonl", "data_source.json"),
         vfs_path=path.vfs_path.replace("rows.jsonl", "data_source.json"),
@@ -255,7 +255,7 @@ async def test_shell_early_reads_do_not_cache_partial_files(
 @pytest.mark.asyncio
 async def test_failed_stream_is_not_cached(monkeypatch, path):
     replies = Replies([STREAM["responses"][0], PAGINATION[-1]["responses"][1]])
-    monkeypatch.setattr(pages_mod, "notion_post", replies.post)
+    monkeypatch.setattr(pages_mod, "notion_request", replies.post)
     vfs = NotionVFS(NotionConfig(api_key="key"))
     ws = Workspace({"/notion": vfs})
     await index_for(

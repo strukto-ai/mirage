@@ -49,7 +49,6 @@ from mirage.types import (
     LINK_TARGET_KEY,
     FileStat,
     FileType,
-    FindType,
     PathSpec,
 )
 from mirage.utils.dates import in_mtime_window, iso_timestamp
@@ -655,7 +654,7 @@ def build_tree(
     name: str | None = None,
     iname: str | None = None,
     path_pattern: str | None = None,
-    type: FindType | str | None = None,
+    type: str | None = None,
     name_exclude: str | None = None,
     or_names: list[str] | None = None,
     empty: bool = False,
@@ -669,9 +668,7 @@ def build_tree(
         kids.append(Name(iname, icase=True))
     if path_pattern is not None:
         kids.append(Path(path_pattern))
-    if isinstance(type, FindType):
-        type = "d" if type == FindType.DIRECTORY else "f"
-    elif type in ("file", "directory"):
+    if type in ("file", "directory"):
         type = "f" if type == "file" else "d"
     if type is not None:
         kids.append(Type(type))

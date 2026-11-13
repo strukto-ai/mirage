@@ -208,12 +208,12 @@ async def test_members_and_server_info(monkeypatch):
     async def fake_search(accessor, guild, query):
         return [{"user": {"id": "U2"}}]
 
-    async def fake_get(accessor, endpoint):
+    async def fake_get(accessor, method, endpoint):
         return {"id": endpoint.rsplit("/", 1)[-1]}
 
     monkeypatch.setitem(members.__globals__, "list_members", fake_list)
     monkeypatch.setitem(members.__globals__, "search_members", fake_search)
-    monkeypatch.setitem(server_info.__globals__, "discord_get", fake_get)
+    monkeypatch.setitem(server_info.__globals__, "discord_request", fake_get)
     out, _io = await members(ACCESSOR, [], [], _ctx("members", guild="G1"))
     assert await _json(out) == [{"user": {"id": "U1"}}]
     out, _io = await members(

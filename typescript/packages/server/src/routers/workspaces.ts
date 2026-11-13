@@ -79,25 +79,46 @@ export interface WorkspaceRoutesDeps {
 }
 
 /**
- * The config a create builds, checked and as written: the body's own, or a
- * copy of the named template's, so a later edit of the template leaves the
- * workspace as it is. Refuses both or neither, an unknown template, a
- * template on a server of many accounts, or a config that fails its check.
- * Mirrors Python's `_config_of`.
+ * A create's body and the config it builds, checked and as written. The
+ * body is read as Python's model reads one: the config's own fields first,
+ * then the other declared fields, then an unknown key. The config is the
+ * body's own, or a copy of the named template's, so a later edit of the
+ * template leaves the workspace as it is. Refuses both or neither, an
+ * unknown template, a template on a server of many accounts, or a config
+ * that fails its check. Mirrors Python's `_config_of`.
  */
 async function configOf(
-  body: CreateWorkspaceRequest,
-  cfg: WorkspaceConfig | undefined,
+  raw: unknown,
   resources: ResourceStore | undefined,
   registry: WorkspaceRegistry,
-): Promise<{ cfg: WorkspaceConfig; written: Record<string, JsonValue> }> {
+): Promise<{
+  body: CreateWorkspaceRequest
+  cfg: WorkspaceConfig
+  written: Record<string, JsonValue>
+}> {
+  const parsed = CreateWorkspaceRequest.safeParse(raw)
+  const first = parsed.error?.issues.find((issue) => issue.code !== 'unrecognized_keys')
+  if (first !== undefined && (first.path.length === 0 || first.path[0] === 'config')) {
+    throw validationError(parsed.error as z.ZodError, raw)
+  }
+  const config = (raw as { config?: unknown }).config
+  let cfg: WorkspaceConfig | undefined
+  if (config !== undefined && config !== null) {
+    try {
+      cfg = checkConfig(config)
+    } catch (e) {
+      throw loaderError(e, ['config'], config)
+    }
+  }
+  if (!parsed.success) throw validationError(parsed.error, raw)
+  const body = parsed.data
   const given = body.config ?? undefined
   const template = body.template ?? undefined
   if (template === undefined) {
     if (given === undefined || cfg === undefined) {
       throw new HttpError('invalid_request', 'give a template or a config')
     }
-    return { cfg, written: given as Record<string, JsonValue> }
+    return { body, cfg, written: given as Record<string, JsonValue> }
   }
   if (given !== undefined) {
     throw new HttpError('invalid_request', 'give a template or a config, not both')
@@ -120,33 +141,7 @@ async function configOf(
   }
   if ((checked.workspaceId ?? null) !== null)
     throw new HttpError('invalid_request', NO_WORKSPACE_ID)
-  return { cfg: checked, written }
-}
-
-/**
- * A create's body, read as Python's model reads one: the config's own
- * fields first, then the other declared fields, then an unknown key.
- */
-function createRequest(body: unknown): {
-  req: CreateWorkspaceRequest
-  cfg: WorkspaceConfig | undefined
-} {
-  const parsed = CreateWorkspaceRequest.safeParse(body)
-  const first = parsed.error?.issues.find((issue) => issue.code !== 'unrecognized_keys')
-  if (first !== undefined && (first.path.length === 0 || first.path[0] === 'config')) {
-    throw validationError(parsed.error as z.ZodError, body)
-  }
-  const config = (body as { config?: unknown }).config
-  let cfg: WorkspaceConfig | undefined
-  if (config !== undefined && config !== null) {
-    try {
-      cfg = checkConfig(config)
-    } catch (e) {
-      throw loaderError(e, ['config'], config)
-    }
-  }
-  if (!parsed.success) throw validationError(parsed.error, body)
-  return { req: parsed.data, cfg }
+  return { body, cfg: checked, written }
 }
 
 interface WorkspaceIdParams {
@@ -635,14 +630,8 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
     ) => {
       // The query is read before the body, as Python's route reads them.
       const { explain } = queryFlag(req.query, 'explain')
-      const body = createRequest(req.body)
       // The policies judge, and the build uses, the same document.
-      const { cfg, written: config } = await configOf(
-        body.req,
-        body.cfg,
-        deps.resources,
-        deps.registry,
-      )
+      const { body, cfg, written: config } = await configOf(req.body, deps.resources, deps.registry)
       // The server's policies judge the config as written before any of it
       // is built; explain answers what they say without creating anything.
       if (explain) {
@@ -654,7 +643,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       // one config, so an id held by a workspace created from an identical
       // config answers it with 200, and an id held by anything else is
       // refused.
-      const wid = body.req.id ?? cfg.workspaceId ?? newWorkspaceId()
+      const wid = body.id ?? cfg.workspaceId ?? newWorkspaceId()
       refuseId(wid, deps.host.reservedIds)
       return openWorkspace(deps, req, reply, wid, cfg, config, 201)
     },

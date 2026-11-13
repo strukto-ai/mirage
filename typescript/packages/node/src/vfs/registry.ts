@@ -31,12 +31,6 @@ import type { RedisVFSOptions } from './redis/redis.ts'
 import type { SqlVFSOptions } from './sql/sql.ts'
 import './s3/s3.ts'
 
-// The backends that take their options without a schema, and the option
-// names each takes. Python builds them from constructor keywords,
-// so a key outside these is refused on both sides rather than ignored here.
-const DISK_OPTIONS: readonly (keyof DiskVFSOptions)[] = ['root', 'folderVersions', 'capacity']
-const REDIS_OPTIONS: readonly (keyof RedisVFSOptions)[] = ['url', 'keyPrefix', 'capacity']
-
 /**
  * Node's VFS table: the backends core implements (`REGISTRY` in
  * `@struktoai/mirage-core/vfs/registry`), the ones core wires for a host
@@ -50,19 +44,25 @@ const REDIS_OPTIONS: readonly (keyof RedisVFSOptions)[] = ['url', 'keyPrefix', '
  *
  * Configs are normalized from Python-style snake_case (used in YAML and
  * by the Python `mirage.config` loader) to TS-idiomatic camelCase. So
- * the same YAML file works in both Python and TS.
+ * the same YAML file works in both Python and TS. A backend that takes its
+ * options without a schema names the ones it takes, so a key outside them is
+ * refused, as Python refuses a constructor keyword, rather than ignored.
  */
 const REGISTRY: Record<string, VFSFactory> = {
   ...CORE_REGISTRY,
   ...DIRECT_REGISTRY,
   disk: async (config) => {
-    refuseUnknownKeys(config, DISK_OPTIONS)
+    refuseUnknownKeys(config, [
+      'root',
+      'folderVersions',
+      'capacity',
+    ] satisfies (keyof DiskVFSOptions)[])
     const { DiskVFS } = await import('./disk/disk.ts')
     const norm = normalizeFields(config) as unknown as DiskVFSOptions
     return new DiskVFS(norm)
   },
   redis: async (config) => {
-    refuseUnknownKeys(config, REDIS_OPTIONS)
+    refuseUnknownKeys(config, ['url', 'keyPrefix', 'capacity'] satisfies (keyof RedisVFSOptions)[])
     const { RedisVFS } = await import('./redis/redis.ts')
     const norm = normalizeFields(config)
     return new RedisVFS(norm)
@@ -171,23 +171,6 @@ function vfsDefect(value: unknown): string | null {
   return null
 }
 
-async function buildFromRef(ref: string, config: Record<string, unknown>): Promise<BaseVFS> {
-  const exported = await loadAttr(ref)
-  if (typeof exported !== 'function') {
-    throw new Error(`VFS ref ${JSON.stringify(ref)} must name a class, got ${typeof exported}`)
-  }
-  const cls = exported as {
-    create?: (config: Record<string, unknown>) => unknown
-    new (config: Record<string, unknown>): unknown
-  }
-  const built = await (typeof cls.create === 'function' ? cls.create(config) : new cls(config))
-  const defect = vfsDefect(built)
-  if (defect !== null) {
-    throw new Error(`VFS ref ${JSON.stringify(ref)} ${defect}`)
-  }
-  return built as BaseVFS
-}
-
 /**
  * Build a VFS instance by registry name, or from a colon reference
  * naming a class directly (`./wiki.mjs:WikiVFS`, or the package
@@ -204,7 +187,23 @@ export async function buildVfs(
   config: Record<string, unknown> = {},
   sources?: Readonly<Record<string, ResolvedSource>>,
 ): Promise<BaseVFS> {
-  return buildVfsFrom(REGISTRY, CUSTOM, name, config, sources, (unknown, resolved) =>
-    unknown.includes(':') ? buildFromRef(unknown, resolved) : Promise.resolve(null),
-  )
+  return buildVfsFrom(REGISTRY, CUSTOM, name, config, sources, async (ref, resolved) => {
+    if (!ref.includes(':')) return null
+    const exported = await loadAttr(ref)
+    if (typeof exported !== 'function') {
+      throw new Error(`VFS ref ${JSON.stringify(ref)} must name a class, got ${typeof exported}`)
+    }
+    const cls = exported as {
+      create?: (config: Record<string, unknown>) => unknown
+      new (config: Record<string, unknown>): unknown
+    }
+    const built = await (typeof cls.create === 'function'
+      ? cls.create(resolved)
+      : new cls(resolved))
+    const defect = vfsDefect(built)
+    if (defect !== null) {
+      throw new Error(`VFS ref ${JSON.stringify(ref)} ${defect}`)
+    }
+    return built as BaseVFS
+  })
 }

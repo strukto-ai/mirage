@@ -557,11 +557,6 @@ const SORT_KEYS: Record<
   subject: (header) => header.subject,
 }
 
-function compare(a: string | number, b: string | number): number {
-  if (typeof a === 'number' && typeof b === 'number') return a - b
-  return String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0
-}
-
 /**
  * Orders fetched headers by the query's sorters, applied right to left so
  * the first sorter ends up the primary key. With no sorters the order is
@@ -580,7 +575,11 @@ export function sortHeaders(
   }
   for (const sorter of [...sorters].reverse()) {
     const key = SORT_KEYS[sorter.kind]
-    ordered.sort((a, b) => (sorter.descending ? compare(key(b), key(a)) : compare(key(a), key(b))))
+    ordered.sort((a, b) => {
+      const [x, y] = sorter.descending ? [key(b), key(a)] : [key(a), key(b)]
+      if (typeof x === 'number' && typeof y === 'number') return x - y
+      return String(x) < String(y) ? -1 : String(x) > String(y) ? 1 : 0
+    })
   }
   return ordered
 }

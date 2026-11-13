@@ -42,7 +42,7 @@ class QueryReplies:
         self.requests: list[dict[str, Any]] = []
         self.accessors: list[NotionAccessor] = []
 
-    async def post(self, accessor, path, body):
+    async def post(self, accessor, method, path, body):
         assert path == "/data_sources/ds/query"
         self.requests.append(dict(body))
         self.accessors.append(accessor)
@@ -64,7 +64,7 @@ def assert_query_error(exc: Exception, expected: dict[str, Any]) -> None:
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case["name"])
 async def test_query_pages_shared_contract(monkeypatch, case):
     replies = QueryReplies(case["responses"])
-    monkeypatch.setattr(pages_mod, "notion_post", replies.post)
+    monkeypatch.setattr(pages_mod, "notion_request", replies.post)
     body = {"filter": {"property": "Done", "checkbox": {"equals": False}}}
     async with aclosing(
         pages_mod.query_data_source_pages(ACCESSOR, "ds", body=body)
@@ -92,7 +92,7 @@ async def test_query_pages_shared_contract(monkeypatch, case):
 @pytest.mark.asyncio
 async def test_closing_query_pages_stops_requests(monkeypatch):
     replies = QueryReplies(CASES[0]["responses"])
-    monkeypatch.setattr(pages_mod, "notion_post", replies.post)
+    monkeypatch.setattr(pages_mod, "notion_request", replies.post)
     pages = pages_mod.query_data_source_pages(ACCESSOR, "ds")
     async with aclosing(pages):
         async for page in pages:
@@ -106,7 +106,7 @@ async def test_closing_query_pages_stops_requests(monkeypatch):
 @pytest.mark.asyncio
 async def test_query_pages_keep_initial_cursor_and_cap_page_size(monkeypatch):
     replies = QueryReplies(CASES[0]["responses"])
-    monkeypatch.setattr(pages_mod, "notion_post", replies.post)
+    monkeypatch.setattr(pages_mod, "notion_request", replies.post)
     body = {"start_cursor": "initial", "page_size": 7}
     async with aclosing(
         pages_mod.query_data_source_pages(
@@ -170,7 +170,7 @@ async def test_one_page_query_refuses_an_incomplete_page(monkeypatch):
             },
         }
 
-    monkeypatch.setattr(pages_mod, "notion_post", post)
+    monkeypatch.setattr(pages_mod, "notion_request", post)
     with pytest.raises(NotionAPIError, match="query_result_limit_reached"):
         await pages_mod.query_data_source_page(
             ACCESSOR, "ds", {"page_size": 10}

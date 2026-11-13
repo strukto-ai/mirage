@@ -16,7 +16,7 @@ from typing import Any, cast
 from urllib.parse import quote
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.core.discord.client import discord_get, discord_put
+from mirage.core.discord.client import discord_request
 
 
 async def add_reaction(
@@ -31,8 +31,9 @@ async def add_reaction(
         emoji (str): emoji name or unicode.
     """
     encoded = quote(emoji, safe="")
-    await discord_put(
+    await discord_request(
         accessor,
+        "PUT",
         f"/channels/{channel_id}/messages"
         f"/{message_id}/reactions/{encoded}/@me",
     )
@@ -50,8 +51,8 @@ async def message_reactions(
     """
     message = cast(
         dict[str, Any],
-        await discord_get(
-            accessor, f"/channels/{channel_id}/messages/{message_id}"
+        await discord_request(
+            accessor, "GET", f"/channels/{channel_id}/messages/{message_id}"
         ),
     )
     return cast(list[dict[str, Any]], message.get("reactions", []))

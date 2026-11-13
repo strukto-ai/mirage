@@ -13,12 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it } from 'vitest'
-import { runWithMountGate } from '../../../context/session_context.ts'
+import { currentCaller, runWithCaller, runWithMountGate } from '../../../context/session_context.ts'
 import { eacces, enoent } from '../../../errors/fs.ts'
 import { GlobLimitError } from '../../../errors/types.ts'
 import { yieldBytes } from '../../../io/stream.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { runWithRevisions } from '../../../observe/context.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { BatchedRAM, readers } from '../../../test-utils.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
@@ -296,7 +295,9 @@ describe('fileSize', () => {
     const ctx = contextFor(answering(st, now, warm))
     const bound = fileSize(await guarded(ctx), ctx)
     const pins = pinned ? new Map([['/f', 'v1']]) : null
-    expect(await runWithRevisions(pins, () => bound(at('/f')))).toBe(size)
+    expect(
+      await runWithCaller({ ...currentCaller(), revisions: { map: pins } }, () => bound(at('/f'))),
+    ).toBe(size)
   })
 })
 

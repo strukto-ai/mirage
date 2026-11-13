@@ -20,9 +20,7 @@ from mirage.accessor.notion import NotionAccessor
 from mirage.core.api.paginate import cursor_pages
 from mirage.core.notion.client import (
     complete_page,
-    notion_get,
-    notion_patch,
-    notion_post,
+    notion_request,
     paginate_list,
     paginate_post,
 )
@@ -59,13 +57,15 @@ async def search_data_sources(
 async def get_database(
     accessor: NotionAccessor, database_id: str
 ) -> dict[str, Any]:
-    return await notion_get(accessor, f"/databases/{database_id}")
+    return await notion_request(accessor, "GET", f"/databases/{database_id}")
 
 
 async def get_data_source(
     accessor: NotionAccessor, data_source_id: str
 ) -> dict[str, Any]:
-    return await notion_get(accessor, f"/data_sources/{data_source_id}")
+    return await notion_request(
+        accessor, "GET", f"/data_sources/{data_source_id}"
+    )
 
 
 async def query_data_source_pages(
@@ -121,31 +121,32 @@ async def query_data_source_page(
         NotionAPIError: when Notion marks the page incomplete, so a
             truncated result never prints as a successful query.
     """
-    page = await notion_post(
-        accessor, f"/data_sources/{data_source_id}/query", body
+    page = await notion_request(
+        accessor, "POST", f"/data_sources/{data_source_id}/query", body
     )
     return complete_page(page)
 
 
 async def get_page(accessor: NotionAccessor, page_id: str) -> dict[str, Any]:
-    return await notion_get(accessor, f"/pages/{page_id}")
+    return await notion_request(accessor, "GET", f"/pages/{page_id}")
 
 
 async def get_self(accessor: NotionAccessor) -> dict[str, Any]:
-    return await notion_get(accessor, "/users/me")
+    return await notion_request(accessor, "GET", "/users/me")
 
 
 async def get_page_markdown(
     accessor: NotionAccessor, page_id: str
 ) -> dict[str, Any]:
-    return await notion_get(accessor, f"/pages/{page_id}/markdown")
+    return await notion_request(accessor, "GET", f"/pages/{page_id}/markdown")
 
 
 async def replace_page_markdown(
     accessor: NotionAccessor, page_id: str, markdown: str
 ) -> dict[str, Any]:
-    return await notion_patch(
+    return await notion_request(
         accessor,
+        "PATCH",
         f"/pages/{page_id}/markdown",
         {
             "type": "replace_content",
@@ -199,10 +200,10 @@ async def list_block_tree(
 async def create_page(
     accessor: NotionAccessor, body: dict[str, Any]
 ) -> dict[str, Any]:
-    return await notion_post(accessor, "/pages", body)
+    return await notion_request(accessor, "POST", "/pages", body)
 
 
 async def update_page(
     accessor: NotionAccessor, page_id: str, body: dict[str, Any]
 ) -> dict[str, Any]:
-    return await notion_patch(accessor, f"/pages/{page_id}", body)
+    return await notion_request(accessor, "PATCH", f"/pages/{page_id}", body)

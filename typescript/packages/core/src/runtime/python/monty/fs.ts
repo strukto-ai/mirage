@@ -66,12 +66,6 @@ const CONTENT = new Set([
   'Path.rename',
 ])
 
-/** The predicates, which answer false where there is no filesystem. */
-const PROBES = new Set(['Path.exists', 'Path.is_file', 'Path.is_dir', 'Path.is_symlink'])
-
-/** The other calls this adapter serves, which refuse where there is none. */
-const STRUCTURE = new Set(['Path.mkdir', 'Path.iterdir', 'Path.scan', 'Path.stat'])
-
 /**
  * Monty's OS callbacks: every path a guest names is the workspace's.
  *
@@ -234,10 +228,15 @@ export class MontyFs {
     })
   }
 
-  /** Outside a workspace there is no filesystem: probes answer false, the rest refuse. */
+  /**
+   * Outside a workspace there is no filesystem: the predicates answer false,
+   * and the other calls this adapter serves refuse.
+   */
   private unbound(name: string, path: string): unknown {
-    if (PROBES.has(name)) return false
-    if (CONTENT.has(name) || STRUCTURE.has(name)) throw guestError('ENOENT', path)
+    if (/^Path\.(exists|is_file|is_dir|is_symlink)$/.test(name)) return false
+    if (CONTENT.has(name) || /^Path\.(mkdir|iterdir|scan|stat)$/.test(name)) {
+      throw guestError('ENOENT', path)
+    }
     return this.notHandled
   }
 

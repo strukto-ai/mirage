@@ -23,7 +23,6 @@ from mirage.types import (
     ContentType,
     FileStat,
     FileType,
-    FindType,
     MountMode,
     PathSpec,
 )
@@ -70,8 +69,8 @@ def test_parse_find_args_empty_returns_defaults():
         ({"size": "1k"}, {"min_size": 1, "max_size": 1024}, ()),
         ({"mtime": "-1"}, {"mtime_max": None}, ("mtime_min",)),
         ({"mtime": "+7"}, {"mtime_min": None}, ("mtime_max",)),
-        ({"type": "d"}, {"type": FindType.DIRECTORY}, ()),
-        ({"type": "f"}, {"type": FindType.FILE}, ()),
+        ({"type": "d"}, {"type": "d"}, ()),
+        ({"type": "f"}, {"type": "f"}, ()),
         ({"type": "symlink"}, {"type": "symlink"}, ()),
     ],
 )
@@ -116,7 +115,7 @@ def _root_spec() -> PathSpec:
         ),
         pytest.param(
             AsyncMock(return_value=["/mystery"]),
-            FindArgs(type=FindType.FILE),
+            FindArgs(type="f"),
             ["/mystery"],
             id="type-stat-falls-back-to-file",
         ),
@@ -224,7 +223,7 @@ async def test_walk_find_records_an_entry_whose_stat_fails_and_walks_on():
         _root_spec(),
         readdir=readdir,
         stat=stat,
-        args=FindArgs(type=FindType.FILE),
+        args=FindArgs(type="f"),
         unstatted=unstatted,
     )
     assert results == ["/a.json", "/b.json", "/c.json"]

@@ -19,7 +19,7 @@ from typing import Any
 from mirage.accessor.discord import DiscordAccessor
 from mirage.core.api.errors import ApiError
 from mirage.core.discord.channels import TEXT_CHANNEL_TYPES
-from mirage.core.discord.client import discord_get
+from mirage.core.discord.client import discord_request
 from mirage.core.discord.constants import (
     CHANNEL_EVENTS,
     CHAT_FILE,
@@ -98,7 +98,7 @@ class DiscordEventHook:
         Args:
             endpoint (str): The path under the API root.
         """
-        data = await discord_get(self._accessor, endpoint)
+        data = await discord_request(self._accessor, "GET", endpoint)
         return data if isinstance(data, dict) else {}
 
     async def _guild_dir(self, guild_id: str) -> str | None:

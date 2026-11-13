@@ -29,7 +29,7 @@ vi.mock('./client.ts', async () => {
   return mockedClient(actual, () => store)
 })
 
-import { runWithRevisions } from '@struktoai/mirage-core/observe/context'
+import { currentCaller, runWithCaller } from '@struktoai/mirage-core/context/session_context'
 import { exists } from './exists.ts'
 import { read } from './read.ts'
 import { readdir, tree } from './readdir.ts'
@@ -80,13 +80,18 @@ describe('gridfs unlink', () => {
   it('keeps a pinned read working after rm', async () => {
     const [first] = await seedAndRm()
     const pins = new Map([[A_TXT.virtual, first ?? '']])
-    const bytes = await runWithRevisions(pins, () => read(makeAccessor(store), A_TXT))
+    const bytes = await runWithCaller({ ...currentCaller(), revisions: { map: pins } }, () =>
+      read(makeAccessor(store), A_TXT),
+    )
     expect(DEC.decode(bytes)).toBe('v1')
-    const chunks = await runWithRevisions(pins, async () => {
-      const out: Uint8Array[] = []
-      for await (const chunk of readStream(makeAccessor(store), A_TXT)) out.push(chunk)
-      return out
-    })
+    const chunks = await runWithCaller(
+      { ...currentCaller(), revisions: { map: pins } },
+      async () => {
+        const out: Uint8Array[] = []
+        for await (const chunk of readStream(makeAccessor(store), A_TXT)) out.push(chunk)
+        return out
+      },
+    )
     expect(DEC.decode(Buffer.concat(chunks))).toBe('v1')
   })
 
@@ -95,11 +100,15 @@ describe('gridfs unlink', () => {
     // deleted needs the pinned stat to reach the trash too.
     const [first] = await seedAndRm()
     const pins = new Map([[A_TXT.virtual, String(first)]])
-    const found = await runWithRevisions(pins, () => stat(makeAccessor(store), A_TXT))
-    expect([found.size, found.fingerprint]).toEqual([2, first])
-    await expect(runWithRevisions(pins, () => exists(makeAccessor(store), A_TXT))).resolves.toBe(
-      true,
+    const found = await runWithCaller({ ...currentCaller(), revisions: { map: pins } }, () =>
+      stat(makeAccessor(store), A_TXT),
     )
+    expect([found.size, found.fingerprint]).toEqual([2, first])
+    await expect(
+      runWithCaller({ ...currentCaller(), revisions: { map: pins } }, () =>
+        exists(makeAccessor(store), A_TXT),
+      ),
+    ).resolves.toBe(true)
   })
 
   it('reads the name as gone after rm', async () => {

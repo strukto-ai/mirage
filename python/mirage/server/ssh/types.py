@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import socket
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Callable, Coroutine
 from typing import Any, Protocol
 
 from fastapi import WebSocket
@@ -30,9 +30,6 @@ class SSHListener(Protocol):
     def close(self) -> None: ...
 
     async def wait_closed(self) -> None: ...
-
-
-StartSSH = Callable[[WorkspaceRegistry, SSHConfig], Awaitable[SSHListener]]
 
 
 class SSHTunnel(Protocol):

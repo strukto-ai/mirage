@@ -64,17 +64,6 @@ const NAMED_ZONES: Record<string, number> = {
   PDT: -420,
 }
 
-/** Minutes east of UTC the timestamp states, null when it states none. */
-function statedOffset(value: string): number | null {
-  const numeric = /([+-])(\d{2}):?(\d{2})\s*$/.exec(value)
-  if (numeric !== null) {
-    const sign = numeric[1] === '-' ? -1 : 1
-    return sign * (Number(numeric[2]) * 60 + Number(numeric[3]))
-  }
-  const named = /([A-Z]{1,3})\s*$/.exec(value.toUpperCase())
-  return NAMED_ZONES[named?.[1] ?? ''] ?? null
-}
-
 function ymd(year: number, month: number, day: number): string {
   return `${year.toString().padStart(4, '0')}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`
 }
@@ -88,8 +77,14 @@ function parseDate(value: string): string | null {
   // comparing the date "disregarding time and timezone", so a message
   // written 05 Jan 23:30 -0500 answers a search for the 5th and has to
   // sit in the 5th's directory. `Date` only keeps the instant, so the
-  // stated offset is added back before reading the fields.
-  const offset = statedOffset(value)
+  // stated offset, in minutes east of UTC, is added back before reading the
+  // fields.
+  const numeric = /([+-])(\d{2}):?(\d{2})\s*$/.exec(value)
+  const named = /([A-Z]{1,3})\s*$/.exec(value.toUpperCase())
+  const offset =
+    numeric !== null
+      ? (numeric[1] === '-' ? -1 : 1) * (Number(numeric[2]) * 60 + Number(numeric[3]))
+      : (NAMED_ZONES[named?.[1] ?? ''] ?? null)
   // No zone stated: `new Date` read the wall clock as host-local, so the
   // local fields hand it back exactly as written.
   if (offset === null) return ymd(d.getFullYear(), d.getMonth() + 1, d.getDate())

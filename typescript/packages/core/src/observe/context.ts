@@ -343,23 +343,6 @@ export function recordStream(
 }
 
 /**
- * Run `fn` inside a revisions context. Backend read functions inside
- * `fn` (or any async chain it starts) can consult {@link revisionFor}
- * to look up a pin. Independent of {@link runWithRecording} so that
- * direct {@link Workspace.dispatch} calls (which don't open a recording
- * scope) still honour installed pins.
- *
- * Task-isolated via AsyncLocalStorage: concurrent runs on different
- * mounts each see their own pin map.
- */
-export function runWithRevisions<T>(
-  revisions: Map<string, string> | null,
-  fn: () => Promise<T>,
-): Promise<T> {
-  return runWithCaller({ ...currentCaller(), revisions: { map: revisions } }, fn)
-}
-
-/**
  * Look up the active revision pin for `path`, or null if no pin is
  * installed (or no revisions context is active).
  *

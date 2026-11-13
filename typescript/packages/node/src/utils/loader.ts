@@ -18,16 +18,6 @@ import { isAbsolute, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 /**
- * Extensions Node will import from disk. Python's twin tests for a
- * single one (`.py`) because it has one module language; here `.ts` and
- * `.mts` ride on Node's own type stripping, which is strip-only: a file
- * using `enum`, a parameter property, a runtime `namespace` or a legacy
- * decorator is refused at load with ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX.
- * `.mjs` is the spelling with no caveats.
- */
-export const MODULE_SUFFIXES = ['.mjs', '.cjs', '.mts', '.cts', '.js', '.ts']
-
-/**
  * True when a ref's source is a file on disk rather than a package
  * specifier Node resolves for itself.
  *
@@ -43,6 +33,13 @@ export const MODULE_SUFFIXES = ['.mjs', '.cjs', '.mts', '.cts', '.js', '.ts']
  * sources with no slash so that `pkg/dist/index.js` stays a subpath
  * export, and `./dist/index.js` says path by saying so.
  *
+ * The suffixes are the extensions Node will import from disk. Python's
+ * twin tests for a single one (`.py`) because it has one module language;
+ * here `.ts` and `.mts` ride on Node's own type stripping, which is
+ * strip-only: a file using `enum`, a parameter property, a runtime
+ * `namespace` or a legacy decorator is refused at load with
+ * ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX. `.mjs` is the spelling with no caveats.
+ *
  * The config loader's `absolutizeCliRef` calls this same function, so
  * the two cannot disagree about what a path is.
  */
@@ -50,7 +47,7 @@ export function isModulePath(source: string): boolean {
   if (source.startsWith('./') || source.startsWith('../')) return true
   if (source.startsWith('/') || isAbsolute(source)) return true
   if (source.includes('/')) return false
-  return MODULE_SUFFIXES.some((suffix) => source.endsWith(suffix))
+  return ['.mjs', '.cjs', '.mts', '.cts', '.js', '.ts'].some((suffix) => source.endsWith(suffix))
 }
 
 /** Split a `source:exportName` ref on its last colon. */

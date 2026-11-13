@@ -31,13 +31,13 @@ const DISPATCH_NAMES: ReadonlyMap<string, string> = new Map([
   ['linesContaining', 'lines_containing'],
   ['beforeFullWalk', 'before_full_walk'],
 ])
-const METHOD_NAMES: ReadonlyMap<string, string> = new Map(
-  [...DISPATCH_NAMES].map(([method, name]) => [name, method]),
-)
 
 /** The method that answers the dispatcher's `name`. */
 export function methodName(name: string): string {
-  return METHOD_NAMES.get(name) ?? name
+  for (const [method, dispatched] of DISPATCH_NAMES) {
+    if (dispatched === name) return method
+  }
+  return name
 }
 
 // Removing, moving or copying a name is what these calls do, and the

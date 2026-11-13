@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.core.discord.client import discord_get
+from mirage.core.discord.client import discord_request
 
 
 async def after_id_pages(
@@ -58,7 +58,7 @@ async def after_id_pages(
         params = dict(base_params)
         params["after"] = last
         params["limit"] = page_size
-        data = await discord_get(accessor, endpoint, params=params)
+        data = await discord_request(accessor, "GET", endpoint, params=params)
         if not isinstance(data, list) or not data:
             return
         yield data
@@ -110,7 +110,7 @@ async def offset_pages(
     while True:
         params = dict(base_params)
         params["offset"] = offset
-        data = await discord_get(accessor, endpoint, params=params)
+        data = await discord_request(accessor, "GET", endpoint, params=params)
         if not isinstance(data, dict):
             return
         items = _get_nested(data, items_path) or []

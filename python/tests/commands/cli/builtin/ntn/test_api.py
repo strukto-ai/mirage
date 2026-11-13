@@ -18,7 +18,6 @@ import pytest
 
 from mirage.accessor.notion import NotionAccessor
 from mirage.commands.cli.builtin.ntn.api import (
-    METHODS,
     InlineRefusal,
     api,
     classify,
@@ -92,14 +91,16 @@ async def test_inline_headers_reach_the_request(monkeypatch):
 
     async def fake_get(
         accessor: NotionAccessor,
+        method: str,
         path: str,
-        params: dict[str, Any] | None = None,
+        body: JsonValue = None,
         extra_headers: dict[str, str] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         seen["headers"] = extra_headers
         return {"ok": True}
 
-    monkeypatch.setitem(api.__globals__, "notion_get", fake_get)
+    monkeypatch.setitem(api.__globals__, "notion_request", fake_get)
     await api(NOTION, [], ["v1/search", "X-Foo:bar", "X-Two:baz"], Context())
     assert seen["headers"] == {"X-Foo": "bar", "X-Two": "baz"}
 
@@ -110,14 +111,16 @@ async def test_no_inline_header_sends_none(monkeypatch):
 
     async def fake_get(
         accessor: NotionAccessor,
+        method: str,
         path: str,
-        params: dict[str, Any] | None = None,
+        body: JsonValue = None,
         extra_headers: dict[str, str] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         seen["headers"] = extra_headers
         return {"ok": True}
 
-    monkeypatch.setitem(api.__globals__, "notion_get", fake_get)
+    monkeypatch.setitem(api.__globals__, "notion_request", fake_get)
     await api(NOTION, [], ["v1/search"], Context())
     assert seen["headers"] is None
 
@@ -144,6 +147,7 @@ async def test_a_non_object_data_is_sent_rather_than_refused(monkeypatch):
 
     async def fake_post(
         accessor: NotionAccessor,
+        method: str,
         path: str,
         body: JsonValue = None,
         extra_headers: dict[str, str] | None = None,
@@ -152,7 +156,7 @@ async def test_a_non_object_data_is_sent_rather_than_refused(monkeypatch):
         seen["body"] = body
         return {"ok": True}
 
-    monkeypatch.setitem(METHODS, "POST", fake_post)
+    monkeypatch.setitem(api.__globals__, "notion_request", fake_post)
     _out, io = await api(
         NOTION, [], ["v1/search"], Context(flags={"data": "[]"})
     )
@@ -169,6 +173,7 @@ async def test_an_empty_data_object_still_posts(monkeypatch):
 
     async def fake_post(
         accessor: NotionAccessor,
+        method: str,
         path: str,
         body: JsonValue = None,
         extra_headers: dict[str, str] | None = None,
@@ -177,7 +182,7 @@ async def test_an_empty_data_object_still_posts(monkeypatch):
         seen["body"] = body
         return {"ok": True}
 
-    monkeypatch.setitem(METHODS, "POST", fake_post)
+    monkeypatch.setitem(api.__globals__, "notion_request", fake_post)
     await api(NOTION, [], ["v1/search"], Context(flags={"data": "{}"}))
     assert seen["body"] == {}
 
@@ -230,6 +235,7 @@ async def test_blank_stdin_is_not_a_body_source(monkeypatch):
 
     async def fake_post(
         accessor: NotionAccessor,
+        method: str,
         path: str,
         body: JsonValue = None,
         extra_headers: dict[str, str] | None = None,
@@ -238,7 +244,7 @@ async def test_blank_stdin_is_not_a_body_source(monkeypatch):
         seen["body"] = body
         return {"ok": True}
 
-    monkeypatch.setitem(METHODS, "POST", fake_post)
+    monkeypatch.setitem(api.__globals__, "notion_request", fake_post)
     _out, io = await api(
         NOTION,
         [],
@@ -282,6 +288,7 @@ async def test_a_query_parameter_survives_a_non_get(monkeypatch):
 
     async def fake_post(
         accessor: NotionAccessor,
+        method: str,
         path: str,
         body: JsonValue = None,
         extra_headers: dict[str, str] | None = None,
@@ -290,7 +297,7 @@ async def test_a_query_parameter_survives_a_non_get(monkeypatch):
         seen["params"] = params
         return {"ok": True}
 
-    monkeypatch.setitem(METHODS, "POST", fake_post)
+    monkeypatch.setitem(api.__globals__, "notion_request", fake_post)
     await api(NOTION, [], ["v1/search", "a=1", "q==2"], Context())
     assert seen["params"] == {"q": "2"}
 
@@ -301,6 +308,7 @@ async def test_body_infers_post_and_output_is_compact(monkeypatch):
 
     async def fake_post(
         accessor: NotionAccessor,
+        method: str,
         path: str,
         body: JsonValue = None,
         extra_headers: dict[str, str] | None = None,
@@ -310,10 +318,7 @@ async def test_body_infers_post_and_output_is_compact(monkeypatch):
         seen["body"] = body
         return {"b": 1, "a": 2}
 
-    # The non-GET path dispatches through METHODS, which captured the
-    # real function at import, so patching the module global alone would
-    # not be seen.
-    monkeypatch.setitem(METHODS, "POST", fake_post)
+    monkeypatch.setitem(api.__globals__, "notion_request", fake_post)
     out, _io = await api(NOTION, [], ["v1/search", "query=x"], Context())
     assert seen["path"] == "/search"
     assert seen["body"] == {"query": "x"}
@@ -333,6 +338,7 @@ async def test_delete_is_a_reachable_method(monkeypatch):
 
     async def fake_delete(
         accessor: NotionAccessor,
+        method: str,
         path: str,
         body: JsonValue = None,
         extra_headers: dict[str, str] | None = None,
@@ -342,7 +348,7 @@ async def test_delete_is_a_reachable_method(monkeypatch):
         seen["body"] = body
         return {"object": "block", "in_trash": True}
 
-    monkeypatch.setitem(METHODS, "DELETE", fake_delete)
+    monkeypatch.setitem(api.__globals__, "notion_request", fake_delete)
     out, io = await api(
         NOTION, [], ["v1/blocks/abc-123"], Context(flags={"method": "delete"})
     )

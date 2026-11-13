@@ -19,7 +19,6 @@ const DEFAULT_TZ = 'UTC'
 export const WINDOW_AHEAD_DAYS = 90
 // A Monday, so the 7-day buckets tiled from it are ISO weeks.
 const BUCKET_EPOCH = '1970-01-05'
-const FIRST_DAY = '0001-01-01'
 export const SPAN_SEP = '--'
 
 const DAY_MS = 86_400_000
@@ -146,7 +145,7 @@ export function dayBounds(day: string, tz: string, days = 1): [string, string] {
 export function bucketStart(day: string, size: number): string {
   const days = (Date.parse(`${day}T00:00:00Z`) - Date.parse(`${BUCKET_EPOCH}T00:00:00Z`)) / DAY_MS
   const start = shiftDay(day, -(((days % size) + size) % size))
-  return start < FIRST_DAY ? FIRST_DAY : start
+  return start < '0001-01-01' ? '0001-01-01' : start
 }
 
 /**

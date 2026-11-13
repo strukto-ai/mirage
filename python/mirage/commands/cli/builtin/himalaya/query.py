@@ -20,7 +20,6 @@ from typing import Any, Callable
 from mirage.commands.builtin.utils.constants import MONTHS
 from mirage.commands.cli.builtin.git.ref_format import display_width
 from mirage.core.email.client import quote_string
-from mirage.types import JsonValue
 
 # himalaya's search DSL: 3 operators (and, or, not) and 7 conditions
 # (date, after, from, to, subject, body, flag), optionally followed by
@@ -575,18 +574,10 @@ def _uid_number(header: dict[str, Any]) -> int:
     return int(header.get("uid") or 0)
 
 
-def _first_email(entries: JsonValue) -> str:
-    if isinstance(entries, list) and entries:
-        first = entries[0]
-        if isinstance(first, dict):
-            return str(first.get("email", ""))
-    return ""
-
-
 SORT_KEYS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "date": _sent_at,
     "from": lambda header: str((header.get("from") or {}).get("email", "")),
-    "to": lambda header: _first_email(header.get("to")),
+    "to": lambda header: str((header.get("to") or [{}])[0].get("email", "")),
     "subject": lambda header: str(header.get("subject", "")),
 }
 

@@ -383,44 +383,36 @@ def test_whoami_row_names_the_owning_user():
 
 @pytest.mark.asyncio
 async def test_api_infers_method_and_strips_the_version_prefix(monkeypatch):
-    gets = []
-    posts = []
+    calls = []
 
-    async def fake_get(accessor, path, params=None, extra_headers=None):
-        gets.append((path, params))
-        return {"ok": True}
-
-    async def fake_post(
-        accessor, path, body=None, extra_headers=None, params=None
+    async def fake_request(
+        accessor, method, path, body=None, extra_headers=None, params=None
     ):
-        posts.append((path, body))
+        calls.append((method, path, body, params))
         return {"ok": True}
 
-    monkeypatch.setitem(api.__globals__, "notion_get", fake_get)
-    monkeypatch.setitem(api.__globals__, "notion_post", fake_post)
-    monkeypatch.setitem(
-        api.__globals__, "METHODS", {"GET": fake_get, "POST": fake_post}
-    )
+    monkeypatch.setitem(api.__globals__, "notion_request", fake_request)
     await api(NOTION, [], ["v1/users/me"], Context())
     await api(NOTION, [], ["v1/search", "query=Roadmap"], Context())
     await api(NOTION, [], ["v1/blocks/B1/children", "page_size==1"], Context())
-    assert gets[0] == ("/users/me", None)
-    assert posts[0] == ("/search", {"query": "Roadmap"})
-    assert gets[1] == ("/blocks/B1/children", {"page_size": "1"})
+    assert calls == [
+        ("GET", "/users/me", None, None),
+        ("POST", "/search", {"query": "Roadmap"}, None),
+        ("GET", "/blocks/B1/children", None, {"page_size": "1"}),
+    ]
 
 
 @pytest.mark.asyncio
 async def test_api_builds_nested_bodies(monkeypatch):
     posts = []
 
-    async def fake_post(
-        accessor, path, body=None, extra_headers=None, params=None
+    async def fake_request(
+        accessor, method, path, body=None, extra_headers=None, params=None
     ):
         posts.append(body)
         return {"ok": True}
 
-    monkeypatch.setitem(api.__globals__, "notion_post", fake_post)
-    monkeypatch.setitem(api.__globals__, "METHODS", {"POST": fake_post})
+    monkeypatch.setitem(api.__globals__, "notion_request", fake_request)
     await api(
         NOTION,
         [],
@@ -432,9 +424,9 @@ async def test_api_builds_nested_bodies(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_api_prints_compact_sorted_json(monkeypatch):
-    async def fake_get(accessor, path, params=None, extra_headers=None):
+    async def fake_request(accessor, method, path, body=None, **kwargs):
         return {"b": 1, "a": {"d": 2, "c": 3}}
 
-    monkeypatch.setitem(api.__globals__, "notion_get", fake_get)
+    monkeypatch.setitem(api.__globals__, "notion_request", fake_request)
     out, _io = await api(NOTION, [], ["v1/users/me"], Context())
     assert await _text(out) == '{"a":{"c":3,"d":2},"b":1}\n'

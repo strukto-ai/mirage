@@ -25,24 +25,6 @@ const TIMED_OUT = Symbol('timed-out')
 /** The start of the notice a command's capped output ends its stderr with. */
 export const TRUNCATION_NOTICE = 'output truncated at limit'
 
-function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
-  return new Promise<T | typeof TIMED_OUT>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      resolve(TIMED_OUT)
-    }, ms)
-    promise.then(
-      (value) => {
-        clearTimeout(timer)
-        resolve(value)
-      },
-      (err: unknown) => {
-        clearTimeout(timer)
-        reject(err instanceof Error ? err : new Error(String(err)))
-      },
-    )
-  })
-}
-
 /**
  * Wait for `promise` until its deadline, then throw a timeout error. The call
  * itself runs on, and a stream it answers after the deadline is closed, since
@@ -61,7 +43,24 @@ export async function runWithTimeout<T>(
   const left = seconds * 1000 - (start === undefined ? 0 : performance.now() - start)
   // Spent before the call: a race against no time left loses to a call that
   // settles in a microtask.
-  const result = left > 0 ? await withDeadline(promise, left) : TIMED_OUT
+  const result =
+    left > 0
+      ? await new Promise<T | typeof TIMED_OUT>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            resolve(TIMED_OUT)
+          }, left)
+          promise.then(
+            (value) => {
+              clearTimeout(timer)
+              resolve(value)
+            },
+            (err: unknown) => {
+              clearTimeout(timer)
+              reject(err instanceof Error ? err : new Error(String(err)))
+            },
+          )
+        })
+      : TIMED_OUT
   if (result === TIMED_OUT) {
     void promise.then(
       async (late) => {

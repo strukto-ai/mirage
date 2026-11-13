@@ -68,13 +68,6 @@ def _min_positive(values: Iterable[float | int | None]) -> float | int | None:
     return min(positives) if positives else None
 
 
-class FindType(str, Enum):
-    """POSIX `find -type` flag values (`-type d`, `-type f`)."""
-
-    DIRECTORY = "d"
-    FILE = "f"
-
-
 class LsSortBy(str, Enum):
     """`ls` sort keys: NAME is the default, TIME `-t`, SIZE `-S`, VERSION
     `-v`, EXTENSION `-X`, WIDTH `--sort=width`, and NONE `-U`."""

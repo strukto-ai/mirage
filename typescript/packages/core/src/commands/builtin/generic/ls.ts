@@ -528,39 +528,62 @@ function primaryValue(entry: FileStat, sortBy: LsSortBy, timeKind: LsTimeKind): 
   return entry.extra[STAT_FAILED_KEY] === true ? 0 : contentSize(entry)
 }
 
-// GNU's -t/-S comparators fall back to the name when the timestamps or sizes
-// tie, so the order is total. `-r` negates the whole comparison, tie-break
-// included, which is why callers fold the sign into this comparator instead of
-// reversing the finished array. -X and --sort=width are stable sorts over
-// the name order too; -v goes through sortByVersion instead. `widths` holds
-// each name's --sort=width key, measured once per sort as Python's key is.
-function compareStats(
-  a: FileStat,
-  b: FileStat,
+/**
+ * Indices of `rows` in GNU ls order. GNU's -t/-S comparators fall back to the
+ * name when the timestamps or sizes tie, so the order is total, and `-r`
+ * negates the whole comparison, tie-break included. -X and --sort=width are
+ * stable sorts over the name order too, each width measured once per sort as
+ * Python's key is; -v is `sort -V`'s order; -U keeps the listing order, and
+ * -r does not reverse it (GNU's -r reverses while sorting, and -U does not
+ * sort). --group-directories-first partitions the finished order, so the
+ * directories come first in every sort but -U, where GNU ignores it. Mirrors
+ * Python's `_order_rows`.
+ */
+async function orderRows(
+  rows: readonly FileStat[],
   sortBy: LsSortBy,
-  timeKind: LsTimeKind,
-  widths: ReadonlyMap<string, number>,
-): number {
-  if (sortBy === 'extension') {
-    const byExt = compareCodePoints(extensionOf(a.name), extensionOf(b.name))
-    if (byExt !== 0) return byExt
-  } else if (sortBy === 'width') {
-    const byWidth = (widths.get(a.name) ?? 0) - (widths.get(b.name) ?? 0)
-    if (byWidth !== 0) return byWidth
-  } else if (sortBy !== 'name' && sortBy !== 'none') {
-    const av = primaryValue(a, sortBy, timeKind)
-    const bv = primaryValue(b, sortBy, timeKind)
-    // -t and -S list newest/largest first.
-    if (av < bv) return 1
-    if (av > bv) return -1
+  reverse: boolean,
+  timeKind: LsTimeKind = 'mtime',
+  groupDirsFirst = false,
+  quote: Quote | null = null,
+): Promise<number[]> {
+  if (sortBy === 'none') return rows.map((_, i) => i)
+  let order: number[]
+  if (sortBy === 'version') {
+    order = await sortByVersion(rows.map((s) => s.name))
+    if (reverse) order.reverse()
+  } else {
+    const widths = new Map(
+      sortBy === 'width'
+        ? rows.map((s) => [s.name, textWidth(quote === null ? s.name : quote(s.name))] as const)
+        : [],
+    )
+    const compare = (a: FileStat, b: FileStat): number => {
+      if (sortBy === 'extension') {
+        const byExt = compareCodePoints(extensionOf(a.name), extensionOf(b.name))
+        if (byExt !== 0) return byExt
+      } else if (sortBy === 'width') {
+        const byWidth = (widths.get(a.name) ?? 0) - (widths.get(b.name) ?? 0)
+        if (byWidth !== 0) return byWidth
+      } else if (sortBy !== 'name') {
+        const av = primaryValue(a, sortBy, timeKind)
+        const bv = primaryValue(b, sortBy, timeKind)
+        // -t and -S list newest/largest first.
+        if (av < bv) return 1
+        if (av > bv) return -1
+      }
+      return compareCodePoints(a.name, b.name)
+    }
+    const sign = reverse ? -1 : 1
+    order = [...rows.entries()].sort(([, a], [, b]) => sign * compare(a, b)).map(([i]) => i)
   }
-  return compareCodePoints(a.name, b.name)
+  if (!groupDirsFirst) return order
+  return [
+    ...order.filter((i) => rows[i]?.type === FileType.DIRECTORY),
+    ...order.filter((i) => rows[i]?.type !== FileType.DIRECTORY),
+  ]
 }
 
-// -U keeps the listing order, and -r does not reverse it (GNU's -r
-// reverses while sorting, and -U does not sort);
-// --group-directories-first partitions the finished order, so the
-// directories come first in every sort but -U, where GNU ignores it.
 export async function sortStats(
   stats: readonly FileStat[],
   sortBy: LsSortBy,
@@ -569,29 +592,8 @@ export async function sortStats(
   groupDirsFirst = false,
   quote: Quote | null = null,
 ): Promise<FileStat[]> {
-  let ordered: FileStat[]
-  if (sortBy === 'none') {
-    ordered = [...stats]
-  } else if (sortBy === 'version') {
-    const order = await sortByVersion(stats.map((s) => s.name))
-    ordered = order.flatMap((i) => stats[i] ?? [])
-    if (reverse) ordered.reverse()
-  } else {
-    const sign = reverse ? -1 : 1
-    const widths = new Map(
-      sortBy === 'width'
-        ? stats.map((s) => [s.name, textWidth(quote === null ? s.name : quote(s.name))] as const)
-        : [],
-    )
-    ordered = [...stats].sort((a, b) => sign * compareStats(a, b, sortBy, timeKind, widths))
-  }
-  if (groupDirsFirst && sortBy !== 'none') {
-    ordered = [
-      ...ordered.filter((s) => s.type === FileType.DIRECTORY),
-      ...ordered.filter((s) => s.type !== FileType.DIRECTORY),
-    ]
-  }
-  return ordered
+  const order = await orderRows(stats, sortBy, reverse, timeKind, groupDirsFirst, quote)
+  return order.flatMap((i) => stats[i] ?? [])
 }
 
 // A file operand whose readdir came back empty: backends without real
@@ -911,26 +913,10 @@ async function sortOperands(
   timeKind: LsTimeKind,
   quote: Quote | null,
 ): Promise<Operand[]> {
-  const keyed: { key: FileStat; operand: Operand }[] = []
-  for (const operand of operands) {
-    keyed.push({ key: await operandKey(operand, sortBy, stat), operand })
-  }
-  if (sortBy === 'none') return keyed.map((k) => k.operand)
-  if (sortBy === 'version') {
-    const order = await sortByVersion(keyed.map((k) => k.key.name))
-    const ordered = order.flatMap((i) => keyed[i]?.operand ?? [])
-    return reverse ? ordered.reverse() : ordered
-  }
-  const sign = reverse ? -1 : 1
-  const widths = new Map(
-    sortBy === 'width'
-      ? keyed.map(
-          ({ key }) => [key.name, textWidth(quote === null ? key.name : quote(key.name))] as const,
-        )
-      : [],
-  )
-  keyed.sort((a, b) => sign * compareStats(a.key, b.key, sortBy, timeKind, widths))
-  return keyed.map((k) => k.operand)
+  const keys: FileStat[] = []
+  for (const operand of operands) keys.push(await operandKey(operand, sortBy, stat))
+  const order = await orderRows(keys, sortBy, reverse, timeKind, false, quote)
+  return order.flatMap((i) => operands[i] ?? [])
 }
 
 /** The ls flag bag, parsed once. */
@@ -1418,10 +1404,9 @@ export async function lsGeneric(
       if (row instanceof FileStat) collected.push({ row, href: p.virtual })
       else warnings.push(row)
     }
-    const byRow = new Map(collected.map((c) => [c.row, c.href]))
-    const rows =
+    const order =
       collected.length > 1
-        ? await sortStats(
+        ? await orderRows(
             collected.map((c) => c.row),
             sortBy,
             reverse,
@@ -1429,8 +1414,10 @@ export async function lsGeneric(
             groupDirsFirst,
             quote,
           )
-        : collected.map((c) => c.row)
-    const rowPaths = rows.map((r) => byRow.get(r) ?? '')
+        : collected.map((_, i) => i)
+    const sorted = order.flatMap((i) => collected[i] ?? [])
+    const rows = sorted.map((c) => c.row)
+    const rowPaths = sorted.map((c) => c.href)
     await renderGroup(
       rows,
       render,
