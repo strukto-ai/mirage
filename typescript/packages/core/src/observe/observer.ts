@@ -125,7 +125,7 @@ function tracer(): Tracer {
 }
 
 /**
- * Open a typed line's `command` span as it starts (`start`, epoch
+ * Open a typed line's `shell` span as it starts (`start`, epoch
  * milliseconds), naming the line, its session, its workspace, the host
  * running Mirage (`host.name`) and the cwd it starts in; the spans of its jobs
  * and processes go under it. Mirrors Python's `_start_line`.
@@ -148,11 +148,11 @@ function startLine(
   if (workspaceId !== undefined) attributes['mirage.workspace.id'] = workspaceId
   if (machine !== undefined) attributes['host.name'] = machine
   if (cwd !== undefined) attributes['mirage.cwd'] = cwd
-  return tracer().startSpan('command', { startTime: start, attributes })
+  return tracer().startSpan('shell', { startTime: start, attributes })
 }
 
 /**
- * Close a typed line's `command` span (`span`, its start and end in epoch
+ * Close a typed line's `shell` span (`span`, its start and end in epoch
  * milliseconds): how it ended and the start of its stdout and stderr
  * (`output`, as it wrote them). It also carries its length in milliseconds,
  * as the history's entries have it, for a tracer that can't be given a
@@ -174,6 +174,38 @@ function endLine(
     line.setAttribute('mirage.stderr', tracedOutput(output[1], limit))
   }
   line.end(span[1])
+}
+
+/**
+ * Send a call the caller made to a mount itself (`Workspace.vfs`, a FUSE or
+ * SFTP mount), outside any line, as a `vfs.<call>` span of its own: the path,
+ * the mount that served it and the bytes it moved. It carries its end and
+ * its length in milliseconds too, as the history's entries have them, for a
+ * tracer that can't be given a span's times. TRACE_CONTENT_ENV keeps it out.
+ * `session` is empty for none. Mirrors Python's `_call_span`.
+ */
+function callSpan(
+  workspaceId: string | undefined,
+  machine: string | undefined,
+  rec: OpRecord,
+  session: string,
+): void {
+  if (!traceContent()) return
+  const attributes: Attributes = {
+    'mirage.vfs.path': rec.path,
+    'mirage.vfs.source': rec.source,
+    'mirage.vfs.bytes': rec.bytes,
+    'mirage.vfs.timestamp': rec.timestamp,
+    'mirage.vfs.duration_ms': rec.durationMs,
+  }
+  if (session !== '') attributes['mirage.session.id'] = session
+  if (workspaceId !== undefined) attributes['mirage.workspace.id'] = workspaceId
+  if (machine !== undefined) attributes['host.name'] = machine
+  const call = tracer().startSpan(`vfs.${rec.op}`, {
+    startTime: rec.timestamp - rec.durationMs,
+    attributes,
+  })
+  call.end(rec.timestamp)
 }
 
 /**
@@ -247,14 +279,15 @@ function later(a: number | null, b: number | null): number | null {
  * persisted log) would otherwise file a clear or delete ahead of the
  * commands it acts on. A session with no history sets no floor.
  *
- * Each typed line also goes to OpenTelemetry as a span, and so does each job
- * and process once it ends: a process under the one that started it, a job's
+ * Each typed line also goes to OpenTelemetry as a `shell` span, each call made
+ * to a mount outside a line as a `vfs.<call>` span, and so does each job and
+ * process once it ends: a process under the one that started it, a job's
  * process under its job, and the line's own under the line's span while the
  * newest `HISTORY_MAX_RECORDS` lines' spans are known. A process links to
- * each it reads from,
- * `mirage.input` naming where: its `stdin`, a `/dev/fd` path or its `argv`.
- * Nothing leaves the process until an SDK is set up. Tracing stops at the workspace's own machine and runtimes: a program
- * a runtime runs elsewhere starts no trace of its own there. `machine` is
+ * each it reads from, `mirage.input` naming where: its `stdin`, a `/dev/fd`
+ * path or its `argv`. Nothing leaves the process until an SDK is set up.
+ * Tracing stops at the workspace's own machine and runtimes: a program a
+ * runtime runs elsewhere starts no trace of its own there. `machine` is
  * the host running Mirage, `host.name` on its command, job and process spans;
  * `processes` gives the process records the workspace keeps, which a span
  * goes under, and `instance` what each machine's provider calls it,
@@ -329,8 +362,14 @@ export class Observer {
     )
   }
 
+  /**
+   * Persist an OpRecord as a JSONL line. A call no line made, one the caller
+   * made to a mount itself, is a `vfs.<call>` span too; a line's calls are its
+   * commands' own work and send none.
+   */
   async logOp(rec: OpRecord, session: string, cwd?: string, parent?: string): Promise<void> {
     await this.log(LogEntry.fromOpRecord(rec, session, cwd, parent))
+    if (parent === undefined) callSpan(this.workspaceId, this.machine, rec, session)
   }
 
   /**

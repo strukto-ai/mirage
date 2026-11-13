@@ -146,7 +146,7 @@ def _start_line(
     cwd: str | None,
     start: int,
 ) -> trace.Span:
-    """Open a typed line's ``command`` span as it starts, naming the
+    """Open a typed line's ``shell`` span as it starts, naming the
     line, its session, its workspace, the host running Mirage and the
     cwd it starts in; the spans of its jobs and processes go under it.
 
@@ -172,7 +172,7 @@ def _start_line(
     if cwd is not None:
         attributes["mirage.cwd"] = cwd
     return _tracer().start_span(
-        "command", start_time=start * _NS_PER_MS, attributes=attributes
+        "shell", start_time=start * _NS_PER_MS, attributes=attributes
     )
 
 
@@ -182,7 +182,7 @@ def _end_line(
     exit_code: int,
     output: tuple[bytes, bytes],
 ) -> None:
-    """Close a typed line's ``command`` span: how it ended and the start
+    """Close a typed line's ``shell`` span: how it ended and the start
     of its stdout and stderr. It also carries its length in
     milliseconds, as the history's entries have it, for a tracer that
     can't be given a span's times. ``TRACE_CONTENT_ENV`` leaves out the
@@ -203,6 +203,48 @@ def _end_line(
         line.set_attribute("mirage.stdout", _traced_output(output[0], limit))
         line.set_attribute("mirage.stderr", _traced_output(output[1], limit))
     line.end(end_time=span[1] * _NS_PER_MS)
+
+
+def _call_span(
+    workspace_id: str | None,
+    machine: str | None,
+    rec: OpRecord,
+    session: str,
+) -> None:
+    """Send a call the caller made to a mount itself (``Workspace.vfs``,
+    a FUSE or SFTP mount), outside any line, as a ``vfs.<call>`` span of
+    its own: the path, the mount that served it and the bytes it moved.
+    It carries its end and its length in milliseconds too, as the
+    history's entries have them, for a tracer that can't be given a
+    span's times. ``TRACE_CONTENT_ENV`` keeps it out.
+
+    Args:
+        workspace_id (str | None): the workspace the call ran in.
+        machine (str | None): the host running Mirage, ``host.name``.
+        rec (OpRecord): the call.
+        session (str): the session it ran as, empty for none.
+    """
+    if not _trace_content():
+        return
+    attributes: dict[str, str | int] = {
+        "mirage.vfs.path": rec.path,
+        "mirage.vfs.source": rec.source,
+        "mirage.vfs.bytes": rec.bytes,
+        "mirage.vfs.timestamp": rec.timestamp,
+        "mirage.vfs.duration_ms": rec.duration_ms,
+    }
+    if session:
+        attributes["mirage.session.id"] = session
+    if workspace_id is not None:
+        attributes["mirage.workspace.id"] = workspace_id
+    if machine is not None:
+        attributes["host.name"] = machine
+    call = _tracer().start_span(
+        f"vfs.{rec.op}",
+        start_time=(rec.timestamp - rec.duration_ms) * _NS_PER_MS,
+        attributes=attributes,
+    )
+    call.end(end_time=rec.timestamp * _NS_PER_MS)
 
 
 def _parse_files(files: dict[str, bytes]) -> list[dict[str, Any]]:
@@ -267,8 +309,9 @@ class Observer:
     ahead of the commands it acts on. A session with no history sets no
     floor.
 
-    Each typed line also goes to OpenTelemetry as a span, and so does
-    each job and process once it ends: a process under the one that
+    Each typed line also goes to OpenTelemetry as a ``shell`` span, each
+    call made to a mount outside a line as a ``vfs.<call>`` span, and so
+    does each job and process once it ends: a process under the one that
     started it, a job's process under its job, and the line's own under
     the line's span while the newest ``HISTORY_MAX_RECORDS`` lines' spans
     are known. A process links to each it reads from, ``mirage.input``
@@ -366,7 +409,9 @@ class Observer:
         cwd: str | None = None,
         parent: str | None = None,
     ) -> None:
-        """Persist an OpRecord as a JSONL line.
+        """Persist an OpRecord as a JSONL line. A call no line made, one
+        the caller made to a mount itself, is a ``vfs.<call>`` span too;
+        a line's calls are its commands' own work and send none.
 
         Args:
             rec (OpRecord): The operation record.
@@ -375,6 +420,8 @@ class Observer:
             parent (str | None): The line that made the call.
         """
         await self._log(LogEntry.from_op_record(rec, session, cwd, parent))
+        if parent is None:
+            _call_span(self._workspace_id, self._machine, rec, session)
 
     async def log_command(
         self,

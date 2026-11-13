@@ -17,14 +17,14 @@ export const NAME_LIMIT = 200
 export const TRACER_NAME = 'mirage.observe'
 
 /**
- * Set to `false` or `0` to keep lines' output out of their `command` spans.
- * Named after OpenTelemetry's
+ * Set to `false` or `0` to keep what calls touched out of spans: no output on
+ * `shell`, no `vfs.<call>` spans. Named after OpenTelemetry's
  * `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`.
  */
 export const TRACE_CONTENT_ENV = 'MIRAGE_TRACE_CAPTURE_CONTENT'
 
 /**
- * How many bytes of each of a line's stdout and stderr its `command` span
+ * How many bytes of each of a line's stdout and stderr its `shell` span
  * keeps: TRACE_CONTENT_MAX_BYTES unless this sets a positive whole number.
  * Named after Langfuse's `LANGFUSE_MAX_EVENT_SIZE_BYTES`.
  */
