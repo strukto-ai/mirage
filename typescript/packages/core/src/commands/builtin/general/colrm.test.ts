@@ -74,3 +74,12 @@ describe('colrm across chunks', () => {
     await ws.close()
   })
 })
+
+it('records invalid input before an early reader closes', async () => {
+  const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
+  const io = await ws.shell("set -o pipefail; printf 'ab\\377' | LC_ALL=C colrm 3 | head -c 1")
+  expect(io.stdoutText).toBe('a')
+  expect(io.exitCode).toBe(1)
+  expect(io.stderrText).toContain('Invalid or incomplete multibyte')
+  await ws.close()
+})

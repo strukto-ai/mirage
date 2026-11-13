@@ -70,3 +70,19 @@ it('drains large expansions and lists variables without reading stdin', async ()
   expect(reads).toBe(0)
   await ws.close()
 })
+
+it('substitutes property names and leaves unrelated large values unused', async () => {
+  const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
+  const env = { ['__proto__']: 'proto', constructor: 'ctor', UNUSED: 'z'.repeat(1000000) }
+  const io = await ws.shell('envsubst', {
+    stdin: new TextEncoder().encode('$__proto__:${constructor}'),
+    env,
+  })
+  expect(io.stdoutText).toBe('proto:ctor')
+  const untouched = await ws.shell("envsubst ''", {
+    stdin: new TextEncoder().encode('$UNUSED'),
+    env,
+  })
+  expect(untouched.stdoutText).toBe('$UNUSED')
+  await ws.close()
+})

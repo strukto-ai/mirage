@@ -20,6 +20,8 @@ struct Config {
     variables: bool,
     #[serde(default)]
     env: BTreeMap<String, Value>,
+    #[serde(default, deserialize_with = "crate::latin1_list")]
+    names: Vec<Vec<u8>>,
 }
 
 #[derive(Deserialize)]
@@ -74,6 +76,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         args,
         variables,
         env,
+        names: available,
     } = parse_config(config)?;
     if args.len() > 1 {
         return Err(StreamError::new("envsubst: too many arguments"));
@@ -105,6 +108,8 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         .collect();
     Ok(Box::new(Envsubst {
         selected,
+        available: available.into_iter().collect(),
+        pending: Pending::Idle,
         bindings,
         values,
         variables,
@@ -117,7 +122,15 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     }))
 }
 
+enum Pending {
+    Idle,
+    Ready(Vec<Vec<u8>>),
+    Sent(Vec<Vec<u8>>),
+}
+
 struct Envsubst {
+    available: BTreeSet<Vec<u8>>,
+    pending: Pending,
     selected: Option<BTreeSet<Vec<u8>>>,
     bindings: BTreeMap<Vec<u8>, usize>,
     values: Vec<Vec<u8>>,
@@ -152,6 +165,9 @@ impl Envsubst {
     }
 
     fn pump(&mut self, out: &mut Vec<u8>) {
+        if !matches!(self.pending, Pending::Idle) {
+            return;
+        }
         let limit = out.len().saturating_add(OUTPUT);
         let mut work = 0;
         while out.len() < limit && work < WORK {
@@ -184,6 +200,20 @@ impl Envsubst {
                     .as_ref()
                     .is_none_or(|set| set.contains(&self.input[name.clone()]))
                 {
+                    if self.available.contains(&self.input[name.clone()])
+                        && !self.bindings.contains_key(&self.input[name.clone()])
+                    {
+                        let needed: BTreeSet<Vec<u8>> = names(&self.input[self.at..])
+                            .filter(|name| {
+                                self.available.contains(*name)
+                                    && !self.bindings.contains_key(*name)
+                                    && self.selected.as_ref().is_none_or(|set| set.contains(*name))
+                            })
+                            .map(<[u8]>::to_vec)
+                            .collect();
+                        self.pending = Pending::Ready(needed.into_iter().collect());
+                        return;
+                    }
                     self.value = self
                         .bindings
                         .get(&self.input[name])
@@ -218,9 +248,48 @@ impl Stream for Envsubst {
         Ok(())
     }
     fn busy(&self) -> bool {
-        self.at < self.ready || self.value.is_some()
+        matches!(self.pending, Pending::Idle) && (self.at < self.ready || self.value.is_some())
     }
     fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.pump(out);
+        Ok(())
+    }
+    fn request(&mut self, _data: &mut Vec<u8>) -> Option<Vec<u8>> {
+        match std::mem::replace(&mut self.pending, Pending::Idle) {
+            Pending::Ready(names) => {
+                let header = serde_json::json!({"op":"env", "names":names.iter().map(|name| crate::byte_text(name)).collect::<Vec<_>>()});
+                self.pending = Pending::Sent(names);
+                Some(header.to_string().into_bytes())
+            }
+            other => {
+                self.pending = other;
+                None
+            }
+        }
+    }
+    fn respond(
+        &mut self,
+        reply: &[u8],
+        _data: &[u8],
+        out: &mut Vec<u8>,
+    ) -> Result<(), StreamError> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Reply {
+            env: BTreeMap<String, Value>,
+        }
+        let mut reply: Reply = parse_config(reply)?;
+        let Pending::Sent(names) = std::mem::replace(&mut self.pending, Pending::Idle) else {
+            return Err(StreamError::new("envsubst: unexpected environment reply"));
+        };
+        for name in names {
+            let value = reply
+                .env
+                .remove(&crate::byte_text(&name))
+                .ok_or_else(|| StreamError::new("envsubst: missing environment value"))?;
+            self.bindings.insert(name, self.values.len());
+            self.values.push(value.0);
+        }
         self.pump(out);
         Ok(())
     }
@@ -230,6 +299,31 @@ impl Stream for Envsubst {
 mod tests {
     use super::*;
     use crate::run;
+
+    #[test]
+    fn values_are_requested_in_batches_and_cached() {
+        let mut stream = open(br#"{"names":["X","UNUSED"]}"#).unwrap();
+        let mut out = Vec::new();
+        stream.feed(b"$X $X!", &mut out).unwrap();
+        let request = stream.request(&mut Vec::new()).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&request).unwrap(),
+            serde_json::json!({"op":"env","names":["X"]})
+        );
+        stream
+            .respond(br#"{"env":{"X":"\u00ff"}}"#, &[], &mut out)
+            .unwrap();
+        assert_eq!(out, b"\xff \xff!");
+        out.clear();
+        stream.feed(b"$X!", &mut out).unwrap();
+        assert_eq!(out, b"\xff!");
+        assert!(stream.request(&mut Vec::new()).is_none());
+        let mut empty = open(br#"{"args":[""],"names":["UNUSED"]}"#).unwrap();
+        out.clear();
+        empty.feed(b"$UNUSED!", &mut out).unwrap();
+        assert_eq!(out, b"$UNUSED!");
+        assert!(empty.request(&mut Vec::new()).is_none());
+    }
 
     #[test]
     fn references_and_raw_values_survive_every_split() {
