@@ -152,9 +152,6 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
   static override readonly provider = 'e2b'
   private sdk: E2bSdk | null = null
   private sandbox: Sandbox | null = null
-  // Set by a connect that reached the sandbox; close hands it to `pausable` for the pause after.
-  private reached = false
-  private pausable = false
 
   constructor(name: string, config?: E2BConfig) {
     super(name, config, E2BMachine.configFields)
@@ -195,31 +192,16 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
     this.reached = true
   }
 
-  /**
-   * Close as any machine does, so the pause after it touches only a sandbox
-   * this workspace reached; a connect still under way settles first.
-   */
-  override async close(): Promise<void> {
-    await Promise.allSettled([this.connecting])
-    this.pausable = this.reached
-    this.reached = false
-    await super.close()
-  }
-
   /** Whether the config says `onPause: 'pause'`. */
   override configAsksToPause(): boolean {
     return this.config.onPause === 'pause'
   }
 
   /**
-   * Pause the sandbox when the workspace that just closed reached it,
-   * keeping its disk and memory; the next connect resumes it. A sandbox
-   * already gone has nothing to pause.
+   * Pause the sandbox, keeping its disk and memory; the next connect resumes
+   * it. A sandbox already gone has nothing to pause.
    */
-  override async pause(): Promise<void> {
-    const pausable = this.pausable
-    this.pausable = false
-    if (!pausable) return
+  protected override async pauseMachine(): Promise<void> {
     const sdk = await this.ensureSdk()
     try {
       await sdk.Sandbox.pause(this.config.sandboxId, this.apiParams())

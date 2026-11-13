@@ -205,6 +205,10 @@ class MachineHandle:
         # retries.
         self._connected = False
         self._connect_lock = asyncio.Lock()
+        # Set by a provider's connect that reached the machine; close hands
+        # it to ``_pausable`` for the pause after.
+        self._reached = False
+        self._pausable = False
         self._mounts: MachineMounts | None = None
         # The libfaketime the machine holds, asked once the first program
         # runs there under a system_time: None for none. Its first runs
@@ -818,7 +822,13 @@ class MachineHandle:
     async def close(self) -> None:
         """Unmount what the machine was served; the machine is the user's.
         The next run connects again, so a workspace that takes the handle
-        after this one reaches the machine anew."""
+        after this one reaches the machine anew. A connect still under way
+        settles first, so the pause after touches only a machine this
+        workspace reached."""
+        async with self._connect_lock:
+            pass
+        self._pausable = self._reached
+        self._reached = False
         try:
             if self._spent:
                 await self._remove_spent()
@@ -833,9 +843,18 @@ class MachineHandle:
         return False
 
     async def pause(self) -> None:
-        """Pause the machine after its workspace closed to pause. A
-        provider that can pause overrides this, and its next connect
-        resumes the machine; by default the machine is only disconnected."""
+        """Pause the machine after its workspace closed to pause, when that
+        workspace reached it; by default the machine is only
+        disconnected."""
+        pausable = self._pausable
+        self._pausable = False
+        if pausable:
+            await self._pause_machine()
+
+    async def _pause_machine(self) -> None:
+        """Pause the machine a closed workspace reached. A provider that
+        can pause overrides this, and its next connect resumes the
+        machine; a machine already gone counts as paused."""
 
 
 def _parse_status(first: str, second: str) -> RunStatus | None:
