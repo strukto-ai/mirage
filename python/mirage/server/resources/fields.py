@@ -26,12 +26,20 @@ from pydantic_core import PydanticUndefined
 from mirage.commands.cli.mcp.constants import NAME as MCP_CLI
 from mirage.commands.cli.specs import cli_spec_for, known_cli_names
 from mirage.core.mcp.config import MCPConfig
+from mirage.machine.config import MachineConfig
 from mirage.machine.registry import known_providers, machine_class
 from mirage.resources.types import EntryKind
 from mirage.runtime.constants import SECRET_CONFIG_FIELDS
 from mirage.runtime.python.local import LocalRuntime
 from mirage.runtime.python.monty import MontyRuntime
-from mirage.runtime.table import HOST, IN_PROCESS, WORKER, in_process_runtimes
+from mirage.runtime.sandlock import SandlockRuntime
+from mirage.runtime.table import (
+    HOST,
+    IN_PROCESS,
+    WORKER,
+    in_process_runtimes,
+    runtime_class,
+)
 from mirage.server.resources.types import Field, FieldType, TypeTable
 from mirage.vfs.registry import known_vfs_names, resolve_class, resolve_entry
 from mirage.vfs.secrets import secret_field_names
@@ -236,8 +244,30 @@ def cli_types() -> TypeTable:
 
 
 def machine_types() -> TypeTable:
-    """Every machine provider and engine provider, with its fields."""
+    """Every machine provider and engine provider, with its fields: an
+    ``in_process`` machine's are those of each runtime it may run, none
+    required, and a ``host`` machine's include its ``sandbox`` block's as
+    ``sandbox.<field>`` in that group."""
     captures = described("captures", ("list", None), False, False, None, None)
+    engine: dict[str, Field] = {}
+    for name in in_process_runtimes():
+        try:
+            config = runtime_class(name).config_cls
+        except ImportError as e:
+            logger.debug("runtime %s is not installed: %s", name, e)
+            continue
+        for field in dataclass_fields(config):
+            field["required"] = False
+            engine.setdefault(field["name"], field)
+    base = {f.name for f in dataclasses.fields(MachineConfig)}
+    sandbox = [
+        field
+        for field in dataclass_fields(SandlockRuntime.config_cls)
+        if field["name"] not in base
+    ]
+    for field in sandbox:
+        field["name"] = f"sandbox.{field['name']}"
+        field["group"] = "sandbox"
     out: TypeTable = {
         IN_PROCESS: [
             described(
@@ -248,10 +278,11 @@ def machine_types() -> TypeTable:
                 None,
                 None,
             ),
+            *engine.values(),
             captures,
         ],
         WORKER: [*dataclass_fields(MontyRuntime.config_cls), captures],
-        HOST: [*dataclass_fields(LocalRuntime.config_cls), captures],
+        HOST: [*dataclass_fields(LocalRuntime.config_cls), *sandbox, captures],
     }
     for provider in known_providers():
         try:

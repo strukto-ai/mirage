@@ -147,16 +147,15 @@
     {
       "id": "local_a_shells_last_program_runs_in_its_place",
       "world": {
-        "runtimes": [
-          {
-            "name": "local",
+        "machines": {
+          "local": {
+            "provider": "host",
             "captures": [
               "python3",
               "@external"
             ]
-          },
-          "workspace"
-        ]
+          }
+        }
       },
       "steps": [
         {

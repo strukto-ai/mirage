@@ -15,6 +15,7 @@
 import { cliSpecFor, knownCliNames } from '@struktoai/mirage-core/commands/cli/specs'
 import { NAME as MCP_CLI } from '@struktoai/mirage-core/commands/cli/mcp/constants'
 import { MCPConfig } from '@struktoai/mirage-core/core/mcp/config'
+import { BASE_CONFIG_FIELDS } from '@struktoai/mirage-core/machine/config'
 import { knownProviders, machineClass } from '@struktoai/mirage-core/machine/registry'
 import type { EntryKind } from '@struktoai/mirage-core/resources/types'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
@@ -181,23 +182,42 @@ function configTypes(configFields: ConfigFields): Field[] {
 }
 
 /**
- * Every machine provider and engine provider, with its fields: a worker
- * where monty runs on one, a host where this host registers its own
- * programs.
+ * Every machine provider and engine provider, with its fields: an
+ * `in_process` machine's are those of each runtime it may run, none
+ * required, a worker's where monty runs on one, and a host's where this
+ * host registers its own programs, its `sandbox` block's as
+ * `sandbox.<field>` in that group.
  */
 function machineTypes(): TypeTable {
   const captures: Field = { name: 'captures', type: 'list', secret: false, required: false }
   const inProcess = inProcessRuntimes()
+  const engine = new Map<string, Field>()
+  for (const name of inProcess) {
+    for (const field of configTypes(runtimeClass(name).configFields)) {
+      if (!engine.has(field.name)) engine.set(field.name, { ...field, required: false })
+    }
+  }
   const out: TypeTable = {
     [IN_PROCESS]: [
       { name: 'runtime', type: 'string', secret: false, required: true, options: inProcess },
+      ...engine.values(),
       captures,
     ],
   }
   if (!inProcess.includes('monty'))
     out[WORKER] = [...configTypes(runtimeClass('monty').configFields), captures]
-  if (knownRuntimes().includes('local'))
-    out[HOST] = [...configTypes(runtimeClass('local').configFields), captures]
+  if (knownRuntimes().includes('local')) {
+    const sandbox = knownRuntimes().includes('sandlock')
+      ? configTypes(
+          Object.fromEntries(
+            Object.entries(runtimeClass('sandlock').configFields).filter(
+              ([name]) => !(name in BASE_CONFIG_FIELDS),
+            ),
+          ),
+        ).map((field) => ({ ...field, name: `sandbox.${field.name}`, group: 'sandbox' }))
+      : []
+    out[HOST] = [...configTypes(runtimeClass('local').configFields), ...sandbox, captures]
+  }
   for (const provider of knownProviders())
     out[provider] = configTypes(machineClass(provider).configFields)
   return Object.fromEntries(Object.entries(out).sort(([a], [b]) => compareCodePoints(a, b)))

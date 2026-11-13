@@ -97,6 +97,22 @@ async def test_swap_by_remove_then_add_and_a_removed_instance_stays_out():
 
 
 @pytest.mark.asyncio
+async def test_a_refused_add_leaves_the_engine_its_name():
+    alpha = Engine("alpha")
+    first, second = workspace(alpha), workspace()
+    try:
+        with pytest.raises(ValueError, match="another workspace"):
+            second.add_machine("renamed", alpha)
+        with pytest.raises(ValueError, match="duplicate machine"):
+            first.add_machine("again", alpha)
+        assert alpha.name == "alpha"
+        assert await python3(first, machine="alpha") == (0, b"alpha\n", b"")
+    finally:
+        await first.close()
+        await second.close()
+
+
+@pytest.mark.asyncio
 async def test_remove_waits_for_a_running_line_before_closing():
     alpha = Engine("alpha")
     alpha.release.clear()

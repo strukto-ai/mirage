@@ -16,7 +16,7 @@
 // already running to end before it answers EBUSY.
 export const QUIESCE_SECONDS = 30
 
-export const FORMAT_VERSION = 7
+export const FORMAT_VERSION = 8
 
 export const BLOB_REF_KEY = '__file'
 

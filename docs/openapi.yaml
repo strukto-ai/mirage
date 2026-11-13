@@ -472,8 +472,8 @@ paths:
           $ref: '#/components/responses/404'
         '429':
           $ref: '#/components/responses/429'
-      description: Stop background jobs and runtime processes across every session. The workspace and
-        sessions remain open.
+      description: Stop background jobs and the programs machines started across every session. The
+        workspace and sessions remain open.
       tags:
         - Workspaces
       x-hosts:

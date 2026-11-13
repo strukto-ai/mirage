@@ -134,6 +134,21 @@ describe('removeMachine', () => {
     expect(alpha.closed).toBe(1)
   })
 
+  it('leaves a runtime its name when adding it is refused', async () => {
+    const alpha = new Engine('alpha')
+    const first = workspace(alpha)
+    const second = workspace()
+    try {
+      expect(() => second.addMachine('renamed', alpha)).toThrow(/another workspace/)
+      expect(() => first.addMachine('again', alpha)).toThrow(/duplicate machine/)
+      expect(alpha.name).toBe('alpha')
+      expect(await python3(first, 'alpha')).toEqual([0, 'alpha\n', ''])
+    } finally {
+      await first.close()
+      await second.close()
+    }
+  })
+
   it('waits for a running line before closing the runtime', async () => {
     const alpha = new Engine('alpha')
     const gate = latch()

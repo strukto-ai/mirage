@@ -108,7 +108,7 @@ class Runtimes:
         A sandbox (``is_sandbox``) lands after the last sandbox listed,
         else before the first language runtime, else last; any other
         entry lands last. A duplicate name is rejected before any state
-        changes.
+        changes, and an engine refused keeps the name it had.
 
         Args:
             name (str): the machine's name.
@@ -120,29 +120,35 @@ class Runtimes:
             ValueError: what ``build_entry`` refuses, a machine provider,
                 or a duplicate name.
         """
-        handle, entry = build_entry(name, spec)
-        if handle is not None:
-            raise ValueError(
-                f"machine {name!r}: a {handle.provider} machine is declared"
-                " when the workspace is built"
-            )
-        at = len(self._entries)
-        if is_sandbox(entry):
-            sandboxes = [
-                i + 1 for i, e in enumerate(self._entries) if is_sandbox(e)
-            ]
-            languages = [
-                i
-                for i, e in enumerate(self._entries)
-                if isinstance(e, LanguageRuntime)
-            ]
-            if sandboxes:
-                at = sandboxes[-1]
-            elif languages:
-                at = languages[0]
-        candidate = [*self._entries[:at], entry, *self._entries[at:]]
-        bindings = bind_commands(candidate)
-        self._bind(entry)
+        named = spec.name if isinstance(spec, Runtime) else None
+        try:
+            handle, entry = build_entry(name, spec)
+            if handle is not None:
+                raise ValueError(
+                    f"machine {name!r}: a {handle.provider} machine is"
+                    " declared when the workspace is built"
+                )
+            at = len(self._entries)
+            if is_sandbox(entry):
+                sandboxes = [
+                    i + 1 for i, e in enumerate(self._entries) if is_sandbox(e)
+                ]
+                languages = [
+                    i
+                    for i, e in enumerate(self._entries)
+                    if isinstance(e, LanguageRuntime)
+                ]
+                if sandboxes:
+                    at = sandboxes[-1]
+                elif languages:
+                    at = languages[0]
+            candidate = [*self._entries[:at], entry, *self._entries[at:]]
+            bindings = bind_commands(candidate)
+            self._bind(entry)
+        except ValueError:
+            if isinstance(spec, Runtime) and named is not None:
+                spec.name = named
+            raise
         self._install(candidate, bindings)
         return entry
 

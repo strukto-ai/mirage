@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MachineTable } from '../../execution/machine/table.ts'
-import type { Runtime } from '../../runtime/base.ts'
+import { Runtime } from '../../runtime/base.ts'
 import type { WorkspaceBinding } from '../../runtime/binding.ts'
 import { LanguageRuntime } from '../../runtime/language.ts'
 import { RemoteRuntime } from '../../runtime/machine/runtime.ts'
@@ -74,25 +74,36 @@ export class Runtimes {
    *
    * A sandbox (`isSandbox`) lands after the last sandbox listed, else before
    * the first language runtime, else last; any other entry lands last. A
-   * duplicate name is rejected before any state changes; a machine
-   * provider's handle is the workspace's to hold from the start.
+   * duplicate name is rejected before any state changes, and a runtime
+   * refused keeps the name it had; a machine provider's handle is the
+   * workspace's to hold from the start.
    */
   add(name: string, spec: MachineSpec): Runtime {
-    const [handle, entry] = buildEntry(name, spec)
-    if (handle !== null)
-      throw new Error(
-        `machine '${name}': a ${handle.provider} machine is declared when the workspace is built`,
-      )
-    let at = this.entries.length
-    if (isSandbox(entry)) {
-      const lastSandbox = this.entries.reduce((last, e, i) => (isSandbox(e) ? i : last), -1)
-      const firstLanguage = this.entries.findIndex((e) => e instanceof LanguageRuntime)
-      if (lastSandbox >= 0) at = lastSandbox + 1
-      else if (firstLanguage >= 0) at = firstLanguage
+    const named = spec instanceof Runtime ? spec.name : null
+    let entry: Runtime
+    let candidate: Runtime[]
+    let bindings: Record<string, Runtime>
+    try {
+      const [handle, built] = buildEntry(name, spec)
+      if (handle !== null)
+        throw new Error(
+          `machine '${name}': a ${handle.provider} machine is declared when the workspace is built`,
+        )
+      entry = built
+      let at = this.entries.length
+      if (isSandbox(entry)) {
+        const lastSandbox = this.entries.reduce((last, e, i) => (isSandbox(e) ? i : last), -1)
+        const firstLanguage = this.entries.findIndex((e) => e instanceof LanguageRuntime)
+        if (lastSandbox >= 0) at = lastSandbox + 1
+        else if (firstLanguage >= 0) at = firstLanguage
+      }
+      candidate = [...this.entries.slice(0, at), entry, ...this.entries.slice(at)]
+      bindings = bindCommands(candidate)
+      this.bindEntry(entry)
+    } catch (err) {
+      if (spec instanceof Runtime && named !== null) spec.name = named
+      throw err
     }
-    const candidate = [...this.entries.slice(0, at), entry, ...this.entries.slice(at)]
-    const bindings = bindCommands(candidate)
-    this.bindEntry(entry)
     this.install(candidate, bindings)
     return entry
   }
