@@ -217,7 +217,10 @@ export async function handlePipe(
         if (error instanceof PipeClosed) {
           io.exitCode = SIGPIPE_STATUS
         } else if (isUnwinding(error) && inParent) {
-          if (!(error instanceof LoopSignal)) throw error
+          if (!(error instanceof LoopSignal)) {
+            const stderr = await output.snapshot(Channel.STDERR)
+            throw await carried(error, null, new IOResult({ stderr }))
+          }
           unwinding.push(error)
         } else if (isUnwinding(error)) {
           // A stage is a subshell: whatever unwinds ends it there, a simple

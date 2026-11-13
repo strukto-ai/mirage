@@ -253,7 +253,8 @@ async def handle_pipe(
         except Unwinding as sig:
             if in_parent:
                 if not isinstance(sig, LoopSignal):
-                    raise
+                    stderr = await output.snapshot(Channel.STDERR)
+                    raise await carried(sig, None, IOResult(stderr=stderr))
                 unwinding.append(sig)
             else:
                 # A stage is a subshell: whatever unwinds ends it there, a
