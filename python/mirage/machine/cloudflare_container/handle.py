@@ -423,7 +423,10 @@ class ContainerMachine(MachineHandle, PipeTransportMixin, SleepableMixin):
         """Unmount what the container was served, as any machine does,
         without starting a container that has stopped: what a close
         would clean up there went with its disk. The relay's session
-        closes with it."""
+        closes with it. A start still under way settles first, so a
+        sleep after this close finds no container still starting."""
+        async with self._connect_lock:
+            pass
         self._closing = True
         try:
             await super().close()

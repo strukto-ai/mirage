@@ -889,6 +889,30 @@ describe('ContainerMachine sleep', () => {
     expect(order).toEqual(['closed', 'sleep'])
   })
 
+  it('sleeps only after a start under way at close comes up', async () => {
+    const gate = deferred<undefined>()
+    const order: string[] = []
+    const machine = new ContainerMachine(
+      'box',
+      {},
+      new FakeContainer(),
+      async () => {
+        await gate.promise
+        order.push('started')
+      },
+      () => {
+        order.push('sleep')
+        return Promise.resolve()
+      },
+    )
+    const connecting = machine.ensureConnected()
+    const slept = machine.close().then(() => machine.sleep())
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    gate.resolve(undefined)
+    await Promise.all([connecting, slept])
+    expect(order).toEqual(['started', 'sleep'])
+  })
+
   it('does nothing on sleep without a hook', async () => {
     const { machine, start } = boxed()
     await machine.sleep()

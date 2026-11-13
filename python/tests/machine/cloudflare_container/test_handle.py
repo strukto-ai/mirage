@@ -217,6 +217,35 @@ async def test_sleep_runs_the_hosts_hook_once_after_close():
 
 
 @pytest.mark.asyncio
+async def test_sleep_waits_for_a_start_under_way_at_close():
+    box = FakeContainer()
+    gate = asyncio.Event()
+    order: list[str] = []
+
+    async def start() -> None:
+        await gate.wait()
+        box.start()
+        order.append("started")
+
+    async def sleep() -> None:
+        order.append("sleep")
+
+    machine = ContainerMachine("box", {}, box, start, sleep)
+
+    async def close_then_sleep() -> None:
+        await machine.close()
+        await machine.sleep()
+
+    connecting = asyncio.create_task(machine.ensure_connected())
+    await asyncio.sleep(0)
+    slept = asyncio.create_task(close_then_sleep())
+    await asyncio.sleep(0.01)
+    gate.set()
+    await asyncio.gather(connecting, slept)
+    assert order == ["started", "sleep"]
+
+
+@pytest.mark.asyncio
 async def test_sleep_does_nothing_without_a_hook():
     _, machine = boxed()
     await machine.sleep()

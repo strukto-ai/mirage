@@ -393,6 +393,8 @@ export class ContainerMachine
    * closes its sockets; the next line connects again.
    */
   override async close(): Promise<void> {
+    // A start under way settles first, so a sleep after this close finds no container still starting.
+    await Promise.allSettled([this.connecting])
     this.closing = true
     try {
       await super.close()
