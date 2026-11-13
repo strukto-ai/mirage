@@ -405,8 +405,8 @@ and alerts.
 | --- | --- |
 | <code style={{ whiteSpace: 'nowrap' }}>host.name</code> | The hostname of the host that runs Mirage, such as `my-laptop`. |
 | <code style={{ whiteSpace: 'nowrap' }}>mirage.machine.type</code> | The provider of the [machine](/home/setup/machine/overview) a job or process ran on, such as `e2b` or `docker`, and `host` for the host that runs Mirage. |
-| <code style={{ whiteSpace: 'nowrap' }}>mirage.machine.name</code> | The machine's name under `machines:`, such as `gpu`, or the hostname for the host that runs Mirage. With the type it makes the machine's full name elsewhere in Mirage, such as `e2b:gpu`. |
-| <code style={{ whiteSpace: 'nowrap' }}>mirage.machine.id</code> | What the provider calls the machine: the sandbox id for E2B and Daytona, the container for Docker, the pod for Kubernetes, the host for SSH. |
+| <code style={{ whiteSpace: 'nowrap' }}>mirage.machine.name</code> | The machine's name under `machines:`, such as `gpu`, or the hostname for Mirage's own processes. With the type it makes the machine's full name elsewhere in Mirage, such as `e2b:gpu` or `host:laptop`. |
+| <code style={{ whiteSpace: 'nowrap' }}>mirage.machine.id</code> | What the provider calls the machine: the sandbox id for E2B and Daytona, the container for Docker, the pod for Kubernetes, the host for SSH, the hostname for a `host` machine. |
 | <code style={{ whiteSpace: 'nowrap' }}>process.pid</code> | The pid the agent sees in `ps` and `$!`: a program's own pid on its machine, else Mirage's number for the process. |
 | <code style={{ whiteSpace: 'nowrap' }}>mirage.process.pid</code> | Mirage's own number for the process, the same as `process.pid` for a command Mirage runs itself. |
 | <code style={{ whiteSpace: 'nowrap' }}>mirage.cwd</code> | The directory the line started in. |

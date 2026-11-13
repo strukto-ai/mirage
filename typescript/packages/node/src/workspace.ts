@@ -34,6 +34,7 @@ import {
   type MachineResources,
 } from '@struktoai/mirage-core/execution/types'
 import { hostname } from 'node:os'
+import { HOST } from '@struktoai/mirage-core/runtime/constants'
 import { watch } from './io/gateway.ts'
 import { releaseNetwork, watchNetwork } from './io/network.ts'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
@@ -84,7 +85,7 @@ export class Workspace extends CoreWorkspace {
 
   /** This host, by its name. */
   protected override hostMachine(): MachineName {
-    return new MachineName('host', hostname())
+    return new MachineName(HOST, hostname())
   }
 
   private fuseSetupPromise: Promise<void> | null = null

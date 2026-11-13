@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import socket
 from dataclasses import replace
 
 import pytest
@@ -414,7 +415,9 @@ async def test_a_session_reusing_a_closed_ones_id_finds_none_of_its_own():
 @pytest.mark.asyncio
 async def test_a_host_scan_finds_what_an_ended_program_left_running():
     ws = Workspace(
-        {"/": RAMVFS()}, mode=MountMode.EXEC, machines=[LocalRuntime()]
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"laptop": {"provider": "host"}},
     )
     spawn = (
         "import subprocess as s; "
@@ -423,10 +426,20 @@ async def test_a_host_scan_finds_what_an_ended_program_left_running():
     )
     try:
         assert (await ws.shell(f'python3 -c "{spawn}"')).exit_code == 0
-        said = await ws.shell("ps -o machine=,pid=,args=")
+        said = await ws.shell("ps --machine=laptop -o machine=,pid=,args=")
         rows = [line.split() for line in said.stdout.decode().splitlines()]
         held = [row for row in rows if row[2:] == ["sleep", "30"]]
-        assert len(held) == 1 and held[0][0].startswith("host:")
+        assert [row[0] for row in held] == ["host:laptop"]
+        ran = [
+            (str(p.machine), p.machine_instance)
+            for p in ws.process_table.records()
+            if p.machine_pid is not None
+        ]
+        assert set(ran) == {("host:laptop", socket.gethostname())}
+        assert [str(m.name) for m in await ws.machines()] == [
+            f"host:{socket.gethostname()}",
+            "host:laptop",
+        ]
         assert (await ws.shell(f"kill -9 {held[0][1]}")).exit_code == 0
     finally:
         await ws.close()

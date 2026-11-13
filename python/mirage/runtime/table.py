@@ -21,6 +21,7 @@ from mirage.machine.registry import build_machine
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import (
     EXTERNAL_COMMANDS,
+    HOST,
     JS_GROUP,
     LANGUAGE_COMMANDS,
     PYTHON_GROUP,
@@ -103,7 +104,6 @@ RUNTIME_HINTS: dict[str, str] = {
 # processes it spawns, or as native programs on its host.
 IN_PROCESS = "in_process"
 WORKER = "worker"
-HOST = "host"
 ENGINE_PROVIDERS: tuple[str, ...] = (IN_PROCESS, WORKER, HOST)
 
 # The runtimes a builtin provider runs no other way.

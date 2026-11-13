@@ -14,7 +14,7 @@
 
 import { chmodSync, statSync, writeFileSync } from 'node:fs'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
@@ -26,7 +26,7 @@ import { DiskVFS } from './vfs/disk/disk.ts'
 import { InlineGitHub } from '../tests/vfs/fixtures/github.ts'
 import { buildVfs } from './vfs/registry.ts'
 import { conditionalS3, s3Vfs, tmpRoot } from '../tests/test-utils.ts'
-import { LocalRuntime } from './runtime/python/local/runtime.ts'
+import './runtime/python/local/runtime.ts'
 import { Workspace } from './workspace.ts'
 
 describe('@struktoai/mirage-node Workspace', () => {
@@ -274,20 +274,28 @@ describe('a host scan', () => {
   it('finds what an ended program left running', async () => {
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, machines: [new LocalRuntime()] },
+      { mode: MountMode.EXEC, machines: { laptop: { provider: 'host' } } },
     )
     const spawn =
       'import subprocess as s; ' +
       "s.Popen(['sleep', '30'], stdin=s.DEVNULL, stdout=s.DEVNULL, stderr=s.DEVNULL)"
     try {
       expect((await ws.shell(`python3 -c "${spawn}"`)).exitCode).toBe(0)
-      const said = await ws.shell('ps -o machine=,pid=,args=')
+      const said = await ws.shell('ps --machine=laptop -o machine=,pid=,args=')
       const held = said.stdoutText
         .split('\n')
         .map((line) => line.trim().split(/\s+/))
         .filter((row) => row.slice(2).join(' ') === 'sleep 30')
-      expect(held).toHaveLength(1)
-      expect(held[0]?.[0]).toMatch(/^host:/)
+      expect(held.map((row) => row[0])).toEqual(['host:laptop'])
+      const ran = ws.processTable
+        .records()
+        .filter((p) => p.machinePid !== null)
+        .map((p) => `${p.machine.toString()} ${p.machineInstance ?? ''}`)
+      expect(new Set(ran)).toEqual(new Set([`host:laptop ${hostname()}`]))
+      expect((await ws.machines()).map((m) => m.name.toString())).toEqual([
+        `host:${hostname()}`,
+        'host:laptop',
+      ])
       expect((await ws.shell(`kill -9 ${held[0]?.[1] ?? ''}`)).exitCode).toBe(0)
     } finally {
       await ws.close()

@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { EXTERNAL_COMMANDS } from '@struktoai/mirage-core/runtime/constants'
+import { EXTERNAL_COMMANDS, HOST } from '@struktoai/mirage-core/runtime/constants'
+import { MachineName } from '@struktoai/mirage-core/execution/types'
 import type { ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
@@ -61,6 +62,11 @@ export class SandlockRuntime
     super(options, [EXTERNAL_COMMANDS], SandlockRuntime.configFields)
     if (this.config.mountType != null)
       throw new Error('sandlock: mountType needs a remote pipe transport')
+  }
+
+  /** The host, under the name of the machine entry that runs it. Mirrors Python's `machine`. */
+  override get machine(): MachineName {
+    return new MachineName(HOST, this.name)
   }
 
   policyArgv(): string[] {

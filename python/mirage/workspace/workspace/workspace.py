@@ -129,6 +129,7 @@ from mirage.runtime.binding import (
     capture_binding,
     restricted_mounts_for,
 )
+from mirage.runtime.constants import HOST
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.routing import RouteRule
 from mirage.runtime.table import (
@@ -455,7 +456,7 @@ class Workspace:
         # A line binds the system clock only once its process has started.
         self.process_table = ProcessTable(
             self._workspace_id,
-            MachineName("host", socket.gethostname()),
+            MachineName(HOST, socket.gethostname()),
             bind=run_as_process,
             changed=lambda: self.job_table.processes_changed(),
             now=lambda: (
@@ -676,7 +677,12 @@ class Workspace:
         )
         handles, entries = split_machines(machines)
         self.machine_table = MachineTable(
-            handles, scan_host, signal_host, stop_host_run, host_resources
+            handles,
+            scan_host,
+            signal_host,
+            stop_host_run,
+            host_resources,
+            host=self.process_table.machine,
         )
         self._wire_machines()
         if route_policy is not None:
@@ -2898,18 +2904,31 @@ class Workspace:
     ) -> list[Machine]:
         """The machines the workspace runs programs on, each as a check
         of it finds it now: its own host first, which Mirage always
-        manages, then every machine ``machines:`` names, checked at once.
+        manages, and each ``host`` machine, the host under its entry's
+        name, then every other machine ``machines:`` names, checked at
+        once.
 
         Args:
             machine (MachineName | None): only this machine; None for every
                 one.
         """
         host = self.process_table.machine
-        found = (
-            [Machine(host, MachineState.MANAGED, self._clock.now())]
-            if machine is None or machine == host
-            else []
+        hosts = dict.fromkeys(
+            [
+                host,
+                *(
+                    entry.machine
+                    for entry in self._runtimes.entries
+                    if entry.machine is not None
+                    and entry.machine.provider == HOST
+                ),
+            ]
         )
+        found = [
+            Machine(each, MachineState.MANAGED, self._clock.now())
+            for each in hosts
+            if machine is None or machine == each
+        ]
         return found + await self.machine_table.check(
             self._clock.now, None if machine is None else str(machine)
         )

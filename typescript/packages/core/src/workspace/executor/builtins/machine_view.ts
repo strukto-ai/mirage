@@ -56,6 +56,19 @@ function reachOf(runtime: unknown): string {
 }
 
 /**
+ * The machine a runtime runs its programs on, by id as `ps` shows it: a host
+ * program's on its `host` entry, else on the host; null for one that runs
+ * none. Mirrors Python's `_machine_of`.
+ */
+function machineOf(runtime: unknown, host: string): string | null {
+  const reach = reachOf(runtime)
+  if (runtime == null || (reach !== 'process' && reach !== 'remote')) return null
+  const found = (runtime as { machine: MachineName | null }).machine
+  if (found !== null) return found.toString()
+  return reach === 'process' ? host : null
+}
+
+/**
  * The machine programs run on by default: the one taking programs no name
  * captures, else the first that captures any. Mirrors Python's
  * `_default_machine`.
@@ -66,11 +79,8 @@ function defaultMachine(
   host: string,
 ): string {
   for (const runtime of [bindings[EXTERNAL_COMMANDS], ...Object.values(bindings)]) {
-    const reach = reachOf(runtime)
-    if (reach === 'process') return host
-    if (reach !== 'remote') continue
-    const found = (runtime as { machine: MachineName | null }).machine
-    if (found !== null) return found.toString()
+    const found = machineOf(runtime, host)
+    if (found !== null) return found
   }
   return every[0] ?? ''
 }
@@ -93,11 +103,10 @@ export function machineScope(
   const routing = frame?.routing
   const every = [...(processes.machineNames?.() ?? [])]
   const host = processes.machine.toString()
-  if (
-    routing !== undefined &&
-    Object.values(routing.bindings).some((runtime) => reachOf(runtime) === 'process')
-  )
-    every.push(host)
+  for (const runtime of Object.values(routing?.bindings ?? {})) {
+    const shown = reachOf(runtime) === 'process' ? machineOf(runtime, host) : null
+    if (shown !== null && !every.includes(shown)) every.push(shown)
+  }
   if (name !== null) {
     if (workspace && namesMachine(WORKSPACE_MACHINE, name))
       return { ids: [], picked: true, several: false, workspace: true }

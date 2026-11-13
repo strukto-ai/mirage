@@ -19,6 +19,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from mirage.commands.config import Context
+from mirage.execution.types import MachineName
 from mirage.machine.program import (
     Children,
     close_children,
@@ -27,7 +28,7 @@ from mirage.machine.program import (
     system_time_env,
 )
 from mirage.runtime.base import Runtime
-from mirage.runtime.constants import EXTERNAL_COMMANDS
+from mirage.runtime.constants import EXTERNAL_COMMANDS, HOST
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.sandlock.config import SandlockConfig
 from mirage.runtime.sandlock.constants import (
@@ -64,6 +65,11 @@ class SandlockRuntime(
             )
         self._children: Children = {}
         self._closed = False
+
+    @property
+    def machine(self) -> MachineName:
+        """The host, under the name of the machine entry that runs it."""
+        return MachineName(HOST, self.name)
 
     def policy_argv(self) -> list[str]:
         argv: list[str] = []

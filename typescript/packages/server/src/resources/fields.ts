@@ -19,9 +19,8 @@ import { BASE_CONFIG_FIELDS } from '@struktoai/mirage-core/machine/config'
 import { knownProviders, machineClass } from '@struktoai/mirage-core/machine/registry'
 import type { EntryKind } from '@struktoai/mirage-core/resources/types'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
-import { SECRET_CONFIG_FIELDS } from '@struktoai/mirage-core/runtime/constants'
+import { HOST, SECRET_CONFIG_FIELDS } from '@struktoai/mirage-core/runtime/constants'
 import {
-  HOST,
   IN_PROCESS,
   inProcessRuntimes,
   knownRuntimes,

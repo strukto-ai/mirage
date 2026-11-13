@@ -80,6 +80,7 @@ import {
 } from '../../execution/types.ts'
 import type { SessionProcesses } from '../../execution/process/session.ts'
 import { DiffPool } from '../../rs/diff_pool.ts'
+import { HOST } from '../../runtime/constants.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import {
   captureBinding,
@@ -641,6 +642,7 @@ export class Workspace {
       (target, signum) => this.signalHost(target, signum),
       (target, seenAt, signum) => this.stopHostRun(target, seenAt, signum),
       (machine, cpu) => this.hostResources(machine, cpu),
+      this.processTable.machine,
     )
     this.wireMachines()
     if (options.routePolicy !== undefined) {
@@ -1571,16 +1573,21 @@ export class Workspace {
 
   /**
    * The machines the workspace runs programs on, each as a check of it finds
-   * it now: its own host first, which Mirage always manages, then every
-   * machine `machines:` names, checked at once; only `machine` when named.
-   * Mirrors Python's `Workspace.machines`.
+   * it now: its own host first, which Mirage always manages, and each `host`
+   * machine, the host under its entry's name, then every other machine
+   * `machines:` names, checked at once; only `machine` when named. Mirrors
+   * Python's `Workspace.machines`.
    */
   async machines(machine?: MachineName): Promise<Machine[]> {
     const host = this.processTable.machine
-    const found: Machine[] =
-      machine === undefined || machine.toString() === host.toString()
-        ? [{ name: host, state: 'managed', checkedAt: this.clock.now() }]
-        : []
+    const hosts = new Map([[host.toString(), host]])
+    for (const entry of this.runtimeWorld.entries) {
+      const named = entry.machine
+      if (named?.provider === HOST) hosts.set(named.toString(), named)
+    }
+    const found: Machine[] = [...hosts.values()]
+      .filter((each) => machine === undefined || machine.toString() === each.toString())
+      .map((each) => ({ name: each, state: 'managed', checkedAt: this.clock.now() }))
     return [
       ...found,
       ...(await this.machineTable.check(() => this.clock.now(), machine?.toString())),

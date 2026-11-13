@@ -19,6 +19,8 @@ import { access, stat } from 'node:fs/promises'
 import { isAbsolute, resolve } from 'node:path'
 import { debuglog } from 'node:util'
 import { fsStrerror } from '@struktoai/mirage-core/errors/fs'
+import { MachineName } from '@struktoai/mirage-core/execution/types'
+import { HOST } from '@struktoai/mirage-core/runtime/constants'
 import {
   resolveHome,
   type ConfigFields,
@@ -149,6 +151,11 @@ export class LocalRuntime
         )
       }
     }
+  }
+
+  /** The host, under the name of the machine entry that runs it. Mirrors Python's `machine`. */
+  override get machine(): MachineName {
+    return new MachineName(HOST, this.name)
   }
 
   override async version(_env: Record<string, string>, signal?: AbortSignal): Promise<RunResult> {

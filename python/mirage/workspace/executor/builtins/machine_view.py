@@ -87,6 +87,24 @@ def _reach_of(runtime: RuntimeIdentity | None) -> str:
     return getattr(runtime, "reach", "workspace")
 
 
+def _machine_of(runtime: RuntimeIdentity | None, host: str) -> str | None:
+    """The machine a runtime runs its programs on, by id as ``ps`` shows
+    it: a host program's on its ``host`` entry, else on the host; None for
+    one that runs none.
+
+    Args:
+        runtime (RuntimeIdentity | None): the runtime.
+        host (str): the host's id.
+    """
+    reach = _reach_of(runtime)
+    if runtime is None or reach not in ("process", "remote"):
+        return None
+    found = Runtime.require(runtime).machine
+    if found is not None:
+        return str(found)
+    return host if reach == "process" else None
+
+
 def _default_machine(
     routing: RouteDecision[RuntimeIdentity], every: list[str], host: str
 ) -> str:
@@ -100,14 +118,9 @@ def _default_machine(
     """
     bindings = routing.bindings
     for runtime in (bindings.get(EXTERNAL_COMMANDS), *bindings.values()):
-        reach = _reach_of(runtime)
-        if reach == "process":
-            return host
-        if runtime is None or reach != "remote":
-            continue
-        found = Runtime.require(runtime).machine
+        found = _machine_of(runtime, host)
         if found is not None:
-            return str(found)
+            return found
     return every[0]
 
 
@@ -135,11 +148,15 @@ def machine_scope(
     routing = frame.routing if frame is not None else None
     every = list(processes.machine_names() if processes.machine_names else [])
     host = str(processes.machine)
-    if routing is not None and any(
-        _reach_of(runtime) == "process"
-        for runtime in routing.bindings.values()
-    ):
-        every.append(host)
+    if routing is not None:
+        for runtime in routing.bindings.values():
+            shown = (
+                _machine_of(runtime, host)
+                if _reach_of(runtime) == "process"
+                else None
+            )
+            if shown is not None and shown not in every:
+                every.append(shown)
     if name is not None:
         if workspace and names_machine(WORKSPACE_MACHINE, name):
             return MachineScope((), True, True)

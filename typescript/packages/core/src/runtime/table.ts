@@ -21,6 +21,7 @@ import type { RuntimeOptions } from './config.ts'
 import type { RouteDecision } from './types.ts'
 import {
   EXTERNAL_COMMANDS,
+  HOST,
   JS_GROUP,
   LANGUAGE_COMMANDS,
   PYTHON_GROUP,
@@ -79,7 +80,6 @@ const RUNTIME_HINTS: Record<string, string> = {
  */
 export const IN_PROCESS = 'in_process'
 export const WORKER = 'worker'
-export const HOST = 'host'
 const ENGINE_PROVIDERS: readonly string[] = [IN_PROCESS, WORKER, HOST]
 
 // Where each builtin runtime runs, when that is not in process. Null
@@ -146,20 +146,16 @@ export function knownRuntimes(): string[] {
   return Object.keys(NAMED).sort(compareCodePoints)
 }
 
-// The options every runtime's constructor takes; Python's signature refuses any other.
-const OPTION_KEYS: readonly string[] = ['captures', 'config']
-
 /**
  * Construct a runtime by name, failing loud on unknown names (with a
- * cross-language hint for Python-only names) and on unknown options.
+ * cross-language hint for Python-only names) and on unknown options, as
+ * Python's constructor signature does.
  */
 export function buildRuntime(name: string, options: Record<string, unknown> = {}): Runtime {
   const cls = runtimeClass(name)
   for (const key of Object.keys(options)) {
-    if (!OPTION_KEYS.includes(key)) {
-      const known = OPTION_KEYS.map((k) => `'${k}'`).join(', ')
-      throw new Error(`unknown ${name} runtime option '${key}' (expected: ${known})`)
-    }
+    if (key !== 'captures' && key !== 'config')
+      throw new Error(`unknown ${name} runtime option '${key}' (expected: 'captures', 'config')`)
   }
   return new cls(options as RuntimeOptions<never>)
 }
