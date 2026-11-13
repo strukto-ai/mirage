@@ -16,7 +16,7 @@ import type { ProcessPermissions } from '../process/config.ts'
 import type { ProcessHandle } from '../process/handle.ts'
 import { ProcessTable } from '../process/table.ts'
 import { shownMachine } from '../process/types.ts'
-import { currentRequest } from '../../io/web/request.ts'
+import { currentRequest, type IncomingRequest } from '../../io/web/request.ts'
 import { PathSpec } from '../../types.ts'
 import { JobConsole } from '../../shell/console/index.ts'
 import {
@@ -133,6 +133,8 @@ function heldConsoles(fields: RecordFields | null): Set<string> {
  */
 export class JobTable {
   private readonly substitutions = new Map<number, ProcessHandle>()
+  // The edge-runtime request each substitution started in.
+  private readonly substitutionRequests = new WeakMap<ProcessHandle, IncomingRequest>()
   store: ExecutionStore
   // The id of the daemon this table runs on, which its lease names.
   readonly daemon: string
@@ -879,6 +881,8 @@ export class JobTable {
   trackSubstitution(process: ProcessHandle): void {
     const pid = process.record.id.pid
     this.substitutions.set(pid, process)
+    const request = currentRequest()
+    if (request !== null) this.substitutionRequests.set(process, request)
     // Its table runs the hook that tracks it just before starting it, so it
     // has something to join a microtask later.
     queueMicrotask(() => {
@@ -896,32 +900,18 @@ export class JobTable {
    * ends, or each it started without one. A shell waits only for its own, as
    * bash does: never for another pipeline stage's.
    */
-  async waitSubstitution(
-    sessionId: string,
-    shell: number | null,
-    pid?: number,
-    signal?: AbortSignal,
-  ): Promise<void> {
+  async waitSubstitution(sessionId: string, shell: number | null, pid?: number): Promise<void> {
+    const request = currentRequest()
     for (const [child, process] of [...this.substitutions]) {
       const { record } = process
-      if (record.sessionId === sessionId && record.parent === shell && (pid ?? child) === child)
-        await this.substitutionEnded(process, signal)
-    }
-  }
-
-  /**
-   * Wait for a substitution's process to end. On an edge runtime the request
-   * that runs it may not be the one waiting, and a wake from that one would
-   * run this waiter inside it, so the waiter looks on its own timer instead,
-   * every 10 ms, as a polled `BytePipe` does, until `signal` cancels the wait.
-   */
-  private async substitutionEnded(process: ProcessHandle, signal?: AbortSignal): Promise<void> {
-    if (currentRequest() === null) {
+      if (record.sessionId !== sessionId || record.parent !== shell || (pid ?? child) !== child)
+        continue
+      // On an edge runtime a substitution an earlier request started cannot
+      // end once that request has answered, and a wake from one still live
+      // would run this waiter inside it: a request waits for its own only.
+      if (request !== null && this.substitutionRequests.get(process) !== request) continue
       await process.join()
-      return
     }
-    while (process.record.endedAt === null && signal?.aborted !== true)
-      await new Promise((resolve) => setTimeout(resolve, 10))
   }
 
   /**

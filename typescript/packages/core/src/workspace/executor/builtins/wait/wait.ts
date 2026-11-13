@@ -221,8 +221,7 @@ export async function handleWait(
     }
     if (numeric && !refusal.endsWith(AMBIGUOUS_SPEC)) {
       answeredPid = Number(spec)
-      if (!nextJob)
-        await abortable(jobTable.waitSubstitution(sid, shell, answeredPid, signal), signal)
+      if (!nextJob) await abortable(jobTable.waitSubstitution(sid, shell, answeredPid), signal)
       const [saved, ambiguous] = savedOnMachine(jobTable.savedStatuses(sid, answeredPid), machine)
       answered = saved
       if (ambiguous) refusal = `${spec}: ${AMBIGUOUS_SPEC}`
@@ -260,7 +259,7 @@ export async function handleWait(
     const told = waitReports(session, jobTable)
     await jobTable.popCompleted(sid, keep)
     jobTable.forgetStatuses(sid)
-    await abortable(jobTable.waitSubstitution(sid, shell, undefined, signal), signal)
+    await abortable(jobTable.waitSubstitution(sid, shell), signal)
     if (visible.length > 0) jobTable.forgetStatuses(sid)
     return [
       null,
