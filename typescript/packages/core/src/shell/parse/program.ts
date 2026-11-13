@@ -19,7 +19,11 @@ import type { ShellNode, TSNodeLike } from '../types.ts'
  * typed, and the references that keep it readable. Mirrors Python's
  * ParsedProgram. */
 export class ParsedProgram {
-  readonly root: ProgramNode
+  private parsedRoot: ProgramNode | undefined
+  private cachedChildren = new WeakMap<
+    ProgramNode,
+    { all?: ProgramNode[]; named?: ProgramNode[] }
+  >()
   references = 1
   private released = false
 
@@ -30,7 +34,26 @@ export class ParsedProgram {
     root: ShellTreeNode,
   ) {
     this.sourceOffsets = root.offsets
-    this.root = new ProgramNode(root, this)
+    this.parsedRoot = new ProgramNode(root, this)
+  }
+
+  get root(): ProgramNode {
+    if (this.parsedRoot === undefined) throw new Error('parsed program is released')
+    return this.parsedRoot
+  }
+
+  children(node: ProgramNode, named: boolean): ProgramNode[] {
+    this.check()
+    let cached = this.cachedChildren.get(node)
+    if (cached === undefined) {
+      cached = {}
+      this.cachedChildren.set(node, cached)
+    }
+    const key = named ? 'named' : 'all'
+    cached[key] ??= (named ? node.borrowed.namedChildren : node.borrowed.children).map(
+      (child) => new ProgramNode(child, this),
+    )
+    return [...cached[key]]
   }
 
   get original(): string {
@@ -65,8 +88,10 @@ export class ParsedProgram {
   private drop(): void {
     this.references -= 1
     if (this.references === 0) {
-      const borrowed = this.root.borrowed
+      const borrowed = this.parsedRoot?.borrowed
       if (borrowed instanceof ShellTreeNode) borrowed.tree.dispose()
+      this.cachedChildren = new WeakMap()
+      this.parsedRoot = undefined
       this.sourceOffsets = undefined
       this.originalText = ''
       this.newlines = null
@@ -99,8 +124,6 @@ export class ParsedProgram {
 /** A node of a parsed program; every read checks the program is still held.
  * The wrappers of a node's children are built once and kept, as in Python. */
 export class ProgramNode implements ShellNode {
-  private kids: ProgramNode[] | undefined
-  private named: ProgramNode[] | undefined
   constructor(
     readonly borrowed: ShellNode,
     readonly program: ParsedProgram,
@@ -162,14 +185,10 @@ export class ProgramNode implements ShellNode {
     return this.wrap(this.node.child(index))
   }
   get children(): ProgramNode[] {
-    const node = this.node
-    this.kids ??= node.children.map((child) => new ProgramNode(child, this.program))
-    return [...this.kids]
+    return this.program.children(this, false)
   }
   get namedChildren(): ProgramNode[] {
-    const node = this.node
-    this.named ??= node.namedChildren.map((child) => new ProgramNode(child, this.program))
-    return [...this.named]
+    return this.program.children(this, true)
   }
   private wrap(node: ShellNode | null): ProgramNode | null {
     return node === null ? null : new ProgramNode(node, this.program)

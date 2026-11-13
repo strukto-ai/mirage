@@ -32,10 +32,12 @@ struct Parsed {
     error_at: i32,
     status: u8,
     message: Vec<u8>,
+    message_tree: u32,
     names: Vec<u8>,
     extras: Vec<u32>,
     text: Vec<u8>,
     reread: Vec<u32>,
+    reread_tree: u32,
 }
 
 /// The trees parses kept, each until the host drops it, for the engine's
@@ -190,7 +192,13 @@ pub extern "C" fn mirage_rs_shell_drop_tree(handle: u32) {
             clear_scratch(&mut parsed.table);
             clear_scratch(&mut parsed.extras);
             clear_scratch(&mut parsed.text);
+        }
+        if parsed.message_tree == handle {
+            parsed.message_tree = 0;
             clear_scratch(&mut parsed.message);
+        }
+        if parsed.reread_tree == handle {
+            parsed.reread_tree = 0;
             clear_scratch(&mut parsed.reread);
         }
     });
@@ -350,6 +358,7 @@ pub extern "C" fn mirage_rs_shell_words(
         })
         .unwrap_or_default();
     PARSED.with_borrow_mut(|parsed| {
+        parsed.message_tree = handle;
         parsed.message = words;
         parsed.message.len()
     })
@@ -366,6 +375,7 @@ pub extern "C" fn mirage_rs_shell_reread(handle: u32, index: u32) -> usize {
         .map(|tree| mirage_rs::shell::reread_lines(&tree, index as usize))
         .unwrap_or_default();
     PARSED.with_borrow_mut(|parsed| {
+        parsed.reread_tree = handle;
         parsed.reread.clear();
         for (node, line, end) in lines {
             parsed.reread.extend_from_slice(&[node, line, end]);
@@ -419,6 +429,28 @@ pub extern "C" fn mirage_rs_shell_names_len() -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dropping_oldest_tree_releases_later_diagnostic_scratch() {
+        let source = b"echo $(echo hi)";
+        ARGS.with_borrow_mut(|args| *args = source.to_vec());
+        mirage_rs_shell_parse(source.len(), 0, 1);
+        let older = mirage_rs_shell_tree();
+        ARGS.with_borrow_mut(|args| *args = b"echo newer".to_vec());
+        mirage_rs_shell_parse(10, 0, 1);
+        mirage_rs_shell_drop_tree(mirage_rs_shell_tree());
+        assert!(mirage_rs_shell_reread(older, 0) > 0);
+        mirage_rs_shell_words(older, 1, 0, 1, 1);
+        PARSED.with_borrow_mut(|parsed| {
+            parsed.reread.reserve(32768);
+            parsed.message = vec![b'x'; 131072];
+        });
+        mirage_rs_shell_drop_tree(older);
+        PARSED.with_borrow(|parsed| {
+            assert_eq!(parsed.reread.capacity(), 0);
+            assert_eq!(parsed.message.capacity(), 0);
+        });
+    }
 
     #[test]
     fn utf16_coordinates_include_non_bmp_and_invalid_bytes() {

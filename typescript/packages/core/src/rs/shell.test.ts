@@ -92,6 +92,32 @@ describe('parseShell', () => {
     expect(command.fieldNameForChild(2)).toBe('argument')
   })
 
+  it('rejects raw node reads after disposing its tree', () => {
+    const tree = parseShell('echo hello')
+    const root = tree.rootNode
+    const child = root.children[0]
+    if (child === undefined) throw new Error('no command')
+    tree.dispose()
+    tree.dispose()
+    for (const node of [root, child]) {
+      for (const read of [
+        () => node.parent,
+        () => node.text,
+        () => node.children,
+        () => node.id,
+        () => node.offsets,
+        () => node.inlined,
+        () => node.error,
+        () => node.rereadLines(),
+        () => node.warnings('', 1),
+        () => node.child(-1),
+        () => node.childForFieldName('missing'),
+      ])
+        expect(read).toThrow('released')
+    }
+    expect(() => tree.rootNode).toThrow('released')
+  })
+
   it('counts offsets and columns in UTF-16 units', () => {
     const line = 'echo é💡 x'
     const word = parseShell(line).rootNode.child(0)?.child(2)
