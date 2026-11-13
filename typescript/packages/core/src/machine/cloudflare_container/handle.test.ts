@@ -28,6 +28,7 @@ import { ConnectionLostError } from '../errors.ts'
 import { logger } from '../handle.ts'
 import { buildMachine } from '../registry.ts'
 import { OPEN } from '../../mount/constants.ts'
+import { settledWithin } from '../../utils/abort.ts'
 import '../../mount/sftp.ts'
 import { RemoteRuntime } from '../../runtime/machine/runtime.ts'
 import type { RunResult } from '../../runtime/types.ts'
@@ -911,6 +912,42 @@ describe('ContainerMachine sleep', () => {
     gate.resolve(undefined)
     await Promise.all([connecting, slept])
     expect(order).toEqual(['started', 'sleep'])
+  })
+
+  it('closes without waiting for a start that never answers', async () => {
+    const machine = new ContainerMachine(
+      'box',
+      {},
+      new FakeContainer(),
+      () => new Promise(() => undefined),
+    )
+    void machine.ensureConnected()
+    expect(await settledWithin(machine.close(), 1)).toBe(true)
+  })
+
+  it('sleeps after the start’s wait when a start never answers', async () => {
+    vi.useFakeTimers()
+    try {
+      const order: string[] = []
+      const machine = new ContainerMachine(
+        'box',
+        {},
+        new FakeContainer(),
+        () => new Promise(() => undefined),
+        () => {
+          order.push('sleep')
+          return Promise.resolve()
+        },
+      )
+      void machine.ensureConnected()
+      await machine.close()
+      const slept = machine.sleep()
+      await vi.advanceTimersByTimeAsync((START_WAIT_SECONDS + 1) * 1000)
+      await slept
+      expect(order).toEqual(['sleep'])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('does nothing on sleep without a hook', async () => {

@@ -423,10 +423,7 @@ class ContainerMachine(MachineHandle, PipeTransportMixin, SleepableMixin):
         """Unmount what the container was served, as any machine does,
         without starting a container that has stopped: what a close
         would clean up there went with its disk. The relay's session
-        closes with it. A start still under way settles first, so a
-        sleep after this close finds no container still starting."""
-        async with self._connect_lock:
-            pass
+        closes with it."""
         self._closing = True
         try:
             await super().close()
@@ -441,9 +438,22 @@ class ContainerMachine(MachineHandle, PipeTransportMixin, SleepableMixin):
 
     async def sleep(self) -> None:
         """Run the host's sleep hook, if it gave one; without one, sleep
-        only disconnects."""
-        if self._sleep is not None:
-            await self._sleep()
+        only disconnects. A start under way at close boots the
+        container, so the hook follows it, or a start stalled past
+        ``START_WAIT_SECONDS``."""
+        if self._sleep is None:
+            return
+        try:
+            async with asyncio.timeout(START_WAIT_SECONDS):
+                async with self._connect_lock:
+                    pass
+        except TimeoutError:
+            logger.debug(
+                "cloudflare_container: a start still under way after %ss; "
+                "sleeping anyway",
+                START_WAIT_SECONDS,
+            )
+        await self._sleep()
 
     async def open_pipe(self, command: str) -> MachinePipe:
         if self._container is None:

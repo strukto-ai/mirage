@@ -143,6 +143,8 @@ export class ContainerMachine
   private exits = 0
   // Set while the workspace closes, when nothing starts a container.
   private closing = false
+  // The connect a close found under way, for the sleep after it.
+  private starting: Promise<void> | null = null
   private readonly container: Container | undefined
   private readonly start: (() => Promise<void>) | undefined
   private readonly sleepHook: (() => Promise<void>) | undefined
@@ -393,8 +395,7 @@ export class ContainerMachine
    * closes its sockets; the next line connects again.
    */
   override async close(): Promise<void> {
-    // A start under way settles first, so a sleep after this close finds no container still starting.
-    await Promise.allSettled([this.connecting])
+    this.starting = this.connecting
     this.closing = true
     try {
       await super.close()
@@ -406,9 +407,21 @@ export class ContainerMachine
     }
   }
 
-  /** Run the host's sleep hook, if it gave one; without one, sleep only disconnects. */
+  /**
+   * Run the host's sleep hook, if it gave one; without one, sleep only
+   * disconnects. A start under way at close boots the container, so the
+   * hook follows it, or a start stalled past `START_WAIT_SECONDS`.
+   */
   async sleep(): Promise<void> {
-    await this.sleepHook?.()
+    const starting = this.starting
+    this.starting = null
+    if (this.sleepHook === undefined) return
+    if (starting !== null && !(await settledWithin(starting, START_WAIT_SECONDS))) {
+      logger.debug?.(
+        `cloudflare_container: a start still under way after ${String(START_WAIT_SECONDS)}s; sleeping anyway`,
+      )
+    }
+    await this.sleepHook()
   }
 
   async openPipe(command: string): Promise<MachinePipe> {

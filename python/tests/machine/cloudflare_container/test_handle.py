@@ -245,6 +245,44 @@ async def test_sleep_waits_for_a_start_under_way_at_close():
     assert order == ["started", "sleep"]
 
 
+async def _never() -> None:
+    await asyncio.Event().wait()
+
+
+@pytest.mark.asyncio
+async def test_close_does_not_wait_for_a_start_that_never_answers():
+    machine = ContainerMachine("box", {}, FakeContainer(), _never)
+    connecting = asyncio.create_task(machine.ensure_connected())
+    await asyncio.sleep(0)
+    try:
+        await asyncio.wait_for(machine.close(), 1)
+    finally:
+        connecting.cancel()
+        await asyncio.gather(connecting, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_sleep_gives_up_on_a_start_that_never_answers(monkeypatch):
+    monkeypatch.setattr(
+        "mirage.machine.cloudflare_container.handle.START_WAIT_SECONDS", 0.05
+    )
+    order: list[str] = []
+
+    async def sleep() -> None:
+        order.append("sleep")
+
+    machine = ContainerMachine("box", {}, FakeContainer(), _never, sleep)
+    connecting = asyncio.create_task(machine.ensure_connected())
+    await asyncio.sleep(0)
+    try:
+        await asyncio.wait_for(machine.close(), 1)
+        await asyncio.wait_for(machine.sleep(), 1)
+    finally:
+        connecting.cancel()
+        await asyncio.gather(connecting, return_exceptions=True)
+    assert order == ["sleep"]
+
+
 @pytest.mark.asyncio
 async def test_sleep_does_nothing_without_a_hook():
     _, machine = boxed()
