@@ -242,24 +242,24 @@ instead of a page of 25, up to the newest 200 messages, the account's
 
 The recruiting team asked each candidate for two times, one per line, written
 as `2026-11-16 10:00`. A short Python script takes each candidate's name and
-address from the `From:` line, using the address as the name when there is
-none, and the times from the body, saves them to
+address from the sender in the search results, using the address as the name
+when there is none, and the times from the reply's body. It saves them to
 `/work/candidates.json` and prints a table:
 
 ```bash
 run <<'SH'
 cat > /work/candidates.py <<'PY'
-import json, os, re
+import json, re
 candidates = []
-for name in sorted(os.listdir("/work/replies"), key=lambda n: int(n.split(".")[0])):
-    text = open("/work/replies/" + name).read()
-    sender = re.search(r"^From: (?:(.*?) ?<(.+)>|(\S+))$", text, re.M)
-    email = sender.group(2) or sender.group(3)
-    who = sender.group(1) or email
+replies = json.loads(open("/work/replies.json").read())["envelopes"]
+for reply in sorted(replies, key=lambda r: int(r["id"])):
+    text = open("/work/replies/%s.eml" % reply["id"]).read()
+    sender = reply["from"][0]
+    who = sender["name"] or sender["email"]
     times = re.findall(r"^(\d{4}-\d\d-\d\d \d\d:\d\d)$", text, re.M)
-    candidates.append({"id": name.split(".")[0], "name": who,
-                       "email": email, "times": times})
-    print("%-3s %-13s %s" % (name.split(".")[0], who, ", ".join(times)))
+    candidates.append({"id": str(reply["id"]), "name": who,
+                       "email": sender["email"], "times": times})
+    print("%-3s %-13s %s" % (reply["id"], who, ", ".join(times)))
 open("/work/candidates.json", "w").write(json.dumps(candidates))
 PY
 python3 /work/candidates.py
