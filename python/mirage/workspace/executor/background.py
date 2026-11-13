@@ -35,11 +35,12 @@ from mirage.context import (
 )
 from mirage.errors.types import CommandTimeoutError
 from mirage.execution.context import new_line_id
-from mirage.execution.job import JobHandle, JobState, JobTable
+from mirage.execution.job import JobHandle, JobState, JobTable, JobWaits
 from mirage.execution.job.constants import (
     ENDING_SIGNALS,
     STOP_WAIT_SECONDS,
 )
+from mirage.execution.job.waits import Hold
 from mirage.execution.line.handle import LineHandle
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
@@ -90,6 +91,14 @@ from mirage.shell.types import TSNodeLike
 from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec, PolicyDecision
 from mirage.workspace.evaluation import EvaluationContext, child_context
+from mirage.workspace.executor.builtins.exec import (
+    ForkRoute,
+    descriptor_name,
+)
+from mirage.workspace.executor.builtins.exec.constants import (
+    TO_STDERR,
+    TO_STDOUT,
+)
 from mirage.workspace.executor.builtins.jobspec import session_of
 from mirage.workspace.executor.statement import (
     answer_closed,
@@ -227,19 +236,20 @@ async def _send_stderr(sink: JobConsole, io: IOResult) -> None:
 
 def job_streams(
     node: TSNodeLike, session: SessionState
-) -> set[Channel | OwnedStream]:
-    """The streams a job started from ``node`` writes, as its shell hands
-    them on: stdout, stderr and the copies the shell holds (``3>&1``),
-    after the job's own redirects (``sleep 9 >/dev/null &``). A stream
-    sent to a file or closed is gone.
+) -> dict[int, Channel | OwnedStream]:
+    """The streams a job started from ``node`` writes, by descriptor, as
+    its shell hands them on: its stdout and stderr where an ``exec`` left
+    them (``exec 2>&1`` crosses stderr over) and the copies the shell
+    holds (``3>&1``), after the job's own redirects (``sleep 9 >/dev/null
+    &``). A stream sent to a file or closed is gone.
 
     Args:
         node (TSNodeLike): the backgrounded command.
         session (SessionState): the shell that starts it.
     """
+    terminal = {TO_STDOUT: Channel.STDOUT, TO_STDERR: Channel.STDERR}
     fds: dict[int, Channel | OwnedStream | None] = {
-        1: Channel.STDOUT,
-        2: Channel.STDERR,
+        fd: terminal.get(descriptor_name(session, fd)) for fd in (1, 2)
     }
     for fd, descriptor in session.descriptors.items():
         if fd > 2:
@@ -253,7 +263,34 @@ def job_streams(
             else:
                 for fd in (1, 2) if r.fd == FD_BOTH else (r.fd,):
                     fds[fd] = None
-    return {stream for stream in fds.values() if stream is not None}
+    return {fd: stream for fd, stream in fds.items() if stream is not None}
+
+
+def capture_hold(
+    waits: JobWaits,
+    start: JobConsole,
+    streams: dict[int, Channel | OwnedStream],
+    session: SessionState,
+    ended: Callable[[], Awaitable[None]],
+) -> Hold | None:
+    """Count a child in the capture one of its streams leads into, held
+    by what those descriptors named as it started; None when none leads
+    there.
+
+    Args:
+        waits (JobWaits): the capture's waits.
+        start (JobConsole): where the child writes.
+        streams (dict[int, Channel | OwnedStream]): what it writes, by
+            descriptor (``job_streams``).
+        session (SessionState): the shell that starts it.
+        ended (Callable[[], Awaitable[None]]): returns once it has ended.
+    """
+    named = frozenset(
+        descriptor_name(session, fd)
+        for fd, stream in streams.items()
+        if waits.reaches(start, {stream})
+    )
+    return waits.add(ended, named) if named else None
 
 
 def one_program(left: TSNodeLike, session: SessionState) -> bool:
@@ -691,7 +728,7 @@ async def handle_background(
             soon(task.get_loop(), drop_holds())
 
     inherit_traps(bg_session)
-    output = session.job_output or session.tty.jobs
+    output = ForkRoute(session.job_output or session.tty.jobs, session)
     # A job is a shell of its own: what jobs it starts write into the
     # statement it runs, then where it writes.
     bg_session.job_output = JobOutput(output)
@@ -916,8 +953,19 @@ async def handle_background(
         await job.process.stages[-1].placed(RUN_START_WAIT_SECONDS)
     session.last_bg_job_id = job.last_pid
     waits = session.job_waits
-    if waits is not None and waits.reaches(output, job_streams(left, session)):
-        waits.add(job.console.wait_finished)
+    hold = (
+        None
+        if waits is None
+        else capture_hold(
+            waits,
+            output,
+            job_streams(left, session),
+            session,
+            job.console.wait_finished,
+        )
+    )
+    if hold is not None:
+        bg_session.holds.append(hold)
 
     if right is None:
         return (

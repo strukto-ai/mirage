@@ -19,7 +19,7 @@ from typing import Any, TypeVar
 
 from mirage.cache.versions import VersionHistory
 from mirage.execution.job.table import JobTable
-from mirage.execution.job.waits import JobWaits
+from mirage.execution.job.waits import Hold, JobWaits
 from mirage.execution.process.config import ProcessPermissions
 from mirage.io.async_line_iterator import SharedInput, release_inputs
 from mirage.io.network import NetworkSetting
@@ -455,6 +455,9 @@ class SessionState:
     tty: Terminal = field(default_factory=Terminal, repr=False)
     job_output: JobOutput | None = field(default=None, repr=False)
     job_waits: JobWaits | None = field(default=None, repr=False)
+    # The captures this shell holds open as a child of the shell that
+    # started it, which its `exec` lets go of; a fork starts with none.
+    holds: list[Hold] = field(default_factory=list, repr=False)
     # A per-call line's jobs, which a callback in it reaches; None otherwise.
     job_table: JobTable | None = field(default=None, repr=False)
     # Transient `set -e` marker: True when the failure just returned

@@ -2,6 +2,7 @@ import type { ByteSource, IOResult } from '../io/types.ts'
 import type { ProcessHandle } from '../execution/process/handle.ts'
 import type { JobConsole } from '../shell/console/index.ts'
 import type { TSNodeLike } from '../shell/types.ts'
+import type { SessionState } from './session/session.ts'
 
 export type ProcessSubLine = (
   text: string,
@@ -9,7 +10,7 @@ export type ProcessSubLine = (
     stdin?: ByteSource | null
     sink?: JobConsole
     signal?: AbortSignal
-    started?: (process: ProcessHandle) => void
+    started?: (process: ProcessHandle, session: SessionState) => void
   },
 ) => Promise<IOResult>
 

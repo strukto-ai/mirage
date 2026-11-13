@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from mirage.io.types import ByteSource, IOResult
     from mirage.runtime.types import RouteDecision, RuntimeIdentity
     from mirage.shell.console import JobConsole
+    from mirage.workspace.session.session import SessionState
 
 
 class ProcessSubLine(Protocol):
@@ -20,7 +21,7 @@ class ProcessSubLine(Protocol):
         *,
         stdin: ByteSource | None = None,
         sink: JobConsole | None = None,
-        started: Callable[[ProcessHandle], None] | None = None,
+        started: Callable[[ProcessHandle, SessionState], None] | None = None,
     ) -> IOResult: ...
 
 

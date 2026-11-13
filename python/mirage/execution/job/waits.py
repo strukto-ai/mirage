@@ -12,9 +12,36 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from collections.abc import Awaitable, Callable
 
 from mirage.shell.console import Channel, JobConsole, JobOutput, OwnedStream
+
+
+class Hold:
+    """What a child holds open of a capture: what its descriptors that
+    lead into the capture named as it started (``&1``, ``&2``, a copy),
+    until its shell points every descriptor elsewhere (``exec
+    2>/dev/null``), as bash's capture ends once each writer has closed
+    the pipe.
+
+    Args:
+        named (frozenset[str]): what those descriptors named.
+    """
+
+    def __init__(self, named: frozenset[str]) -> None:
+        self.named = named
+        self.released = asyncio.Event()
+
+    def settle(self, named: set[str]) -> None:
+        """Let go of the capture once none of the shell's descriptors
+        names what led into it.
+
+        Args:
+            named (set[str]): what the shell's descriptors name now.
+        """
+        if self.named.isdisjoint(named):
+            self.released.set()
 
 
 class JobWaits:
@@ -64,14 +91,35 @@ class JobWaits:
             for stream in left
         )
 
-    def add(self, ended: Callable[[], Awaitable[None]]) -> None:
-        """Count a child the capture has to outlast.
+    def add(
+        self, ended: Callable[[], Awaitable[None]], named: frozenset[str]
+    ) -> Hold:
+        """Count a child the capture has to outlast, until it ends or
+        lets go of the capture (``Hold``).
 
         Args:
             ended (Callable[[], Awaitable[None]]): returns once the child
                 has ended.
+            named (frozenset[str]): what the child's descriptors that lead
+                into the capture named as it started.
         """
-        self.ends.append(ended)
+        hold = Hold(named)
+
+        async def held() -> None:
+            waiting = (
+                asyncio.ensure_future(ended()),
+                asyncio.ensure_future(hold.released.wait()),
+            )
+            try:
+                await asyncio.wait(
+                    waiting, return_when=asyncio.FIRST_COMPLETED
+                )
+            finally:
+                for waiter in waiting:
+                    waiter.cancel()
+
+        self.ends.append(held)
+        return hold
 
     async def join(self, rest: JobConsole) -> None:
         """Return once every child writing into the capture has ended;

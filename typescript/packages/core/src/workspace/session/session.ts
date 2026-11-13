@@ -29,6 +29,7 @@ import { Terminal, type JobOutput } from '../../shell/console/index.ts'
 import { BIN_PREFIX, IFS_DEFAULT, SHELL_ARGV0 } from '../../shell/constants.ts'
 import type { Descriptor, StreamOwner } from '../../shell/descriptors.ts'
 import type { JobTable, JobWaits } from '../../execution/job/index.ts'
+import type { Hold } from '../../execution/job/waits.ts'
 import { lineRow, sourceRow } from '../../shell/helpers.ts'
 import type { AliasExpansion, TSNodeLike } from '../../shell/types.ts'
 import type { ManagedRef, ShellVar } from '../../shell/variable.ts'
@@ -490,6 +491,9 @@ export class SessionState {
   tty = new Terminal()
   jobOutput: JobOutput | null = null
   jobWaits: JobWaits | null = null
+  // The captures this shell holds open as a child of the shell that started
+  // it, which its `exec` lets go of; a fork starts with none.
+  holds: Hold[] = []
   // A per-call line's jobs, which a callback in it reaches; null otherwise.
   jobTable: JobTable | null = null
   shellOptions: Record<string, boolean>

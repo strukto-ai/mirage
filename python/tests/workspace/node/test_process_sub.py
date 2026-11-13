@@ -177,6 +177,17 @@ async def test_cancel_joins_children_and_releases_descriptors(command):
             "{ : <(sleep .05; echo piped >&2); } 2>&1 | cat; echo end",
             (0, "piped\nend\n", ""),
         ),
+        (
+            ": <(sleep .05; echo kept >&2); exec 2>/data/log; sleep .2; "
+            'exec 2>&1; echo "log=[$(cat /data/log)]"',
+            (0, "log=[]\n", "kept\n"),
+        ),
+        (
+            "x=$( { : <(exec 2>/dev/null; sleep .3; touch /data/held); } "
+            "2>&1 ); [ -e /data/held ] && echo waited || echo closed; "
+            "sleep .5",
+            (0, "closed\n", ""),
+        ),
     ],
 )
 async def test_line_releases_its_descriptors(command, expected):

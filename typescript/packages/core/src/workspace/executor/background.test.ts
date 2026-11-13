@@ -678,3 +678,49 @@ describe('a job as bash runs it', () => {
     }
   })
 })
+
+describe('a job keeps the descriptors it started with', () => {
+  it.each([
+    [
+      '(sleep .05; echo kept >&2) & exec 2>/m/log; sleep .2; exec 2>&1; echo "log=[$(cat /m/log)]"',
+      ['log=[]\n', 'kept\n'],
+    ],
+    [
+      '(sleep .05; echo kept) & exec 3>&1 >/m/log; sleep .2; exec >&3; echo "log=[$(cat /m/log)]"',
+      ['kept\nlog=[]\n', ''],
+    ],
+  ])('keeps the stream its shell had when it started: %s', async (line, expected) => {
+    const ws = buildWs()
+    try {
+      const io = await ws.shell(line)
+      expect([io.stdoutText, io.stderrText]).toEqual(expected)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([
+    '{ exec >/dev/null; sleep .3; touch /m/held; } &',
+    '(exec >/dev/null; sleep .3; touch /m/held) &',
+  ])('a capture lets go of a job that closed its stdout: %s', async (job) => {
+    const ws = buildWs()
+    try {
+      const io = await ws.shell(
+        `x=$( ${job} ); [ -e /m/held ] && echo waited || echo closed; sleep .5`,
+      )
+      expect(io.stdoutText).toBe('closed\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a capture waits for a job whose subshell closed only its copy', async () => {
+    const ws = buildWs()
+    try {
+      const io = await ws.shell('x=$( { (exec >/dev/null); sleep .1; echo held; } & ); echo "[$x]"')
+      expect(io.stdoutText).toBe('[held]\n')
+    } finally {
+      await ws.close()
+    }
+  })
+})

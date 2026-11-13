@@ -19,12 +19,14 @@ from functools import partial
 
 from mirage.core.dev.pipe import DevicePipe
 from mirage.execution.job import JobTable
+from mirage.execution.job.waits import Hold
 from mirage.execution.process.handle import ProcessHandle
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.errors import PipeClosed
 from mirage.io.pipe import BytePipe
 from mirage.io.types import ByteSource, materialize
 from mirage.shell.console import Channel, JobConsole
+from mirage.shell.constants import FD_STDOUT
 from mirage.shell.helpers import (
     get_process_sub_body,
     get_process_sub_direction,
@@ -33,10 +35,12 @@ from mirage.shell.parse.program import retain_programs
 from mirage.shell.types import ProcessSubDirection, TSNodeLike
 from mirage.vfs.dev.dev import DevVFS
 from mirage.workspace.evaluation import EvaluationContext
-from mirage.workspace.executor.background import job_streams
+from mirage.workspace.executor.background import capture_hold, job_streams
+from mirage.workspace.executor.builtins.exec import ForkRoute
 from mirage.workspace.frame import ProcessSubLine
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.node.types import Substitution
+from mirage.workspace.session import SessionState
 
 logger = logging.getLogger(__name__)
 
@@ -107,19 +111,21 @@ class ProcessSubScope:
         # A producer is a child of the shell, as bash forks it: what it
         # writes past its pipe goes where that shell's jobs write, into
         # the statement running then or, once that has ended, on out.
-        jobs = session.job_output or session.tty.jobs
+        jobs = ForkRoute(session.job_output or session.tty.jobs, session)
         output = SubstitutionConsole(endpoint, jobs)
         writers = self.context.frame.writers
         begun: asyncio.Future[None] = (
             asyncio.get_running_loop().create_future()
         )
+        holds: list[Hold] = []
 
-        def started(process: ProcessHandle) -> None:
+        def started(process: ProcessHandle, shell: SessionState) -> None:
             pid = process.record.pid
             if endpoint.readable:
                 writers.append((path, pid))
-            self.context.session.last_bg_job_id = pid
+            session.last_bg_job_id = pid
             self.jobs.track_substitution(process)
+            shell.holds.extend(holds)
             if not begun.done():
                 begun.set_result(None)
 
@@ -141,17 +147,20 @@ class ProcessSubScope:
         task.add_done_callback(finished)
         self.held.append(Substitution(dev, path, allocation, endpoint, task))
         # Like a job, it holds open a capture (`$( )`, a pipe stage) one of
-        # its streams leads into, which waits for it.
+        # its streams leads into, which waits for it until it ends or its
+        # shell points them elsewhere.
         streams = job_streams(node, session)
         if endpoint.readable:
-            streams.discard(Channel.STDOUT)
+            streams.pop(FD_STDOUT, None)
         waits = session.job_waits
-        if waits is not None and waits.reaches(jobs, streams):
+        if waits is not None:
 
             async def ended() -> None:
                 await asyncio.wait((task,))
 
-            waits.add(ended)
+            hold = capture_hold(waits, jobs, streams, session, ended)
+            if hold is not None:
+                holds.append(hold)
         # A `<( )` the command reads starts first, as bash forks it, so
         # the command's program knows the process writing the path; a
         # `>( )` starts after the command, so it cannot close its pipe

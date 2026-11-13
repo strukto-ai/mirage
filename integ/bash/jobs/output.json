@@ -203,11 +203,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( { (sleep 0.05; echo late >&2) & } 2>/dev/null; echo now; sleep 0.2 )",
+      "command": "( { (sleep 0.05; echo late >&2) & } 2>/dev/null; echo now; sleep 0.2 ); ( (sleep 0.05; echo kept >&2) & exec 2>/dev/null; sleep 0.2 )",
       "expect": {
         "exit": 0,
         "stdout": "now\n",
-        "stderr": ""
+        "stderr": "kept\n"
       }
     },
     {
@@ -413,11 +413,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "x=$( (sleep 1; echo late) >&2 & echo ready); echo \"got $x\" >&2; sleep 2",
+      "command": "x=$( (sleep 1; echo late) >&2 & echo ready); echo \"got $x\" >&2; sleep 2; y=$( { exec >/dev/null; sleep .3; touch {mount}/job-held; } & ); [ -e {mount}/job-held ] && echo waited >&2 || echo closed >&2; sleep .5; rm -f {mount}/job-held",
       "expect": {
         "exit": 0,
         "stdout": "",
-        "stderr": "got ready\nlate\n"
+        "stderr": "got ready\nlate\nclosed\n"
       }
     },
     {

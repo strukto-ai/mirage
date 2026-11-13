@@ -15,6 +15,35 @@
 import { Channel, type JobConsole, JobOutput, type OwnedStream } from '../../shell/console/index.ts'
 
 /**
+ * What a child holds open of a capture: what its descriptors that lead into
+ * the capture named as it started (`&1`, `&2`, a copy), until its shell
+ * points every descriptor elsewhere (`exec 2>/dev/null`), as bash's capture
+ * ends once each writer has closed the pipe. Mirrors Python's Hold.
+ */
+export class Hold {
+  readonly released: Promise<void>
+  private release: () => void = () => undefined
+
+  /** @param named what those descriptors named. */
+  constructor(readonly named: ReadonlySet<string>) {
+    this.released = new Promise((resolve) => {
+      this.release = resolve
+    })
+  }
+
+  /**
+   * Let go of the capture once none of the shell's descriptors names what
+   * led into it.
+   *
+   * @param named what the shell's descriptors name now.
+   */
+  settle(named: ReadonlySet<string>): void {
+    for (const name of this.named) if (named.has(name)) return
+    this.release()
+  }
+}
+
+/**
  * The background jobs and process substitutions started inside a capture
  * (`$( )`, a pipe stage), which the capture waits for before it ends: bash
  * reads the pipe until every writer has closed it, and a child holds it
@@ -52,9 +81,18 @@ export class JobWaits {
     return false
   }
 
-  /** Count a child the capture has to outlast, by what resolves once it has ended. */
-  add(ended: () => Promise<void>): void {
-    this.ends.push(ended)
+  /**
+   * Count a child the capture has to outlast, until it ends or lets go of
+   * the capture (`Hold`).
+   *
+   * @param ended resolves once the child has ended.
+   * @param named what the child's descriptors that lead into the capture
+   *   named as it started.
+   */
+  add(ended: () => Promise<void>, named: ReadonlySet<string>): Hold {
+    const hold = new Hold(named)
+    this.ends.push(() => Promise.race([ended(), hold.released]))
+    return hold
   }
 
   /**

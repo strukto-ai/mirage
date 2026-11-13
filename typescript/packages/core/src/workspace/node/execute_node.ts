@@ -1074,7 +1074,8 @@ async function forkSubshell(
   if (context.frame.shell === null && owner !== null) {
     // The whole of what its runner runs (`( sleep 3; echo x ) &`) is the
     // runner itself, as bash forks a job's subshell once: it keeps the INT
-    // its job ignores.
+    // its job ignores, and the captures it holds.
+    child.session.holds = session.holds
     forked(owner)
     const code = await run()
     return subshellRan ?? result(getText(node), { exitCode: code })

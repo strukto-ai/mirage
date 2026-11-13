@@ -23,7 +23,12 @@ import type { ByteSource } from '../../../../io/types.ts'
 import { IOResult, materialize, PipeStream } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
-import { Channel, type JobConsole } from '../../../../shell/console/index.ts'
+import {
+  Channel,
+  type JobConsole,
+  JobOutput,
+  type OwnedStream,
+} from '../../../../shell/console/index.ts'
 import {
   FD_BOTH,
   FD_CLOSE,
@@ -174,6 +179,88 @@ function identity(session: SessionState, fd: number): [string, boolean] {
   if (fd === FD_STDIN) return [session.execStdinIdentity ?? TO_STDIN, false]
   if (fd === FD_STDERR) return [session.execStderr ?? TO_STDERR, session.execStderrAppend]
   return [session.execStdout ?? TO_STDOUT, session.execStdoutAppend]
+}
+
+/**
+ * What a writing descriptor of a shell points at, named as a dup copies it
+ * (`identity`): `&1` or `&2` for the terminal's own streams, a path, or
+ * `CLOSED`. Mirrors Python's descriptor_name.
+ */
+export function descriptorName(session: SessionState, fd: number): string {
+  return identity(session, fd)[0]
+}
+
+/**
+ * Let go of each capture the shell holds open as a child once none of its
+ * descriptors leads into it any more (`exec 2>/dev/null`). Mirrors
+ * Python's _settle_holds.
+ */
+function settleHolds(session: SessionState): void {
+  if (session.holds.length === 0) return
+  const named = new Set<string>()
+  for (const fd of new Set([FD_STDOUT, FD_STDERR, ...session.descriptors.keys()]))
+    if (fd > FD_STDIN) named.add(descriptorName(session, fd))
+  for (const hold of session.holds) hold.settle(named)
+}
+
+/**
+ * Whether every level on the way from `at` passes `channel` on as it is, so
+ * no redirect between a child and its shell's terminal routes it. Mirrors
+ * Python's _passed.
+ */
+function passed(at: JobConsole, channel: Channel): boolean {
+  let left = new Set<Channel | OwnedStream>([channel])
+  let level: JobConsole = at
+  while (level instanceof JobOutput) {
+    left = level.passes(left)
+    level = level.target
+  }
+  return left.size === 1 && left.has(channel)
+}
+
+/**
+ * Where a child a shell starts (a job, a process substitution) writes: the
+ * shell's stdout and stderr as they stood then. A later `exec` moves the
+ * shell's own streams, not the child's, which goes on writing the terminal
+ * stream it was given (`cmd & exec 2>log` leaves the job's stderr on the
+ * terminal), as a forked child keeps its descriptors. A channel a redirect
+ * on the way routes (`JobRoute`) is left to it. Mirrors Python's ForkRoute.
+ */
+export class ForkRoute extends JobOutput {
+  private readonly given = new Map<Channel, string>()
+
+  constructor(
+    target: JobConsole,
+    private readonly session: SessionState,
+  ) {
+    super(target)
+    for (const [fd, channel] of [
+      [FD_STDOUT, Channel.STDOUT],
+      [FD_STDERR, Channel.STDERR],
+    ] as const)
+      if (passed(target, channel)) this.given.set(channel, descriptorName(session, fd))
+  }
+
+  /**
+   * The terminal stream the child was given on `channel` once the shell has
+   * pointed its own elsewhere; null while it has not, or when the child was
+   * given no terminal stream there.
+   */
+  private moved(channel: Channel): Inherited | null {
+    const name = this.given.get(channel)
+    const fd = channel === Channel.STDOUT ? FD_STDOUT : FD_STDERR
+    if (name === undefined || descriptorName(this.session, fd) === name) return null
+    if (name === TO_STDOUT) return new Inherited(this.session.terminal, Channel.STDOUT)
+    if (name === TO_STDERR) return new Inherited(this.session.terminal, Channel.STDERR)
+    return null
+  }
+
+  /** Write what the child wrote on the stream it was given. */
+  override async emit(channel: Channel, data: Uint8Array): Promise<void> {
+    const stream = this.moved(channel)
+    if (stream === null) await super.emit(channel, data)
+    else await super.emitTo(stream, data)
+  }
 }
 
 /** A new descriptor on the read end a descriptor holds, as a dup makes
@@ -353,6 +440,7 @@ export async function installExecRedirects(
   }
   if (err === null) {
     await session.releaseInputs([...before, ...owned])
+    settleHolds(session)
     return [null, new IOResult(), new ExecutionNode({ command: 'exec', exitCode: 0 })]
   }
   try {

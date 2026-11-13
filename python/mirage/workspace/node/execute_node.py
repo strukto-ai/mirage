@@ -1162,7 +1162,8 @@ async def _fork_subshell(
     if context.frame.shell is None and owner is not None:
         # The whole of what its runner runs (`( sleep 3; echo x ) &`)
         # is the runner itself, as bash forks a job's subshell once:
-        # it keeps the INT its job ignores.
+        # it keeps the INT its job ignores, and the captures it holds.
+        child.session.holds = session.holds
         forked(owner)
         await run_subshell()
         return results[0]

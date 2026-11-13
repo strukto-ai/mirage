@@ -13,7 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { JobTable } from '../../execution/job/table.ts'
+import type { Hold } from '../../execution/job/waits.ts'
 import { DevicePipe } from '../../core/dev/pipe.ts'
+import { FD_STDOUT } from '../../shell/constants.ts'
 import type { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import type { BytePipe } from '../../io/pipe.ts'
 import { PipeClosed } from '../../io/errors.ts'
@@ -25,7 +27,8 @@ import { ProcessSubDirection, type TSNodeLike } from '../../shell/types.ts'
 import { runCancellable, mergeSignals } from '../../utils/abort.ts'
 import { DevVFS } from '../../vfs/dev/dev.ts'
 import type { EvaluationContext } from '../evaluation.ts'
-import { jobStreams } from '../executor/background.ts'
+import { captureHold, jobStreams } from '../executor/background.ts'
+import { ForkRoute } from '../executor/builtins/exec/index.ts'
 import type { ProcessSubLine } from '../frame.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Substitution } from './types.ts'
@@ -99,9 +102,10 @@ export class ProcessSubScope {
     // A producer is a child of the shell, as bash forks it: what it writes
     // past its pipe goes where that shell's jobs write, into the statement
     // running then or, once that has ended, on out.
-    const jobs = session.jobOutput ?? session.tty.jobs
+    const jobs = new ForkRoute(session.jobOutput ?? session.tty.jobs, session)
     const output = new SubstitutionConsole(endpoint, jobs, abort)
     const writers = this.context.frame.writers
+    const holds: Hold[] = []
     let begin = (): void => undefined
     const begun = new Promise<void>((resolve) => {
       begin = resolve
@@ -116,11 +120,12 @@ export class ProcessSubScope {
           sink: output,
           signal,
           ...(endpoint.readable ? {} : { stdin: endpoint.pipe.stream() }),
-          started: (process) => {
+          started: (process, shell) => {
             const pid = process.record.id.pid
             if (endpoint.readable) writers.push([path, pid])
             session.lastBgJobId = pid
             this.jobs.trackSubstitution(process)
+            shell.holds.push(...holds)
             begin()
           },
         }),
@@ -144,10 +149,15 @@ export class ProcessSubScope {
       })
     this.held.push(child)
     // Like a job, it holds open a capture (`$( )`, a pipe stage) one of its
-    // streams leads into, which waits for it.
+    // streams leads into, which waits for it until it ends or its shell
+    // points them elsewhere.
     const streams = jobStreams(node, session)
-    if (endpoint.readable) streams.delete(Channel.STDOUT)
-    if (session.jobWaits?.reaches(jobs, streams) === true) session.jobWaits.add(() => child.task)
+    if (endpoint.readable) streams.delete(FD_STDOUT)
+    const hold =
+      session.jobWaits === null
+        ? null
+        : captureHold(session.jobWaits, jobs, streams, session, () => child.task)
+    if (hold !== null) holds.push(hold)
     // A `<( )` the command reads has started before the command does, as bash
     // forks it, so the command's program knows the process writing the path.
     if (endpoint.readable) await begun

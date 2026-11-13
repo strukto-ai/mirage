@@ -455,7 +455,7 @@ async def recurse(
                 session.process_id = process.record.pid
                 context.frame.shell = process
                 if began is not None:
-                    began(process)
+                    began(process, session)
 
             process = start_shell(
                 opts["job_table"].processes,

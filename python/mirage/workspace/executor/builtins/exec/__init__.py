@@ -14,6 +14,8 @@
 
 from mirage.workspace.executor.builtins.exec.constants import CLOSED
 from mirage.workspace.executor.builtins.exec.exec import (
+    ForkRoute,
+    descriptor_name,
     divert_statement,
     diverted_file,
     handle_exec_command,
@@ -23,6 +25,8 @@ from mirage.workspace.executor.builtins.exec.exec import (
 
 __all__ = [
     "CLOSED",
+    "ForkRoute",
+    "descriptor_name",
     "divert_statement",
     "diverted_file",
     "handle_exec_command",
