@@ -13,6 +13,19 @@
         "stdout": "hello val $$ $1 ${1} ${FOO:-x} \\val !\na $X 2\na $X\nX\nY\nX\nrc=1\nrc=1\n",
         "stderr": "envsubst: missing arguments\nenvsubst: too many arguments\n"
       }
+    },
+    {
+      "id": "envsubst_preserves_raw_environment_bytes",
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "printf '$X ${X}!' | X=$(printf '\\377') envsubst | od -An -tx1; envsubst -v '$X ${Y} $X'; printf '$X ${Y}' | X=one Y=two envsubst '$X'",
+      "expect": {
+        "exit": 0,
+        "stdout": " ff 20 ff 21\nX\nY\nX\none ${Y}",
+        "stderr": ""
+      }
     }
   ]
 }

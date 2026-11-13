@@ -40,3 +40,37 @@ async def test_envsubst(line, stdout, stderr, code):
     assert await io.stdout_str() == stdout
     assert await io.stderr_str() == stderr
     assert io.exit_code == code
+
+
+@pytest.mark.asyncio
+async def test_envsubst_split_references_and_byte_values():
+    data = b"${X} / $X / $MISSING / ${ / \xff"
+    ws = Workspace({"/d": RAMVFS()}, mode=MountMode.WRITE)
+    for split in range(len(data) + 1):
+
+        async def source():
+            yield data[:split]
+            yield data[split:]
+
+        io = await ws.shell("envsubst", stdin=source(), env={"X": "\udcff"})
+        assert await io.materialize_stdout() == b"\xff / \xff /  / ${ / \xff"
+        assert io.exit_code == 0
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_envsubst_large_expansion_and_listing_without_reading_stdin():
+    ws = Workspace({"/d": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell("envsubst", stdin=b"${X}", env={"X": "z" * 100000})
+    assert await io.materialize_stdout() == b"z" * 100000
+    reads = 0
+
+    async def source():
+        nonlocal reads
+        reads += 1
+        yield b"ignored"
+
+    io = await ws.shell("envsubst -v '$X ${Y} $X'", stdin=source())
+    assert await io.stdout_str() == "X\nY\nX\n"
+    assert reads == 0
+    await ws.close()
