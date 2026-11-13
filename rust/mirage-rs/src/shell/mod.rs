@@ -26,7 +26,7 @@ mod tests;
 
 pub use lower::Heredoc;
 pub use reread::reread_lines;
-pub use tree::{FIELDS, KINDS, Node, Refusal, Tree, field_id};
+pub use tree::{FIELDS, KINDS, Node, Refusal, SourceMap, Tree, field_id};
 
 /// How a line is read: the names the shell expands as aliases, each a
 /// command where a command starts, as bash expands it before it reads a

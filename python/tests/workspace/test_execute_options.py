@@ -542,3 +542,37 @@ async def test_a_queued_line_runs_after_the_aborted_one_and_keeps_its_status():
 
     r = await ws.shell("echo $?")
     assert r.stdout.decode().strip() == "1"
+
+
+@pytest.mark.parametrize(
+    "definition,expected",
+    [
+        ("f() {\n printf '%s\\n' \"$LINENO\"\n}\n", b"2\n"),
+        ("f() { cat <<E\n$(printf 'é😀')\nE\n}\n", "é😀\n".encode()),
+        ("f() { cat <<'E'\n$LINENO\nE\n}\n", b"$LINENO\n"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_function_runs_after_defining_program_release(
+    definition, expected
+):
+    ws = _make_ws()
+    try:
+        defined = await ws.shell(definition)
+        assert defined.exit_code == 0
+        result = await ws.shell("f")
+        assert result.exit_code == 0
+        assert await result.stdout_str() == expected.decode()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_lineno_after_continuation_uses_original_source():
+    ws = _make_ws()
+    try:
+        result = await ws.shell("echo é\\\n😀\nprintf '%s\\n' \"$LINENO\"")
+        assert result.exit_code == 0
+        assert await result.stdout_str() == "é😀\n3\n"
+    finally:
+        await ws.close()

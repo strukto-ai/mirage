@@ -621,7 +621,7 @@ async function readOn(
   reading: LineHistory | null,
 ): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
   const original = node.sourceText ?? node.text
-  const at = node.offsets?.[child.startIndex ?? 0] ?? 0
+  const at = node.offsets?.[child.startIndex ?? 0] ?? child.startIndex ?? 0
   const rest = original.slice(at)
   const rows = original.slice(0, at).split('\n').length - 1
   const run = async (): Promise<IOResult> => {

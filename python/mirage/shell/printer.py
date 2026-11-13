@@ -358,10 +358,13 @@ class _Printer:
         text, owners = rewrite
         root = self.aliases.parse(text)
         mapped = (*owners, frozenset())
+        offsets = getattr(root, "offsets", ())
         printer = _Printer(
             self.in_function,
             self.aliases,
-            tuple(mapped[i] for i in getattr(root, "offsets", ())),
+            mapped
+            if isinstance(offsets, range)
+            else tuple(mapped[i] for i in offsets),
         )
         out = printer.statements(root.children, indent, False)
         self.deferred.extend(printer.deferred)

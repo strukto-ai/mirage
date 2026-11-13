@@ -248,11 +248,14 @@ async function runAlias(
         const mapped = [...owners, new Set<string>()]
         session.aliasExpansion = {
           root: ast.id,
-          owners: Array.from(ast.offsets ?? [], (i) => {
-            const owner = mapped[i]
-            if (owner === undefined) throw new Error('alias source offset is out of bounds')
-            return owner
-          }),
+          owners:
+            ast.offsets === undefined
+              ? mapped
+              : Array.from(ast.offsets, (i) => {
+                  const owner = mapped[i]
+                  if (owner === undefined) throw new Error('alias source offset is out of bounds')
+                  return owner
+                }),
           names,
         }
         // The rewritten line is read from this node, so it runs as a line

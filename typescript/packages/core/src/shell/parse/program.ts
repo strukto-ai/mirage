@@ -23,14 +23,22 @@ export class ParsedProgram {
   references = 1
   private released = false
 
-  readonly offsets: Uint32Array
+  private sourceOffsets: Uint32Array | undefined
 
   constructor(
-    readonly original: string,
+    private originalText: string,
     root: ShellTreeNode,
   ) {
-    this.offsets = root.offsets
+    this.sourceOffsets = root.offsets
     this.root = new ProgramNode(root, this)
+  }
+
+  get original(): string {
+    return this.originalText
+  }
+
+  get offsets(): Uint32Array | undefined {
+    return this.sourceOffsets
   }
 
   check(): void {
@@ -44,14 +52,25 @@ export class ParsedProgram {
     return () => {
       if (released) return
       released = true
-      this.references -= 1
+      this.drop()
     }
   }
 
   release(): void {
     if (this.released) return
     this.released = true
+    this.drop()
+  }
+
+  private drop(): void {
     this.references -= 1
+    if (this.references === 0) {
+      const borrowed = this.root.borrowed
+      if (borrowed instanceof ShellTreeNode) borrowed.tree.dispose()
+      this.sourceOffsets = undefined
+      this.originalText = ''
+      this.newlines = null
+    }
   }
 
   private newlines: number[] | null = null
@@ -59,6 +78,7 @@ export class ParsedProgram {
   /** The row a char of the line as typed is on: the newlines before it,
    * found once per parse. Mirrors Python's row. */
   row(at: number): number {
+    this.check()
     if (this.newlines === null) {
       const found: number[] = []
       for (let i = this.original.indexOf('\n'); i !== -1; i = this.original.indexOf('\n', i + 1))
@@ -96,6 +116,7 @@ export class ProgramNode implements ShellNode {
     return this.node.warnings?.(head, first) ?? ''
   }
   get offsets() {
+    this.program.check()
     return this.program.offsets
   }
   get error() {
@@ -170,7 +191,10 @@ export class ProgramNode implements ShellNode {
 /** The parser's own node a node reads, null for a synthetic one. Mirrors
  * Python's shell_node. */
 export function shellNode(node: TSNodeLike): ShellTreeNode | null {
-  if (node instanceof ProgramNode) return shellNode(node.borrowed)
+  if (node instanceof ProgramNode) {
+    node.program.check()
+    return shellNode(node.borrowed)
+  }
   return node instanceof ShellTreeNode ? node : null
 }
 

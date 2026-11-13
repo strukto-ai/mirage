@@ -1,6 +1,7 @@
 from bisect import bisect_left
 from collections.abc import Callable, Sequence
 from typing import Any
+from weakref import WeakSet
 
 from mirage._rs import ShellNode
 from mirage.shell.bytes import encode_text
@@ -11,9 +12,8 @@ class ParsedProgram:
     """One parse of a line: its tree, where each of its bytes sits in the
     line as typed, and the references that keep it.
 
-    Python frees the tree with the last reference to it; the count is what
-    makes a read after the last release fail, as TypeScript's native tree
-    is freed then.
+    The final explicit release clears the tree and maps, even if stale
+    node wrappers remain reachable.
 
     Args:
         original (str): the line as typed.
@@ -22,11 +22,18 @@ class ParsedProgram:
 
     def __init__(self, original: str, root: ShellNode) -> None:
         self.original = original
-        self.offsets = tuple(root.offsets)
+        self.offsets: Sequence[int] = root.offsets
+        self._nodes: WeakSet[ProgramNode] = WeakSet()
         self.references = 1
         self._released = False
         self._newlines: list[int] | None = None
-        self.root = ProgramNode(root, self)
+        self._root: ProgramNode | None = ProgramNode(root, self)
+
+    @property
+    def root(self) -> "ProgramNode":
+        self.check()
+        assert self._root is not None
+        return self._root
 
     def row(self, offset: int) -> int:
         """The row a byte of the line as typed is on: the newlines before
@@ -35,6 +42,7 @@ class ParsedProgram:
         Args:
             offset (int): the byte's offset in the line as typed.
         """
+        self.check()
         if self._newlines is None:
             text = encode_text(self.original)
             found = []
@@ -58,14 +66,27 @@ class ParsedProgram:
             nonlocal released
             if not released:
                 released = True
-                self.references -= 1
+                self._drop()
 
         return release
 
     def release(self) -> None:
         if not self._released:
             self._released = True
-            self.references -= 1
+            self._drop()
+
+    def _drop(self) -> None:
+        self.references -= 1
+        if self.references == 0:
+            for node in self._nodes:
+                node._borrowed = None
+                node._children = None
+                node._named = None
+            self._nodes.clear()
+            self.original = ""
+            self.offsets = ()
+            self._newlines = None
+            self._root = None
 
 
 class ProgramNode:
@@ -80,13 +101,20 @@ class ProgramNode:
         program (ParsedProgram): the program the node belongs to.
     """
 
-    __slots__ = ("_node", "program", "_children", "_named")
+    __slots__ = ("_borrowed", "program", "_children", "_named", "__weakref__")
 
     def __init__(self, node: TSNodeLike, program: ParsedProgram) -> None:
-        self._node = node
+        self._borrowed: TSNodeLike | None = node
+        program._nodes.add(self)
         self.program = program
         self._children: list[ProgramNode] | None = None
         self._named: list[ProgramNode] | None = None
+
+    @property
+    def _node(self) -> TSNodeLike:
+        self.program.check()
+        assert self._borrowed is not None
+        return self._borrowed
 
     def __getattr__(self, name: str) -> Any:
         self.program.check()
@@ -94,6 +122,11 @@ class ProgramNode:
 
     def _wrap(self, node: TSNodeLike | None) -> "ProgramNode | None":
         return None if node is None else ProgramNode(node, self.program)
+
+    @property
+    def offsets(self) -> Sequence[int]:
+        self.program.check()
+        return self.program.offsets
 
     @property
     def type(self) -> str:

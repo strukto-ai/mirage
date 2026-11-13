@@ -330,9 +330,12 @@ async def _run_alias(
                         ),
                     )
                 mapped = owners + (frozenset(),)
+                offsets = getattr(ast, "offsets", ())
                 session._alias_expansion = AliasExpansion(
                     ast.id,
-                    tuple(mapped[i] for i in getattr(ast, "offsets", ())),
+                    mapped
+                    if isinstance(offsets, range)
+                    else tuple(mapped[i] for i in offsets),
                     names,
                 )
                 # The rewritten line is read from this node, so it runs as

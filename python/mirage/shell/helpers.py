@@ -1105,7 +1105,7 @@ def get_function_source(node: TSNodeLike) -> str:
         offsets = node.program.offsets
     else:
         original = getattr(root, "source_text", root.text) or b""
-        offsets = getattr(root, "offsets", tuple(range(len(original) + 1)))
+        offsets = getattr(root, "offsets", range(len(original) + 1))
     start = offsets[node.start_byte]
     end = _syntax_end(node, offsets)
     source = original[start:end]

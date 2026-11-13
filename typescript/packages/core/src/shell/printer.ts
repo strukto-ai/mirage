@@ -162,7 +162,9 @@ class Printer {
     const printer = new Printer(
       this.inFunction,
       this.aliases,
-      Array.from(root.offsets ?? [], (i) => mapped[i] ?? new Set<string>()),
+      root.offsets === undefined
+        ? mapped
+        : Array.from(root.offsets, (i) => mapped[i] ?? new Set<string>()),
     )
     const out = printer.statements(root.children, indent, false)
     this.deferred.push(...printer.deferred)
