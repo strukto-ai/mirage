@@ -26,6 +26,19 @@
         "stdout": "a\ud83d\ude42xyz\na     b\bcdef\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "colrm_invalid_bytes_with_early_reader",
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "set -o pipefail; printf 'ab\\377' | LC_ALL=C colrm 3 | head -c 1",
+      "expect": {
+        "exit": 1,
+        "stdout": "a",
+        "stderr": "colrm: fgetwc() failed: Invalid or incomplete multibyte or wide character\n"
+      }
     }
   ]
 }

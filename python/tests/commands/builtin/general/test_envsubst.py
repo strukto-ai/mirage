@@ -74,3 +74,20 @@ async def test_envsubst_large_expansion_and_listing_without_reading_stdin():
     assert await io.stdout_str() == "X\nY\nX\n"
     assert reads == 0
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_envsubst_property_names_and_unrelated_large_values():
+    ws = Workspace({"/d": RAMVFS()}, mode=MountMode.WRITE)
+    env = {
+        "__proto__": "proto",
+        "constructor": "ctor",
+        "UNUSED": "z" * 1000000,
+    }
+    io = await ws.shell(
+        "envsubst", stdin=b"$__proto__:${constructor}", env=env
+    )
+    assert await io.stdout_str() == "proto:ctor"
+    io = await ws.shell("envsubst ''", stdin=b"$UNUSED", env=env)
+    assert await io.stdout_str() == "$UNUSED"
+    await ws.close()

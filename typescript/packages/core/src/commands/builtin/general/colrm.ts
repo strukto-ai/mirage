@@ -16,10 +16,30 @@ import type { PathSpec } from '../../../types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
 import { runStream } from '../../../rs/stream.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
 import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { resolveSource } from '../utils/stream.ts'
-import { byteView, utf8Locale } from '../../../shell/bytes.ts'
+import { byteView, fromByteView, utf8Locale } from '../../../shell/bytes.ts'
+
+async function* removed(
+  source: AsyncIterable<Uint8Array>,
+  args: string[],
+  utf8: boolean,
+  io: IOResult,
+): AsyncGenerator<Uint8Array> {
+  try {
+    yield* runStream('colrm', { args, utf8 }, source)
+  } catch (error) {
+    if (!(error instanceof StreamRefusal)) throw error
+    io.exitCode = error.status
+    const message = fromByteView(error.message)
+    io.stderr = new Uint8Array(message.length + 1)
+    io.stderr.set(message)
+    io.stderr[message.length] = 10
+    if (error.output.length) yield error.output
+  }
+}
 
 function colrm(
   _accessor: Accessor,
@@ -27,13 +47,15 @@ function colrm(
   texts: string[],
   ctx: Context,
 ): CommandFnResult {
+  const io = new IOResult()
   return [
-    runStream(
-      'colrm',
-      { args: texts.map((text) => byteView(text)), utf8: utf8Locale(ctx.env) },
+    removed(
       resolveSource(ctx.stdin),
+      texts.map((text) => byteView(text)),
+      utf8Locale(ctx.env),
+      io,
     ),
-    new IOResult(),
+    io,
   ]
 }
 

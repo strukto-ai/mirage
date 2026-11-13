@@ -11,14 +11,32 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+from collections.abc import AsyncIterator, Mapping
+from contextlib import aclosing
+
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.stream import resolve_source
 from mirage.commands.config import Context, command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
+from mirage.rs.errors import StreamRefusal
 from mirage.rs.stream import run_stream
-from mirage.shell.bytes import byte_view, utf8_locale
+from mirage.shell.bytes import byte_view, from_byte_view, utf8_locale
 from mirage.types import JsonValue, PathSpec
+
+
+async def _removed(
+    source: ByteSource, config: Mapping[str, JsonValue], io: IOResult
+) -> AsyncIterator[bytes]:
+    try:
+        async with aclosing(run_stream("colrm", config, source)) as output:
+            async for chunk in output:
+                yield chunk
+    except StreamRefusal as refusal:
+        io.exit_code = refusal.status
+        io.stderr = from_byte_view(refusal.message) + b"\n"
+        if refusal.output:
+            yield refusal.output
 
 
 @command("colrm", vfs=None, spec=SPECS["colrm"])
@@ -33,4 +51,5 @@ async def colrm(
         "args": [byte_view(text) for text in texts],
         "utf8": utf8_locale(ctx.env),
     }
-    return run_stream("colrm", config, resolve_source(ctx.stdin)), IOResult()
+    io = IOResult()
+    return _removed(resolve_source(ctx.stdin), config, io), io
