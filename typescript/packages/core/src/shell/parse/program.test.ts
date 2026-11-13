@@ -29,6 +29,9 @@ it('drops the final tree and maps while stale nodes remain reachable', () => {
   const root = program.root
   const child = root.namedChildren[0]
   assert(child)
+  const borrowed = root.borrowed
+  assert(borrowed instanceof ShellTreeNode)
+  const tree = borrowed.tree
   expect(program.offsets).toBeUndefined()
   const hold = program.retain()
   program.release()
@@ -37,16 +40,15 @@ it('drops the final tree and maps while stale nodes remain reachable', () => {
   hold()
   hold()
   expect(program.references).toBe(0)
+  expect(() => program.root).toThrow('released')
   expect(program.original).toBe('')
   expect(program.offsets).toBeUndefined()
   expect(() => child.text).toThrow('released')
   expect(() => program.retain()).toThrow('released')
   expect(() => shellNode(root)).toThrow('released')
-  const borrowed = root.borrowed
-  assert(borrowed instanceof ShellTreeNode)
-  expect(borrowed.tree.table.length).toBe(0)
-  expect(borrowed.tree.source).toBe('')
-  borrowed.tree.dispose()
+  expect(tree.table.length).toBe(0)
+  expect(tree.source).toBe('')
+  tree.dispose()
 })
 
 it.each(['echo é😀', 'echo \udcff', 'ec\\\nho é😀', 'cat <<E\né😀\nE\n', "cat <<'E'\n$HOME\nE\n"])(
