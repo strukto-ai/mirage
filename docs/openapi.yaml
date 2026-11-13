@@ -1801,7 +1801,7 @@ paths:
         - name: machine
           in: query
           required: false
-          description: Filter by machine identifier in `provider:name` format.
+          description: Filter by machine name in `provider:name` format.
           schema:
             type: string
       responses:
@@ -1926,7 +1926,9 @@ paths:
                 $ref: '#/components/schemas/MachineList'
               example:
                 items:
-                  - id: host:my-laptop
+                  - type: host
+                    name: my-laptop
+                    id: my-laptop
                     state: managed
                     checked_at: '2026-11-07T00:00:05.000Z'
         '400':
@@ -1945,16 +1947,16 @@ paths:
         - Machines
       x-hosts:
         - daemon
-  /v1/workspaces/{workspace_id}/machines/{machine_id}:
+  /v1/workspaces/{workspace_id}/machines/{machine}:
     get:
       summary: Get machine
-      operationId: get_machine_v1_workspaces__workspace_id__machines__machine_id__get
+      operationId: get_machine_v1_workspaces__workspace_id__machines__machine__get
       parameters:
         - $ref: '#/components/parameters/workspaceId'
-        - name: machine_id
+        - name: machine
           in: path
           required: true
-          description: Machine ID in `provider:name` format.
+          description: Machine name in `provider:name` format.
           schema:
             type: string
       responses:
@@ -1965,7 +1967,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/MachineDetailResponse'
               example:
-                id: host:my-laptop
+                type: host
+                name: my-laptop
+                id: my-laptop
                 state: managed
                 checked_at: '2026-11-07T00:00:05.000Z'
                 processes:
@@ -6527,10 +6531,18 @@ components:
         `unreachable` means the latest check failed.
     MachineResponse:
       properties:
+        type:
+          type: string
+          title: Type
+          description: The machine's provider, such as `e2b` or `docker`, or `host` for the host running Mirage.
+        name:
+          type: string
+          title: Name
+          description: The machine's name under `machines:`; with the type it makes the machine's full name, `type:name`.
         id:
           type: string
           title: Id
-          description: Machine ID in `provider:name` format.
+          description: What the provider calls the machine, such as an E2B sandbox id or a container.
         state:
           $ref: '#/components/schemas/MachineState'
         checked_at:
@@ -6540,16 +6552,26 @@ components:
           description: When the check ran.
       type: object
       required:
+        - type
+        - name
         - id
         - state
         - checked_at
       title: MachineResponse
     MachineDetailResponse:
       properties:
+        type:
+          type: string
+          title: Type
+          description: The machine's provider, such as `e2b` or `docker`, or `host` for the host running Mirage.
+        name:
+          type: string
+          title: Name
+          description: The machine's name under `machines:`; with the type it makes the machine's full name, `type:name`.
         id:
           type: string
           title: Id
-          description: Machine ID in `provider:name` format.
+          description: What the provider calls the machine, such as an E2B sandbox id or a container.
         state:
           $ref: '#/components/schemas/MachineState'
         checked_at:
@@ -6565,6 +6587,8 @@ components:
           description: The processes the workspace keeps that ran on the machine.
       type: object
       required:
+        - type
+        - name
         - id
         - state
         - checked_at
@@ -6598,7 +6622,7 @@ components:
         name:
           title: Name
           type: string
-          description: The machine's name under `machines:`; with the type it makes the machine's id, `type:name`.
+          description: The machine's name under `machines:`; with the type it makes the machine's full name, `type:name`.
         type:
           title: Type
           type: string

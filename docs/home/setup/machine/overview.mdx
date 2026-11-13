@@ -27,6 +27,25 @@ A line or a command can also name its machine: `execute(machine=)`, a
 `machine` on the shell request, or a policy's `Route(machine=)`: see
 [Route Machine](/home/policy/route-machine).
 
+A `remote` entry with a `machine` is named for it, such as `remote:box`, so
+a workspace takes one entry per machine:
+
+```yaml
+runtimes:
+  - name: remote
+    captures: [python3]
+    machine: py
+  - name: remote
+    captures: [node]
+    machine: js
+```
+
+A program goes to the first entry that captures it, so with two `@external`
+entries the first one listed runs every program. Two entries on one machine
+are refused. `execute(runtime=)` and `Route(runtime=)` take an entry's name,
+such as `remote:js`, or plain `remote` while the workspace has one `remote`
+entry.
+
 | Provider | Runs programs in |
 | --- | --- |
 | [Docker](/home/setup/machine/docker) | A Docker container |
@@ -220,9 +239,11 @@ process of another user.
 
 `GET /v1/workspaces/{id}/machines` checks every machine, and
 `GET /v1/workspaces/{id}/machines/{machine}` checks one and lists its
-processes. `{machine}` is the id `ps` shows, `provider:name` such as
-`docker:box`; a bare name answers 400. `mirage workspace list-machines -w ID`
-prints each machine and its state.
+processes. `{machine}` is the name `ps` shows, `provider:name` such as
+`docker:box`; a bare name answers 400. Each machine answers its `type`, its
+`name` and its `id`, what its provider calls it, such as the sandbox id.
+`mirage workspace list-machines -w ID` prints each machine, its id and its
+state.
 
 ## The machine image
 

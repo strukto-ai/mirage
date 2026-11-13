@@ -14,7 +14,7 @@
 
 import type { Context } from '../../commands/config.ts'
 import type { MachineTable } from '../../execution/machine/table.ts'
-import type { MachineId } from '../../execution/types.ts'
+import type { MachineName } from '../../execution/types.ts'
 import type { MachineHandle } from '../../machine/handle.ts'
 import type { PathSpec } from '../../types.ts'
 import { Runtime } from '../base.ts'
@@ -47,7 +47,8 @@ export class RemoteRuntime
   extends Runtime<undefined>
   implements LineExecutorMixin<undefined>, ProcessExecutorMixin<undefined>
 {
-  readonly name = 'remote'
+  /** `remote`, or `remote:<machine>` for an entry with a machine, so a workspace can hold one per machine. */
+  readonly name: string
   // Programs execute on the machine and act on its world (its filesystem,
   // its network); the workspace gate never sees those effects, however well
   // isolated the machine itself is.
@@ -61,6 +62,7 @@ export class RemoteRuntime
   constructor(options: MachineOptions = {}) {
     const { machine, ...rest } = options
     super(rest, [EXTERNAL_COMMANDS])
+    this.name = machine === undefined ? 'remote' : `remote:${machine}`
     this.defaultMachine = machine ?? null
   }
 
@@ -91,13 +93,13 @@ export class RemoteRuntime
     return this.machines.get(name)
   }
 
-  override get machine(): MachineId | null {
+  override get machine(): MachineName | null {
     if (this.machines === null || this.defaultMachine === null) return null
-    return this.machines.get(this.defaultMachine).id
+    return this.machines.get(this.defaultMachine).machine
   }
 
-  override machineFor(ctx: Context): MachineId | null {
-    return this.handle(ctx).id
+  override machineFor(ctx: Context): MachineName | null {
+    return this.handle(ctx).machine
   }
 
   /**

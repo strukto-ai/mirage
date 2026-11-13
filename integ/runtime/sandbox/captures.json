@@ -84,6 +84,51 @@
       ]
     },
     {
+      "id": "each_machine_takes_a_remote_entry_of_its_own",
+      "runtimes": [
+        "docker"
+      ],
+      "also_machines": [
+        "second"
+      ],
+      "also_entries": [
+        {
+          "machine": "second",
+          "captures": [
+            "perl"
+          ]
+        }
+      ],
+      "entry": {
+        "captures": [
+          "dash"
+        ]
+      },
+      "steps": [
+        {
+          "command": "dash -c 'echo one' | perl -pe 's/one/two/'",
+          "expect": {
+            "exit": 0,
+            "stdout": "two\n"
+          }
+        },
+        {
+          "command": "dash -c 'exec sleep 30' & perl -e 'sleep 31' & sleep 1; ps -o machine | sort -u",
+          "expect": {
+            "exit": 0,
+            "stdout": "MACHINE\ndocker:docker\ndocker:second\nmirage\n"
+          }
+        },
+        {
+          "command": "kill %1 %2; wait; ps -o machine | sort -u",
+          "expect": {
+            "exit": 0,
+            "stdout": "MACHINE\nmirage\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "a_signal_reaches_the_program_as_sent",
       "runtimes": [
         "docker",

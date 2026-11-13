@@ -332,7 +332,7 @@ async def test_a_dropped_run_keeps_the_errors_it_streamed():
     assert (ran.exit_code, ran.stdout, ran.stderr) == (
         129,
         b"step 0\n",
-        f"warn\nmirage: {box.id}: connection lost\n".encode(),
+        f"warn\nmirage: {box.machine}: connection lost\n".encode(),
     )
 
 
@@ -346,7 +346,7 @@ async def test_a_dropped_run_keeps_the_output_it_read():
     assert (ran.exit_code, ran.stdout, ran.stderr) == (
         129,
         b"step 0\n",
-        f"warn\nmirage: {box.id}: connection lost\n".encode(),
+        f"warn\nmirage: {box.machine}: connection lost\n".encode(),
     )
 
 
@@ -358,7 +358,7 @@ async def test_a_dropped_connection_ends_the_line_as_hung_up():
         io = await ws.shell("train")
         assert io.exit_code == 129
         assert await materialize(io.stderr) == (
-            f"warn\nmirage: {box.id}: connection lost\n".encode()
+            f"warn\nmirage: {box.machine}: connection lost\n".encode()
         )
     finally:
         await ws.close()

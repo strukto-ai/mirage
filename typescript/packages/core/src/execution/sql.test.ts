@@ -26,7 +26,7 @@ import { JobTable } from './job/table.ts'
 import type { Line } from './line/types.ts'
 import type { Process } from './process/types.ts'
 import { SqlExecutionStore } from './sql.ts'
-import { LineId, MachineId, ProcessId } from './types.ts'
+import { LineId, MachineName, ProcessId } from './types.ts'
 
 const enc = new TextEncoder()
 
@@ -188,7 +188,7 @@ describe('SqlExecutionStore', () => {
       group: 3,
       command: 'sleep 30',
       cwd: PathSpec.fromStrPath('/m'),
-      machine: new MachineId('docker', 'tools'),
+      machine: new MachineName('docker', 'tools'),
       startedAt: 1.5,
       runtime: 'docker',
       machinePid: { pid: 4242, started: 1.25, exited: null },

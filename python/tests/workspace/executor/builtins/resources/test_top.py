@@ -18,7 +18,7 @@ from mirage.execution.process.types import Process, ProcessUsage
 from mirage.execution.types import (
     CpuShares,
     LineId,
-    MachineId,
+    MachineName,
     ProcessId,
     TaskCounts,
 )
@@ -137,7 +137,7 @@ def _busy(pid: int, cpu_seconds: float) -> Process:
         group=pid,
         command="sleep 30",
         cwd=PathSpec.from_str_path("/"),
-        machine=MachineId("host", "box"),
+        machine=MachineName("host", "box"),
         started_at=1.0,
         usage=ProcessUsage(cpu_seconds, 1.0, 0.0, 0, 0),
     )

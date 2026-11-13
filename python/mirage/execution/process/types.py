@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Any
 
 from mirage.execution.process.constants import WORKSPACE_MACHINE
-from mirage.execution.types import LineId, MachineId, MachinePid, ProcessId
+from mirage.execution.types import LineId, MachineName, MachinePid, ProcessId
 from mirage.types import PathSpec
 
 
@@ -55,7 +55,7 @@ class Process:
     group: int
     command: str
     cwd: PathSpec
-    machine: MachineId
+    machine: MachineName
     started_at: float
     runtime: str | None = None
     machine_pid: MachinePid | None = None

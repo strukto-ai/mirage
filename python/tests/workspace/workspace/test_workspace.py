@@ -32,7 +32,7 @@ from mirage.execution.job import JobState
 from mirage.execution.line.types import Line, LineState
 from mirage.execution.process.types import Process, ProcessState
 from mirage.execution.ram import RAMExecutionStore
-from mirage.execution.types import LineId, MachineId, ProcessId
+from mirage.execution.types import LineId, MachineName, ProcessId
 from mirage.machine import MachineHandle
 from mirage.types import MountBackend, MountMode, PathSpec
 from mirage.utils.abort import MirageAbortError
@@ -1020,7 +1020,7 @@ async def test_records_a_lost_daemon_left_running_end_hung_up():
             group=99,
             command="sleep 30",
             cwd=PathSpec.from_str_path("/"),
-            machine=MachineId("host", "gone"),
+            machine=MachineName("host", "gone"),
             started_at=1.0,
         )
         ws.job_table.store.note(left)

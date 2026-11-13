@@ -62,7 +62,7 @@ async def test_a_check_tells_how_far_mirage_reaches_each_machine():
     }
     table = MachineTable(boxes)
     found = await table.check(lambda: 7.0)
-    assert [(str(m.id), m.state, m.checked_at) for m in found] == [
+    assert [(str(m.name), m.state, m.checked_at) for m in found] == [
         ("box:a", MachineState.MANAGED, 7.0),
         ("box:b", MachineState.REACHABLE, 7.0),
         ("box:c", MachineState.UNREACHABLE, 7.0),
@@ -74,7 +74,7 @@ async def test_a_check_tells_how_far_mirage_reaches_each_machine():
 @pytest.mark.asyncio
 async def test_a_check_may_name_one_machine():
     table = MachineTable({"a": _Box("a", 0), "b": _Box("b", 0)})
-    assert [str(m.id) for m in await table.check(lambda: 0.0, "box:b")] == [
+    assert [str(m.name) for m in await table.check(lambda: 0.0, "box:b")] == [
         "box:b"
     ]
     assert await table.check(lambda: 0.0, "box:z") == []

@@ -393,7 +393,7 @@ describe('MachineHandle', () => {
     try {
       const io = await ws.shell('train')
       expect(io.exitCode).toBe(129)
-      expect(DEC.decode(io.stderr)).toBe(`warn\nmirage: ${String(box.id)}: connection lost\n`)
+      expect(DEC.decode(io.stderr)).toBe(`warn\nmirage: ${String(box.machine)}: connection lost\n`)
     } finally {
       await ws.close()
     }
@@ -413,7 +413,7 @@ describe('MachineHandle', () => {
     expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr ?? undefined)]).toEqual([
       129,
       'step 0\n',
-      `warn\nmirage: ${String(box.id)}: connection lost\n`,
+      `warn\nmirage: ${String(box.machine)}: connection lost\n`,
     ])
   })
 
@@ -427,7 +427,7 @@ describe('MachineHandle', () => {
     expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr ?? undefined)]).toEqual([
       129,
       'step 0\n',
-      `warn\nmirage: ${String(box.id)}: connection lost\n`,
+      `warn\nmirage: ${String(box.machine)}: connection lost\n`,
     ])
   })
 

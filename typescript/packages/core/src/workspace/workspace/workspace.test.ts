@@ -20,7 +20,7 @@ import { MachineHandle } from '../../machine/handle.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { RAMExecutionStore } from '../../execution/ram.ts'
 import type { Process } from '../../execution/process/types.ts'
-import { LineId, MachineId, ProcessId } from '../../execution/types.ts'
+import { LineId, MachineName, ProcessId } from '../../execution/types.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { ManualClock } from '../../utils/clock.ts'
 import { SeededIdSource, SystemIdSource } from '../../utils/ids.ts'
@@ -573,7 +573,7 @@ it('ends the records a lost daemon left running as hung up', async () => {
       group: 99,
       command: 'sleep 30',
       cwd: PathSpec.fromStrPath('/'),
-      machine: new MachineId('host', 'gone'),
+      machine: new MachineName('host', 'gone'),
       startedAt: 1,
       runtime: null,
       machinePid: null,

@@ -17,7 +17,7 @@ from typing import Any
 
 from mirage.commands.config import Context
 from mirage.execution.machine.table import MachineTable
-from mirage.execution.types import MachineId
+from mirage.execution.types import MachineName
 from mirage.machine.handle import MachineHandle
 from mirage.runtime.base import Runtime
 from mirage.runtime.config import RuntimeConfig
@@ -37,7 +37,9 @@ class RemoteRuntime(
     to the machine its route names (``execute(machine=)``, a policy's
     Route), else to this entry's ``machine``. Captures default to
     ``@external``, the programs nothing in Mirage resolves; an explicit
-    ``@line`` sends whole lines, run as ``/bin/sh -c``.
+    ``@line`` sends whole lines, run as ``/bin/sh -c``. An entry with a
+    ``machine`` is named for it, ``remote:<machine>``, so a workspace can
+    hold one per machine.
 
     Args:
         captures (Sequence[str] | None): commands routed to this runtime.
@@ -61,6 +63,8 @@ class RemoteRuntime(
         machine: str | None = None,
     ) -> None:
         super().__init__(captures, config)
+        if machine is not None:
+            self.name = f"{self.name}:{machine}"
         self.default_machine = machine
         self._machines: MachineTable | None = None
 
@@ -99,13 +103,13 @@ class RemoteRuntime(
         return self._machines.get(name)
 
     @property
-    def machine(self) -> MachineId | None:
+    def machine(self) -> MachineName | None:
         if self._machines is None or self.default_machine is None:
             return None
-        return self._machines.get(self.default_machine).id
+        return self._machines.get(self.default_machine).machine
 
-    def machine_for(self, ctx: Context) -> MachineId | None:
-        return self.handle(ctx).id
+    def machine_for(self, ctx: Context) -> MachineName | None:
+        return self.handle(ctx).machine
 
     def refusal_name(self, ctx: Context) -> str:
         """The provider of the machine the run goes to, as a refusal of

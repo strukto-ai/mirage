@@ -19,7 +19,7 @@ import { CONTINUE_SIGNALS, STOP_SIGNALS } from '../../shell/constants.ts'
 import type { ProcessHandle } from '../process/handle.ts'
 import type { ProcessTable } from '../process/table.ts'
 import type { Process } from '../process/types.ts'
-import { ProcessId, type MachineId, type MachinePid, type MachineResources } from '../types.ts'
+import { ProcessId, type MachineName, type MachinePid, type MachineResources } from '../types.ts'
 import type { RecordFields } from '../../workspace/record/types.ts'
 import type { Machine, MachineProcess, MachineState } from './types.ts'
 
@@ -135,7 +135,7 @@ export class MachineTable {
   /**
    * The handle whose id is `machine`, written `docker:tools`.
    *
-   * @param machine a machine id as a process record names it.
+   * @param machine a machine name as a process record names it.
    */
   async resources(machine: string, cpu: boolean): Promise<MachineResources> {
     const handle = this.byId(machine)
@@ -145,7 +145,7 @@ export class MachineTable {
   }
 
   byId(machine: string): MachineHandle | null {
-    return this.handles().find((h) => h.id.toString() === machine) ?? null
+    return this.handles().find((h) => h.machine.toString() === machine) ?? null
   }
 
   /**
@@ -153,7 +153,7 @@ export class MachineTable {
    * for one the table holds no handle of, such as the host. Mirrors Python's
    * `MachineTable.instance`.
    */
-  instance(machine: MachineId): string {
+  instance(machine: MachineName): string {
     return this.byId(machine.toString())?.instance ?? machine.name
   }
 
@@ -165,7 +165,7 @@ export class MachineTable {
    */
   async check(now: () => number, machine?: string): Promise<Machine[]> {
     const handles = this.handles().filter(
-      (h) => machine === undefined || h.id.toString() === machine,
+      (h) => machine === undefined || h.machine.toString() === machine,
     )
     return Promise.all(handles.map((h) => check(h, now)))
   }
@@ -211,9 +211,9 @@ export class MachineTable {
       const machine = runs.get(tag)?.machine.toString()
       if (machine !== undefined && machine !== host) machinesToScan.add(machine)
     }
-    const scans: [MachineId, Promise<MachineProcess[]>][] = this.handles()
-      .filter((handle) => handle.executing || machinesToScan.has(handle.id.toString()))
-      .map((handle) => [handle.id, handle.status(workspace)])
+    const scans: [MachineName, Promise<MachineProcess[]>][] = this.handles()
+      .filter((handle) => handle.executing || machinesToScan.has(handle.machine.toString()))
+      .map((handle) => [handle.machine, handle.status(workspace)])
     if (this.scanHost !== null) {
       const groups = new Map<number, readonly [string, number]>()
       for (const [tag, record] of runs) {
@@ -283,7 +283,7 @@ export class MachineTable {
    */
   private async deliverSignal(
     handle: ProcessHandle,
-    machine: MachineId,
+    machine: MachineName,
     target: string | MachinePid,
     signum: number,
   ): Promise<boolean> {
@@ -334,7 +334,7 @@ export class MachineTable {
 
   /** Send `signum` to one process on `machine`. */
   private signalOn(
-    machine: MachineId,
+    machine: MachineName,
     target: string | MachinePid,
     signum: number,
   ): Promise<boolean> {
@@ -364,7 +364,7 @@ export class MachineTable {
    */
   private applyScan(
     processes: ProcessTable,
-    machine: MachineId,
+    machine: MachineName,
     rows: readonly MachineProcess[],
     live: ReadonlyMap<string, ProcessHandle>,
     runs: ReadonlyMap<string, Process>,
@@ -430,7 +430,7 @@ export class MachineTable {
    */
   private placeFound(
     processes: ProcessTable,
-    machine: MachineId,
+    machine: MachineName,
     row: MachineProcess,
     parent: number | null,
     owner: Process | null,
@@ -486,7 +486,7 @@ export class MachineTable {
   }
 
   /** Stop a process a scan found, as Mirage stops what it runs. */
-  private async stopFound(machine: MachineId, target: MachinePid, signum: number): Promise<void> {
+  private async stopFound(machine: MachineName, target: MachinePid, signum: number): Promise<void> {
     try {
       await this.signalOn(machine, target, signum)
     } catch (error) {
@@ -514,7 +514,7 @@ export class MachineTable {
 }
 
 /** The key a process a scan found is kept by: its machine, pid and start. */
-function foundKey(machine: MachineId, row: MachineProcess): string {
+function foundKey(machine: MachineName, row: MachineProcess): string {
   return `${machine.toString()} ${String(row.pid)} ${String(row.started)}`
 }
 
@@ -545,8 +545,8 @@ async function check(handle: MachineHandle, now: () => number): Promise<Machine>
   try {
     state = (await handle.check()) ? 'managed' : 'reachable'
   } catch (caught) {
-    console.debug(`${handle.id.toString()}: check failed:`, caught)
+    console.debug(`${handle.machine.toString()}: check failed:`, caught)
     state = 'unreachable'
   }
-  return { id: handle.id, state, checkedAt: now() }
+  return { name: handle.machine, state, checkedAt: now() }
 }

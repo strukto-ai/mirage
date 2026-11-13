@@ -125,7 +125,7 @@ describe('KubernetesMachine', () => {
   it("registers under the config name 'kubernetes'", () => {
     const machine = buildMachine('box', { provider: 'kubernetes', pod: 'p' })
     expect(machine).toBeInstanceOf(KubernetesMachine)
-    expect(String(machine.id)).toBe('kubernetes:box')
+    expect(String(machine.machine)).toBe('kubernetes:box')
   })
 
   it('carries cwd and env on the command', async () => {

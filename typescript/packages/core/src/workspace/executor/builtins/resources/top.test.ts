@@ -15,7 +15,12 @@
 import { describe, expect, it } from 'vitest'
 import type { JobTable } from '../../../../execution/job/index.ts'
 import type { Process, ProcessUsage } from '../../../../execution/process/types.ts'
-import { LineId, MachineId, type MachineResources, ProcessId } from '../../../../execution/types.ts'
+import {
+  LineId,
+  MachineName,
+  type MachineResources,
+  ProcessId,
+} from '../../../../execution/types.ts'
 import { PathSpec } from '../../../../types.ts'
 import {
   decoded,
@@ -55,7 +60,7 @@ function busy(pid: number, cpuSeconds: number): Process {
     group: pid,
     command: 'sleep 30',
     cwd: PathSpec.fromStrPath('/'),
-    machine: new MachineId('host', 'box'),
+    machine: new MachineName('host', 'box'),
     startedAt: 1,
     runtime: null,
     machinePid: null,

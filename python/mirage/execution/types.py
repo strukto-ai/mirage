@@ -49,9 +49,10 @@ class JobId:
 
 
 @dataclass(frozen=True, slots=True)
-class MachineId:
+class MachineName:
     """Where a process runs: the provider that reaches the machine and
-    the machine's name there, written ``docker:tools``."""
+    the name the workspace gave it, written ``docker:tools``. What the
+    provider calls the machine is its handle's ``instance``."""
 
     provider: str
     name: str
@@ -60,8 +61,8 @@ class MachineId:
         return f"{self.provider}:{self.name}"
 
     @classmethod
-    def parse(cls, text: str) -> "MachineId":
-        """The id ``str`` wrote.
+    def parse(cls, text: str) -> "MachineName":
+        """The name ``str`` wrote.
 
         Args:
             text (str): ``<provider>:<name>``.
@@ -71,7 +72,7 @@ class MachineId:
         """
         provider, sep, name = text.partition(":")
         if not sep or not provider or not name:
-            raise ValueError(f"not a machine id: {text!r}")
+            raise ValueError(f"not a machine name: {text!r}")
         return cls(provider, name)
 
 

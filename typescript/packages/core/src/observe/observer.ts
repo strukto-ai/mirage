@@ -25,7 +25,7 @@ import {
 import { HISTORY_MAX_RECORDS } from '../execution/constants.ts'
 import type { Job } from '../execution/job/types.ts'
 import type { Process } from '../execution/process/types.ts'
-import type { MachineId } from '../execution/types.ts'
+import type { MachineName } from '../execution/types.ts'
 import { CHUNK_SIZE } from '../io/cooperative.ts'
 import type { IOResult } from '../io/types.ts'
 import { YieldBudget } from '../io/yield_budget.ts'
@@ -129,7 +129,7 @@ function tracer(): Tracer {
 /**
  * Open a typed line's `command` span as it starts (`start`, epoch
  * milliseconds), naming the line, its session, its workspace, the host
- * running Mirage (`host.id`) and the cwd it starts in; the spans of its jobs
+ * running Mirage (`host.name`) and the cwd it starts in; the spans of its jobs
  * and processes go under it. Mirrors Python's `_start_line`.
  */
 function startLine(
@@ -148,7 +148,7 @@ function startLine(
     'mirage.timestamp': start,
   }
   if (workspaceId !== undefined) attributes['mirage.workspace.id'] = workspaceId
-  if (machine !== undefined) attributes['host.id'] = machine
+  if (machine !== undefined) attributes['host.name'] = machine
   if (cwd !== undefined) attributes['mirage.cwd'] = cwd
   return tracer().startSpan('command', { startTime: start, attributes })
 }
@@ -282,7 +282,7 @@ function later(a: number | null, b: number | null): number | null {
  * lines' spans are known; nothing leaves the process until an SDK is set
  * up. Tracing stops at the workspace's own machine and runtimes: a program
  * a runtime runs elsewhere starts no trace of its own there. `machine` is
- * the workspace's, `host.id` on its command, job and process spans;
+ * the host running Mirage, `host.name` on its command, job and process spans;
  * `processes` gives the process records the workspace keeps, which a span
  * goes under, and `instance` what each machine's provider calls it,
  * `mirage.machine.id` for a record that does not say.
@@ -311,7 +311,7 @@ export class Observer {
     private readonly workspaceId?: string,
     private readonly machine?: string,
     private readonly processes?: () => Process[],
-    private readonly instance?: (machine: MachineId) => string,
+    private readonly instance?: (machine: MachineName) => string,
   ) {
     this._store = store ?? new RAMObserverStore()
     this.clock = clock
@@ -450,7 +450,7 @@ export class Observer {
    * it when the work started, else asked now). Mirrors Python's
    * `_machine_attributes`.
    */
-  private machineAttributes(machine: MachineId, instance: string | null = null): Attributes {
+  private machineAttributes(machine: MachineName, instance: string | null = null): Attributes {
     return {
       'mirage.machine.type': machine.provider,
       'mirage.machine.name': machine.name,
@@ -576,7 +576,7 @@ export class Observer {
     under: Context | undefined,
     startedAt: number,
   ): Span {
-    if (this.machine !== undefined) attributes['host.id'] = this.machine
+    if (this.machine !== undefined) attributes['host.name'] = this.machine
     if (line !== null) attributes['mirage.line.id'] = line
     const span = tracer().startSpan(
       name,

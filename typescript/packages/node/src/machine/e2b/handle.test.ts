@@ -507,7 +507,7 @@ describe('E2BMachine', () => {
   it("registers under the config name 'e2b'", () => {
     const machine = buildMachine('box', { provider: 'e2b', sandboxId: 'sb-live' })
     expect(machine).toBeInstanceOf(E2BMachine)
-    expect(String(machine.id)).toBe('e2b:box')
+    expect(String(machine.machine)).toBe('e2b:box')
   })
 })
 

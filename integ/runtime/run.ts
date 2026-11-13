@@ -223,6 +223,7 @@ interface Case {
   runtimes?: string[]
   runtime?: string
   also_machines?: string[]
+  also_entries?: { machine: string; captures: string[] }[]
   backends?: string[]
   backend?: string
   requires?: string[]
@@ -1610,7 +1611,11 @@ function forRuntime(testCase: Case, runtime: string): Case | null {
       )
       entry = { ...rest, name: 'remote', machine: runtime }
     }
-    world.runtimes = [entry, 'workspace']
+    world.runtimes = [
+      entry,
+      ...(testCase.also_entries ?? []).map((e) => ({ name: 'remote', ...e })),
+      'workspace',
+    ]
   }
   return {
     ...testCase,

@@ -32,7 +32,7 @@ from mirage.workspace.types import ExecutionNode
 
 def table(*ids: str) -> ProcessTable:
     processes = ProcessTable("w")
-    processes.machine_ids = lambda: list(ids)
+    processes.machine_names = lambda: list(ids)
     return processes
 
 

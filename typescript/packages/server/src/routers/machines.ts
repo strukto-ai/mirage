@@ -13,13 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Machine, MachineState } from '@struktoai/mirage-core/execution/machine/types'
-import { MachineId } from '@struktoai/mirage-core/execution/types'
+import { MachineName } from '@struktoai/mirage-core/execution/types'
 import type { RouteApp } from '../routes.ts'
 import { msToRfc3339 } from '@struktoai/mirage-core/utils/dates'
 import type { WorkspaceRegistry } from '../registry.ts'
+import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { Instant } from '../schemas.ts'
 import { HttpError, loaderError, WorkspaceMissing } from '../errors.ts'
-import { toResponse as processResponse, type ProcessResponse } from './processes.ts'
+import {
+  toResponse as processResponse,
+  type ProcessMachineResponse,
+  type ProcessResponse,
+} from './processes.ts'
 
 interface WsIdParams {
   wsId: string
@@ -27,11 +32,10 @@ interface WsIdParams {
 
 interface WsMachineParams {
   wsId: string
-  machineId: string
+  machine: string
 }
 
-interface MachineResponse {
-  id: string
+interface MachineResponse extends ProcessMachineResponse {
   state: MachineState
   checked_at: Instant
 }
@@ -44,9 +48,11 @@ interface MachineDetailResponse extends MachineResponse {
   processes: ProcessResponse[]
 }
 
-function toResponse(record: Machine): MachineResponse {
+function toResponse(record: Machine, ws: Workspace): MachineResponse {
   return {
-    id: record.id.toString(),
+    type: record.name.provider,
+    name: record.name.name,
+    id: ws.machineTable.instance(record.name),
     state: record.state,
     checked_at: msToRfc3339(record.checkedAt * 1000),
   }
@@ -70,29 +76,29 @@ export function registerMachinesRoutes(
         throw new WorkspaceMissing(wsId)
       }
       const ws = deps.registry.get(wsId).runner.ws
-      return { items: (await ws.machines()).map(toResponse) }
+      return { items: (await ws.machines()).map((record) => toResponse(record, ws)) }
     },
   )
 
-  app.get<{ Params: WsMachineParams }>('/v1/workspaces/:wsId/machines/:machineId', async (req) => {
-    // One machine, by its id (`provider:name`), checked now, with the
+  app.get<{ Params: WsMachineParams }>('/v1/workspaces/:wsId/machines/:machine', async (req) => {
+    // One machine, by its name (`provider:name`), checked now, with the
     // processes the workspace keeps that ran on it.
-    const { wsId, machineId } = req.params
+    const { wsId, machine } = req.params
     if (deps.registry.visible(wsId, req.account) === null) {
       throw new WorkspaceMissing(wsId)
     }
-    let machine: MachineId
+    let where: MachineName
     try {
-      machine = MachineId.parse(machineId)
+      where = MachineName.parse(machine)
     } catch (err) {
       throw loaderError(err)
     }
     const ws = deps.registry.get(wsId).runner.ws
-    const [found] = await ws.machines(machine)
+    const [found] = await ws.machines(where)
     if (found === undefined) throw new HttpError('not_found', 'machine not found')
-    const processes = await ws.processes({ machine })
+    const processes = await ws.processes({ machine: where })
     const detail: MachineDetailResponse = {
-      ...toResponse(found),
+      ...toResponse(found, ws),
       processes: processes.map((process) => processResponse(process, ws)),
     }
     return detail

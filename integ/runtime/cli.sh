@@ -146,7 +146,8 @@ runtime_variants() {
          end) as $entry
       | (if ($t.machines | index($r)) != null and ($entry | type) == "object"
          then {machines: ([$r, ($c.also_machines // [])[]] | map({key: ., value: ({provider: $r} + ($entry.config // {}))}) | from_entries),
-               runtimes: [($entry | del(.config)) + {name: "remote", machine: $r}, "workspace"]}
+               runtimes: ([($entry | del(.config)) + {name: "remote", machine: $r}]
+                 + [($c.also_entries // [])[] | {name: "remote"} + .] + ["workspace"])}
          else {runtimes: [$entry, "workspace"]} end) as $placed
       | $c + {
           id: ($c.id + "@" + $r),

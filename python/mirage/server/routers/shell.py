@@ -28,6 +28,7 @@ from mirage.execution.line.handle import LineHandle
 from mirage.execution.types import LineId
 from mirage.io.pipe import BytePipe
 from mirage.io.types import ByteSource
+from mirage.runtime.table import runtime_bindings_for
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.server.errors import (
     INTERNAL_MESSAGE,
@@ -80,23 +81,31 @@ def _check_placement(ws: Workspace, req: ShellRequest) -> None:
             "'workspace' is the default executor, not a runtime you can select",
             param="runtime",
         )
+    runtimes = ws.runtimes()
     named = (
         (
             "runtime",
             req.runtime,
-            [r.name for r in ws.runtimes() if r.name != WorkspaceRuntime.name],
+            [r.name for r in runtimes if r.name != WorkspaceRuntime.name],
         ),
         ("machine", req.machine, ws.machine_table.names()),
     )
     for param, given, names in named:
-        if given is not None and given not in names:
+        if given is None or given in names:
+            continue
+        message = (
+            f"{param} must be one of {', '.join(names)}"
+            if names
+            else f"{param} must be unset: the workspace has no {param}s"
+        )
+        if param != "runtime":
+            raise HttpError(ErrorCode.INVALID_VALUE, message, param=param)
+        try:
+            runtime_bindings_for(runtimes, given)
+        except ValueError as exc:
             raise HttpError(
-                ErrorCode.INVALID_VALUE,
-                f"{param} must be one of {', '.join(names)}"
-                if names
-                else f"{param} must be unset: the workspace has no {param}s",
-                param=param,
-            )
+                ErrorCode.INVALID_VALUE, message, param=param
+            ) from exc
 
 
 def _build_shell_kwargs(

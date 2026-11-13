@@ -25,7 +25,7 @@ import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { builtinUsage } from '../shared.ts'
 import { MAX_PID_OPERAND } from '../constants.ts'
-import type { MachineId } from '../../../../execution/types.ts'
+import type { MachineName } from '../../../../execution/types.ts'
 import {
   grantsOf,
   jobOfSpec,
@@ -165,7 +165,7 @@ export async function handleKill(
   await jobTable.sync(sid)
   for (const operand of words) {
     const jobs = jobTable.listJobs(sid)
-    let groupMachine: MachineId | null = null
+    let groupMachine: MachineName | null = null
     let [pid, refusal] = killPid(jobs, operand, jobTable.jobMarks(sid))
     const shown = new Map(jobs.map((job) => [job.pid, job.shownPid]))
     if (pid !== null && pid > 0 && pid < FIRST_PID && /^[0-9]+$/.test(operand)) {
@@ -278,7 +278,7 @@ async function killGroup(
   jobs: JobHandle[],
   group: number,
   signal: number,
-  machine: MachineId | null = null,
+  machine: MachineName | null = null,
 ): Promise<boolean> {
   const processes = jobTable.processes
   const sid = sessionOf(session)
