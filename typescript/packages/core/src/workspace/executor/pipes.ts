@@ -45,7 +45,7 @@ import { ExecutionNode } from '../types.ts'
 import { StatementRecorder } from '../node/program.ts'
 import { divertStatement, divertedFile } from './builtins/exec/index.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
-import { carried, ended, isUnwinding, type Unwinding } from './control.ts'
+import { carried, ended, isUnwinding, LoopSignal } from './control.ts'
 import {
   handleBackground,
   oneProgram,
@@ -128,10 +128,11 @@ export async function handlePipe(
   let failed = false
   const tasks: Promise<void>[] = []
   const stages: (ProcessHandle | null)[] = commands.map(() => null)
-  // What the last stage, run in this shell, unwound with (`return`,
-  // `break`): it goes on past the pipeline once the other stages end,
-  // with what they wrote.
-  const unwinding: Unwinding[] = []
+  // The `break` or `continue` the last stage, run in this shell, unwound
+  // with: it goes on past the pipeline once the other stages end, with what
+  // they wrote, as bash waits for them; a `return` or `exit` there leaves at
+  // once.
+  const unwinding: LoopSignal[] = []
   const launch = (cmd: TSNodeLike, i: number): Promise<void> => {
     // Each segment is a child shell: bash forks one per stage, which a signal
     // stops on its own, its status 128 plus it, and which hands a QUIT to the
@@ -216,6 +217,7 @@ export async function handlePipe(
         if (error instanceof PipeClosed) {
           io.exitCode = SIGPIPE_STATUS
         } else if (isUnwinding(error) && inParent) {
+          if (!(error instanceof LoopSignal)) throw error
           unwinding.push(error)
         } else if (isUnwinding(error)) {
           // A stage is a subshell: whatever unwinds ends it there, a simple

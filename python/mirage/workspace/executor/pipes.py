@@ -66,7 +66,12 @@ from mirage.workspace.executor.builtins.exec import (
     divert_statement,
     diverted_file,
 )
-from mirage.workspace.executor.control import Unwinding, carried, ended
+from mirage.workspace.executor.control import (
+    LoopSignal,
+    Unwinding,
+    carried,
+    ended,
+)
 from mirage.workspace.executor.statement import (
     answer_closed,
     as_written,
@@ -162,10 +167,11 @@ async def handle_pipe(
         for i in range(len(commands))
     ]
     stages: list[ProcessHandle | None] = [None for _ in commands]
-    # What the last stage, run in this shell, unwound with (`return`,
-    # `break`): it goes on past the pipeline once the other stages end,
-    # with what they wrote.
-    unwinding: list[Exception] = []
+    # The `break` or `continue` the last stage, run in this shell, unwound
+    # with: it goes on past the pipeline once the other stages end, with
+    # what they wrote, as bash waits for them; a `return` or `exit` there
+    # leaves at once.
+    unwinding: list[LoopSignal] = []
 
     async def run_segment(i: int, cmd: TSNodeLike) -> int:
         child_evaluation = children[i]
@@ -246,6 +252,8 @@ async def handle_pipe(
             io.exit_code = SIGPIPE_STATUS
         except Unwinding as sig:
             if in_parent:
+                if not isinstance(sig, LoopSignal):
+                    raise
                 unwinding.append(sig)
             else:
                 # A stage is a subshell: whatever unwinds ends it there, a

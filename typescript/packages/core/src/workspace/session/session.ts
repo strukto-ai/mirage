@@ -1129,6 +1129,7 @@ export class SessionState {
    * them.
    */
   toDict(variables = true): Record<string, unknown> {
+    this.syncShopts()
     const data: Record<string, unknown> = {
       session_id: this.sessionId,
       cwd: this.cwd,

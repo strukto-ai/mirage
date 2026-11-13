@@ -4239,6 +4239,84 @@
       ]
     },
     {
+      "id": "globignore_dotglob_from_the_last_line_survives_checkout_and_load",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "config": {}
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "cd /data; touch .dot keep skip",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "GLOBIGNORE=skip",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "snapshot"
+        },
+        {
+          "op": "exec",
+          "command": "shopt -u dotglob",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "checkout"
+        },
+        {
+          "op": "exec",
+          "command": "cd /data; echo *",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": ".dot keep\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "load"
+        },
+        {
+          "op": "exec",
+          "command": "cd /data; echo *",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": ".dot keep\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
       "id": "shell_settings_and_function_aliases_survive_checkout_and_load",
       "settings": {
         "mode": "write",

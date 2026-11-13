@@ -916,7 +916,27 @@
       "targets": [
         "ram",
         "disk",
-        "opfs"
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
       ],
       "command": "(v=$(printf 'a\\0b\\0c\\n\\n'); printf '<%s> %s\\n' \"$v\" \"${#v}\"; printf 'a\\0b\\nc\\0d\\n' | { IFS= read -r -n2 a; read b; mapfile -t lines; printf '<%s> <%s> <%s>\\n' \"$a\" \"$b\" \"${lines[0]}\"; })",
       "expect": {

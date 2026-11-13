@@ -721,6 +721,7 @@ class SessionState:
                 leaves them out, for a flush that compares their store's
                 version instead of reading them.
         """
+        self.sync_shopts()
         data: dict[str, Any] = {
             "session_id": self.session_id,
             "cwd": self.cwd,
