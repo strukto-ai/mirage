@@ -110,7 +110,8 @@ export class Runtimes {
 
   /** The `machines:` entries of the runtimes built from one, by name, in list order; a copy rebuilds these. */
   specs(): Record<string, Record<string, unknown>> {
-    const out: Record<string, Record<string, unknown>> = {}
+    // Null prototype: machine names come from config.
+    const out = Object.create(null) as Record<string, Record<string, unknown>>
     for (const entry of this.entries) {
       const spec = builtFrom(entry)
       if (spec !== undefined) out[entry.name] = spec

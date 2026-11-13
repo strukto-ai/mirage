@@ -260,6 +260,12 @@ describe('buildRuntime options', () => {
     expect([...buildRuntime('monty', { captures: ['python3'] }).captures]).toEqual(['python3'])
   })
 
+  it('unknown options fail loud', () => {
+    expect(() => buildRuntime('monty', { captuers: [] })).toThrow(
+      /unknown monty runtime option 'captuers' \(expected: 'captures', 'config'\)/,
+    )
+  })
+
   it('unknown config keys fail loud inside the runtime', () => {
     expect(() => buildRuntime('pyodide', { config: { homee: '/typo' } })).toThrow(
       /unknown runtime config key 'homee'/,

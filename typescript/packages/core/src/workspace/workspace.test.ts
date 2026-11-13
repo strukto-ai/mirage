@@ -1203,6 +1203,25 @@ it('setProfile keeps any name as an entry through a copy', async () => {
   }
 })
 
+it('a copy keeps a machine of any name', async () => {
+  const machines = Object.fromEntries([
+    ['__proto__', { provider: 'in_process', runtime: 'quickjs', captures: ['js'] }],
+  ])
+  const ws = new Workspace({ '/data': new RAMVFS() }, { machines })
+  const copy = await ws.copy()
+  try {
+    for (const each of [ws, copy]) {
+      expect(each.engines().map((e) => [e.name, [...e.captures]])).toEqual([
+        ['__proto__', ['js']],
+        ['workspace', []],
+      ])
+    }
+  } finally {
+    await copy.close()
+    await ws.close()
+  }
+})
+
 it('unmount drains metadata globs and their index writes', async () => {
   let enter = (): void => undefined
   let resume = (): void => undefined

@@ -146,9 +146,22 @@ export function knownRuntimes(): string[] {
   return Object.keys(NAMED).sort(compareCodePoints)
 }
 
-/** Construct a runtime by name, failing loud on unknown names, with a cross-language hint for Python-only names. */
+// The options every runtime's constructor takes; Python's signature refuses any other.
+const OPTION_KEYS: readonly string[] = ['captures', 'config']
+
+/**
+ * Construct a runtime by name, failing loud on unknown names (with a
+ * cross-language hint for Python-only names) and on unknown options.
+ */
 export function buildRuntime(name: string, options: Record<string, unknown> = {}): Runtime {
-  return new (runtimeClass(name))(options as RuntimeOptions<never>)
+  const cls = runtimeClass(name)
+  for (const key of Object.keys(options)) {
+    if (!OPTION_KEYS.includes(key)) {
+      const known = OPTION_KEYS.map((k) => `'${k}'`).join(', ')
+      throw new Error(`unknown ${name} runtime option '${key}' (expected: ${known})`)
+    }
+  }
+  return new cls(options as RuntimeOptions<never>)
 }
 
 // The `machines:` entry each engine provider's runtime was built from, so
