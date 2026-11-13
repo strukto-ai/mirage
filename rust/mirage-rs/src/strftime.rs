@@ -3,7 +3,11 @@ use std::collections::VecDeque;
 use serde::Deserialize;
 
 use crate::calendar::{MONTHS, WEEKDAYS};
-use crate::{Stream, StreamError, constants::OUTPUT, parse_config};
+use crate::{
+    Stream, StreamError,
+    constants::{OUTPUT, WORK},
+    parse_config,
+};
 
 /// The widest field: date reads a wider width as this one.
 const MAX_WIDTH: usize = i32::MAX as usize;
@@ -72,6 +76,7 @@ impl Strftime {
             iso_week,
             format: Vec::new(),
             finished: false,
+            layout: Layout::default(),
             rendered: Rendered::default(),
         })
     }
@@ -128,6 +133,7 @@ pub(crate) struct Strftime {
     iso_week: i64,
     format: Vec<u8>,
     finished: bool,
+    layout: Layout,
     rendered: Rendered,
 }
 
@@ -140,37 +146,79 @@ impl Stream for Strftime {
     }
 
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        if !std::mem::replace(&mut self.finished, true) {
-            let format = std::mem::take(&mut self.format);
-            let mut rendered = Rendered::default();
-            self.layout(&format, &mut rendered)?;
-            self.rendered = rendered;
-        }
+        self.finished = true;
         self.drain(out)
     }
 
     fn busy(&self) -> bool {
-        !self.rendered.pieces.is_empty()
+        self.finished && (!self.layout.done(&self.format) || !self.rendered.pieces.is_empty())
     }
 
     fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        self.rendered.write(out, OUTPUT);
+        if !self.finished {
+            return Ok(());
+        }
+        if self.rendered.pieces.is_empty() && !self.layout.done(&self.format) {
+            let mut layout = std::mem::take(&mut self.layout);
+            let mut rendered = std::mem::take(&mut self.rendered);
+            self.layout_step(&self.format, &mut layout, &mut rendered, true)?;
+            self.layout = layout;
+            self.rendered = rendered;
+        }
+        self.rendered
+            .write(out, OUTPUT, &self.format, &self.config.zone);
+        if self.layout.done(&self.format) && self.rendered.pieces.is_empty() {
+            self.format = Vec::new();
+            self.layout = Layout::default();
+        }
         Ok(())
     }
 }
 
+#[derive(Default)]
+enum Scan {
+    #[default]
+    Literal,
+    Flags,
+    Width,
+    Colons,
+    Modifier,
+    Code,
+}
+
+#[derive(Default)]
+struct Layout {
+    at: usize,
+    start: usize,
+    scan: Scan,
+    flags: Flags,
+    colons: usize,
+    modifier: Option<u8>,
+}
+
+impl Layout {
+    fn done(&self, format: &[u8]) -> bool {
+        self.at == format.len() && matches!(self.scan, Scan::Literal)
+    }
+}
+
+enum Source {
+    Format,
+    Zone,
+}
+
 enum Piece {
     Bytes(Vec<u8>),
+    Span(Source, std::ops::Range<usize>, Option<bool>),
     Fill(u8, usize),
 }
 
-/// What a format renders to: bytes, and each field's padding as one byte
-/// and a count, so the widest field date allows is written a window at a
-/// time, as date writes it, rather than held.
+/// Bytes and borrowed spans, with virtual padding and a cursor in the first piece.
 #[derive(Default)]
 struct Rendered {
     pieces: VecDeque<Piece>,
     len: usize,
+    written: usize,
 }
 
 impl Rendered {
@@ -189,6 +237,13 @@ impl Rendered {
         }
     }
 
+    fn span(&mut self, source: Source, range: std::ops::Range<usize>) {
+        if !range.is_empty() {
+            self.len = self.len.saturating_add(range.len());
+            self.pieces.push_back(Piece::Span(source, range, None));
+        }
+    }
+
     fn fill(&mut self, byte: u8, count: usize) {
         if count > 0 {
             self.len = self.len.saturating_add(count);
@@ -197,52 +252,61 @@ impl Rendered {
     }
 
     fn append(&mut self, other: Rendered) {
-        for piece in other.pieces {
-            match piece {
-                Piece::Bytes(bytes) => self.extend_from_slice(&bytes),
-                Piece::Fill(byte, count) => self.fill(byte, count),
-            }
-        }
+        self.len = self.len.saturating_add(other.len);
+        self.pieces.extend(other.pieces);
     }
 
-    /// Case-map the bytes; padding is blanks or zeros either way.
+    /// Case-map bytes and defer span mapping until emission; padding is unchanged.
     fn map(&mut self, upper: bool) {
         for piece in &mut self.pieces {
-            if let Piece::Bytes(bytes) = piece {
-                if upper {
-                    bytes.make_ascii_uppercase();
-                } else {
-                    bytes.make_ascii_lowercase();
+            match piece {
+                Piece::Bytes(bytes) => {
+                    if upper {
+                        bytes.make_ascii_uppercase();
+                    } else {
+                        bytes.make_ascii_lowercase();
+                    }
                 }
+                Piece::Span(_, _, case) => *case = Some(upper),
+                Piece::Fill(_, _) => {}
             }
         }
     }
 
-    /// Write at most `most` bytes of what is left.
-    fn write(&mut self, out: &mut Vec<u8>, most: usize) {
+    fn write(&mut self, out: &mut Vec<u8>, most: usize, format: &[u8], zone: &str) {
         let mut room = most;
         while room > 0 {
-            let Some(piece) = self.pieces.front_mut() else {
+            let Some(piece) = self.pieces.front() else {
                 break;
             };
-            match piece {
-                Piece::Bytes(bytes) => {
-                    let taken = bytes.len().min(room);
-                    out.extend(bytes.drain(..taken));
-                    room -= taken;
-                    if bytes.is_empty() {
-                        self.pieces.pop_front();
-                    }
+            let (len, bytes, upper) = match piece {
+                Piece::Bytes(bytes) => (bytes.len(), bytes.as_slice(), None),
+                Piece::Span(source, range, upper) => {
+                    let source = match source {
+                        Source::Format => format,
+                        Source::Zone => zone.as_bytes(),
+                    };
+                    (range.len(), &source[range.clone()], *upper)
                 }
-                Piece::Fill(byte, count) => {
-                    let taken = (*count).min(room);
-                    out.extend(std::iter::repeat_n(*byte, taken));
-                    room -= taken;
-                    *count -= taken;
-                    if *count == 0 {
-                        self.pieces.pop_front();
-                    }
+                Piece::Fill(_, count) => (*count, &[][..], None),
+            };
+            let taken = (len - self.written).min(room);
+            if let Piece::Fill(byte, _) = piece {
+                out.resize(out.len() + taken, *byte);
+            } else {
+                let start = out.len();
+                out.extend_from_slice(&bytes[self.written..self.written + taken]);
+                match upper {
+                    Some(true) => out[start..].make_ascii_uppercase(),
+                    Some(false) => out[start..].make_ascii_lowercase(),
+                    None => {}
                 }
+            }
+            room -= taken;
+            self.written += taken;
+            if self.written == len {
+                self.pieces.pop_front();
+                self.written = 0;
             }
         }
     }
@@ -310,81 +374,159 @@ impl Strftime {
     // date's formatter differs from libc's (used by jq): widths replace
     // numeric defaults, '-' suppresses text padding, and '+' signs years.
     pub(crate) fn render(&self, format: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+        let mut layout = Layout::default();
         let mut rendered = Rendered::default();
-        self.layout(format, &mut rendered)?;
-        rendered.write(out, usize::MAX);
+        while !layout.done(format) || !rendered.pieces.is_empty() {
+            if rendered.pieces.is_empty() {
+                self.layout_step(format, &mut layout, &mut rendered, true)?;
+            }
+            rendered.write(out, OUTPUT, format, &self.config.zone);
+        }
         Ok(())
     }
 
     fn layout(&self, format: &[u8], out: &mut Rendered) -> Result<(), StreamError> {
-        let mut at = 0;
-        while at < format.len() {
-            let start = at;
-            at += 1;
-            if format[start] != b'%' {
-                out.push(format[start]);
-                continue;
-            }
-            if format.get(at) == Some(&b'%') {
-                out.push(b'%');
-                at += 1;
-                continue;
-            }
-            let mut flags = Flags::default();
-            while let Some(&flag) = format.get(at).filter(|f| b"-_0^#+".contains(f)) {
-                match flag {
-                    b'^' => flags.upper = true,
-                    b'#' => flags.swap = true,
-                    _ => flags.pad = Some(flag),
+        let mut layout = Layout::default();
+        while !layout.done(format) {
+            self.layout_step(format, &mut layout, out, false)?;
+        }
+        Ok(())
+    }
+
+    fn layout_step(
+        &self,
+        format: &[u8],
+        state: &mut Layout,
+        out: &mut Rendered,
+        spans: bool,
+    ) -> Result<(), StreamError> {
+        let spans = spans && format.len() > WORK;
+        let mut work = WORK;
+        while work > 0 && !state.done(format) {
+            let byte = format.get(state.at).copied();
+            match state.scan {
+                Scan::Literal => {
+                    let end = format.len().min(state.at.saturating_add(work));
+                    let len =
+                        memchr::memchr(b'%', &format[state.at..end]).unwrap_or(end - state.at);
+                    if len > 0 {
+                        if spans {
+                            out.span(Source::Format, state.at..state.at + len);
+                        } else {
+                            out.extend_from_slice(&format[state.at..state.at + len]);
+                        }
+                        state.at += len;
+                        work -= len;
+                    } else {
+                        state.start = state.at;
+                        state.at += 1;
+                        work -= 1;
+                        state.flags = Flags::default();
+                        state.colons = 0;
+                        state.modifier = None;
+                        state.scan = Scan::Flags;
+                    }
                 }
-                at += 1;
-            }
-            while let Some(&digit) = format.get(at).filter(|b| b.is_ascii_digit()) {
-                let width = flags.width.unwrap_or(0).saturating_mul(10);
-                flags.width = Some(MAX_WIDTH.min(width.saturating_add(usize::from(digit - b'0'))));
-                at += 1;
-            }
-            let colon_start = at;
-            while format.get(at) == Some(&b':') {
-                at += 1;
-            }
-            let colons = at - colon_start;
-            let modifier = format
-                .get(at)
-                .copied()
-                .filter(|m| colons == 0 && matches!(m, b'E' | b'O'));
-            at += usize::from(modifier.is_some());
-            let code = format.get(at).copied();
-            at += usize::from(code.is_some());
-            // date 9.7 keeps all nine digits for bare %-N; adding a
-            // width or another flag makes '-' trim the trailing zeros.
-            if &format[start..at] == b"%-N" {
-                flags.pad = None;
-            }
-            let valid = code.is_some_and(|c| {
-                if colons > 0 {
-                    return c == b'z' && colons <= 3;
+                Scan::Flags => {
+                    if byte == Some(b'%') && state.at == state.start + 1 {
+                        out.push(b'%');
+                        state.at += 1;
+                        work -= 1;
+                        state.scan = Scan::Literal;
+                    } else {
+                        let end = format.len().min(state.at.saturating_add(work));
+                        let mut taken = 0;
+                        for &flag in &format[state.at..end] {
+                            match flag {
+                                b'^' => state.flags.upper = true,
+                                b'#' => state.flags.swap = true,
+                                b'-' | b'_' | b'0' | b'+' => state.flags.pad = Some(flag),
+                                _ => break,
+                            }
+                            taken += 1;
+                        }
+                        state.at += taken;
+                        work -= taken;
+                        if state.at < end || state.at == format.len() {
+                            state.scan = Scan::Width;
+                        }
+                    }
                 }
-                match modifier {
-                    Some(b'E') => b"cCnpPqrRstTuxXyYzZ".contains(&c),
-                    Some(b'O') => b"bBCdeghHIjklmMnNpPrRsStTuUVwWyzZG".contains(&c),
-                    _ => true,
+                Scan::Width => {
+                    if let Some(digit) = byte.filter(u8::is_ascii_digit) {
+                        let width = state.flags.width.unwrap_or(0).saturating_mul(10);
+                        state.flags.width =
+                            Some(MAX_WIDTH.min(width.saturating_add(usize::from(digit - b'0'))));
+                        state.at += 1;
+                        work -= 1;
+                    } else {
+                        state.scan = Scan::Colons;
+                    }
                 }
-            });
-            if valid && self.conversion(code.unwrap(), modifier, colons, flags, out)? {
-                continue;
-            }
-            // A refused percent conversion is itself the next literal percent.
-            // Its width counts the prefix, leaving that last '%' outside it.
-            let end = if code == Some(b'%') { at - 1 } else { at };
-            let mut literal = Rendered::default();
-            literal.extend_from_slice(&format[start..end]);
-            if flags.upper {
-                literal.map(true);
-            }
-            flags.text(literal, out);
-            if code == Some(b'%') {
-                at -= 1;
+                Scan::Colons => {
+                    if byte == Some(b':') {
+                        state.colons += 1;
+                        state.at += 1;
+                        work -= 1;
+                    } else {
+                        state.scan = Scan::Modifier;
+                    }
+                }
+                Scan::Modifier => {
+                    state.modifier = byte.filter(|m| state.colons == 0 && matches!(m, b'E' | b'O'));
+                    if state.modifier.is_some() {
+                        state.at += 1;
+                        work -= 1;
+                    }
+                    state.scan = Scan::Code;
+                }
+                Scan::Code => {
+                    state.at += usize::from(byte.is_some());
+                    let mut flags = state.flags;
+                    if &format[state.start..state.at] == b"%-N" {
+                        flags.pad = None;
+                    }
+                    let valid = byte.is_some_and(|c| {
+                        if state.colons > 0 {
+                            return c == b'z' && state.colons <= 3;
+                        }
+                        match state.modifier {
+                            Some(b'E') => b"cCnpPqrRstTuxXyYzZ".contains(&c),
+                            Some(b'O') => b"bBCdeghHIjklmMnNpPrRsStTuUVwWyzZG".contains(&c),
+                            _ => true,
+                        }
+                    });
+                    if !valid
+                        || !self.conversion(
+                            byte.unwrap(),
+                            state.modifier,
+                            state.colons,
+                            flags,
+                            out,
+                        )?
+                    {
+                        let end = if byte == Some(b'%') {
+                            state.at - 1
+                        } else {
+                            state.at
+                        };
+                        let mut literal = Rendered::default();
+                        if spans {
+                            literal.span(Source::Format, state.start..end);
+                        } else {
+                            literal.extend_from_slice(&format[state.start..end]);
+                        }
+                        if flags.upper {
+                            literal.map(true);
+                        }
+                        flags.text(literal, out);
+                        if byte == Some(b'%') {
+                            state.at -= 1;
+                        }
+                    }
+                    state.scan = Scan::Literal;
+                    work = work.saturating_sub(64);
+                }
             }
         }
         Ok(())
@@ -533,30 +675,33 @@ impl Strftime {
             text
         } else {
             let mut text = Rendered::default();
-            text.extend_from_slice(match code {
-                b'a' => &WEEKDAYS[self.weekday as usize].as_bytes()[..3],
-                b'A' => WEEKDAYS[self.weekday as usize].as_bytes(),
-                b'b' | b'h' => &MONTHS[c.month - 1].as_bytes()[..3],
-                b'B' => MONTHS[c.month - 1].as_bytes(),
-                b'n' => b"\n",
-                b't' => b"\t",
-                b'p' => {
-                    if c.hour < 12 {
-                        b"AM"
-                    } else {
-                        b"PM"
+            if code == b'Z' {
+                text.span(Source::Zone, 0..c.zone.len());
+            } else {
+                text.extend_from_slice(match code {
+                    b'a' => &WEEKDAYS[self.weekday as usize].as_bytes()[..3],
+                    b'A' => WEEKDAYS[self.weekday as usize].as_bytes(),
+                    b'b' | b'h' => &MONTHS[c.month - 1].as_bytes()[..3],
+                    b'B' => MONTHS[c.month - 1].as_bytes(),
+                    b'n' => b"\n",
+                    b't' => b"\t",
+                    b'p' => {
+                        if c.hour < 12 {
+                            b"AM"
+                        } else {
+                            b"PM"
+                        }
                     }
-                }
-                b'P' => {
-                    if c.hour < 12 {
-                        b"am"
-                    } else {
-                        b"pm"
+                    b'P' => {
+                        if c.hour < 12 {
+                            b"am"
+                        } else {
+                            b"pm"
+                        }
                     }
-                }
-                b'Z' => c.zone.as_bytes(),
-                _ => return Ok(false),
-            });
+                    _ => return Ok(false),
+                });
+            }
             text
         };
         if flags.swap && b"pZ".contains(&code) {
@@ -597,7 +742,7 @@ impl Strftime {
 mod tests {
     use serde_json::{Value, json};
 
-    use crate::open;
+    use crate::{Stream, open};
 
     fn moment() -> Value {
         json!({"year": 2026, "month": 1, "day": 1, "hour": 0, "minute": 0,
@@ -793,6 +938,97 @@ mod tests {
         let mut expected = vec![b'0'; 69996];
         expected.extend(b"2026|  Thu");
         assert!(out == expected);
+    }
+
+    #[test]
+    fn long_literals_and_directives_resume_without_changing_bytes() {
+        let n = super::WORK * 5 + 3;
+        let mut config = moment();
+        config["zone"] = json!("mIx".repeat(n));
+        let cases = [
+            (vec![b'x'; n], vec![b'x'; n]),
+            (
+                ["é😀".repeat(n / 6).into_bytes(), b"%Y".to_vec()].concat(),
+                ["é😀".repeat(n / 6).into_bytes(), b"2026".to_vec()].concat(),
+            ),
+            (
+                [b"%".as_slice(), &vec![b'^'; n], b"Z"].concat(),
+                b"MIX".repeat(n),
+            ),
+            (
+                [b"%".as_slice(), &vec![b':'; n], b"z"].concat(),
+                [b"%".as_slice(), &vec![b':'; n], b"z"].concat(),
+            ),
+            (
+                [b"%".as_slice(), &vec![b'^'; n], b"q?"].concat(),
+                b"1?".to_vec(),
+            ),
+            (
+                [b"%".as_slice(), &vec![b'^'; n], b"Q"].concat(),
+                [b"%".as_slice(), &vec![b'^'; n], b"Q"].concat(),
+            ),
+            (
+                [b"%-".as_slice(), &vec![b'9'; n], b"Y"].concat(),
+                b"2026".to_vec(),
+            ),
+            (
+                [b"%".as_slice(), &vec![b'^'; n], b"%Y"].concat(),
+                [b"%".as_slice(), &vec![b'^'; n], b"2026"].concat(),
+            ),
+            (
+                [b"%".as_slice(), &vec![b'^'; n]].concat(),
+                [b"%".as_slice(), &vec![b'^'; n]].concat(),
+            ),
+            (
+                b"%#Z|%^Z".to_vec(),
+                [b"mix".repeat(n), b"|".to_vec(), b"MIX".repeat(n)].concat(),
+            ),
+        ];
+        for (format, expected) in cases {
+            let mut stream =
+                super::Strftime::new(serde_json::from_value(config.clone()).unwrap()).unwrap();
+            let mut out = Vec::new();
+            stream.feed(&format, &mut out).unwrap();
+            stream.drain(&mut out).unwrap();
+            assert!(out.is_empty());
+            stream.finish(&mut out).unwrap();
+            let mut calls = 1;
+            while stream.busy() {
+                let at = stream.layout.at;
+                let mut chunk = Vec::new();
+                stream.drain(&mut chunk).unwrap();
+                if stream.busy() {
+                    assert!(stream.layout.at - at <= super::WORK);
+                }
+                assert!(chunk.len() <= super::OUTPUT);
+                out.extend(chunk);
+                calls += 1;
+                assert!(calls < n);
+            }
+            assert_eq!(out, expected);
+            stream.finish(&mut out).unwrap();
+            assert_eq!(out, expected);
+            let mut sync = Vec::new();
+            stream.render(&format, &mut sync).unwrap();
+            assert_eq!(sync, expected);
+        }
+    }
+
+    #[test]
+    fn host_drain_returns_during_a_long_directive_without_output() {
+        let mut stream = open("strftime", moment().to_string().as_bytes()).unwrap();
+        let format = [b"%".as_slice(), &vec![b'^'; super::WORK * 20], b"Y"].concat();
+        let mut out = Vec::new();
+        stream.feed(&format, &mut out).unwrap();
+        stream.finish(&mut out).unwrap();
+        assert!(out.is_empty());
+        crate::drain_steps(stream.as_mut(), &mut out).unwrap();
+        assert!(out.is_empty());
+        assert!(stream.busy());
+        while stream.busy() {
+            crate::drain_steps(stream.as_mut(), &mut out).unwrap();
+        }
+        assert_eq!(out, b"2026");
     }
 
     #[test]
