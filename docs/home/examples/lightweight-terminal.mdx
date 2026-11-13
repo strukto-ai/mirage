@@ -5,7 +5,7 @@ icon: terminal
 description: A terminal for agents inside your FastAPI or Express server, with no sandbox per agent.
 ---
 
-import { SandboxesVsTerminals, SharedBudget, WaitingOrWorking } from "/snippets/terminal-models.jsx"
+import { SandboxesVsTerminals, WaitingOrWorking } from "/snippets/terminal-models.jsx"
 
 An agent needs somewhere to run commands: Bash, Python, and CLIs such as
 `git`. The usual answer is a sandbox, a container or microVM for each agent.
@@ -228,91 +228,6 @@ Press each button to see four terminals run a command at the same moment:
 
 Size the server as you would any web service: by how many terminals are busy
 at the same moment, not by how many exist.
-
-## Limits
-
-Every terminal runs in the one server process, so a command that takes too much
-memory takes it from the other terminals. Mirage caps what a terminal can
-take, and the caps are on by default:
-
-| A command that | Is stopped by | Default |
-| --- | --- | --- |
-| keeps growing a variable | `max_env` | 2 MB for each terminal |
-| fills memory with files or a command's output | `max_memory` | 96 MB for the workspace |
-
-A terminal that reaches a cap gets an error, as it would from bash, and
-keeps working. The first block doubles a variable without end, and the
-second writes a 120 MB file:
-
-```bash
-run <<'SH'
-x=aaaaaaaaaaaaaaaa
-while true; do x=$x$x; done
-SH
-run <<< 'echo the terminal still works'
-```
-
-```text
-bash: xmalloc: cannot allocate 2097153 bytes (past max_env of 2097152 bytes, a mirage workspace setting)
-the terminal still works
-```
-
-```bash
-run <<'SH'
-head -c 120000000 /dev/zero > /work/big.bin
-rm /work/big.bin
-SH
-```
-
-```text
-bash: line 1: /work/big.bin: Disk quota exceeded
-```
-
-`max_memory` is for the workspace, and the server on this page has one
-workspace. Its terminals share the 96 MB, so a file that one terminal leaves
-in `/work` counts against all of them. Write a file from each terminal, then
-remove one:
-
-<SharedBudget />
-
-To give each agent its own budget, give it its own workspace.
-
-Set the caps where the server creates the workspace:
-
-<Tabs>
-  <Tab title="FastAPI" icon="/images/python-logo.svg">
-    ```python
-    ws = Workspace(
-        {"/work": (RAMVFS(), MountMode.EXEC)},
-        runtimes=[MontyRuntime(captures=["python", "python3"])],
-        max_memory="32MB",
-        max_env="256KB",
-    )
-    ```
-  </Tab>
-  <Tab title="Express" icon="/images/typescript-logo.svg">
-    ```typescript
-    const ws = new Workspace(
-      { '/work': new RAMVFS() },
-      {
-        mode: MountMode.EXEC,
-        runtimes: [new MontyRuntime({ captures: ['python', 'python3'] })],
-        maxMemory: '32MB',
-        maxEnv: '256KB',
-      },
-    )
-    ```
-  </Tab>
-</Tabs>
-
-A cap needs headroom to work. While a command writes a file, the server holds
-several times the bytes written, so a write that reaches the default 96 MB
-cap can take a few hundred megabytes for a moment. A server with 512 MB or
-more has that room. On a smaller server, set `max_memory` lower: otherwise
-one large write can end the process before the cap refuses it.
-
-[Limits](/home/limits) lists every limit, including the ones for a loop that
-never ends and for a command that starts processes without end.
 
 ## Async
 
