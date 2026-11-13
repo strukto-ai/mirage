@@ -99,6 +99,12 @@ def _error_of(
     )
 
 
+def _flow_error(
+    resp: aiohttp.ClientResponse, text: str, *, flow: str
+) -> Exception:
+    return BoxApiError(f"{flow} -> {resp.status} {text}", resp.status)
+
+
 async def refresh_access_token(
     config: BoxConfig, current_refresh_token: str
 ) -> tuple[str, str, int]:
@@ -124,9 +130,7 @@ async def refresh_access_token(
     body = await api_request(
         "POST",
         token_url_of(config),
-        error_of=lambda resp, text: BoxApiError(
-            f"Box token refresh -> {resp.status} {text}", resp.status
-        ),
+        error_of=partial(_flow_error, flow="Box token refresh"),
         data=data,
     )
     return (body["access_token"], body["refresh_token"], body["expires_in"])
@@ -156,9 +160,7 @@ async def fetch_ccg_token(config: BoxConfig) -> tuple[str, int]:
     body = await api_request(
         "POST",
         token_url_of(config),
-        error_of=lambda resp, text: BoxApiError(
-            f"Box CCG token -> {resp.status} {text}", resp.status
-        ),
+        error_of=partial(_flow_error, flow="Box CCG token"),
         data=data,
     )
     return body["access_token"], body["expires_in"]

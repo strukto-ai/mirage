@@ -49,6 +49,24 @@ export interface LangfuseTransport {
   request(path: string, query?: Record<string, string | number | undefined>): Promise<unknown>
 }
 
+// The parse comes before the status check, so a non-JSON error body reports
+// as invalid JSON rather than a bare status. The status must land on the
+// error either way: fetchOrEnoent keys on it.
+function langfuseError(response: Response, text: string): LangfuseApiError {
+  let body: unknown
+  try {
+    body = JSON.parse(text)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return new LangfuseApiError(`Langfuse API: invalid JSON: ${msg}`, [], response.status)
+  }
+  const message =
+    body !== null && typeof body === 'object' && 'message' in body
+      ? String((body as Record<string, unknown>).message)
+      : `Langfuse API error: HTTP ${String(response.status)}`
+  return new LangfuseApiError(message, [], response.status)
+}
+
 export class HttpLangfuseTransport implements LangfuseTransport {
   // Read on each call, so a client built before the host wraps fetch still
   // sends through the wrapper that judges its network rule and policies.
@@ -75,23 +93,7 @@ export class HttpLangfuseTransport implements LangfuseTransport {
         Accept: 'application/json',
       },
       read: 'text',
-      // The parse comes before the status check, so a non-JSON error body
-      // reports as invalid JSON rather than a bare status. The status must
-      // land on the error either way: fetchOrEnoent keys on it.
-      errorOf: (response, raw) => {
-        let body: unknown
-        try {
-          body = JSON.parse(raw)
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err)
-          return new LangfuseApiError(`Langfuse API: invalid JSON: ${msg}`, [], response.status)
-        }
-        const message =
-          body !== null && typeof body === 'object' && 'message' in body
-            ? String((body as Record<string, unknown>).message)
-            : `Langfuse API error: HTTP ${String(response.status)}`
-        return new LangfuseApiError(message, [], response.status)
-      },
+      errorOf: langfuseError,
     })) as string
     try {
       return JSON.parse(text) as unknown
