@@ -1,18 +1,52 @@
 export const SandboxesVsTerminals = () => {
-  const mark = (label, color, opacity, outline) => (
+  const mark = (label, color, shape) => (
     <span className="inline-flex items-center gap-1.5">
       <span
-        className={`inline-block h-2.5 w-2.5 rounded-sm ${
-          outline ? "border border-zinc-400 dark:border-zinc-500" : color ? "" : "bg-zinc-300 dark:bg-zinc-700"
+        className={`inline-block h-2.5 w-2.5 ${shape === "ring" ? "rounded-full border-2" : "rounded-sm"} ${
+          shape === "outline" ? "border border-zinc-400 dark:border-zinc-500" : color ? "" : "bg-zinc-300 dark:bg-zinc-700"
         }`}
-        style={color ? { background: color, opacity } : undefined}
+        style={color ? (shape === "ring" ? { borderColor: color } : { background: color }) : undefined}
       />
       {label}
     </span>
   )
+  const button = (label, onClick, pressed) => (
+    <button
+      key={label}
+      type="button"
+      aria-pressed={pressed}
+      onClick={onClick}
+      className={`rounded-lg border px-2.5 py-1 text-xs transition-colors ${
+        pressed
+          ? "border-zinc-900 bg-zinc-900 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-900"
+          : "border-zinc-300 text-zinc-700 hover:border-zinc-500 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-zinc-500"
+      }`}
+    >
+      {label}
+    </button>
+  )
   const steps = [1, 5, 10, 25, 50, 100]
+  const shares = [
+    ["None", 0],
+    ["1 in 10", 0.1],
+    ["1 in 4", 0.25],
+    ["Half", 0.5],
+    ["All", 1],
+  ]
+  const sizes = [1, 4, 16]
   const [step, setStep] = useState(4)
+  const [share, setShare] = useState(1)
+  const [size, setSize] = useState(1)
   const agents = steps[step]
+  const busy = Math.round(agents * shares[share][1])
+  const idle = agents - busy
+  const holds = sizes[size]
+
+  const base = 100
+  const idleMB = idle * 0.02
+  const busyMB = busy * holds
+  const used = base + idleMB + busyMB
+  const over = used > 512
 
   const width = 300
   const height = 240
@@ -33,14 +67,26 @@ export const SandboxesVsTerminals = () => {
   const dotCols = Math.min(agents, Math.floor((zoom.w - 20) / pitch))
   const dotRows = Math.ceil(agents / dotCols)
   const dotsLeft = zoom.x + (zoom.w - (dotCols - 1) * pitch) / 2
-  const dotsTop = zoom.y + (zoom.h - (dotRows - 1) * pitch) / 2
+  const dotsTop = zoom.y + 12 + (64 - (dotRows - 1) * pitch) / 2
+
+  const bar = { x: zoom.x + 12, y: zoom.y + 88, w: zoom.w - 24, h: 14 }
+  const scale = bar.w / Math.max(512, used)
+  const baseW = base * scale
+  const idleW = Math.max(idle ? 1 : 0, idleMB * scale)
+  const busyW = busyMB * scale
+  const limitX = bar.x + 512 * scale
 
   const megabytes = agents * 128
-  const reserved =
-    megabytes >= 1024 ? `${Number((megabytes / 1024).toFixed(1))} GB` : `${megabytes} MB`
+  const format = (mb) =>
+    mb >= 1024 ? `${Number((mb / 1024).toFixed(1))} GB` : mb > 0 && mb < 1 ? "under 1 MB" : `${Math.round(mb)} MB`
+  const reserved = format(megabytes)
   const plural = agents === 1 ? "" : "s"
   const count = agents.toLocaleString("en-US")
   const marks = Array.from({ length: agents })
+  const strip = (index) => Math.max(1.5, (cell * (index < busy ? holds : 0.02)) / 128)
+  const summary = over
+    ? `needs ${format(used)}, more than the server has`
+    : `${format(used)} of 512 MB in use`
 
   return (
     <div className="terminal-model not-prose my-6 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-4">
@@ -66,11 +112,21 @@ export const SandboxesVsTerminals = () => {
         />
         <span className="tabular-nums">{count}</span>
       </div>
+      <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-zinc-900 dark:text-zinc-100">
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Busy terminals">
+          <span className="mr-1 font-semibold">Busy</span>
+          {shares.map(([label], index) => button(label, () => setShare(index), share === index))}
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="What each busy terminal holds">
+          <span className="mr-1 font-semibold">Each holds</span>
+          {sizes.map((mb, index) => button(`${mb} MB`, () => setSize(index), size === index))}
+        </div>
+      </div>
 
       <svg
         viewBox="0 0 680 244"
         role="img"
-        aria-label={`${agents} sandboxes reserve ${reserved} of memory. One 512 MB server holds the same ${agents} terminal${plural}.`}
+        aria-label={`${agents} sandboxes reserve ${reserved} of memory. One 512 MB server holds ${idle} idle and ${busy} busy terminals and ${summary}.`}
         className="mt-3 w-full"
       >
         <g className="text-zinc-300 dark:text-zinc-700" fill="currentColor">
@@ -104,24 +160,74 @@ export const SandboxesVsTerminals = () => {
         >
           one server, at the same scale
         </text>
-        <g fill="var(--tm-a)">
-          {marks.map((_, index) => (
-            <rect
-              key={index}
-              x={left + (index % cols) * (cell + gap)}
-              y={top + Math.floor(index / cols) * (cell + gap) + cell * 0.86}
-              width={cell}
-              height={cell * 0.14}
-            />
-          ))}
-          {marks.map((_, index) => (
+        {marks.map((_, index) => (
+          <rect
+            key={index}
+            x={left + (index % cols) * (cell + gap)}
+            y={top + Math.floor(index / cols) * (cell + gap) + cell - strip(index)}
+            width={cell}
+            height={strip(index)}
+            fill={index < busy ? "var(--tm-b)" : "var(--tm-a)"}
+          />
+        ))}
+        {marks.map((_, index) =>
+          index < busy ? (
             <circle
               key={index}
               cx={dotsLeft + (index % dotCols) * pitch}
               cy={dotsTop + Math.floor(index / dotCols) * pitch}
               r={radius}
+              fill="var(--tm-b)"
             />
-          ))}
+          ) : (
+            <circle
+              key={index}
+              cx={dotsLeft + (index % dotCols) * pitch}
+              cy={dotsTop + Math.floor(index / dotCols) * pitch}
+              r={radius - 0.75}
+              fill="none"
+              stroke="var(--tm-a)"
+              strokeWidth="1.5"
+            />
+          ),
+        )}
+        <g>
+          <rect
+            x={bar.x}
+            y={bar.y}
+            width={bar.w}
+            height={bar.h}
+            rx="3"
+            className="text-zinc-100 dark:text-zinc-800"
+            fill="currentColor"
+          />
+          <rect x={bar.x} y={bar.y} width={baseW} height={bar.h} className="text-zinc-400 dark:text-zinc-500" fill="currentColor" />
+          <rect x={bar.x + baseW} y={bar.y} width={idleW} height={bar.h} fill="var(--tm-a)" />
+          <rect x={bar.x + baseW + idleW} y={bar.y} width={busyW} height={bar.h} fill="var(--tm-b)" />
+          {over && (
+            <g>
+              <line
+                x1={limitX}
+                x2={limitX}
+                y1={bar.y - 4}
+                y2={bar.y + bar.h + 4}
+                stroke="var(--tm-refused)"
+                strokeWidth="2"
+              />
+              <text x={limitX} y={bar.y - 7} fontSize="10" textAnchor="middle" fill="var(--tm-refused)">
+                512 MB
+              </text>
+            </g>
+          )}
+          <text
+            x={bar.x}
+            y={bar.y + bar.h + 16}
+            fontSize="11"
+            fill="currentColor"
+            className="text-zinc-600 dark:text-zinc-400"
+          >
+            {`Mirage ${base} MB · idle ${format(idleMB)} · busy ${format(busyMB)}`}
+          </text>
         </g>
         <g className="text-zinc-400 dark:text-zinc-500" fill="none" stroke="currentColor">
           <rect x={zoom.x} y={zoom.y} width={zoom.w} height={zoom.h} rx="10" strokeWidth="1.5" />
@@ -137,21 +243,22 @@ export const SandboxesVsTerminals = () => {
         <div>
           <div className="font-semibold text-zinc-900 dark:text-zinc-100">A sandbox for each agent</div>
           <div className="text-zinc-600 dark:text-zinc-400">
-            {count} machine{plural}, {reserved} reserved
+            {count} machine{plural}, {reserved} reserved, busy or idle
           </div>
         </div>
         <div>
           <div className="font-semibold text-zinc-900 dark:text-zinc-100">Terminals in one server</div>
-          <div className="text-zinc-600 dark:text-zinc-400">
-            1 process, 512 MB, holding {count} terminal{plural}
+          <div className="text-zinc-600 dark:text-zinc-400" style={over ? { color: "var(--tm-refused)" } : undefined}>
+            1 process, {idle} idle and {busy} busy, {summary}
           </div>
         </div>
       </div>
 
       <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-zinc-600 dark:text-zinc-400">
         {mark("128 MB of memory, reserved")}
-        {mark("what an agent's terminal holds", "var(--tm-a)")}
-        {mark("the server, enlarged", null, 1, true)}
+        {mark("idle terminal, about 20 KB", "var(--tm-a)", "ring")}
+        {mark("busy terminal: its files, cache and buffers", "var(--tm-b)")}
+        {mark("the server, enlarged", null, "outline")}
       </div>
     </div>
   )
