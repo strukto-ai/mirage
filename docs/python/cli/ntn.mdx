@@ -123,7 +123,6 @@ Command-line parsing follows CLAP style. Exit codes distinguish these failures:
 | --- | --- |
 | Unknown options or missing required arguments, such as `ntn --bogus` or `ntn pages get` | 2 |
 | Invalid JSON in a nonempty `ntn api --data` body or stdin | 1 |
-| `ntn auth token`, which never prints the token | 1 |
 | Empty `--data`, invalid inline request input, or conflicting body sources | 5 |
 | Notion API authentication failure (HTTP 401) | 4 |
 | Other Notion API failures | 5 |
