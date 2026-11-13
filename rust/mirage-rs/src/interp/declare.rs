@@ -477,6 +477,12 @@ impl<H: Host> Run<'_, H> {
         })
     }
 
+    /// Whether a new local starts from the value it shadows: `-I`, or the
+    /// `localvar_inherit` option.
+    fn inherits(&self, flags: &[u8]) -> bool {
+        flags.contains(&b'I') || self.shell.shopt("localvar_inherit")
+    }
+
     /// Reset a name the function just shadowed to what a new local starts
     /// as: unset, with the attributes `local_attrs` keeps, or under `-I`
     /// the shadowed value too.
@@ -1260,7 +1266,7 @@ impl<H: Host> Run<'_, H> {
             marks,
             plus: plus.clone(),
             nameref: declaration.flags.contains(&b'n') && !plus.contains(&b'n'),
-            inherit: declaration.flags.contains(&b'I') || self.shell.shopt("localvar_inherit"),
+            inherit: self.inherits(&declaration.flags),
             scoped: !global && self.store().in_function(),
             subscripts: declaration.subscripts,
         };
@@ -1352,7 +1358,8 @@ impl<H: Host> Run<'_, H> {
                 self.shell.vars.shadow(&name, false);
             }
             if local && fresh {
-                self.start_local(&name, flags.contains(&b'I'));
+                let inherit = self.inherits(flags);
+                self.start_local(&name, inherit);
             }
             let held = self.held_value(&name);
             if let Some(conflict) = kind_conflict(held.as_ref(), Some(want)) {

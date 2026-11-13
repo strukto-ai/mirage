@@ -1151,7 +1151,7 @@ export class SessionState {
     const files = ownRecord<string>()
     for (const [name, source] of Object.entries(this.functions)) {
       const site = this.functionSites.get(name)
-      if (site === undefined || site.source !== source) continue
+      if (site?.source !== source) continue
       if (site.aliases != null) views[name] = { ...site.aliases }
       if (site.name !== undefined && site.name !== 'environment') files[name] = site.name
     }

@@ -1511,7 +1511,7 @@ describe('handleSet', () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ A: '1' }) })
     const [out] = handleSet([], s)
     expect(decode(out as Uint8Array)).toBe(
-      "A=1\nBASH_LINENO=()\nIFS=$' \\t\\n'\nOPTERR=1\nOPTIND=1\nPATH=/usr/bin\nPWD=/\n",
+      "A=1\nBASH_LINENO=()\nBASH_SOURCE=()\nIFS=$' \\t\\n'\nOPTERR=1\nOPTIND=1\nPATH=/usr/bin\nPWD=/\n",
     )
   })
 

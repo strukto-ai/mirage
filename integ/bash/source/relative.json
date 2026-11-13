@@ -41,10 +41,25 @@
         "disk",
         "opfs"
       ],
-      "command": "(mkdir -p {mount}/source_path_and_definition_stack; cd {mount}/source_path_and_definition_stack; mkdir lib; printf '%s\\n' 'echo wrong' > helper; printf '%s\\n' 'f() { printf \"<%s>\\n\" \"${BASH_SOURCE[@]}\"; }; f' > lib/helper; PATH=lib; set -u; source helper; f; shopt -u sourcepath; source helper)",
+      "command": "(declare -p BASH_SOURCE; mkdir -p {mount}/source_path_and_definition_stack; cd {mount}/source_path_and_definition_stack; mkdir lib; printf '%s\\n' 'echo wrong' > helper; printf '%s\\n' 'f() { printf \"<%s>\\n\" \"${BASH_SOURCE[@]}\"; }; f' > lib/helper; PATH=lib; set -u; source helper; f; shopt -u sourcepath; source helper)",
       "expect": {
         "exit": 0,
-        "stdout": "<lib/helper>\n<lib/helper>\n<lib/helper>\nwrong\n",
+        "stdout": "declare -a BASH_SOURCE=()\n<lib/helper>\n<lib/helper>\n<lib/helper>\nwrong\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "source_arguments_and_set_replace_parameters",
+      "seq": 1380029,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "(printf '%s\\n' 'set -- x y; echo \"in:$#\"' > {mount}/source_set_args; set -- a b c; source {mount}/source_set_args p q; echo \"top:$# $*\"; f() { source {mount}/source_set_args p q; echo \"fn:$# $*\"; }; f 1 2; source {mount}/source_set_args; echo \"bare:$# $*\"; printf '%s\\n' '. {mount}/source_set_args inner; echo \"outer:$*\"' > {mount}/source_set_outer; printf '%s\\n' '. {mount}/source_set_args; echo \"outer2:$*\"' > {mount}/source_set_outer2; set -- original; . {mount}/source_set_outer arg; echo \"nested:$*\"; . {mount}/source_set_outer2 arg; echo \"nested2:$*\"; rm {mount}/source_set_args {mount}/source_set_outer {mount}/source_set_outer2)",
+      "expect": {
+        "exit": 0,
+        "stdout": "in:2\ntop:2 x y\nin:2\nfn:2 1 2\nin:2\nbare:2 x y\nin:2\nouter:x y\nnested:original\nin:2\nouter2:x y\nnested2:x y\n",
         "stderr": ""
       }
     }

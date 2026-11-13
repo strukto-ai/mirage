@@ -4172,6 +4172,73 @@
       ]
     },
     {
+      "id": "globignore_keeps_saved_dotglob_after_checkout_and_load",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "config": {}
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "cd /data; touch .dot keep skip; GLOBIGNORE=skip; shopt -u dotglob; echo *",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "keep\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "snapshot"
+        },
+        {
+          "op": "exec",
+          "command": "shopt -s dotglob",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "checkout"
+        },
+        {
+          "op": "exec",
+          "command": "cd /data; shopt dotglob; echo *",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "dotglob        \toff\nkeep\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "load"
+        },
+        {
+          "op": "exec",
+          "command": "cd /data; shopt dotglob; echo *",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "dotglob        \toff\nkeep\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
       "id": "shell_settings_and_function_aliases_survive_checkout_and_load",
       "settings": {
         "mode": "write",

@@ -296,8 +296,8 @@ impl Store {
 
     /// The names set now whose value the shell computes at each read, which
     /// `${!prefix@}` lists beside the stored ones: `PIPESTATUS` once a
-    /// command has run, `FUNCNAME` inside a function, `BASH_LINENO` even
-    /// empty, and `RANDOM`, `LINENO` and `BASHPID` until each is no longer
+    /// command has run, `FUNCNAME` inside a function, `BASH_LINENO` and
+    /// `BASH_SOURCE` even empty, and `RANDOM`, `LINENO` and `BASHPID` until each is no longer
     /// special.
     pub fn computed(&self) -> impl Iterator<Item = &'static str> + '_ {
         [
@@ -313,9 +313,9 @@ impl Store {
         .filter(|&name| {
             self.random_special(name)
                 || self.dynamic(name).is_some()
-                || self
-                    .special(name)
-                    .is_some_and(|array| !array.is_empty() || name == BASH_LINENO)
+                || self.special(name).is_some_and(|array| {
+                    !array.is_empty() || name == BASH_LINENO || name == BASH_SOURCE
+                })
         })
     }
 

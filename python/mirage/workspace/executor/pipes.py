@@ -44,6 +44,7 @@ from mirage.shell.console import JobConsole, JobOutput
 from mirage.shell.console.pipe import PipeConsole
 from mirage.shell.console.types import Channel
 from mirage.shell.constants import (
+    FD_STDIN,
     SIGPIPE_STATUS,
 )
 from mirage.shell.descriptors import Recorder
@@ -161,6 +162,10 @@ async def handle_pipe(
         for i in range(len(commands))
     ]
     stages: list[ProcessHandle | None] = [None for _ in commands]
+    # What the last stage, run in this shell, unwound with (`return`,
+    # `break`): it goes on past the pipeline once the other stages end,
+    # with what they wrote.
+    unwinding: list[Exception] = []
 
     async def run_segment(i: int, cmd: TSNodeLike) -> int:
         child_evaluation = children[i]
@@ -199,6 +204,19 @@ async def handle_pipe(
             child.job_output = waits.output
             child.job_waits = waits
         rest = session.job_output or session.tty.jobs
+        if in_parent:
+            # bash dups the pipe onto its own fd 0 for the stage it runs
+            # itself and puts fd 0 back after, so an `exec <` there ends
+            # with the stage; the input it replaced stays open till then.
+            fd0 = (
+                session.exec_stdin,
+                session.exec_stdin_unreadable,
+                session.exec_stdin_identity,
+                session.descriptors.get(FD_STDIN),
+            )
+            borrowed = session._borrowed
+            if session.exec_stdin is not None:
+                session._borrowed = [*borrowed, session.exec_stdin]
 
         async def statement() -> tuple[
             ByteSource | None, IOResult, ExecutionNode
@@ -228,15 +246,16 @@ async def handle_pipe(
             io.exit_code = SIGPIPE_STATUS
         except Unwinding as sig:
             if in_parent:
-                raise
-            # A stage is a subshell: whatever unwinds ends it there, a
-            # simple command the top shell forked as that shell would.
-            unwound = ended(sig, simple_command(cmd) and not forked)
-            io.exit_code = unwound.exit_code
-            await pump(output, Channel.STDOUT, unwound.stdout)
-            await pump(output, Channel.STDERR, unwound.stderr)
-            if waits is not None:
-                await waits.join(rest)
+                unwinding.append(sig)
+            else:
+                # A stage is a subshell: whatever unwinds ends it there, a
+                # simple command the top shell forked as that shell would.
+                unwound = ended(sig, simple_command(cmd) and not forked)
+                io.exit_code = unwound.exit_code
+                await pump(output, Channel.STDOUT, unwound.stdout)
+                await pump(output, Channel.STDERR, unwound.stderr)
+                if waits is not None:
+                    await waits.join(rest)
         except BaseException as error:
             # One a signal stopped closes its pipe as a killed child does:
             # the reader sees the end, not the stop.
@@ -260,7 +279,21 @@ async def handle_pipe(
             ios[i] = io
             child_nodes[i] = child_exec
             reset_caller(token)
-            if not in_parent:
+            if in_parent:
+                left = session.open_inputs()
+                (
+                    session.exec_stdin,
+                    session.exec_stdin_unreadable,
+                    session.exec_stdin_identity,
+                    descriptor,
+                ) = fd0
+                if descriptor is None:
+                    session.descriptors.pop(FD_STDIN, None)
+                else:
+                    session.descriptors[FD_STDIN] = descriptor
+                session._borrowed = borrowed
+                await session.release_inputs(left)
+            else:
                 await child.close_inputs()
         return io.exit_code
 
@@ -326,6 +359,9 @@ async def handle_pipe(
             # the next line reads on from it.
             if stdin is not session.exec_stdin:
                 await discard_streams(stdin)
+    if unwinding:
+        stderr = b"".join([await materialize(io.stderr) for io in ios])
+        raise await carried(unwinding[0], last_stdout, IOResult(stderr=stderr))
 
     last_io = ios[-1]
     # Parked for the boundary that closes this statement to claim as

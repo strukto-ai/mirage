@@ -912,22 +912,23 @@ class JobTable:
         )
 
     async def wait_substitution(
-        self, session_id: str, pid: int | None = None
+        self, session_id: str, shell: int | None, pid: int | None = None
     ) -> None:
-        """Wait until the session's process substitution ``pid`` ends, or
-        each of them without one.
+        """Wait until the process substitution ``pid`` the shell ``shell``
+        started ends, or each it started without one. A shell waits only
+        for its own, as bash does: never for another pipeline stage's.
 
         Args:
             session_id (str): the session that started them.
+            shell (int | None): the pid of the waiting shell.
             pid (int | None): the substitution's pid; None for every one.
         """
-        if pid is not None:
-            process = self._substitutions.get((session_id, pid))
-            if process is not None:
-                await process.join()
-            return
-        for (scope, _), process in list(self._substitutions.items()):
-            if scope == session_id:
+        for (scope, child), process in list(self._substitutions.items()):
+            if (
+                scope == session_id
+                and process.record.parent == shell
+                and (pid is None or child == pid)
+            ):
                 await process.join()
 
     def forget_statuses(self, session_id: str = "") -> None:

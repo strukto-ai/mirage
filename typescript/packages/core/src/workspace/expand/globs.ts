@@ -69,15 +69,21 @@ export interface GlobOptions {
   ignore?: readonly string[]
 }
 
-/** Whether a GLOBIGNORE pattern matches a spelled match, component by component. */
+/**
+ * Whether a GLOBIGNORE pattern matches a spelled match. A pattern matches
+ * component by component, as a pathname does, but one ending in `*` takes any
+ * components left too: bash hides `d/a` under `*` and `d*`, not under `*a`
+ * or `d`. Mirrors Python's `_ignored`.
+ */
 function ignored(spelling: string, options: GlobOptions): boolean {
   const parts = spelling.split('/')
   return (
     options.ignore?.some((pattern) => {
       const pats = globParts(pattern, options.access)
+      const openEnd = pattern.endsWith('*') && !pattern.endsWith('\\*')
       return (
-        pats.length === parts.length &&
-        pats.every((pat, i) => fnmatch(parts[i]!, pat, options.extglob))
+        (pats.length === parts.length || (openEnd && pats.length < parts.length)) &&
+        pats.every((pat, i) => fnmatch(parts[i] ?? '', pat, options.extglob))
       )
     }) ?? false
   )

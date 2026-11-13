@@ -592,7 +592,7 @@ function parseFileRedirect(child: TSNodeLike): Redirect {
   if (op !== null && DUP_OPERATORS.has(op) && dupFd === null && targetNode !== null) {
     const reading = op === NT.REDIRECT_DUP_IN
     fd ??= reading ? FD_STDIN : FD_STDOUT
-    const moved = /^([0-9]+)-$/.exec(String(target))
+    const moved = /^([0-9]+)-$/.exec(target)
     if (moved !== null) {
       return new Redirect({
         fd,

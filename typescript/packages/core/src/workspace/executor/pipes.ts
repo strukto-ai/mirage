@@ -28,7 +28,7 @@ import { CallStack } from '../../shell/call_stack.ts'
 import { type JobConsole, JobOutput } from '../../shell/console/index.ts'
 import { PipeConsole } from '../../shell/console/pipe.ts'
 import { Channel } from '../../shell/console/types.ts'
-import { SIGPIPE_STATUS } from '../../shell/constants.ts'
+import { FD_STDIN, SIGPIPE_STATUS } from '../../shell/constants.ts'
 import type { Recorder } from '../../shell/descriptors.ts'
 import { ExitSignal, PipeClosed, ReturnSignal } from '../../shell/errors.ts'
 import { type JobTable, JobWaits } from '../../execution/job/index.ts'
@@ -45,7 +45,7 @@ import { ExecutionNode } from '../types.ts'
 import { StatementRecorder } from '../node/program.ts'
 import { divertStatement, divertedFile } from './builtins/exec/index.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
-import { carried, ended, isUnwinding } from './control.ts'
+import { carried, ended, isUnwinding, type Unwinding } from './control.ts'
 import {
   handleBackground,
   oneProgram,
@@ -128,6 +128,10 @@ export async function handlePipe(
   let failed = false
   const tasks: Promise<void>[] = []
   const stages: (ProcessHandle | null)[] = commands.map(() => null)
+  // What the last stage, run in this shell, unwound with (`return`,
+  // `break`): it goes on past the pipeline once the other stages end,
+  // with what they wrote.
+  const unwinding: Unwinding[] = []
   const launch = (cmd: TSNodeLike, i: number): Promise<void> => {
     // Each segment is a child shell: bash forks one per stage, which a signal
     // stops on its own, its status 128 plus it, and which hands a QUIT to the
@@ -173,6 +177,18 @@ export async function handlePipe(
         child.jobWaits = waits
       }
       const rest = session.jobOutput ?? session.tty.jobs
+      // bash dups the pipe onto its own fd 0 for the stage it runs itself and
+      // puts fd 0 back after, so an `exec <` there ends with the stage; the
+      // input it replaced stays open till then.
+      const fd0 = {
+        execStdin: session.execStdin,
+        execStdinUnreadable: session.execStdinUnreadable,
+        execStdinIdentity: session.execStdinIdentity,
+      }
+      const descriptor = session.descriptors.get(FD_STDIN)
+      const borrowed = session.borrowed
+      if (inParent && session.execStdin !== null)
+        session.borrowed = [...borrowed, session.execStdin]
       try {
         const statement = async (): Promise<RedirectResult> => {
           const [out, ran, node] = await executeNode(cmd, childEvaluation, input, stageStack, {
@@ -199,8 +215,9 @@ export async function handlePipe(
       } catch (error) {
         if (error instanceof PipeClosed) {
           io.exitCode = SIGPIPE_STATUS
+        } else if (isUnwinding(error) && inParent) {
+          unwinding.push(error)
         } else if (isUnwinding(error)) {
-          if (inParent) throw error
           // A stage is a subshell: whatever unwinds ends it there, a simple
           // command the top shell forked as that shell would.
           const unwound = ended(error, simpleCommand(cmd) && !forked)
@@ -222,7 +239,14 @@ export async function handlePipe(
         ios[i] = io
         childNodes[i] = childExec
         if (failed) await discardIo(io)
-        if (!inParent) await child.closeInputs()
+        if (inParent) {
+          const left = session.openInputs()
+          Object.assign(session, fd0)
+          if (descriptor === undefined) session.descriptors.delete(FD_STDIN)
+          else session.descriptors.set(FD_STDIN, descriptor)
+          session.borrowed = borrowed
+          await session.releaseInputs(left)
+        } else await child.closeInputs()
       }
     }
     const isolated = () =>
@@ -288,6 +312,11 @@ export async function handlePipe(
       // line reads on from it.
       await discardStreams(lastStdout, stdin === session.execStdin ? null : stdin)
     }
+  }
+  const [unwound] = unwinding
+  if (unwound !== undefined) {
+    const stderr = concat(await Promise.all(ios.map((io) => materialize(io.stderr))))
+    throw await carried(unwound, lastStdout, new IOResult({ stderr }))
   }
 
   const lastIo = ios[ios.length - 1] ?? new IOResult()

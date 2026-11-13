@@ -148,10 +148,10 @@
         "disk",
         "opfs"
       ],
-      "command": "(shopt -s nocasematch; v=FoO; [[ $v == f* ]] && echo glob; [[ $v =~ ^(f.o)$ ]] && echo \"${BASH_REMATCH[1]}\"; case $v in f*) echo case;; esac; echo \"${v//o/[_&]}\"; [[ a == [[:upper:]] ]]; echo class:$?; shopt -u nocasematch; [[ $v == f* ]]; echo off:$?)",
+      "command": "(shopt -s nocasematch; v=FoO; [[ $v == f* ]] && echo glob; [[ $v =~ ^(f.o)$ ]] && echo \"${BASH_REMATCH[1]}\"; case $v in f*) echo case;; esac; echo \"${v//o/[_&]}\"; [[ a == [[:upper:]] ]]; echo class:$?; LC_ALL=C; [[ _ == [A-z] ]]; echo range:$?; [[ b == [A-Z] ]]; echo fold:$?; case _ in [A-z]) echo in;; *) echo out;; esac; shopt -u nocasematch; [[ $v == f* ]]; echo off:$?)",
       "expect": {
         "exit": 0,
-        "stdout": "glob\nFoO\ncase\nF[_o][_O]\nclass:1\noff:1\n",
+        "stdout": "glob\nFoO\ncase\nF[_o][_O]\nclass:1\nrange:1\nfold:0\nout\noff:1\n",
         "stderr": ""
       }
     },
@@ -163,10 +163,10 @@
         "disk",
         "opfs"
       ],
-      "command": "(f() { local v; echo \"${v-unset}\"; }; g() { local v=outer; shopt -s localvar_inherit; f; shopt -u localvar_inherit; f; echo \"$v\"; }; g)",
+      "command": "(f() { local v; echo \"${v-unset}\"; }; g() { local v=outer; shopt -s localvar_inherit; f; shopt -u localvar_inherit; f; echo \"$v\"; }; g; a=(one two); declare -A m=([k]=v); h() { shopt -s localvar_inherit; local -a a; local -A m; declare -p a m; }; h)",
       "expect": {
         "exit": 0,
-        "stdout": "outer\nunset\nouter\n",
+        "stdout": "outer\nunset\nouter\ndeclare -a a=([0]=\"one\" [1]=\"two\")\ndeclare -A m=([k]=\"v\" )\n",
         "stderr": ""
       }
     }

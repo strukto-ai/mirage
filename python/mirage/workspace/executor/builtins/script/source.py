@@ -190,8 +190,12 @@ async def handle_source(
             session.function_names = outer_names
         session.call_lines = outer_lines
         session.source_files = outer_sources
-        if not args or (frame.replaced_args and not cs.function_depth):
+        # A file sourced with no arguments shares its caller's, so a `set
+        # --` in it is the caller's own; one given arguments hands back
+        # what a `set --` made of them, outside a function only.
+        if not args:
             cs.current.replaced_args |= frame.replaced_args
+        if not args or (frame.replaced_args and not cs.function_depth):
             set_positional_params(session, cs, frame.positional)
     return (
         stdout,

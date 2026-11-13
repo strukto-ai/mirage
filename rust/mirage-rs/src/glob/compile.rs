@@ -39,9 +39,8 @@ impl Atom {
     pub(super) fn contains(self, cp: u32, nocase: bool) -> bool {
         match self {
             Self::Literal(unit) => equal(unit, cp, nocase),
-            Self::Range(lo, hi) => {
-                (lo <= cp && cp <= hi) || (nocase && (fold(lo)..=fold(hi)).contains(&fold(cp)))
-            }
+            Self::Range(lo, hi) if nocase => (fold(lo)..=fold(hi)).contains(&fold(cp)),
+            Self::Range(lo, hi) => lo <= cp && cp <= hi,
             Self::Class(class) => class.contains(cp),
         }
     }

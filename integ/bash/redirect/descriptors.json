@@ -1529,6 +1529,21 @@
         "stdout": "|ok|1\nokempty:1\nexplicit:1\n",
         "stderr": "bash: line 1: \"$fd\": Bad file descriptor\nbash: line 1: 3: Bad file descriptor\n"
       }
+    },
+    {
+      "id": "redirect_descriptor_moves",
+      "seq": 1380030,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "(exec 3>{mount}/fd_move_out; echo hi >&3; exec 4>&3-; echo more >&4; echo x >&3; echo closed:$?; cat {mount}/fd_move_out; printf 'abc\\n' > {mount}/fd_move_in; exec 5<{mount}/fd_move_in; cat <&5-; cat <&5; echo kept:$?; rm {mount}/fd_move_out {mount}/fd_move_in)",
+      "expect": {
+        "exit": 0,
+        "stdout": "closed:1\nhi\nmore\nabc\nkept:0\n",
+        "stderr": "bash: line 1: 3: Bad file descriptor\n"
+      }
     }
   ]
 }

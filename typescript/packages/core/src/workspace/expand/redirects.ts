@@ -103,7 +103,8 @@ async function expandTarget(
       links,
       globOptions(session),
     )
-    if (targets.length !== 1) {
+    const [target] = targets
+    if (target === undefined || targets.length !== 1) {
       return new Redirect({
         fd: r.fd,
         target: r.target,
@@ -111,7 +112,6 @@ async function expandTarget(
         kind: RedirectKind.AMBIGUOUS,
       })
     }
-    const target = targets[0]!
     targetScope = target
     if (r.kind === RedirectKind.DUP_INPUT || r.kind === RedirectKind.DUP_OUTPUT) {
       const word = wordText(target)

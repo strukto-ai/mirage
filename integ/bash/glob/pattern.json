@@ -43,10 +43,10 @@
         "disk",
         "opfs"
       ],
-      "command": "(mkdir -p {mount}/globignore_path_components; cd {mount}/globignore_path_components; mkdir gi; cd gi; touch keep skip .dot; mkdir d; touch d/keep d/skip; GLOBIGNORE=skip:d/skip; printf '<%s>\\n' * d/*; shopt -q dotglob; echo dot:$?; shopt -u dotglob; printf '<%s>\\n' *; unset GLOBIGNORE; printf '<%s>\\n' *)",
+      "command": "(mkdir -p {mount}/globignore_path_components; cd {mount}/globignore_path_components; mkdir gi; cd gi; touch keep skip .dot; mkdir d; touch d/keep d/skip; GLOBIGNORE=skip:d/skip; printf '<%s>\\n' * d/*; shopt -q dotglob; echo dot:$?; shopt -u dotglob; printf '<%s>\\n' *; GLOBIGNORE='d*'; printf '[%s]\\n' d/*; GLOBIGNORE='*p'; printf '[%s]\\n' d/*; unset GLOBIGNORE; printf '<%s>\\n' *)",
       "expect": {
         "exit": 0,
-        "stdout": "<.dot>\n<d>\n<keep>\n<d/keep>\ndot:0\n<d>\n<keep>\n<d>\n<keep>\n<skip>\n",
+        "stdout": "<.dot>\n<d>\n<keep>\n<d/keep>\ndot:0\n<d>\n<keep>\n[d/*]\n[d/keep]\n[d/skip]\n<d>\n<keep>\n<skip>\n",
         "stderr": ""
       }
     }

@@ -92,7 +92,7 @@ pub fn line(name: &str, var: &Var) -> Vec<u8> {
 
 /// A name the shell computes, as a read of it holds it now, over the
 /// attributes its own record adds: `PIPESTATUS` once a command has run,
-/// `FUNCNAME` and `BASH_LINENO` as arrays, `FUNCNAME` declared and never
+/// `FUNCNAME`, `BASH_LINENO` and `BASH_SOURCE` as arrays, `FUNCNAME` declared and never
 /// assigned outside a function, `LINENO` and `BASHPID` as scalars, and
 /// `BASHPID` and `RANDOM` integers, `RANDOM` holding its last draw. None
 /// for any other name, or one no longer computed.
@@ -106,8 +106,7 @@ pub fn computed(vars: &Store, name: &str) -> Option<Var> {
                 managed: None,
             });
         }
-        BASH_SOURCE if !vars.source_files.is_empty() => (Value::Indexed(vars.special(name)?), 0),
-        BASH_LINENO => (Value::Indexed(vars.special(name)?), 0),
+        BASH_LINENO | BASH_SOURCE => (Value::Indexed(vars.special(name)?), 0),
         "PIPESTATUS" | "FUNCNAME" => {
             let array = vars.special(name)?;
             if array.is_empty() && name == "PIPESTATUS" {
@@ -273,6 +272,7 @@ mod tests {
             set,
             [
                 "BASH_LINENO=()",
+                "BASH_SOURCE=()",
                 "a=([0]=\"x\" [1]=\"\\$y\")",
                 "m=([\"a b\"]=\"w\" [k]=\"v\" )",
                 "s='a b'"
@@ -295,6 +295,7 @@ mod tests {
             9,
             Vec::new(),
         );
+        vars.source_files = vec![b"environment".to_vec()];
         vars.seed("n", Value::Scalar(b"1".to_vec()));
         vars.set_attr("n", Some(INTEGER), true);
         let listed = |vars: &Store, letters| -> Vec<String> {
@@ -308,6 +309,7 @@ mod tests {
             [
                 "declare -i BASHPID",
                 "declare -a BASH_LINENO=([0]=\"3\")",
+                "declare -a BASH_SOURCE=([0]=\"environment\")",
                 "declare -a FUNCNAME=([0]=\"f\")",
                 "declare -- LINENO",
                 "declare -a PIPESTATUS=([0]=\"0\")",
@@ -323,7 +325,7 @@ mod tests {
                 "declare -i n=\"1\""
             ]
         );
-        assert_eq!(listed(&vars, "pa").len(), 3);
+        assert_eq!(listed(&vars, "pa").len(), 4);
         assert!(listed(&vars, "aA").is_empty());
         let drawn = String::from_utf8(declaration(&mut vars, RANDOM).unwrap()).unwrap();
         assert!(drawn.starts_with("declare -i RANDOM=\""), "{drawn}");
@@ -333,9 +335,10 @@ mod tests {
             .map(|line| String::from_utf8(line).unwrap())
             .collect();
         assert_eq!(
-            &set[..3],
+            &set[..4],
             [
                 "BASH_LINENO=([0]=\"3\")",
+                "BASH_SOURCE=([0]=\"environment\")",
                 "FUNCNAME=([0]=\"f\")",
                 "PIPESTATUS=([0]=\"0\")"
             ]

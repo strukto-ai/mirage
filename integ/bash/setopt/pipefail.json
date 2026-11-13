@@ -43,11 +43,11 @@
         "disk",
         "opfs"
       ],
-      "command": "(shopt -s lastpipe; x=old; printf 'new\\n' | read -r x; echo \"$x:${PIPESTATUS[*]}\"; printf x | { q=kept; cd /; }; echo \"$q:$PWD\"; (printf x | { exit 8; }; echo unexpected); echo status:$?; set -m; printf 'lost\\n' | read x; echo \"$x\")",
+      "command": "(shopt -s lastpipe; x=old; printf 'new\\n' | read -r x; echo \"$x:${PIPESTATUS[*]}\"; printf x | { q=kept; cd /; }; echo \"$q:$PWD\"; (printf x | { exit 8; }; echo unexpected); echo status:$?; f() { { sleep .05; echo marker >&2; } | return 7; }; f; echo rc:$?; sleep .1; for i in 1 2; do { sleep .05; echo up$i >&2; } | break; done; echo after; exec <<<original; printf x | { exec <<<changed; }; read -r v; echo \"in:$v\"; printf x | { exec <&-; }; read -r w; echo \"closed:$w:$?\"; set -m; printf 'lost\\n' | read x; echo \"$x\")",
       "expect": {
         "exit": 0,
-        "stdout": "new:0 0\nkept:/\nstatus:8\nnew\n",
-        "stderr": ""
+        "stdout": "new:0 0\nkept:/\nstatus:8\nrc:7\nafter\nin:original\nclosed::1\nnew\n",
+        "stderr": "marker\nup1\n"
       }
     }
   ]

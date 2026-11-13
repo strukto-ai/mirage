@@ -173,10 +173,10 @@
         "disk",
         "opfs"
       ],
-      "command": "((read -r v < <(printf 'row\\n'; exit 7); p=$!; wait \"$p\"; echo \"$v:$?\"; wait \"$p\"; echo again:$?); (cat <(exit 3) <(exit 9); wait \"$!\"; echo last:$?); (: <(sleep .05; echo late); wait \"$!\"; echo closed:$?); (: <(sleep .05; echo waited > {mount}/procsub-wait-marker; exit 5); wait; cat {mount}/procsub-wait-marker; rm {mount}/procsub-wait-marker))",
+      "command": "((read -r v < <(printf 'row\\n'; exit 7); p=$!; wait \"$p\"; echo \"$v:$?\"; wait \"$p\"; echo again:$?); (cat <(exit 3) <(exit 9); wait \"$!\"; echo last:$?); (: <(sleep .05; echo late); wait \"$!\"; echo closed:$?); (: <(sleep .05; echo waited > {mount}/procsub-wait-marker; exit 5); wait; cat {mount}/procsub-wait-marker; rm {mount}/procsub-wait-marker); (cat <(seq 1 100000) | { sleep .05; wait; echo sibling:$?; }))",
       "expect": {
         "exit": 0,
-        "stdout": "row:7\nagain:7\nlast:9\nclosed:141\nwaited\n",
+        "stdout": "row:7\nagain:7\nlast:9\nclosed:141\nwaited\nsibling:0\n",
         "stderr": ""
       }
     }

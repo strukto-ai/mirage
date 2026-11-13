@@ -890,15 +890,16 @@ export class JobTable {
     })
   }
 
-  /** Wait until the session's process substitution `pid` ends, or each of them without one. */
-  async waitSubstitution(sessionId: string, pid?: number): Promise<void> {
-    if (pid !== undefined) {
-      const process = this.substitutions.get(pid)
-      if (process?.record.sessionId === sessionId) await process.join()
-      return
-    }
-    for (const process of [...this.substitutions.values()]) {
-      if (process.record.sessionId === sessionId) await process.join()
+  /**
+   * Wait until the process substitution `pid` the shell `shell` started
+   * ends, or each it started without one. A shell waits only for its own, as
+   * bash does: never for another pipeline stage's.
+   */
+  async waitSubstitution(sessionId: string, shell: number | null, pid?: number): Promise<void> {
+    for (const [child, process] of [...this.substitutions]) {
+      const { record } = process
+      if (record.sessionId === sessionId && record.parent === shell && (pid ?? child) === child)
+        await process.join()
     }
   }
 

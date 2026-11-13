@@ -144,10 +144,12 @@ export async function handleSource(
     if (session.functionNames !== null) session.functionNames = outerNames
     session.callLines = outerLines
     session.sourceFiles = outerSources
-    if (args.length === 0 || (frame.replacedArgs && cs.functionDepth === 0)) {
-      cs.current.replacedArgs ||= frame.replacedArgs
+    // A file sourced with no arguments shares its caller's, so a `set --` in
+    // it is the caller's own; one given arguments hands back what a `set --`
+    // made of them, outside a function only.
+    if (args.length === 0) cs.current.replacedArgs ||= frame.replacedArgs
+    if (args.length === 0 || (frame.replacedArgs && cs.functionDepth === 0))
       setPositionalParams(session, cs, frame.positional)
-    }
   }
   return [stdout, io, new ExecutionNode({ command: `source ${raw}`, exitCode: io.exitCode })]
 }

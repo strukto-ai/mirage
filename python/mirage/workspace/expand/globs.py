@@ -578,8 +578,10 @@ def _match_raw(item: PathSpec, match: PathSpec) -> PathSpec:
 
 
 def _ignored(spelling: str, options: GlobOptions) -> bool:
-    """Whether a GLOBIGNORE pattern matches a spelled match, component
-    by component.
+    """Whether a GLOBIGNORE pattern matches a spelled match. A pattern
+    matches component by component, as a pathname does, but one ending
+    in `*` takes any components left too: bash hides `d/a` under `*`
+    and `d*`, not under `*a` or `d`.
 
     Args:
         spelling (str): the match as the word spells it.
@@ -588,7 +590,10 @@ def _ignored(spelling: str, options: GlobOptions) -> bool:
     parts = spelling.split("/")
     for pattern in options.ignore:
         pats = glob_parts(pattern)
-        if len(pats) == len(parts) and all(
+        open_end = pattern.endswith("*") and not pattern.endswith("\\*")
+        if (
+            len(pats) == len(parts) or (open_end and len(pats) < len(parts))
+        ) and all(
             fnmatch(part, pat, extglob=options.extglob)
             for part, pat in zip(parts, pats)
         ):
