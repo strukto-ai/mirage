@@ -25,11 +25,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "cat <({ echo out; echo err >&2; })",
+      "command": "cat <({ echo out; echo err >&2; }); : <(sleep .05; echo late >&2) | cat; sleep .3; x=$( { : <(sleep .05; echo cap >&2); } 2>&1 ); echo \"[$x]\"; { : <(sleep .05; echo piped >&2); } 2>&1 | cat; echo end",
       "expect": {
         "exit": 0,
-        "stdout": "out\n",
-        "stderr": "err\n"
+        "stdout": "out\n[cap]\npiped\nend\n",
+        "stderr": "err\nlate\n"
       }
     },
     {

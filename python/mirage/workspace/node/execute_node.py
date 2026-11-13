@@ -116,7 +116,6 @@ from mirage.workspace.executor.control import (
     handle_if,
     handle_select,
     handle_while,
-    trailed,
 )
 from mirage.workspace.executor.pipes import (
     handle_connection,
@@ -904,7 +903,7 @@ async def execute_node(
     )
     # The node's own `<(...)` files go when it ends, so a command still
     # reading one is read out first.
-    process_subs = ProcessSubScope(context, registry, job_table, sink)
+    process_subs = ProcessSubScope(context, registry, job_table)
     previous = context.frame.process_sub
     context.frame.process_sub = process_subs.open
     writers = context.frame.writers
@@ -943,11 +942,11 @@ async def execute_node(
             finally:
                 context.frame.diagnostics = outer
                 context.frame.reports = outer_reports
-        return process_subs.own(stdout, io, exec_node), io, exec_node
-    except Unwinding as sig:
+        return process_subs.own(stdout), io, exec_node
+    except Unwinding:
         # `exit`, `return` or `break` ends the node as its last command
         # did: output consumers finish, rather than being cut off.
-        await trailed(sig, *await process_subs.settle())
+        await process_subs.close()
         raise
     except BaseException:
         await process_subs.close(True)

@@ -23,8 +23,8 @@ from mirage.execution.process.handle import ProcessHandle
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.errors import PipeClosed
 from mirage.io.pipe import BytePipe
-from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.shell.console import Channel, JobConsole, Terminal
+from mirage.io.types import ByteSource, materialize
+from mirage.shell.console import Channel, JobConsole
 from mirage.shell.helpers import (
     get_process_sub_body,
     get_process_sub_direction,
@@ -33,10 +33,10 @@ from mirage.shell.parse.program import retain_programs
 from mirage.shell.types import ProcessSubDirection, TSNodeLike
 from mirage.vfs.dev.dev import DevVFS
 from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.background import job_streams
 from mirage.workspace.frame import ProcessSubLine
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.node.types import Substitution
-from mirage.workspace.types import ExecutionNode
 
 logger = logging.getLogger(__name__)
 
@@ -86,13 +86,10 @@ class ProcessSubScope:
         context: EvaluationContext,
         registry: MountRegistry,
         jobs: JobTable,
-        sink: JobConsole | None = None,
     ) -> None:
         self.jobs = jobs
         self.context = context
         self.registry = registry
-        self.sink = sink
-        self.capture = Terminal()
         self.held: list[Substitution] = []
         self.closed = False
 
@@ -106,7 +103,12 @@ class ProcessSubScope:
             get_process_sub_direction(node) != ProcessSubDirection.OUTPUT
         )
         path, allocation = dev.allocate_input(endpoint)
-        output = SubstitutionConsole(endpoint, self.sink or self.capture)
+        session = self.context.session
+        # A producer is a child of the shell, as bash forks it: what it
+        # writes past its pipe goes where that shell's jobs write, into
+        # the statement running then or, once that has ended, on out.
+        jobs = session.job_output or session.tty.jobs
+        output = SubstitutionConsole(endpoint, jobs)
         writers = self.context.frame.writers
         begun: asyncio.Future[None] = (
             asyncio.get_running_loop().create_future()
@@ -138,6 +140,18 @@ class ProcessSubScope:
 
         task.add_done_callback(finished)
         self.held.append(Substitution(dev, path, allocation, endpoint, task))
+        # Like a job, it holds open a capture (`$( )`, a pipe stage) one of
+        # its streams leads into, which waits for it.
+        streams = job_streams(node, session)
+        if endpoint.readable:
+            streams.discard(Channel.STDOUT)
+        waits = session.job_waits
+        if waits is not None and waits.reaches(jobs, streams):
+
+            async def ended() -> None:
+                await asyncio.wait((task,))
+
+            waits.add(ended)
         # A `<( )` the command reads starts first, as bash forks it, so
         # the command's program knows the process writing the path; a
         # `>( )` starts after the command, so it cannot close its pipe
@@ -239,22 +253,10 @@ class ProcessSubScope:
             source.pipe = None
         return held
 
-    async def settle(self) -> tuple[bytes, bytes]:
-        """End the substitutions as a finished command does, for a node
-        ``exit``, ``return`` or ``break`` leaves, and return what they
-        wrote to the capture, stdout then stderr.
-        """
-        await self.close()
-        return self.capture.take()
+    def own(self, stdout: ByteSource | None) -> ByteSource | None:
+        return self._output(stdout) if self.held else stdout
 
-    def own(
-        self, stdout: ByteSource | None, io: IOResult, node: ExecutionNode
-    ) -> ByteSource | None:
-        return self._output(stdout, io, node) if self.held else stdout
-
-    async def _output(
-        self, stdout: ByteSource | None, io: IOResult, node: ExecutionNode
-    ) -> AsyncIterator[bytes]:
+    async def _output(self, stdout: ByteSource | None) -> AsyncIterator[bytes]:
         completed = False
         try:
             if isinstance(stdout, bytes):
@@ -266,9 +268,3 @@ class ProcessSubScope:
             completed = True
         finally:
             await self.close(not completed)
-            out, err = self.capture.take()
-            if err:
-                io.stderr = await materialize(io.stderr) + err
-                node.stderr = io.stderr
-            if completed and out:
-                yield out

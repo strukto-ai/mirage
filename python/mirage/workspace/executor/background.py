@@ -225,7 +225,7 @@ async def _send_stderr(sink: JobConsole, io: IOResult) -> None:
         io.stderr = None
 
 
-def _job_streams(
+def job_streams(
     node: TSNodeLike, session: SessionState
 ) -> set[Channel | OwnedStream]:
     """The streams a job started from ``node`` writes, as its shell hands
@@ -916,10 +916,8 @@ async def handle_background(
         await job.process.stages[-1].placed(RUN_START_WAIT_SECONDS)
     session.last_bg_job_id = job.last_pid
     waits = session.job_waits
-    if waits is not None and waits.reaches(
-        output, _job_streams(left, session)
-    ):
-        waits.add(job)
+    if waits is not None and waits.reaches(output, job_streams(left, session)):
+        waits.add(job.console.wait_finished)
 
     if right is None:
         return (

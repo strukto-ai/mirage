@@ -165,6 +165,18 @@ async def test_cancel_joins_children_and_releases_descriptors(command):
                 "not supported\n",
             ),
         ),
+        (
+            ": <(sleep .05; echo late >&2) | cat; sleep .3; echo end",
+            (0, "end\n", "late\n"),
+        ),
+        (
+            'x=$( { : <(sleep .05; echo cap >&2); } 2>&1 ); echo "[$x]"',
+            (0, "[cap]\n", ""),
+        ),
+        (
+            "{ : <(sleep .05; echo piped >&2); } 2>&1 | cat; echo end",
+            (0, "piped\nend\n", ""),
+        ),
     ],
 )
 async def test_line_releases_its_descriptors(command, expected):

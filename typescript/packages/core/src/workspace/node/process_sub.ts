@@ -17,18 +17,17 @@ import { DevicePipe } from '../../core/dev/pipe.ts'
 import type { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import type { BytePipe } from '../../io/pipe.ts'
 import { PipeClosed } from '../../io/errors.ts'
-import { materialize, type ByteSource, type IOResult } from '../../io/types.ts'
-import { Channel, JobConsole, Terminal } from '../../shell/console/index.ts'
+import { materialize, type ByteSource } from '../../io/types.ts'
+import { Channel, JobConsole } from '../../shell/console/index.ts'
 import { retainPrograms } from '../../shell/parse/program.ts'
 import { getProcessSubBody, getProcessSubDirection } from '../../shell/helpers.ts'
 import { ProcessSubDirection, type TSNodeLike } from '../../shell/types.ts'
 import { runCancellable, mergeSignals } from '../../utils/abort.ts'
-import { concat } from '../../utils/bytes.ts'
 import { DevVFS } from '../../vfs/dev/dev.ts'
 import type { EvaluationContext } from '../evaluation.ts'
+import { jobStreams } from '../executor/background.ts'
 import type { ProcessSubLine } from '../frame.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import type { ExecutionNode } from '../types.ts'
 import type { Substitution } from './types.ts'
 
 class SubstitutionConsole extends JobConsole {
@@ -68,14 +67,12 @@ async function closeReaders(endpoint: DevicePipe): Promise<void> {
 /** Own the virtual descriptors and auxiliary children of one command node. */
 export class ProcessSubScope {
   private readonly held: Substitution[] = []
-  private readonly capture = new Terminal()
   private closing: Promise<void> | undefined
 
   constructor(
     private readonly context: EvaluationContext,
     private readonly registry: MountRegistry,
     private readonly jobs: JobTable,
-    private readonly sink?: JobConsole,
     private readonly signal?: AbortSignal,
   ) {}
 
@@ -98,7 +95,12 @@ export class ProcessSubScope {
       signal,
       task: Promise.resolve(),
     }
-    const output = new SubstitutionConsole(endpoint, this.sink ?? this.capture, abort)
+    const session = this.context.session
+    // A producer is a child of the shell, as bash forks it: what it writes
+    // past its pipe goes where that shell's jobs write, into the statement
+    // running then or, once that has ended, on out.
+    const jobs = session.jobOutput ?? session.tty.jobs
+    const output = new SubstitutionConsole(endpoint, jobs, abort)
     const writers = this.context.frame.writers
     let begin = (): void => undefined
     const begun = new Promise<void>((resolve) => {
@@ -117,7 +119,7 @@ export class ProcessSubScope {
           started: (process) => {
             const pid = process.record.id.pid
             if (endpoint.readable) writers.push([path, pid])
-            this.context.session.lastBgJobId = pid
+            session.lastBgJobId = pid
             this.jobs.trackSubstitution(process)
             begin()
           },
@@ -141,6 +143,11 @@ export class ProcessSubScope {
         else endpoint.pipe.closeReader()
       })
     this.held.push(child)
+    // Like a job, it holds open a capture (`$( )`, a pipe stage) one of its
+    // streams leads into, which waits for it.
+    const streams = jobStreams(node, session)
+    if (endpoint.readable) streams.delete(Channel.STDOUT)
+    if (session.jobWaits?.reaches(jobs, streams) === true) session.jobWaits.add(() => child.task)
     // A `<( )` the command reads has started before the command does, as bash
     // forks it, so the command's program knows the process writing the path.
     if (endpoint.readable) await begun
@@ -208,25 +215,11 @@ export class ProcessSubScope {
     return held
   }
 
-  /**
-   * End the substitutions as a finished command does, for a node `exit`,
-   * `return` or `break` leaves, and return what they wrote to the capture,
-   * stdout then stderr. Mirrors Python's settle.
-   */
-  async settle(): Promise<[Uint8Array, Uint8Array]> {
-    await this.close()
-    return this.capture.take()
+  own(stdout: ByteSource | null): ByteSource | null {
+    return this.held.length === 0 ? stdout : this.output(stdout)
   }
 
-  own(stdout: ByteSource | null, io: IOResult, node: ExecutionNode): ByteSource | null {
-    return this.held.length === 0 ? stdout : this.output(stdout, io, node)
-  }
-
-  private async *output(
-    stdout: ByteSource | null,
-    io: IOResult,
-    node: ExecutionNode,
-  ): AsyncGenerator<Uint8Array> {
+  private async *output(stdout: ByteSource | null): AsyncGenerator<Uint8Array> {
     let completed = false
     try {
       if (stdout instanceof Uint8Array) {
@@ -235,12 +228,6 @@ export class ProcessSubScope {
       completed = true
     } finally {
       await this.close(!completed)
-      const [out, err] = this.capture.take()
-      if (err.byteLength > 0) {
-        io.stderr = concat([await materialize(io.stderr), err])
-        node.stderr = io.stderr
-      }
-      if (completed && out.byteLength > 0) yield out
     }
   }
 }

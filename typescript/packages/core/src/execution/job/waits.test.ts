@@ -29,29 +29,27 @@ describe('JobWaits', () => {
       open = resolve
     })
     const finished: string[] = []
-    waits.add(
-      await table.submit({
-        command: 'first',
-        abort: new AbortController(),
-        cwd: '/',
-        run: async () => {
-          waits.add(
-            await table.submit({
-              command: 'late',
-              abort: new AbortController(),
-              cwd: '/',
-              run: async () => {
-                await gate
-                finished.push('late')
-                return [new IOResult(), new ExecutionNode({ command: 'late' })] as JobResult
-              },
-            }),
-          )
-          finished.push('first')
-          return [new IOResult(), new ExecutionNode({ command: 'first' })] as JobResult
-        },
-      }),
-    )
+    const first = await table.submit({
+      command: 'first',
+      abort: new AbortController(),
+      cwd: '/',
+      run: async () => {
+        const late = await table.submit({
+          command: 'late',
+          abort: new AbortController(),
+          cwd: '/',
+          run: async () => {
+            await gate
+            finished.push('late')
+            return [new IOResult(), new ExecutionNode({ command: 'late' })] as JobResult
+          },
+        })
+        waits.add(() => late.console.waitFinished())
+        finished.push('first')
+        return [new IOResult(), new ExecutionNode({ command: 'first' })] as JobResult
+      },
+    })
+    waits.add(() => first.console.waitFinished())
     let joined = false
     const join = waits.join(new JobConsole()).then(() => {
       joined = true

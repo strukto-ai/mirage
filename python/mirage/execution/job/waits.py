@@ -12,15 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.execution.job.handle import JobHandle
+from collections.abc import Awaitable, Callable
+
 from mirage.shell.console import Channel, JobConsole, JobOutput, OwnedStream
 
 
 class JobWaits:
-    """The background jobs started inside a capture (``$( )``, a pipe
-    stage), which the capture waits for before it ends: bash reads the
-    pipe until every writer has closed it, and a job holds it open for as
-    long as one of its streams leads into it.
+    """The background jobs and process substitutions started inside a
+    capture (``$( )``, a pipe stage), which the capture waits for before
+    it ends: bash reads the pipe until every writer has closed it, and a
+    child holds it open for as long as one of its streams leads into it.
 
     Args:
         output (JobOutput): where the capture's jobs write, at its edge.
@@ -33,7 +34,7 @@ class JobWaits:
         output: JobOutput,
         channels: frozenset[Channel] = frozenset({Channel.STDOUT}),
     ) -> None:
-        self.jobs: list[JobHandle] = []
+        self.ends: list[Callable[[], Awaitable[None]]] = []
         self.output = output
         self.channels = channels
 
@@ -63,24 +64,25 @@ class JobWaits:
             for stream in left
         )
 
-    def add(self, job: JobHandle) -> None:
-        """Count a job the capture has to outlast.
+    def add(self, ended: Callable[[], Awaitable[None]]) -> None:
+        """Count a child the capture has to outlast.
 
         Args:
-            job (JobHandle): the job.
+            ended (Callable[[], Awaitable[None]]): returns once the child
+                has ended.
         """
-        self.jobs.append(job)
+        self.ends.append(ended)
 
     async def join(self, rest: JobConsole) -> None:
-        """Return once every job writing into the capture has ended; what
-        the capture's other jobs write from then on goes to ``rest``,
-        where the capture's caller writes.
+        """Return once every child writing into the capture has ended;
+        what the capture's other children write from then on goes to
+        ``rest``, where the capture's caller writes.
 
         Args:
             rest (JobConsole): where the capture's caller writes.
         """
-        # A job added while this waits is still reached: the loop reads
+        # A child added while this waits is still reached: the loop reads
         # the list as it grows.
-        for job in self.jobs:
-            await job.console.wait_finished()
+        for ended in self.ends:
+            await ended()
         self.output.target = rest

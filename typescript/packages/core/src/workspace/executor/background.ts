@@ -197,7 +197,7 @@ class JobCopy extends JobConsole {
  * job's own redirects (`sleep 9 >/dev/null &`). A stream sent to a file
  * or closed is gone.
  */
-function jobStreams(node: TSNodeLike, session: SessionState): Set<Channel | OwnedStream> {
+export function jobStreams(node: TSNodeLike, session: SessionState): Set<Channel | OwnedStream> {
   const fds = new Map<number, Channel | OwnedStream | null>([
     [1, Channel.STDOUT],
     [2, Channel.STDERR],
@@ -795,7 +795,7 @@ export async function handleBackground(
     await lastStage.placed(RUN_START_WAIT_SECONDS)
   session.lastBgJobId = job.lastPid
   if (session.jobWaits?.reaches(output, jobStreams(left, session)) === true)
-    session.jobWaits.add(job)
+    session.jobWaits.add(() => job.console.waitFinished())
 
   if (right === null) {
     const tree = new ExecutionNode({
