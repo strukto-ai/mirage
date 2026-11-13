@@ -104,6 +104,7 @@ from mirage.server.ssh.config import SSHConfig, resolve_ssh_config
 from mirage.server.ssh.constants import SERVER_MODULE
 from mirage.server.ssh.errors import SSHConfigError
 from mirage.server.ssh.types import SSHListener, StartSSH
+from mirage.server.trace import TraceContextMiddleware
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.record.disk import DiskRecordClient
 
@@ -487,6 +488,7 @@ def build_app(
     proxies = resolve_forwarded_allow_ips(forwarded_allow_ips)
     if proxies:
         app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=proxies)
+    app.add_middleware(TraceContextMiddleware)
     app.state.allowed_hosts = hosts
     app.state.auth_config = auth
     app.state.started_at = time.time()
