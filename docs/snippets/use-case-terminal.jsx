@@ -1,4 +1,4 @@
-export const UseCaseTerminal = ({ services, steps, extras = [], reads = "The agent reads and writes", terminal = "Runs in one terminal", server = "on a Mirage server of its own, or embedded in your agent's server" }) => {
+export const UseCaseTerminal = ({ services, steps, extras = [], reads = "The agent reads and writes", terminal = "Runs in one terminal", server = "its own server, or a library in your app" }) => {
   const [pos, setPos] = useState({ step: steps.length, chars: 0, output: true })
 
   useEffect(() => {
