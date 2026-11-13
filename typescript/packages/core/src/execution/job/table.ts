@@ -896,11 +896,16 @@ export class JobTable {
    * ends, or each it started without one. A shell waits only for its own, as
    * bash does: never for another pipeline stage's.
    */
-  async waitSubstitution(sessionId: string, shell: number | null, pid?: number): Promise<void> {
+  async waitSubstitution(
+    sessionId: string,
+    shell: number | null,
+    pid?: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
     for (const [child, process] of [...this.substitutions]) {
       const { record } = process
       if (record.sessionId === sessionId && record.parent === shell && (pid ?? child) === child)
-        await this.substitutionEnded(process)
+        await this.substitutionEnded(process, signal)
     }
   }
 
@@ -908,14 +913,15 @@ export class JobTable {
    * Wait for a substitution's process to end. On an edge runtime the request
    * that runs it may not be the one waiting, and a wake from that one would
    * run this waiter inside it, so the waiter looks on its own timer instead,
-   * every 10 ms, as a polled `BytePipe` does.
+   * every 10 ms, as a polled `BytePipe` does, until `signal` cancels the wait.
    */
-  private async substitutionEnded(process: ProcessHandle): Promise<void> {
+  private async substitutionEnded(process: ProcessHandle, signal?: AbortSignal): Promise<void> {
     if (currentRequest() === null) {
       await process.join()
       return
     }
-    while (process.record.endedAt === null) await new Promise((resolve) => setTimeout(resolve, 10))
+    while (process.record.endedAt === null && signal?.aborted !== true)
+      await new Promise((resolve) => setTimeout(resolve, 10))
   }
 
   /**
