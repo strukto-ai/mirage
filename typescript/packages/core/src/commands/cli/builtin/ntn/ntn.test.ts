@@ -24,6 +24,7 @@ import { api } from './api.ts'
 import { create } from './pages/create.ts'
 import { edit } from './pages/edit.ts'
 import { trash } from './pages/trash.ts'
+import { token } from './auth/token.ts'
 import { query } from './datasources/query.ts'
 import { whoamiRow } from './whoami.ts'
 import { notionTransport, propertyCell } from './util.ts'
@@ -197,6 +198,16 @@ describe('ntn verbs', () => {
     const [, done] = unwrap(await trash(ACCESSOR, [], ['P2'], context({ flags: { yes: true } })))
     expect(CALLS[0]).toEqual({ name: 'API-patch-page', args: { in_trash: true, page_id: 'P2' } })
     expect(DEC.decode(done.stderr as Uint8Array)).toBe('✔ Page trashed\n')
+  })
+
+  it('auth token refuses and never prints the key', () => {
+    const [out, refused] = unwrap(token(ACCESSOR, [], [], context()))
+    expect(out).toBeNull()
+    expect(refused.exitCode).toBe(1)
+    expect(DEC.decode(refused.stderr as Uint8Array)).toBe(
+      'error: The authentication token stays in Mirage configuration and is never printed.\n' +
+        '  hint: ntn commands use it directly.\n',
+    )
   })
 
   it('datasources query sends one page and sorts its columns by name', async () => {

@@ -59,9 +59,38 @@
         "cli-ntn"
       ],
       "command": "ntn auth token",
+      "conformance_skip": "the token stays in Mirage configuration; the real ntn prints it",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "error: The authentication token stays in Mirage configuration and is never printed.\n  hint: ntn commands use it directly.\n"
+      }
+    },
+    {
+      "id": "ntn_auth_token_never_reaches_stdout",
+      "seq": 566081,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "echo \"[$(ntn auth token 2>/dev/null)]\"; ntn auth token > /scratch/token 2>/dev/null; echo $?; wc -c < /scratch/token",
+      "conformance_skip": "the token stays in Mirage configuration; the real ntn prints it",
       "expect": {
         "exit": 0,
-        "stdout": "integ-test\n",
+        "stdout": "[]\n1\n0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_auth_token_help_describes_refusal",
+      "seq": 566082,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn auth token --help | head -n 1",
+      "conformance_skip": "the help names the refusal; the real ntn describes printing the token",
+      "expect": {
+        "exit": 0,
+        "stdout": "Token display is unavailable in Mirage\n",
         "stderr": ""
       }
     },

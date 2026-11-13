@@ -30,7 +30,7 @@ This list is generated from Mirage's registered command tree.
 | Command | Description |
 | --- | --- |
 | `ntn api` | Call the public Notion API (beta) |
-| `ntn auth token` | Print the current authentication token |
+| `ntn auth token` | Token display is unavailable in Mirage |
 | `ntn datasources query` | Query pages in a data source |
 | `ntn datasources resolve` | Resolve a Notion database ID to its data source IDs |
 | `ntn files create` | Create a file upload from stdin or an external URL |
@@ -112,7 +112,8 @@ use API paths; they are not separate command groups.
 The optional [Notion VFS](/typescript/setup/notion) provides page and database
 files. Reuse its IDs, or obtain them through the API; no mount is required.
 Interactive login/logout, update, workers, deployment and file-management
-commands are absent. The config supplies the credential.
+commands are absent. The config supplies the credential, and
+`ntn auth token` refuses to print it.
 
 Command-line parsing follows CLAP style. Exit codes distinguish these failures:
 
@@ -120,6 +121,7 @@ Command-line parsing follows CLAP style. Exit codes distinguish these failures:
 | --- | --- |
 | Unknown options or missing required arguments, such as `ntn --bogus` or `ntn pages get` | 2 |
 | Invalid JSON in a nonempty `ntn api --data` body or stdin | 1 |
+| `ntn auth token`, which never prints the token | 1 |
 | Empty `--data`, invalid inline request input, or conflicting body sources | 5 |
 | Notion API authentication failure (HTTP 401) | 4 |
 | Other Notion API failures | 5 |
