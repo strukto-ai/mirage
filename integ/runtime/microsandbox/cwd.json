@@ -11,19 +11,12 @@
         "machines": {
           "box": {
             "provider": "microsandbox",
-            "sandbox": "${MIRAGE_INTEG_MICROSANDBOX_SANDBOX}"
-          }
-        },
-        "runtimes": [
-          {
-            "name": "remote",
+            "sandbox": "${MIRAGE_INTEG_MICROSANDBOX_SANDBOX}",
             "captures": [
               "uname"
-            ],
-            "machine": "box"
-          },
-          "workspace"
-        ],
+            ]
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"

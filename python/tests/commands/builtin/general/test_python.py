@@ -21,12 +21,13 @@ import pytest_asyncio
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.io.types import materialize
 from mirage.runtime.python import LocalRuntime
+from mirage.runtime.python.monty import MontyRuntime
 
 
 @pytest_asyncio.fixture
 async def ws():
     workspace = Workspace(
-        {"/": RAMVFS()}, mode=MountMode.EXEC, runtimes=["monty", "workspace"]
+        {"/": RAMVFS()}, mode=MountMode.EXEC, machines=[MontyRuntime()]
     )
     yield workspace
     await workspace.close()
@@ -35,7 +36,7 @@ async def ws():
 @pytest_asyncio.fixture
 async def ws_cpython():
     workspace = Workspace(
-        {"/": RAMVFS()}, mode=MountMode.EXEC, runtimes=[LocalRuntime()]
+        {"/": RAMVFS()}, mode=MountMode.EXEC, machines=[LocalRuntime()]
     )
     yield workspace
     await workspace.close()
@@ -60,7 +61,7 @@ async def test_a_rule_on_the_script_reads_it_however_it_is_typed(line, shown):
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
         profiles={"guarded": GUARDED},
-        runtimes=["monty", "workspace"],
+        machines=[MontyRuntime()],
     )
     try:
         await ws.shell("printf 'print(1)\\n' > /secret.py")
@@ -82,7 +83,7 @@ async def test_a_rule_on_python3_reaches_its_own_open():
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
         profiles={"guarded": GUARDED},
-        runtimes=["monty", "workspace"],
+        machines=[MontyRuntime()],
     )
     try:
         await ws.shell("printf 'print(1)\\n' > /secret.py")
@@ -106,7 +107,7 @@ async def test_the_words_after_the_script_stay_its_argv(line):
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
         profiles={"guarded": GUARDED},
-        runtimes=["monty", "workspace"],
+        machines=[MontyRuntime()],
     )
     try:
         await ws.shell("printf 'print(argv[1:])\\n' > /s.py")
@@ -123,7 +124,7 @@ async def two_mounts():
     workspace = Workspace(
         {"/w": RAMVFS(), "/t": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=["monty", "workspace"],
+        machines=[MontyRuntime()],
     )
     await workspace.shell("mkdir -p /w")
     await workspace.shell("printf 'print(argv[1:])\\n' > /w/s.py")
@@ -242,7 +243,7 @@ async def test_program_version_operand_is_not_intercepted(ws):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name", ["node"])
 async def test_version_without_a_runtime_uses_the_invoked_name(name):
-    ws = Workspace({"/": RAMVFS()}, runtimes=[])
+    ws = Workspace({"/": RAMVFS()}, machines=[])
     try:
         io = await ws.shell(f"{name} --version")
         assert io.exit_code == 127
@@ -267,7 +268,7 @@ async def test_missing_script_uses_the_invoked_name(ws):
 async def test_an_unbound_interpreter_answers_127_before_its_script(line):
     # bash answers a missing command before it looks at any operand, so
     # neither a missing script nor a mode without x changes the answer.
-    ws = Workspace({"/": RAMVFS()}, mode=MountMode.READ, runtimes=[])
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.READ, machines=[])
     try:
         io = await ws.shell(line)
         name = line.split()[0]

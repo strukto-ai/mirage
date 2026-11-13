@@ -29,7 +29,6 @@ import { logger } from '../handle.ts'
 import { buildMachine } from '../registry.ts'
 import { OPEN } from '../../mount/constants.ts'
 import '../../mount/sftp.ts'
-import { RemoteRuntime } from '../../runtime/machine/runtime.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { concat } from '../../utils/bytes.ts'
@@ -807,8 +806,9 @@ describe('ContainerMachine in a workspace', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        machines: { box: new ContainerMachine('box', { mountType: 'ssh' }, box, start) },
-        runtimes: [new RemoteRuntime({ machine: 'box', captures: ['python3'] }), 'workspace'],
+        machines: {
+          box: new ContainerMachine('box', { mountType: 'ssh', captures: ['python3'] }, box, start),
+        },
       },
     )
     try {
@@ -838,8 +838,9 @@ describe('ContainerMachine in a workspace', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        machines: { box: new ContainerMachine('box', { mountType: 'ssh' }, box, start) },
-        runtimes: [new RemoteRuntime({ machine: 'box', captures: ['python3'] }), 'workspace'],
+        machines: {
+          box: new ContainerMachine('box', { mountType: 'ssh', captures: ['python3'] }, box, start),
+        },
       },
     )
     try {

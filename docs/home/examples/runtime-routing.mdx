@@ -4,10 +4,10 @@ icon: route
 description: Route each line with a policy script, first a fixed one and then one that asks an LLM, so plain Python stays in-process and only GPU work reaches a Daytona GPU sandbox.
 ---
 
-Mirage picks a runtime for every command line. Most Python an agent writes
-runs on [Monty](/home/setup/runtime/monty), in-process and at no
-infrastructure cost. A line that needs a GPU has to run on one, and a GPU is
-billed while it runs. A [route policy](/home/policy/route-runtime) makes that
+Mirage picks a machine for every command line. Most Python an agent writes
+runs on [Monty](/home/setup/runtime/monty), at no infrastructure
+cost. A line that needs a GPU has to run on one, and a GPU is
+billed while it runs. A [route policy](/home/policy/route-machine) makes that
 choice per line. This example sends GPU work to a
 [Daytona](/home/setup/machine/daytona) GPU sandbox and keeps
 everything else on Monty: first with a fixed script, then with one that asks
@@ -27,9 +27,9 @@ ephemeral. Mirage runs programs in it and leaves its lifecycle to Daytona.
 
 ## The workspace
 
-Two runtimes capture `python3`: `monty` first, then `machine`, which runs it
-on the `gpu` machine, the Daytona sandbox. The route
-policy is a script that runs on Monty, read from `route.py`:
+Two machines capture `python3`: `monty` first, a `worker` that runs it on
+Monty, then `gpu`, the Daytona sandbox. The route policy is a script that
+runs on Monty, read from `route.py`:
 
 ```yaml workspace.yaml
 mode: exec
@@ -39,16 +39,12 @@ mounts:
     vfs: ram
 
 machines:
+  monty:
+    provider: worker
   gpu:
     provider: daytona
     sandbox_id: ${DAYTONA_GPU_SANDBOX_ID}
-
-runtimes:
-  - monty
-  - name: remote
     captures: ["python3"]
-    machine: gpu
-  - workspace
 
 route_policy:
   script: route.py
@@ -63,10 +59,10 @@ any line that names PyTorch or CUDA to the GPU:
 ```python route.py
 def pre_execute(ctx):
     if any(word in ctx["line"] for word in ("torch", "cuda")):
-        return {"kind": "route", "runtime": "remote", "reason": "the line uses PyTorch or CUDA"}
+        return {"kind": "route", "machine": "gpu", "reason": "the line uses PyTorch or CUDA"}
 ```
 
-A line the script stays silent on runs on the first runtime that captures
+A line the script stays silent on runs on the first machine that captures
 it, so `python3 -c "print(sum(range(1, 101)))"` runs on Monty. The script costs
 microseconds, and it misses what it does not name: a script file that
 imports `torch`, or a GPU library under another name.
@@ -74,24 +70,24 @@ imports `torch`, or a GPU library under another name.
 ## Route by an LLM
 
 An LLM reads the line the way an engineer would. This `route.py` describes
-each runtime and asks which one the line needs. A program on Monty has no
+each machine and asks which one the line needs. A program on Monty has no
 network, so the LLM call is a
-[host function](/home/policy/scripts#host-functions), `parse_runtime`, that
+[host function](/home/policy/scripts#host-functions), `parse_machine`, that
 the workspace hands it:
 
 ```python route.py
 TASK = (
-    "Pick the runtime that can run the Python code in this line, monty "
+    "Pick the machine that can run the Python code in this line, monty "
     "when it can."
 )
 
-RUNTIMES = {
+MACHINES = {
     "monty": (
-        "Mirage's sandboxed Python, in-process and free: a subset of the "
+        "Mirage's sandboxed Python, free: a subset of the "
         "language and part of the standard library, with no packages, GPU, "
         "network or subprocesses"
     ),
-    "remote": (
+    "gpu": (
         "a cloud sandbox with an NVIDIA GPU, CUDA, PyTorch and the full "
         "standard library, billed while it runs"
     ),
@@ -100,14 +96,14 @@ RUNTIMES = {
 
 async def pre_execute(ctx):
     if any(c["command"] == "python3" for c in ctx["commands"]):
-        choice = await parse_runtime(TASK, RUNTIMES, ctx["line"])
+        choice = await parse_machine(TASK, MACHINES, ctx["line"])
         return {"kind": "route", **choice}
 ```
 
 A line with no `python3` gets no answer, and runs where its commands'
 captures put it.
 
-`parse_runtime` asks the LLM for a runtime and a one-sentence reason. Both
+`parse_machine` asks the LLM for a machine and a one-sentence reason. Both
 `explain` and the run ask the policy, so it keeps each line's answer and the
 preview and the run agree:
 
@@ -123,21 +119,21 @@ preview and the run agree:
     from mirage.config import load_config
 
 
-    class RuntimeChoice(BaseModel):
-        runtime: Literal["monty", "machine"]
+    class MachineChoice(BaseModel):
+        machine: Literal["monty", "gpu"]
         reason: str
 
 
     CHOICES: dict[str, dict[str, str]] = {}
 
 
-    async def parse_runtime(task: str, runtimes: dict[str, str], line: str) -> dict[str, str]:
+    async def parse_machine(task: str, machines: dict[str, str], line: str) -> dict[str, str]:
         if line not in CHOICES:
             prompt = f"{task} Say why in one sentence.\n" + "\n".join(
-                f"{name}: {about}" for name, about in runtimes.items()
+                f"{name}: {about}" for name, about in machines.items()
             )
             done = await AsyncOpenAI(timeout=10).responses.parse(
-                model="gpt-6-luna", instructions=prompt, input=line, text_format=RuntimeChoice
+                model="gpt-6-luna", instructions=prompt, input=line, text_format=MachineChoice
             )
             CHOICES[line] = done.output_parsed.model_dump()
         return CHOICES[line]
@@ -145,7 +141,7 @@ preview and the run agree:
 
     ws = Workspace(
         **load_config("workspace.yaml").to_workspace_kwargs(),
-        policy_functions={"parse_runtime": parse_runtime},
+        policy_functions={"parse_machine": parse_machine},
     )
     ```
   </Tab>
@@ -156,31 +152,31 @@ preview and the run agree:
     import { z } from 'zod'
     import { Workspace, configToWorkspaceArgs, loadWorkspaceConfigFile } from '@struktoai/mirage-node'
 
-    const RuntimeChoice = z.object({ runtime: z.enum(['monty', 'machine']), reason: z.string() })
-    type Choice = z.infer<typeof RuntimeChoice>
+    const MachineChoice = z.object({ machine: z.enum(['monty', 'gpu']), reason: z.string() })
+    type Choice = z.infer<typeof MachineChoice>
 
     const choices = new Map<string, Choice>()
 
-    async function parseRuntime(task: string, runtimes: Record<string, string>, line: string): Promise<Choice> {
+    async function parseMachine(task: string, machines: Record<string, string>, line: string): Promise<Choice> {
       const known = choices.get(line)
       if (known !== undefined) return known
       const prompt = [
         `${task} Say why in one sentence.`,
-        ...Object.entries(runtimes).map(([name, about]) => `${name}: ${about}`),
+        ...Object.entries(machines).map(([name, about]) => `${name}: ${about}`),
       ].join('\n')
       const done = await new OpenAI({ timeout: 10_000 }).responses.parse({
         model: 'gpt-6-luna',
         instructions: prompt,
         input: line,
-        text: { format: zodTextFormat(RuntimeChoice, 'runtime_choice') },
+        text: { format: zodTextFormat(MachineChoice, 'machine_choice') },
       })
-      if (done.output_parsed === null) throw new Error('the model chose no runtime')
+      if (done.output_parsed === null) throw new Error('the model chose no machine')
       choices.set(line, done.output_parsed)
       return done.output_parsed
     }
 
     const { mounts, options } = await configToWorkspaceArgs(loadWorkspaceConfigFile('workspace.yaml'))
-    const ws = new Workspace(mounts, { ...options, policyFunctions: { parse_runtime: parseRuntime } })
+    const ws = new Workspace(mounts, { ...options, policyFunctions: { parse_machine: parseMachine } })
     ```
   </Tab>
 </Tabs>
@@ -200,7 +196,7 @@ no GPU starts for a line that does not need one:
         plan = await ws.explain(line)
         for answer in plan.answers:
             if answer.kind == "route":
-                print(line, "->", answer.runtime, answer.reason)
+                print(line, "->", answer.machine, answer.reason)
         await ws.shell(line)
     ```
   </Tab>
@@ -212,7 +208,7 @@ no GPU starts for a line that does not need one:
     ]) {
       const plan = await ws.explain(line)
       for (const answer of plan.answers) {
-        if (answer.kind === 'route') console.log(line, '->', answer.runtime, answer.reason)
+        if (answer.kind === 'route') console.log(line, '->', answer.machine, answer.reason)
       }
       await ws.shell(line)
     }
@@ -220,7 +216,7 @@ no GPU starts for a line that does not need one:
   </Tab>
 </Tabs>
 
-The sum stays on Monty and prints `5050` in-process; only the `torch` line
+The sum stays on Monty and prints `5050`; only the `torch` line
 reaches the GPU.
 
 ## Notes

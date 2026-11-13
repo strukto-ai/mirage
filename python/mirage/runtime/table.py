@@ -13,13 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import weakref
-from collections.abc import Mapping
-from typing import Any, TypeGuard
+from collections.abc import Mapping, Sequence
+from typing import Any, TypeAlias, TypeGuard
 
-from mirage.machine.registry import MACHINE_MODULES
+from mirage.machine.handle import MachineHandle
+from mirage.machine.registry import build_machine
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import (
     EXTERNAL_COMMANDS,
+    HOST,
     JS_GROUP,
     LANGUAGE_COMMANDS,
     PYTHON_GROUP,
@@ -35,6 +37,7 @@ from mirage.runtime.python.wasi import WasiRuntime
 from mirage.runtime.sandlock import SandlockRuntime
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.runtime.workspace import WorkspaceRuntime
+from mirage.utils.loader import load_attr
 
 # The builtin runtimes by name. The command -> runtime mapping is
 # derived from each class's captures, never hand-maintained.
@@ -62,11 +65,10 @@ def register_runtime(name: str, cls: type[Runtime[Any]]) -> None:
 
     Host-side only, like ``register_vfs`` and ``register_cli_spec``:
     the embedding program calls it, never a line the agent types. Once
-    registered the name works everywhere a builtin's does: a ``runtimes:``
-    entry in workspace YAML, a string in ``Workspace(runtimes=[...])``,
-    and ``execute(runtime=name)``. Mirrors ``registerRuntime`` in
-    ``runtime/table.ts``. A builtin name cannot be shadowed;
-    re-registering a custom name replaces it.
+    registered the name is a ``runtime`` an ``in_process`` machine
+    entry may name. Mirrors ``registerRuntime`` in ``runtime/table.ts``.
+    A builtin name cannot be shadowed; re-registering a custom name
+    replaces it.
 
     Args:
         name (str): the name config spells; also what ``build_runtime``
@@ -88,25 +90,193 @@ def known_runtimes() -> list[str]:
     return sorted(NAMED)
 
 
-# The default world when no runtimes list is given: the builtin command
-# engine alone, as TypeScript's, so an interpreter runs only where the
-# config names one (integ/runtime/routing/defaults.json pins it).
-DEFAULT_ENTRIES: tuple[str, ...] = (WorkspaceRuntime.name,)
-
-# TypeScript-only runtime names a cross-language config may carry.
+# TypeScript-only engine names a cross-language config may carry.
 RUNTIME_HINTS: dict[str, str] = {
     "pyodide": (
         "runtime 'pyodide' is TypeScript-only (a WASM CPython for "
-        "runtimes without a host Python); Python supports 'monty' "
-        "(sandboxed), 'wasi' (sandboxed full CPython), "
-        "'sandlock' (confined native processes), 'local' (the host "
-        "CPython), and 'quickjs' (sandboxed JavaScript)"
+        "hosts without a Python); Python runs 'quickjs' and 'wasi' in "
+        "process and 'monty' on a worker"
     ),
 }
 
+# The providers a ``machines:`` entry names for an engine of Mirage's
+# own rather than a machine it reaches: in its process, in worker
+# processes it spawns, or as native programs on its host.
+IN_PROCESS = "in_process"
+WORKER = "worker"
+ENGINE_PROVIDERS: tuple[str, ...] = (IN_PROCESS, WORKER, HOST)
 
-# By identity, the name each runtime built with no options came from.
-_BUILT_FROM: dict[int, tuple[weakref.ref[Runtime[Any]], str]] = {}
+# The runtimes a builtin provider runs no other way.
+_PLACED: dict[str, str] = {
+    MontyRuntime.name: WORKER,
+    LocalRuntime.name: HOST,
+    SandlockRuntime.name: HOST,
+    RemoteRuntime.name: "a machine provider",
+    WorkspaceRuntime.name: IN_PROCESS,
+}
+
+# What a ``machines:`` entry may be: a machine handle, an engine
+# instance, or the entry as YAML spells it.
+MachineSpec: TypeAlias = MachineHandle | Runtime[Any] | Mapping[str, Any]
+
+# A workspace's ``machines``: the entries by name, or handles and
+# engines named by their own ``name``.
+MachineSpecs: TypeAlias = (
+    Mapping[str, MachineSpec] | Sequence[MachineHandle | Runtime[Any]]
+)
+
+
+def build_entry(
+    name: str, spec: MachineSpec
+) -> tuple[MachineHandle | None, Runtime[Any]]:
+    """The machine one ``machines:`` entry describes, and the engine
+    that runs what it captures there.
+
+    A machine provider (docker, ssh, ...) builds its handle and the
+    remote runtime that runs its ``captures`` through it. An engine
+    provider builds the engine alone: ``in_process`` the one its
+    ``runtime`` names (none for the shell, which only ``workspace`` may
+    be), ``worker`` monty, ``host`` the host's own programs, confined by
+    sandlock when a ``sandbox`` block grants paths. The entry's other
+    keys are the engine's config.
+
+    Args:
+        name (str): the entry's name, which the engine takes.
+        spec (MachineSpec): a handle, an engine, or the entry as YAML
+            spells it.
+
+    Raises:
+        ValueError: ``workspace`` for anything but the shell, an engine
+            its provider does not run, a ``sandbox`` that is not a
+            mapping, or what ``build_machine`` refuses.
+    """
+    if isinstance(spec, Runtime):
+        runtime = spec
+    elif isinstance(spec, MachineHandle) or spec.get("provider") not in (
+        ENGINE_PROVIDERS
+    ):
+        handle = build_machine(name, spec)
+        runtime = RemoteRuntime(name, handle.config.captures)
+        if name == WorkspaceRuntime.name:
+            raise ValueError(f"{name!r} is the shell's machine name")
+        return handle, runtime
+    else:
+        fields = dict(spec)
+        provider = fields.pop("provider")
+        captures = fields.pop("captures", None)
+        sandbox = fields.pop("sandbox", None)
+        if "sandbox" in spec and not isinstance(sandbox, Mapping):
+            raise ValueError(f"machine {name!r}: sandbox must be a mapping")
+        cls = _runtime_for(
+            name, provider, fields.pop("runtime", None), sandbox
+        )
+        config = {**fields, **(sandbox or {})}
+        runtime = cls(captures=captures, config=config or None)
+        key = id(runtime)
+
+        def forget(_gone: weakref.ref[Runtime[Any]]) -> None:
+            _BUILT_FROM.pop(key, None)
+
+        _BUILT_FROM[key] = (weakref.ref(runtime, forget), dict(spec))
+    if (name == WorkspaceRuntime.name) != isinstance(
+        runtime, WorkspaceRuntime
+    ):
+        raise ValueError(f"{name!r} is the shell's machine name")
+    runtime.name = name
+    return None, runtime
+
+
+def _runtime_for(
+    name: str,
+    provider: str,
+    runtime: str | type[Runtime[Any]] | None,
+    sandbox: Mapping[str, Any] | None,
+) -> type[Runtime[Any]]:
+    """The runtime an engine provider's entry runs.
+
+    Args:
+        name (str): the entry's name, for the message.
+        provider (str): ``in_process``, ``worker`` or ``host``.
+        runtime (str | type[Runtime] | None): the entry's ``runtime``: a
+            registered name, a ``source:Class`` reference, or the class.
+        sandbox (Mapping[str, Any] | None): the entry's ``sandbox``.
+
+    Raises:
+        ValueError: a runtime the provider does not run, a sandbox off
+            a host, or a name ``runtime_class`` does not know.
+    """
+    if sandbox is not None and provider != HOST:
+        raise ValueError(f"machine {name!r}: only a host takes a sandbox")
+    if provider == HOST:
+        if runtime is not None:
+            raise ValueError(
+                f"machine {name!r}: a host runs its own programs, not a runtime"
+            )
+        return SandlockRuntime if sandbox is not None else LocalRuntime
+    if provider == WORKER:
+        if runtime not in (None, MontyRuntime.name):
+            raise ValueError(
+                f"machine {name!r}: a worker runs {MontyRuntime.name!r},"
+                f" not {runtime!r}"
+            )
+        return MontyRuntime
+    if runtime is None:
+        return WorkspaceRuntime
+    if isinstance(runtime, type):
+        if not issubclass(runtime, Runtime):
+            raise ValueError(
+                f"machine {name!r}: its runtime is not a Runtime subclass"
+            )
+        return runtime
+    if ":" in runtime:
+        loaded = load_attr(runtime)
+        if not (isinstance(loaded, type) and issubclass(loaded, Runtime)):
+            raise ValueError(f"{runtime!r} is not a Runtime subclass")
+        return loaded
+    if runtime in _PLACED:
+        raise ValueError(
+            f"machine {name!r}: {runtime!r} runs on {_PLACED[runtime]},"
+            f" not {IN_PROCESS}"
+        )
+    return runtime_class(runtime)
+
+
+def in_process_runtimes() -> list[str]:
+    """Every runtime an ``in_process`` machine may name."""
+    return [name for name in known_runtimes() if name not in _PLACED]
+
+
+def split_machines(
+    machines: MachineSpecs | None,
+) -> tuple[dict[str, MachineHandle], list[Runtime[Any]]]:
+    """The machine handles and the ordered engine entries ``machines``
+    describes, each entry named for its machine.
+
+    Args:
+        machines (MachineSpecs | None): the entries by name, or handles
+            and engines named by their own ``name``; None for none.
+
+    Raises:
+        ValueError: what ``build_entry`` refuses.
+    """
+    items = (
+        list(machines.items())
+        if isinstance(machines, Mapping)
+        else [(spec.name, spec) for spec in machines or ()]
+    )
+    handles: dict[str, MachineHandle] = {}
+    entries: list[Runtime[Any]] = []
+    for name, spec in items:
+        handle, runtime = build_entry(name, spec)
+        if handle is not None:
+            handles[name] = handle
+        entries.append(runtime)
+    return handles, entries
+
+
+# By identity, the ``machines:`` entry each engine provider's engine was
+# built from, which a copy of the workspace builds again.
+_BUILT_FROM: dict[int, tuple[weakref.ref[Runtime[Any]], dict[str, Any]]] = {}
 
 
 def build_runtime(name: str, **options: Any) -> Runtime[Any]:
@@ -121,26 +291,18 @@ def build_runtime(name: str, **options: Any) -> Runtime[Any]:
         ValueError: unknown name, with a cross-language hint for
             TypeScript-only names.
     """
-    runtime = runtime_class(name)(**options)
-    if not options:
-        key = id(runtime)
-
-        def forget(_gone: weakref.ref[Runtime[Any]]) -> None:
-            _BUILT_FROM.pop(key, None)
-
-        _BUILT_FROM[key] = (weakref.ref(runtime, forget), name)
-    return runtime
+    return runtime_class(name)(**options)
 
 
-def built_from(runtime: Runtime[Any]) -> str | None:
-    """The registry name a runtime was built from with no options.
+def built_from(runtime: Runtime[Any]) -> dict[str, Any] | None:
+    """The ``machines:`` entry an engine provider's engine was built from.
 
     Args:
-        runtime (Runtime): a runtime entry.
+        runtime (Runtime): a workspace entry.
 
     Returns:
-        str | None: the name, or None for one built with options or by
-        the host.
+        dict[str, Any] | None: the entry, or None for a machine
+        provider's runtime or an engine the host built.
     """
     held = _BUILT_FROM.get(id(runtime))
     return held[1] if held is not None and held[0]() is runtime else None
@@ -160,12 +322,6 @@ def runtime_class(name: str) -> type[Runtime[Any]]:
     if cls is None:
         if name in RUNTIME_HINTS:
             raise ValueError(RUNTIME_HINTS[name])
-        if name in MACHINE_MODULES:
-            raise ValueError(
-                f"{name!r} is a machine provider, not a runtime: declare the"
-                f" machine under machines: with provider: {name}, and run"
-                " its programs with the remote runtime"
-            )
         known = ", ".join(repr(n) for n in known_runtimes())
         raise ValueError(
             f"unknown runtime: {name!r} (expected one of {known})"
@@ -173,38 +329,35 @@ def runtime_class(name: str) -> type[Runtime[Any]]:
     return cls
 
 
-def runtime_bindings_for(
+def machine_bindings_for(
     entries: list[Runtime[Any]], name: str
 ) -> dict[str, Runtime[Any]]:
-    """Resolve an explicit runtime name into a binding override map.
+    """Resolve a machine a line names into a binding override map.
 
-    Naming a runtime places a line's captured stages on it without
-    touching capability: only commands the runtime captures rebind,
+    Naming a machine places a line's captured stages on it without
+    touching capability: only commands its entry captures rebind,
     everything else keeps its normal binding.
 
     Args:
-        entries (list[Runtime]): the workspace's ordered runtime world.
-        name (str): the workspace runtime entry to bind to, or the
-            part before its colon (``remote`` for ``remote:gpu``) while
-            the workspace has one such entry.
+        entries (list[Runtime]): the workspace's ordered entries.
+        name (str): the machine.
 
     Raises:
-        ValueError: the name is workspace (captures nothing, so there is
-            nothing to rebind), no workspace entry or several.
+        ValueError: the name is ``workspace`` (the shell captures
+            nothing, so there is nothing to rebind) or no machine.
     """
     if name == WorkspaceRuntime.name:
         raise ValueError(
-            "'workspace' is the default executor, not a runtime you can select"
+            "'workspace' is the default executor, not a machine you can select"
         )
-    found = [e for e in entries if e.name == name] or [
-        e for e in entries if e.name.partition(":")[0] == name
-    ]
-    if len(found) == 1:
-        return {command: found[0] for command in found[0].captures}
-    known = ", ".join(repr(e.name) for e in entries)
+    found = next((e for e in entries if e.name == name), None)
+    if found is not None:
+        return {command: found for command in found.captures}
+    known = ", ".join(
+        repr(e.name) for e in entries if e.name != WorkspaceRuntime.name
+    )
     raise ValueError(
-        f"{'ambiguous' if found else 'unknown'} runtime: {name!r}"
-        f" (workspace runtimes: {known})"
+        f"unknown machine: {name!r} (workspace machines: {known or 'none'})"
     )
 
 
@@ -252,10 +405,10 @@ def bind_commands(entries: list[Runtime[Any]]) -> dict[str, Runtime[Any]]:
             for capture in entry.captures:
                 if capture not in LANGUAGE_COMMANDS[entry.language]:
                     raise ValueError(
-                        f"runtime {entry.name!r} does not run {capture!r}"
+                        f"machine {entry.name!r} does not run {capture!r}"
                     )
         if entry.name in seen:
-            raise ValueError(f"duplicate runtime entry: {entry.name!r}")
+            raise ValueError(f"duplicate machine: {entry.name!r}")
         seen.add(entry.name)
         for command in entry.captures:
             if command not in bindings:
@@ -321,80 +474,35 @@ def is_sandbox(entry: RuntimeIdentity | None) -> TypeGuard[Runtime[Any]]:
 def routed(
     entries: list[Runtime[Any]],
     bindings: Mapping[str, RuntimeIdentity | None],
-    runtime: str | None,
     machine: str | None,
-    inherited: str | None = None,
 ) -> RouteDecision[RuntimeIdentity]:
     """The decision a policy's route places a line or a command on.
 
     ``workspace`` keeps it in Mirage: no line executor (an ``@line``
     capture) takes it, and each command stays on its first other
-    capturer. Any other runtime serves every command it captures over
+    capturer. Any other machine serves every command it captures over
     ``bindings``; none leaves each command where ``bindings`` put it.
 
     Args:
-        entries (list[Runtime]): the workspace's ordered runtimes.
+        entries (list[Runtime]): the workspace's ordered entries.
         bindings (Mapping[str, RuntimeIdentity | None]): the bindings
             the route overlays: the static ones for a line, the line's
             own for a command.
-        runtime (str | None): the runtime the route names.
-        machine (str | None): the machine it names.
-        inherited (str | None): the machine of the placement the route
-            overlays, kept when the route names none.
+        machine (str | None): the machine the route names.
 
     Raises:
-        ValueError: no entry has the runtime's name, or no runtime it
-            places takes the machine (``check_route_machine``).
+        ValueError: no entry is the machine.
     """
-    check_route_machine(entries, runtime, machine)
     placed: dict[str, RuntimeIdentity | None] = dict(bindings)
-    if runtime == WorkspaceRuntime.name:
+    if machine == WorkspaceRuntime.name:
         kept = [e for e in entries if WHOLE_LINE not in e.captures]
         placed = {
             command: None for entry in entries for command in entry.captures
         }
         placed.update(bind_commands(kept))
-    elif runtime is not None:
-        placed.update(runtime_bindings_for(entries, runtime))
-    return RouteDecision(
-        bindings=placed,
-        fallback=catch_all(entries),
-        machine=machine or inherited,
-    )
-
-
-def check_route_machine(
-    entries: list[Runtime[Any]], runtime: str | None, machine: str | None
-) -> None:
-    """Refuse a placement whose machine no runtime it places would run
-    on: only the remote runtime runs on a machine a line names, so a
-    named runtime has to be one, and a placement naming no runtime needs
-    one among the entries.
-
-    Args:
-        entries (list[Runtime]): the workspace's ordered runtimes.
-        runtime (str | None): the runtime the placement names.
-        machine (str | None): the machine it names.
-
-    Raises:
-        ValueError: the named runtime runs on its own machine, or no
-            entry is a remote runtime.
-    """
-    if machine is None:
-        return
-    if runtime is None or runtime == WorkspaceRuntime.name:
-        if not any(isinstance(e, RemoteRuntime) for e in entries):
-            raise ValueError(
-                f"machine {machine!r} takes the remote runtime, and the "
-                "workspace has none"
-            )
-        return
-    for entry in entries:
-        if entry.name == runtime and not isinstance(entry, RemoteRuntime):
-            raise ValueError(
-                f"runtime {runtime!r} runs on the workspace's machine; "
-                f"machine {machine!r} takes the remote runtime"
-            )
+    elif machine is not None:
+        placed.update(machine_bindings_for(entries, machine))
+    return RouteDecision(bindings=placed, fallback=catch_all(entries))
 
 
 def catch_all(entries: list[Runtime[Any]]) -> Runtime[Any] | None:

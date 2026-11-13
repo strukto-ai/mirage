@@ -299,22 +299,15 @@ def test_a_reason_left_out_is_the_documents_default():
 
 
 def test_a_route_places_a_line_or_a_command_only():
-    printed = _answer(kind="route", runtime="docker")
+    printed = _answer(kind="route", machine="docker")
     assert script_action(printed, "pre_execute") == Route("docker")
     assert script_action(printed, "pre_command") == Route("docker")
     with pytest.raises(ValueError, match="cannot answer route at pre_vfs"):
         script_action(printed, "pre_vfs")
 
 
-def test_a_route_may_name_a_machine_alone():
-    printed = _answer(kind="route", machine="gpu")
-    assert script_action(printed, "pre_command") == Route(machine="gpu")
-    both = _answer(kind="route", runtime="remote", machine="gpu")
-    assert script_action(both, "pre_execute") == Route("remote", machine="gpu")
-
-
 def test_a_route_carries_the_reason_it_gives():
-    printed = _answer(kind="route", runtime="docker", reason="needs a GPU")
+    printed = _answer(kind="route", machine="docker", reason="needs a GPU")
     assert script_action(printed, "pre_execute") == Route(
         "docker", "needs a GPU"
     )
@@ -328,7 +321,8 @@ def test_a_route_carries_the_reason_it_gives():
         b'{"deny": "x"}',
         b'{"kind": "allow"}',
         b'{"kind": "route"}',
-        b'{"kind": "deny", "runtime": "docker"}',
+        b'{"kind": "deny", "machine": "docker"}',
+        b'{"kind": "route", "runtime": "docker"}',
         b'{"kind": "ask", "machine": "gpu"}',
         b'{"kind": "deny", "reason": "x", "policy": "Mine"}',
         b'{"kind": "deny"}\n{"kind": "ask"}',
@@ -707,7 +701,7 @@ async def test_a_program_answers_after_the_action_too():
 @pytest.mark.asyncio
 async def test_a_program_after_the_action_cannot_route():
     policy = _policy(
-        "post_execute", FakeProgram(_answer(kind="route", runtime="x"))
+        "post_execute", FakeProgram(_answer(kind="route", machine="x"))
     )
     done = ExecuteResultContext(
         line="python3 job.py", commands=(), session_id="s", output=b"out"
@@ -773,33 +767,33 @@ async def test_an_ask_and_a_route_both_stand():
     policy = _programs(
         "pre_execute",
         _answer(kind="ask", reason="nod"),
-        _answer(kind="route", runtime="docker"),
+        _answer(kind="route", machine="docker"),
     )
     said, route = await Policies([policy]).pre_execute(_line())
     assert isinstance(said, Ask) and said.reason == "nod"
-    assert route is not None and route.runtime == "docker"
+    assert route is not None and route.machine == "docker"
 
 
 @pytest.mark.asyncio
 async def test_routes_must_agree():
     agree = _programs(
         "pre_execute",
-        _answer(kind="route", runtime="docker"),
-        _answer(kind="route", runtime="docker"),
+        _answer(kind="route", machine="docker"),
+        _answer(kind="route", machine="docker"),
     )
     said, route = await Policies([agree]).pre_execute(_line())
     assert said is None
-    assert route is not None and route.runtime == "docker"
+    assert route is not None and route.machine == "docker"
     differ = _programs(
         "pre_execute",
-        _answer(kind="route", runtime="docker"),
-        _answer(kind="route", runtime="monty"),
+        _answer(kind="route", machine="docker"),
+        _answer(kind="route", machine="monty"),
     )
     said, route = await Policies([differ]).pre_execute(_line())
     assert route is None
     assert isinstance(said, Deny)
     assert said.reason == (
-        "policies place the line on different runtimes: "
+        "policies place the line on different machines: "
         "ScriptPolicy on docker, ScriptPolicy on monty"
     )
 
@@ -889,7 +883,7 @@ async def test_a_program_gets_its_runtimes_memory_cap_unless_it_names_one(
 @pytest.mark.asyncio
 async def test_run_answers_one_program_and_raises_what_went_wrong():
     policy = _policy(
-        "pre_execute", FakeProgram(_answer(kind="route", runtime="x"))
+        "pre_execute", FakeProgram(_answer(kind="route", machine="x"))
     )
     assert await policy.run(_entry(), "pre_execute", _line()) == Route("x")
     failing = _policy("pre_execute", FakeProgram(b"", 3, b"Traceback"))

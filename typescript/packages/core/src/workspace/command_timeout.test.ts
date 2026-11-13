@@ -17,7 +17,8 @@ import type { Context } from '../commands/config.ts'
 
 import { describe, expect, it, vi } from 'vitest'
 import { LanguageRuntime } from '../runtime/language.ts'
-import type { RuntimeEntry } from '../runtime/base.ts'
+import type { Runtime } from '../runtime/base.ts'
+import { buildRuntime } from '../runtime/table.ts'
 import { ScriptSource, type Program, type RunResult } from '../runtime/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Limit, MountMode } from '../types.ts'
@@ -59,12 +60,12 @@ function buildWs(): Workspace {
 // past it the run's signal aborts, a busy guest is interrupted, and the line
 // answers 124.
 describe('interpreters at the line deadline', () => {
-  function lineWs(runtimes: RuntimeEntry[], seconds: number): Workspace {
+  function lineWs(machines: Runtime[], seconds: number): Workspace {
     return new Workspace(
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes,
+        machines,
         commandLimits: { '@line': new Limit({ timeoutSeconds: seconds }) },
       },
     )
@@ -74,7 +75,7 @@ describe('interpreters at the line deadline', () => {
     // The budget starts before the line's passes, so the run has to be given
     // one they cannot spend on a loaded runner to start at all.
     const probe = new SignalProbeRuntime()
-    const ws = lineWs([probe, 'workspace'], 1)
+    const ws = lineWs([probe], 1)
     try {
       const r = await ws.shell('cd /data && python3 -c "hang"')
       expect(r.exitCode).toBe(124)
@@ -86,7 +87,7 @@ describe('interpreters at the line deadline', () => {
   }, 60_000)
 
   it('a busy pyodide loop trips the deadline instead of wedging the event loop', async () => {
-    const ws = lineWs(['pyodide', 'workspace'], 0.5)
+    const ws = lineWs([buildRuntime('pyodide')], 0.5)
     try {
       const started = Date.now()
       const r = await ws.shell('cd /data && python3 -c "while True: pass"')
@@ -99,7 +100,7 @@ describe('interpreters at the line deadline', () => {
   }, 120_000)
 
   it('a busy monty loop trips the deadline and the worker is reclaimed', async () => {
-    const ws = lineWs(['monty', 'workspace'], 0.25)
+    const ws = lineWs([buildRuntime('monty')], 0.25)
     try {
       const r = await ws.shell('cd /data && python3 -c "while True: pass"')
       expect(r.exitCode).toBe(124)
@@ -112,7 +113,7 @@ describe('interpreters at the line deadline', () => {
 
   // QuickJS runs on a worker, which the line's abort ends at the deadline.
   it('a busy JS loop trips the deadline instead of wedging the event loop', async () => {
-    const ws = lineWs(['quickjs', 'workspace'], 0.3)
+    const ws = lineWs([buildRuntime('quickjs')], 0.3)
     try {
       const started = Date.now()
       const r = await ws.shell('cd /data && node -e "while (true) {}"')
@@ -125,13 +126,13 @@ describe('interpreters at the line deadline', () => {
   }, 60_000)
 
   it('a busy JS script CLI trips the deadline through the leaf signal', async () => {
-    const ws = lineWs(['quickjs', 'workspace'], 0.3)
+    const ws = lineWs([buildRuntime('quickjs')], 0.3)
     ws.registerCli(
       'spin',
       new CLI({
         spec: new CommandSpec({ name: 'spin' }),
         script: new ScriptSource('while (true) {}', 'js'),
-        runtime: 'quickjs',
+        machine: 'quickjs',
       }),
     )
     try {
@@ -293,10 +294,7 @@ describe('background job kill', () => {
   it('kill %1 aborts the runtime run of a background job', async () => {
     const probe = new SignalProbeRuntime()
     const ram = new RAMVFS()
-    const ws = new Workspace(
-      { '/data': ram },
-      { mode: MountMode.EXEC, runtimes: [probe, 'workspace'] },
-    )
+    const ws = new Workspace({ '/data': ram }, { mode: MountMode.EXEC, machines: [probe] })
     try {
       await ws.shell('python3 -c "hang" &')
       await ws.shell('kill %1')

@@ -39,7 +39,6 @@ interface Kind {
 const KINDS: readonly Kind[] = [
   { name: 'vfs', route: '/v1/vfs', noun: 'VFS' },
   { name: 'cli', route: '/v1/clis', noun: 'CLI' },
-  { name: 'runtime', route: '/v1/runtimes', noun: 'runtime' },
   { name: 'machine', route: '/v1/machines', noun: 'machine' },
 ]
 
@@ -482,7 +481,7 @@ function registerKindCommands(program: Command, kind: Kind): void {
     })
 }
 
-/** `mirage vfs|cli|runtime`, the saved connections, as the HTTP routes name them. */
+/** `mirage vfs|cli|machine`, the saved connections, as the HTTP routes name them. */
 export function registerConnectionCommands(program: Command): void {
   for (const kind of KINDS) registerKindCommands(program, kind)
 }

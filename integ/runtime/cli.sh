@@ -5,10 +5,10 @@
 # workspace create`) and executed with `mirage shell`. This is the
 # yaml -> daemon -> CLI construction path: entry captures, config
 # blocks, the route program, workspace, mount and profile
-# command_limits, the workspace max_memory and network, and the per-line --runtime
+# command_limits, the workspace max_memory and network, and the per-line --machine
 # argument.
 #
-# Cases whose steps need the SDK surface (add_runtime, rename, s3_put,
+# Cases whose steps need the SDK surface (add_machine, rename, s3_put,
 # read_op, profile, wait_job, facade — the last calls ws.vfs directly) or a runner-local
 # test runtime (echobox, named as a string or a mapping, or registered
 # through world.register_runtimes), generated file catalogs, runner-local
@@ -53,7 +53,8 @@ requirement_met() {
 # runtime a case's `runtimes` may name (null for a sandbox, which runs whole
 # lines), the line head a program runs under, per host what the runtime
 # needs (absent: not on that host; e2b is python's only, see the README),
-# the world entry it is built from, and the runtimes an unmet requirement
+# the world entry it is built from, the machine provider each of Mirage's own
+# runtimes runs on when not in process, and the runtimes an unmet requirement
 # skips even under INTEG_RUNTIME_STRICT.
 RUNTIMES='{
   "language": {"monty": "python", "wasi": "python", "pyodide": "python", "quickjs": "js",
@@ -87,6 +88,7 @@ RUNTIMES='{
     "apple_container": {"captures": ["@line"], "config": {"container": "${MIRAGE_INTEG_APPLE_CONTAINER}"}},
     "kubernetes": {"captures": ["@line"], "config": {"pod": "${MIRAGE_INTEG_KUBERNETES_POD}"}}
   },
+  "engine": {"monty": "worker", "local": "host"},
   "optional": ["sandlock", "e2b", "smolvm", "microsandbox", "apple_container", "kubernetes"],
   "machines": ["docker", "ssh", "e2b", "smolvm", "microsandbox", "apple_container", "kubernetes"]
 }'
@@ -98,9 +100,9 @@ RUNTIMES='{
 # language, a parallel step keeps the branches that run there, `expect_on`
 # keyed by the runtime, then by `runtime@host`, then by `ram` and
 # `runtime@ram` (every mount here is RAM: this is a case's ram variant), is
-# merged over `expect`, and the world runs the runtime's table entry with
-# the case's `entry` laid over it; a machine provider's config becomes its
-# `machines:` entry, which the remote runtime runs on.
+# merged over `expect`, and the world runs the runtime on a machine of its
+# name, from its table entry with the case's `entry` laid over it, beside the
+# case's `also_machines`, each capturing what `also_entries` names for it.
 # INTEG_RUNTIMES (comma separated) keeps only the runtimes it names.
 runtime_variants() {
   local case_json="$1" host="$2"
@@ -139,19 +141,21 @@ runtime_variants() {
       | [$c.steps[] | for_lang($lang) | overlay([$r, $r + "@" + $h, "ram", $r + "@ram"])]
         as $steps
       | select($lang == null or any($steps[]; .guest))
-      | (if $base == {} and $over == {} then $r
-         else {name: $r} + $base + $over
-           + (if ($base | has("config")) or ($over | has("config"))
-              then {config: (($base.config // {}) + ($over.config // {}))} else {} end)
-         end) as $entry
-      | (if ($t.machines | index($r)) != null and ($entry | type) == "object"
-         then {machines: ([$r, ($c.also_machines // [])[]] | map({key: ., value: ({provider: $r} + ($entry.config // {}))}) | from_entries),
-               runtimes: ([($entry | del(.config)) + {name: "remote", machine: $r}]
-                 + [($c.also_entries // [])[] | {name: "remote"} + .] + ["workspace"])}
-         else {runtimes: [$entry, "workspace"]} end) as $placed
+      | (($base.config // {}) + ($over.config // {})) as $config
+      | ($over.captures // $base.captures) as $captures
+      | ((if ($t.machines | index($r)) != null then {provider: $r} + $config
+          elif $r == "sandlock" then {provider: "host", sandbox: $config}
+          elif $t.engine[$r] != null then {provider: $t.engine[$r]} + $config
+          else {provider: "in_process", runtime: $r} + $config end)
+         + (if $captures != null then {captures: $captures} else {} end)) as $spec
+      | ({($r): $spec}
+         + ([($c.also_machines // [])[] | {key: ., value: ({provider: $r} + $config + {captures: []})}]
+           | from_entries)
+         | reduce ($c.also_entries // [])[] as $e (.; .[$e.machine].captures = $e.captures))
+        as $machines
       | $c + {
           id: ($c.id + "@" + $r),
-          world: (($c.world // {}) + $placed),
+          world: (($c.world // {}) | .machines = ($machines + (.machines // {}))),
           steps: ($steps | map(unmark)),
           requires: (($c.requires // []) + $t.requires[$h][$r]),
           optional: ($t.optional | index($r) != null)
@@ -174,9 +178,9 @@ cli_expressible() {
     and (.world.read_control == null)
     and (((.world.builtin_clis // []) | length) == 0)
     and (((.world.policies // []) | length) == 0)
-    and (((.world.runtimes // []) | map(select((type == "object" and .name == "echobox") or . == "echobox")) | length) == 0)
+    and (((.world.machines // {}) | to_entries | map(select(.value.runtime == "echobox")) | length) == 0)
     and (((.world.register_runtimes // {}) | length) == 0)
-    and (([(.steps // [])[] | ., (.parallel // [])[]] | map(select(has("add_runtime") or has("add_policies") or has("rename") or has("s3_put") or has("read_op") or has("facade") or has("profile") or has("wait_job") or has("handle"))) | length) == 0)
+    and (([(.steps // [])[] | ., (.parallel // [])[]] | map(select(has("add_machine") or has("add_policies") or has("rename") or has("s3_put") or has("read_op") or has("facade") or has("profile") or has("wait_job") or has("handle"))) | length) == 0)
   ' >/dev/null <<<"$case_json"
 }
 
@@ -215,7 +219,6 @@ write_world_yaml() {
       + (if .profiles then {profiles: .profiles} else {} end)
       + (if .profile then {profile: .profile} else {} end)
       + (if .machines then {machines: .machines} else {} end)
-      + (if .runtimes then {runtimes: .runtimes} else {} end)
       + (if .route_policy then {route_policy: .route_policy} else {} end)
       + (if .clis then {clis: .clis} else {} end)' \
     <<<"$world_json" > "$work/ws.yaml"
@@ -226,15 +229,13 @@ write_world_yaml() {
 exec_step() {
   local cli="$1" step="$2" dir="$3"
   shift 3
-  local cmd script runtime machine
+  local cmd script machine
   cmd=$(jq -r '.command' <<<"$step")
   script=$(jq -r '.script // empty' <<<"$step")
   if [ -n "$script" ]; then
     cmd+=" $(jq -Rrs '@sh' "$SUITE_DIR/../fixtures/runtime/$script")"
   fi
-  runtime=$(jq -r '.runtime // empty' <<<"$step")
   local args=("$@" --json -c "$cmd")
-  [ -n "$runtime" ] && args+=(--runtime "$runtime")
   machine=$(jq -r '.machine // empty' <<<"$step")
   [ -n "$machine" ] && args+=(--machine "$machine")
   if jq -e 'has("stdin")' >/dev/null <<<"$step"; then

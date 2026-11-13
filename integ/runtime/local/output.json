@@ -3,15 +3,14 @@
     {
       "id": "local_program_output_reaches_its_file_as_it_runs_and_stays",
       "world": {
-        "runtimes": [
-          {
-            "name": "local",
+        "machines": {
+          "local": {
+            "provider": "host",
             "captures": [
               "@external"
             ]
-          },
-          "workspace"
-        ],
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",

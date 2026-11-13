@@ -6,10 +6,11 @@
     {
       "id": "mongodb_read",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "mounts": {
           "/mongodb": {
             "vfs": "mongodb"

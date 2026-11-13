@@ -25,12 +25,9 @@ def test_a_keyed_pointer_and_a_managed_env_entry_name_a_saved_entry():
                 },
             }
         },
-        "runtimes": [
-            {
-                "name": "local",
-                "config": {"env": {"from": "strukto", "ref": "x"}},
-            }
-        ],
+        "machines": {
+            "box": {"provider": "host", "env": {"from": "strukto", "ref": "x"}}
+        },
         "env": {
             "TOKEN": {"from": "strukto", "ref": "ci", "readonly": True},
             "PLAIN": {"value": "v", "readonly": True},

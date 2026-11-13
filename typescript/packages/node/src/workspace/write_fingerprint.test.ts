@@ -28,6 +28,7 @@ import { installS3Mock, type S3Mock } from '../../tests/vfs/s3/mock.ts'
 import type { S3Config } from '@struktoai/mirage-core/vfs/direct/s3'
 import { S3VFS } from '../vfs/s3/s3.ts'
 import { Workspace } from '../workspace.ts'
+import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 
 const FRESH: ReadSpec = { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL }
 const BOUNDED: ReadSpec = { policy: ReadPolicy.BOUNDED, ttl: DEFAULT_READ_TTL }
@@ -58,7 +59,7 @@ function makeConfig(): S3Config {
 function makeWorkspace(read: ReadSpec, mode: MountMode = MountMode.WRITE): Workspace {
   return new Workspace(
     { '/s3': new S3VFS(makeConfig()) },
-    { mode, read, runtimes: ['quickjs', 'workspace'] },
+    { mode, read, machines: [buildRuntime('quickjs')] },
   )
 }
 

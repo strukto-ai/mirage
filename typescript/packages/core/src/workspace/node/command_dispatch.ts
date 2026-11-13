@@ -1007,13 +1007,7 @@ async function runArgv(
         if (answer === null || here === undefined) return
         let routing: RouteDecision<Runtime>
         try {
-          routing = routed(
-            registry.runtimeEntries,
-            here.bindings,
-            answer.runtime,
-            answer.machine,
-            here.machine,
-          )
+          routing = routed(registry.runtimeEntries, here.bindings, answer.machine)
         } catch (caught) {
           throw new RouteError(caught instanceof Error ? caught.message : String(caught), {
             cause: caught,

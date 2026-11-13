@@ -3,26 +3,26 @@
     {
       "id": "whole_line_capture",
       "world": {
-        "runtimes": [
-          {
-            "name": "echobox",
+        "machines": {
+          "echobox": {
+            "provider": "in_process",
+            "runtime": "echobox",
             "captures": [
               "@line"
             ]
           },
-          {
-            "name": "monty",
+          "monty": {
+            "provider": "worker",
             "captures": []
-          },
-          "workspace"
-        ],
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
           }
         },
         "route_policy": {
-          "script": "def pre_execute(ctx):\n    if 'keep-out' in ctx['line']:\n        return {\"kind\": \"route\", \"runtime\": \"workspace\"}\n",
+          "script": "def pre_execute(ctx):\n    if 'keep-out' in ctx['line']:\n        return {\"kind\": \"route\", \"machine\": \"workspace\"}\n",
           "runtime": "monty"
         }
       },
@@ -47,15 +47,15 @@
       "id": "whole_line_literal_words",
       "note": "A whole-line runtime expands the line itself, so the gate reads it as typed. Dynamic command names are refused under any rule, and dynamic arguments are refused when a rule reads that command's arguments. Nested commands (eval, sh -c, xargs, timeout) are admitted in turn; files and unsupported shell options remain unreadable. Shell program selection uses only a literal prefix including glob quoting, because expansion can shift an option's value onto --version or -c. A known version response or literal -c payload stays readable with dynamic positional words. Literal words, and dynamic ones no rule reads, reach the runtime.",
       "world": {
-        "runtimes": [
-          {
-            "name": "echobox",
+        "machines": {
+          "echobox": {
+            "provider": "in_process",
+            "runtime": "echobox",
             "captures": [
               "@line"
             ]
-          },
-          "workspace"
-        ],
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
@@ -273,19 +273,19 @@
       "id": "whole_line_interpreter_script",
       "note": "A whole-line runtime runs the interpreter itself, where no dispatcher follows the script read, so the gate reads the script slot from the interpreter's spec exactly as it reads a mount command's: a bare script name under the working directory is the file it names, and a payload's operands are not paths. A lone dash selects stdin and carries no path, while ./-, absolute dash filenames and stdin redirects still name protected files.",
       "world": {
-        "runtimes": [
-          {
-            "name": "echobox",
+        "machines": {
+          "echobox": {
+            "provider": "in_process",
+            "runtime": "echobox",
             "captures": [
               "@line"
             ]
           },
-          {
-            "name": "monty",
+          "monty": {
+            "provider": "worker",
             "captures": []
-          },
-          "workspace"
-        ],
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
@@ -306,7 +306,7 @@
           }
         },
         "route_policy": {
-          "script": "def pre_execute(ctx):\n    if 'cd ' in ctx['line']:\n        return {\"kind\": \"route\", \"runtime\": \"workspace\"}\n",
+          "script": "def pre_execute(ctx):\n    if 'cd ' in ctx['line']:\n        return {\"kind\": \"route\", \"machine\": \"workspace\"}\n",
           "runtime": "monty"
         }
       },

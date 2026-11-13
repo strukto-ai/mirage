@@ -450,10 +450,10 @@ async def test_the_server_policies_refuse_a_workspace_before_it_is_built(
         assert r.status_code == 403
 
 
-_NO_RUNTIMES = """
+_NO_MACHINES = """
 def pre_workspace(ctx):
-    if "runtimes" in ctx["config"]:
-        return {"kind": "deny", "reason": "runtimes are the server's"}
+    if "machines" in ctx["config"]:
+        return {"kind": "deny", "reason": "machines are the server's"}
 """
 
 _NO_CAT = """
@@ -465,11 +465,11 @@ def pre_command(ctx):
 
 @pytest.mark.asyncio
 async def test_a_policy_file_answers_like_the_server_policies(tmp_path):
-    (tmp_path / "no_runtimes.py").write_text(_NO_RUNTIMES)
+    (tmp_path / "no_machines.py").write_text(_NO_MACHINES)
     (tmp_path / "no_cat.py").write_text(_NO_CAT)
     policy_file = tmp_path / "policy.yaml"
     policy_file.write_text(
-        "pre_workspace:\n  - script: no_runtimes.py\n"
+        "pre_workspace:\n  - script: no_machines.py\n"
         "pre_command:\n  - script: no_cat.py\n"
     )
     app = build_app(idle_grace_seconds=10.0, policy_file=policy_file)
@@ -478,10 +478,10 @@ async def test_a_policy_file_answers_like_the_server_policies(tmp_path):
         transport=transport, base_url="http://test"
     ) as client:
         refused = _minimal_config()
-        refused["config"]["runtimes"] = ["monty"]
+        refused["config"]["machines"] = {"py": {"provider": "worker"}}
         r = await client.post("/v1/workspaces", json=refused)
         assert r.status_code == 403
-        assert r.json()["error"]["message"] == "runtimes are the server's"
+        assert r.json()["error"]["message"] == "machines are the server's"
         r = await client.post("/v1/workspaces", json=_minimal_config())
         assert r.status_code == 201, r.text
         wid = r.json()["id"]

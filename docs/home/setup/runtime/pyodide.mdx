@@ -32,7 +32,10 @@ page must be cross-origin isolated or registered with Mirage's service worker; s
     ```typescript
     import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
-    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: ['pyodide'] })
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'pyodide' } } },
+    )
     try {
       const inline = await ws.shell("python3 -c 'print(1 + 1)'")
       console.log(inline.stdoutText) // 2
@@ -51,8 +54,10 @@ page must be cross-origin isolated or registered with Mirage's service worker; s
   <Tab title="YAML" icon="file-code">
     ```yaml
     mode: exec
-    runtimes:
-      - pyodide
+    machines:
+      py:
+        provider: in_process
+        runtime: pyodide
     mounts:
       /data:
         vfs: ram
@@ -88,18 +93,19 @@ the package from the Pyodide CDN; Node keeps it beside the installed
         sysPath: ['/data/vendor', '/data/wheels/*.whl'],
       },
     })
-    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [runtime] })
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, machines: { py: runtime } })
     ```
   </Tab>
   <Tab title="YAML" icon="file-code">
     ```yaml
     mode: exec
-    runtimes:
-      - name: pyodide
-        config:
-          packages: [numpy]
-          deny_packages: [requests]
-          sys_path: [/data/vendor, /data/wheels/*.whl]
+    machines:
+      py:
+        provider: in_process
+        runtime: pyodide
+        packages: [numpy]
+        deny_packages: [requests]
+        sys_path: [/data/vendor, /data/wheels/*.whl]
     mounts:
       /data:
         vfs: ram
@@ -115,10 +121,11 @@ fails. Put its pure-Python wheel on a mount and list it in `sys_path`.
 `max_memory` caps the memory one run may grow to:
 
 ```yaml
-runtimes:
-  - name: pyodide
-    config:
-      max_memory: 256M
+machines:
+  py:
+    provider: in_process
+    runtime: pyodide
+    max_memory: 256M
 ```
 
 A run starts at about 50M. One that passes the cap fails with

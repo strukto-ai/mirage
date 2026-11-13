@@ -49,7 +49,6 @@ class Kind:
 KINDS: tuple[Kind, ...] = (
     Kind("vfs", "/v1/vfs", "VFS"),
     Kind("cli", "/v1/clis", "CLI"),
-    Kind("runtime", "/v1/runtimes", "runtime"),
     Kind("machine", "/v1/machines", "machine"),
 )
 

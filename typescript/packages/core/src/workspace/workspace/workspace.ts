@@ -80,7 +80,8 @@ import {
 } from '../../execution/types.ts'
 import type { SessionProcesses } from '../../execution/process/session.ts'
 import { DiffPool } from '../../rs/diff_pool.ts'
-import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
+import { HOST } from '../../runtime/constants.ts'
+import type { Runtime } from '../../runtime/base.ts'
 import {
   captureBinding,
   restrictedMountsFor,
@@ -91,7 +92,7 @@ import { PrefixResolver } from '../../runtime/resolver.ts'
 import { MachineTable } from '../../execution/machine/table.ts'
 import type { MachineProcess } from '../../execution/machine/types.ts'
 import type { Machine } from '../../execution/machine/types.ts'
-import { wholeLineRuntime } from '../../runtime/table.ts'
+import { splitMachines, wholeLineRuntime, type MachineSpec } from '../../runtime/table.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { SecretSource } from '../../secrets/config.ts'
 import { SecretsError } from '../../secrets/errors.ts'
@@ -355,7 +356,7 @@ export class Workspace {
   constructor(mounts: Record<string, MountSpec>, options: WorkspaceOptions = {}) {
     if ('python' in options) {
       throw new Error(
-        "the 'python' workspace option was removed: configure the engine on its runtimes entry, " +
+        "the 'python' workspace option was removed: configure the runtime on its machine, " +
           'e.g. new PyodideRuntime({ config: { denyPackages } })',
       )
     }
@@ -634,12 +635,14 @@ export class Workspace {
       null,
       this.processTable,
     )
+    const [handles, entries] = splitMachines(options.machines)
     this.machineTable = new MachineTable(
-      options.machines,
+      handles,
       (groups) => this.scanHost(groups),
       (target, signum) => this.signalHost(target, signum),
       (target, seenAt, signum) => this.stopHostRun(target, seenAt, signum),
       (machine, cpu) => this.hostResources(machine, cpu),
+      this.processTable.machine,
     )
     this.wireMachines()
     if (options.routePolicy !== undefined) {
@@ -647,7 +650,7 @@ export class Workspace {
     }
     this.runtimeWorld = new Runtimes({
       registry: this.registry,
-      entries: options.runtimes,
+      entries,
       binding: this.runtimeBinding,
       machines: this.machineTable,
     })
@@ -797,8 +800,10 @@ export class Workspace {
     this.processTable.scanner = () => this.machineTable.scan(this.processTable, this.workspaceId)
     this.processTable.sender = (handle, signum) =>
       this.machineTable.send(this.processTable, handle, signum)
-    this.processTable.machineNames = () =>
-      this.machineTable.handles().map((h) => h.machine.toString())
+    this.processTable.machineNames = () => [
+      ...this.machineTable.handles().map((h) => h.machine.toString()),
+      ...this.hostEntries().map((machine) => machine.toString()),
+    ]
     this.processTable.machineResources = (machine, cpu) => this.machineTable.resources(machine, cpu)
     this.processTable.machineInstance = (machine) => this.machineTable.instance(machine)
   }
@@ -838,8 +843,8 @@ export class Workspace {
     return this.sandboxMounts().filter((prefix) => pathVisible(vis, rstripSlash(prefix) || '/'))
   }
 
-  /** The ordered runtime world, first capturer first. */
-  runtimes(): readonly Runtime[] {
+  /** The runtime each machine runs, first capturer first, each named for its machine. */
+  engines(): readonly Runtime[] {
     return this.runtimeWorld.entries
   }
 
@@ -893,14 +898,14 @@ export class Workspace {
     return LOCAL_MACHINE
   }
 
-  /** Add a runtime entry to the workspace's ordered set; `Runtimes.add` places it. */
-  addRuntime(runtime: RuntimeEntry): Runtime {
+  /** Add a machine to the workspace's ordered set; `Runtimes.add` places it. */
+  addMachine(name: string, spec: MachineSpec): Runtime {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
-    return this.runtimeWorld.add(runtime)
+    return this.runtimeWorld.add(name, spec)
   }
 
-  /** Remove a runtime entry, closing it once its runs finish; `workspace` is permanent. */
-  async removeRuntime(name: string): Promise<void> {
+  /** Remove a machine, closing its runtime once its runs finish; `workspace` is permanent. */
+  async removeMachine(name: string): Promise<void> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     await this.runtimeWorld.remove(name)
   }
@@ -1568,18 +1573,30 @@ export class Workspace {
     return own ?? (await this.jobTable.store.getProcess(id))
   }
 
+  /** The machine each `host` entry names, the host under the entry's name, once each in entry order. */
+  private hostEntries(): MachineName[] {
+    const named = new Map<string, MachineName>()
+    for (const entry of this.runtimeWorld.entries) {
+      const machine = entry.machine
+      if (machine?.provider === HOST) named.set(machine.toString(), machine)
+    }
+    return [...named.values()]
+  }
+
   /**
    * The machines the workspace runs programs on, each as a check of it finds
-   * it now: its own host first, which Mirage always manages, then every
-   * machine `machines:` names, checked at once; only `machine` when named.
-   * Mirrors Python's `Workspace.machines`.
+   * it now: its own host first, which Mirage always manages, and each `host`
+   * machine, the host under its entry's name, then every other machine
+   * `machines:` names, checked at once; only `machine` when named. Mirrors
+   * Python's `Workspace.machines`.
    */
   async machines(machine?: MachineName): Promise<Machine[]> {
     const host = this.processTable.machine
-    const found: Machine[] =
-      machine === undefined || machine.toString() === host.toString()
-        ? [{ name: host, state: 'managed', checkedAt: this.clock.now() }]
-        : []
+    const hosts = new Map([[host.toString(), host]])
+    for (const named of this.hostEntries()) hosts.set(named.toString(), named)
+    const found: Machine[] = [...hosts.values()]
+      .filter((each) => machine === undefined || machine.toString() === each.toString())
+      .map((each) => ({ name: each, state: 'managed', checkedAt: this.clock.now() }))
     return [
       ...found,
       ...(await this.machineTable.check(() => this.clock.now(), machine?.toString())),
@@ -1684,7 +1701,7 @@ export class Workspace {
           line,
           judged,
           wholeLine ? judged : verdicts,
-          (one) => (wholeLine ? this.router.placementFor(one, this.router.unplaced()) : ['', '']),
+          (one) => (wholeLine ? this.router.placementFor(one, this.router.unplaced()) : ''),
           reparse,
           wholeLine,
         )
@@ -1713,7 +1730,7 @@ export class Workspace {
       if ('kind' in placed) {
         const refused = placementRefused(placed, line)
         return {
-          ...explainedLine(line, judged, verdicts, () => ['', ''], reparse),
+          ...explainedLine(line, judged, verdicts, () => '', reparse),
           answers,
           outcome: placed.kind === 'pending' ? Outcome.ASK : Outcome.DENY,
           reason: placed.reason,
@@ -2734,12 +2751,12 @@ export class Workspace {
       // instance, and without the block the copy would answer the
       // first read with "unknown secrets source". Policy instances and
       // the route policy stay behind: a policy is a live host object whose
-      // state two workspaces must not share, and the route names runtime
-      // instances the copy does not carry; the entries named by string are
-      // rebuilt. The policy functions travel, the host's code as a CLI's
+      // state two workspaces must not share, and the route names machines
+      // the copy does not carry; the runtimes built from a machines: entry
+      // are rebuilt. The policy functions travel, the host's code as a CLI's
       // spec is. A caller's own profile table brings its own default.
       secrets: options.secrets ?? this.declaredSecretSources,
-      runtimes: options.runtimes ?? this.runtimeWorld.named(),
+      machines: options.machines ?? this.runtimeWorld.specs(),
       policyFunctions: options.policyFunctions ?? this.policyFunctions,
       clock: options.clock ?? this.clock,
       ids: options.ids ?? this.ids,

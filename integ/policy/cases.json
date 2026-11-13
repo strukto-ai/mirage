@@ -9,7 +9,7 @@
     {"op": "exec", "session": "agent", "command": "echo hi", "expect": {"value": {"exit_code": 0, "stdout": "hi\n", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "agent", "command": "rm /data/x", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm is not allowed"}}},
     {"op": "exec", "session": "agent", "command": "rm /data/x; echo after", "expect": {"value": {"exit_code": 0, "stdout": "after\n", "stderr": "rm: Permission denied\n", "decision": "rm is not allowed"}}},
-    {"op": "explain", "session": "agent", "command": "rm /data/x; echo after", "expect": {"value": {"outcome": "allow", "reason": "", "answers": [], "decision": null, "exit_code": 0, "stderr": "", "commands": [{"command": "rm", "outcome": "deny", "answers": [{"kind": "deny", "policy": "PermissionsPolicy", "reason": "rm is not allowed"}], "runtime": ""}, {"command": "echo", "outcome": "allow", "answers": [], "runtime": ""}]}}},
+    {"op": "explain", "session": "agent", "command": "rm /data/x; echo after", "expect": {"value": {"outcome": "allow", "reason": "", "answers": [], "decision": null, "exit_code": 0, "stderr": "", "commands": [{"command": "rm", "outcome": "deny", "answers": [{"kind": "deny", "policy": "PermissionsPolicy", "reason": "rm is not allowed"}], "machine": ""}, {"command": "echo", "outcome": "allow", "answers": [], "machine": ""}]}}},
     {"op": "tools", "session": "agent", "expect": {"value": ["shell", "read", "write", "edit", "ls", "glob"]}}
    ]
   },
@@ -20,7 +20,7 @@
     {"op": "session", "id": "agent", "profile": {"commands": {"deny": [{"reason": "no deletes", "commands": ["rm"]}]}}},
     {"op": "exec", "command": "echo x > /data/f", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "agent", "command": "echo first; rm /data/f", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "no deletes"}}},
-    {"op": "explain", "session": "agent", "command": "echo first; rm /data/f", "expect": {"value": {"outcome": "deny", "reason": "no deletes", "answers": [], "decision": "deny", "exit_code": 126, "stderr": "rm: Permission denied\n", "commands": [{"command": "echo", "outcome": "allow", "answers": [], "runtime": ""}, {"command": "rm", "outcome": "deny", "answers": [{"kind": "deny", "policy": "PermissionsPolicy", "reason": "no deletes"}], "runtime": ""}]}}},
+    {"op": "explain", "session": "agent", "command": "echo first; rm /data/f", "expect": {"value": {"outcome": "deny", "reason": "no deletes", "answers": [], "decision": "deny", "exit_code": 126, "stderr": "rm: Permission denied\n", "commands": [{"command": "echo", "outcome": "allow", "answers": [], "machine": ""}, {"command": "rm", "outcome": "deny", "answers": [{"kind": "deny", "policy": "PermissionsPolicy", "reason": "no deletes"}], "machine": ""}]}}},
     {"op": "vfs", "session": "agent", "call": "exists", "args": {"path": "/data/f"}, "expect": {"value": true}}
    ]
   },
@@ -31,7 +31,7 @@
     {"op": "session", "id": "agent", "profile": {"commands": {"deny": [{"reason": "sealed", "paths": ["/data/sec/*"]}]}}},
     {"op": "exec", "command": "mkdir -p /data/sec; echo k > /data/sec/k; echo o > /data/open", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "agent", "command": "cat /data/open /data/sec/k", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cat: /data/sec/k: Permission denied\n", "decision": "sealed"}}},
-    {"op": "explain", "session": "agent", "command": "cat /data/open /data/sec/k", "expect": {"value": {"outcome": "deny", "reason": "sealed", "answers": [], "decision": "deny", "exit_code": 1, "stderr": "cat: /data/sec/k: Permission denied\n", "commands": [{"command": "cat", "outcome": "deny", "answers": [{"kind": "deny", "policy": "PermissionsPolicy", "reason": "sealed"}], "runtime": ""}]}}},
+    {"op": "explain", "session": "agent", "command": "cat /data/open /data/sec/k", "expect": {"value": {"outcome": "deny", "reason": "sealed", "answers": [], "decision": "deny", "exit_code": 1, "stderr": "cat: /data/sec/k: Permission denied\n", "commands": [{"command": "cat", "outcome": "deny", "answers": [{"kind": "deny", "policy": "PermissionsPolicy", "reason": "sealed"}], "machine": ""}]}}},
     {"op": "exec", "session": "agent", "command": "grep -r k /data", "expect": {"value": {"exit_code": 2, "stdout": "", "stderr": "grep: /data/sec/k: Permission denied\n", "decision": "sealed"}}},
     {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/sec/k"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
     {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/sec/k"}, "explain": true, "expect": {"value": {"call": "read", "outcome": "deny", "reason": "sealed", "answers": [{"kind": "deny", "policy": "PermissionsPolicy", "reason": "sealed"}], "decision": "deny", "error": "EACCES"}}},
@@ -46,7 +46,7 @@
     {"op": "exec", "command": "mkdir -p /data/keep; echo a > /data/keep/a; echo b > /data/b", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "agent", "command": "rm /data/b", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "rm: cannot remove '/data/b': Permission denied\n", "decision": "no deletes in data"}}},
     {"op": "exec", "session": "agent", "command": "rm /data/keep/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "keep needs a nod"}}},
-    {"op": "explain", "session": "agent", "command": "rm /data/keep/a", "expect": {"value": {"outcome": "ask", "reason": "keep needs a nod", "answers": [], "decision": "pending", "exit_code": 126, "stderr": "rm: Permission denied\n", "commands": [{"command": "rm", "outcome": "ask", "answers": [{"kind": "ask", "policy": "PermissionsPolicy", "reason": "keep needs a nod"}], "runtime": ""}]}}}
+    {"op": "explain", "session": "agent", "command": "rm /data/keep/a", "expect": {"value": {"outcome": "ask", "reason": "keep needs a nod", "answers": [], "decision": "pending", "exit_code": 126, "stderr": "rm: Permission denied\n", "commands": [{"command": "rm", "outcome": "ask", "answers": [{"kind": "ask", "policy": "PermissionsPolicy", "reason": "keep needs a nod"}], "machine": ""}]}}}
    ]
   },
   {
@@ -249,8 +249,8 @@
     {"op": "exec", "command": "cp /data/locked /data/copy", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cp: cannot stat '/data/locked': Permission denied\n", "decision": "locked file"}}},
     {"op": "exec", "command": "mv /data/locked /data/moved", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "mv: cannot stat '/data/locked': Permission denied\n", "decision": "locked file"}}},
     {"op": "exec", "command": "echo blocked", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "echo: Permission denied\n", "decision": "blocked line"}}},
-    {"op": "explain", "command": "touch /data/t", "expect": {"value": {"outcome": "allow", "reason": "", "answers": [], "decision": null, "exit_code": 0, "stderr": "", "commands": [{"command": "touch", "outcome": "deny", "answers": [{"kind": "deny", "policy": "RulePolicy", "reason": "no touching"}], "runtime": ""}]}}},
-    {"op": "explain", "command": "echo blocked", "expect": {"value": {"outcome": "deny", "reason": "blocked line", "answers": [{"kind": "deny", "policy": "RulePolicy", "reason": "blocked line"}], "decision": "deny", "exit_code": 126, "stderr": "echo: Permission denied\n", "commands": [{"command": "echo", "outcome": "allow", "answers": [], "runtime": ""}]}}},
+    {"op": "explain", "command": "touch /data/t", "expect": {"value": {"outcome": "allow", "reason": "", "answers": [], "decision": null, "exit_code": 0, "stderr": "", "commands": [{"command": "touch", "outcome": "deny", "answers": [{"kind": "deny", "policy": "RulePolicy", "reason": "no touching"}], "machine": ""}]}}},
+    {"op": "explain", "command": "echo blocked", "expect": {"value": {"outcome": "deny", "reason": "blocked line", "answers": [{"kind": "deny", "policy": "RulePolicy", "reason": "blocked line"}], "decision": "deny", "exit_code": 126, "stderr": "echo: Permission denied\n", "commands": [{"command": "echo", "outcome": "allow", "answers": [], "machine": ""}]}}},
     {"op": "vfs", "call": "read", "args": {"path": "/data/locked"}, "expect": {"errno": "EACCES", "reason": "locked file"}},
     {"op": "unregister_policy", "id": "cmd", "expect": {"value": true}},
     {"op": "exec", "command": "touch /data/t", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
@@ -269,7 +269,7 @@
     {"op": "register_policy", "id": "lines", "pre_execute": {"wait": {"ask": "line needs a nod"}}, "post_execute": {"hidden": {"deny": "output withheld"}, "review": {"ask": "output needs review"}, "capped": {"limit": {"max_bytes": 4}}}},
     {"op": "exec", "command": "echo wait", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "echo: Permission denied\n", "decision": "line needs a nod"}}},
     {"op": "asks", "expect": {"value": [{"command": "", "paths": [], "reason": "line needs a nod"}]}},
-    {"op": "explain", "command": "echo wait", "expect": {"value": {"outcome": "ask", "reason": "line needs a nod", "answers": [{"kind": "ask", "policy": "RulePolicy", "reason": "line needs a nod"}], "decision": "pending", "exit_code": 126, "stderr": "echo: Permission denied\n", "commands": [{"command": "echo", "outcome": "allow", "answers": [], "runtime": ""}]}}},
+    {"op": "explain", "command": "echo wait", "expect": {"value": {"outcome": "ask", "reason": "line needs a nod", "answers": [{"kind": "ask", "policy": "RulePolicy", "reason": "line needs a nod"}], "decision": "pending", "exit_code": 126, "stderr": "echo: Permission denied\n", "commands": [{"command": "echo", "outcome": "allow", "answers": [], "machine": ""}]}}},
     {"op": "answer", "outcome": "allow", "scope": "once"},
     {"op": "exec", "command": "echo wait", "expect": {"value": {"exit_code": 0, "stdout": "wait\n", "stderr": "", "decision": null}}},
     {"op": "exec", "command": "echo wait", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "echo: Permission denied\n", "decision": "line needs a nod"}}},
@@ -291,7 +291,7 @@
     {"op": "register_policy", "id": "commands", "pre_command": {"touch": {"ask": "touch needs a nod"}}, "post_command": {"cat": {"deny": "cat output judged"}, "wc": {"ask": "wc needs review"}}},
     {"op": "exec", "command": "touch /data/t", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "touch: Permission denied\n", "decision": "touch needs a nod"}}},
     {"op": "asks", "expect": {"value": [{"command": "touch", "paths": ["/data/t"], "reason": "touch needs a nod"}]}},
-    {"op": "explain", "command": "touch /data/t", "expect": {"value": {"outcome": "allow", "reason": "", "answers": [], "decision": null, "exit_code": 0, "stderr": "", "commands": [{"command": "touch", "outcome": "ask", "answers": [{"kind": "ask", "policy": "RulePolicy", "reason": "touch needs a nod"}], "runtime": ""}]}}},
+    {"op": "explain", "command": "touch /data/t", "expect": {"value": {"outcome": "allow", "reason": "", "answers": [], "decision": null, "exit_code": 0, "stderr": "", "commands": [{"command": "touch", "outcome": "ask", "answers": [{"kind": "ask", "policy": "RulePolicy", "reason": "touch needs a nod"}], "machine": ""}]}}},
     {"op": "answer", "outcome": "allow", "scope": "once"},
     {"op": "exec", "command": "touch /data/t", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
     {"op": "exec", "command": "cat /data/f && echo next", "expect": {"value": {"exit_code": 126, "stdout": "x\n", "stderr": "cat: Permission denied\n", "decision": "cat output judged"}}},
@@ -337,21 +337,21 @@
   },
   {
    "id": "placement_routes_the_line_and_a_deny_outranks_it",
-   "settings": {"mode": "exec", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "runtimes": ["monty", "workspace"]},
+   "settings": {"mode": "exec", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "machines": {"monty": {"provider": "worker"}}},
    "steps": [
     {"op": "register_policy", "id": "route", "pre_execute": {"heavy": {"route": "monty"}}},
     {"op": "register_policy", "id": "deny", "pre_execute": {"secret": {"deny": "secrets stay put"}}},
-    {"op": "explain", "command": "python3 -c \"print('heavy')\"", "expect": {"value": {"outcome": "allow", "reason": "", "answers": [{"kind": "route", "policy": "RulePolicy", "reason": "", "runtime": "monty"}], "decision": null, "exit_code": 0, "stderr": "", "commands": [{"command": "python3", "outcome": "allow", "answers": [], "runtime": "monty"}]}}},
+    {"op": "explain", "command": "python3 -c \"print('heavy')\"", "expect": {"value": {"outcome": "allow", "reason": "", "answers": [{"kind": "route", "policy": "RulePolicy", "reason": "", "machine": "monty"}], "decision": null, "exit_code": 0, "stderr": "", "commands": [{"command": "python3", "outcome": "allow", "answers": [], "machine": "monty"}]}}},
     {"op": "exec", "command": "python3 -c \"print('heavy')\"", "expect": {"value": {"exit_code": 0, "stdout": "heavy\n", "stderr": "", "decision": null}}},
-    {"op": "explain", "command": "python3 -c \"print('heavy secret')\"", "expect": {"value": {"outcome": "deny", "reason": "secrets stay put", "answers": [{"kind": "route", "policy": "RulePolicy", "reason": "", "runtime": "monty"}, {"kind": "deny", "policy": "RulePolicy", "reason": "secrets stay put"}], "decision": "deny", "exit_code": 126, "stderr": "python3: Permission denied\n", "commands": [{"command": "python3", "outcome": "allow", "answers": [], "runtime": ""}]}}},
+    {"op": "explain", "command": "python3 -c \"print('heavy secret')\"", "expect": {"value": {"outcome": "deny", "reason": "secrets stay put", "answers": [{"kind": "route", "policy": "RulePolicy", "reason": "", "machine": "monty"}, {"kind": "deny", "policy": "RulePolicy", "reason": "secrets stay put"}], "decision": "deny", "exit_code": 126, "stderr": "python3: Permission denied\n", "commands": [{"command": "python3", "outcome": "allow", "answers": [], "machine": ""}]}}},
     {"op": "exec", "command": "python3 -c \"print('heavy secret')\"", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "python3: Permission denied\n", "decision": "secrets stay put"}}}
    ]
   },
   {
    "id": "a_profile_policys_ask_and_route_both_hold",
-   "settings": {"mode": "exec", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "runtimes": ["monty", "local", "workspace"]},
+   "settings": {"mode": "exec", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "machines": {"monty": {"provider": "worker"}, "local": {"provider": "host"}}},
    "steps": [
-    {"op": "session", "id": "agent", "profile": {"policy": {"pre_execute": [{"script": {"source": "def pre_execute(ctx):\n    return {\"kind\": \"ask\", \"reason\": \"line needs a nod\"}\n", "language": "python"}, "runtime": "monty"}, {"script": {"source": "def pre_execute(ctx):\n    return {\"kind\": \"route\", \"runtime\": \"local\"}\n", "language": "python"}, "runtime": "monty"}]}}},
+    {"op": "session", "id": "agent", "profile": {"policy": {"pre_execute": [{"script": {"source": "def pre_execute(ctx):\n    return {\"kind\": \"ask\", \"reason\": \"line needs a nod\"}\n", "language": "python"}, "runtime": "monty"}, {"script": {"source": "def pre_execute(ctx):\n    return {\"kind\": \"route\", \"machine\": \"local\"}\n", "language": "python"}, "runtime": "monty"}]}}},
     {"op": "exec", "session": "agent", "command": "python3 -c \"import sys; print(sys.platform != 'monty')\"", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "python3: Permission denied\n", "decision": "line needs a nod"}}},
     {"op": "asks", "session": "agent", "expect": {"value": [{"command": "", "paths": [], "reason": "line needs a nod"}]}},
     {"op": "answer", "outcome": "allow", "scope": "once"},
@@ -360,23 +360,23 @@
   },
   {
    "id": "a_policy_programs_route_says_why_and_explain_shows_it",
-   "settings": {"mode": "exec", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "runtimes": ["monty", "local", "workspace"]},
+   "settings": {"mode": "exec", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "machines": {"monty": {"provider": "worker"}, "local": {"provider": "host"}}},
    "steps": [
-    {"op": "session", "id": "agent", "profile": {"policy": {"pre_execute": [{"script": {"source": "def pre_execute(ctx):\n    return {\"kind\": \"route\", \"runtime\": \"local\", \"reason\": \"monty has no sqlite3\"}\n", "language": "python"}, "runtime": "monty"}]}}},
-    {"op": "explain", "session": "agent", "command": "python3 -c \"import sqlite3\"", "expect": {"value": {"outcome": "allow", "reason": "", "answers": [{"kind": "route", "policy": "ScriptPolicy", "reason": "monty has no sqlite3", "runtime": "local"}], "decision": null, "exit_code": 0, "stderr": "", "commands": [{"command": "python3", "outcome": "allow", "answers": [], "runtime": "local"}]}}},
+    {"op": "session", "id": "agent", "profile": {"policy": {"pre_execute": [{"script": {"source": "def pre_execute(ctx):\n    return {\"kind\": \"route\", \"machine\": \"local\", \"reason\": \"monty has no sqlite3\"}\n", "language": "python"}, "runtime": "monty"}]}}},
+    {"op": "explain", "session": "agent", "command": "python3 -c \"import sqlite3\"", "expect": {"value": {"outcome": "allow", "reason": "", "answers": [{"kind": "route", "policy": "ScriptPolicy", "reason": "monty has no sqlite3", "machine": "local"}], "decision": null, "exit_code": 0, "stderr": "", "commands": [{"command": "python3", "outcome": "allow", "answers": [], "machine": "local"}]}}},
     {"op": "exec", "session": "agent", "command": "python3 -c \"import sys; print(sys.platform != 'monty')\"", "expect": {"value": {"exit_code": 0, "stdout": "True\n", "stderr": "", "decision": null}}}
    ]
   },
   {
    "id": "a_profile_policy_answers_at_each_pre_method",
-   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "runtimes": ["monty", "workspace"]},
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "machines": {"monty": {"provider": "worker"}}},
    "steps": [
     {"op": "session", "id": "agent", "profile": {"env": {"MODE": "safe"}, "policy": {"pre_command": [{"script": {"source": "def pre_command(ctx):\n    name = ctx['command']\n    if name == 'touch':\n        return {'kind': 'deny', 'reason': 'script says no'}\n    if name == 'mkdir':\n        return {'kind': 'ask', 'reason': 'mkdir needs a nod'}\n    if name == 'rm' and ctx['env'].get('MODE') == 'safe':\n        return {'kind': 'deny', 'reason': 'safe mode'}\n", "language": "python"}, "runtime": "monty"}], "pre_vfs": [{"script": {"source": "def pre_vfs(ctx):\n    if ctx['path'] == '/data/s':\n        return {'kind': 'deny', 'reason': 'script guards s'}\n    if ctx['path'] == '/data/held':\n        return {'kind': 'ask', 'reason': 'held needs a nod'}\n", "language": "python"}, "runtime": "monty"}]}}},
     {"op": "exec", "command": "echo s > /data/s", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "agent", "command": "touch /data/t", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "touch: Permission denied\n", "decision": "script says no"}}},
     {"op": "exec", "session": "agent", "command": "cat /data/s", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cat: /data/s: Permission denied\n", "decision": "script guards s"}}},
     {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/s"}, "expect": {"errno": "EACCES", "reason": "script guards s"}},
-    {"op": "explain", "session": "agent", "command": "touch /data/t", "expect": {"value": {"outcome": "allow", "reason": "", "answers": [], "decision": null, "exit_code": 0, "stderr": "", "commands": [{"command": "touch", "outcome": "deny", "answers": [{"kind": "deny", "policy": "ScriptPolicy", "reason": "script says no"}], "runtime": ""}]}}},
+    {"op": "explain", "session": "agent", "command": "touch /data/t", "expect": {"value": {"outcome": "allow", "reason": "", "answers": [], "decision": null, "exit_code": 0, "stderr": "", "commands": [{"command": "touch", "outcome": "deny", "answers": [{"kind": "deny", "policy": "ScriptPolicy", "reason": "script says no"}], "machine": ""}]}}},
     {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/s"}, "explain": true, "expect": {"value": {"call": "read", "outcome": "deny", "reason": "script guards s", "answers": [{"kind": "deny", "policy": "ScriptPolicy", "reason": "script guards s"}], "decision": "deny", "error": "EACCES"}}},
     {"op": "exec", "command": "echo h > /data/held; touch /data/r", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "agent", "command": "mkdir /data/m", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "mkdir: Permission denied\n", "decision": "mkdir needs a nod"}}},
@@ -393,7 +393,7 @@
   },
   {
    "id": "a_profile_policy_runs_each_program_with_the_session",
-   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "runtimes": ["monty", "workspace"]},
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "machines": {"monty": {"provider": "worker"}}},
    "steps": [
     {"op": "session", "id": "agent", "profile": {"policy": {"pre_execute": [{"script": {"source": "def pre_execute(ctx):\n    names = [c['command'] for c in ctx['commands']]\n    if 'false' in names and ctx['cwd'] == '/data':\n        reason = 'no false in /data: ' + ' '.join(names)\n        return {'kind': 'deny', 'reason': reason}\n", "language": "python"}, "runtime": "monty"}], "pre_command": [{"script": {"source": "import os\n\ndef pre_command(ctx):\n    if ctx['command'] == 'hostname':\n        reason = 'cwd ' + os.getcwd() + ' team ' + str(ctx['env'].get('TEAM')) + ' env ' + ','.join(sorted(os.environ))\n        return {'kind': 'deny', 'reason': reason}\n", "language": "python"}, "runtime": "monty"}, {"script": {"source": "def pre_command(ctx):\n    if ctx['command'] in ('hostname', 'whoami'):\n        return {'kind': 'ask', 'reason': ctx['command'] + ' needs a nod'}\n", "language": "python"}, "runtime": "monty"}], "pre_vfs": [{"script": {"source": "def pre_vfs(ctx):\n    if ctx['call']['name'] == 'read' and 'secret' in open(ctx['path']).read():\n        return {'kind': 'deny', 'reason': 'secret text'}\n", "language": "python"}, "runtime": "monty"}]}}},
     {"op": "exec", "command": "echo secret > /data/x; echo plain > /data/y", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
@@ -440,7 +440,7 @@
     {"op": "register_policy", "id": "lines", "pre_execute": {"blocked": {"deny": "blocked here"}}},
     {"op": "explain", "session": "agent", "command": "rm /x", "expect": {"value": {"outcome": "deny", "exit_code": 126, "answers": [], "commands": [{"command": "rm", "outcome": "deny", "answers": [{"kind": "deny", "policy": "PermissionsPolicy", "reason": "no deletes"}]}]}}},
     {"op": "explain", "session": "agent", "command": "echo blocked", "expect": {"value": {"outcome": "deny", "exit_code": 126, "stderr": "echo: Permission denied\n", "answers": [{"kind": "deny", "reason": "blocked here"}]}}},
-    {"op": "explain", "session": "agent", "command": "echo hi", "expect": {"value": {"outcome": "allow", "exit_code": 0, "answers": [], "commands": [{"command": "echo", "runtime": ""}]}}},
+    {"op": "explain", "session": "agent", "command": "echo hi", "expect": {"value": {"outcome": "allow", "exit_code": 0, "answers": [], "commands": [{"command": "echo", "machine": ""}]}}},
     {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/sec/k"}, "explain": true, "expect": {"value": {"outcome": "deny", "error": "EACCES", "decision": "deny", "answers": [{"kind": "deny", "policy": "PermissionsPolicy", "reason": "sealed"}]}}},
     {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/out/a", "data": "eA=="}, "explain": true, "expect": {"value": {"outcome": "ask", "error": "EACCES", "decision": "pending"}}},
     {"op": "vfs", "session": "agent", "call": "rename", "args": {"src": "/a", "dst": "/sec/b"}, "explain": true, "expect": {"value": {"call": "rename", "outcome": "deny", "error": "EACCES"}}},
@@ -475,9 +475,9 @@
   },
   {
    "id": "a_cli_that_reaches_a_service_runs_under_hides_only_where_the_allow_list_names_it",
-   "settings": {"mode": "write", "runtimes": ["monty", "workspace"], "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "settings": {"mode": "write", "machines": {"monty": {"provider": "worker"}}, "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [
-    {"op": "register_cli", "name": "probe", "script": {"source": "print('ran')", "language": "python"}, "runtime": "monty"},
+    {"op": "register_cli", "name": "probe", "script": {"source": "print('ran')", "language": "python"}, "machine": "monty"},
     {"op": "session", "id": "hides", "profile": {"paths": {"hide": ["/data/secret.txt"]}}},
     {"op": "session", "id": "wildcard", "profile": {"paths": {"hide": ["/data/secret.txt"]}, "commands": {"allow": ["*"]}}},
     {"op": "session", "id": "named", "profile": {"paths": {"hide": ["/data/secret.txt"]}, "commands": {"allow": ["*", "probe"]}}},
@@ -489,7 +489,7 @@
   },
   {
    "id": "a_post_command_program_refuses_a_command_after_it_ran",
-   "settings": {"mode": "write", "runtimes": ["monty", "workspace"], "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "settings": {"mode": "write", "machines": {"monty": {"provider": "worker"}}, "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [
     {"op": "session", "id": "agent", "profile": {"policy": {"post_command": [{"script": {"source": "def post_command(ctx):\n    if ctx['command'] == 'echo':\n        return {'kind': 'deny', 'reason': 'no echo after ' + str(ctx['exit_code'])}\n", "language": "python"}, "runtime": "monty"}]}}},
     {"op": "exec", "session": "agent", "command": "echo hi", "expect": {"value": {"exit_code": 126, "stdout": "hi\n", "stderr": "echo: Permission denied\n", "decision": "no echo after 0"}}},
@@ -507,10 +507,11 @@
       "config": {}
      }
     },
-    "runtimes": [
-     "monty",
-     "workspace"
-    ]
+    "machines": {
+     "monty": {
+      "provider": "worker"
+     }
+    }
    },
    "steps": [
     {
@@ -596,7 +597,7 @@
   },
   {
    "id": "a_policy_sees_whether_a_line_writes_and_what_it_moves",
-   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "runtimes": ["monty", "workspace"]},
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "machines": {"monty": {"provider": "worker"}}},
    "steps": [
     {"op": "session", "id": "agent", "profile": {"policy": {"pre_command": [{"script": {"source": "def pre_command(ctx):\n    if ctx['command'] in ('mv', 'rm'):\n        return {'kind': 'deny', 'reason': 'subtree ' + str(ctx['subtree']) + ' into ' + str(ctx['move_target'])}\n    if ctx['write']:\n        return {'kind': 'deny', 'reason': 'writes'}\n", "language": "python"}, "runtime": "monty"}]}}},
     {"op": "exec", "command": "mkdir /data/sub && printf 'b\\na\\n' > /data/a && cd /data && tar -cf t.tar a", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},

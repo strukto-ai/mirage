@@ -38,6 +38,7 @@ from mirage.policy.match import Outcome
 from mirage.policy.types import Decision, RouteContext, Scope
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
+from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.types import RunResult, ScriptSource
 from mirage.secrets import registry
 from mirage.secrets.errors import SecretsError
@@ -241,7 +242,7 @@ async def test_guest_runtime_reads_the_fetched_value():
     ws = _ws(
         {"GITHUB_TOKEN": {"from": "fake", "ref": "r"}},
         mode=MountMode.EXEC,
-        runtimes=["monty", "workspace"],
+        machines=[MontyRuntime()],
     )
     try:
         io = await ws.shell(
@@ -1751,7 +1752,7 @@ async def test_a_runtime_line_keeps_its_fetch_past_an_inner_refusal():
     ws = _ws(
         {"TOKEN": {"from": "fake", "ref": "r"}},
         mode=MountMode.EXEC,
-        runtimes=[NiceBox(), "workspace"],
+        machines=[NiceBox()],
         profiles={"p": {"commands": {"allow": ["nice"]}}},
         profile="p",
     )
@@ -2168,7 +2169,7 @@ async def test_a_whole_line_with_nothing_pending_resolves_nothing():
     ws = Workspace(
         {"/ram": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[LineBox(), "workspace"],
+        machines=[LineBox()],
         secrets={
             "prod": {
                 "source": "acct-whole",

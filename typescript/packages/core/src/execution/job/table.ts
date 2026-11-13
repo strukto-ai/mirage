@@ -1425,10 +1425,11 @@ export class JobTable {
         command: record.command,
         cwd: record.cwd.virtual,
         machine: record.machine.toString(),
+        machine_instance: record.machineInstance,
         started_at: record.startedAt,
         state: record.state,
         line: record.line?.toString() ?? null,
-        runtime: record.runtime,
+        program: record.program,
         machine_pid:
           record.machinePid === null
             ? null
@@ -1620,7 +1621,7 @@ export class JobTable {
   ): Promise<Record<string, RecordFields>> {
     const left: Record<string, RecordFields> = {}
     for (const [pid, record] of Object.entries(records)) {
-      if (record.runtime == null) continue
+      if (record.program !== true) continue
       if (await this.running(owner)) return records
       if (this.runStopper === null || !(await this.runStopper(record, 15))) left[pid] = record
     }

@@ -3,10 +3,11 @@
     {
       "id": "named_by_its_head_word",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "clis": {
           "pager": {
             "script": "import os\nif '--help' in argv[1:]:\n    print('usage:', argv[0], '[--width N] FILE')\nelse:\n    print('prog', argv[0])\n    print('args', argv[1:])\n    print('config', os.getenv('MIRAGE_CLI_CONFIG'))\n    if stdin:\n        print('stdin', stdin.decode())\n"
@@ -27,10 +28,11 @@
     {
       "id": "flags_reach_the_program",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "clis": {
           "pager": {
             "script": "print('args', argv[1:])\n"
@@ -51,10 +53,11 @@
     {
       "id": "program_answers_its_own_help",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "clis": {
           "pager": {
             "script": "if '--help' in argv[1:]:\n    print('usage:', argv[0], '[--width N] FILE')\nelse:\n    print('ran')\n"
@@ -75,10 +78,11 @@
     {
       "id": "config_arrives_in_the_environment",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "clis": {
           "pager": {
             "script": "import os\nprint('config', os.getenv('MIRAGE_CLI_CONFIG'))\n",
@@ -102,10 +106,11 @@
     {
       "id": "config_readable_by_both_env_spellings",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "clis": {
           "pager": {
             "script": "import os\ncfg = os.getenv('MIRAGE_CLI_CONFIG')\nprint('same', os.environ.get('MIRAGE_CLI_CONFIG') == cfg)\nprint('in', 'MIRAGE_CLI_CONFIG' in os.environ)\nprint('getitem', os.environ['MIRAGE_CLI_CONFIG'] == cfg)\n",
@@ -129,10 +134,11 @@
     {
       "id": "piped_stdin_reaches_the_program",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "clis": {
           "pager": {
             "script": "if stdin:\n    print('stdin', stdin.decode())\nelse:\n    print('no stdin')\n"
@@ -154,10 +160,11 @@
     {
       "id": "two_installs_name_themselves_apart",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "clis": {
           "pager": {
             "script": "print('prog', argv[0])\n"
@@ -189,14 +196,15 @@
     {
       "id": "runtime_pin_is_honored",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "clis": {
           "pager": {
             "script": "print('pinned', argv[0])\n",
-            "runtime": "monty"
+            "machine": "monty"
           }
         }
       },
@@ -218,18 +226,21 @@
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          "monty",
-          "local",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          },
+          "local": {
+            "provider": "host"
+          }
+        },
         "clis": {
           "pager": {
             "script": "import sys\nprint('monty', sys.platform == 'monty')\n"
           }
         },
         "route_policy": {
-          "script": "def pre_execute(ctx):\n    if 'on-local' in ctx['line']:\n        return {\"kind\": \"route\", \"runtime\": \"local\"}\n",
+          "script": "def pre_execute(ctx):\n    if 'on-local' in ctx['line']:\n        return {\"kind\": \"route\", \"machine\": \"local\"}\n",
           "runtime": "monty"
         }
       },
@@ -255,9 +266,7 @@
     {
       "id": "no_runtime_for_the_language_exits_127",
       "world": {
-        "runtimes": [
-          "workspace"
-        ],
+        "machines": {},
         "clis": {
           "pager": {
             "script": "print('unreachable')\n"
@@ -270,7 +279,7 @@
           "expect": {
             "exit": 127,
             "stdout": "",
-            "stderr_contains": "no workspace runtime runs python scripts"
+            "stderr_contains": "no workspace machine runs python scripts"
           }
         }
       ]
@@ -281,14 +290,16 @@
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          "pyodide",
-          "workspace"
-        ],
+        "machines": {
+          "pyodide": {
+            "provider": "in_process",
+            "runtime": "pyodide"
+          }
+        },
         "clis": {
           "pager": {
-            "runtime": "pyodide",
-            "script": "from __future__ import annotations\nimport sys\nprint(argv)\nprint(stdin)\nprint(argv == sys.argv)\nprint(sys.stdin.buffer.read() == (stdin if stdin is not None else b''))\n"
+            "script": "from __future__ import annotations\nimport sys\nprint(argv)\nprint(stdin)\nprint(argv == sys.argv)\nprint(sys.stdin.buffer.read() == (stdin if stdin is not None else b''))\n",
+            "machine": "pyodide"
           }
         }
       },
@@ -336,14 +347,15 @@
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          "local",
-          "workspace"
-        ],
+        "machines": {
+          "local": {
+            "provider": "host"
+          }
+        },
         "clis": {
           "pager": {
-            "runtime": "local",
-            "script": "from __future__ import annotations\nimport sys\nprint(argv)\nprint(stdin)\nprint(argv == sys.argv)\nprint(sys.stdin.buffer.read() == (stdin if stdin is not None else b''))\n"
+            "script": "from __future__ import annotations\nimport sys\nprint(argv)\nprint(stdin)\nprint(argv == sys.argv)\nprint(sys.stdin.buffer.read() == (stdin if stdin is not None else b''))\n",
+            "machine": "local"
           }
         }
       },

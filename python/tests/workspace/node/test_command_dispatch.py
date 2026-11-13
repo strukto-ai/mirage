@@ -22,8 +22,8 @@ from mirage.policy.types import Outcome, Scope
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.language import LanguageRuntime
-from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.mixin import ProcessExecutorMixin
+from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.types import RunResult
 from mirage.shell.parse import parse, syntax_refusal
 from mirage.types import MountMode
@@ -88,7 +88,7 @@ class ShellsOut(LanguageRuntime):
 )
 async def test_a_lazy_run_shells_out_under_its_prefix(line):
     ws = Workspace(
-        {"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[ShellsOut()]
+        {"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[ShellsOut()]
     )
     try:
         assert (await ws.shell(line)).stdout == b"one\n"
@@ -179,7 +179,7 @@ async def test_an_outside_wrapper_runs_no_program_the_allow_list_leaves_out(
     line, refused
 ):
     box = Box()
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box])
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
     try:
         ws.create_session(
             "s",
@@ -199,7 +199,7 @@ async def test_an_outside_wrapper_runs_no_program_the_allow_list_leaves_out(
 @pytest.mark.asyncio
 async def test_an_outside_wrapper_admits_every_wrapper_it_runs():
     box = Box()
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box])
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
     try:
         ws.create_session(
             "s", profile={"commands": {"allow": ["nohup", "python3"]}}
@@ -224,7 +224,7 @@ async def test_an_outside_wrapper_admits_every_wrapper_it_runs():
 )
 async def test_an_outside_wrapper_runs_a_listed_program(line):
     box = Box()
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box])
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
     try:
         ws.create_session(
             "s", profile={"commands": {"allow": ["nohup", "nice", "python3"]}}
@@ -239,7 +239,7 @@ async def test_an_outside_wrapper_runs_a_listed_program(line):
 @pytest.mark.asyncio
 async def test_an_outside_wrapper_reads_its_program_s_operands():
     box = Box()
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box])
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
     try:
         ws.create_session(
             "s",
@@ -267,7 +267,7 @@ async def test_an_outside_wrapper_s_program_is_asked_once():
     # The pass asks about the program where it stands under the wrapper,
     # and the gate finds that answer there rather than asking again.
     box = Box()
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box])
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
     try:
         ws.create_session(
             "s",
@@ -305,7 +305,7 @@ async def test_an_outside_wrapper_runs_a_path_only_without_an_allow_list(
     # The box resolves a path on its own disk, which the gate cannot read,
     # so an allow list, which names only what it can read, refuses it.
     box = Box()
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box])
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
     try:
         ws.create_session("s", profile=profile)
         r = await ws.shell("nohup /usr/bin/env python3 -c x", session_id="s")
@@ -337,7 +337,7 @@ async def test_an_outside_wrapper_s_program_is_what_the_machine_runs(
     # GNU env splits -S into a command line the gate cannot read, and the
     # machine runs its own pip, not the session's function of that name.
     box = Box()
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box])
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
     try:
         ws.create_session(
             "s",
@@ -385,8 +385,10 @@ async def test_an_outside_wrapper_runs_where_its_program_is_routed(machine):
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        machines={"a": Named("a"), "b": Named("b")},
-        runtimes=[RemoteRuntime(["hostname"], machine="a"), "workspace"],
+        machines={
+            "a": Named("a", {"captures": ["hostname"]}),
+            "b": Named("b", {"captures": ["hostname"]}),
+        },
         policies=[HostnameOn(machine)],
     )
     try:
@@ -413,11 +415,10 @@ def _routed(routes: dict[str, Route]) -> Workspace:
     return Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        machines={"a": Named("a"), "b": Named("b")},
-        runtimes=[
-            RemoteRuntime(["find", "hostname"], machine="a"),
-            "workspace",
-        ],
+        machines={
+            "a": Named("a", {"captures": ["find", "hostname"]}),
+            "b": Named("b", {"captures": ["find", "hostname"]}),
+        },
         policies=[Routes(routes)],
     )
 
@@ -451,7 +452,7 @@ async def test_routes_one_process_cannot_honor_refuse_the_wrapper(
         assert (r.exit_code, r.stdout) == (126, b"")
         assert r.decision is not None
         assert r.decision.reason.startswith(
-            "policies place the line on different runtimes"
+            "policies place the line on different machines"
         )
     finally:
         await ws.close()
@@ -486,7 +487,7 @@ async def test_a_routed_wrapper_reaches_the_runtime_with_its_words():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[box, other],
+        machines=[box, other],
         policies=[HostnameTo("other")],
     )
     try:
@@ -509,7 +510,7 @@ async def test_a_route_into_mirage_runs_the_wrapper_s_program_there():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[box, "monty"],
+        machines=[box, MontyRuntime()],
         policies=[PythonOnMonty()],
     )
     try:
@@ -531,7 +532,7 @@ async def test_a_route_into_mirage_runs_the_wrapper_s_program_there():
 )
 async def test_an_absent_path_goes_to_the_external_runtime(profile, refused):
     box = Box()
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box])
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
     try:
         ws.create_session("s", profile=profile)
         r = await ws.shell("/opt/tool a", session_id="s")
@@ -551,7 +552,7 @@ async def test_an_absent_path_goes_to_the_external_runtime(profile, refused):
 @pytest.mark.asyncio
 async def test_a_path_mirage_holds_runs_in_mirage():
     box = Box()
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box])
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
     try:
         await ws.shell("echo 'echo hi' > /data/s.sh")
         r = await ws.shell("/data/s.sh")
@@ -564,7 +565,7 @@ async def test_a_path_mirage_holds_runs_in_mirage():
 @pytest.mark.asyncio
 async def test_a_relative_path_stays_the_shell_s_to_answer():
     box = Box()
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box])
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
     try:
         r = await ws.shell("./tool a")
         assert r.exit_code == 127
@@ -575,9 +576,7 @@ async def test_a_relative_path_stays_the_shell_s_to_answer():
 
 @pytest.mark.asyncio
 async def test_an_absent_path_is_the_shell_s_without_an_external_runtime():
-    ws = Workspace(
-        {"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=["workspace"]
-    )
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[])
     try:
         r = await ws.shell("/opt/tool a")
         assert r.exit_code == 127

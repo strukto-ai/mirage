@@ -78,14 +78,13 @@ ws = Workspace(
             "commands": {"deny": ["slack send-message", "curl"]},
         },
     },
-    # die e2b-Sandbox ist eine Maschine; die Remote-Laufzeitumgebung führt Programme darauf aus
-    machines={"box": {"provider": "e2b", "sandbox_id": sandbox_id, "mount_type": "ssh"}},
-    runtimes=[
-        MontyRuntime(captures=["python", "python3"]),
-        RemoteRuntime(captures=["python", "python3"], machine="box"),
-    ],
+    # Python läuft auf monty in einem Worker oder in der e2b-Sandbox
+    machines={
+        "py": {"provider": "worker"},
+        "box": {"provider": "e2b", "sandbox_id": sandbox_id, "mount_type": "ssh", "captures": ["python", "python3"]},
+    },
     # leitet die Berechnung: numpy-Zeilen laufen auf der Maschine, der Rest auf monty
-    route_policy=lambda ctx: "remote" if "numpy" in ctx.line else None,
+    route_policy=lambda ctx: "box" if "numpy" in ctx.line else None,
 )
 
 # fügt einen Agenten mit dem Profil analyst hinzu
@@ -155,7 +154,7 @@ Diese Kommandozeilenwerkzeuge sind virtualisiert: [Mirage](https://www.strukto.a
 
 ## Virtuelle Laufzeitumgebung
 
-Laufzeitumgebungen werden auf dieselbe Weise virtualisiert, und nicht nur für Programmiersprachen. Jeder Befehl auf der Zeile kann an eine konfigurierte Laufzeitumgebung umgeleitet werden: Python läuft etwa im Prozess mit [Monty](https://pydantic.dev/articles/pydantic-monty), während ein anderer Befehl, sagen wir `kubectl`, per SSH an eine entfernte Maschine geht. Welche Laufzeitumgebung eine Zeile bedient, kann ein [geskripteter Runtime-Router](https://docs.mirage.strukto.ai/home/policy/route-runtime) entscheiden.
+Laufzeitumgebungen werden auf dieselbe Weise virtualisiert, und nicht nur für Programmiersprachen. Jeder Befehl auf der Zeile kann an eine konfigurierte Laufzeitumgebung umgeleitet werden: Python läuft etwa im Prozess mit [Monty](https://pydantic.dev/articles/pydantic-monty), während ein anderer Befehl, sagen wir `kubectl`, per SSH an eine entfernte Maschine geht. Welche Laufzeitumgebung eine Zeile bedient, kann ein [geskripteter Runtime-Router](https://docs.mirage.strukto.ai/home/policy/route-machine) entscheiden.
 
 |                | Laufzeitumgebungen                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -269,11 +268,11 @@ npm install @struktoai/mirage-node @pydantic/monty express
 
 ```ts
 import express from 'express'
-import { MontyRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
   { '/work': new RAMVFS() },
-  { mode: MountMode.EXEC, runtimes: [new MontyRuntime({ captures: ['python', 'python3'] })] },
+  { mode: MountMode.EXEC, machines: { py: { provider: 'worker' } } },
 )
 const app = express()
 app.use(express.json())

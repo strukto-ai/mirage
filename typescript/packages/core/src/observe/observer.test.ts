@@ -26,7 +26,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { IOResult } from '../io/types.ts'
 import { CHECK_MARK, RUN_PID_MARK, isRun } from '../machine/constants.ts'
 import { MachineHandle } from '../machine/handle.ts'
-import { RemoteRuntime } from '../runtime/machine/runtime.ts'
 import type { RunResult } from '../runtime/types.ts'
 import type { Policy } from '../policy/base.ts'
 import { MountMode, PathSpec } from '../types.ts'
@@ -700,7 +699,7 @@ it('ends the span of a line whose route is refused', async () => {
   const spans = exported()
   const ws = new Workspace({ '/data': new RAMVFS() })
   try {
-    await expect(ws.shell('echo hi', { runtime: 'nope' })).rejects.toBeInstanceOf(RouteError)
+    await expect(ws.shell('echo hi', { machine: 'nope' })).rejects.toBeInstanceOf(RouteError)
     const [command] = spans.filter((s) => s.name === 'shell')
     expect(command?.end).toBeDefined()
     expect(command?.attributes['mirage.exit_code']).not.toBe(0)
@@ -793,8 +792,7 @@ it("names the machine a span's work ran on", async () => {
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      machines: { a: new Box('a') },
-      runtimes: [new RemoteRuntime({ captures: ['train'], machine: 'a' })],
+      machines: { a: new Box('a', { captures: ['train'] }) },
     },
   )
   try {
@@ -875,7 +873,7 @@ it('puts a child of a stopping parent under it', async () => {
     command: '(train) &',
     machine: new MachineName('host', 'h'),
     startedAt: 1,
-    runtime: null,
+    program: false,
     state: 'stopping',
     endedAt: null,
     exit: null,
@@ -887,7 +885,7 @@ it('puts a child of a stopping parent under it', async () => {
     command: 'train',
     machine: new MachineName('box', 'a'),
     startedAt: 2,
-    runtime: 'remote',
+    program: true,
     state: 'exited',
     endedAt: 3,
     exit: 143,
@@ -917,8 +915,7 @@ it("puts a nested job's process under its job", async () => {
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      machines: { a: new Box('a') },
-      runtimes: [new RemoteRuntime({ captures: ['train'], machine: 'a' })],
+      machines: { a: new Box('a', { captures: ['train'] }) },
     },
   )
   try {
@@ -951,8 +948,7 @@ it('links a process to each it read from', async () => {
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      machines: { a: new Box('a') },
-      runtimes: [new RemoteRuntime({ captures: ['train'], machine: 'a' })],
+      machines: { a: new Box('a', { captures: ['train'] }) },
     },
   )
   try {

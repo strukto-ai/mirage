@@ -81,6 +81,9 @@ export class MachineTable {
    * @param signalHost sends a signal to a host process; null sends none.
    * @param stopHost stops a host program a lapsed workspace left; null
    *   reaches none.
+   * @param hostResources reads what the host holds; null reads nothing.
+   * @param host the host Mirage runs on, which every `host` machine is;
+   *   null for a table that knows none.
    */
   constructor(
     machines: Record<string, MachineHandle | Record<string, unknown>> = {},
@@ -88,6 +91,7 @@ export class MachineTable {
     private readonly signalHost: HostSignal | null = null,
     private readonly stopHost: HostStop | null = null,
     private readonly hostResources: HostResources | null = null,
+    private readonly host: MachineName | null = null,
   ) {
     for (const [name, spec] of Object.entries(machines)) {
       const handle = buildMachine(name, spec)
@@ -149,12 +153,15 @@ export class MachineTable {
   }
 
   /**
-   * What `machine`'s provider calls it (`MachineHandle.instance`), its name
-   * for one the table holds no handle of, such as the host. Mirrors Python's
-   * `MachineTable.instance`.
+   * What `machine`'s provider calls it (`MachineHandle.instance`): the
+   * host's own name for a host machine, its name for another one the table
+   * holds no handle of. Mirrors Python's `MachineTable.instance`.
    */
   instance(machine: MachineName): string {
-    return this.byId(machine.toString())?.instance ?? machine.name
+    const handle = this.byId(machine.toString())
+    if (handle !== null) return handle.instance
+    if (this.host !== null && machine.provider === this.host.provider) return this.host.name
+    return machine.name
   }
 
   /**
@@ -199,7 +206,7 @@ export class MachineTable {
     const runs = new Map(
       processes
         .records()
-        .filter((record) => record.runtime !== null)
+        .filter((record) => record.program)
         .map((record) => [record.id.toString(), record]),
     )
     const ended = new Set([...runs.keys()].filter((tag) => !live.has(tag)))
@@ -208,8 +215,9 @@ export class MachineTable {
     const foundTags = new Set([...this.found.values()].map((entry) => entry.tag))
     const machinesToScan = new Set([...this.found.values()].map((entry) => entry.machine))
     for (const tag of unscanned) {
-      const machine = runs.get(tag)?.machine.toString()
-      if (machine !== undefined && machine !== host) machinesToScan.add(machine)
+      const machine = runs.get(tag)?.machine
+      if (machine !== undefined && reached(processes, machine).toString() !== host)
+        machinesToScan.add(machine.toString())
     }
     const scans: [MachineName, Promise<MachineProcess[]>][] = this.handles()
       .filter((handle) => handle.executing || machinesToScan.has(handle.machine.toString()))
@@ -218,7 +226,7 @@ export class MachineTable {
       const groups = new Map<number, readonly [string, number]>()
       for (const [tag, record] of runs) {
         if (
-          record.machine.toString() === host &&
+          reached(processes, record.machine).toString() === host &&
           record.machinePid !== null &&
           (live.has(tag) || unscanned.has(tag) || foundTags.has(tag))
         )
@@ -241,8 +249,9 @@ export class MachineTable {
       finishing.push(...this.applyScan(processes, machine, rows.value, live, runs))
     })
     for (const tag of unscanned) {
-      const machine = runs.get(tag)?.machine.toString()
-      if (machine === undefined || !failed.has(machine)) stillScanned.add(tag)
+      const machine = runs.get(tag)?.machine
+      if (machine === undefined || !failed.has(reached(processes, machine).toString()))
+        stillScanned.add(tag)
     }
     this.scannedAfterEnd = stillScanned
     await Promise.allSettled(finishing.map((handle) => handle.task))
@@ -266,14 +275,12 @@ export class MachineTable {
     const record = handle.record
     if (record.state !== 'running') return null
     const target = record.machinePid
-    if (record.machine.toString() === processes.machine.toString()) {
+    const machine = reached(processes, record.machine)
+    if (machine.toString() === processes.machine.toString()) {
       if (this.signalHost === null || target === null || target.exited != null) return null
-    } else if (
-      this.byId(record.machine.toString()) === null ||
-      (target === null && record.runtime === null)
-    )
+    } else if (this.byId(machine.toString()) === null || (target === null && !record.program))
       return null
-    return this.deliverSignal(handle, record.machine, target ?? record.id.toString(), signum)
+    return this.deliverSignal(handle, machine, target ?? record.id.toString(), signum)
   }
 
   /**
@@ -292,14 +299,14 @@ export class MachineTable {
       sent = await this.signalOn(machine, target, signum)
     } catch (error) {
       console.debug(`${machine.toString()}: signal ${String(signum)} not sent:`, error)
-      if (handle.record.runtime === null) return false
+      if (!handle.record.program) return false
       sent = false
     }
     if (sent) {
       handle.programSignaled(signum)
       return true
     }
-    if (handle.record.runtime === null) {
+    if (!handle.record.program) {
       this.endFound(handle)
       return false
     }
@@ -323,7 +330,13 @@ export class MachineTable {
     const found = record.machine_pid as MachinePid | null | undefined
     const seen = record.seen_at
     if (typeof pid !== 'number') return false
-    if (machine === processes.machine.toString() && found != null) {
+    const host = processes.machine
+    if (
+      typeof machine === 'string' &&
+      machine.startsWith(`${host.provider}:`) &&
+      record.machine_instance === host.name &&
+      found != null
+    ) {
       if (this.stopHost === null) return false
       return this.stopHost(found, typeof seen === 'number' ? seen : null, signum)
     }
@@ -375,13 +388,14 @@ export class MachineTable {
     for (const [tag, run] of tagged) {
       const handle = live.get(tag) ?? null
       const owner = handle?.record ?? runs.get(tag) ?? null
-      if (owner !== null && owner.machine.toString() !== machine.toString()) continue
+      if (owner !== null && reached(processes, owner.machine).toString() !== machine.toString())
+        continue
       const pids = new Set(run.map((row) => row.pid))
       const placed = new Map<number, number>()
       if (
         handle !== null &&
-        handle.record.runtime !== null &&
-        handle.record.machine.toString() === machine.toString()
+        handle.record.program &&
+        reached(processes, handle.record.machine).toString() === machine.toString()
       ) {
         const known = handle.record.machinePid
         const root = programRow(run, pids, known)
@@ -443,10 +457,7 @@ export class MachineTable {
     const placed = processes
       .live()
       .filter(
-        (p) =>
-          p.record.sessionId === session &&
-          p.record.runtime === null &&
-          p.record.machinePid !== null,
+        (p) => p.record.sessionId === session && !p.record.program && p.record.machinePid !== null,
       ).length
     if (placed >= MAX_PROCESSES) {
       console.debug(
@@ -474,7 +485,7 @@ export class MachineTable {
         },
         parent,
         line: owner.line,
-        machine,
+        machine: owner.machine,
       })
     } catch (error) {
       console.debug(`${machine.toString()}: process ${String(row.pid)} not placed:`, error)
@@ -514,6 +525,16 @@ export class MachineTable {
 }
 
 /** The key a process a scan found is kept by: its machine, pid and start. */
+/**
+ * The machine a scan or a signal reaches `machine` as: the host for every
+ * host machine, each the name a `host` entry gives it. Mirrors Python's
+ * `_reached`.
+ */
+function reached(processes: ProcessTable, machine: MachineName): MachineName {
+  const host = processes.machine
+  return machine.provider === host.provider ? host : machine
+}
+
 function foundKey(machine: MachineName, row: MachineProcess): string {
   return `${machine.toString()} ${String(row.pid)} ${String(row.started)}`
 }

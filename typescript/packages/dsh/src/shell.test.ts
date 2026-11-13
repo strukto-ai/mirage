@@ -109,7 +109,7 @@ describe('resolve', () => {
 
   it('claims no confinement once a runtime executes beyond the workspace', async () => {
     const { shell, ws } = await makeShell()
-    ws.addRuntime(new LocalRuntime({ captures: ['python'] }))
+    ws.addMachine('local', new LocalRuntime({ captures: ['python'] }))
     expect(shell.sandboxMode).toBeUndefined()
   })
 
@@ -295,7 +295,7 @@ describe('sandbox policy', () => {
 
   it('makes no sandbox claim once a runtime executes beyond the workspace', async () => {
     const { shell, ws } = await makeShell()
-    ws.addRuntime(new LocalRuntime({ captures: ['python'] }))
+    ws.addMachine('local', new LocalRuntime({ captures: ['python'] }))
     const result = await runOn(
       shell,
       shell.resolve({ command: 'echo written > /data/x.txt', sandboxPolicy: READ_ONLY }),
@@ -940,7 +940,7 @@ describe('sandbox facts', () => {
 
   it('omits the sandbox once a runtime executes beyond the workspace', async () => {
     const { shell, ws } = await makeShell()
-    ws.addRuntime(new LocalRuntime({ captures: ['python'] }))
+    ws.addMachine('local', new LocalRuntime({ captures: ['python'] }))
     const result = await runOn(shell, shell.resolve({ command: 'true' }))
     expect(result.sandbox).toBeUndefined()
   })

@@ -1995,11 +1995,12 @@ jobs:
                 jq -e 'any(.cases[]?; any((.backends // [])[]; split("+")[0] == "s3"))' "$f" >/dev/null; then
               minio_suites+=("$n")
             fi
-            # A case naming a runtime, through a `runtimes` matrix or its
-            # world, needs what that runtime runs on wherever it lands.
+            # A case naming a runtime, through a `runtimes` matrix or a
+            # world machine's `runtime` or `provider`, needs what that
+            # runtime runs on wherever it lands.
             named() {
-              jq -e --arg r "$1" 'any(.cases[]?; any(((.runtimes // []) + (.world.runtimes // []))[];
-                (if type == "object" then .name else . end) == $r))' "$f" >/dev/null
+              jq -e --arg r "$1" 'any(.cases[]?; any(((.runtimes // [])
+                + [(.world.machines // {})[] | (.runtime // .provider)])[]; . == $r))' "$f" >/dev/null
             }
             if named wasi; then wasi_suites+=("$n"); fi
             if named docker || named ssh; then box_suites+=("$n"); fi

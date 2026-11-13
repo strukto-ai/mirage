@@ -60,7 +60,7 @@ def secret_refs(config: JsonValue) -> list[str]:
     ``{from: strukto, ref, key}`` pointer, or a managed entry of an
     ``env`` block, whose ``key`` is optional. A pointer counts by the rule
     the secrets layer reads one by, and a managed entry only as an ``env``
-    block's entry, so a runtime's ``env`` map holding ``from`` and ``ref``
+    block's entry, so a machine's ``env`` map holding ``from`` and ``ref``
     is neither.
 
     Args:

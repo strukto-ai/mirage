@@ -3,10 +3,11 @@
     {
       "id": "named_world_python3",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ]
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        }
       },
       "steps": [
         {
@@ -22,10 +23,11 @@
     {
       "id": "python_alias",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ]
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        }
       },
       "steps": [
         {
@@ -40,10 +42,11 @@
     {
       "id": "python3_file_names_its_runtime",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ]
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        }
       },
       "steps": [
         {
@@ -59,10 +62,11 @@
     {
       "id": "module_flag_refused_by_name",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ]
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        }
       },
       "steps": [
         {
@@ -84,10 +88,11 @@
     {
       "id": "option_refusals_follow_cpython",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ]
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        }
       },
       "steps": [
         {
@@ -111,10 +116,11 @@
     {
       "id": "version_names_the_monty_guest",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",
@@ -162,10 +168,11 @@
     {
       "id": "invoked_name_errors_and_help",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ]
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        }
       },
       "steps": [
         {
@@ -196,10 +203,11 @@
     {
       "id": "shadowing_function_takes_the_words_as_typed",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ]
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        }
       },
       "steps": [
         {
@@ -221,10 +229,11 @@
     {
       "id": "unknown_long_option_follows_cpython",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ]
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        }
       },
       "steps": [
         {

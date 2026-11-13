@@ -12,12 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { MachineHandle } from '../machine/handle.ts'
+import { buildMachine } from '../machine/registry.ts'
+import { isPlainObject } from '../utils/records.ts'
 import { compareCodePoints } from '../utils/sort.ts'
-import type { Runtime } from './base.ts'
+import { Runtime } from './base.ts'
 import type { RuntimeOptions } from './config.ts'
 import type { RouteDecision } from './types.ts'
 import {
   EXTERNAL_COMMANDS,
+  HOST,
   JS_GROUP,
   LANGUAGE_COMMANDS,
   PYTHON_GROUP,
@@ -51,63 +55,65 @@ const NAMED: Record<
   },
 )
 
-/**
- * The default world when no runtimes list is given: the builtin command
- * engine alone, as Python's, so an interpreter runs only where the config
- * names one (integ/runtime/routing/defaults.json pins it).
- */
-export const DEFAULT_ENTRIES: readonly string[] = ['workspace']
-
 // The runtimes @struktoai/mirage-node registers when it is imported.
 const NODE_RUNTIMES: readonly string[] = ['local', 'sandlock']
-
-// The machine providers: names a runtimes entry may still carry from
-// before machines had their own block.
-const MACHINE_PROVIDERS: readonly string[] = [
-  'apple_container',
-  'daytona',
-  'docker',
-  'e2b',
-  'kubernetes',
-  'microsandbox',
-  'smolvm',
-  'ssh',
-]
 
 /** Why a name a config may carry is not registered here, and where it lives. */
 const RUNTIME_HINTS: Record<string, string> = {
   ...Object.fromEntries(
     NODE_RUNTIMES.map((name) => [
       name,
-      `runtime '${name}' lives in @struktoai/mirage-node; import that package to register ` +
-        "it. Browser worlds support 'monty' (sandboxed), 'pyodide' (WASM CPython), and " +
-        "'quickjs' (sandboxed JavaScript)",
+      "a host machine's programs run through @struktoai/mirage-node; import that package " +
+        "to register them. Browser worlds run 'quickjs' and 'pyodide' in process and " +
+        "'monty' on a worker",
     ]),
   ),
   wasi:
-    "runtime 'wasi' is Python-only (a CPython WASI build); TypeScript " +
-    "supports 'monty' (sandboxed), 'pyodide' (WASM CPython), " +
-    "and 'quickjs' (sandboxed JavaScript)",
-  sandlock:
-    "runtime 'sandlock' lives in @struktoai/mirage-node; import that package " +
-    'to register it. Sandlock requires Linux and `sandlock` on PATH.',
-  ...Object.fromEntries(
-    MACHINE_PROVIDERS.map((name) => [
-      name,
-      `'${name}' is a machine provider, not a runtime: declare the machine under ` +
-        `machines: with provider: ${name}, and run its programs with the remote runtime`,
-    ]),
-  ),
+    "runtime 'wasi' is Python-only (a CPython WASI build); TypeScript runs " +
+    "'quickjs' and 'pyodide' in process and 'monty' on a worker",
 }
 
-// Every runtime is constructed the same way; config keys are checked
-// inside each class (its config key list), so the entry level only
-// knows the uniform options. Python gets this check for free
-// (`**options` raises TypeError on an unknown kwarg); a TS object
-// literal would silently swallow a typo key without it.
-const ENTRY_KEYS: readonly string[] = ['captures', 'config']
-// The one runtime that runs on a machine takes one more: its default.
-const MACHINE_KEYS: readonly string[] = [...ENTRY_KEYS, 'machine']
+/**
+ * The providers a `machines:` entry names for a runtime of Mirage's own
+ * rather than a machine it reaches: in its process, in worker processes it
+ * spawns, or as native programs on its host.
+ */
+export const IN_PROCESS = 'in_process'
+export const WORKER = 'worker'
+const ENGINE_PROVIDERS: readonly string[] = [IN_PROCESS, WORKER, HOST]
+
+// Where each builtin runtime runs, when that is not in process. Null
+// prototype: names come from config.
+const PLACED: Record<string, string> = Object.assign(
+  Object.create(null) as Record<string, string>,
+  {
+    monty: WORKER,
+    local: HOST,
+    sandlock: HOST,
+    remote: 'a machine provider',
+    workspace: IN_PROCESS,
+  },
+)
+
+/**
+ * Say where a runtime runs on this host. A host package calls it when it
+ * swaps a runtime's engine: Cloudflare runs Monty in its isolate, so there
+ * monty is an `in_process` runtime, not a worker's.
+ */
+export function placeRuntime(name: string, provider: string): void {
+  if (provider === IN_PROCESS) Reflect.deleteProperty(PLACED, name)
+  else PLACED[name] = provider
+}
+
+/** A runtime class, as the registry holds one. */
+type RuntimeClass = (new (options?: RuntimeOptions<never>) => Runtime) &
+  Pick<typeof Runtime, 'configFields'>
+
+/** What a `machines:` entry may be: a machine handle, a runtime, or the entry as config spells it. */
+export type MachineSpec = MachineHandle | Runtime | Record<string, unknown>
+
+/** A workspace's `machines`: the entries by name, or handles and runtimes named by their own `name`. */
+export type MachineSpecs = Record<string, MachineSpec> | readonly (MachineHandle | Runtime)[]
 
 // The names mirage ships: core's own, and the ones its packages register
 // when they load, so `registerRuntime` can refuse to shadow one the way
@@ -117,12 +123,11 @@ const BUILTIN_RUNTIMES: ReadonlySet<string> = new Set([...Object.keys(NAMED), ..
 
 /**
  * Register a runtime class under a config name. Host-side only, like
- * `registerVfs` and `registerCliSpec`: the embedding program
- * calls it, never a line the agent types. Once registered the name works
- * everywhere a builtin's does: a `runtimes:` entry in workspace config, a
- * string in `new Workspace(..., { runtimes })`, and `execute({ runtime })`.
- * Runtime packages use the same entry point for their own runtimes (`daytona`
- * from `@struktoai/mirage-node`). Mirrors `register_runtime` in
+ * `registerVfs` and `registerCliSpec`: the embedding program calls it,
+ * never a line the agent types. Once registered the name is a `runtime` an
+ * `in_process` machine entry may name. Runtime packages use the same entry
+ * point for their own runtimes (`local` and `sandlock` from
+ * `@struktoai/mirage-node`). Mirrors `register_runtime` in
  * `mirage/runtime/table.py`: a core builtin cannot be shadowed, and
  * re-registering any other name replaces it.
  */
@@ -142,43 +147,137 @@ export function knownRuntimes(): string[] {
 }
 
 /**
- * Refuse an entry key no runtime takes, naming the entry. Every runtime
- * is constructed the same way, so this is one check for a builtin, a
- * registered name and a `source:Class` reference alike: `buildRuntime`
- * runs it for the names it resolves, and the config loader runs it for
- * a reference, whose class it constructs itself.
+ * Construct a runtime by name, failing loud on unknown names (with a
+ * cross-language hint for Python-only names) and on unknown options, as
+ * Python's constructor signature does.
  */
-export function checkRuntimeOptions(name: string, options: Record<string, unknown>): void {
+export function buildRuntime(name: string, options: Record<string, unknown> = {}): Runtime {
+  const cls = runtimeClass(name)
   for (const key of Object.keys(options)) {
-    if (key === 'machine' && name !== 'remote' && name in NAMED)
-      throw new Error(
-        `runtime '${name}' runs on the workspace's machine; a machine takes the remote runtime`,
-      )
-    if (!(name === 'remote' ? MACHINE_KEYS : ENTRY_KEYS).includes(key)) {
-      const knownKeys = ENTRY_KEYS.map((k) => `'${k}'`).join(', ')
-      throw new Error(`unknown ${name} runtime option '${key}' (expected: ${knownKeys})`)
-    }
+    if (key !== 'captures' && key !== 'config')
+      throw new Error(`unknown ${name} runtime option '${key}' (expected: 'captures', 'config')`)
   }
+  return new cls(options as RuntimeOptions<never>)
+}
+
+// The `machines:` entry each engine provider's runtime was built from, so
+// a copy can build it again.
+const BUILT_FROM = new WeakMap<Runtime, Record<string, unknown>>()
+
+/** The `machines:` entry an engine provider's runtime was built from; undefined for a machine provider's runtime or one the host built. */
+export function builtFrom(runtime: Runtime): Record<string, unknown> | undefined {
+  return BUILT_FROM.get(runtime)
 }
 
 /**
- * Construct a runtime by name, failing loud on unknown names (with a
- * cross-language hint for Python-only names) and on unknown options.
+ * The machine one `machines:` entry describes, and the runtime that runs
+ * what it captures there. A machine provider (docker, ssh, ...) builds its
+ * handle and the remote runtime that runs its `captures` through it. An
+ * engine provider builds the runtime alone: `in_process` the one its
+ * `runtime` names (a registered name, or a class a `source:Class` reference
+ * loaded; none for the shell, which only `workspace` may be),
+ * `worker` monty, `host` the host's own programs, confined by sandlock when a
+ * `sandbox` block grants paths. The entry's other keys are the runtime's
+ * config. Mirrors Python's `build_entry`.
+ *
+ * Throws:
+ *   Error: `workspace` for anything but the shell, a runtime its provider
+ *   does not run, a `sandbox` that is not a mapping, or what `buildMachine`
+ *   refuses.
  */
-// The name each runtime built with no options came from, so a copy can build it again.
-const BUILT_FROM = new WeakMap<Runtime, string>()
-
-export function buildRuntime(name: string, options: Record<string, unknown> = {}): Runtime {
-  const cls = runtimeClass(name)
-  checkRuntimeOptions(name, options)
-  const runtime = new cls(options as RuntimeOptions<never>)
-  if (Object.keys(options).length === 0) BUILT_FROM.set(runtime, name)
-  return runtime
+export function buildEntry(name: string, spec: MachineSpec): [MachineHandle | null, Runtime] {
+  let runtime: Runtime
+  if (spec instanceof Runtime) {
+    runtime = spec
+  } else if (spec instanceof MachineHandle || !ENGINE_PROVIDERS.includes(spec.provider as string)) {
+    const handle = buildMachine(name, spec)
+    if (name === 'workspace') throw new Error(`'${name}' is the shell's machine name`)
+    const captures = (handle.config as { captures?: readonly string[] }).captures
+    return [handle, new RemoteRuntime(name, captures === undefined ? {} : { captures })]
+  } else {
+    const { provider, captures, sandbox, runtime: named, ...fields } = spec
+    if (sandbox !== undefined && !isPlainObject(sandbox))
+      throw new Error(`machine '${name}': sandbox must be a mapping`)
+    const cls = runtimeFor(
+      name,
+      provider as string,
+      named as string | RuntimeClass | undefined,
+      sandbox,
+    )
+    const config = { ...fields, ...sandbox }
+    runtime = new cls({
+      ...(captures === undefined ? {} : { captures: captures as string[] }),
+      ...(Object.keys(config).length > 0 ? { config: config as never } : {}),
+    })
+    BUILT_FROM.set(runtime, { ...spec })
+  }
+  if ((name === 'workspace') !== runtime instanceof WorkspaceRuntime)
+    throw new Error(`'${name}' is the shell's machine name`)
+  runtime.name = name
+  return [null, runtime]
 }
 
-/** The registry name a runtime was built from with no options; undefined for one built with options or by the host. */
-export function builtFrom(runtime: Runtime): string | undefined {
-  return BUILT_FROM.get(runtime)
+function runtimeFor(
+  name: string,
+  provider: string,
+  runtime: string | RuntimeClass | undefined,
+  sandbox: Record<string, unknown> | undefined,
+): RuntimeClass {
+  if (sandbox !== undefined && provider !== HOST)
+    throw new Error(`machine '${name}': only a host takes a sandbox`)
+  if (provider === HOST) {
+    if (runtime !== undefined)
+      throw new Error(`machine '${name}': a host runs its own programs, not a runtime`)
+    return runtimeClass(sandbox !== undefined ? 'sandlock' : 'local')
+  }
+  if (provider === WORKER) {
+    if (runtime !== undefined && runtime !== 'monty') {
+      const named = typeof runtime === 'function' ? runtime.name : runtime
+      throw new Error(`machine '${name}': a worker runs 'monty', not '${named}'`)
+    }
+    if (PLACED.monty !== WORKER)
+      throw new Error(`machine '${name}': monty runs in process here, not on a worker`)
+    return runtimeClass('monty')
+  }
+  if (runtime === undefined) return WorkspaceRuntime
+  if (typeof runtime === 'function') {
+    if (!(runtime.prototype instanceof Runtime))
+      throw new Error(`machine '${name}': its runtime is not a Runtime subclass`)
+    return runtime
+  }
+  const placed = PLACED[runtime]
+  if (placed !== undefined)
+    throw new Error(`machine '${name}': '${runtime}' runs on ${placed}, not ${IN_PROCESS}`)
+  return runtimeClass(runtime)
+}
+
+/** Every runtime an `in_process` machine may name. */
+export function inProcessRuntimes(): string[] {
+  return knownRuntimes().filter((name) => !(name in PLACED))
+}
+
+/**
+ * The machine handles and the ordered runtimes `machines` describes, each
+ * named for its machine. Mirrors Python's `split_machines`.
+ */
+export function splitMachines(
+  machines: MachineSpecs | undefined,
+): [Record<string, MachineHandle>, Runtime[]] {
+  const items: [string, MachineSpec][] =
+    machines === undefined
+      ? []
+      : Array.isArray(machines)
+        ? (machines as readonly (MachineHandle | Runtime)[]).map((m) => [m.name, m])
+        : Object.entries(machines as Record<string, MachineSpec>)
+  // Null prototype: machine names come from config.
+  const handles = Object.create(null) as Record<string, MachineHandle>
+  const entries: Runtime[] = []
+  for (const [name, spec] of items) {
+    const [handle, runtime] = buildEntry(name, spec)
+    if (handle !== null) handles[name] = handle
+    entries.push(runtime)
+  }
+  return [handles, entries]
 }
 
 /**
@@ -203,34 +302,30 @@ export function runtimeClass(
 }
 
 /**
- * Resolve an explicit runtime name into a binding override map.
- *
- * Naming a runtime places a line's captured stages on it without
- * touching capability: only commands the runtime captures rebind,
- * everything else keeps its normal binding. The name is an entry's, or the
- * part before its colon (`remote` for `remote:gpu`) while the workspace has
- * one such entry; throws for `workspace`, no entry or several.
+ * Resolve a machine a line names into a binding override map. Naming a
+ * machine places a line's captured stages on it without touching
+ * capability: only commands its entry captures rebind, everything else keeps
+ * its normal binding. Throws for `workspace` and for no machine.
  */
-export function runtimeBindingsFor(
+export function machineBindingsFor(
   entries: readonly Runtime[],
   name: string,
 ): Record<string, Runtime> {
   if (name === 'workspace') {
-    throw new Error(`'workspace' is the default executor, not a runtime you can select`)
+    throw new Error(`'workspace' is the default executor, not a machine you can select`)
   }
-  const exact = entries.filter((e) => e.name === name)
-  const found = exact.length > 0 ? exact : entries.filter((e) => e.name.split(':', 1)[0] === name)
-  const [entry] = found
-  if (found.length === 1 && entry !== undefined) {
+  const entry = entries.find((e) => e.name === name)
+  if (entry !== undefined) {
     // Null prototype: captures are arbitrary command names.
     const bindings: Record<string, Runtime> = Object.create(null) as Record<string, Runtime>
     for (const command of entry.captures) bindings[command] = entry
     return bindings
   }
-  const known = entries.map((e) => `'${e.name}'`).join(', ')
-  throw new Error(
-    `${found.length > 0 ? 'ambiguous' : 'unknown'} runtime: '${name}' (workspace runtimes: ${known})`,
-  )
+  const known = entries
+    .filter((e) => e.name !== 'workspace')
+    .map((e) => `'${e.name}'`)
+    .join(', ')
+  throw new Error(`unknown machine: '${name}' (workspace machines: ${known || 'none'})`)
 }
 
 /**
@@ -272,12 +367,12 @@ export function bindCommands(entries: readonly Runtime[]): Record<string, Runtim
       const runs = LANGUAGE_COMMANDS[entry.language]
       for (const capture of entry.captures) {
         if (!runs.includes(capture)) {
-          throw new Error(`runtime '${entry.name}' does not run '${capture}'`)
+          throw new Error(`machine '${entry.name}' does not run '${capture}'`)
         }
       }
     }
     if (seen.has(entry.name)) {
-      throw new Error(`duplicate runtime entry: '${entry.name}'`)
+      throw new Error(`duplicate machine: '${entry.name}'`)
     }
     seen.add(entry.name)
     for (const command of entry.captures) {
@@ -337,27 +432,21 @@ export function isSandbox(entry: Runtime | null | undefined): entry is Runtime &
  *
  * `workspace` keeps it in Mirage: no line executor (an `@line` capture)
  * takes it, and each command stays on its first other capturer. Any other
- * runtime serves every command it captures over `bindings`; none leaves
+ * machine serves every command it captures over `bindings`; none leaves
  * each command where `bindings` put it. `bindings` are the static ones for
- * a line, the line's own for a command. `inherited` is the machine of the
- * placement the route overlays, kept when the route names none. Mirrors
- * Python's `routed`.
+ * a line, the line's own for a command. Mirrors Python's `routed`.
  *
  * Throws:
- *   Error: no entry has the runtime's name, or no runtime it places takes
- *   the machine (`checkRouteMachine`).
+ *   Error: no entry is the machine.
  */
 export function routed(
   entries: readonly Runtime[],
   bindings: Readonly<Record<string, Runtime | null | undefined>>,
-  runtime: string | undefined,
   machine: string | undefined,
-  inherited?: string,
 ): RouteDecision<Runtime> {
-  checkRouteMachine(entries, runtime, machine)
   // Null prototype: captures are arbitrary command names.
   const placed = Object.create(null) as Record<string, Runtime | null>
-  if (runtime === 'workspace') {
+  if (machine === 'workspace') {
     for (const entry of entries) {
       for (const command of entry.captures) placed[command] = null
     }
@@ -367,46 +456,9 @@ export function routed(
     )
   } else {
     Object.assign(placed, bindings)
-    if (runtime !== undefined) Object.assign(placed, runtimeBindingsFor(entries, runtime))
+    if (machine !== undefined) Object.assign(placed, machineBindingsFor(entries, machine))
   }
-  const on = machine ?? inherited
-  return {
-    bindings: placed,
-    fallback: catchAll(entries),
-    ...(on !== undefined ? { machine: on } : {}),
-  }
-}
-
-/**
- * Refuse a placement whose machine no runtime it places would run on: only
- * the remote runtime runs on a machine a line names, so a named runtime has
- * to be one, and a placement naming no runtime needs one among the entries.
- * Mirrors Python's `check_route_machine`.
- *
- * Throws:
- *   Error: the named runtime runs on its own machine, or no entry is a
- *   remote runtime.
- */
-export function checkRouteMachine(
-  entries: readonly Runtime[],
-  runtime: string | undefined,
-  machine: string | undefined,
-): void {
-  if (machine === undefined) return
-  if (runtime === undefined || runtime === 'workspace') {
-    if (!entries.some((e) => e instanceof RemoteRuntime)) {
-      throw new Error(`machine '${machine}' takes the remote runtime, and the workspace has none`)
-    }
-    return
-  }
-  for (const entry of entries) {
-    if (entry.name === runtime && !(entry instanceof RemoteRuntime)) {
-      throw new Error(
-        `runtime '${runtime}' runs on the workspace's machine; ` +
-          `machine '${machine}' takes the remote runtime`,
-      )
-    }
-  }
+  return { bindings: placed, fallback: catchAll(entries) }
 }
 
 /**

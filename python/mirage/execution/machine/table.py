@@ -77,6 +77,8 @@ class MachineTable:
             Awaitable[MachineResources]] | None): reads what the host
             holds, given its id and whether to sample its processors;
             None reads nothing.
+        host (MachineName | None): the host Mirage runs on, which every
+            ``host`` machine is; None for a table that knows none.
 
     Raises:
         ValueError: an entry no provider builds.
@@ -96,6 +98,7 @@ class MachineTable:
         stop_host: Callable[[MachinePid, float | None, int], Awaitable[bool]]
         | None = None,
         host_resources: HostResources | None = None,
+        host: MachineName | None = None,
     ) -> None:
         self._handles = {
             name: build_machine(name, spec)
@@ -111,6 +114,7 @@ class MachineTable:
         self._signal_host = signal_host
         self._stop_host = stop_host
         self._host_resources = host_resources
+        self._host = host
         # The processes scans found, by machine, pid and start, each
         # with the event that ends it once a scan no longer sees it and
         # the tag of the run that started it.
@@ -174,14 +178,19 @@ class MachineTable:
         )
 
     def instance(self, machine: MachineName) -> str:
-        """What ``machine``'s provider calls it (``MachineHandle.instance``),
-        its name for one the table holds no handle of, such as the host.
+        """What ``machine``'s provider calls it (``MachineHandle.instance``):
+        the host's own name for a host machine, its name for another one
+        the table holds no handle of.
 
         Args:
             machine (MachineName): the machine.
         """
         handle = self.by_id(str(machine))
-        return machine.name if handle is None else handle.instance
+        if handle is not None:
+            return handle.instance
+        if self._host is not None and machine.provider == self._host.provider:
+            return self._host.name
+        return machine.name
 
     async def resources(self, machine: str, cpu: bool) -> MachineResources:
         """What one machine holds now.
@@ -228,10 +237,10 @@ class MachineTable:
         earlier scan found there still shows, and after a run there ends
         until a scan of it answers, the host likewise. A run's first
         process is the
-        Mirage process the run is, when that process is the program (it
-        has a runtime) and still runs, and its machine pid is recorded.
+        Mirage process the run is, when that process is the program (a
+        runtime started it) and still runs, and its machine pid is recorded.
         Every other process the run started joins the table as a process
-        of its own, with no runtime, under the process whose machine pid
+        of its own, no program of a runtime, under the process whose machine pid
         is its parent's, else under the run's while it runs, else at the
         top, and leaves it once a scan no longer sees it. A machine that
         does not answer keeps what it showed.
@@ -248,7 +257,7 @@ class MachineTable:
             runs = {
                 str(record.id): record
                 for record in processes.records()
-                if record.runtime is not None
+                if record.program
             }
             ended = {tag for tag in runs if tag not in live}
             unscanned = ended - self._scanned_after_end
@@ -258,7 +267,7 @@ class MachineTable:
             machines_to_scan |= {
                 str(runs[tag].machine)
                 for tag in unscanned
-                if runs[tag].machine != processes.machine
+                if _reached(processes, runs[tag].machine) != processes.machine
             }
             scans: list[
                 tuple[MachineName, Awaitable[list[MachineProcess]]]
@@ -271,7 +280,7 @@ class MachineTable:
                 groups = {
                     record.machine_pid.pid: (tag, record.machine_pid.started)
                     for tag, record in runs.items()
-                    if record.machine == processes.machine
+                    if _reached(processes, record.machine) == processes.machine
                     and record.machine_pid is not None
                     and (tag in live or tag in unscanned or tag in found_tags)
                 }
@@ -295,7 +304,7 @@ class MachineTable:
             self._scanned_after_end = still_scanned | {
                 tag
                 for tag in unscanned
-                if str(runs[tag].machine) not in failed
+                if str(_reached(processes, runs[tag].machine)) not in failed
             }
             if finishing:
                 await asyncio.wait([handle.task for handle in finishing])
@@ -325,7 +334,8 @@ class MachineTable:
         if record.state != ProcessState.RUNNING:
             return None
         target = record.machine_pid
-        if record.machine == processes.machine:
+        machine = _reached(processes, record.machine)
+        if machine == processes.machine:
             if (
                 self._signal_host is None
                 or target is None
@@ -333,12 +343,10 @@ class MachineTable:
             ):
                 return None
         elif self.by_id(str(record.machine)) is None or (
-            target is None and record.runtime is None
+            target is None and not record.program
         ):
             return None
-        return self._deliver(
-            handle, record.machine, target or str(record.id), signum
-        )
+        return self._deliver(handle, machine, target or str(record.id), signum)
 
     async def _deliver(
         self,
@@ -361,13 +369,13 @@ class MachineTable:
             sent = await self._signal_on(machine, target, signum)
         except Exception as exc:
             logger.debug("%s: signal %d not sent: %s", machine, signum, exc)
-            if handle.record.runtime is None:
+            if not handle.record.program:
                 return False
             sent = False
         if sent:
             handle.program_signaled(signum)
             return True
-        if handle.record.runtime is None:
+        if not handle.record.program:
             self._end_found(handle)
             return False
         if signum in CONTINUE_SIGNALS or signum in STOP_SIGNALS:
@@ -397,7 +405,13 @@ class MachineTable:
         found, seen = record.get("machine_pid"), record.get("seen_at")
         if not isinstance(pid, int):
             return False
-        if machine == str(processes.machine) and isinstance(found, dict):
+        host = processes.machine
+        if (
+            isinstance(machine, str)
+            and machine.startswith(f"{host.provider}:")
+            and record.get("machine_instance") == host.name
+            and isinstance(found, dict)
+        ):
             if self._stop_host is None:
                 return False
             return await self._stop_host(
@@ -458,14 +472,17 @@ class MachineTable:
         for tag, run in tagged.items():
             handle = live.get(tag)
             owner = handle.record if handle is not None else runs.get(tag)
-            if owner is not None and owner.machine != machine:
+            if (
+                owner is not None
+                and _reached(processes, owner.machine) != machine
+            ):
                 continue
             pids = {row.pid for row in run}
             placed: dict[int, int] = {}
             if (
                 handle is not None
-                and handle.record.runtime is not None
-                and handle.record.machine == machine
+                and handle.record.program
+                and _reached(processes, handle.record.machine) == machine
             ):
                 root = _program_row(run, pids, handle.record.machine_pid)
                 if root is not None:
@@ -537,7 +554,7 @@ class MachineTable:
             1
             for handle in processes.live()
             if handle.record.session_id == session
-            and handle.record.runtime is None
+            and not handle.record.program
             and handle.record.machine_pid is not None
         )
         if placed >= MAX_PROCESSES:
@@ -572,7 +589,7 @@ class MachineTable:
                 run=run,
                 parent=parent,
                 line=owner.line,
-                machine=machine,
+                machine=owner.machine,
             )
         except (RuntimeError, BlockingIOError) as exc:
             logger.debug(
@@ -630,6 +647,19 @@ class MachineTable:
                 if len(failures) == 1
                 else BaseExceptionGroup("machine close failed", failures)
             )
+
+
+def _reached(processes: ProcessTable, machine: MachineName) -> MachineName:
+    """The machine a scan or a signal reaches ``machine`` as: the host for
+    every host machine, each the name a ``host`` entry gives it.
+
+    Args:
+        processes (ProcessTable): the workspace's processes, whose own
+            machine is the host.
+        machine (MachineName): the machine a record names.
+    """
+    host = processes.machine
+    return host if machine.provider == host.provider else machine
 
 
 def _program_row(

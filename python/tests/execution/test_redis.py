@@ -223,7 +223,7 @@ async def test_a_noted_record_reaches_every_store(stores):
         cwd=PathSpec.from_str_path("/m"),
         machine=MachineName("docker", "tools"),
         started_at=1.5,
-        runtime="docker",
+        program=True,
         machine_pid=MachinePid(4242, 1.25),
         state=ProcessState.STOPPING,
         ancestors=(1, 3),

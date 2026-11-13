@@ -3,16 +3,15 @@
     {
       "id": "local_kill_waits_for_the_program_and_takes_its_status",
       "world": {
-        "runtimes": [
-          {
-            "name": "local",
+        "machines": {
+          "local": {
+            "provider": "host",
             "captures": [
               "python3",
               "@external"
             ]
-          },
-          "workspace"
-        ]
+          }
+        }
       },
       "steps": [
         {
@@ -108,16 +107,15 @@
     {
       "id": "local_programs_a_job_forks_are_its_children",
       "world": {
-        "runtimes": [
-          {
-            "name": "local",
+        "machines": {
+          "local": {
+            "provider": "host",
             "captures": [
               "python3",
               "@external"
             ]
-          },
-          "workspace"
-        ]
+          }
+        }
       },
       "steps": [
         {
@@ -149,16 +147,15 @@
     {
       "id": "local_a_shells_last_program_runs_in_its_place",
       "world": {
-        "runtimes": [
-          {
-            "name": "local",
+        "machines": {
+          "local": {
+            "provider": "host",
             "captures": [
               "python3",
               "@external"
             ]
-          },
-          "workspace"
-        ]
+          }
+        }
       },
       "steps": [
         {

@@ -693,14 +693,14 @@ async def test_close_refuses_lifecycle_changes_but_allows_runtime_drain(
 
     monkeypatch.setattr(vfs, "close", closing_vfs)
     runtime = DrainingRuntime()
-    ws.add_runtime(runtime)
+    ws.add_machine(runtime.name, runtime)
     closing = asyncio.create_task(ws.close())
     try:
         await asyncio.wait_for(entered.wait(), timeout=5)
         for mutate in (
             lambda: ws.add_mount("/late", RAMVFS()),
             lambda: ws.set_mount_mode("/m", MountMode.READ),
-            lambda: ws.add_runtime(runtime),
+            lambda: ws.add_machine(runtime.name, runtime),
             lambda: ws.register_cli("late", spec),
         ):
             with pytest.raises(RuntimeError, match="Workspace is closed"):
@@ -1451,7 +1451,7 @@ async def test_close_releases_later_resources_after_multiple_errors(
     monkeypatch,
 ):
     vfs = RAMVFS()
-    ws = Workspace(mounts={"/data": vfs}, runtimes=[])
+    ws = Workspace(mounts={"/data": vfs}, machines=[])
     closed = []
 
     async def runtime_close():

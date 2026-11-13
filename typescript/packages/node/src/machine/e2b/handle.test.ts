@@ -655,7 +655,7 @@ describe('E2B cancellation and validation', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        ...on(runtime, 'workspace'),
+        ...on(runtime),
         ...(kind === 'timeout'
           ? { commandLimits: { '@line': new Limit({ timeoutSeconds: 0.05 }) } }
           : {}),
@@ -737,7 +737,7 @@ const RESTRICTIONS: SessionProfile[] = [
 function restricted(runtime: E2BMachine, profile: SessionProfile): Workspace {
   return new Workspace(
     { '/data': new RAMVFS() },
-    { mode: MountMode.EXEC, profiles: { agent: profile }, ...on(runtime, 'workspace') },
+    { mode: MountMode.EXEC, profiles: { agent: profile }, ...on(runtime) },
   )
 }
 

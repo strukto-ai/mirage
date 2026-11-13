@@ -42,10 +42,10 @@ _WASM_NAME = "qjs-wasi.wasm"
 _BUILD_HINT = (
     f"the quickjs runtime needs a {_WASM_NAME} module: download a WASI "
     "build of quickjs-ng from "
-    "https://github.com/quickjs-ng/quickjs/releases, and point the runtime "
-    "entry's config `home` (yaml `runtimes: [{name: quickjs, config: "
-    f"{{home: ...}}}}]`) or the {QUICKJS_HOME_ENV} environment variable at "
-    "the directory containing it"
+    "https://github.com/quickjs-ng/quickjs/releases, and point the "
+    "machine's `home` (yaml `machines: {js: {provider: in_process, runtime: "
+    f"quickjs, home: ...}}}}`) or the {QUICKJS_HOME_ENV} environment variable "
+    "at the directory containing it"
 )
 
 

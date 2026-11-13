@@ -78,7 +78,7 @@ so a read of an undeclared option fails rather than looking like an omitted flag
 | --- | --- | --- |
 | Leaf | `CommandSpec.arguments`, a `CLIHandler` binding | Paths and text as arguments, parsed flags on `ctx` |
 | Group | `subcommands`, optional inherited options | Dispatches to a leaf |
-| Script CLI | `CLI.script`, optional runtime | Raw argv, stdin and environment |
+| Script CLI | `CLI.script`, optional machine | Raw argv, stdin and environment |
 
 A typed node is a leaf or a group. Names and aliases are single words;
 child names and aliases share one namespace. Options cannot collide across
@@ -151,7 +151,7 @@ that with policy; shell functions can otherwise shadow it like they do in bash.
 
 Registered on a mount, a typed CLI serves its verbs there as a command
 tree. Its leaves get the mount's accessor, so the tree declares no
-`config_model`, `accessor`, `script` or `runtime`:
+`config_model`, `accessor`, `script` or `machine`:
 
 ```python
 from mirage import MountMode, RAMVFS
@@ -285,7 +285,7 @@ imports:
 clis:
   pager:
     script: ./cli/pager.py
-    runtime: monty
+    machine: py
     config:
       width: 80
 ```
@@ -328,7 +328,7 @@ and [`CommandSpec` and `Argument`](https://github.com/strukto-ai/mirage/blob/mai
 | `CLI.handlers` | Canonical leaf paths mapped to `CLIHandler` bindings. |
 | `CLI.config_model` | Pydantic model for per-install account validation. |
 | `CLI.accessor` | Builds the install's accessor from its validated config, once per install; closed when the install goes. Default `NOOPAccessor`. |
-| `CLI.script`, `CLI.runtime` | Embedded script and optional runtime; used instead of typed handlers. |
+| `CLI.script`, `CLI.machine` | Embedded script and the machine that runs it, if pinned; used instead of typed handlers. |
 | `CLIHandler.fn` | Leaf handler, called as `fn(accessor, paths, texts, ctx)`. |
 | `CLIHandler.write`, `CLIHandler.limit` | Mutation classification and optional execution-limit category. |
 

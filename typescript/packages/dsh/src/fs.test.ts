@@ -570,7 +570,7 @@ describe('sandbox policy', () => {
 
   it('makes no claim once a runtime executes beyond the workspace', async () => {
     const { fs, ws } = await makeFs()
-    ws.addRuntime(new LocalRuntime({ captures: ['python'] }))
+    ws.addMachine('local', new LocalRuntime({ captures: ['python'] }))
     expect(fs.sandboxMode).toBeUndefined()
   })
 

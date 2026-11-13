@@ -103,34 +103,29 @@ class Deny:
 
 @dataclass(frozen=True, slots=True)
 class Route:
-    """Place a line or one command on a runtime, a machine or both: the
-    answer ``pre_execute`` gives for a line and ``pre_command`` for a
-    command, beside a Deny.
+    """Place a line or one command on a machine: the answer
+    ``pre_execute`` gives for a line and ``pre_command`` for a command,
+    beside a Deny.
 
-    The runtime serves every command it captures there, as a
-    ``route_policy`` verdict naming it does; the machine is where the
-    remote runtime runs what it serves, over its entry's own machine. A
+    The machine runs every command it captures, as a ``route_policy``
+    verdict naming it does; ``workspace`` keeps the line in Mirage. A
     Deny at the stage outranks it, and two policies placing one line on
-    different runtimes or machines refuse it, since neither choice is
-    the line's.
+    different machines refuse it, since neither choice is the line's.
 
     Args:
-        runtime (str | None): the runtime entry's name; None leaves each
-            command on its first capturer.
+        machine (str | None): the machine's name under ``machines:``;
+            None leaves each command on its first capturer.
         reason (str): why the line goes there, for ``explain`` to show;
             empty when the policy gives none.
         policy (str): the policy that placed the line; the chain fills
             it in.
-        machine (str | None): the machine's name under ``machines:``;
-            None leaves each remote runtime on its own.
     """
 
     kind: ClassVar[str] = "route"
 
-    runtime: str | None = None
+    machine: str | None = None
     reason: str = ""
     policy: str = ""
-    machine: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,29 +282,27 @@ class Answer(BaseModel):
     What a policy program prints, and what the server's entry points
     send (``answer_to_dict``, which adds the policy that spoke). A deny
     or an ask may leave the reason out for the default one; a route
-    names its runtime, its machine or both, and may say why.
+    names its machine, and may say why.
 
     Args:
         kind (Literal["deny", "ask", "route"]): which answer.
         reason (str | None): why.
-        runtime (str | None): the runtime a route places the line on.
-        machine (str | None): the machine a route runs it on.
+        machine (str | None): the machine a route places the line on.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     kind: Literal["deny", "ask", "route"]
     reason: str | None = None
-    runtime: str | None = None
     machine: str | None = None
 
     @model_validator(mode="after")
     def _v_fields(self) -> "Answer":
         if self.kind == Route.kind:
-            if not self.runtime and not self.machine:
-                raise ValueError("a route names its runtime or its machine")
-        elif self.runtime is not None or self.machine is not None:
-            raise ValueError(f"a {self.kind} carries no runtime or machine")
+            if not self.machine:
+                raise ValueError("a route names its machine")
+        elif self.machine is not None:
+            raise ValueError(f"a {self.kind} carries no machine")
         return self
 
 
@@ -595,8 +588,7 @@ class ProfileScript:
         script (ScriptSource): the program, as the config loader loaded
             it.
         runtime (str): the runtime the profile named for it.
-        config (Mapping[str, Any]): that runtime's settings, as a
-            ``runtimes`` entry's ``config`` block states them; empty for
+        config (Mapping[str, Any]): that runtime's settings; empty for
             none.
         env (Mapping[str, str | SecretRef]): the variables the program
             runs with beside ``MIRAGE_POLICY_CTX``, a pointer still the
@@ -875,9 +867,7 @@ class RouteContext:
         [p.virtual for p in ctx.commands[1].paths] == ["/data/process.py"]
         ctx.session.cwd() == "/data"
 
-    A script gets the same as plain data (``script_context``), with
-    ``ctx["runtime"]`` naming the runtime when a runtime's own
-    ``script:`` is asked.
+    A script gets the same as plain data (``script_context``).
 
     Args:
         line (str): the line as typed.
@@ -1165,10 +1155,8 @@ class CommandExplanation(Explanation):
         exit_code (int): what the command would exit with where it
             stands, 0 to run.
         stderr (str): what the agent would read from it, empty to run.
-        runtime (str): the runtime entry that would run it, empty when
-            the workspace runs it itself.
-        machine (str): the machine it would run on, ``docker:tools``,
-            empty when the workspace's own does.
+        machine (str): the machine that would run it, by its
+            ``machines:`` name, empty when the workspace runs it itself.
         text (str): the command's source text.
         children (tuple[ShellNode, ...]): the lines it runs in turn
             (``$( )`` in its words, a ``bash -c`` string), in source
@@ -1182,7 +1170,6 @@ class CommandExplanation(Explanation):
     words: tuple[CommandWord, ...] = ()
     exit_code: int = 0
     stderr: str = ""
-    runtime: str = ""
     machine: str = ""
     text: str = ""
     children: tuple[ShellNode, ...] = ()

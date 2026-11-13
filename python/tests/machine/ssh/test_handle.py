@@ -484,7 +484,7 @@ async def test_a_session_restriction_refuses_a_line_with_no_mount_type(
         {"/data": SSHVFS(SSHConfig(host="box"))},
         mode=MountMode.EXEC,
         profiles={"agent": profile},
-        **on(runtime, "workspace"),
+        **on(runtime),
     )
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("tool run")

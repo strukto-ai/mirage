@@ -411,7 +411,7 @@ it.each(RESTRICTIONS)(
     const runtime = new FakeSSHMachine('box', { host: 'box' })
     const ws = new Workspace(
       { '/data': new SSHVFS({ host: 'box' }) },
-      { mode: MountMode.EXEC, profiles: { agent: profile }, ...on(runtime, 'workspace') },
+      { mode: MountMode.EXEC, profiles: { agent: profile }, ...on(runtime) },
     )
     try {
       const agent = await ws.session('agent', { profile: 'agent' })

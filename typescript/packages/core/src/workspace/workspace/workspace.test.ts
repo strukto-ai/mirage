@@ -418,7 +418,7 @@ class StoppedBox extends MachineHandle {
 }
 
 function boxProcess(pid: number, machine = 'stopbox:b1'): Record<string, unknown> {
-  return { pid, session: 's', machine, runtime: 'x' }
+  return { pid, session: 's', machine, program: true }
 }
 
 // A lapsed workspace's programs are stopped by whatever reaches them here: a
@@ -575,7 +575,7 @@ it('ends the records a lost daemon left running as hung up', async () => {
       cwd: PathSpec.fromStrPath('/'),
       machine: new MachineName('host', 'gone'),
       startedAt: 1,
-      runtime: null,
+      program: false,
       machinePid: null,
       state: 'running',
       endedAt: null,

@@ -16,13 +16,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { CHECK_LINE, CHECK_MARK } from '../../machine/constants.ts'
 import type * as machineConstants from '../../machine/constants.ts'
 import { MachineHandle } from '../../machine/handle.ts'
-import { RemoteRuntime } from '../../runtime/machine/runtime.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import type { MachinePid } from '../types.ts'
-import type { ProcessTable } from '../process/table.ts'
+import { MachineName, type MachinePid } from '../types.ts'
+import { ProcessTable } from '../process/table.ts'
 import { shownPid } from '../process/types.ts'
 import { MachineTable } from './table.ts'
 import type { MachineProcess } from './types.ts'
@@ -274,16 +273,43 @@ async function started(box: Sleeper): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 10))
 }
 
+// Each box captures `train`, so the first listed takes it and a line can
+// name another.
 function sleepers(boxes: Record<string, Sleeper>): Workspace {
-  return new Workspace(
-    { '/': new RAMVFS() },
-    {
-      mode: MountMode.EXEC,
-      machines: boxes,
-      runtimes: [new RemoteRuntime({ captures: ['train'], machine: Object.keys(boxes)[0] ?? '' })],
-    },
-  )
+  for (const box of Object.values(boxes)) {
+    const held = box as { config: Sleeper['config'] }
+    held.config = { ...held.config, captures: ['train'] }
+  }
+  return new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC, machines: boxes })
 }
+
+describe('MachineTable stop', () => {
+  it("stops a lapsed host entry's program on its host", async () => {
+    const stopped: [number, number][] = []
+    const host = new MachineName('host', 'h')
+    const table = new MachineTable(
+      {},
+      null,
+      null,
+      (target, _seen, signum) => {
+        stopped.push([target.pid, signum])
+        return Promise.resolve(true)
+      },
+      null,
+      host,
+    )
+    const processes = new ProcessTable('w', host)
+    const record = {
+      pid: 2,
+      machine: 'host:laptop',
+      machine_instance: 'h',
+      machine_pid: { pid: 41, started: 1, exited: null },
+    }
+    expect(await table.stop(processes, record, 15)).toBe(true)
+    expect(await table.stop(processes, { ...record, machine_instance: 'other' }, 15)).toBe(false)
+    expect(stopped).toEqual([[41, 15]])
+  })
+})
 
 describe('MachineTable scans', () => {
   it('shows what a program started on its machine', async () => {
@@ -307,7 +333,7 @@ describe('MachineTable scans', () => {
       ])
       expect([rows[2]?.[0], rows[3]?.[0]]).toEqual(['412', '413'])
       const [program, found] = ws.processTable.records().slice(-2)
-      expect([found?.runtime, found?.parent]).toEqual([null, program?.id.pid])
+      expect([found?.program, found?.parent]).toEqual([false, program?.id.pid])
       const killed = await ws.shell(`kill -USR1 413; kill -0 ${String(pid)}; echo $?`)
       expect(DEC.decode(killed.stdout)).toBe('0\n')
       expect(box.sent).toEqual([[{ pid: 413, started: 101, exited: null }, 10]])
@@ -486,7 +512,7 @@ describe('MachineTable scans', () => {
       const found = ws.processTable
         .live()
         .map((p) => p.record)
-        .filter((r) => r.sessionId === 'capped' && r.runtime === null)
+        .filter((r) => r.sessionId === 'capped' && !r.program)
       expect(found.map((r) => r.machinePid?.pid)).toEqual([413])
       const said = await ws.shell('(echo room)', { sessionId: 'capped' })
       expect([DEC.decode(said.stdout), said.exitCode]).toEqual(['room\n', 0])
@@ -838,17 +864,6 @@ describe('MachineTable scans', () => {
           { mode: MountMode.EXEC, machines: { a: box, b: { provider: 'nope' } } },
         ),
     ).toThrow('nope')
-    expect(
-      () =>
-        new Workspace(
-          { '/': new RAMVFS() },
-          {
-            mode: MountMode.EXEC,
-            machines: { a: box },
-            runtimes: [new RemoteRuntime({ machine: 'c' }), 'workspace'],
-          },
-        ),
-    ).toThrow("unknown machine: 'c'")
     await new Workspace(
       { '/': new RAMVFS() },
       { mode: MountMode.EXEC, machines: { a: box } },

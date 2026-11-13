@@ -17,6 +17,7 @@ import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../../types.ts'
 import { stderrStr, stdoutStr } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
+import { buildRuntime } from '../../../../runtime/table.ts'
 
 // Direct port of tests/workspace/executor/builtins/test_exec_path.py: a
 // slash-carrying head word runs the file, bash's loader rule.
@@ -26,7 +27,7 @@ function makeWs(): Workspace {
   const work = new RAMVFS()
   return new Workspace(
     { '/': root, '/work/': work },
-    { mode: MountMode.WRITE, runtimes: ['monty', 'workspace'] },
+    { mode: MountMode.WRITE, machines: [buildRuntime('monty')] },
   )
 }
 

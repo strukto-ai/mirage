@@ -406,7 +406,7 @@ async def test_version_process_gets_none_of_the_session_environment(
     baseline = await runtime.version({})
     expected = json.loads(baseline.stdout)
     assert expected["MIRAGE_TEST_VERSION_ENV"] is None
-    ws = Workspace({"/": RAMVFS()}, mode=mode, runtimes=[runtime, "workspace"])
+    ws = Workspace({"/": RAMVFS()}, mode=mode, machines=[runtime])
     try:
         for line in ["python --version", "python3 -V", "python -VV"]:
             io = await ws.shell(line, env=session)
@@ -425,9 +425,7 @@ async def test_read_only_version_does_not_run_startup_code(tmp_path):
     )
     env = {"PYTHONPATH": str(tmp_path)}
     runtime = LocalRuntime(config={"home": sys.executable})
-    ws = Workspace(
-        {"/": RAMVFS()}, mode=MountMode.READ, runtimes=[runtime, "workspace"]
-    )
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.READ, machines=[runtime])
     try:
         for line in ["python --version", "python3 -V", "python -VV"]:
             io = await ws.shell(line, env=env)
@@ -581,9 +579,7 @@ def test_close_leaves_a_blocked_loops_child_to_that_loop():
 )
 async def test_external_streams_infinite_pipes_and_closes_children(line):
     runtime = LocalRuntime(captures=("@external",))
-    ws = Workspace(
-        {"/": RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime, "workspace"]
-    )
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines=[runtime])
     try:
         async with asyncio.timeout(5):
             result = await ws.shell(line)
@@ -621,7 +617,7 @@ async def test_a_session_restriction_refuses_every_program(tmp_path, profile):
         {"/data": DiskVFS(str(tmp_path))},
         mode=MountMode.EXEC,
         profiles={"agent": profile},
-        runtimes=[runtime, "workspace"],
+        machines=[runtime],
     )
     try:
         agent = await ws.session("agent", profile="agent")
@@ -644,7 +640,7 @@ async def test_a_file_the_program_makes_shows_in_the_next_listing(tmp_path):
     with Workspace(
         {root: DiskVFS(root=root)},
         mode=MountMode.EXEC,
-        runtimes=[LocalRuntime(), "workspace"],
+        machines=[LocalRuntime()],
     ) as ws:
         assert await (await ws.shell(f"ls {root}")).stdout_str() == ""
         made = await ws.shell(
@@ -660,7 +656,7 @@ async def test_runs_on_the_system_time_or_the_host_clock_without_libfaketime():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[LocalRuntime(captures=["python3"])],
+        machines=[LocalRuntime(captures=["python3"])],
         system_time="2026-03-02T09:00:00Z",
     )
     try:

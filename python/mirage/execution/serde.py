@@ -87,7 +87,7 @@ def process_to_fields(record: Process) -> RecordFields:
         "machine": str(record.machine),
         "machine_instance": record.machine_instance,
         "started_at": record.started_at,
-        "runtime": record.runtime,
+        "program": record.program,
         "machine_pid": machine_pid,
         "state": record.state.value,
         "ended_at": record.ended_at,
@@ -120,7 +120,7 @@ def process_from_fields(fields: RecordFields) -> Process:
         machine=MachineName.parse(fields["machine"]),
         machine_instance=fields.get("machine_instance"),
         started_at=fields["started_at"],
-        runtime=fields.get("runtime"),
+        program=bool(fields.get("program", False)),
         machine_pid=(
             MachinePid(found["pid"], found["started"], found.get("exited"))
             if found is not None

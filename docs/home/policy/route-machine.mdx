@@ -1,33 +1,32 @@
 ---
 title: Route Machine
 description: Choose which machine runs each command line.
-icon: server
+icon: route
 ---
 
-A [machine](/home/setup/machine/overview) is somewhere you already run
-programs: a container, a VM, a cloud sandbox, a server over SSH. The
-`remote` runtime runs programs on a machine. When you have more than one, a
-route policy picks the machine for each line.
+Your agent types into one shell. A machine is what runs a command: a
+`worker` machine runs Python on Monty, a `docker` machine runs programs in a
+container, and `workspace` is Mirage itself. A route policy looks at each
+line and picks the machine for it.
 
 ## Example
 
-Run jobs on a CPU container by default, and GPU jobs on a GPU container:
+Run small Python snippets on Monty, the training jobs under `/jobs/` on a
+CPU container, and the GPU jobs on a GPU container:
 
 ```yaml
 mode: exec
 machines:
+  py:
+    provider: worker
   box:
     provider: docker
     container: my-box
+    captures: ["@python"]
   gpu:
     provider: docker
     container: my-gpu
-runtimes:
-  - monty
-  - name: remote
     captures: ["@python"]
-    machine: box
-  - workspace
 route_policy: {script: ./route.py, runtime: monty}
 ```
 
@@ -35,34 +34,35 @@ route_policy: {script: ./route.py, runtime: monty}
 def pre_execute(ctx):
     paths = [p for c in ctx["commands"] for p in c["paths"]]
     if any(p.startswith("/jobs/gpu/") for p in paths):
-        return {"kind": "route", "runtime": "remote", "machine": "gpu"}
+        return {"kind": "route", "machine": "gpu"}
     if any(p.startswith("/jobs/") for p in paths):
-        return {"kind": "route", "runtime": "remote"}
+        return {"kind": "route", "machine": "box"}
 ```
 
 Now `python3 /jobs/gpu/train.py` runs in `my-gpu`, `python3 /jobs/train.py`
-runs in `my-box` (the `machine` of the `remote` entry), and
-`cat data.csv | python3 -c "..."` stays on monty.
+runs in `my-box`, and `cat data.csv | python3 -c "..."` stays on Monty.
 
-## Name the runtime too
+Without a route, each command goes to the first machine in `machines` that
+captures it. Here that is `py` for `python3`.
 
-Only the `remote` runtime runs on a machine. A route that names just a
-machine changes where `remote` runs, not what `remote` runs:
+## What the script returns
 
 | Return | What happens |
 | --- | --- |
-| `{"kind": "route", "runtime": "remote", "machine": "gpu"}` | `remote` runs every command it captures, on `gpu` |
-| `{"kind": "route", "machine": "gpu"}` | commands `remote` already runs go to `gpu`; the rest stay where they are |
+| `{"kind": "route", "machine": "box"}` | `box` runs every command it captures; the rest stay where they are |
+| `{"kind": "route", "machine": "box", "reason": "..."}` | the same, and `ws.explain(line)` shows the reason |
+| `{"kind": "route", "machine": "workspace"}` | machines that take whole lines (`@line`) are skipped; a command only they capture is refused |
+| `None` | no opinion: the first machine that captures each command runs it |
+| `{"kind": "deny", "reason": "..."}` | the line is refused |
 
-In the example, monty captures `python3` first. So
-`{"kind": "route", "machine": "gpu"}` alone would leave `python3` on monty.
-Name `remote` as well.
+A route to a machine that is not under `machines:` fails the line with a
+routing error.
 
-A route fails the line with a routing error when it names:
-
-- a machine that is not under `machines:`
-- a machine together with a runtime other than `remote` or `workspace`
-- a machine in a workspace that has no `remote` runtime
+The script gets the line, each command with its words and paths, and the
+session. It runs on Monty unless the block names another runtime, and
+has 10 seconds. If it fails, times out or returns anything else, the line
+fails with a routing error. See [Scripts](/home/policy/scripts) for
+everything it can read.
 
 ## One machine per session
 
@@ -78,43 +78,37 @@ machines:
   bob:
     provider: docker
     container: bob-box
-runtimes:
-  - name: remote
-    machine: alice
-  - workspace
 route_policy: {script: ./route.py, runtime: monty}
 ```
 
 ```python route.py
 def pre_execute(ctx):
-    return {"kind": "route", "runtime": "remote", "machine": ctx["session_id"]}
+    return {"kind": "route", "machine": ctx["session_id"]}
 ```
 
 ## In code
 
-A route function returns a `Route` to pick a machine:
+`route_policy` also takes a function. It returns a machine name, a `Route`,
+or nothing:
 
 <CodeGroup>
 
 ```python Python
-from mirage.policy import Route, RouteContext
+from mirage.policy import RouteContext
 
-def route(ctx: RouteContext) -> Route | None:
+def route(ctx: RouteContext) -> str | None:
     paths = [p.virtual for c in ctx.commands for p in c.paths]
-    if any(p.startswith("/jobs/gpu/") for p in paths):
-        return Route("remote", machine="gpu")
-    return None
+    return "gpu" if any(p.startswith("/jobs/gpu/") for p in paths) else None
 
-ws = Workspace(mounts, machines=machines, runtimes=runtimes, route_policy=route)
+ws = Workspace(mounts, machines=machines, route_policy=route)
 ```
 
 ```typescript TypeScript
 const ws = new Workspace(mounts, {
   machines,
-  runtimes,
   routePolicy: (ctx) =>
     ctx.commands.some((c) => c.paths.some((p) => p.virtual.startsWith('/jobs/gpu/')))
-      ? { kind: 'route', runtime: 'remote', machine: 'gpu' }
+      ? 'gpu'
       : null,
 })
 ```
@@ -129,5 +123,20 @@ too. At `pre_command` it moves one command: in `ls; python3 train.py`, only
 `python3` goes to the machine. Behind `nohup`, `nice`, `setsid`, `stdbuf` or
 `ionice`, the wrapper goes where its program goes.
 
-The rules of [Route Runtime](/home/policy/route-runtime#rules) apply here
-too, and `ws.explain(line)` shows the machine each command would run on.
+## Rules
+
+- A refused line never runs anywhere. A deny beats any route.
+- If two policies pick different machines, the line is refused.
+- Lines inside a line (`$( )`, `eval`, `source`, `xargs`) run where the
+  outer line runs.
+- `ws.explain(line)` shows which machine each command would run on.
+
+## Ask a model
+
+A route script can ask an LLM where a line should run. Scripts on Monty have
+no network, so the model call is a
+[host function](/home/policy/scripts#host-functions). Its answer counts
+against the script's 10 seconds. See the example in
+[Python](https://github.com/strukto-ai/mirage/tree/main/examples/python/policy/llm_routing)
+and
+[TypeScript](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/policy/llm_routing).

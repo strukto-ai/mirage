@@ -104,8 +104,8 @@ function parseSpecFor(
 /**
  * Pick the workspace entry that runs a script leaf.
  *
- * A `runtime:` pin names the entry, and the entry must speak the
- * script's language, so `runtime: monty` on a `.mjs` fails loud
+ * A `machine:` pin names the machine, and its runtime must speak the
+ * script's language, so a monty machine pinned for a `.mjs` fails loud
  * instead of feeding JS to a python interpreter. Without a pin the
  * program runs where this line runs its language's own interpreter
  * (the tier's head word, `python3` or `node`), so the runtime capturing
@@ -130,12 +130,12 @@ function selectRuntime(
   }
   const known = entries.map((entry) => `'${entry.name}'`).join(', ') || 'none'
   let chosen: Runtime | null | undefined
-  if (leaf.runtime !== null) {
-    chosen = entries.find((entry) => entry.name === leaf.runtime) ?? null
+  if (leaf.machine !== null) {
+    chosen = entries.find((entry) => entry.name === leaf.machine) ?? null
     if (chosen === null) {
       return [
         null,
-        missing(`${prog}: unknown runtime: '${leaf.runtime}' (workspace runtimes: ${known})`),
+        missing(`${prog}: unknown machine: '${leaf.machine}' (workspace machines: ${known})`),
       ]
     }
   } else {
@@ -144,7 +144,7 @@ function selectRuntime(
       return [
         null,
         missing(
-          `${prog}: no workspace runtime runs ${script.language} scripts (workspace runtimes: ${known})`,
+          `${prog}: no workspace machine runs ${script.language} scripts (workspace machines: ${known})`,
         ),
       ]
     }
@@ -161,7 +161,7 @@ function selectRuntime(
   if (!(chosen instanceof LanguageRuntime) || chosen.language !== script.language) {
     return [
       null,
-      missing(`${prog}: runtime '${chosen.name}' does not run ${script.language} scripts`),
+      missing(`${prog}: machine '${chosen.name}' does not run ${script.language} scripts`),
     ]
   }
   return [chosen, null]

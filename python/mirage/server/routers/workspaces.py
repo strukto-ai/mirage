@@ -307,10 +307,10 @@ async def _construct(
     ceilings: Ceilings,
 ) -> Workspace:
     """Build a workspace from its config, on the loop that awaits this:
-    its secrets are read, its mounts and runtimes constructed and their
+    its secrets are read, its mounts and machines constructed and their
     backends imported there, not on the server's loop.
 
-    Map runtime entries construct their instances here, so a bad entry
+    Machine entries construct their instances here, so a bad entry
     fails the create like any other config mistake. A secret the config
     names is read under the network the workspace will be held to. The
     server's default store is disk, so a created workspace survives a

@@ -21,7 +21,7 @@ describe('secretRefs', () => {
       mounts: {
         '/gh': { vfs: 'github', config: { token: { from: 'strukto', ref: 'gh', key: 'token' } } },
       },
-      runtimes: [{ name: 'local', config: { env: { from: 'strukto', ref: 'x' } } }],
+      machines: { box: { provider: 'host', env: { from: 'strukto', ref: 'x' } } },
       env: {
         TOKEN: { from: 'strukto', ref: 'ci', readonly: true },
         PLAIN: { value: 'v', readonly: true },

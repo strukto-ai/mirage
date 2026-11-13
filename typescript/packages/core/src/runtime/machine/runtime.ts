@@ -88,42 +88,36 @@ async function unfeed(
   }
 }
 
-/** A machine entry's options: a runtime's, and the machine a run goes to by default. */
-export interface MachineOptions extends RuntimeOptions {
-  machine?: string
-}
-
 /**
  * Run a machine's own programs through that machine's exec.
  *
  * The runtime is the same whatever the provider: the machine handle a
- * workspace declares under `machines:` is the transport. A run goes to the
- * machine its route names (`execute({ machine })`, a policy's Route), else
- * to this entry's `machine`. Captures default to `@external`, the programs
- * nothing in Mirage resolves; an explicit `@line` sends whole lines, run as
- * `/bin/sh -c`. Mirrors Python's `RemoteRuntime`.
+ * workspace declares under `machines:` is the transport. Each machine entry
+ * builds one, named for the machine, capturing what the entry's `captures`
+ * lists: `@external` by default, the programs nothing in Mirage resolves; an
+ * explicit `@line` sends whole lines, run as `/bin/sh -c`. Mirrors Python's
+ * `RemoteRuntime`.
  */
 export class RemoteRuntime
   extends Runtime<undefined>
   implements LineExecutorMixin<undefined>, ProcessExecutorMixin<undefined>
 {
-  /** `remote`, or `remote:<machine>` for an entry with a machine, so a workspace can hold one per machine. */
-  readonly name: string
+  /** The machine's name. */
+  name: string
   // Programs execute on the machine and act on its world (its filesystem,
   // its network); the workspace gate never sees those effects, however well
   // isolated the machine itself is.
   override readonly reach = 'remote'
   readonly [LINE_EXECUTOR] = true as const
   readonly [PROCESS_EXECUTOR] = true as const
-  /** The machine a run goes to when its route names none. */
-  readonly defaultMachine: string | null
+  /** The machine every run goes to. */
+  readonly defaultMachine: string
   private machines: MachineTable | null = null
 
-  constructor(options: MachineOptions = {}) {
-    const { machine, ...rest } = options
-    super(rest, [EXTERNAL_COMMANDS])
-    this.name = machine === undefined ? 'remote' : `remote:${machine}`
-    this.defaultMachine = machine ?? null
+  constructor(machine: string, options: RuntimeOptions = {}) {
+    super(options, [EXTERNAL_COMMANDS])
+    this.name = machine
+    this.defaultMachine = machine
   }
 
   /**
@@ -133,53 +127,41 @@ export class RemoteRuntime
    *   Error: the entry's `machine` is none of them.
    */
   bindMachines(machines: MachineTable): void {
-    if (this.defaultMachine !== null) machines.get(this.defaultMachine)
+    machines.get(this.defaultMachine)
     this.machines = machines
   }
 
   /**
-   * The machine one run goes to.
+   * The machine every run goes to.
    *
    * Throws:
-   *   Error: no machine is named, or the workspace has none by that name.
+   *   Error: the runtime is not in a workspace.
    */
-  handle(ctx: Context): MachineHandle {
-    const name = ctx.machine ?? this.defaultMachine
-    if (name === null)
-      throw new Error(
-        `${this.name}: no machine to run on; name one with the entry's machine or the line's route`,
-      )
+  handle(): MachineHandle {
     if (this.machines === null) throw new Error(`${this.name}: runtime is not in a workspace`)
-    return this.machines.get(name)
+    return this.machines.get(this.defaultMachine)
   }
 
   override get machine(): MachineName | null {
-    if (this.machines === null || this.defaultMachine === null) return null
+    if (this.machines === null) return null
     return this.machines.get(this.defaultMachine).machine
   }
 
-  override machineFor(ctx: Context): MachineName | null {
-    return this.handle(ctx).machine
-  }
-
   /**
-   * The provider of the machine the run goes to, as a refusal of its mounts
-   * names it; the runtime's name when it names none.
+   * The provider of the machine its runs go to, as a refusal of its mounts
+   * names it; the runtime's name before it is bound.
    */
-  override refusalName(ctx: Context): string {
-    const name = ctx.machine ?? this.defaultMachine
-    if (this.machines === null || name === null || !this.machines.names().includes(name))
-      return this.name
-    return this.machines.get(name).provider
+  override get refusalName(): string {
+    if (this.machines === null) return this.name
+    return this.machines.get(this.defaultMachine).provider
   }
 
   override get fileEffectsDispatched(): boolean {
-    const handles = this.machines?.handles() ?? []
-    return handles.length > 0 && handles.every((h) => h.fileEffectsDispatched(this.binding))
+    return this.machines !== null && this.handle().fileEffectsDispatched(this.binding)
   }
 
-  protected override servesSession(restrictedMounts: readonly string[], ctx: Context): boolean {
-    return this.handle(ctx).servesSession(restrictedMounts)
+  protected override servesSession(restrictedMounts: readonly string[]): boolean {
+    return this.handle().servesSession(restrictedMounts)
   }
 
   /**
@@ -206,7 +188,7 @@ export class RemoteRuntime
     errors?: OutputFn,
   ): Promise<RunResult> {
     const line = ctx.flags.c
-    return this.handle(ctx).run(
+    return this.handle().run(
       ['/bin/sh', '-c', typeof line === 'string' ? line : ''],
       ctx,
       this.binding,
@@ -229,7 +211,7 @@ export class RemoteRuntime
     output: OutputFn | undefined,
     errors?: OutputFn,
   ): Promise<RunResult> {
-    const handle = this.handle(ctx)
+    const handle = this.handle()
     const env = { ...handle.config.env }
     const { evaluation } = currentCaller()
     const reads = new Set(

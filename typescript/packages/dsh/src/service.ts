@@ -15,10 +15,12 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
 import type { ShellExplanation } from '@struktoai/mirage-core/policy/types'
-import type { Runtime, RuntimeEntry } from '@struktoai/mirage-core/runtime/base'
-import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
+import type { MachineHandle } from '@struktoai/mirage-core/machine/handle'
+import type { Runtime } from '@struktoai/mirage-core/runtime/base'
+import { buildEntry, type MachineSpecs } from '@struktoai/mirage-core/runtime/table'
 import { parseMountMode } from '@struktoai/mirage-core/types'
 import { snakeToCamel } from '@struktoai/mirage-core/utils/normalize'
+import { isPlainObject } from '@struktoai/mirage-core/utils/records'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { NodeWorkspaceOptions } from '@struktoai/mirage-node'
@@ -52,16 +54,6 @@ const MOUNT_BLOCK_KEYS = ['vfs', 'mode', 'config']
 /** One mount entry: a live spec or instance, or a declarative block. */
 export type MirageMount = MountSpec | Mount | MirageMountBlock
 
-/** A runtime entry, YAML-friendly: a name, or a name with its options. */
-export interface MirageRuntimeBlock {
-  /** Runtime registry name (`monty`, `pyodide`, `quickjs`, ...). */
-  name: string
-  /** Command words this runtime captures (e.g. `['python', 'python3']`). */
-  captures?: string[]
-  /** The runtime's own config block; a key it does not have is refused. */
-  config?: Record<string, unknown>
-}
-
 /**
  * Configuration for the shared mirage execution world. Exactly one of
  * `workspace` (adopt a live workspace the embedder owns and closes) or
@@ -74,11 +66,12 @@ export interface MirageConfig {
   /** Mounts for a service-owned workspace, keyed by mount prefix. */
   mounts?: Record<string, MirageMount>
   /**
-   * Runtimes for a service-owned workspace, built via `buildRuntime`.
-   * The YAML-friendly twin of `workspaceOptions.runtimes`; pass one or
-   * the other, not both.
+   * Machines for a service-owned workspace, by name, each a `machines:`
+   * entry as a workspace file spells it (`{ provider: 'worker', captures:
+   * ['@python'] }`). The YAML-friendly twin of `workspaceOptions.machines`;
+   * pass one or the other, not both.
    */
-  runtimes?: (string | MirageRuntimeBlock)[]
+  machines?: Record<string, Record<string, unknown>>
   /**
    * The roles (`profiles:` in mirage config), each a whole permission
    * document: its `commands.allow` list, its `commands.ask` and
@@ -146,20 +139,28 @@ function camelKeys(block: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(block).map(([key, value]) => [snakeToCamel(key), value]))
 }
 
-function toRuntimeEntry(entry: string | MirageRuntimeBlock): RuntimeEntry {
-  if (typeof entry === 'string') return entry
-  const { name, config, ...options } = entry
-  return buildRuntime(
-    name,
-    config === undefined ? options : { ...options, config: camelKeys(config) },
-  )
-}
-
-// A name shorthand builds exactly as the workspace would build it; holding
-// the instance early is what lets `vfsOnly` classify the world before the
-// (asynchronous) mounts finish resolving.
-function builtEntry(entry: RuntimeEntry): Runtime {
-  return typeof entry === 'string' ? buildRuntime(entry) : entry
+// A machine is built once, here, so `vfsOnly` can classify the world
+// before the (asynchronous) mounts finish resolving; the workspace takes
+// the built handle or runtime as it is.
+function builtMachines(
+  machines: MachineSpecs,
+): [Record<string, MachineHandle | Runtime>, Runtime[]] {
+  const built: Record<string, MachineHandle | Runtime> = {}
+  const runtimes: Runtime[] = []
+  const items = Array.isArray(machines)
+    ? (machines as readonly (MachineHandle | Runtime)[]).map((m) => [m.name, m] as const)
+    : Object.entries(machines)
+  for (const [name, entry] of items) {
+    let spec = entry
+    if (isPlainObject(entry)) {
+      spec = camelKeys(entry)
+      if (isPlainObject(spec.sandbox)) spec.sandbox = camelKeys(spec.sandbox)
+    }
+    const [handle, runtime] = buildEntry(name, spec)
+    built[name] = handle ?? runtime
+    runtimes.push(runtime)
+  }
+  return [built, runtimes]
 }
 
 /**
@@ -189,22 +190,22 @@ export class MirageService extends Service {
       throw new Error('mirage: pass either workspace or mounts, not both')
     }
     if (config.workspace !== undefined) {
-      // An adopted workspace is already built, so runtimes and constructor
+      // An adopted workspace is already built, so machines and constructor
       // options can no longer reach it. Saying so beats accepting a config
-      // whose runtimes silently never load, which is what the workspace and
+      // whose machines silently never load, which is what the workspace and
       // mounts pair above already refuses to do.
       // `profiles` and `profile` join them for the same reason, and one
       // more: an adopted workspace's roles and its `onAsk` are the
       // embedder's own, so silently re-answering its asks through
       // `ctx.approval` would take over a seam it may already have filled.
       if (
-        config.runtimes !== undefined ||
+        config.machines !== undefined ||
         config.workspaceOptions !== undefined ||
         config.profiles !== undefined ||
         config.profile !== undefined
       ) {
         throw new Error(
-          'mirage: runtimes, profiles, profile and workspaceOptions configure a service-owned workspace, not an adopted workspace',
+          'mirage: machines, profiles, profile and workspaceOptions configure a service-owned workspace, not an adopted workspace',
         )
       }
       this.built = config.workspace
@@ -215,11 +216,11 @@ export class MirageService extends Service {
       throw new Error('mirage: one of workspace or mounts is required')
     }
     const options = { ...(config.workspaceOptions ?? {}) }
-    if (config.runtimes !== undefined) {
-      if (options.runtimes !== undefined) {
-        throw new Error('mirage: pass runtimes or workspaceOptions.runtimes, not both')
+    if (config.machines !== undefined) {
+      if (options.machines !== undefined) {
+        throw new Error('mirage: pass machines or workspaceOptions.machines, not both')
       }
-      options.runtimes = config.runtimes.map(toRuntimeEntry)
+      options.machines = config.machines
     }
     if (config.profiles !== undefined) {
       if (options.profiles !== undefined) {
@@ -240,8 +241,11 @@ export class MirageService extends Service {
     // what finds an approver composed after this plugin. An explicit
     // `workspaceOptions.onAsk` is the embedder's decision and stands.
     options.onAsk ??= askThroughApproval(ctx)
-    this.plannedRuntimes = options.runtimes?.map(builtEntry)
-    if (this.plannedRuntimes !== undefined) options.runtimes = [...this.plannedRuntimes]
+    if (options.machines !== undefined) {
+      const [machines, runtimes] = builtMachines(options.machines)
+      options.machines = machines
+      this.plannedRuntimes = runtimes
+    }
     const blocks = Object.values(config.mounts).some(isMountBlock)
     if (blocks) {
       this.ready = this.open(config.mounts, options)
@@ -330,11 +334,11 @@ export class MirageService extends Service {
    * the bridged engines, while the host `local` python or a remote
    * sandbox can act around the gate. Answers before `ready` from the
    * constructor-resolved entries (mounts resolve asynchronously,
-   * runtimes never do) and from the live workspace afterwards, so a
-   * later `addRuntime` or `removeRuntime` is seen.
+   * machines never do) and from the live workspace afterwards, so a
+   * later `addMachine` or `removeMachine` is seen.
    */
   get vfsOnly(): boolean {
-    const entries = this.built === null ? (this.plannedRuntimes ?? []) : this.built.runtimes()
+    const entries = this.built === null ? (this.plannedRuntimes ?? []) : this.built.engines()
     return entries.every((entry) => entry.reach === 'workspace')
   }
 

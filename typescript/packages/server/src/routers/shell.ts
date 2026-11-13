@@ -20,7 +20,7 @@ import type { ShellExplanation } from '@struktoai/mirage-core/policy/types'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
-import { runtimeBindingsFor } from '@struktoai/mirage-core/runtime/table'
+import { machineBindingsFor } from '@struktoai/mirage-core/runtime/table'
 import { WorkspaceRuntime } from '@struktoai/mirage-core/runtime/workspace'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { errorResponse, HttpError, INTERNAL_MESSAGE, validationError } from '../errors.ts'
@@ -39,10 +39,6 @@ const ShellRequest = z
   .object({
     command: z.string(),
     cwd: z
-      .string()
-      .nullish()
-      .transform((value) => value ?? undefined),
-    runtime: z
       .string()
       .nullish()
       .transform((value) => value ?? undefined),
@@ -72,41 +68,25 @@ interface ShellUpload {
 }
 
 /**
- * Refuse a runtime or machine the workspace does not have, before the line
- * is submitted, naming the workspace's own choices. Mirrors Python's
+ * Refuse a machine the workspace does not have, before the line is
+ * submitted, naming the workspace's own choices. Mirrors Python's
  * `_check_placement`.
  */
 function checkPlacement(ws: Workspace, req: ShellRequest): void {
-  if (req.runtime === 'workspace') {
-    throw new HttpError(
-      'invalid_value',
-      `'workspace' is the default executor, not a runtime you can select`,
-      { param: 'runtime' },
-    )
-  }
-  const runtimes = ws.runtimes()
-  const named = [
-    [
-      'runtime',
-      req.runtime,
-      runtimes
-        .filter((runtime) => !(runtime instanceof WorkspaceRuntime))
-        .map((runtime) => runtime.name),
-    ],
-    ['machine', req.machine, ws.machineTable.names()],
-  ] as const
-  for (const [param, given, names] of named) {
-    if (given === undefined || names.includes(given)) continue
-    const message =
+  if (req.machine === undefined) return
+  try {
+    machineBindingsFor(ws.engines(), req.machine)
+  } catch (err) {
+    const names = ws
+      .engines()
+      .filter((runtime) => !(runtime instanceof WorkspaceRuntime))
+      .map((runtime) => runtime.name)
+    let message =
       names.length > 0
-        ? `${param} must be one of ${names.join(', ')}`
-        : `${param} must be unset: the workspace has no ${param}s`
-    if (param !== 'runtime') throw new HttpError('invalid_value', message, { param })
-    try {
-      runtimeBindingsFor(runtimes, given)
-    } catch (err) {
-      throw new HttpError('invalid_value', message, { param, cause: err })
-    }
+        ? `machine must be one of ${names.join(', ')}`
+        : 'machine must be unset: the workspace has no machines'
+    if (req.machine === 'workspace' && err instanceof Error) message = err.message
+    throw new HttpError('invalid_value', message, { param: 'machine', cause: err })
   }
 }
 
@@ -274,7 +254,7 @@ function refuse(req: RouteRequest, reply: RouteReply, error: unknown): RouteRepl
 /**
  * What a line would do as a session, without running any of it
  * (`session.explain.shell`). Only the line is read: a working directory, a
- * runtime, a machine or stdin would change what runs, which an
+ * machine or stdin would change what runs, which an
  * explanation cannot follow, so each is refused. Mirrors Python's
  * `_explained`.
  */
@@ -291,13 +271,12 @@ async function explained(
     if (
       body === null ||
       body.cwd !== undefined ||
-      body.runtime !== undefined ||
       body.machine !== undefined ||
       body.open_stdin === true
     ) {
       throw new HttpError(
         'invalid_request',
-        'explain takes the line alone: no stdin, cwd, runtime or machine',
+        'explain takes the line alone: no stdin, cwd or machine',
       )
     }
     const session = await sessionOf(entry.runner.ws, sessionId)
@@ -415,7 +394,6 @@ export function registerShellRoutes(
           sessionId,
           lineHandle,
           ...(body.cwd !== undefined ? { cwd: body.cwd } : {}),
-          ...(body.runtime !== undefined ? { runtime: body.runtime } : {}),
           ...(body.machine !== undefined ? { machine: body.machine } : {}),
           ...(body.record !== undefined ? { record: body.record } : {}),
           ...(source !== undefined ? { stdin: source } : {}),

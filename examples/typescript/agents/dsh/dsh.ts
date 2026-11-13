@@ -27,7 +27,6 @@ import dotenv from 'dotenv'
 import { Context } from '@deepseek-ai/cordis'
 import type { ShellExecutor, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import {
-  buildRuntime,
   MountMode,
   RAMVFS,
   RedisVFS,
@@ -208,7 +207,7 @@ async function main(): Promise<void> {
       '/slack': [new SlackVFS({ token }), MountMode.EXEC],
     },
     {
-      runtimes: [buildRuntime('monty', { captures: ['python', 'python3'] })],
+      machines: { py: { provider: 'worker', captures: ['python', 'python3'] } },
       profiles: { agent: ROLE },
       profile: 'agent',
       // No `onAsk` on purpose: this example composes no approval channel,

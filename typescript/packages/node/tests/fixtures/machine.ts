@@ -14,7 +14,6 @@
 
 import { MachineTable } from '@struktoai/mirage-core/execution/machine/table'
 import type { MachineHandle } from '@struktoai/mirage-core/machine/handle'
-import type { RuntimeEntry } from '@struktoai/mirage-core/runtime/base'
 import { RemoteRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
 
 // One table per handle, as one workspace holds a handle however many
@@ -39,10 +38,7 @@ function capturesOf(handle: MachineHandle): readonly string[] | undefined {
  */
 export function machineRuntime(handle: MachineHandle): RemoteRuntime {
   const captures = capturesOf(handle)
-  const runtime = new RemoteRuntime({
-    machine: handle.name,
-    ...(captures !== undefined ? { captures } : {}),
-  })
+  const runtime = new RemoteRuntime(handle.name, captures !== undefined ? { captures } : {})
   let table = TABLES.get(handle)
   if (table === undefined) {
     table = new MachineTable({ [handle.name]: handle })
@@ -54,17 +50,14 @@ export function machineRuntime(handle: MachineHandle): RemoteRuntime {
 
 /**
  * The workspace options that run one machine's programs, capturing what a
- * fake handle's `captures` names, the other runtime entries after it.
- * Mirrors Python's `tests/fixtures/machine.on`.
+ * fake handle's `captures` names. Mirrors Python's
+ * `tests/fixtures/machine.on`.
  */
-export function on(
-  handle: MachineHandle,
-  ...rest: RuntimeEntry[]
-): { machines: Record<string, MachineHandle>; runtimes: RuntimeEntry[] } {
+export function on(handle: MachineHandle): { machines: Record<string, MachineHandle> } {
   const captures = capturesOf(handle)
-  const entry = new RemoteRuntime({
-    machine: handle.name,
-    ...(captures !== undefined ? { captures } : {}),
-  })
-  return { machines: { [handle.name]: handle }, runtimes: [entry, ...rest] }
+  if (captures !== undefined) {
+    const held = handle as { config: MachineHandle['config'] }
+    held.config = { ...held.config, captures }
+  }
+  return { machines: { [handle.name]: handle } }
 }

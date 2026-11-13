@@ -25,6 +25,7 @@ import { context } from '../../../../tests/workspace/fixtures/context.ts'
 import { materialize } from '../../../io/types.ts'
 import { bindOver, runContext } from '../../../../tests/runtime/fixtures/bridge.ts'
 import { MemoryBudget, runWithMemory } from '../../../io/memory.ts'
+import { buildRuntime } from '../../table.ts'
 
 function makeBridge(
   seed: Record<string, Uint8Array>,
@@ -405,10 +406,7 @@ describe('MontyRuntime', () => {
 
   it("a bound run takes the caller's cwd, not the session's", async () => {
     const rt = new MontyRuntime()
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [rt, 'workspace'] },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, machines: [rt] })
     try {
       expect((await ws.shell('mkdir /data/sub; cd /data')).exitCode).toBe(0)
       const code = 'import os; print(os.getcwd())'
@@ -616,7 +614,7 @@ describe('Workspace with the monty runtime', () => {
     vi.spyOn(runtime, 'version').mockRejectedValue(
       new MontyUnavailableError('install @pydantic/monty'),
     )
-    const ws = new Workspace({ '/data': new RAMVFS() }, { runtimes: [runtime, 'workspace'] })
+    const ws = new Workspace({ '/data': new RAMVFS() }, { machines: [runtime] })
     try {
       const io = await ws.shell('python3 --version')
       expect(io.exitCode).toBe(127)
@@ -628,7 +626,7 @@ describe('Workspace with the monty runtime', () => {
   })
 
   it('does not print Mirage versions for unbound interpreter commands', async () => {
-    const ws = new Workspace({ '/data': new RAMVFS() }, { runtimes: ['workspace'] })
+    const ws = new Workspace({ '/data': new RAMVFS() }, { machines: [] })
     try {
       for (const name of ['python3', 'python', 'node', 'js']) {
         const io = await ws.shell(`${name} --version`)
@@ -642,7 +640,7 @@ describe('Workspace with the monty runtime', () => {
   })
 
   it('reports the guest Python version for --version and -V', async () => {
-    const ws = new Workspace({ '/data': new RAMVFS() }, { runtimes: ['monty', 'workspace'] })
+    const ws = new Workspace({ '/data': new RAMVFS() }, { machines: [buildRuntime('monty')] })
     try {
       for (const line of ['python3 --version', 'python -V', 'python3 -VV']) {
         const io = await ws.shell(line)
@@ -745,7 +743,7 @@ describe('python3 option table (CPython-pinned)', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: ['monty', 'workspace'],
+        machines: [buildRuntime('monty')],
       },
     )
     try {

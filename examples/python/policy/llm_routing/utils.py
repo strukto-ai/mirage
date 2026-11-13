@@ -1,6 +1,6 @@
 import os
 
-from config import RuntimeChoice
+from config import MachineChoice
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from typesafe_sdk import AsyncTypeSafeClient, Choice
@@ -10,8 +10,8 @@ load_dotenv(".env.development")
 CHOICES: dict[str, dict[str, str]] = {}
 
 
-async def parse_runtime(
-    model: str, task: str, runtimes: dict[str, str], line: str
+async def parse_machine(
+    model: str, task: str, machines: dict[str, str], line: str
 ) -> dict[str, str]:
     """Ask the model where a line runs: Jev for a jev model, else OpenAI.
 
@@ -20,44 +20,44 @@ async def parse_runtime(
     Args:
         model (str): the model to ask.
         task (str): what to pick.
-        runtimes (dict[str, str]): each runtime and what it can run.
+        machines (dict[str, str]): each machine and what it can run.
         line (str): the shell line.
     """
     if line not in CHOICES:
         ask = ask_jev if model.startswith("jev") else ask_openai
-        CHOICES[line] = await ask(model, task, runtimes, line)
+        CHOICES[line] = await ask(model, task, machines, line)
     return CHOICES[line]
 
 
 async def ask_openai(
-    model: str, task: str, runtimes: dict[str, str], line: str
+    model: str, task: str, machines: dict[str, str], line: str
 ) -> dict[str, str]:
-    """Ask an OpenAI model for a RuntimeChoice, its reason in its words.
+    """Ask an OpenAI model for a MachineChoice, its reason in its words.
 
     Args:
         model (str): the model to ask.
         task (str): what to pick.
-        runtimes (dict[str, str]): each runtime and what it can run.
+        machines (dict[str, str]): each machine and what it can run.
         line (str): the shell line.
     """
     prompt = f"{task} Say why in one sentence.\n" + "\n".join(
-        f"{name}: {about}" for name, about in runtimes.items()
+        f"{name}: {about}" for name, about in machines.items()
     )
     done = await AsyncOpenAI(timeout=10).responses.parse(
-        model=model, instructions=prompt, input=line, text_format=RuntimeChoice
+        model=model, instructions=prompt, input=line, text_format=MachineChoice
     )
     return done.output_parsed.model_dump()
 
 
 async def ask_jev(
-    model: str, task: str, runtimes: dict[str, str], line: str
+    model: str, task: str, machines: dict[str, str], line: str
 ) -> dict[str, str]:
     """Ask a Jev model to choose, its reason the confidence it reports.
 
     Args:
         model (str): the model to ask.
         task (str): what to pick.
-        runtimes (dict[str, str]): each runtime and what it can run.
+        machines (dict[str, str]): each machine and what it can run.
         line (str): the shell line.
     """
     async with AsyncTypeSafeClient(
@@ -65,11 +65,11 @@ async def ask_jev(
     ) as client:
         done = await client.system_one(
             line,
-            {"runtime": Choice(instructions=task, criteria=runtimes)},
+            {"machine": Choice(instructions=task, criteria=machines)},
             model=model,
         )
-    answer = done.choices["runtime"]
+    answer = done.choices["machine"]
     return {
-        "runtime": answer.choice,
+        "machine": answer.choice,
         "reason": f"confidence {answer.confidence:.2f}",
     }

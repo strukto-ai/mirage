@@ -21,6 +21,7 @@ from mirage import MountMode, Workspace
 from mirage.io.types import materialize
 from mirage.mount.core import MountCore
 from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
+from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.python.wasi.runtime import WASI_HOME_ENV
 from mirage.vfs.ram import RAMVFS
 
@@ -75,6 +76,17 @@ def _seed(files: dict[str, bytes]) -> RAMVFS:
     return r
 
 
+def _machine(runtime: str) -> dict[str, dict[str, str]]:
+    """The machine that runs ``runtime``, named for it.
+
+    Args:
+        runtime (str): registry name of the guest runtime.
+    """
+    if runtime == "monty":
+        return {runtime: {"provider": "worker"}}
+    return {runtime: {"provider": "in_process", "runtime": runtime}}
+
+
 def structure_world(runtime: str) -> Workspace:
     """A nested mount plus a namespace symlink, one backend file each.
 
@@ -94,7 +106,7 @@ def structure_world(runtime: str) -> Workspace:
             "/base/inner": _seed({"/deep.txt": b"needle"}),
         },
         mode=MountMode.EXEC,
-        runtimes=[runtime, "workspace"],
+        machines=_machine(runtime),
     )
 
 
@@ -119,7 +131,7 @@ def scoped_world(runtime: str) -> Workspace:
             "/closed": _seed({"/sec.txt": b"SECRET-xyz"}),
         },
         mode=MountMode.EXEC,
-        runtimes=[runtime, "workspace"],
+        machines=_machine(runtime),
     )
     ws.create_session("agent", profile={"paths": {"hide": ["/closed"]}})
     return ws
@@ -255,7 +267,7 @@ async def test_namespace_only_ancestor_serves_every_ls_variant():
             "/ghost/deep": _seed({"/x.txt": b"inside"}),
         },
         mode=MountMode.EXEC,
-        runtimes=["monty", "workspace"],
+        machines=[MontyRuntime()],
     )
     try:
         code, out, _ = await _sh(ws, "ls -R /ghost")
@@ -369,7 +381,7 @@ def granted_child_world(runtime: str) -> Workspace:
             "/base/inner": _seed({"/deep.txt": b"needle"}),
         },
         mode=MountMode.EXEC,
-        runtimes=[runtime, "workspace"],
+        machines=_machine(runtime),
     )
     ws.create_session("agent", profile={"paths": {"hide": ["/base/a.txt"]}})
     return ws
@@ -442,7 +454,7 @@ def shadowed_world(runtime: str) -> Workspace:
             "/base/inner": _seed({"/deep.txt": b"needle"}),
         },
         mode=MountMode.EXEC,
-        runtimes=[runtime, "workspace"],
+        machines=_machine(runtime),
     )
     ws.create_session("agent", profile={"paths": {"hide": ["/base/inner"]}})
     return ws

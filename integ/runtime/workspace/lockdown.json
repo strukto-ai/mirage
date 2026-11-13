@@ -3,13 +3,12 @@
     {
       "id": "lockdown_script",
       "world": {
-        "runtimes": [
-          "workspace",
-          {
-            "name": "monty",
+        "machines": {
+          "monty": {
+            "provider": "worker",
             "captures": []
           }
-        ],
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"

@@ -78,14 +78,13 @@ ws = Workspace(
             "commands": {"deny": ["slack send-message", "curl"]},
         },
     },
-    # e2b 샌드박스는 머신이고, remote 런타임이 그 위에서 프로그램을 실행한다
-    machines={"box": {"provider": "e2b", "sandbox_id": sandbox_id, "mount_type": "ssh"}},
-    runtimes=[
-        MontyRuntime(captures=["python", "python3"]),
-        RemoteRuntime(captures=["python", "python3"], machine="box"),
-    ],
+    # python은 워커의 monty에서, 또는 e2b 샌드박스에서 실행된다
+    machines={
+        "py": {"provider": "worker"},
+        "box": {"provider": "e2b", "sandbox_id": sandbox_id, "mount_type": "ssh", "captures": ["python", "python3"]},
+    },
     # 연산을 라우팅한다: numpy 줄은 머신에서, 나머지는 monty에서 실행된다
-    route_policy=lambda ctx: "remote" if "numpy" in ctx.line else None,
+    route_policy=lambda ctx: "box" if "numpy" in ctx.line else None,
 )
 
 # analyst 프로파일을 쓰는 에이전트를 추가한다
@@ -155,7 +154,7 @@ slack: Permission denied
 
 ## 가상 런타임
 
-런타임도 같은 방식으로 가상화되며, 프로그래밍 언어에만 해당하지 않습니다. 명령줄의 어떤 명령이든 설정된 런타임으로 보낼 수 있어서, Python은 [Monty](https://pydantic.dev/articles/pydantic-monty)로 프로세스 안에서 실행하고 다른 명령, 예를 들어 `kubectl`은 SSH로 원격 머신에 보낼 수 있습니다. 어떤 줄을 어떤 런타임이 처리할지는 [스크립트 런타임 라우터](https://docs.mirage.strukto.ai/home/policy/route-runtime)가 결정할 수 있습니다.
+런타임도 같은 방식으로 가상화되며, 프로그래밍 언어에만 해당하지 않습니다. 명령줄의 어떤 명령이든 설정된 런타임으로 보낼 수 있어서, Python은 [Monty](https://pydantic.dev/articles/pydantic-monty)로 프로세스 안에서 실행하고 다른 명령, 예를 들어 `kubectl`은 SSH로 원격 머신에 보낼 수 있습니다. 어떤 줄을 어떤 런타임이 처리할지는 [스크립트 런타임 라우터](https://docs.mirage.strukto.ai/home/policy/route-machine)가 결정할 수 있습니다.
 
 |                | 런타임                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -269,11 +268,11 @@ npm install @struktoai/mirage-node @pydantic/monty express
 
 ```ts
 import express from 'express'
-import { MontyRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
   { '/work': new RAMVFS() },
-  { mode: MountMode.EXEC, runtimes: [new MontyRuntime({ captures: ['python', 'python3'] })] },
+  { mode: MountMode.EXEC, machines: { py: { provider: 'worker' } } },
 )
 const app = express()
 app.use(express.json())

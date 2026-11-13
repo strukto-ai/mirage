@@ -18,7 +18,7 @@ from mirage import Policy, Workspace
 from mirage.machine.handle import MachineHandle
 from mirage.policy import Ask, Deny, Outcome, Route
 from mirage.policy.types import Scope
-from mirage.runtime.machine import RemoteRuntime
+from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.routing import RouteError
 from mirage.runtime.types import RunResult
 from mirage.types import MountMode
@@ -37,12 +37,15 @@ class _Box(MachineHandle):
         )
 
 
+def _box(name: str, *captures: str) -> _Box:
+    return _Box(name, {"captures": list(captures)})
+
+
 def _workspace(*policies: Policy) -> Workspace:
     return Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        machines={"a": _Box("a"), "b": _Box("b")},
-        runtimes=[RemoteRuntime(["hostname"], machine="a"), "workspace"],
+        machines={"a": _box("a", "hostname"), "b": _box("b", "hostname")},
         policies=list(policies),
     )
 
@@ -51,8 +54,7 @@ def _whole(*policies: Policy) -> Workspace:
     return Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        machines={"a": _Box("a"), "b": _Box("b")},
-        runtimes=[RemoteRuntime(["@line"], machine="a")],
+        machines={"a": _box("a", "@line"), "b": _box("b", "@line")},
         policies=list(policies),
     )
 
@@ -158,8 +160,7 @@ async def test_a_line_run_whole_keeps_a_route_that_moves_nothing():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        machines={"a": _Box("a")},
-        runtimes=[RemoteRuntime(["@line"], machine="a"), "monty"],
+        machines={"a": _box("a", "@line"), "monty": MontyRuntime()},
         policies=[_HostnameOnMonty()],
     )
     try:
@@ -184,8 +185,8 @@ async def test_two_command_routes_that_disagree_refuse_it():
         said = await ws.shell("hostname -s")
         assert said.exit_code == 126
         assert said.decision is not None
-        assert "_ShortOnB on machine b" in said.decision.reason
-        assert "_OnA on machine a" in said.decision.reason
+        assert "_ShortOnB on b" in said.decision.reason
+        assert "_OnA on a" in said.decision.reason
     finally:
         await ws.close()
 
@@ -196,10 +197,10 @@ async def test_explain_names_the_machine_a_command_runs_on():
     try:
         said = await ws.explain("hostname; hostname -s; ls")
         commands = [node for node in _commands(said.node) if node.command]
-        assert [(c.command, c.runtime, c.machine) for c in commands] == [
-            ("hostname", "remote:a", "box:a"),
-            ("hostname", "remote:a", "box:b"),
-            ("ls", "", ""),
+        assert [(c.command, c.machine) for c in commands] == [
+            ("hostname", "a"),
+            ("hostname", "b"),
+            ("ls", ""),
         ]
     finally:
         await ws.close()
@@ -212,9 +213,9 @@ async def test_explain_names_the_machine_a_routed_eval_runs_on():
         said = await ws.explain("hostname; eval hostname")
         commands = [node for node in _commands(said.node) if node.command]
         assert [(c.command, c.machine) for c in commands] == [
-            ("hostname", "box:a"),
+            ("hostname", "a"),
             ("eval", ""),
-            ("hostname", "box:b"),
+            ("hostname", "b"),
         ]
     finally:
         await ws.close()
@@ -232,8 +233,8 @@ async def test_explain_places_a_wrapper_with_its_program():
         said = await ws.explain("nohup hostname")
         commands = [node for node in _commands(said.node) if node.command]
         assert [(c.command, c.machine) for c in commands] == [
-            ("nohup", "box:b"),
-            ("hostname", "box:b"),
+            ("nohup", "b"),
+            ("hostname", "b"),
         ]
     finally:
         await ws.close()
@@ -244,14 +245,16 @@ async def test_explain_ignores_a_shell_line_under_a_wrapper():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        machines={"a": _Box("a"), "b": _Box("b")},
-        runtimes=[RemoteRuntime(["nohup", "hostname"], machine="a")],
+        machines={
+            "a": _box("a", "nohup", "hostname"),
+            "b": _box("b", "nohup", "hostname"),
+        },
         policies=[_ProgramOnB()],
     )
     try:
         said = await ws.explain("nohup sh -c hostname")
         first = next(node for node in _commands(said.node) if node.command)
-        assert (first.command, first.machine) == ("nohup", "box:a")
+        assert (first.command, first.machine) == ("nohup", "a")
         assert (await ws.shell("nohup sh -c hostname")).stdout == b"a\n"
     finally:
         await ws.close()
@@ -342,135 +345,55 @@ def _commands(node):
         yield from _commands(child)
 
 
-class _MontyOnB(Policy):
+class _OnC(Policy):
     def pre_execute(self, ctx):
-        return Route("monty", machine="b")
-
-
-def _with_monty(*policies: Policy) -> Workspace:
-    return Workspace(
-        {"/": RAMVFS()},
-        mode=MountMode.EXEC,
-        machines={"a": _Box("a"), "b": _Box("b")},
-        runtimes=[
-            RemoteRuntime(["hostname"], machine="a"),
-            "monty",
-            "workspace",
-        ],
-        policies=list(policies),
-    )
+        return Route(machine="c")
 
 
 @pytest.mark.asyncio
-async def test_a_route_refuses_a_machine_its_runtime_does_not_run_on():
-    refusal = "runtime 'monty' runs on the workspace's machine"
-    ws = _with_monty(_MontyOnB())
+async def test_a_route_to_a_machine_the_workspace_lacks_is_a_route_error():
+    ws = _workspace(_OnC())
     try:
-        with pytest.raises(RouteError, match=refusal):
+        with pytest.raises(RouteError, match="unknown machine: 'c'"):
             await ws.shell("hostname")
     finally:
         await ws.close()
-    ws = _with_monty()
-    try:
-        with pytest.raises(RouteError, match=refusal):
-            await ws.shell("hostname", runtime="monty", machine="b")
-    finally:
-        await ws.close()
 
 
+# Each machine runs what it captures, so a program goes to the machine
+# that captures it, and a line can name one.
 @pytest.mark.asyncio
-async def test_a_route_to_a_machine_needs_a_remote_runtime():
+async def test_each_machine_runs_what_it_captures():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        machines={"b": _Box("b")},
-        runtimes=["monty", "workspace"],
-        policies=[_OnB()],
+        machines={"a": _box("a", "python3"), "b": _box("b", "node")},
     )
     try:
-        with pytest.raises(RouteError, match="machine 'b' takes the remote"):
-            await ws.shell("echo hi")
+        assert [r.name for r in ws.engines()] == ["a", "b", "workspace"]
+        said = await ws.shell("python3 x.py; node x.js; python3 x.py | node")
+        assert said.stdout == b"a\nb\nb\n"
+        said = await ws.shell("node x.js", machine="b")
+        assert said.stdout == b"b\n"
     finally:
         await ws.close()
 
 
+# A program two machines both capture goes to the first listed, on every
+# line, and to the next once the first is removed. A machine provider's
+# handle is the workspace's from the start.
 @pytest.mark.asyncio
-async def test_a_command_routed_to_a_local_runtime_keeps_the_lines_machine():
-    ws = _with_monty(_HostnameOnMonty())
-    try:
-        said = await ws.shell("hostname", machine="b")
-        assert (said.exit_code, said.stdout) == (0, b"b\n")
-    finally:
-        await ws.close()
-
-
-class _HostnameOnMontyOnB(Policy):
-    def pre_command(self, ctx):
-        if ctx.command == "hostname":
-            return Route("monty", machine="b")
-        return None
-
-
-@pytest.mark.asyncio
-async def test_explain_refuses_a_command_route_to_a_machine_as_a_route_error():
-    ws = _with_monty(_HostnameOnMontyOnB())
-    try:
-        with pytest.raises(RouteError, match="runs on the workspace's"):
-            await ws.explain("hostname")
-    finally:
-        await ws.close()
-
-
-# Each remote entry is named for its machine, so a workspace holds one per
-# machine and each program goes to the entry that captures it.
-@pytest.mark.asyncio
-async def test_each_machine_takes_a_remote_entry_of_its_own():
+async def test_the_first_machine_keeps_what_both_capture():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
         machines={"a": _Box("a"), "b": _Box("b")},
-        runtimes=[
-            RemoteRuntime(["python3"], machine="a"),
-            RemoteRuntime(["node"], machine="b"),
-        ],
-    )
-    try:
-        assert [r.name for r in ws.runtimes()] == [
-            "remote:a",
-            "remote:b",
-            "workspace",
-        ]
-        said = await ws.shell("python3 x.py; node x.js; python3 x.py | node")
-        assert said.stdout == b"a\nb\nb\n"
-        said = await ws.shell("node x.js", runtime="remote:b")
-        assert said.stdout == b"b\n"
-        with pytest.raises(ValueError, match="ambiguous runtime: 'remote'"):
-            await ws.shell("node x.js", runtime="remote")
-    finally:
-        await ws.close()
-
-
-# A program two remote entries both capture goes to the first listed, on
-# every line, after an entry is added, and to the next once it is removed.
-@pytest.mark.asyncio
-async def test_the_first_remote_entry_keeps_what_both_capture():
-    ws = Workspace(
-        {"/": RAMVFS()},
-        mode=MountMode.EXEC,
-        machines={"a": _Box("a"), "b": _Box("b"), "c": _Box("c")},
-        runtimes=[RemoteRuntime(machine="a"), RemoteRuntime(machine="b")],
     )
     try:
         assert (await ws.shell("train; train")).stdout == b"a\na\n"
-        ws.add_runtime(RemoteRuntime(machine="c"))
-        assert [r.name for r in ws.runtimes()] == [
-            "remote:a",
-            "remote:b",
-            "remote:c",
-            "workspace",
-        ]
-        assert (await ws.shell("train")).stdout == b"a\n"
-        await ws.remove_runtime("remote:a")
+        with pytest.raises(ValueError, match="declared when the workspace"):
+            ws.add_machine("c", _Box("c"))
+        await ws.remove_machine("a")
         assert (await ws.shell("train")).stdout == b"b\n"
     finally:
         await ws.close()
@@ -515,9 +438,7 @@ async def test_a_program_names_the_processes_it_reads_from():
             assert (await ws.shell(line)).stdout == b"a\n"
             ran = {p.pid: p for p in await ws.processes()}
             [program] = [
-                p
-                for p in ran.values()
-                if p.command == reader and p.runtime is not None
+                p for p in ran.values() if p.command == reader and p.program
             ][-1:]
             read[line] = (
                 ran[program.stdin].command if program.stdin else None,
@@ -551,9 +472,7 @@ async def test_a_forked_shells_last_program_runs_as_the_shell():
             assert (await ws.shell(line)).stdout == b"a\n"
         shell = int((await ws.shell("echo $$")).stdout)
         programs = [
-            p
-            for p in await ws.processes()
-            if p.runtime is not None and p.line is not None
+            p for p in await ws.processes() if p.program and p.line is not None
         ]
         assert [(p.command, p.parent) for p in programs] == [
             ("hostname", shell),

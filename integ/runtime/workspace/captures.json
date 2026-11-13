@@ -6,16 +6,18 @@
         "python"
       ],
       "world": {
-        "runtimes": [
-          "monty",
-          {
-            "name": "workspace",
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          },
+          "workspace": {
+            "provider": "in_process",
             "captures": [
               "echo",
               "cat"
             ]
           }
-        ],
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
@@ -52,16 +54,19 @@
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          "quickjs",
-          {
-            "name": "workspace",
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          },
+          "workspace": {
+            "provider": "in_process",
             "captures": [
               "echo",
               "cat"
             ]
           }
-        ],
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"

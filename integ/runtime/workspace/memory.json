@@ -4,9 +4,7 @@
       "id": "getconf_counts_pages_of_max_memory",
       "note": "The default 96 MB is 24576 pages, and a workspace's own max_memory replaces it.",
       "world": {
-        "runtimes": [
-          "workspace"
-        ]
+        "machines": {}
       },
       "steps": [
         {
@@ -21,9 +19,7 @@
     {
       "id": "getconf_follows_a_workspaces_max_memory",
       "world": {
-        "runtimes": [
-          "workspace"
-        ],
+        "machines": {},
         "max_memory": "64MB"
       },
       "steps": [
@@ -40,9 +36,7 @@
       "id": "free_in_a_substitution_answers_for_the_workspace",
       "note": "With no machine the workspace is the default one, so a script reading free still gets its row.",
       "world": {
-        "runtimes": [
-          "workspace"
-        ]
+        "machines": {}
       },
       "steps": [
         {

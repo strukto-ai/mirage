@@ -4,10 +4,12 @@
       "id": "std_and_os_surface",
       "note": "The real engine's std and os, as qjs runs them on WASI: its globals, signals, strerror, the environment, writeFile and loadFile, fdopen, FILE calls, evalScript and loadScript, os.sleep, and its timers.",
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ],
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -32,10 +34,12 @@
       "id": "standard_streams",
       "note": "std.in, std.out and std.err and descriptors 0 to 2 as qjs on WASI has them: a pipe with no position, stdio's buffer between FILE and os.read, EINVAL writing input and EBADF reading output; the wasi-libc strerror table and std.Error.",
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ],
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -60,10 +64,12 @@
       "id": "event_loop",
       "note": "Once the script ends, the loop calls a read handler while its descriptor reads and a timer once it is due, until none is left; a callback that throws ends the run with 1. The real engine's message adds a stack.",
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ],
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",

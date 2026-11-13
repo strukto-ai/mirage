@@ -190,7 +190,7 @@ describe('SqlExecutionStore', () => {
       cwd: PathSpec.fromStrPath('/m'),
       machine: new MachineName('docker', 'tools'),
       startedAt: 1.5,
-      runtime: 'docker',
+      program: true,
       machinePid: { pid: 4242, started: 1.25, exited: null },
       state: 'stopping',
       endedAt: null,

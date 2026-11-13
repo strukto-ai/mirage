@@ -21,7 +21,7 @@ export interface ProcessUsage {
 /**
  * One managed runner, as every instance on its store reads it: not an OS
  * process or a shell job number. Its machine is where its program runs and
- * its runtime what Mirage runs it with; a native program's own pid there is
+ * `program` whether a runtime started it there; a native program's own pid there is
  * `machinePid`, and what the last scan read of its use of the machine
  * `usage`.
  *
@@ -47,7 +47,7 @@ export interface Process {
   readonly cwd: PathSpec
   readonly machine: MachineName
   readonly startedAt: number
-  readonly runtime: string | null
+  readonly program: boolean
   readonly machinePid: MachinePid | null
   readonly state: ProcessState
   readonly endedAt: number | null
@@ -67,7 +67,7 @@ export interface Process {
 
 /** Whether a process is a program on a machine, not Mirage's own. */
 export function isProgram(process: Process): boolean {
-  return process.runtime !== null || process.machinePid !== null
+  return process.program || process.machinePid !== null
 }
 
 /** The pid the agent sees: its program's on its machine, else Mirage's own. */

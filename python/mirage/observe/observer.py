@@ -317,8 +317,8 @@ class Observer:
     are known. A process links to each it reads from, ``mirage.input``
     naming where: its ``stdin``, a ``/dev/fd`` path or its ``argv``.
     Nothing leaves the process until an SDK is set up. Tracing stops at
-    the workspace's own machine and runtimes: a program a runtime runs
-    elsewhere starts no trace of its own there.
+    the workspace: a program one of its machines runs elsewhere starts no
+    trace of its own there.
 
     Args:
         store (ObserverStore | None): Storage backend for log files;
@@ -707,8 +707,6 @@ class Observer:
             attributes["process.parent_pid"] = self._shown.get(
                 ("process", line, record.parent), record.parent
             )
-        if record.runtime is not None:
-            attributes["mirage.runtime"] = record.runtime
         return self._start(
             ("process", line, record.pid), attributes, under, record.started_at
         )

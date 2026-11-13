@@ -32,7 +32,6 @@ import { CreateBucketCommand, PutObjectCommand, S3Client } from '@aws-sdk/client
 import { MongoClient } from 'mongodb'
 import type { FileEntryWithStats, SFTPWrapper } from 'ssh2'
 import {
-  buildRuntime,
   CLI,
   CommandSpec,
   DiskVFS,
@@ -61,7 +60,6 @@ import {
   type Policy,
   type RouteContext,
   BaseVFS,
-  type RuntimeEntry,
   type FilesystemOperation,
   type Context,
 } from '@struktoai/mirage-node'
@@ -69,6 +67,7 @@ import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
 import { norm } from '@struktoai/mirage-core/utils/path'
+import { isPlainObject } from '@struktoai/mirage-core/utils/records'
 import {
   EXTERNAL_COMMANDS,
   PROCESS_EXECUTOR,
@@ -135,10 +134,9 @@ interface Step {
   program?: Record<string, string>
   // The host entry point's program, run in this process under patchNodeFs.
   host_program?: string
-  runtime?: string
   machine?: string
   stdin?: string
-  add_runtime?: string
+  add_machine?: Record<string, Record<string, unknown>>
   wait_job?: number
   add_policies?: PolicySpec[]
   // The default session's profile from this step on.
@@ -176,7 +174,7 @@ interface MountSpecJson {
 interface CliSpecJson {
   script: string
   language?: Language
-  runtime?: string
+  machine?: string
   config?: Record<string, unknown>
 }
 
@@ -191,7 +189,6 @@ interface World {
   network?: NetworkSetting
   register_runtimes?: Record<string, string>
   machines?: Record<string, Record<string, unknown>>
-  runtimes?: (string | Record<string, unknown>)[]
   route_policy?: { script: string; runtime: string }
   policies?: PolicySpec[]
   profiles?: Record<string, unknown>
@@ -204,7 +201,7 @@ interface PolicySpec {
   name: string
   sync?: boolean
   contains?: string
-  runtime?: string
+  machine?: string
   deny?: string
   command?: string
   flag?: string
@@ -263,7 +260,7 @@ class EchoBox extends Runtime<undefined> implements LineExecutorMixin<undefined>
 }
 
 // Registered the way a host registers its own runtime, so a case names
-// it by string like a builtin, `buildRuntime` resolves it, and the
+// it by string like a builtin, a machine's `runtime` resolves it, and the
 // unknown-name refusal lists it. The registry suite pins that entry point.
 registerRuntime('echobox', EchoBox)
 
@@ -338,7 +335,7 @@ class PlaceLine implements TestPolicy<RouteContext> {
   decide(ctx: RouteContext): Action | null {
     if (!ctx.line.includes(this.spec.contains ?? '')) return null
     if (this.spec.deny !== undefined) return { kind: 'deny', reason: this.spec.deny }
-    return { kind: 'route', runtime: this.spec.runtime ?? '' }
+    return { kind: 'route', machine: this.spec.machine ?? '' }
   }
 }
 
@@ -350,7 +347,7 @@ class PlaceCommand implements TestPolicy<CommandContext> {
   }
   decide(ctx: CommandContext): Action | null {
     return ctx.command === this.spec.contains
-      ? { kind: 'route', runtime: this.spec.runtime ?? '' }
+      ? { kind: 'route', machine: this.spec.machine ?? '' }
       : null
   }
 }
@@ -901,18 +898,14 @@ function camelizeKeys(obj: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(obj).map(([k, v]) => [snakeToCamel(k), v]))
 }
 
-function buildEntry(entry: string | Record<string, unknown>): RuntimeEntry {
-  if (typeof entry === 'string') return entry
-  const options: Record<string, unknown> = {}
-  if (entry.captures !== undefined) options.captures = entry.captures
-  if (entry.config !== undefined) {
-    // The JSON carries Python's snake_case config keys; the TS config
-    // classes use camelCase, the same normalization the server yaml
-    // loader applies.
-    options.config = camelizeKeys(expand(entry.config) as Record<string, unknown>)
-  }
-  if (entry.machine !== undefined) options.machine = entry.machine
-  return buildRuntime(entry.name as string, options)
+// A machine entry as the JSON spells it, with Python's snake_case keys
+// camelized for the TS config classes, a host's sandbox block's too (a
+// microsandbox's `sandbox` is its name): the same normalization the yaml
+// loader applies.
+function machineSpec(spec: Record<string, unknown>): Record<string, unknown> {
+  const out = camelizeKeys(expand(spec) as Record<string, unknown>)
+  if (isPlainObject(out.sandbox)) out.sandbox = camelizeKeys(out.sandbox)
+  return out
 }
 
 function trackReads(vfs: BaseVFS): void {
@@ -960,13 +953,9 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
   if (world.network !== undefined) options.network = world.network
   if (world.machines !== undefined) {
     options.machines = Object.fromEntries(
-      Object.entries(world.machines).map(([name, spec]) => [
-        name,
-        camelizeKeys(expand(spec) as Record<string, unknown>),
-      ]),
+      Object.entries(world.machines).map(([name, spec]) => [name, machineSpec(spec)]),
     )
   }
-  if (world.runtimes !== undefined) options.runtimes = world.runtimes.map(buildEntry)
   if (world.route_policy !== undefined) {
     options.routePolicy = {
       script: new ScriptSource(world.route_policy.script, 'python'),
@@ -997,7 +986,7 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
     const spec = new CLI({
       spec: new CommandSpec({ name }),
       script: new ScriptSource(entry.script, entry.language ?? 'python'),
-      ...(entry.runtime !== undefined ? { runtime: entry.runtime } : {}),
+      ...(entry.machine !== undefined ? { machine: entry.machine } : {}),
     })
     ws.registerCli(name, spec, entry.config ?? null)
   }
@@ -1244,8 +1233,9 @@ async function performStep(
     await putS3(step.s3_put.key, step.s3_put.body)
     return []
   }
-  if (step.add_runtime !== undefined) {
-    ws.addRuntime(step.add_runtime)
+  if (step.add_machine !== undefined) {
+    for (const [name, spec] of Object.entries(step.add_machine))
+      ws.addMachine(name, machineSpec(spec))
     return []
   }
   if (step.wait_job !== undefined) {
@@ -1301,7 +1291,6 @@ async function performStep(
   }
   const options: Record<string, unknown> = {}
   if (sessionId !== undefined) options.sessionId = sessionId
-  if (step.runtime !== undefined) options.runtime = step.runtime
   if (step.machine !== undefined) options.machine = step.machine
   if (step.stdin !== undefined) options.stdin = ENC.encode(step.stdin)
   if (expect.cancelled === true) {
@@ -1482,6 +1471,9 @@ const OPTIONAL_RUNTIMES = new Set([
 // A machine provider's variant runs the remote runtime on a machine of that
 // provider, its config the machine's `machines:` entry. Mirrors run.py
 // `MACHINE_PROVIDERS`.
+// The machine provider each of Mirage's own runtimes runs on, when it is
+// not in process. Mirrors run.py ENGINE_PROVIDERS.
+const ENGINE_PROVIDERS: Record<string, string> = { monty: 'worker', local: 'host' }
 const MACHINE_PROVIDERS = new Set([
   'docker',
   'ssh',
@@ -1492,18 +1484,34 @@ const MACHINE_PROVIDERS = new Set([
   'kubernetes',
 ])
 
-/** The world entry for one runtime of a case's matrix. Mirrors run.py `_entry`. */
-function runtimeEntry(
-  runtime: string,
-  override: { captures?: string[]; config?: Record<string, unknown> },
-): string | Record<string, unknown> {
+/**
+ * The machines one runtime of a case's matrix runs on, by name. The
+ * runtime's machine takes its name and runs it from its `RUNTIME_ENTRY`,
+ * the case's `entry` captures and config laid over it. A machine
+ * provider's variant adds the case's `also_machines`, each capturing what
+ * an `also_entries` entry names for it and nothing else. Mirrors run.py
+ * `_machines`.
+ */
+function machinesFor(runtime: string, testCase: Case): Record<string, Record<string, unknown>> {
   const base = RUNTIME_ENTRY[runtime] ?? {}
-  if (Object.keys(base).length === 0 && Object.keys(override).length === 0) return runtime
-  const entry: Record<string, unknown> = { name: runtime, ...base, ...override }
-  if (base.config !== undefined || override.config !== undefined) {
-    entry.config = { ...base.config, ...override.config }
+  const override = testCase.entry ?? {}
+  const config = { ...base.config, ...override.config }
+  const captures = override.captures ?? base.captures
+  let spec: Record<string, unknown>
+  if (MACHINE_PROVIDERS.has(runtime)) spec = { provider: runtime, ...config }
+  else if (runtime === 'sandlock') spec = { provider: 'host', sandbox: config }
+  else if (ENGINE_PROVIDERS[runtime] !== undefined)
+    spec = { provider: ENGINE_PROVIDERS[runtime], ...config }
+  else spec = { provider: 'in_process', runtime, ...config }
+  if (captures !== undefined) spec.captures = captures
+  const machines: Record<string, Record<string, unknown>> = { [runtime]: spec }
+  for (const name of testCase.also_machines ?? [])
+    machines[name] = { provider: runtime, ...config, captures: [] }
+  for (const entry of testCase.also_entries ?? []) {
+    const also = machines[entry.machine]
+    if (also !== undefined) also.captures = entry.captures
   }
-  return entry
+  return machines
 }
 
 /**
@@ -1599,24 +1607,7 @@ function forRuntime(testCase: Case, runtime: string): Case | null {
   }
   if (programs === 0 && language !== null) return null
   const world = structuredClone(testCase.world ?? {})
-  if (!onHost) {
-    let entry = runtimeEntry(runtime, testCase.entry ?? {})
-    if (MACHINE_PROVIDERS.has(runtime) && typeof entry !== 'string') {
-      const { config = {}, ...rest } = entry
-      world.machines = Object.fromEntries(
-        [runtime, ...(testCase.also_machines ?? [])].map((name) => [
-          name,
-          { provider: runtime, ...(config as Record<string, unknown>) },
-        ]),
-      )
-      entry = { ...rest, name: 'remote', machine: runtime }
-    }
-    world.runtimes = [
-      entry,
-      ...(testCase.also_entries ?? []).map((e) => ({ name: 'remote', ...e })),
-      'workspace',
-    ]
-  }
+  if (!onHost) world.machines = { ...machinesFor(runtime, testCase), ...world.machines }
   return {
     ...testCase,
     id: `${testCase.id}@${runtime}`,
@@ -1757,7 +1748,7 @@ async function runCase(suite: string, testCase: Case): Promise<string[]> {
   const problems: string[] = []
   try {
     for (const [name, operations] of Object.entries(testCase.filesystem ?? {})) {
-      const runtime = ws.runtimes().find((entry) => entry.name === name)
+      const runtime = ws.engines().find((entry) => entry.name === name)
       if (runtime === undefined) throw new Error(`Missing runtime ${name}`)
       const supported = new Set<string>(runtime.filesystem)
       for (const [operation, expected] of Object.entries(operations)) {

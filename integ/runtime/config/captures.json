@@ -4,68 +4,64 @@
       "id": "monty_cannot_take_node",
       "note": "A runtime that only interprets one language refuses a name outside it, where the capture would run JavaScript through the Python interpreter.",
       "world": {
-        "runtimes": [
-          {
-            "name": "monty",
+        "machines": {
+          "monty": {
+            "provider": "worker",
             "captures": [
               "python3",
               "node"
             ]
-          },
-          "workspace"
-        ]
+          }
+        }
       },
       "build_error": {
-        "contains": "runtime 'monty' does not run 'node'"
+        "contains": "machine 'monty' does not run 'node'"
       }
     },
     {
       "id": "monty_cannot_take_a_program",
       "world": {
-        "runtimes": [
-          {
-            "name": "monty",
+        "machines": {
+          "monty": {
+            "provider": "worker",
             "captures": [
               "python3",
               "gcc"
             ]
-          },
-          "workspace"
-        ]
+          }
+        }
       },
       "build_error": {
-        "contains": "runtime 'monty' does not run 'gcc'"
+        "contains": "machine 'monty' does not run 'gcc'"
       }
     },
     {
       "id": "monty_cannot_take_the_js_group",
       "world": {
-        "runtimes": [
-          {
-            "name": "monty",
+        "machines": {
+          "monty": {
+            "provider": "worker",
             "captures": [
               "@js"
             ]
-          },
-          "workspace"
-        ]
+          }
+        }
       },
       "build_error": {
-        "contains": "runtime 'monty' does not run 'node'"
+        "contains": "machine 'monty' does not run 'node'"
       }
     },
     {
       "id": "unknown_group",
       "world": {
-        "runtimes": [
-          {
-            "name": "monty",
+        "machines": {
+          "monty": {
+            "provider": "worker",
             "captures": [
               "@pyton"
             ]
-          },
-          "workspace"
-        ]
+          }
+        }
       },
       "build_error": {
         "contains": "'@pyton' is not a program or a group; the groups are '@external', '@line', '@python' and '@js'"

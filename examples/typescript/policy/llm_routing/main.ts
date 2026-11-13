@@ -2,7 +2,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { Workspace, configToWorkspaceArgs, loadWorkspaceConfigFile } from '@struktoai/mirage-node'
-import { parseRuntime } from './utils.ts'
+import { parseMachine } from './utils.ts'
 
 const CONFIG = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -14,8 +14,8 @@ async function main(model: string): Promise<void> {
   const ws = new Workspace(args.mounts, {
     ...args.options,
     policyFunctions: {
-      parse_runtime: (task: string, runtimes: Record<string, string>, line: string) =>
-        parseRuntime(model, task, runtimes, line),
+      parse_machine: (task: string, machines: Record<string, string>, line: string) =>
+        parseMachine(model, task, machines, line),
     },
   })
   try {
@@ -27,7 +27,7 @@ async function main(model: string): Promise<void> {
       const plan = await ws.explain(line)
       console.log(`  plan: ${plan.outcome}`)
       for (const answer of plan.answers) {
-        const where = answer.kind === 'route' ? ` ${answer.runtime}` : ''
+        const where = answer.kind === 'route' ? ` ${answer.machine}` : ''
         console.log(`    ${answer.kind}${where}: ${answer.reason ?? ''}`)
         console.log(`      by ${answer.policy ?? ''}`)
       }

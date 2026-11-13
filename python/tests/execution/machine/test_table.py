@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import socket
+from dataclasses import replace
 
 import pytest
 
@@ -20,10 +22,9 @@ from mirage import Workspace
 from mirage.execution.machine.table import MachineTable
 from mirage.execution.machine.types import MachineProcess, MachineState
 from mirage.execution.process.table import ProcessTable
-from mirage.execution.types import MachinePid
+from mirage.execution.types import MachineName, MachinePid
 from mirage.machine.constants import CHECK_LINE, CHECK_MARK
 from mirage.machine.handle import MachineHandle
-from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.types import RunResult
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -129,12 +130,26 @@ async def _started(box: _Sleeper) -> None:
             await asyncio.sleep(0.01)
 
 
+def _capturing(
+    boxes: dict[str, MachineHandle], *captures: str
+) -> dict[str, MachineHandle]:
+    """``boxes``, each capturing ``captures``, so the first listed takes
+    them and a line can name another.
+
+    Args:
+        boxes (dict[str, MachineHandle]): the machines, by name.
+        captures (str): what each one captures.
+    """
+    for box in boxes.values():
+        box.config = replace(box.config, captures=captures)
+    return boxes
+
+
 def _sleepers(**boxes: MachineHandle) -> Workspace:
     return Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        machines=boxes,
-        runtimes=[RemoteRuntime(["train"], machine=next(iter(boxes)))],
+        machines=_capturing(boxes, "train"),
     )
 
 
@@ -159,7 +174,7 @@ async def test_a_scan_shows_what_a_program_started_on_its_machine():
         ]
         assert rows[2][0] == "412" and rows[3][0] == "413"
         program, found = ws.process_table.records()[-2:]
-        assert (found.runtime, found.parent) == (None, program.pid)
+        assert (found.program, found.parent) == (False, program.pid)
         killed = await ws.shell(f"kill -USR1 413; kill -0 {pid}; echo $?")
         assert killed.stdout == b"0\n"
         assert box.sent == [(MachinePid(413, 101.0), 10)]
@@ -344,7 +359,7 @@ async def test_what_a_scan_found_leaves_the_session_room_to_fork():
             for p in ws.process_table.live()
             if p.record.session_id == "capped"
         ]
-        found = [p.machine_pid for p in held if p.runtime is None]
+        found = [p.machine_pid for p in held if not p.program]
         assert [m.pid for m in found if m is not None] == [413]
         said = await ws.shell("(echo room)", session_id="capped")
         assert (said.stdout, said.exit_code) == (b"room\n", 0)
@@ -399,7 +414,9 @@ async def test_a_session_reusing_a_closed_ones_id_finds_none_of_its_own():
 @pytest.mark.asyncio
 async def test_a_host_scan_finds_what_an_ended_program_left_running():
     ws = Workspace(
-        {"/": RAMVFS()}, mode=MountMode.EXEC, runtimes=["local", "workspace"]
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"laptop": {"provider": "host"}},
     )
     spawn = (
         "import subprocess as s; "
@@ -408,13 +425,69 @@ async def test_a_host_scan_finds_what_an_ended_program_left_running():
     )
     try:
         assert (await ws.shell(f'python3 -c "{spawn}"')).exit_code == 0
-        said = await ws.shell("ps -o machine=,pid=,args=")
+        said = await ws.shell("ps --machine=laptop -o machine=,pid=,args=")
         rows = [line.split() for line in said.stdout.decode().splitlines()]
         held = [row for row in rows if row[2:] == ["sleep", "30"]]
-        assert len(held) == 1 and held[0][0].startswith("host:")
+        assert [row[0] for row in held] == ["host:laptop"]
+        ran = [
+            (str(p.machine), p.machine_instance)
+            for p in ws.process_table.records()
+            if p.machine_pid is not None
+        ]
+        assert set(ran) == {("host:laptop", socket.gethostname())}
+        assert [str(m.name) for m in await ws.machines()] == [
+            f"host:{socket.gethostname()}",
+            "host:laptop",
+        ]
         assert (await ws.shell(f"kill -9 {held[0][1]}")).exit_code == 0
     finally:
         await ws.close()
+
+
+# Every host entry is in a search's scope, not only the one that wins a
+# command: a program a line ran on the second is found by name.
+@pytest.mark.asyncio
+async def test_a_search_finds_a_program_on_any_host_entry():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"one": {"provider": "host"}, "two": {"provider": "host"}},
+    )
+    program = "python3 -c 'import time; time.sleep(30)'"
+    try:
+        await ws.shell(f"{program} &", machine="two")
+        found = (await ws.shell("pgrep -a python3")).stdout.decode()
+        assert program in found and found.split()[-1] == "host:two"
+        said = await ws.shell("ps --machine=two -o machine=,args=")
+        assert said.stdout.decode().split()[0] == "host:two"
+        assert (await ws.shell("pkill -x python3")).exit_code == 0
+    finally:
+        await ws.close()
+
+
+# A lapsed workspace's program on a host entry is stopped by its pid when
+# the host its record names is this one, whatever the entry was called.
+@pytest.mark.asyncio
+async def test_a_lapsed_host_entrys_program_is_stopped_on_its_host():
+    stopped: list[tuple[int, int]] = []
+
+    async def stop_host(target: MachinePid, seen, signum: int) -> bool:
+        stopped.append((target.pid, signum))
+        return True
+
+    host = MachineName("host", "h")
+    table = MachineTable(stop_host=stop_host, host=host)
+    processes = ProcessTable("w", host)
+    record = {
+        "pid": 2,
+        "machine": "host:laptop",
+        "machine_instance": "h",
+        "machine_pid": {"pid": 41, "started": 1.0, "exited": None},
+    }
+    assert await table.stop(processes, record, 15)
+    elsewhere = {**record, "machine_instance": "other"}
+    assert not await table.stop(processes, elsewhere, 15)
+    assert stopped == [(41, 15)]
 
 
 @pytest.mark.asyncio
@@ -815,13 +888,6 @@ async def test_a_workspace_that_fails_to_build_holds_no_machine():
             {"/": RAMVFS()},
             mode=MountMode.EXEC,
             machines={"a": box, "b": {"provider": "nope"}},
-        )
-    with pytest.raises(ValueError, match="unknown machine: 'c'"):
-        Workspace(
-            {"/": RAMVFS()},
-            mode=MountMode.EXEC,
-            machines={"a": box},
-            runtimes=[RemoteRuntime(machine="c"), "workspace"],
         )
     await Workspace(
         {"/": RAMVFS()}, mode=MountMode.EXEC, machines={"a": box}

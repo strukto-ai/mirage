@@ -348,7 +348,7 @@ class SleepingRuntime extends FakePyRuntime {
 
 function scriptInstall(
   opts: {
-    runtime?: string | null
+    machine?: string | null
     config?: Record<string, unknown> | null
     language?: Language
     options?: Argument[]
@@ -357,7 +357,7 @@ function scriptInstall(
   const spec = new CLI({
     spec: new CommandSpec({ name: 'pager', arguments: [...(opts.options ?? [])] }),
     script: new ScriptSource("print('hi')", opts.language ?? 'python'),
-    runtime: opts.runtime ?? null,
+    machine: opts.machine ?? null,
   })
   return installOf('pager', spec, opts.config ?? null)
 }
@@ -562,7 +562,7 @@ describe('handleCli script arm', () => {
     const first = new FakePyRuntime()
     const pinned = new OtherPyRuntime()
     const [, io] = await drained(
-      scriptInstall({ runtime: 'otherpy' }),
+      scriptInstall({ machine: 'otherpy' }),
       ['pager'],
       new SessionState({ sessionId: 't' }),
       null,
@@ -601,7 +601,7 @@ describe('handleCli script arm', () => {
     const second = new TierPyRuntime('second')
     const ws = new Workspace(
       { '/ram/': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [first, second] },
+      { mode: MountMode.EXEC, machines: [first, second] },
     )
     try {
       ws.registerCli('pager', scriptInstall().cli)
@@ -642,7 +642,7 @@ describe('handleCli script arm', () => {
     )
     expect(io.exitCode).toBe(127)
     expect(dec.decode(await materialize(io.stderr))).toBe(
-      "pager: runtime 'box' does not run python scripts\n",
+      "pager: machine 'box' does not run python scripts\n",
     )
     expect(py.seen).toEqual([])
   })
@@ -677,7 +677,7 @@ describe('handleCli script arm', () => {
   it('an unknown pin exits 127', async () => {
     const py = new FakePyRuntime()
     const [, io, node] = await drained(
-      scriptInstall({ runtime: 'local' }),
+      scriptInstall({ machine: 'local' }),
       ['pager'],
       new SessionState({ sessionId: 't' }),
       null,
@@ -685,7 +685,7 @@ describe('handleCli script arm', () => {
     )
     expect(io.exitCode).toBe(127)
     expect(dec.decode(await materialize(io.stderr))).toBe(
-      "pager: unknown runtime: 'local' (workspace runtimes: 'fakepy')\n",
+      "pager: unknown machine: 'local' (workspace machines: 'fakepy')\n",
     )
     expect(node.exitCode).toBe(127)
     expect(py.seen).toEqual([])
@@ -694,7 +694,7 @@ describe('handleCli script arm', () => {
   it('a pin language mismatch exits 127', async () => {
     const js = new FakeJsRuntime()
     const [, io] = await drained(
-      scriptInstall({ runtime: 'fakejs' }),
+      scriptInstall({ machine: 'fakejs' }),
       ['pager'],
       new SessionState({ sessionId: 't' }),
       null,
@@ -702,7 +702,7 @@ describe('handleCli script arm', () => {
     )
     expect(io.exitCode).toBe(127)
     expect(dec.decode(await materialize(io.stderr))).toBe(
-      "pager: runtime 'fakejs' does not run python scripts\n",
+      "pager: machine 'fakejs' does not run python scripts\n",
     )
     expect(js.seen).toEqual([])
   })
@@ -718,7 +718,7 @@ describe('handleCli script arm', () => {
     )
     expect(io.exitCode).toBe(127)
     expect(dec.decode(await materialize(io.stderr))).toBe(
-      "pager: no workspace runtime runs js scripts (workspace runtimes: 'fakepy')\n",
+      "pager: no workspace machine runs js scripts (workspace machines: 'fakepy')\n",
     )
   })
 
@@ -726,7 +726,7 @@ describe('handleCli script arm', () => {
     const [, io] = await drained(scriptInstall(), ['pager'], new SessionState({ sessionId: 't' }))
     expect(io.exitCode).toBe(127)
     expect(dec.decode(await materialize(io.stderr))).toBe(
-      'pager: no workspace runtime runs python scripts (workspace runtimes: none)\n',
+      'pager: no workspace machine runs python scripts (workspace machines: none)\n',
     )
   })
 

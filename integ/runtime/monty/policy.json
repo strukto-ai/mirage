@@ -3,10 +3,11 @@
     {
       "id": "cwd_relative_write_obeys_policy",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "mounts": {
           "/data": {
             "vfs": "ram",
@@ -57,10 +58,11 @@
     {
       "id": "script_operand_obeys_policy",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",
@@ -129,10 +131,11 @@
     {
       "id": "script_rule_reads_the_operand_as_typed",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",

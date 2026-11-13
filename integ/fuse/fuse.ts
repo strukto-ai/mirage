@@ -435,7 +435,7 @@ async function runLocalProgramProbe(
   data.store.files.set('/a.txt', new TextEncoder().encode('alpha\n'))
   const ws = new Workspace(
     { [folder]: [data, MountMode.EXEC] },
-    { runtimes: [new LocalRuntime({ captures: ['@external'] })] },
+    { machines: [new LocalRuntime({ captures: ['@external'] })] },
   )
   try {
     await ws.addFuseMount(folder, folder)

@@ -1,15 +1,14 @@
 ---
-title: Local
+title: Host
 icon: laptop
-description: Run programs installed on your host with the Python or TypeScript SDK.
+description: Run programs installed on your host, optionally confined by a sandbox.
 ---
 
-`local` runs programs installed on your host, such as `python3`, `node`,
-`tsx`, `ffmpeg` or a vendor CLI. Add their names to `captures` to select them.
-A program sees the host's files and network, not the workspace
-mounts; to reach the mounts, give it a [FUSE folder](/home/setup/fuse).
-Nothing confines it; on Linux, [Sandlock](/home/setup/runtime/sandlock)
-does. Python SDK and Node only, and never in the default runtimes.
+A `host` machine runs programs installed on the host running Mirage, such as
+`python3`, `node`, `tsx`, `ffmpeg` or a vendor CLI. A program sees the host's
+files and network, not the workspace mounts; to reach the mounts, give it a
+[FUSE folder](/home/setup/fuse). Nothing confines it unless the machine has a
+[`sandbox`](#sandbox). Python SDK and Node only.
 
 ## Installation
 
@@ -29,23 +28,25 @@ in Mirage: `ffmpeg -i in.mp4 out.webm | wc -c` sends only `ffmpeg`.
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.runtime.python import LocalRuntime
 
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[LocalRuntime(captures=["@python", "@external"])],
+        machines={"host": {"provider": "host", "captures": ["@python", "@external"]}},
     )
     await ws.shell("python3 -c 'print(1 + 1)'; echo hi | cksum")
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { LocalRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const ws = new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [new LocalRuntime({ captures: ['@python', '@external'] })] },
+      {
+        mode: MountMode.EXEC,
+        machines: { host: { provider: 'host', captures: ['@python', '@external'] } },
+      },
     )
     await ws.shell("python3 -c 'print(1 + 1)'; echo hi | cksum")
     ```
@@ -53,11 +54,11 @@ in Mirage: `ffmpeg -i in.mp4 out.webm | wc -c` sends only `ffmpeg`.
   <Tab title="YAML" icon="file-code">
     ```yaml
     mode: exec
-    runtimes:
-      - name: local
+    machines:
+      host:
+        provider: host
         captures: ["@python", "@external"]
-        config:
-          home: /path/to/venv/bin/python
+        home: /path/to/venv/bin/python
     mounts:
       /data:
         vfs: ram
@@ -65,10 +66,62 @@ in Mirage: `ffmpeg -i in.mp4 out.webm | wc -c` sends only `ffmpeg`.
   </Tab>
 </Tabs>
 
+## Sandbox
+
+A `sandbox` block confines each program through
+[Sandlock](https://github.com/multikernel/sandlock), with Landlock and
+seccomp: it reads only the paths you grant and writes only the ones you
+allow. Linux only. Install the `sandlock` CLI on `PATH`; the full ruleset
+needs Linux 6.12 or later. With a sandbox, `captures` defaults to
+[`@external`](/home/setup/runtime/overview#captures); name `@python` to run
+the host's `python3` under it too.
+
+```yaml
+machines:
+  host:
+    provider: host
+    captures: ["@python", "@external"]
+    sandbox:
+      fs_readable: [/opt/tools]
+      fs_writable: [/tmp/work]
+      max_memory: 512M
+```
+
+### Sandbox behavior
+
+| Capability | Under the sandbox |
+| --- | --- |
+| Command | The captured program and its words, as argv |
+| Piped input | stdin |
+| Environment | The session's, over the machine's `env`; none of the host's |
+| Working directory | The shell's |
+| Files it can read | `/usr`, `/lib`, `/lib64`, `/bin`, `/etc`, `/proc`, `/dev`, and `fs_readable` |
+| Files it can write | `fs_writable` only |
+| Memory | Capped at `max_memory`, when set |
+| Workspace files | Only through a FUSE folder you grant; see [below](#connecting-the-workspace) |
+
+- Under a [`system_time`](/home/configuration/workspace#system-time), programs see
+  that time through libfaketime when it is installed, and the host's
+  clock without it.
+- An interpreter installed outside the system paths needs an `fs_readable`
+  grant.
+- Host credentials are not passed to the program.
+- A workspace whose [`network`](/home/configuration/workspace#network) limits
+  anything, or whose policies judge connections, runs nothing here: the
+  program connects from this host, around both. It answers `Permission
+  denied`, exit 126.
+- Mirage does not create the FUSE folder or bind it to a session.
+- Program lookup uses the sandbox's `PATH`, with the CLI's system default when
+  the session does not set one. Add directories such as `/usr/local/bin` to the
+  session's `PATH` when required. Missing-program diagnostics come from Sandlock.
+- A working directory absent from the host refuses the command with exit 126.
+- A [timeout](/home/core/output-limits#limit-a-lines-time) kills the program.
+
 ## Connecting the workspace
 
-A local program opens host paths, not the workspace's. To give it workspace
-files, expose a mount as a [FUSE folder](/home/setup/fuse):
+A host program opens host paths, not the workspace's. To give it workspace
+files, expose a mount as a [FUSE folder](/home/setup/fuse), and under a
+sandbox grant it in `fs_writable`, or `fs_readable` for read only:
 
 ```yaml
 mounts:
@@ -78,9 +131,12 @@ mounts:
       bucket: my-bucket
     backend: fuse
     mountpoint: /data
-runtimes:
-  - name: local
+machines:
+  host:
+    provider: host
     captures: ["@python", "@external"]
+    sandbox:
+      fs_writable: [/data]
 ```
 
 After the folder is mounted, run the shared
@@ -96,7 +152,7 @@ After the folder is mounted, run the shared
 ## Python compatibility
 
 `python3` is the same Mirage command on every Python runtime: Mirage reads
-the script from the workspace and checks it like any file, and `local` runs
+the script from the workspace and checks it like any file, and a host machine runs
 it on the host's interpreter. Every other program is a plain host program.
 
 Python module availability and file modes come from the host interpreter.
@@ -169,7 +225,7 @@ the host interpreter's Python version.
     | API or behavior | Limitation |
     | --- | --- |
     | Filesystem APIs | Operate on host paths, including FUSE folders. |
-    | `os.environ` | The session's environment plus config `env`; none of the host's environment. |
+    | `os.environ` | The session's environment plus the machine's `env`; none of the host's environment. |
     | `os.getcwd()` | Starts in Mirage's own working directory. |
   </Accordion>
 </AccordionGroup>
@@ -243,7 +299,7 @@ the host interpreter's Python version.
 | Program | The host's `python3`, given the script from the workspace | The name, found on the host's `PATH`; exit 127 if it is not there |
 | Arguments | `sys.argv` | Its argv, with no shell |
 | Piped input | stdin | stdin |
-| Environment | The session's, plus the config `env`; none of the host's | The same |
+| Environment | The session's, plus the machine's `env`; none of the host's | The same |
 | Working directory | Mirage's own | The shell's; exit 126 if it does not exist on the host |
 | Files | The host's, and FUSE folders | The host's, and FUSE folders |
 | Network | The host's | The host's |

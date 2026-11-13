@@ -667,7 +667,7 @@ async function quickjsCheck(home: string): Promise<void> {
     { '/data': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      runtimes: [buildRuntime('quickjs', { config: { home } }), 'workspace'],
+      machines: [buildRuntime('quickjs', { config: { home } })],
     },
   )
   try {

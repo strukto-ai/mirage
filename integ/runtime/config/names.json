@@ -6,10 +6,12 @@
         "python"
       ],
       "world": {
-        "runtimes": [
-          "pyodide",
-          "workspace"
-        ]
+        "machines": {
+          "pyodide": {
+            "provider": "in_process",
+            "runtime": "pyodide"
+          }
+        }
       },
       "build_error": {
         "contains": "TypeScript-only"
@@ -21,10 +23,12 @@
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          "wasi",
-          "workspace"
-        ]
+        "machines": {
+          "wasi": {
+            "provider": "in_process",
+            "runtime": "wasi"
+          }
+        }
       },
       "build_error": {
         "contains": "Python-only"
@@ -33,10 +37,12 @@
     {
       "id": "unknown_name",
       "world": {
-        "runtimes": [
-          "ghost",
-          "workspace"
-        ]
+        "machines": {
+          "ghost": {
+            "provider": "in_process",
+            "runtime": "ghost"
+          }
+        }
       },
       "build_error": {
         "contains": "unknown runtime"

@@ -54,7 +54,7 @@ async function main(): Promise<void> {
       // The demo scripts live under /work, so the mount carries x.
       '/work/': new Mount(new RAMVFS(), { mode: MountMode.EXEC }),
     },
-    { mode: MountMode.EXEC, runtimes: ['monty', 'workspace'] },
+    { mode: MountMode.EXEC, machines: { py: { provider: 'worker' } } },
   )
   try {
     console.log('=== Python exec: read first 5 lines of JSONL from S3 ===\n')

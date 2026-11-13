@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Context } from '../../../commands/config.ts'
 import { renderHelp } from '../../../commands/spec/help.ts'
 import { parseShellOptions, SHELL_SPECS, type ShellParse } from '../../../commands/spec/shell.ts'
 import { SYNOPSES } from '../../../commands/spec/synopsis.ts'
@@ -57,37 +56,38 @@ function reachOf(runtime: unknown): string {
 }
 
 /**
+ * The machine a runtime runs its programs on, by id as `ps` shows it: a host
+ * program's on its `host` entry, else on the host; null for one that runs
+ * none. Mirrors Python's `_machine_of`.
+ */
+function machineOf(runtime: unknown, host: string): string | null {
+  const reach = reachOf(runtime)
+  if (runtime == null || (reach !== 'process' && reach !== 'remote')) return null
+  const found = (runtime as { machine: MachineName | null }).machine
+  if (found !== null) return found.toString()
+  return reach === 'process' ? host : null
+}
+
+/**
  * The machine programs run on by default: the one taking programs no name
  * captures, else the first that captures any. Mirrors Python's
  * `_default_machine`.
  */
 function defaultMachine(
   bindings: Record<string, unknown>,
-  machine: string | undefined,
   every: readonly string[],
   host: string,
 ): string {
   for (const runtime of [bindings[EXTERNAL_COMMANDS], ...Object.values(bindings)]) {
-    const reach = reachOf(runtime)
-    if (reach === 'process') return host
-    if (reach !== 'remote') continue
-    try {
-      const found = (
-        runtime as { machineFor: (ctx: Partial<Context>) => MachineName | null }
-      ).machineFor({
-        ...(machine === undefined ? {} : { machine }),
-      })
-      if (found !== null) return found.toString()
-    } catch (err) {
-      console.debug('no default machine:', err)
-    }
+    const found = machineOf(runtime, host)
+    if (found !== null) return found
   }
   return every[0] ?? ''
 }
 
 /**
- * Which machines a command answers for: the one `--machine` or the line's
- * placement names; in a command substitution, whose reader is a script, only
+ * Which machines a command answers for: the one `--machine` names; in a
+ * command substitution, whose reader is a script, only
  * the default one, the workspace when there is no machine; otherwise every
  * one. The host counts only while a runtime
  * runs programs on it. A command that also answers for the workspace passes
@@ -103,11 +103,10 @@ export function machineScope(
   const routing = frame?.routing
   const every = [...(processes.machineNames?.() ?? [])]
   const host = processes.machine.toString()
-  if (
-    routing !== undefined &&
-    Object.values(routing.bindings).some((runtime) => reachOf(runtime) === 'process')
-  )
-    every.push(host)
+  for (const runtime of Object.values(routing?.bindings ?? {})) {
+    const shown = reachOf(runtime) === 'process' ? machineOf(runtime, host) : null
+    if (shown !== null && !every.includes(shown)) every.push(shown)
+  }
   if (name !== null) {
     if (workspace && namesMachine(WORKSPACE_MACHINE, name))
       return { ids: [], picked: true, several: false, workspace: true }
@@ -116,15 +115,10 @@ export function machineScope(
       ? null
       : { ids: [named[0]], picked: true, several: false, workspace: false }
   }
-  const placed = routing?.machine ?? null
-  if (placed !== null) {
-    const found = every.find((machine) => namesMachine(machine, placed))
-    if (found !== undefined) return { ids: [found], picked: true, several: false, workspace: false }
-  }
   const substituted = frame?.substitution === true && routing !== undefined
   if (substituted && every.length > 1)
     return {
-      ids: [defaultMachine(routing.bindings, placed ?? undefined, every, host)],
+      ids: [defaultMachine(routing.bindings, every, host)],
       picked: false,
       several: false,
       workspace: false,

@@ -3,9 +3,7 @@
     {
       "id": "syntax_error_exit2",
       "world": {
-        "runtimes": [
-          "workspace"
-        ],
+        "machines": {},
         "mounts": {
           "/ram": {
             "vfs": "ram"
@@ -25,9 +23,7 @@
     {
       "id": "syntax_error_unclamped",
       "world": {
-        "runtimes": [
-          "workspace"
-        ],
+        "machines": {},
         "mounts": {
           "/ram": {
             "vfs": "ram"
@@ -47,10 +43,11 @@
     {
       "id": "syntax_error_beats_policy",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"

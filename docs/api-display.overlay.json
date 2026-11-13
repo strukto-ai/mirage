@@ -157,7 +157,7 @@
       "target": "$.paths[\"/v1/workspaces/{workspace_id}/kill\"].post",
       "update": {
         "x-mint": {
-          "content": "Stop background jobs and runtime processes across every session. The workspace and sessions remain open.\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | The request is malformed: the body is not JSON (`invalid_json`) or not a JSON object, a field is missing (`missing_field`), unknown (`unknown_field`) or has a wrong value (`invalid_value`), or the request is otherwise invalid (`invalid_request`). `param` names the field at fault. |\n| `401` | The token is missing or wrong (`unauthorized`). |\n| `404` | The workspace, session, job, file or route does not exist, or the caller may not see it (`not_found`). |\n| `429` | Past a rate limit (`rate_limited`), or a new session past max_sessions (`session_limit`). |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
+          "content": "Stop background jobs and the programs machines started across every session. The workspace and sessions remain open.\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | The request is malformed: the body is not JSON (`invalid_json`) or not a JSON object, a field is missing (`missing_field`), unknown (`unknown_field`) or has a wrong value (`invalid_value`), or the request is otherwise invalid (`invalid_request`). `param` names the field at fault. |\n| `401` | The token is missing or wrong (`unauthorized`). |\n| `404` | The workspace, session, job, file or route does not exist, or the caller may not see it (`not_found`). |\n| `429` | Past a rate limit (`rate_limited`), or a new session past max_sessions (`session_limit`). |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
         }
       }
     },
@@ -313,7 +313,7 @@
       "target": "$.paths[\"/v1/workspaces/{workspace_id}/shell\"].post",
       "update": {
         "x-mint": {
-          "content": "Run a shell command or script in the workspace and return its exit code and output.\n\nOne endpoint serves three modes:\n\n| Mode | Request | Response |\n| --- | --- | --- |\n| Run (default) | no query flags | One JSON result when the command ends. |\n| Stream | `stream=true` | NDJSON output records as they are produced, then a status record. |\n| Explain | `explain=true` | The policy decision. Nothing runs. |\n\nA `200` means the request was accepted, not that the command succeeded. Check `exit_code`. A policy refusal also returns `200`; check `decision` to know whether a policy refused anything. See Refused commands below.\n\nThe request stays open until the command ends, and closing it cancels the command. To leave work running, end the command with `&`; it returns at once and the work appears under [jobs](/api/operations/jobs/list-jobs). Every result carries a `line_id` for the [lines](/api/operations/lines/get-command) endpoints.\n\nTo send input, use a `multipart/form-data` body with a `stdin` part, or set `open_stdin=true` with `stream=true` to write while the command runs. See [Streaming and stdin](/api/streaming).\n\n## Stream output\n\nSet `stream=true` to receive output as it is produced. Each line is one JSON record: output records carry base64 `data`, and the last record carries `status` and the final `result`.\n\n```bash\ncurl --no-buffer --request POST \\\n  --url 'http://127.0.0.1:8765/v1/workspaces/{workspace_id}/shell?stream=true' \\\n  --header 'Authorization: Bearer <token>' \\\n  --header 'Content-Type: application/json' \\\n  --data '{\"command\":\"echo hello\"}'\n```\n\n```json\n{\"stream\":\"stdout\",\"data\":\"aGVsbG8K\"}\n{\"status\":\"done\",\"result\":{\"exit_code\":0,\"stdout\":\"\",\"stderr\":\"\",\"decision\":null,\"line_id\":\"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37\"},\"error\":null}\n```\n\n## Explain a command\n\nSet `explain=true` to get the policy decision without running the command. The response has one `node` per part of the line; the example below is trimmed to one command.\n\n```bash\ncurl --request POST \\\n  --url 'http://127.0.0.1:8765/v1/workspaces/{workspace_id}/shell?explain=true' \\\n  --header 'Authorization: Bearer <token>' \\\n  --header 'Content-Type: application/json' \\\n  --data '{\"command\":\"echo hello\"}'\n```\n\n```json\n{\n  \"line\": \"echo hello\",\n  \"outcome\": \"allow\",\n  \"reason\": \"\",\n  \"decision\": null,\n  \"exit_code\": 0,\n  \"node\": {\n    \"type\": \"line\",\n    \"text\": \"echo hello\",\n    \"children\": [\n      {\n        \"type\": \"command\",\n        \"text\": \"echo hello\",\n        \"command\": \"echo\",\n        \"outcome\": \"allow\",\n        \"children\": []\n      }\n    ]\n  }\n}\n```\n\n## Refused commands\n\nA policy refusal returns `200`. `decision` is set whenever a policy refused something on the line, and is `null` otherwise. The exit code alone does not tell you:\n\n- A command refused before it runs usually exits `126` with `<command>: Permission denied`.\n- A refusal about a path appears as that path's own error, such as exit `1`.\n- A policy that judges a command after it ran sets exit `126` but does not undo its effects, and output already sent stays sent. A policy that judges the whole line after it ran drops the line's output.\n- A pipeline exits with its last stage's status unless `pipefail` is set, so a refused earlier stage can leave the exit code at `0`.\n\nA refusal does not always mean nothing ran, so do not retry a refused command blindly.\n\nA command denied before it ran:\n\n```json\n{\n  \"exit_code\": 126,\n  \"stdout\": \"\",\n  \"stderr\": \"rm: Permission denied\\n\",\n  \"decision\": {\n    \"kind\": \"deny\",\n    \"reason\": \"rm is not allowed in this workspace\",\n    \"policy\": \"PermissionsPolicy\",\n    \"ask_id\": null\n  },\n  \"line_id\": \"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c38\"\n}\n```\n\n## Keep stdin open\n\nWith `stream=true` and `\"open_stdin\": true`, the first record carries the `line_id`, and you write input to that line while the command runs. See [Streaming and stdin](/api/streaming) for the full flow.\n\n<div className=\"hidden\">\n<ResponseExample>\n\n```json 200\n{\n  \"exit_code\": 0,\n  \"stdout\": \"hello\\n\",\n  \"stderr\": \"\",\n  \"decision\": null,\n  \"line_id\": \"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37\"\n}\n```\n\n</ResponseExample>\n</div>\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | The request is malformed or its options conflict. The body is not JSON (`invalid_json`), a field is missing, unknown or of the wrong type (`missing_field`, `unknown_field`, `invalid_value`, with `param`; a field of the multipart `request` part is named as in a JSON body), or `runtime` or `machine` names one the workspace does not have (`invalid_value`, `param` `runtime` or `machine`), refused before anything runs. Or the multipart parts are malformed, missing or out of order, or the options conflict, as `stream` with `explain`, `open_stdin` without `stream=true` or with a stdin part, or `explain` with a multipart body, `cwd`, `runtime`, `machine` or `open_stdin` set to `true` (`invalid_request`). |\n| `401` | The token is missing or wrong (`unauthorized`). |\n| `404` | The workspace, session, job, file or route does not exist, or the caller may not see it (`not_found`). |\n| `409` | Another server owns command execution for this workspace (`workspace_busy`; the message names that server), or the workspace is stopped (`workspace_stopped`). |\n| `429` | Past a rate limit (`rate_limited`), or a new session past max_sessions (`session_limit`). |\n| `413` | The request body, a multipart part, or stdin exceeds its size limit (`too_large`). |\n| `499` | The running shell job was canceled (`canceled`). |\n| `500` | The command's job failed internally (`internal`). The message is always `internal server error`. The job's own error stays readable as `error` at `GET /v1/workspaces/&#123;workspace_id&#125;/lines/&#123;line_id&#125;`, and in a stream's final record. |\n| `503` | The server is shutting down and accepts no new commands (`shutting_down`). |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
+          "content": "Run a shell command or script in the workspace and return its exit code and output.\n\nOne endpoint serves three modes:\n\n| Mode | Request | Response |\n| --- | --- | --- |\n| Run (default) | no query flags | One JSON result when the command ends. |\n| Stream | `stream=true` | NDJSON output records as they are produced, then a status record. |\n| Explain | `explain=true` | The policy decision. Nothing runs. |\n\nA `200` means the request was accepted, not that the command succeeded. Check `exit_code`. A policy refusal also returns `200`; check `decision` to know whether a policy refused anything. See Refused commands below.\n\nThe request stays open until the command ends, and closing it cancels the command. To leave work running, end the command with `&`; it returns at once and the work appears under [jobs](/api/operations/jobs/list-jobs). Every result carries a `line_id` for the [lines](/api/operations/lines/get-command) endpoints.\n\nTo send input, use a `multipart/form-data` body with a `stdin` part, or set `open_stdin=true` with `stream=true` to write while the command runs. See [Streaming and stdin](/api/streaming).\n\n## Stream output\n\nSet `stream=true` to receive output as it is produced. Each line is one JSON record: output records carry base64 `data`, and the last record carries `status` and the final `result`.\n\n```bash\ncurl --no-buffer --request POST \\\n  --url 'http://127.0.0.1:8765/v1/workspaces/{workspace_id}/shell?stream=true' \\\n  --header 'Authorization: Bearer <token>' \\\n  --header 'Content-Type: application/json' \\\n  --data '{\"command\":\"echo hello\"}'\n```\n\n```json\n{\"stream\":\"stdout\",\"data\":\"aGVsbG8K\"}\n{\"status\":\"done\",\"result\":{\"exit_code\":0,\"stdout\":\"\",\"stderr\":\"\",\"decision\":null,\"line_id\":\"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37\"},\"error\":null}\n```\n\n## Explain a command\n\nSet `explain=true` to get the policy decision without running the command. The response has one `node` per part of the line; the example below is trimmed to one command.\n\n```bash\ncurl --request POST \\\n  --url 'http://127.0.0.1:8765/v1/workspaces/{workspace_id}/shell?explain=true' \\\n  --header 'Authorization: Bearer <token>' \\\n  --header 'Content-Type: application/json' \\\n  --data '{\"command\":\"echo hello\"}'\n```\n\n```json\n{\n  \"line\": \"echo hello\",\n  \"outcome\": \"allow\",\n  \"reason\": \"\",\n  \"decision\": null,\n  \"exit_code\": 0,\n  \"node\": {\n    \"type\": \"line\",\n    \"text\": \"echo hello\",\n    \"children\": [\n      {\n        \"type\": \"command\",\n        \"text\": \"echo hello\",\n        \"command\": \"echo\",\n        \"outcome\": \"allow\",\n        \"children\": []\n      }\n    ]\n  }\n}\n```\n\n## Refused commands\n\nA policy refusal returns `200`. `decision` is set whenever a policy refused something on the line, and is `null` otherwise. The exit code alone does not tell you:\n\n- A command refused before it runs usually exits `126` with `<command>: Permission denied`.\n- A refusal about a path appears as that path's own error, such as exit `1`.\n- A policy that judges a command after it ran sets exit `126` but does not undo its effects, and output already sent stays sent. A policy that judges the whole line after it ran drops the line's output.\n- A pipeline exits with its last stage's status unless `pipefail` is set, so a refused earlier stage can leave the exit code at `0`.\n\nA refusal does not always mean nothing ran, so do not retry a refused command blindly.\n\nA command denied before it ran:\n\n```json\n{\n  \"exit_code\": 126,\n  \"stdout\": \"\",\n  \"stderr\": \"rm: Permission denied\\n\",\n  \"decision\": {\n    \"kind\": \"deny\",\n    \"reason\": \"rm is not allowed in this workspace\",\n    \"policy\": \"PermissionsPolicy\",\n    \"ask_id\": null\n  },\n  \"line_id\": \"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c38\"\n}\n```\n\n## Keep stdin open\n\nWith `stream=true` and `\"open_stdin\": true`, the first record carries the `line_id`, and you write input to that line while the command runs. See [Streaming and stdin](/api/streaming) for the full flow.\n\n<div className=\"hidden\">\n<ResponseExample>\n\n```json 200\n{\n  \"exit_code\": 0,\n  \"stdout\": \"hello\\n\",\n  \"stderr\": \"\",\n  \"decision\": null,\n  \"line_id\": \"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37\"\n}\n```\n\n</ResponseExample>\n</div>\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | The request is malformed or its options conflict. The body is not JSON (`invalid_json`), a field is missing, unknown or of the wrong type (`missing_field`, `unknown_field`, `invalid_value`, with `param`; a field of the multipart `request` part is named as in a JSON body), or `machine` names one the workspace does not have (`invalid_value`, `param` `machine`), refused before anything runs. Or the multipart parts are malformed, missing or out of order, or the options conflict, as `stream` with `explain`, `open_stdin` without `stream=true` or with a stdin part, or `explain` with a multipart body, `cwd`, `machine` or `open_stdin` set to `true` (`invalid_request`). |\n| `401` | The token is missing or wrong (`unauthorized`). |\n| `404` | The workspace, session, job, file or route does not exist, or the caller may not see it (`not_found`). |\n| `409` | Another server owns command execution for this workspace (`workspace_busy`; the message names that server), or the workspace is stopped (`workspace_stopped`). |\n| `429` | Past a rate limit (`rate_limited`), or a new session past max_sessions (`session_limit`). |\n| `413` | The request body, a multipart part, or stdin exceeds its size limit (`too_large`). |\n| `499` | The running shell job was canceled (`canceled`). |\n| `500` | The command's job failed internally (`internal`). The message is always `internal server error`. The job's own error stays readable as `error` at `GET /v1/workspaces/&#123;workspace_id&#125;/lines/&#123;line_id&#125;`, and in a stream's final record. |\n| `503` | The server is shutting down and accepts no new commands (`shutting_down`). |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
         },
         "x-codeSamples": [
           {
@@ -2006,186 +2006,6 @@
     },
     {
       "target": "$.paths[\"/v1/clis/{ref}\"].delete.responses[\"501\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes\"].get",
-      "update": {
-        "x-mint": {
-          "content": "List saved runtime configurations for reuse in workspace templates.\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | The request is malformed: the body is not JSON (`invalid_json`) or not a JSON object, a field is missing (`missing_field`), unknown (`unknown_field`) or has a wrong value (`invalid_value`), or the request is otherwise invalid (`invalid_request`). `param` names the field at fault. |\n| `401` | The token is missing or wrong (`unauthorized`). |\n| `429` | Past a rate limit (`rate_limited`), or a new session past max_sessions (`session_limit`). |\n| `501` | The server does not support this call (`not_supported`). Saved configs are kept only on a server of one account. |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
-        }
-      }
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes\"].get.description",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes\"].get.responses[\"400\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes\"].get.responses[\"401\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes\"].get.responses[\"429\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes\"].get.responses[\"501\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes\"].post",
-      "update": {
-        "x-mint": {
-          "content": "Save a named runtime configuration. Fields are validated for the selected type. Secret values are stored securely and omitted from read responses. String fields can reference secrets in a saved store. Returns `409` if the name exists.\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | The request is malformed or a field is not valid for the type (`param` names it), or the fields refer to a secret store that is not saved yet (`invalid_request`; `missing` lists the stores to add first). |\n| `401` | The token is missing or wrong (`unauthorized`). |\n| `409` | The request conflicts with the current state. The id or name is taken (`already_exists`), the workspace is busy on another server or starting or stopping (`workspace_busy`), the workspace is stopped (`workspace_stopped`), a file changed since it was read (`stale_write`), or the state allows no such change (`conflict`). |\n| `429` | Past a rate limit (`rate_limited`), or a new session past max_sessions (`session_limit`). |\n| `501` | The server does not support this call (`not_supported`). Saved configs are kept only on a server of one account. |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
-        }
-      }
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes\"].post.description",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes\"].post.responses[\"400\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes\"].post.responses[\"401\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes\"].post.responses[\"409\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes\"].post.responses[\"429\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes\"].post.responses[\"501\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/types\"].get",
-      "update": {
-        "x-mint": {
-          "content": "List supported runtime configuration types and their fields. Available types depend on the server.\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `401` | The token is missing or wrong (`unauthorized`). |\n| `429` | Past a rate limit (`rate_limited`), or a new session past max_sessions (`session_limit`). |\n| `501` | The server does not support this call (`not_supported`). Saved configs are kept only on a server of one account. |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
-        }
-      }
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/types\"].get.description",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/types\"].get.responses[\"401\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/types\"].get.responses[\"429\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/types\"].get.responses[\"501\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/{ref}\"].get",
-      "update": {
-        "x-mint": {
-          "content": "Get a saved runtime configuration without secret values. The `sealed` field lists stored secret names.\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | The request is malformed: the body is not JSON (`invalid_json`) or not a JSON object, a field is missing (`missing_field`), unknown (`unknown_field`) or has a wrong value (`invalid_value`), or the request is otherwise invalid (`invalid_request`). `param` names the field at fault. |\n| `401` | The token is missing or wrong (`unauthorized`). |\n| `404` | The workspace, session, job, file or route does not exist, or the caller may not see it (`not_found`). |\n| `429` | Past a rate limit (`rate_limited`), or a new session past max_sessions (`session_limit`). |\n| `501` | The server does not support this call (`not_supported`). Saved configs are kept only on a server of one account. |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
-        }
-      }
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/{ref}\"].get.description",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/{ref}\"].get.responses[\"400\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/{ref}\"].get.responses[\"401\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/{ref}\"].get.responses[\"404\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/{ref}\"].get.responses[\"429\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/{ref}\"].get.responses[\"501\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/{ref}\"].put",
-      "update": {
-        "x-mint": {
-          "content": "Update a saved runtime configuration. The name and type cannot change. Omitted secret fields keep their values; `null` removes a field.\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | The request is malformed or a field is not valid for the type (`param` names it), or the fields refer to a secret store that is not saved yet (`invalid_request`; `missing` lists the stores to add first). |\n| `401` | The token is missing or wrong (`unauthorized`). |\n| `404` | The workspace, session, job, file or route does not exist, or the caller may not see it (`not_found`). |\n| `429` | Past a rate limit (`rate_limited`), or a new session past max_sessions (`session_limit`). |\n| `501` | The server does not support this call (`not_supported`). Saved configs are kept only on a server of one account. |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
-        }
-      }
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/{ref}\"].put.description",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/{ref}\"].put.responses[\"400\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/{ref}\"].put.responses[\"401\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/{ref}\"].put.responses[\"404\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/{ref}\"].put.responses[\"429\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/{ref}\"].put.responses[\"501\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/{ref}\"].delete",
-      "update": {
-        "x-mint": {
-          "content": "Delete a saved runtime configuration.\n\n<div className=\"hidden\">\n<ResponseExample>\n\n```http 204 No Content\nHTTP/1.1 204 No Content\n```\n\n</ResponseExample>\n</div>\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | The request is malformed: the body is not JSON (`invalid_json`) or not a JSON object, a field is missing (`missing_field`), unknown (`unknown_field`) or has a wrong value (`invalid_value`), or the request is otherwise invalid (`invalid_request`). `param` names the field at fault. |\n| `401` | The token is missing or wrong (`unauthorized`). |\n| `404` | The workspace, session, job, file or route does not exist, or the caller may not see it (`not_found`). |\n| `429` | Past a rate limit (`rate_limited`), or a new session past max_sessions (`session_limit`). |\n| `501` | The server does not support this call (`not_supported`). Saved configs are kept only on a server of one account. |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
-        }
-      }
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/{ref}\"].delete.description",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/{ref}\"].delete.responses[\"400\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/{ref}\"].delete.responses[\"401\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/{ref}\"].delete.responses[\"404\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/{ref}\"].delete.responses[\"429\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/runtimes/{ref}\"].delete.responses[\"501\"]",
       "remove": true
     },
     {

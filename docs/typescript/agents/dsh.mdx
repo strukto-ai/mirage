@@ -19,7 +19,7 @@ Four Cordis plugins. `MirageService` owns the workspace; the providers inject it
 ```ts
 import { Context } from '@deepseek-ai/cordis'
 import type { ShellExecRequest } from '@deepseek-ai/dsh-shell'
-import { buildRuntime, MountMode, RAMVFS, RedisVFS, SlackVFS, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, RedisVFS, SlackVFS, Workspace } from '@struktoai/mirage-node'
 import {
   MirageFileSystem,
   MirageService,
@@ -33,7 +33,7 @@ const ws = new Workspace(
     '/redis': [new RedisVFS({ url: redisUrl }), MountMode.WRITE],
     '/slack': [new SlackVFS({ token: slackBotToken }), MountMode.EXEC],
   },
-  { runtimes: [buildRuntime('monty', { captures: ['python', 'python3'] })] },
+  { machines: { py: { provider: 'worker', captures: ['python', 'python3'] } } },
 )
 
 const ctx = new Context()
@@ -79,7 +79,7 @@ const result = await run({ command: 'pwd; echo $TOKEN', workdir: host })
 
 ## Run Python with monty
 
-The `runtimes` entry above sets [monty](https://github.com/pydantic/monty), a sandboxed Python interpreter with no host access, up to capture `python` and `python3`; the catch-all `workspace` runtime serving the shell commands is always present and needs no entry. A captured invocation (a script file, inline `-c` code, or code piped on stdin) runs inside the workspace, never on the machine. A script can live on any mount: upload `example.py` to a Slack channel and run it straight off the mount, with the shell's redirection filing its stdout back into Redis:
+The `machines` entry above sets [monty](https://github.com/pydantic/monty), a sandboxed Python interpreter with no host access, up to capture `python` and `python3` on a `worker` machine; the shell commands always run in the workspace itself and need no entry. A captured invocation (a script file, inline `-c` code, or code piped on stdin) runs inside the workspace, never on the machine. A script can live on any mount: upload `example.py` to a Slack channel and run it straight off the mount, with the shell's redirection filing its stdout back into Redis:
 
 ```ts
 const script = await run({
@@ -109,13 +109,13 @@ The bundle's default world is one RAM scratch mount at `/tmp`. Mount real source
         vfs: slack
         mode: read
         config: { token: !!js process.env.SLACK_BOT_TOKEN }
-    runtimes:
-      - { name: monty, captures: [python, python3] }
+    machines:
+      py: { provider: worker, captures: [python, python3] }
 ```
 
-A mount block takes `vfs`, `mode` and `config`, and refuses any other key. The same blocks work in code, beside live instances, in `MirageService`'s `mounts`. A runtime row also takes the runtime's own `config`, as a workspace file's does, and refuses a key the runtime does not have.
+A mount block takes `vfs`, `mode` and `config`, and refuses any other key. The same blocks work in code, beside live instances, in `MirageService`'s `mounts`. A machine entry also takes its runtime's own settings, as a workspace file's does, and refuses a key the runtime does not have.
 
-Both seams tell dsh they are a `workspace-write` sandbox, which is what lets dsh's permission presets compose over them. The claim holds only while every runtime stays inside the VFS (each runtime's `reach` is `workspace`). Add a host-reaching one, such as `local` Python, and both seams drop the claim, since a script could then act outside the mounts: dsh is better told there is no sandbox than a false one.
+Both seams tell dsh they are a `workspace-write` sandbox, which is what lets dsh's permission presets compose over them. The claim holds only while every runtime stays inside the VFS (each runtime's `reach` is `workspace`). Add a host-reaching one, such as a `host` machine, and both seams drop the claim, since a script could then act outside the mounts: dsh is better told there is no sandbox than a false one.
 
 The claim is enforced per call, not merely advertised. dsh resolves a policy for every command and every file edit, and Mirage applies it. Under `read-only` the shell runs in a twin of its own session with every grant narrowed to read, so a session already confined to some mounts stays confined (the twin narrows, it never widens), and `ctx.fs` refuses a write or an edit with `FS_SANDBOX_DENIED`, the same error dsh's own sandboxed backend raises:
 

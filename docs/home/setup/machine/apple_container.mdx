@@ -5,7 +5,7 @@ description: Run captured programs in containers under Apple's container tool on
 ---
 
 The `apple_container` machine provider reaches a running container under
-Apple's `container` tool, and the `remote` runtime runs captured programs in
+Apple's `container` tool, and runs the programs it captures in
 it. You start the containers; Mirage only runs programs in them. Needs Apple silicon and macOS 26 or later. Python SDK and Node.
 
 ## Installation
@@ -38,27 +38,24 @@ container a machine of its own and send each session to its machine with a
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.runtime.machine import RemoteRuntime
 
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        machines={"box": {"provider": "apple_container", "container": "my-sandbox"}},
-        runtimes=[RemoteRuntime(["@python", "@external"], machine="box")],
+        machines={"box": {"provider": "apple_container", "container": "my-sandbox", "captures": ["@python", "@external"]}},
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { MountMode, RemoteRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        machines: { box: { provider: 'apple_container', container: 'my-sandbox' } },
-        runtimes: [new RemoteRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+        machines: { box: { provider: 'apple_container', container: 'my-sandbox', captures: ['@python', '@external'] } },
       },
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
@@ -71,10 +68,7 @@ container a machine of its own and send each session to its machine with a
       box:
         provider: apple_container
         container: my-sandbox
-    runtimes:
-      - name: remote
         captures: ["@python", "@external"]
-        machine: box
     mounts:
       /data:
         vfs: ram

@@ -3,9 +3,7 @@
     {
       "id": "ls_lists_past_a_failing_record",
       "world": {
-        "runtimes": [
-          "workspace"
-        ],
+        "machines": {},
         "mounts": {
           "/api": {
             "vfs": "ram",
@@ -68,9 +66,7 @@
     {
       "id": "find_walks_past_a_failing_record",
       "world": {
-        "runtimes": [
-          "workspace"
-        ],
+        "machines": {},
         "mounts": {
           "/api": {
             "vfs": "ram",
