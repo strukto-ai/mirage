@@ -16,11 +16,11 @@ from dataclasses import dataclass
 
 from mirage.machine.config import (
     MachineConfig,
-    check_on_sleep,
+    check_on_pause,
     require_id,
 )
-from mirage.machine.e2b.constants import ON_SLEEP
-from mirage.machine.types import SleepAction
+from mirage.machine.e2b.constants import ON_PAUSE
+from mirage.machine.types import PauseAction
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -32,14 +32,14 @@ class E2BConfig(MachineConfig):
             spawn` or the SDK), with workspace files visible at matching
             paths when commands need them.
         api_key (str | None): E2B credential; None reads E2B_API_KEY.
-        on_sleep (SleepAction | None): ``pause`` pauses the sandbox when
-            the workspace sleeps; None leaves it as it is.
+        on_pause (PauseAction | None): ``pause`` pauses the sandbox when
+            the workspace pauses; None leaves it as it is.
     """
 
     sandbox_id: str
     api_key: str | None = None
-    on_sleep: SleepAction | None = None
+    on_pause: PauseAction | None = None
 
     def __post_init__(self) -> None:
         require_id("e2b", "sandbox_id", self.sandbox_id)
-        check_on_sleep("e2b", self.on_sleep, ON_SLEEP)
+        check_on_pause("e2b", self.on_pause, ON_PAUSE)

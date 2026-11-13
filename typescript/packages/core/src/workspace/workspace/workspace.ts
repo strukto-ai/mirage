@@ -304,7 +304,7 @@ export class Workspace {
   private closing: Promise<void> | null = null
   private metaWrite: Promise<void> | null = null
   private stateDropped = false
-  // The machines the close that ran paused, by name (`sleep`); null when it didn't sleep.
+  // The machines the close that ran paused, by name (`pause`); null when it didn't pause.
   private machinesPaused: ReadonlySet<string> | null = null
   // The stores this workspace's state lives in, whether the state store
   // built them or the caller passed one in directly: delete clears these,
@@ -2807,29 +2807,29 @@ export class Workspace {
 
   /**
    * Close the workspace as `close` does, then pause its machines; the
-   * others are only disconnected, and the state is kept. `pause` names the
-   * machines to pause by their `machines` names, whatever their config
+   * others are only disconnected, and the state is kept. `machines` names
+   * the machines to pause by their `machines` names, whatever their config
    * says; without it, those whose config asks pause (E2B's
-   * `onSleep: 'pause'`). Throws, closing nothing, when `pause` names a
+   * `onPause: 'pause'`). Throws, closing nothing, when `machines` names a
    * machine the workspace lacks; throws after closing when the workspace
-   * was closed first, which let its machines go awake, or when an earlier
-   * sleep closed it without pausing a machine this one names.
+   * was closed first, which left its machines running, or when an earlier
+   * pause closed it without pausing a machine this one names.
    */
-  async sleep(options: { pause?: readonly string[] } = {}): Promise<void> {
+  async pause(options: { machines?: readonly string[] } = {}): Promise<void> {
     const table = this.machineTable
     const names = new Set(
-      options.pause ?? table.names().filter((name) => table.get(name).pausesOnSleep()),
+      options.machines ?? table.names().filter((name) => table.get(name).configAsksToPause()),
     )
     for (const name of names) table.get(name)
     this.closing ??= this.runClose(false, names)
     await this.closing
     const paused = this.machinesPaused
     if (paused === null)
-      throw new Error('workspace was closed before sleep; its machines are awake')
+      throw new Error('workspace was closed before pause; its machines are running')
     const missed = [...names].filter((name) => !paused.has(name)).sort(compareCodePoints)
     if (missed.length > 0) {
       const listed = missed.map((name) => `'${name}'`).join(', ')
-      throw new Error(`workspace already slept without pausing ${listed}`)
+      throw new Error(`workspace already paused without pausing ${listed}`)
     }
   }
 

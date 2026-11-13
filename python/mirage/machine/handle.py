@@ -827,13 +827,13 @@ class MachineHandle:
         finally:
             self._disconnected()
 
-    def pauses_on_sleep(self) -> bool:
+    def config_asks_to_pause(self) -> bool:
         """Whether the machine's config asks to pause it when its
-        workspace sleeps without naming the machines to pause."""
+        workspace pauses without naming the machines to pause."""
         return False
 
     async def pause(self) -> None:
-        """Pause the machine after its workspace closed for sleep. A
+        """Pause the machine after its workspace closed to pause. A
         provider that can pause overrides this, and its next connect
         resumes the machine; by default the machine is only disconnected."""
 

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ConfigFields, RuntimeConfig } from '../runtime/config.ts'
-import type { MountType, SleepAction } from './types.ts'
+import type { MountType, PauseAction } from './types.ts'
 import { MOUNT_TYPES } from './constants.ts'
 
 /**
@@ -54,21 +54,21 @@ export function checkMountType(runtime: string, mountType: unknown): MountType |
 }
 
 /**
- * Fail loud on an `onSleep` other than the provider's own `options`; unset
- * leaves the machine alone. Mirrors Python's `check_on_sleep`.
+ * Fail loud on an `onPause` other than the provider's own `options`; unset
+ * leaves the machine alone. Mirrors Python's `check_on_pause`.
  */
-export function checkOnSleep(
+export function checkOnPause(
   runtime: string,
-  onSleep: unknown,
-  options: readonly SleepAction[],
-): SleepAction | null {
-  if (onSleep === undefined || onSleep === null) return null
-  if (!options.includes(onSleep as SleepAction)) {
+  onPause: unknown,
+  options: readonly PauseAction[],
+): PauseAction | null {
+  if (onPause === undefined || onPause === null) return null
+  if (!options.includes(onPause as PauseAction)) {
     throw new Error(
-      `${runtime} onSleep must be one of ${options.join(', ')}, not ${JSON.stringify(onSleep)}`,
+      `${runtime} onPause must be one of ${options.join(', ')}, not ${JSON.stringify(onPause)}`,
     )
   }
-  return onSleep as SleepAction
+  return onPause as PauseAction
 }
 
 /** Whether a configured id is a string with something in it. Mirrors Python's `nonblank`. */

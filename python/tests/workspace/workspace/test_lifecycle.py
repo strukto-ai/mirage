@@ -1696,7 +1696,7 @@ class _Napper(MachineHandle):
         await super().close()
         self.log.append("close")
 
-    def pauses_on_sleep(self) -> bool:
+    def config_asks_to_pause(self) -> bool:
         return True
 
     async def pause(self) -> None:
@@ -1704,9 +1704,9 @@ class _Napper(MachineHandle):
 
 
 class _Unasked(_Napper):
-    """A machine whose config doesn't ask to pause it at sleep."""
+    """A machine whose config doesn't ask to pause it."""
 
-    def pauses_on_sleep(self) -> bool:
+    def config_asks_to_pause(self) -> bool:
         return False
 
 
@@ -1720,74 +1720,74 @@ class _Insomniac(_Napper):
 
 
 @pytest.mark.asyncio
-async def test_sleep_raises_a_machines_failed_pause():
+async def test_pause_raises_a_machines_failed_pause():
     box = _Insomniac("box")
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box})
     with pytest.raises(RuntimeError, match="pause refused"):
-        await ws.sleep()
+        await ws.pause()
     assert box.log == ["close", "pause"]
 
 
 @pytest.mark.asyncio
-async def test_sleep_closes_the_workspace_then_pauses_its_machines():
+async def test_pause_closes_the_workspace_then_pauses_its_machines():
     box = _Napper("box")
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box})
-    await ws.sleep()
+    await ws.pause()
     assert box.log == ["close", "pause"]
 
 
 @pytest.mark.asyncio
-async def test_sleep_without_a_list_pauses_the_machines_whose_config_asks():
+async def test_pause_without_a_list_pauses_the_machines_whose_config_asks():
     a, b = _Napper("a"), _Unasked("b")
     ws = Workspace(
         {"/": RAMVFS()}, mode=MountMode.EXEC, machines={"a": a, "b": b}
     )
-    await ws.sleep()
+    await ws.pause()
     assert (a.log, b.log) == (["close", "pause"], ["close"])
 
 
 @pytest.mark.asyncio
-async def test_sleep_pauses_exactly_the_machines_it_names():
+async def test_pause_pauses_exactly_the_machines_it_names():
     a, b = _Napper("a"), _Unasked("b")
     ws = Workspace(
         {"/": RAMVFS()}, mode=MountMode.EXEC, machines={"a": a, "b": b}
     )
-    await ws.sleep(pause=["b"])
+    await ws.pause(machines=["b"])
     assert (a.log, b.log) == (["close"], ["close", "pause"])
 
 
 @pytest.mark.asyncio
-async def test_sleep_with_an_empty_list_pauses_nothing():
+async def test_pause_with_an_empty_list_pauses_nothing():
     box = _Napper("box")
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box})
-    await ws.sleep(pause=[])
+    await ws.pause(machines=[])
     assert box.log == ["close"]
 
 
 @pytest.mark.asyncio
-async def test_sleep_refuses_an_unknown_machine_before_closing_anything():
+async def test_pause_refuses_an_unknown_machine_before_closing_anything():
     box = _Napper("box")
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box})
     with pytest.raises(ValueError, match="unknown machine: 'bxo'"):
-        await ws.sleep(pause=["bxo"])
+        await ws.pause(machines=["bxo"])
     assert box.log == []
-    await ws.sleep(pause=["box"])
+    await ws.pause(machines=["box"])
     assert box.log == ["close", "pause"]
 
 
 @pytest.mark.asyncio
-async def test_a_later_sleep_refuses_a_machine_the_first_left_unpaused():
+async def test_a_later_pause_refuses_a_machine_the_first_left_unpaused():
     box = _Napper("box")
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box})
-    await ws.sleep(pause=[])
-    with pytest.raises(RuntimeError, match="slept without pausing 'box'"):
-        await ws.sleep(pause=["box"])
-    await ws.sleep(pause=[])
+    await ws.pause(machines=[])
+    with pytest.raises(RuntimeError, match="paused without pausing 'box'"):
+        await ws.pause(machines=["box"])
+    await ws.pause(machines=[])
     assert box.log == ["close"]
 
 
 @pytest.mark.asyncio
-async def test_a_plain_close_leaves_machines_awake():
+async def test_a_plain_close_leaves_machines_running():
     box = _Napper("box")
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box})
     await ws.close()
@@ -1795,10 +1795,10 @@ async def test_a_plain_close_leaves_machines_awake():
 
 
 @pytest.mark.asyncio
-async def test_sleep_after_close_refuses_rather_than_leave_machines_awake():
+async def test_pause_after_close_refuses_rather_than_leave_machines_running():
     box = _Napper("box")
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box})
     await ws.close()
-    with pytest.raises(RuntimeError, match="closed before sleep"):
-        await ws.sleep()
+    with pytest.raises(RuntimeError, match="closed before pause"):
+        await ws.pause()
     assert box.log == ["close"]

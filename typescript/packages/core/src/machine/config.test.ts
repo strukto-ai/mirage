@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { checkOnSleep, requireId } from './config.ts'
+import { checkOnPause, requireId } from './config.ts'
 import { E2BMachine } from './e2b/handle.ts'
 
 describe('requireId', () => {
@@ -39,16 +39,16 @@ describe('requireId', () => {
   })
 })
 
-describe('checkOnSleep', () => {
-  it('leaves an unset onSleep alone', () => {
-    expect(checkOnSleep('x', undefined, ['pause'])).toBeNull()
+describe('checkOnPause', () => {
+  it('leaves an unset onPause alone', () => {
+    expect(checkOnPause('x', undefined, ['pause'])).toBeNull()
   })
   it('takes one of the provider’s own options', () => {
-    expect(checkOnSleep('x', 'pause', ['pause'])).toBe('pause')
+    expect(checkOnPause('x', 'pause', ['pause'])).toBe('pause')
   })
   it('refuses any other value, naming the options', () => {
-    expect(() => checkOnSleep('x', 'stop', ['pause'])).toThrow(
-      'x onSleep must be one of pause, not "stop"',
+    expect(() => checkOnPause('x', 'stop', ['pause'])).toThrow(
+      'x onPause must be one of pause, not "stop"',
     )
   })
 })

@@ -239,9 +239,9 @@ describe('entries router', () => {
     expect(ssh.mount_type?.options).toEqual(['ssh', 'fuse', 'both'])
     expect(ssh.private_key?.secret).toBe(true)
     expect(ssh.env).toBeUndefined()
-    expect(ssh.on_sleep).toBeUndefined()
+    expect(ssh.on_pause).toBeUndefined()
     const e2b = Object.fromEntries((machines.e2b ?? []).map((f) => [f.name, f]))
-    expect(e2b.on_sleep).toMatchObject({ options: ['pause'], required: false })
+    expect(e2b.on_pause).toMatchObject({ options: ['pause'], required: false })
   })
 
   it('checks a machine against its field types', async () => {

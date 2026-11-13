@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.machine.types import SleepAction
+from mirage.machine.types import PauseAction
 
 # A PTY carries a served prefix's SFTP where a provider's exec decodes
 # output as text (E2B): the terminal goes raw, so bytes pass unchanged,
@@ -24,9 +24,9 @@ PTY_RAW = "stty raw -echo -iexten; printf '\\001mirage-sftp\\002'; "
 # broken-pipe or closed-file text inside a generic INTERNAL error.
 CLOSED_INPUT = ("broken pipe", "file already closed")
 
-# What ``on_sleep`` takes for a sandbox: pause it, keeping its disk and
+# What ``on_pause`` takes for a sandbox: pause it, keeping its disk and
 # memory.
-ON_SLEEP: tuple[SleepAction, ...] = ("pause",)
+ON_PAUSE: tuple[PauseAction, ...] = ("pause",)
 
 # Why a sandbox the SDK says is gone cannot take a line, by how it said so,
 # with the fix: the sandbox is the user's, and Mirage never makes one.

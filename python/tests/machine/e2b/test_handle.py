@@ -946,7 +946,7 @@ async def _reached(**config) -> E2BMachine:
 
 
 @pytest.mark.asyncio
-async def test_pause_pauses_the_sandbox_it_reached_whatever_on_sleep_says():
+async def test_pause_pauses_the_sandbox_it_reached_whatever_on_pause_says():
     await (await _reached()).pause()
     assert FakeMachine.paused == [("sb-live", {"api_key": "k-123"})]
 
@@ -954,17 +954,17 @@ async def test_pause_pauses_the_sandbox_it_reached_whatever_on_sleep_says():
 def _asks(**config) -> bool:
     return E2BMachine(
         "box", config={"sandbox_id": "sb", **config}
-    ).pauses_on_sleep()
+    ).config_asks_to_pause()
 
 
-def test_only_on_sleep_pause_asks_to_pause_at_sleep():
-    assert (_asks(on_sleep="pause"), _asks()) == (True, False)
+def test_only_on_pause_pause_asks_the_workspace_to_pause_it():
+    assert (_asks(on_pause="pause"), _asks()) == (True, False)
 
 
 @pytest.mark.asyncio
 async def test_pause_leaves_alone_a_sandbox_it_never_reached():
     machine = E2BMachine(
-        "box", config={"sandbox_id": "sb-live", "on_sleep": "pause"}
+        "box", config={"sandbox_id": "sb-live", "on_pause": "pause"}
     )
     await machine.pause()
     assert FakeMachine.paused == []
@@ -973,7 +973,7 @@ async def test_pause_leaves_alone_a_sandbox_it_never_reached():
 @pytest.mark.asyncio
 async def test_pause_leaves_alone_a_sandbox_its_connect_never_reached():
     machine = E2BMachine(
-        "box", config={"sandbox_id": "sb-live", "on_sleep": "pause"}
+        "box", config={"sandbox_id": "sb-live", "on_pause": "pause"}
     )
     FakeMachine.refusal = RuntimeError("refused")
     with pytest.raises(RuntimeError, match="refused"):
@@ -984,7 +984,7 @@ async def test_pause_leaves_alone_a_sandbox_its_connect_never_reached():
 
 @pytest.mark.asyncio
 async def test_pause_leaves_alone_a_sandbox_only_an_earlier_workspace_reached():
-    machine = await _reached(on_sleep="pause")
+    machine = await _reached(on_pause="pause")
     await machine.close()
     await machine.pause()
     assert FakeMachine.paused == []
@@ -993,7 +993,7 @@ async def test_pause_leaves_alone_a_sandbox_only_an_earlier_workspace_reached():
 @pytest.mark.asyncio
 async def test_pause_pauses_a_sandbox_a_connect_under_way_at_close_reached():
     machine = E2BMachine(
-        "box", config={"sandbox_id": "sb-live", "on_sleep": "pause"}
+        "box", config={"sandbox_id": "sb-live", "on_pause": "pause"}
     )
     connecting = asyncio.ensure_future(machine.ensure_connected())
     await asyncio.sleep(0)
@@ -1003,21 +1003,21 @@ async def test_pause_pauses_a_sandbox_a_connect_under_way_at_close_reached():
     assert FakeMachine.paused == [("sb-live", {})]
 
 
-def test_on_sleep_takes_only_pause():
-    with pytest.raises(ValueError, match="e2b on_sleep must be one of pause"):
-        E2BMachine("box", config={"sandbox_id": "sb", "on_sleep": "stop"})
+def test_on_pause_takes_only_pause():
+    with pytest.raises(ValueError, match="e2b on_pause must be one of pause"):
+        E2BMachine("box", config={"sandbox_id": "sb", "on_pause": "stop"})
 
 
 @pytest.mark.asyncio
 async def test_a_sandbox_already_gone_counts_as_paused():
-    machine = await _reached(on_sleep="pause")
+    machine = await _reached(on_pause="pause")
     FakeMachine.pause_refusal = sdk.SandboxNotFoundException("gone")
     await machine.pause()
 
 
 @pytest.mark.asyncio
 async def test_any_other_pause_failure_is_raised():
-    machine = await _reached(on_sleep="pause")
+    machine = await _reached(on_pause="pause")
     FakeMachine.pause_refusal = RuntimeError("node busy")
     with pytest.raises(RuntimeError, match="node busy"):
         await machine.pause()

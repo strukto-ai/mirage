@@ -652,7 +652,7 @@ class MachineTable:
         once the signals still queued for its machines have run, so none
         reaches a machine after it pauses; the handles stay held until
         then. Shielded by ``close``, so a caller's cancel never leaves its
-        machines awake.
+        machines running.
 
         Args:
             held (dict[str, MachineHandle]): the handles this table held

@@ -23,7 +23,7 @@ import type { MachinePipe } from '../types.ts'
 import type { OutputFn, PipeWriter, RunResult } from '../../runtime/types.ts'
 import type { ConfigFields } from '../../runtime/config.ts'
 import { concat } from '../../utils/bytes.ts'
-import { checkOnSleep, requireId } from '../config.ts'
+import { checkOnPause, requireId } from '../config.ts'
 import { ConnectionLostError } from '../errors.ts'
 import {
   decodeOutput,
@@ -35,7 +35,7 @@ import {
   stopSignal,
   wrapLine,
 } from '../constants.ts'
-import { CLOSED_INPUT, ON_SLEEP, PTY_MARK, PTY_RAW, SANDBOX_GONE } from './constants.ts'
+import { CLOSED_INPUT, ON_PAUSE, PTY_MARK, PTY_RAW, SANDBOX_GONE } from './constants.ts'
 import { loadOptionalPeer } from '../../utils/optional_peer.ts'
 import type { E2bSdk } from './sdk.ts'
 import { E2B_CONFIG_FIELDS, type E2BConfig } from './config.ts'
@@ -140,7 +140,7 @@ class PtyWriter implements PipeWriter {
  * workspace over a PTY, since E2B's exec decodes output as text.
  *
  * The sandbox is yours: Mirage never kills it, and pauses it only when the
- * workspace sleeps and its config says `onSleep: 'pause'` or the sleep names
+ * workspace pauses and its config says `onPause: 'pause'` or the call names
  * it. Once the SDK
  * says it is gone, connecting fails with how to replace it, and a line it
  * cut short loses its connection (129) with the same advice; the next line
@@ -159,7 +159,7 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
   constructor(name: string, config?: E2BConfig) {
     super(name, config, E2BMachine.configFields)
     requireId('e2b', 'sandboxId', this.config.sandboxId)
-    checkOnSleep('e2b', this.config.onSleep, ON_SLEEP)
+    checkOnPause('e2b', this.config.onPause, ON_PAUSE)
   }
 
   /** The sandbox's id at E2B. */
@@ -206,9 +206,9 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
     await super.close()
   }
 
-  /** Whether the config says `onSleep: 'pause'`. */
-  override pausesOnSleep(): boolean {
-    return this.config.onSleep === 'pause'
+  /** Whether the config says `onPause: 'pause'`. */
+  override configAsksToPause(): boolean {
+    return this.config.onPause === 'pause'
   }
 
   /**

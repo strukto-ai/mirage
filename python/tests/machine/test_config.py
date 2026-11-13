@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.machine.config import MachineConfig, check_on_sleep
+from mirage.machine.config import MachineConfig, check_on_pause
 from mirage.machine.docker import DockerConfig
 from mirage.machine.e2b import E2BConfig
 from mirage.machine.registry import build_machine
@@ -68,16 +68,16 @@ def test_a_blank_required_id_is_refused(provider, field, blank):
         build_machine("box", {"provider": provider, field: blank})
 
 
-def test_an_unset_on_sleep_is_left_alone():
-    check_on_sleep("x", None, ("pause",))
+def test_an_unset_on_pause_is_left_alone():
+    check_on_pause("x", None, ("pause",))
 
 
-def test_on_sleep_takes_one_of_the_providers_own_options():
-    check_on_sleep("x", "pause", ("pause",))
+def test_on_pause_takes_one_of_the_providers_own_options():
+    check_on_pause("x", "pause", ("pause",))
 
 
-def test_on_sleep_refuses_any_other_value_naming_the_options():
+def test_on_pause_refuses_any_other_value_naming_the_options():
     with pytest.raises(
-        ValueError, match="x on_sleep must be one of pause, not 'stop'"
+        ValueError, match="x on_pause must be one of pause, not 'stop'"
     ):
-        check_on_sleep("x", "stop", ("pause",))
+        check_on_pause("x", "stop", ("pause",))

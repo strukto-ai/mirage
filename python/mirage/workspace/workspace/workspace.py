@@ -1957,31 +1957,32 @@ class Workspace:
                 "workspace was closed before delete; its state is kept"
             )
 
-    async def sleep(self, pause: Iterable[str] | None = None) -> None:
+    async def pause(self, machines: Iterable[str] | None = None) -> None:
         """Close the workspace as ``close`` does, then pause its machines;
         the others are only disconnected, and the state is kept.
 
         Args:
-            pause (Iterable[str] | None): the machines to pause, by their
-                ``machines:`` names, whatever their config says; None
-                pauses those whose config asks (E2B's ``on_sleep: pause``).
+            machines (Iterable[str] | None): the machines to pause, by
+                their ``machines:`` names, whatever their config says;
+                None pauses those whose config asks (E2B's
+                ``on_pause: pause``).
 
         Raises:
-            ValueError: ``pause`` names a machine the workspace lacks;
+            ValueError: ``machines`` names a machine the workspace lacks;
                 nothing is closed.
-            RuntimeError: the workspace was closed first, which let its
-                machines go awake, or an earlier sleep closed it without
+            RuntimeError: the workspace was closed first, which left its
+                machines running, or an earlier pause closed it without
                 pausing a machine this one names.
         """
         table = self.machine_table
-        if pause is None:
+        if machines is None:
             names = frozenset(
                 name
                 for name in table.names()
-                if table.get(name).pauses_on_sleep()
+                if table.get(name).config_asks_to_pause()
             )
         else:
-            names = frozenset(pause)
+            names = frozenset(machines)
             for name in names:
                 table.get(name)
         try:
@@ -1992,12 +1993,12 @@ class Workspace:
             await self._sync_bridge.ashutdown()
         if self._machines_paused is None:
             raise RuntimeError(
-                "workspace was closed before sleep; its machines are awake"
+                "workspace was closed before pause; its machines are running"
             )
         if missed := names - self._machines_paused:
             listed = ", ".join(repr(name) for name in sorted(missed))
             raise RuntimeError(
-                f"workspace already slept without pausing {listed}"
+                f"workspace already paused without pausing {listed}"
             )
 
     async def _close(

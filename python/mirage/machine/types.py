@@ -23,8 +23,8 @@ from mirage.runtime.types import ByteReader, PipeWriter
 # ``both`` serves from the host what the machine does not mount itself.
 MountType: TypeAlias = Literal["ssh", "fuse", "both"]
 
-# What a provider does to its machine when the workspace sleeps.
-SleepAction: TypeAlias = Literal["pause"]
+# What a provider does to its machine when the workspace pauses.
+PauseAction: TypeAlias = Literal["pause"]
 
 
 @dataclass(frozen=True, slots=True)

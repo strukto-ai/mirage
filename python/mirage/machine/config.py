@@ -15,7 +15,7 @@
 from dataclasses import dataclass, field
 
 from mirage.machine.constants import MOUNT_TYPES
-from mirage.machine.types import MountType, SleepAction
+from mirage.machine.types import MountType, PauseAction
 from mirage.runtime.config import RuntimeConfig
 
 
@@ -58,24 +58,24 @@ def check_mount_type(provider: str, mount_type: str | None) -> None:
         )
 
 
-def check_on_sleep(
+def check_on_pause(
     provider: str,
-    on_sleep: str | None,
-    options: tuple[SleepAction, ...],
+    on_pause: str | None,
+    options: tuple[PauseAction, ...],
 ) -> None:
-    """Fail loud on an ``on_sleep`` other than the provider's own
+    """Fail loud on an ``on_pause`` other than the provider's own
     ``options``.
 
     Args:
         provider (str): the machine's provider, for the message.
-        on_sleep (str | None): the configured value; None leaves the
+        on_pause (str | None): the configured value; None leaves the
             machine alone.
-        options (tuple[SleepAction, ...]): what this provider can do.
+        options (tuple[PauseAction, ...]): what this provider can do.
     """
-    if on_sleep is not None and on_sleep not in options:
+    if on_pause is not None and on_pause not in options:
         raise ValueError(
-            f"{provider} on_sleep must be one of "
-            f"{', '.join(options)}, not {on_sleep!r}"
+            f"{provider} on_pause must be one of "
+            f"{', '.join(options)}, not {on_pause!r}"
         )
 
 
