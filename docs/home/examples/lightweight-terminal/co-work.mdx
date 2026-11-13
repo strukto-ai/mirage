@@ -253,11 +253,12 @@ import json, os, re
 candidates = []
 for name in sorted(os.listdir("/work/replies"), key=lambda n: int(n.split(".")[0])):
     text = open("/work/replies/" + name).read()
-    sender = re.search(r"^From: (?:(.*) )?<?([^<>\s]+@[^<>\s]+)>?$", text, re.M)
-    who = sender.group(1) or sender.group(2)
+    sender = re.search(r"^From: (?:(.*?) ?<(.+)>|(\S+))$", text, re.M)
+    email = sender.group(2) or sender.group(3)
+    who = sender.group(1) or email
     times = re.findall(r"^(\d{4}-\d\d-\d\d \d\d:\d\d)$", text, re.M)
     candidates.append({"id": name.split(".")[0], "name": who,
-                       "email": sender.group(2), "times": times})
+                       "email": email, "times": times})
     print("%-3s %-13s %s" % (name.split(".")[0], who, ", ".join(times)))
 open("/work/candidates.json", "w").write(json.dumps(candidates))
 PY
