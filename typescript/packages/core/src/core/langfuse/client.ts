@@ -49,15 +49,6 @@ export interface LangfuseTransport {
   request(path: string, query?: Record<string, string | number | undefined>): Promise<unknown>
 }
 
-function encodeBasicAuth(publicKey: string, secretKey: string): string {
-  const raw = `${publicKey}:${secretKey}`
-  if (typeof globalThis.btoa === 'function') return globalThis.btoa(raw)
-  const buf = (globalThis as { Buffer?: { from(s: string): { toString(enc: string): string } } })
-    .Buffer
-  if (buf !== undefined) return buf.from(raw).toString('base64')
-  throw new LangfuseApiError('no base64 encoder available')
-}
-
 // The parse comes before the status check, so a non-JSON error body reports
 // as invalid JSON rather than a bare status, matching the old transport. The
 // status must land on the error either way: fetchOrEnoent keys on it.
@@ -86,7 +77,7 @@ export class HttpLangfuseTransport implements LangfuseTransport {
 
   constructor(opts: Pick<LangfuseConfig, 'publicKey' | 'secretKey' | 'host' | 'timeout'>) {
     this.host = opts.host ?? 'https://cloud.langfuse.com'
-    this.auth = encodeBasicAuth(opts.publicKey, opts.secretKey)
+    this.auth = btoa(`${opts.publicKey}:${opts.secretKey}`)
     this.timeout = opts.timeout
   }
 

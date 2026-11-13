@@ -99,12 +99,6 @@ def _error_of(
     )
 
 
-def _flow_error(
-    resp: aiohttp.ClientResponse, text: str, *, flow: str
-) -> Exception:
-    return BoxApiError(f"{flow} -> {resp.status} {text}", resp.status)
-
-
 async def refresh_access_token(
     config: BoxConfig, current_refresh_token: str
 ) -> tuple[str, str, int]:
@@ -130,7 +124,9 @@ async def refresh_access_token(
     body = await api_request(
         "POST",
         token_url_of(config),
-        error_of=partial(_flow_error, flow="Box token refresh"),
+        error_of=lambda resp, text: BoxApiError(
+            f"Box token refresh -> {resp.status} {text}", resp.status
+        ),
         data=data,
     )
     return (body["access_token"], body["refresh_token"], body["expires_in"])
@@ -160,7 +156,9 @@ async def fetch_ccg_token(config: BoxConfig) -> tuple[str, int]:
     body = await api_request(
         "POST",
         token_url_of(config),
-        error_of=partial(_flow_error, flow="Box CCG token"),
+        error_of=lambda resp, text: BoxApiError(
+            f"Box CCG token -> {resp.status} {text}", resp.status
+        ),
         data=data,
     )
     return body["access_token"], body["expires_in"]
@@ -241,12 +239,6 @@ async def box_auth_headers(tm: BoxTokenManager) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _str_params(params: dict[str, Any] | None) -> dict[str, str] | None:
-    if params is None:
-        return None
-    return {k: str(v) for k, v in params.items()}
-
-
 async def box_get(
     tm: BoxTokenManager,
     url: str,
@@ -257,7 +249,7 @@ async def box_get(
         url,
         error_of=partial(_error_of, label="GET", url=url),
         headers=await box_auth_headers(tm),
-        params=_str_params(params),
+        params=params,
         session=tm.pool,
     )
     return data
@@ -294,7 +286,7 @@ async def box_get_bytes(
         url,
         error_of=partial(_error_of, label="GET", url=url),
         headers=await box_auth_headers(tm),
-        params=_str_params(params),
+        params=params,
         read="bytes",
         window=window,
         session=tm.pool,
@@ -312,9 +304,7 @@ async def box_get_stream(
     # The manager's shared pool, not a per-call session: the response
     # context releases its connection back to the pool when the stream
     # ends, so streaming holds one connection, never a whole session.
-    async with tm.session().get(
-        url, headers=headers, params=_str_params(params)
-    ) as resp:
+    async with tm.session().get(url, headers=headers, params=params) as resp:
         if resp.status >= 400:
             text = await resp.text()
             raise BoxApiError(
@@ -367,7 +357,7 @@ async def box_delete(
         url,
         error_of=partial(_error_of, label="DELETE", url=url),
         headers={**await box_auth_headers(tm), **(headers or {})},
-        params=_str_params(params),
+        params=params,
         read="none",
         session=tm.pool,
     )

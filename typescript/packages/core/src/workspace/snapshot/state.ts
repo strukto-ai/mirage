@@ -68,7 +68,7 @@ import { HISTORY_PREFIX } from '../../vfs/history/history.ts'
 import { RAMVFS, type RAMVFSState } from '../../vfs/ram/ram.ts'
 import {
   hasRedactedSecret,
-  redactConfigWithSchema,
+  redactedConfigDump,
   vfsStateRequiresOverride,
 } from '../../vfs/secrets.ts'
 import type { VFSStateBase } from '../../vfs/types.ts'
@@ -306,7 +306,7 @@ function cliSpecFromEntry(entry: CLISnapshot): string | CLI {
 function cliConfigDump(install: CLIInstall): Record<string, unknown> | null {
   const model = install.cli.configModel
   if (model instanceof z.ZodObject) {
-    return redactConfigWithSchema(model, install.config)
+    return redactedConfigDump(model, install.config)
   }
   // A script's config is opaque, so it is captured verbatim rather than
   // guessed at; the config loader refuses a secrets pointer in one for

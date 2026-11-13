@@ -25,14 +25,12 @@ export { z }
 
 export const REDACTED_SECRET = '<REDACTED>' as const
 
-const SECRET_META_KEY = 'mirageSecret'
-
 export function secretStr(): SecretSchema<z.ZodString> {
   return secretSchema(z.string())
 }
 
 export function secretSchema<T extends z.ZodType>(schema: T): SecretSchema<T> {
-  return schema.meta({ [SECRET_META_KEY]: true }) as SecretSchema<T>
+  return schema.meta({ mirageSecret: true }) as SecretSchema<T>
 }
 
 /**
@@ -155,11 +153,11 @@ export function normalizeNonEmpty(value: string, field: string): string {
   return normalized
 }
 
-export function redactConfigWithSchema<S extends ZodObject>(
+export function redactedConfigDump<S extends ZodObject>(
   schema: S,
   config: unknown,
 ): RedactedSchema<S> {
-  return redactValueWithSchema(schema, schema.parse(config)) as RedactedSchema<S>
+  return walkConfigDump(schema, schema.parse(config)) as RedactedSchema<S>
 }
 
 export function hasRedactedSecret(value: unknown): boolean {
@@ -193,33 +191,33 @@ export function vfsStateRequiresOverride(state: unknown): boolean {
   return hasRedactedSecret(state.config)
 }
 
-function redactValueWithSchema(schema: SchemaType, value: unknown): unknown {
+function walkConfigDump(schema: z.core.SomeType, value: unknown): unknown {
   if (value === undefined || value === null) return value
-  if (isSecretSchema(schema)) return REDACTED_SECRET
+  if (isSecretType(schema)) return REDACTED_SECRET
 
   const unwrapped = unwrapSchema(schema)
   if (unwrapped instanceof z.ZodObject && isRecord(value)) {
     const out: Record<string, unknown> = { ...value }
-    for (const [key, child] of Object.entries(unwrapped.shape as Record<string, SchemaType>)) {
-      if (key in out) out[key] = redactValueWithSchema(child, out[key])
+    for (const [key, child] of Object.entries(unwrapped.shape as Record<string, z.core.SomeType>)) {
+      if (key in out) out[key] = walkConfigDump(child, out[key])
     }
     return out
   }
   if (unwrapped instanceof z.ZodArray && Array.isArray(value)) {
-    return value.map((item) => redactValueWithSchema(unwrapped.element, item))
+    return value.map((item) => walkConfigDump(unwrapped.element, item))
   }
   return value
 }
 
 // A record of secrets is one secret field, as Python's dict[str, SecretStr] is.
-function isSecretSchema(schema: SchemaType): boolean {
+function isSecretType(schema: z.core.SomeType): boolean {
   const unwrapped = unwrapSchema(schema)
   const meta = (unwrapped as { meta?: () => Record<string, unknown> | undefined }).meta?.()
-  if (meta?.[SECRET_META_KEY] === true) return true
-  return unwrapped instanceof z.ZodRecord && isSecretSchema(unwrapped.valueType as SchemaType)
+  if (meta?.mirageSecret === true) return true
+  return unwrapped instanceof z.ZodRecord && isSecretType(unwrapped.valueType as z.core.SomeType)
 }
 
-function unwrapSchema(schema: SchemaType): SchemaType {
+function unwrapSchema(schema: z.core.SomeType): z.core.SomeType {
   let current = schema
   for (;;) {
     if (current instanceof z.ZodOptional || current instanceof z.ZodNullable) {
@@ -227,8 +225,8 @@ function unwrapSchema(schema: SchemaType): SchemaType {
       continue
     }
     const candidate = current as {
-      def?: { innerType?: SchemaType }
-      _zod?: { def?: { innerType?: SchemaType } }
+      def?: { innerType?: z.core.SomeType }
+      _zod?: { def?: { innerType?: z.core.SomeType } }
     }
     const inner = (candidate.def ?? candidate._zod?.def)?.innerType
     if (inner !== undefined) {
@@ -301,5 +299,3 @@ export type RedactedSchema<S extends z.ZodObject, C = ConfigOf<S>> = RedactedFie
 export type ConfigOf<S extends z.ZodType> = {
   [K in keyof z.infer<S>]: Exclude<z.infer<S>[K], undefined>
 }
-
-export type SchemaType = z.core.SomeType

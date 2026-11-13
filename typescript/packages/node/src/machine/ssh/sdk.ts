@@ -12,15 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import type * as Ssh2Mod from 'ssh2'
 
 export type Ssh2Sdk = typeof Ssh2Mod
-
-/** Load the optional host SDK at the runtime boundary. */
-export function loadSdk(): Promise<Ssh2Sdk> {
-  return loadOptionalPeer(() => import('ssh2'), {
-    feature: "the 'ssh' runtime",
-    packageName: 'ssh2',
-  })
-}

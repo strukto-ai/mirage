@@ -25,8 +25,6 @@ import type { EvaluationContext } from '../../evaluation.ts'
 import type { LineHandle } from '../../../execution/line/handle.ts'
 import type { ExecutionNode } from '../../types.ts'
 
-export type Flags = Record<string, FlagValue>
-
 /**
  * One parsed command line, named field for field after Python's
  * `ParsedCommand` NamedTuple (executor/command/types.py). It replaces

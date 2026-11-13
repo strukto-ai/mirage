@@ -13,12 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { concat } from '../../../utils/bytes.ts'
-import { chunks } from '../../../io/cooperative.ts'
 import { closeQuietly, ensureStream } from '../../../io/stream.ts'
 import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
 import { type Limit, OnExceed } from '../../../types.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
-import type { Context } from '../../config.ts'
 
 const ENC = new TextEncoder()
 
@@ -203,13 +201,4 @@ export async function guardOutput(
   const guarded = guardIO(stdout, io, limit)
   const data = guarded === null ? null : await materialize(guarded)
   return [data, io.stderr, io.exitCode]
-}
-
-/** An invocation's input under its abort; `split` as in chunks. */
-export function guardInput(
-  source: ByteSource,
-  ctx: Pick<Context, 'signal'>,
-  split = true,
-): AsyncIterable<Uint8Array> {
-  return chunks(source, ctx.signal, split)
 }

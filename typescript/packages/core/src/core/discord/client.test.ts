@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { DiscordApiError, type DiscordResponse, HttpDiscordTransport } from './client.ts'
+import { DiscordApiError, HttpDiscordTransport } from './client.ts'
 
 class TestTransport extends HttpDiscordTransport {
   constructor(
@@ -52,7 +52,7 @@ describe('HttpDiscordTransport', () => {
       { Authorization: 'Bot x' },
       fakeFetch,
     )
-    const out: DiscordResponse = await t.call('GET', '/users/@me/guilds')
+    const out: unknown = await t.call('GET', '/users/@me/guilds')
     expect(url).toBe('https://discord.com/api/v10/users/@me/guilds')
     expect(out).toEqual([{ id: 'g1' }])
   })

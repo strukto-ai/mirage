@@ -31,8 +31,8 @@ from mirage.shell.helpers import (
 )
 from mirage.shell.parse.constants import ALIAS_WORD_TYPES, BASH_KEYWORDS
 from mirage.shell.parse.scope import ParseScope
-from mirage.shell.types import FunctionBody, TSNodeLike
 from mirage.shell.types import NodeType as NT
+from mirage.shell.types import TSNodeLike
 from mirage.utils.quote import single_quote
 
 _INDENT = "    "
@@ -64,7 +64,7 @@ def stored_function_text(
 
 
 def function_text(
-    name: str, body: FunctionBody, aliases: "_Aliases | None" = None
+    name: str, body: list[TSNodeLike], aliases: "_Aliases | None" = None
 ) -> str:
     """A function as ``declare -f`` and ``type`` print it.
 
@@ -78,7 +78,7 @@ def function_text(
 
     Args:
         name (str): the function's name.
-        body (FunctionBody): the body the definition stored.
+        body (list[TSNodeLike]): the body the definition stored.
         aliases (_Aliases | None): the aliases to expand, if any.
     """
     return _Printer(True, aliases).definition(name, _definition_of(body), "")
@@ -123,7 +123,7 @@ class _Aliases:
         self.parse = parse
 
 
-def _definition_of(body: FunctionBody) -> TSNodeLike:
+def _definition_of(body: list[TSNodeLike]) -> TSNodeLike:
     node = body[0]
     if node.parent is None and node.type == NT.REDIRECTED_STATEMENT:
         node = node.children[0]

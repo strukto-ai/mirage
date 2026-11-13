@@ -221,15 +221,11 @@ function lenientJson(app: FastifyInstance): void {
   })
 }
 
-function noop(): void {
-  /* intentional no-op for onIdleExit default */
-}
-
 export function buildApp(options: BuildAppOptions = {}) {
   validateDaemonTable(readDaemonTable(mirageHome()))
   registerSecrets(STRUKTO, StruktoSourceConfig, fetchStrukto)
   const startedAt = Date.now() / 1000
-  const exitFn = options.onIdleExit ?? noop
+  const exitFn = options.onIdleExit ?? ((): void => undefined)
   const authConfig = options.authConfig ?? resolveAuthConfig()
   const stateRoot = stateRootPath(options.stateRoot)
   const host: ServerHost = {
@@ -341,7 +337,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     })
   }
   // Reported once the app is up, so one whose setup fails never is.
-  let unregisterMetrics = noop
+  let unregisterMetrics: (() => void) | null = null
   app.addHook('onReady', (done) => {
     unregisterMetrics = registerMetrics(registry)
     done()
@@ -359,7 +355,7 @@ export function buildApp(options: BuildAppOptions = {}) {
       try {
         await registry.closeAll()
       } finally {
-        unregisterMetrics()
+        unregisterMetrics?.()
       }
     }
   })

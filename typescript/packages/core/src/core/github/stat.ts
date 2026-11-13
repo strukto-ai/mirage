@@ -20,7 +20,6 @@ import { enoent } from '../../errors/fs.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { GitHubApiError } from './client.ts'
 import { fetchDirTree, fetchHead, pointRow, refreshTree, rowOf } from './tree.ts'
-import { makeTreeEntry } from './tree_entry.ts'
 
 /**
  * Every entry under a directory of the repository, each as its row, from one
@@ -103,7 +102,7 @@ async function walked(accessor: GitHubAccessor, rel: string): Promise<FileStat |
     const rows = await fetchDirTree(accessor.account.transport, accessor.owner, accessor.repo, sha)
     const found = rows.find((row) => row.path === name)
     if (found === undefined) return null
-    if (depth === names.length - 1) return rowOf(makeTreeEntry(found), name)
+    if (depth === names.length - 1) return rowOf(found, name)
     if (found.type !== 'tree') return null
     sha = found.sha
   }

@@ -195,10 +195,6 @@ export async function* walkHaystacks(
   yield* walker.below(root, root, shownRoot, 0, [[root, walker.named(shownRoot)]], false)
 }
 
-// One directory the walk has listed, as its link-resolved path and the
-// walker's name for it.
-type Level = readonly [real: string, named: string]
-
 // What one operand's walk reads with and keeps, for every level. Mirrors
 // Python's _Walker.
 class Walker {
@@ -248,7 +244,7 @@ class Walker {
     base: string,
     shownBase: string,
     depth: number,
-    chain: readonly Level[],
+    chain: readonly (readonly [real: string, named: string])[],
     linked: boolean,
   ): AsyncGenerator<Haystack> {
     if (this.walk.maxDepth !== null && depth >= this.walk.maxDepth) return
@@ -308,7 +304,7 @@ class Walker {
     link: string,
     shown: string,
     depth: number,
-    chain: readonly Level[],
+    chain: readonly (readonly [real: string, named: string])[],
   ): AsyncGenerator<Haystack> {
     const resolver = this.resolver
     if (resolver === null) return

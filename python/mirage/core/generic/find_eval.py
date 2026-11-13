@@ -650,16 +650,6 @@ def emit_start_path(
     results.append(start_key)
 
 
-def _type_kind(type_arg: FindType | str | None) -> str | None:
-    if type_arg is None:
-        return None
-    if isinstance(type_arg, FindType):
-        return "d" if type_arg == FindType.DIRECTORY else "f"
-    if type_arg in ("file", "directory"):
-        return "f" if type_arg == "file" else "d"
-    return type_arg
-
-
 def build_tree(
     *,
     name: str | None = None,
@@ -679,9 +669,12 @@ def build_tree(
         kids.append(Name(iname, icase=True))
     if path_pattern is not None:
         kids.append(Path(path_pattern))
-    type_kind = _type_kind(type)
-    if type_kind is not None:
-        kids.append(Type(type_kind))
+    if isinstance(type, FindType):
+        type = "d" if type == FindType.DIRECTORY else "f"
+    elif type in ("file", "directory"):
+        type = "f" if type == "file" else "d"
+    if type is not None:
+        kids.append(Type(type))
     if name_exclude is not None:
         kids.append(Not(Name(name_exclude)))
     if empty:

@@ -21,13 +21,7 @@ import { compareCodePoints } from '../../utils/sort.ts'
 import type { GitHubTreeItem } from './client.ts'
 import { GitHubApiError, type GitHubTransport } from './client.ts'
 import { DEFER_STATUSES } from './constants.ts'
-import { makeTreeEntry, type TreeEntry } from './tree_entry.ts'
-
-export function buildTreeMap(tree: GitHubTreeItem[]): Record<string, TreeEntry> {
-  const map: Record<string, TreeEntry> = {}
-  for (const item of tree) map[item.path] = makeTreeEntry(item)
-  return map
-}
+import type { TreeEntry } from './tree_entry.ts'
 
 /**
  * The row for one tree row, the same from every route: a file's carries its
@@ -134,11 +128,10 @@ export async function refreshTree(accessor: GitHubAccessor): Promise<{
     accessor.repo,
     accessor.ref,
   )
-  const current = buildTreeMap(tree)
   // A drop while GitHub answered may be for the very write this tree
   // predates, so it is handed back but not kept.
-  if (generation === accessor.generation) reseatTree(accessor, current, truncated)
-  return truncated ? null : { tree: current, version: sha }
+  if (generation === accessor.generation) reseatTree(accessor, tree, truncated)
+  return truncated ? null : { tree, version: sha }
 }
 
 /**
@@ -171,15 +164,14 @@ export async function pointRow(
   const parent = cut < 0 ? '' : trimmed.slice(0, cut)
   const name = cut < 0 ? trimmed : trimmed.slice(cut + 1)
   const expression = parent === '' ? accessor.ref : `${accessor.ref}:${parent}`
-  let page: { tree: GitHubTreeItem[]; truncated: boolean }
+  let page: { tree: TreeEntry[]; truncated: boolean }
   try {
     page = await fetchDirPage(accessor.account.transport, accessor.owner, accessor.repo, expression)
   } catch (err) {
     if (err instanceof GitHubApiError && DEFER_STATUSES.has(err.status)) return null
     throw err
   }
-  const row = page.tree.find((item) => item.path === name)
-  return { entry: row === undefined ? null : makeTreeEntry(row), truncated: page.truncated }
+  return { entry: page.tree.find((item) => item.path === name) ?? null, truncated: page.truncated }
 }
 
 /**
@@ -190,28 +182,30 @@ export async function pointRow(
  * so the rows and the version come from one response.
  *
  * Returns:
- *   { tree, truncated, sha }: the rows, GitHub's `truncated` flag, and the
- *   head commit sha, or null when the response names none.
+ *   { tree, truncated, sha }: the rows keyed by repo-relative path, GitHub's
+ *   `truncated` flag, and the head commit sha, or null when the response
+ *   names none.
  */
 export async function fetchTree(
   transport: GitHubTransport,
   owner: string,
   repo: string,
   ref: string,
-): Promise<{ tree: GitHubTreeItem[]; truncated: boolean; sha: string | null }> {
+): Promise<{ tree: Record<string, TreeEntry>; truncated: boolean; sha: string | null }> {
   const data = (await transport.get(
     `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref)}`,
     {
       recursive: '1',
     },
   )) as { tree?: GitHubTreeItem[]; truncated?: boolean; sha?: unknown }
-  return {
-    // Submodule gitlinks (type "commit") have no size and no blob to read;
-    // exclude them from the tree entirely.
-    tree: (data.tree ?? []).filter((item) => item.type !== 'commit'),
-    truncated: data.truncated === true,
-    sha: headOf(data),
+  const tree: Record<string, TreeEntry> = {}
+  // Submodule gitlinks (type "commit") have no size and no blob to read;
+  // exclude them from the tree entirely.
+  for (const item of data.tree ?? []) {
+    if (item.type === 'commit') continue
+    tree[item.path] = { path: item.path, type: item.type, sha: item.sha, size: item.size ?? null }
   }
+  return { tree, truncated: data.truncated === true, sha: headOf(data) }
 }
 
 /**
@@ -257,7 +251,7 @@ export async function fetchDirPage(
   owner: string,
   repo: string,
   treeSha: string,
-): Promise<{ tree: GitHubTreeItem[]; truncated: boolean }> {
+): Promise<{ tree: TreeEntry[]; truncated: boolean }> {
   const data = (await transport.get(
     `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(treeSha)}`,
   )) as {
@@ -270,10 +264,12 @@ export async function fetchDirPage(
       0,
     )
   }
-  return {
-    tree: data.tree.filter((item) => item.type !== 'commit'),
-    truncated: data.truncated === true,
+  const tree: TreeEntry[] = []
+  for (const item of data.tree) {
+    if (item.type === 'commit') continue
+    tree.push({ path: item.path, type: item.type, sha: item.sha, size: item.size ?? null })
   }
+  return { tree, truncated: data.truncated === true }
 }
 
 /**
@@ -294,7 +290,7 @@ export async function fetchDirTree(
   owner: string,
   repo: string,
   treeSha: string,
-): Promise<GitHubTreeItem[]> {
+): Promise<TreeEntry[]> {
   const page = await fetchDirPage(transport, owner, repo, treeSha)
   if (page.truncated) {
     throw new GitHubApiError(`GitHub truncated the tree listing of ${owner}/${repo} ${treeSha}`, 0)

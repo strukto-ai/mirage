@@ -346,11 +346,6 @@ export function operandFollow(
   }
 }
 
-export interface PreparedMv {
-  items: (string | PathSpec)[]
-  early: RedirectResult | null
-}
-
 /** Resolve the destination directory without transferring any source. */
 export async function prepareMv(
   links: NamespaceLinks,
@@ -358,10 +353,10 @@ export async function prepareMv(
   items: (string | PathSpec)[],
   args: readonly string[],
   cwd: string,
-): Promise<PreparedMv> {
+): Promise<[(string | PathSpec)[], RedirectResult | null]> {
   const paths = items.filter((p): p is PathSpec => p instanceof PathSpec)
   const spec = SPECS.mv
-  if (spec === undefined) return { items, early: null }
+  if (spec === undefined) return [items, null]
   const fl = new FlagView(parseToKwargs(parseCommand(spec, [...args], cwd, 'mv')), spec)
   const target = fl.raw('target_directory')
   if (target !== undefined || paths.length > 2) {
@@ -370,7 +365,7 @@ export async function prepareMv(
   const src = paths[0]
   const dst = paths[1]
   if (paths.length !== 2 || src === undefined || dst === undefined) {
-    return { items, early: null }
+    return [items, null]
   }
   return preparePair(links, dispatch, items, src, dst, fl)
 }
@@ -395,7 +390,7 @@ function prepareMany(
   items: (string | PathSpec)[],
   paths: readonly PathSpec[],
   target: FlagValue | undefined,
-): PreparedMv {
+): [(string | PathSpec)[], RedirectResult | null] {
   let dst: PathSpec | undefined
   if (target !== undefined) {
     const spelled =
@@ -408,12 +403,12 @@ function prepareMany(
     dst = paths[paths.length - 1]
   }
   if (dst?.walkError !== null) {
-    return { items, early: null }
+    return [items, null]
   }
   const followed = followPaths(links, [dst])[0]
-  if (!(followed instanceof PathSpec)) return { items, early: null }
+  if (!(followed instanceof PathSpec)) return [items, null]
   const rewritten = items.map((item) => (item === dst ? followed : item))
-  return { items: rewritten, early: null }
+  return [rewritten, null]
 }
 
 // A two-operand `mv`: one source and the destination it replaces or lands
@@ -425,7 +420,7 @@ async function preparePair(
   src: PathSpec,
   dst: PathSpec,
   fl: FlagView,
-): Promise<PreparedMv> {
+): Promise<[(string | PathSpec)[], RedirectResult | null]> {
   if (src.walkError !== null || dst.walkError !== null) {
     // The walk refused the operand, so there is no entry to move or land
     // on; the generic mv reports it through its own stat, which cannot see
@@ -436,13 +431,13 @@ async function preparePair(
         'mv',
         `mv: cannot overwrite directory '' with non-directory '${src.rawPath}'\n`,
       )
-      return { items, early }
+      return [items, early]
     }
     if (dst.walkError === 'ELOOP' && src.walkError === null && links.isLink(src.virtual)) {
       const early = fail('mv', `mv: cannot stat '${dst.rawPath}': ${posixPhrase('ELOOP')}\n`)
-      return { items, early }
+      return [items, early]
     }
-    return { items, early: null }
+    return [items, null]
   }
 
   // Where the move lands: inside a directory destination (followed, so
@@ -464,14 +459,14 @@ async function preparePair(
     if (!isRefusal(err)) throw err
     // A refused destination: the generic mv names it through its stat.
     logger.debug?.(`mv: destination ${dst.virtual} refused: ${String(err)}`)
-    return { items, early: null }
+    return [items, null]
   }
   const intoDir =
     !fl.asBool('no_target_directory') && stat !== null && stat.type === FileType.DIRECTORY
   if (links.isLink(src.virtual)) {
     if (src.rawPath.endsWith('/')) {
       const early = await slashedLinkRefusal(links, dispatch, src, dst, stat)
-      return { items, early }
+      return [items, early]
     }
     if (!intoDir && dst.rawPath.endsWith('/')) {
       // rename(2) never follows the source, so a link is not a directory
@@ -488,7 +483,7 @@ async function preparePair(
               'mv',
               `mv: cannot move '${src.rawPath}' to '${dst.rawPath}': ${posixPhrase(condition ?? 'ENOTDIR')}\n`,
             )
-      return { items, early }
+      return [items, early]
     }
   }
 
@@ -496,5 +491,5 @@ async function preparePair(
     intoDir && links.isLink(dst.virtual)
       ? items.map((item) => (item === dst ? (followPaths(links, [dst])[0] ?? dst) : item))
       : items
-  return { items: rewritten, early: null }
+  return [rewritten, null]
 }

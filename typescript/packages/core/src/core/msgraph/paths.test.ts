@@ -16,16 +16,16 @@ import { OneDriveVFS } from '../../vfs/onedrive/onedrive.ts'
 import { SharePointVFS } from '../../vfs/sharepoint/sharepoint.ts'
 import { PathSpec } from '../../types.ts'
 import { resolveMsGraphConfig } from './config.ts'
-import { DriveLoc, type DriveRef, type DriveUrl } from './drive.ts'
+import { DriveLoc } from './drive.ts'
 
 const BASE = 'https://graph.microsoft.com/v1.0/me/drive'
 
-const itemUrl: DriveUrl = (path, action = '') => {
+const itemUrl = (path: string, action = ''): string => {
   if (path === '') return `${BASE}/root${action}`
   const stem = `${BASE}/root:/${path}`
   return action !== '' ? `${stem}:${action}` : stem
 }
-const refPath: DriveRef = (folder = '') =>
+const refPath = (folder = ''): string =>
   folder !== '' ? `/me/drive/root:/${folder}` : '/me/drive/root:'
 
 function loc(path: string, drive = ''): DriveLoc {

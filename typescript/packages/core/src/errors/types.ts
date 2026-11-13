@@ -59,29 +59,6 @@ export type FsCondition =
   | 'NO_XATTR'
   | 'STALE_WRITE'
 
-export const FS_CONDITIONS: readonly FsCondition[] = [
-  'EBADF',
-  'ENOENT',
-  'ENOTDIR',
-  'EISDIR',
-  'EEXIST',
-  'EACCES',
-  'EPERM',
-  'ENOTEMPTY',
-  'EXDEV',
-  'ENOTSUP',
-  'ELOOP',
-  'EINVAL',
-  'EIO',
-  'EBUSY',
-  'EROFS',
-  'EFBIG',
-  'EDQUOT',
-  'EPIPE',
-  'NO_XATTR',
-  'STALE_WRITE',
-]
-
 /** One condition's POSIX rendering: errno plus strerror text. */
 export interface PosixErrno {
   errno: number

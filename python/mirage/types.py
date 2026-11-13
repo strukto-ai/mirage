@@ -321,7 +321,6 @@ JsonValue: TypeAlias = (
 # resume from (None for the first page) and returns the decoded reply.
 PageFetch: TypeAlias = Callable[[str | None], Awaitable[dict[str, Any]]]
 
-ReadBytesFn: TypeAlias = Callable[..., Awaitable[bytes]]
 ReadStreamFn: TypeAlias = Callable[..., AsyncIterator[bytes]]
 # A "polymorphic" reader is the loose `read` contract head/tail/wc
 # accept: a backend may hand back materialized bytes, an awaitable of

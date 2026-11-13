@@ -3,7 +3,6 @@ import {
   DEFAULT_PROCESS_PERMISSIONS,
   layerProcesses,
   nearer,
-  parseProcessPermissions,
   restrictProcesses,
   statedProcesses,
 } from './config.ts'
@@ -15,7 +14,7 @@ it('an unstated block caps at MAX_PROCESSES', () => {
     kill: 'session',
     max: MAX_PROCESSES,
   })
-  expect(parseProcessPermissions({ max: null }).max).toBeNull()
+  expect(layerProcesses([{ max: null }]).max).toBeNull()
   expect(statedProcesses({ max: 4 })).toEqual({ max: 4 })
 })
 
@@ -33,10 +32,10 @@ it('keeps an inherited kill within the list above it', () => {
 })
 
 it('restricts only the fields the inline block states', () => {
-  const own = parseProcessPermissions({ list: 'workspace', kill: 'workspace', max: 9 })
+  const own = layerProcesses([{ list: 'workspace', kill: 'workspace', max: 9 }])
   expect(restrictProcesses(own, { max: 2 })).toEqual({ ...own, max: 2 })
-  expect(restrictProcesses(own, { list: 'session' })).toEqual(parseProcessPermissions({ max: 9 }))
-  expect(restrictProcesses(parseProcessPermissions({ max: null }), { max: 5 }).max).toBe(5)
+  expect(restrictProcesses(own, { list: 'session' })).toEqual(layerProcesses([{ max: 9 }]))
+  expect(restrictProcesses(layerProcesses([{ max: null }]), { max: 5 }).max).toBe(5)
 })
 
 it('still refuses one block whose kill reaches past its own list', () => {

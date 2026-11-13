@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
 from collections.abc import Awaitable, Callable
 from functools import partial
 
@@ -29,9 +28,6 @@ from mirage.core.databricks_volume.types import FileMetadata
 from mirage.errors.fs import listing_error
 from mirage.types import DirListing, FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
-
-logger = logging.getLogger(__name__)
-SCOPE_ERROR = 10_000
 
 
 async def _exists(
@@ -87,13 +83,6 @@ async def readdir(
                 partial(_exists, accessor, get_directory_metadata),
             ) from exc
         raise
-    if len(entries) > SCOPE_ERROR:
-        logger.warning(
-            "databricks_volume readdir: %s returned %d entries (limit %d)",
-            list_path.virtual,
-            len(entries),
-            SCOPE_ERROR,
-        )
     rows: list[FileStat] = []
     for entry in sorted(entries, key=lambda item: item.path):
         name = entry.path.rstrip("/").rsplit("/", 1)[-1]

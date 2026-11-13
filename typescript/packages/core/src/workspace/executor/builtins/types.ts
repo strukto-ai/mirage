@@ -13,9 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RedirectResult } from '../../../context/session_context.ts'
-import type { ByteSource, IOResult } from '../../../io/types.ts'
-import type { Runtime } from '../../../runtime/base.ts'
-import type { DispatchFn, RouteDecision } from '../../../runtime/types.ts'
+import type { ByteSource } from '../../../io/types.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
 import type { CallStack } from '../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../shell/console/index.ts'
 import type { JobTable } from '../../../execution/job/index.ts'
@@ -25,26 +24,6 @@ import type { Argv } from '../../expand/argv.ts'
 import type { ExecuteFn } from '../../expand/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
-import type { SessionState } from '../../session/session.ts'
-
-/**
- * Runs a text line in a session, as `eval`, `source`, `bash -c`,
- * `command`, `env`, `mapfile`, `timeout` and `xargs` all need it.
- */
-export type ExecuteStringFn = (
-  script: string,
-  opts: {
-    sessionId: string
-    context?: EvaluationContext
-    session?: SessionState
-    stdin?: ByteSource | null
-    signal?: AbortSignal
-    sink?: JobConsole
-    callStack?: CallStack
-    jobTable?: JobTable
-    routingDecision?: RouteDecision<Runtime>
-  },
-) => Promise<IOResult>
 
 /**
  * One shell-builtin invocation, as the dispatcher hands it to the table.

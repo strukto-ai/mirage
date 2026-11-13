@@ -28,7 +28,6 @@ from mirage.core.github.client import (
     github_headers,
     github_request,
     github_request_response,
-    github_url,
     graphql_url,
 )
 from mirage.core.github.config import GhConfig, GitHubConfig
@@ -60,36 +59,6 @@ async def test_fetch_blob_binary(mock_get):
     account = GitHubAccount(GhConfig(token="ghp_test"))
     result = await fetch_blob(account, "acme", "proj", "sha456")
     assert result == content
-
-
-def test_github_url_simple():
-    url = github_url(
-        "/repos/{owner}/{repo}/git/trees/{sha}",
-        owner="acme",
-        repo="proj",
-        sha="abc123",
-    )
-    assert url == "https://api.github.com/repos/acme/proj/git/trees/abc123"
-
-
-def test_github_url_no_params():
-    url = github_url("/rate_limit")
-    assert url == "https://api.github.com/rate_limit"
-
-
-def test_github_url_none_base_url_falls_back():
-    url = github_url("/repos/{owner}/{repo}", None, owner="acme", repo="proj")
-    assert url == "https://api.github.com/repos/acme/proj"
-
-
-def test_github_url_honours_base_url():
-    url = github_url(
-        "/repos/{owner}/{repo}",
-        "http://127.0.0.1:5095",
-        owner="acme",
-        repo="proj",
-    )
-    assert url == "http://127.0.0.1:5095/repos/acme/proj"
 
 
 def test_config_base_url_defaults_to_none():

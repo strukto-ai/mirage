@@ -12,15 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import type * as daytonaSdk from '@daytonaio/sdk'
 
 export type DaytonaSdk = typeof daytonaSdk
-
-/** Load the optional host SDK at the runtime boundary. */
-export function loadSdk(): Promise<DaytonaSdk> {
-  return loadOptionalPeer(() => import('@daytonaio/sdk'), {
-    feature: "the 'daytona' runtime",
-    packageName: '@daytonaio/sdk',
-  })
-}

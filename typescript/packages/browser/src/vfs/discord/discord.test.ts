@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VFSName } from '@struktoai/mirage-core/types'
-import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { redactedConfigDump } from '@struktoai/mirage-core/vfs/secrets'
 import { backendCommands } from '@struktoai/mirage-core/workspace/mount/backends'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildVfs } from '../registry.ts'
@@ -78,11 +78,11 @@ describe('DiscordVFS (browser)', () => {
 
 describe('DiscordConfig redaction (browser)', () => {
   it('keeps proxyUrl in clear, redacts getHeaders only when present', () => {
-    expect(redactConfigWithSchema(DiscordConfig, { proxyUrl: '/p' })).toEqual({
+    expect(redactedConfigDump(DiscordConfig, { proxyUrl: '/p' })).toEqual({
       proxyUrl: '/p',
     })
     const headers = (): Record<string, string> => ({})
-    expect(redactConfigWithSchema(DiscordConfig, { proxyUrl: '/p', getHeaders: headers })).toEqual({
+    expect(redactedConfigDump(DiscordConfig, { proxyUrl: '/p', getHeaders: headers })).toEqual({
       proxyUrl: '/p',
       getHeaders: '<REDACTED>',
     })

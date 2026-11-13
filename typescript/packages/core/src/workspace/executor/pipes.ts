@@ -44,7 +44,6 @@ import type { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import { StatementRecorder } from '../node/program.ts'
 import { divertStatement, divertedFile } from './builtins/exec/index.ts'
-import type { ExecuteStringFn } from './builtins/types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, ended, isUnwinding } from './control.ts'
 import {
@@ -337,7 +336,7 @@ export async function handleConnection(
   context: EvaluationContext,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
-  executeFn: ExecuteStringFn | null = null,
+  executeFn: ExecuteFn | null = null,
 ): Promise<RedirectResult> {
   const session = context.session
   const bound = fd0Binding(session)
@@ -474,7 +473,7 @@ export async function handleSubshell(
   callStack = (callStack ?? new CallStack()).fork(false, true)
   // The subshell's actions run as its own lines: their `wait` and `jobs`
   // see the subshell's jobs, not the caller's.
-  const runAction: ExecuteStringFn | null =
+  const runAction: ExecuteFn | null =
     executeFn === null
       ? null
       : (action, opts) =>

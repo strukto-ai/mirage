@@ -14,7 +14,7 @@
 
 import { timeoutShape } from '../core/api/config.ts'
 import type { ConfigOf, RedactedSchema } from './secrets.ts'
-import { FIELD_NORMALIZERS, redactConfigWithSchema, secretStr, z } from './secrets.ts'
+import { FIELD_NORMALIZERS, redactedConfigDump, secretStr, z } from './secrets.ts'
 import type { ConfigState } from './types.ts'
 import type { S3Config } from './direct/s3.ts'
 import { S3_FAMILY_RENAME } from './s3/config.ts'
@@ -175,7 +175,7 @@ export function makeS3Alias<S extends z.ZodObject>(options: {
       ...(config.timeout !== undefined ? { timeout: config.timeout } : {}),
       ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
     }),
-    redact: (config) => redactConfigWithSchema(schema, { ...config, ...resolved(config) }),
+    redact: (config) => redactedConfigDump(schema, { ...config, ...resolved(config) }),
   }
   return Object.assign(schema.clone(), alias)
 }

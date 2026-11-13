@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { SessionState } from '../session/session.ts'
-import type { ExecuteStringFn } from './builtins/types.ts'
+import type { ExecuteFn } from '../expand/types.ts'
 import { liftFunctionTraps, restoreFunctionTraps, runExitTrap } from './traps.ts'
 
 const DEC = new TextDecoder()
@@ -34,9 +34,9 @@ interface Call {
   callStack: CallStack | undefined
 }
 
-function recorder(result: IOResult): { run: ExecuteStringFn; calls: Call[] } {
+function recorder(result: IOResult): { run: ExecuteFn; calls: Call[] } {
   const calls: Call[] = []
-  const run: ExecuteStringFn = (line, opts) => {
+  const run: ExecuteFn = (line, opts) => {
     calls.push({ line, stdin: opts.stdin, callStack: opts.callStack })
     return Promise.resolve(result)
   }

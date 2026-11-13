@@ -27,6 +27,7 @@ import { DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { sleep } from '../../utils/abort.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
+import { asObject, pickString, stringOf } from '../../utils/records.ts'
 import { windowFor } from '../../utils/ranges.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -53,22 +54,19 @@ import { checkItem } from './paths.ts'
 const SIMPLE_UPLOAD_MAX = 4 * 1024 * 1024
 const UPLOAD_CHUNK = 10 * 327680
 
-export type DriveUrl = (path: string, action?: string) => string
-export type DriveRef = (folder?: string) => string
-
 export class DriveLoc {
   readonly drive: string
   readonly path: string
   readonly virtual: string
-  private readonly url: DriveUrl
-  private readonly ref: DriveRef
+  private readonly url: (path: string, action?: string) => string
+  private readonly ref: (folder?: string) => string
 
   constructor(init: {
     drive: string
     path: string
     virtual: string
-    url: DriveUrl
-    ref: DriveRef
+    url: (path: string, action?: string) => string
+    ref: (folder?: string) => string
   }) {
     this.drive = init.drive
     this.path = init.path
@@ -130,16 +128,8 @@ export function virtualKey(path: PathSpec): string {
   return target.vfsPath !== '' ? `${prefix}/${target.vfsPath}` : prefix !== '' ? prefix : '/'
 }
 
-function asString(value: unknown): string | null {
-  return typeof value === 'string' ? value : null
-}
-
 export function asNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
-function isFolder(item: Record<string, unknown>): boolean {
-  return item.folder !== undefined
 }
 
 // Graph returns the folder facet's childCount by default, so `-empty` needs
@@ -172,15 +162,12 @@ async function copyOnce(
     })
     const result = await pollMonitor(monitor, config.timeout)
     if (result.status === 'completed') return null
-    const error =
-      result.error !== null && typeof result.error === 'object' && !Array.isArray(result.error)
-        ? (result.error as Record<string, unknown>)
-        : {}
+    const error = asObject(result.error)
     if (result.status === 'failed') {
       return new GraphError(
         500,
-        asString(error.code) ?? 'copyFailed',
-        asString(error.message) ?? `copy ${src.path} -> ${dst.path} failed`,
+        pickString(error, 'code') ?? 'copyFailed',
+        pickString(error, 'message') ?? `copy ${src.path} -> ${dst.path} failed`,
       )
     }
     throw new GraphError(504, 'copyTimeout', `copy ${src.path} -> ${dst.path} not confirmed`)
@@ -215,11 +202,11 @@ export async function copyTree(
   }
   const srcItem = await graphGet(config, src.item())
   const dstItem = await graphGet(config, dst.item())
-  if (isFolder(srcItem) && isFolder(dstItem)) {
+  if (srcItem.folder !== undefined && dstItem.folder !== undefined) {
     // GNU cp -r merges into an existing directory; Graph never merges
     // folders, so recurse per child instead.
     for (const child of await graphList(config, src.item('/children'))) {
-      const name = asString(child.name) ?? ''
+      const name = stringOf(child, 'name')
       await copyTree(
         config,
         src.child(name),
@@ -230,7 +217,7 @@ export async function copyTree(
     }
     return
   }
-  if (isFolder(srcItem) || isFolder(dstItem)) {
+  if (srcItem.folder !== undefined || dstItem.folder !== undefined) {
     throw new GraphError(409, conflict.code, conflict.message)
   }
   await graphDelete(config, dst.item())
@@ -279,7 +266,7 @@ export async function renameReplace(
       throw error
     }
     const destination = await graphGet(config, dst.item())
-    if (isFolder(destination)) {
+    if (destination.folder !== undefined) {
       const children = await graphList(config, dst.item('/children'))
       if (children.length > 0) throw error
     }
@@ -356,7 +343,7 @@ async function uploadSessionWrite(
   const session = await graphPost(config, sessionUrl, {
     item: { '@microsoft.graph.conflictBehavior': 'replace' },
   })
-  const uploadUrl = asString(session.uploadUrl)
+  const uploadUrl = pickString(session, 'uploadUrl')
   if (uploadUrl === null) throw new GraphError(502, 'missingUploadUrl', sessionUrl)
   const total = sizeOf(data)
   let start = 0
@@ -421,15 +408,15 @@ export async function writeItem(
 }
 
 function entryStat(item: Record<string, unknown>): FileStat {
-  const name = asString(item.name) ?? ''
-  if (isFolder(item)) {
+  const name = stringOf(item, 'name')
+  if (item.folder !== undefined) {
     // Graph's folder `size` is aggregate storage metadata, not the byte
     // length of any rendered content: keep it out of FileStat.size (see
     // CLAUDE.md FUSE rules) and expose it as `extra.size_bytes`.
     return new FileStat({
       name,
       type: FileType.DIRECTORY,
-      modified: asString(item.lastModifiedDateTime),
+      modified: pickString(item, 'lastModifiedDateTime'),
       extra: { size_bytes: asNumber(item.size), child_count: folderChildCount(item) },
     })
   }
@@ -438,8 +425,8 @@ function entryStat(item: Record<string, unknown>): FileStat {
     type: FileType.FILE,
     content: contentTypeForPath(name),
     size: asNumber(item.size),
-    modified: asString(item.lastModifiedDateTime),
-    fingerprint: asString(item.cTag),
+    modified: pickString(item, 'lastModifiedDateTime'),
+    fingerprint: pickString(item, 'cTag'),
     extra: { id: item.id, ctag: item.cTag, etag: item.eTag },
   })
 }
@@ -449,13 +436,12 @@ function currentVersionId(versions: Record<string, unknown>[]): string | null {
   for (const version of versions) {
     if (
       current === null ||
-      (asString(version.lastModifiedDateTime) ?? '') >
-        (asString(current.lastModifiedDateTime) ?? '')
+      stringOf(version, 'lastModifiedDateTime') > stringOf(current, 'lastModifiedDateTime')
     ) {
       current = version
     }
   }
-  return current === null ? null : asString(current.id)
+  return current === null ? null : pickString(current, 'id')
 }
 
 // The item's cTag, current version and download URL, in one GET. Callers
@@ -483,9 +469,9 @@ async function captureItemMetadata(
       )
     : []
   return [
-    asString(item.cTag),
+    pickString(item, 'cTag'),
     currentVersionId(history),
-    asString(item['@microsoft.graph.downloadUrl']),
+    pickString(item, '@microsoft.graph.downloadUrl'),
   ]
 }
 
@@ -588,8 +574,8 @@ async function* walkTree(
   loc: DriveLoc,
 ): AsyncIterable<[string, Record<string, unknown>, boolean]> {
   for (const child of await graphList(config, loc.item('/children'))) {
-    const childLoc = loc.child(asString(child.name) ?? '')
-    const folder = isFolder(child)
+    const childLoc = loc.child(stringOf(child, 'name'))
+    const folder = child.folder !== undefined
     yield [childLoc.virtual, child, folder]
     if (folder) yield* walkTree(config, childLoc)
   }
@@ -641,7 +627,7 @@ export async function deltaTree(
     return null
   }
   const topId = top.id
-  if (!isFolder(top) || typeof topId !== 'string') return null
+  if (top.folder === undefined || typeof topId !== 'string') return null
   let rows: Record<string, unknown>[]
   try {
     rows = await graphList(config, loc.item('/delta'))
@@ -658,7 +644,7 @@ export async function deltaTree(
   }
   const folders = new Map<string, Record<string, unknown>>()
   for (const [id, item] of items) {
-    if (isFolder(item) && item.deleted === undefined) folders.set(id, item)
+    if (item.folder !== undefined && item.deleted === undefined) folders.set(id, item)
   }
   if (!folders.has(topId)) return null
   for (const item of folders.values()) if (remoteFolder(item)) return null
@@ -669,7 +655,7 @@ export async function deltaTree(
   const places = new Map<string, string | null>([[topId, '']])
   const found = new Map<string, FileStat>()
   for (const [id, item] of items) {
-    const name = asString(item.name)
+    const name = pickString(item, 'name')
     if (id === topId || item.deleted !== undefined || item.root !== undefined) continue
     if (name === null || name === '') continue
     const base = placed(parentId(item), folders, places)
@@ -834,7 +820,7 @@ function placed(
   let base = places.get(current) ?? null
   for (const link of chain.reverse()) {
     if (base !== null) {
-      const name = asString(folders.get(link)?.name) ?? ''
+      const name = stringOf(folders.get(link) ?? {}, 'name')
       base = base !== '' && name !== '' ? `${base}/${name}` : name !== '' ? name : null
     }
     places.set(link, base)

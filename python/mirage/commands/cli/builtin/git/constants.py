@@ -56,6 +56,14 @@ GIT_SPACE = b" \t\n\r"
 # its repository under.
 GIT_DIR = ".git"
 
+# Where the object database keeps loose objects and packs, the suffix
+# of a pack's index, and how many hex digits of an id name the
+# directory a loose object is filed under.
+OBJECTS_DIR = "objects"
+PACK_DIR = "objects/pack"
+IDX_SUFFIX = ".idx"
+FANOUT_LEN = 2
+
 # The pretty kinds a placeholder template spells, and the kinds that end
 # every entry with a newline rather than separating entries by one.
 TEMPLATE_KINDS = ("format", "tformat")

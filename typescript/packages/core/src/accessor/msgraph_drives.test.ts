@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseConfigWithSchema, redactConfigWithSchema } from '../vfs/secrets.ts'
+import { parseConfigWithSchema, redactedConfigDump } from '../vfs/secrets.ts'
 import { OneDriveAccessor, OneDriveConfig } from './onedrive.ts'
 import { SharePointConfig } from './sharepoint.ts'
 
@@ -21,7 +21,7 @@ describe('Microsoft Graph config schema', () => {
     })
 
     expect(config.accessToken).toBe(provider)
-    expect(redactConfigWithSchema(OneDriveConfig, config)).toEqual({
+    expect(redactedConfigDump(OneDriveConfig, config)).toEqual({
       accessToken: '<REDACTED>',
       driveId: 'drive',
     })
@@ -41,13 +41,11 @@ describe('Microsoft Graph config schema', () => {
   })
 
   it('redacts the token whether it is a literal or a provider', () => {
-    expect(
-      redactConfigWithSchema(SharePointConfig, { accessToken: 'literal', site: 'Team' }),
-    ).toEqual({
+    expect(redactedConfigDump(SharePointConfig, { accessToken: 'literal', site: 'Team' })).toEqual({
       accessToken: '<REDACTED>',
       site: 'Team',
     })
-    expect(redactConfigWithSchema(SharePointConfig, { accessToken: () => 'minted' })).toEqual({
+    expect(redactedConfigDump(SharePointConfig, { accessToken: () => 'minted' })).toEqual({
       accessToken: '<REDACTED>',
     })
   })

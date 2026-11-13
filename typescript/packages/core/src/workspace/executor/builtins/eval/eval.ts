@@ -19,7 +19,8 @@ import type { JobConsole } from '../../../../shell/console/index.ts'
 import { ExitSignal } from '../../../../shell/errors.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
-import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
+import type { BuiltinCall } from '../types.ts'
+import type { ExecuteFn } from '../../../expand/types.ts'
 
 /**
  * Run the words as a line of the caller's own: in its frame, so `$1`,
@@ -28,7 +29,7 @@ import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
  * handle_eval.
  */
 export async function handleEval(
-  executeFn: ExecuteStringFn,
+  executeFn: ExecuteFn,
   args: string[],
   session: SessionState,
   stdin: ByteSource | null = null,

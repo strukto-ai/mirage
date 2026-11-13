@@ -20,6 +20,7 @@ from mirage.commands.builtin.utils.constants import (
     STDIN_OPERAND,
 )
 from mirage.commands.builtin.utils.links import LinkResolver
+from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.stream import operand_label
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -86,7 +87,7 @@ async def zgrep_generic(
     pattern, never_match = await resolve_pattern(
         texts,
         fl,
-        read,
+        normalized_read(read),
         ZGREP_NO_PATTERN,
     )
     f = parse_flags(fl, never_match)

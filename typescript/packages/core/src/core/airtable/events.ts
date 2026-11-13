@@ -13,7 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { AirtableAccessor } from '../../accessor/airtable.ts'
-import { Delta, FileChangeKind, type JsonValue, type PathSpec } from '../../types.ts'
+import {
+  Delta,
+  FileChangeKind,
+  type JsonObject,
+  type JsonValue,
+  type PathSpec,
+} from '../../types.ts'
 import { sortedJson } from '../../utils/sort.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { DeltaHook } from '../../events/base.ts'
@@ -21,7 +27,7 @@ import { eventsUnder, lostAt } from '../../events/delta.ts'
 import { eventAt, textField } from '../../events/payload.ts'
 import { listBases, listTables, listWebhooks, webhookPayloads } from './client.ts'
 import { AirtableApiError } from './errors.ts'
-import { asRow, asRows, type Row } from './normalize.ts'
+import { asRow, asRows } from './normalize.ts'
 import { baseDirname, tableDirname } from './pathing.ts'
 import { detectScope } from './scope.ts'
 
@@ -166,12 +172,12 @@ export class AirtableDeltaHook implements DeltaHook {
     baseId: string,
     hookId: string,
     from: number,
-  ): Promise<{ found: Row[]; cursor: number | null; lost: boolean }> {
-    const found: Row[] = []
+  ): Promise<{ found: JsonObject[]; cursor: number | null; lost: boolean }> {
+    const found: JsonObject[] = []
     let cursor = from
     let lost = false
     for (;;) {
-      let page: Row
+      let page: JsonObject
       try {
         page = await webhookPayloads(this.accessor, baseId, hookId, cursor)
       } catch (err) {
@@ -195,7 +201,7 @@ export class AirtableDeltaHook implements DeltaHook {
   private async map(
     baseId: string,
     feed: BaseFeed,
-    payload: Row,
+    payload: JsonObject,
     changes: Changes,
   ): Promise<boolean> {
     if (payload.error === true) return true

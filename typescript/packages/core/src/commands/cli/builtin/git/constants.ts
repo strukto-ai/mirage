@@ -60,6 +60,14 @@ export const GIT_SPACE: ReadonlySet<number> = new Set([0x20, 0x09, 0x0a, 0x0d])
 // repository under.
 export const GIT_DIR = '.git'
 
+// Where the object database keeps loose objects and packs, the suffix of a
+// pack's index, and how many hex digits of an id name the directory a loose
+// object is filed under.
+export const OBJECTS_DIR = 'objects'
+export const PACK_DIR = 'objects/pack'
+export const IDX_SUFFIX = '.idx'
+export const FANOUT_LEN = 2
+
 // The pretty kinds a placeholder template spells, and the kinds that end every
 // entry with a newline rather than separating entries by one.
 export const TEMPLATE_KINDS: readonly string[] = ['format', 'tformat']

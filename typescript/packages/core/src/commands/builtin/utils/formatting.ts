@@ -108,7 +108,8 @@ export function scaledSize(n: number, block: BlockSize | null, human: boolean): 
   if (block === null) return human ? humanSize(n) : String(n)
   if (block.humanBase === 1000) return humanScaled(n, 1000, ['', 'k', 'M', 'G', 'T', 'P', 'E'])
   if (block.humanBase !== null) return humanSize(n)
-  return `${ceilDiv(BigInt(Math.trunc(n)), block.divisor).toString()}${block.suffix}`
+  const count = BigInt(Math.trunc(n))
+  return `${((count + block.divisor - 1n) / block.divisor).toString()}${block.suffix}`
 }
 
 /**
@@ -128,10 +129,6 @@ export function scaledSize(n: number, block: BlockSize | null, human: boolean): 
  * @param units suffixes indexed by power; index 0 is unused because a
  *   sub-unit count carries no suffix at all
  */
-function ceilDiv(a: bigint, b: bigint): bigint {
-  return (a + b - 1n) / b
-}
-
 export function humanScaled(n: number, base: number, units: readonly string[]): string {
   if (n < base) return String(n)
   // BigInt, not number: `n * 10` leaves the safe-integer range a little
@@ -146,13 +143,13 @@ export function humanScaled(n: number, base: number, units: readonly string[]): 
   let i = 1
   let divisor = big
   for (;;) {
-    const tenths = ceilDiv(value * 10n, divisor)
+    const tenths = (value * 10n + divisor - 1n) / divisor
     if (tenths < 100n) {
       const unit = (tenths / 10n).toString()
       const decimal = (tenths % 10n).toString()
       return `${unit}.${decimal}${units[i] ?? ''}`
     }
-    const whole = ceilDiv(value, divisor)
+    const whole = (value + divisor - 1n) / divisor
     if (whole < big || i === units.length - 1) return `${whole.toString()}${units[i] ?? ''}`
     i += 1
     divisor *= big

@@ -51,16 +51,6 @@ from mirage.workspace.session import SessionState
 
 logger = logging.getLogger(__name__)
 
-# GNU's phrase for a refused attribute write, per command
-# (`chmod: changing permissions of 'f': Read-only file system`); `touch`
-# reaches it only for `-h`, which never creates.
-ATTR_ACTIONS = {
-    "chmod": "changing permissions of",
-    "chown": "changing ownership of",
-    "chgrp": "changing group of",
-    "touch": "setting times of",
-}
-
 
 def parse_owner(text: str) -> tuple[int | str | None, int | str | None]:
     """Parse a chown OWNER[:GROUP] argument.
@@ -231,18 +221,15 @@ async def setattr_via(
     )
 
 
-async def apply_link_attrs(
+async def setattr_link(
     dispatch: DispatchFn,
-    cmd: str,
     path: PathSpec,
-    name: str,
-    errors: list[str],
     *,
     uid: int | str | None = None,
     gid: int | str | None = None,
     mtime: str | None = None,
 ) -> None:
-    """Setattr a link node itself (the ``-h`` family), collecting refusals.
+    """Setattr a link node itself (the ``-h`` family).
 
     Dispatched with ``nofollow`` so the dispatcher writes the link entry's own
     attrs instead of the target's; a link has no backend inode, so the
@@ -250,20 +237,14 @@ async def apply_link_attrs(
 
     Args:
         dispatch (DispatchFn): op dispatcher.
-        cmd (str): command name for the error message.
         path (PathSpec): the link's own path.
-        name (str): the link, as the line names it.
-        errors (list[str]): per-operand error accumulator.
         uid (int | str | None): owner id or name.
         gid (int | str | None): group id or name.
         mtime (str | None): ISO modification time.
     """
-    try:
-        await dispatch(
-            "setattr", path, uid=uid, gid=gid, mtime=mtime, nofollow=True
-        )
-    except PermissionError as exc:
-        errors.append(permission_error(cmd, ATTR_ACTIONS[cmd], name, exc))
+    await dispatch(
+        "setattr", path, uid=uid, gid=gid, mtime=mtime, nofollow=True
+    )
 
 
 def follow_operand(
@@ -336,37 +317,6 @@ async def resolve_operand(
         )
         return None
     return resolved, stat
-
-
-async def apply_attrs(
-    dispatch: DispatchFn,
-    cmd: str,
-    resolved: PathSpec,
-    name: str,
-    errors: list[str],
-    *,
-    mode: int | None = None,
-    uid: int | str | None = None,
-    gid: int | str | None = None,
-) -> None:
-    """Setattr one file, collecting its refusal: a read-only mount, or a
-    rule's or policy's deny, is that file's error and the command goes
-    on with the rest, as GNU does.
-
-    Args:
-        dispatch (DispatchFn): op dispatcher.
-        cmd (str): command name for the error message.
-        resolved (PathSpec): link-resolved target path.
-        name (str): the file, as the line names it.
-        errors (list[str]): per-operand error accumulator.
-        mode (int | None): permission bits (e.g. 0o644).
-        uid (int | str | None): owner id or name.
-        gid (int | str | None): group id or name.
-    """
-    try:
-        await setattr_via(dispatch, resolved, mode=mode, uid=uid, gid=gid)
-    except PermissionError as exc:
-        errors.append(permission_error(cmd, ATTR_ACTIONS[cmd], name, exc))
 
 
 # One entry of a walked subtree: its path, its stat, and the refusal it
@@ -802,6 +752,7 @@ async def change_owner(
     identity = Identity(profile=session.profile)
     user = None if uid is None else str(uid)
     group = None if gid is None else str(gid)
+    action = "changing ownership of" if cmd == "chown" else "changing group of"
     errors: list[str] = []
     out: list[str] = []
 
@@ -833,17 +784,23 @@ async def change_owner(
         ):
             out.append(owner_line(name, status, old, user, group))
 
+    async def own(path: PathSpec, name: str, link: bool) -> bool:
+        try:
+            if link:
+                await setattr_link(dispatch, path, uid=uid, gid=gid)
+            else:
+                await setattr_via(dispatch, path, uid=uid, gid=gid)
+        except PermissionError as exc:
+            errors.append(permission_error(cmd, action, name, exc))
+            return False
+        return True
+
     async def own_link(link: PathSpec, name: str) -> None:
         try:
             stat, _ = await dispatch("stat", link, nofollow=True)
         except (FileNotFoundError, NotADirectoryError):
             stat = None
-        before = len(errors)
-        if matches(stat):
-            await apply_link_attrs(
-                dispatch, cmd, link, name, errors, uid=uid, gid=gid
-            )
-        describe(name, stat, len(errors) > before)
+        describe(name, stat, matches(stat) and not await own(link, name, True))
 
     async def own_referent(link: PathSpec, name: str) -> None:
         try:
@@ -854,12 +811,9 @@ async def change_owner(
                 f"{cmd}: cannot dereference {shown}: {fs_strerror(exc)}\n"
             )
             return
-        before = len(errors)
-        if matches(stat):
-            await apply_attrs(
-                dispatch, cmd, link, name, errors, uid=uid, gid=gid
-            )
-        describe(name, stat, len(errors) > before)
+        describe(
+            name, stat, matches(stat) and not await own(link, name, False)
+        )
 
     # Under -H or -L a link the walk meets is changed through, unless -h
     # asks for the link itself; the walk goes on through it either way.
@@ -927,12 +881,10 @@ async def change_owner(
             elif itself and links.is_link(path.virtual):
                 await own_link(path, name)
             else:
-                before = len(errors)
-                if matches(path_stat):
-                    await apply_attrs(
-                        dispatch, cmd, path, name, errors, uid=uid, gid=gid
-                    )
-                describe(name, path_stat, len(errors) > before)
+                failed = matches(path_stat) and not await own(
+                    path, name, False
+                )
+                describe(name, path_stat, failed)
             # A directory whose listing was refused is reported however
             # its own change went, link or not.
             if isinstance(unread, PermissionError):

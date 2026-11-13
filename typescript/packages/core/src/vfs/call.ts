@@ -49,10 +49,6 @@ const NAMED: Partial<Record<Effect, readonly string[]>> = {
   [Effect.COPY]: ['copy', 'dir_copy'],
 }
 
-interface Marked {
-  [MARK]?: VfsCall
-}
-
 /**
  * Make a VFS method callable by name through the dispatcher.
  *
@@ -99,7 +95,7 @@ export function vfsCall(options: {
         `${name}: only ${names.join(', ')} may declare ${mark.effect.toUpperCase()}`,
       )
     }
-    ;(method as Marked)[MARK] = { name, ...mark }
+    ;(method as { [MARK]?: VfsCall })[MARK] = { name, ...mark }
   }
 }
 
@@ -113,7 +109,7 @@ export function declared(cls: { readonly prototype: unknown }, name: string): Vf
   let proto: unknown = cls.prototype
   while (typeof proto === 'object' && proto !== null) {
     const fn: unknown = Object.getOwnPropertyDescriptor(proto, method)?.value
-    const mark = typeof fn === 'function' ? (fn as Marked)[MARK] : undefined
+    const mark = typeof fn === 'function' ? (fn as { [MARK]?: VfsCall })[MARK] : undefined
     if (mark !== undefined) return mark
     proto = Object.getPrototypeOf(proto)
   }

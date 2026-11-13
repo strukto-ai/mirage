@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { AirtableAccessor } from '../../accessor/airtable.ts'
-import { parseConfigWithSchema, redactConfigWithSchema } from '../../vfs/secrets.ts'
+import { parseConfigWithSchema, redactedConfigDump } from '../../vfs/secrets.ts'
 import { AirtableConfig } from './config.ts'
 
 describe('airtable config', () => {
@@ -51,7 +51,7 @@ describe('airtable config', () => {
 
   it('redacts the token', () => {
     expect(
-      JSON.stringify(redactConfigWithSchema(AirtableConfig, { token: 'pat.secret' })),
+      JSON.stringify(redactedConfigDump(AirtableConfig, { token: 'pat.secret' })),
     ).not.toContain('pat.secret')
   })
 })

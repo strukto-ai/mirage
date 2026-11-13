@@ -30,7 +30,7 @@ import type { PathSpec } from '../../../../types.ts'
 
 import { FlagView } from '../../../spec/flag_view.ts'
 import { Argument } from '../../../spec/types.ts'
-import type { GwsMethod, GwsService } from './methods.ts'
+import type { GwsMethod } from './methods.ts'
 import { GWS_METHODS, SERVICE_BASES, gwsMethodDescription } from './methods.ts'
 
 const ENC = new TextEncoder()
@@ -313,7 +313,7 @@ function buildGroup(name: string, node: GroupNode): CommandSpec {
  * nested groups, so `gws gmail users messages get` walks like any other
  * tree path.
  */
-export function apiGroups(service: GwsService): CommandSpec[] {
+export function apiGroups(service: GwsMethod['service']): CommandSpec[] {
   const root = new Map<string, GroupNode>()
   for (const m of GWS_METHODS) {
     if (m.service !== service) continue

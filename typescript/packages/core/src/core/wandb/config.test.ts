@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseConfigWithSchema, redactConfigWithSchema } from '../../vfs/secrets.ts'
+import { parseConfigWithSchema, redactedConfigDump } from '../../vfs/secrets.ts'
 import { WandbConfig } from './config.ts'
 import { safeName } from './pathing.ts'
 
@@ -28,6 +28,6 @@ describe('W&B config', () => {
       page_size: 2,
     })
     expect(config.pageSize).toBe(2)
-    expect(JSON.stringify(redactConfigWithSchema(WandbConfig, config))).not.toContain('private-key')
+    expect(JSON.stringify(redactedConfigDump(WandbConfig, config))).not.toContain('private-key')
   })
 })

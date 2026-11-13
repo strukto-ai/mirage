@@ -17,7 +17,7 @@ import type { PathSpec } from '../../../../../types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import { teeGeneric } from '../../tee.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
-import { crossOpts, flatScopes, relayWrite, statOp, streamOp } from '../utils.ts'
+import { crossOpts, flatScopes, relayWrite, statOp } from '../utils.ts'
 
 // Copy stdin to outputs on several mounts with one tee. One run sees every
 // output, so --output-error=exit checks that each can be opened before any
@@ -32,6 +32,10 @@ export async function runTee(
   stdin: ByteSource | null,
   storageKey?: (path: PathSpec) => string,
 ): Promise<CrossResult> {
+  async function* stream(path: PathSpec): AsyncIterable<Uint8Array> {
+    const [data] = await dispatch('read', path)
+    yield (data as Uint8Array | null) ?? new Uint8Array()
+  }
   const write = (path: PathSpec, data: ByteSource): Promise<void> =>
     relayWrite(dispatch, path, data)
   const append = async (path: PathSpec, data: ByteSource): Promise<void> => {
@@ -41,7 +45,7 @@ export async function runTee(
     flatScopes(scopes),
     [],
     { ...crossOpts(flagKwargs), stdin },
-    streamOp(dispatch),
+    stream,
     write,
     append,
     statOp(dispatch),

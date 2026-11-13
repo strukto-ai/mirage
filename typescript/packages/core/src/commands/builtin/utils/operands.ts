@@ -296,13 +296,6 @@ export function operandsIo(err: string): IOResult {
   })
 }
 
-// A one-shot stream over already-materialized bytes, for feeding buffered
-// operands back through a stream transformer.
-// eslint-disable-next-line @typescript-eslint/require-await
-export async function* singleChunk(data: Uint8Array): AsyncIterable<Uint8Array> {
-  if (data.byteLength > 0) yield data
-}
-
 /** Report a deferred filesystem error while allowing later operands. */
 export async function* reportedStream(
   source: AsyncIterable<Uint8Array>,

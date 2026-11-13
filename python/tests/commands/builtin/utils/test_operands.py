@@ -18,14 +18,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage.commands.builtin.utils.operands import (
-    materialized_read,
-    merge_split_errors,
     normalized_read,
     operands_io,
     split_readable,
 )
 from mirage.io.stream import close_quietly
-from mirage.io.types import IOResult
 from mirage.types import FileStat, FileType, PathSpec
 
 
@@ -145,25 +142,6 @@ def test_operands_io_exit_codes():
 
 
 @pytest.mark.asyncio
-async def test_merge_split_errors_attaches_and_flips_exit():
-    out, io = await merge_split_errors((b"body", IOResult()), b"cat: x\n")
-    assert out == b"body"
-    assert io.exit_code == 1
-    assert io.stderr == b"cat: x\n"
-    out, io = await merge_split_errors((b"body", IOResult()), b"")
-    assert io.exit_code == 0
-    assert io.stderr is None
-
-
-@pytest.mark.asyncio
-async def test_merge_split_errors_appends_after_existing_stderr():
-    existing = IOResult(stderr=b"warn\n")
-    _, io = await merge_split_errors((None, existing), b"cat: x\n")
-    assert io.stderr == b"warn\ncat: x\n"
-    assert io.exit_code == 1
-
-
-@pytest.mark.asyncio
 async def test_normalized_read_accepts_bytes_awaitable_and_stream():
     async def gives_bytes(path):
         return b"bytes"
@@ -177,17 +155,3 @@ async def test_normalized_read_accepts_bytes_awaitable_and_stream():
     assert [c async for c in read(p)] == [b"bytes"]
     read = normalized_read(gives_stream)
     assert [c async for c in read(p)] == [b"st", b"ream"]
-
-
-@pytest.mark.asyncio
-async def test_materialized_read_accepts_bytes_awaitable_and_stream():
-    async def gives_bytes(path):
-        return b"bytes"
-
-    async def gives_stream(path):
-        yield b"st"
-        yield b"ream"
-
-    p = PathSpec.from_str_path("/f")
-    assert await materialized_read(gives_bytes)(p) == b"bytes"
-    assert await materialized_read(gives_stream)(p) == b"stream"

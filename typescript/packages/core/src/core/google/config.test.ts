@@ -15,13 +15,8 @@
 import { describe, expect, it } from 'vitest'
 import { errorSummary } from '../../secrets/summary.ts'
 import { GCalConfig } from '../../vfs/gcal/config.ts'
-import {
-  parseConfigWithSchema,
-  redactConfigWithSchema,
-  REDACTED_SECRET,
-  z,
-} from '../../vfs/secrets.ts'
-import { GOOGLE_CREDENTIAL_ERROR, GoogleConfig } from './config.ts'
+import { parseConfigWithSchema, redactedConfigDump, REDACTED_SECRET, z } from '../../vfs/secrets.ts'
+import { GoogleConfig } from './config.ts'
 
 describe('GoogleConfig', () => {
   it('accepts the refresh-token grant from snake_case', () => {
@@ -57,7 +52,7 @@ describe('GoogleConfig', () => {
   // first read.
   it('refuses a config naming no credential', () => {
     expect(() => parseConfigWithSchema(GoogleConfig, { api_base: 'http://localhost:1' })).toThrow(
-      GOOGLE_CREDENTIAL_ERROR,
+      'GoogleConfig needs either accessToken',
     )
   })
 
@@ -76,7 +71,7 @@ describe('GoogleConfig', () => {
       refreshFn,
     })
     expect(config.refreshFn).toBe(refreshFn)
-    expect(redactConfigWithSchema(GoogleConfig, config)).toEqual({
+    expect(redactedConfigDump(GoogleConfig, config)).toEqual({
       clientId: 'id',
       refreshToken: REDACTED_SECRET,
       refreshFn: REDACTED_SECRET,
@@ -84,10 +79,10 @@ describe('GoogleConfig', () => {
   })
 
   it('redacts a provider the same as a literal token', () => {
-    expect(redactConfigWithSchema(GoogleConfig, { accessToken: () => 'tok' }).accessToken).toBe(
+    expect(redactedConfigDump(GoogleConfig, { accessToken: () => 'tok' }).accessToken).toBe(
       REDACTED_SECRET,
     )
-    expect(redactConfigWithSchema(GoogleConfig, { accessToken: 'tok' }).accessToken).toBe(
+    expect(redactedConfigDump(GoogleConfig, { accessToken: 'tok' }).accessToken).toBe(
       REDACTED_SECRET,
     )
   })
@@ -121,7 +116,7 @@ describe('GoogleConfig', () => {
     })
     // `safeExtend` keeps the base's credential check.
     expect(() => parseConfigWithSchema(GCalConfig, { time_zone: 'UTC' })).toThrow(
-      GOOGLE_CREDENTIAL_ERROR,
+      'GoogleConfig needs either accessToken',
     )
   })
 })

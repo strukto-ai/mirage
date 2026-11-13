@@ -15,7 +15,7 @@
 import type { PathSpec } from '../../../../types.ts'
 import git, { Errors } from 'isomorphic-git'
 
-import { abbrevLength, type CommitFacts } from './format.ts'
+import { abbrevLength, FULL_SHA, type CommitFacts } from './format.ts'
 import { decodeText } from '../../../../shell/bytes.ts'
 import { configValues, gitFs } from './fs.ts'
 import { exists, readNames, readRange, writeFile } from './io.ts'
@@ -24,13 +24,11 @@ import { entryName } from '../../../../utils/remnants.ts'
 import { toHex } from '../../../../utils/hex.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { gitBool } from './util.ts'
-import { GITLINK_MODE, TREE_MODE } from './constants.ts'
+import { GITLINK_MODE, IDX_SUFFIX, OBJECTS_DIR, PACK_DIR, TREE_MODE } from './constants.ts'
 import { GitError } from './errors.ts'
 import type { RefObject, RepoLocation, TreeItem } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
 
-const PACK_DIR = 'objects/pack'
-const IDX_SUFFIX = '.idx'
 // A v2 pack index is a 8-byte header then 256 fanout entries; the last one is
 // the object count, so the total is four bytes at a fixed offset.
 const FANOUT_END = 8 + 256 * 4
@@ -39,13 +37,8 @@ const FANOUT_SIZE = 256 * 4
 // fanout, its entries an offset and a name each rather than names alone.
 const IDX_MAGIC = [0xff, 0x74, 0x4f, 0x63]
 const SHA_BYTES = 20
-const SPACE = 0x20
-const NUL = 0x00
-const SHORT_TREE_MODE = '40000'
 const DEC = new TextDecoder()
 const V1_OFFSET_BYTES = 4
-const OBJECTS_DIR = 'objects'
-const LOOSE_NAME_LENGTH = 38
 
 /**
  * A repository living in a mount, opened for reading.
@@ -184,7 +177,7 @@ export async function idsUnder(repo: Repo, fanout: string): Promise<string[]> {
   const loose = repo.location.commondir.join(`${OBJECTS_DIR}/${fanout}`)
   for (const entry of await readNames(repo.vfs, loose)) {
     const name = entryName(entry)
-    if (name.length === LOOSE_NAME_LENGTH) found.add(`${fanout}${name}`)
+    if (fanout.length + name.length === FULL_SHA) found.add(`${fanout}${name}`)
   }
   return [...found].sort(compareCodePoints)
 }
@@ -200,7 +193,8 @@ export async function rawObject(repo: Repo, oid: string): Promise<RefObject> {
 }
 
 /**
- * The entries of one tree object, read from its stored bytes.
+ * The entries of one tree object, read from its stored bytes: each one its
+ * mode, a space, its name, a NUL and its 20-byte id.
  *
  * Parsed here rather than through isomorphic-git's readTree, which refuses a
  * whole tree over one entry named `..` or `.git`, a tree git stores and reads
@@ -215,12 +209,12 @@ export async function storedItems(repo: Repo, treeOid: string): Promise<TreeItem
   if (type !== 'tree') throw new GitError(`unable to read tree (${treeOid})`)
   const items: TreeItem[] = []
   for (let at = 0; at < raw.length;) {
-    const space = raw.indexOf(SPACE, at)
-    const nul = space < 0 ? -1 : raw.indexOf(NUL, space)
+    const space = raw.indexOf(0x20, at)
+    const nul = space < 0 ? -1 : raw.indexOf(0x00, space)
     if (nul < 0 || nul + 1 + SHA_BYTES > raw.length)
       throw new GitError(`unable to read tree (${treeOid})`)
     const stored = DEC.decode(raw.subarray(at, space))
-    const mode = stored === SHORT_TREE_MODE ? TREE_MODE : stored
+    const mode = stored === '40000' ? TREE_MODE : stored
     items.push({
       path: decodeText(raw.subarray(space + 1, nul)),
       oid: toHex(raw.subarray(nul + 1, nul + 1 + SHA_BYTES)),

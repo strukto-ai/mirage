@@ -14,17 +14,12 @@
 
 import { Accessor } from './base.ts'
 import type { JaegerTransport } from '../core/jaeger/client.ts'
-
-export interface JaegerAccessorConfig {
-  defaultTraceLimit?: number
-  defaultFromTimestamp?: string
-  defaultToTimestamp?: string
-}
+import type { JaegerConfig } from '../vfs/jaeger/config.ts'
 
 export class JaegerAccessor extends Accessor {
   constructor(
     public readonly transport: JaegerTransport,
-    public readonly config: JaegerAccessorConfig = {},
+    public readonly config: JaegerConfig = {},
   ) {
     super()
   }

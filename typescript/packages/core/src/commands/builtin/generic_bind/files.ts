@@ -27,7 +27,7 @@ import { rstripSlash } from '../../../utils/slash.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import type { MountView, SessionAccess } from '../../../view/types.ts'
 import type { Context } from '../../config.ts'
-import { guardInput } from '../utils/limit.ts'
+import { chunks } from '../../../io/cooperative.ts'
 import {
   crossesMounts,
   followOf,
@@ -730,7 +730,7 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
       offset === 0 && size === null
         ? rawStream(path)
         : dispatchedStream(dispatch, path, offset, size)
-    return reading === undefined ? source : guardInput(source, ctx, reading.split)
+    return reading === undefined ? source : chunks(source, ctx.signal, reading.split)
   }
   // A run across mounts runs in no mount's cache scope: it takes an operand's
   // size from its stat, warm or not.

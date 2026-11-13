@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { closeQuietly, primeStream } from '../../../io/stream.ts'
+import { closeQuietly, primeStream, yieldBytes } from '../../../io/stream.ts'
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -21,7 +21,6 @@ import { CHUNK_SIZE, chunks } from '../../../io/cooperative.ts'
 import { ByteSpool } from '../../../io/spool.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
 import type { ByteSource } from '../../../io/types.ts'
-import { singleChunk } from '../utils/operands.ts'
 import { IOResult } from '../../../io/types.ts'
 import { LineFacts, type PathSpec } from '../../../types.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
@@ -251,7 +250,7 @@ async function seeked(
   if (start < 0) return null
   const after = await past(source, start)
   if (after === null && piped) return null
-  return [limited(after ?? singleChunk(new Uint8Array()), limit), start]
+  return [limited(after ?? yieldBytes(new Uint8Array()), limit), start]
 }
 
 /**

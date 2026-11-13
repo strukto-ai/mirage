@@ -16,7 +16,7 @@ import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { DiscordConfig } from '@struktoai/mirage-core/vfs/discord/config'
-import { parseConfigWithSchema, redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { parseConfigWithSchema, redactedConfigDump } from '@struktoai/mirage-core/vfs/secrets'
 import { backendCommands } from '@struktoai/mirage-core/workspace/mount/backends'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildVfs } from '../registry.ts'
@@ -120,7 +120,7 @@ describe('DiscordVFS (node)', () => {
 
 describe('DiscordConfig redaction (node)', () => {
   it('always redacts token', () => {
-    expect(redactConfigWithSchema(DiscordConfig, { token: 'a' })).toEqual({
+    expect(redactedConfigDump(DiscordConfig, { token: 'a' })).toEqual({
       token: '<REDACTED>',
     })
   })

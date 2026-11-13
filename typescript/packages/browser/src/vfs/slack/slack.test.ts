@@ -14,7 +14,7 @@
 
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
-import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { redactedConfigDump } from '@struktoai/mirage-core/vfs/secrets'
 import { backendCommands } from '@struktoai/mirage-core/workspace/mount/backends'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildVfs } from '../registry.ts'
@@ -120,11 +120,11 @@ describe('SlackVFS (browser)', () => {
 
 describe('SlackConfig redaction (browser)', () => {
   it('keeps proxyUrl in clear, redacts getHeaders only when present', () => {
-    expect(redactConfigWithSchema(SlackConfig, { proxyUrl: '/p' })).toEqual({
+    expect(redactedConfigDump(SlackConfig, { proxyUrl: '/p' })).toEqual({
       proxyUrl: '/p',
     })
     const headers = (): Record<string, string> => ({})
-    expect(redactConfigWithSchema(SlackConfig, { proxyUrl: '/p', getHeaders: headers })).toEqual({
+    expect(redactedConfigDump(SlackConfig, { proxyUrl: '/p', getHeaders: headers })).toEqual({
       proxyUrl: '/p',
       getHeaders: '<REDACTED>',
     })

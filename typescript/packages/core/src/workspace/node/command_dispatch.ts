@@ -397,15 +397,15 @@ async function stripLinks(
         ]
       }
     } else if (name === 'mv') {
-      const prepared = await prepareMv(
+      const [prepared, early] = await prepareMv(
         namespace.sessionLinks(session),
         dispatch,
         operands,
         argv.args,
         session.cwd,
       )
-      operands = prepared.items
-      if (prepared.early !== null) return [operands, linkErrors, prepared.early]
+      operands = prepared
+      if (early !== null) return [operands, linkErrors, early]
     }
   } catch (err) {
     if (err instanceof CycleError) {

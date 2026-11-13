@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { LangfuseAccessor, type LangfuseAccessorConfig } from '../../accessor/langfuse.ts'
+import { LangfuseAccessor } from '../../accessor/langfuse.ts'
 import { LangfuseVFS } from '../../vfs/langfuse/langfuse.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { DirListing } from '../../types.ts'
@@ -21,6 +21,7 @@ import { PathSpec, type FileStat } from '../../types.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { LangfuseTransport } from './client.ts'
+import type { LangfuseConfig } from '../../vfs/langfuse/config.ts'
 import { readdir } from './readdir.ts'
 import { jsonlBytes } from '../render/json.ts'
 
@@ -46,7 +47,7 @@ class RecordingTransport implements LangfuseTransport {
   }
 }
 
-function accessor(transport: LangfuseTransport, config: LangfuseAccessorConfig = {}) {
+function accessor(transport: LangfuseTransport, config: Partial<LangfuseConfig> = {}) {
   return new LangfuseAccessor(transport, config)
 }
 
@@ -200,7 +201,7 @@ describe('langfuse bounded trace listing', () => {
       await ws.close()
     }
   })
-  const cases: [string, LangfuseAccessorConfig][] = [
+  const cases: [string, Partial<LangfuseConfig>][] = [
     ['full page', { defaultTraceLimit: 2 }],
     ['time window', { defaultFromTimestamp: '2026-01-01T00:00:00Z' }],
   ]

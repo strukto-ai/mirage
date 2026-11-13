@@ -17,7 +17,7 @@ import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
 import type { ConfigOf, RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
 import {
   FIELD_NORMALIZERS,
-  redactConfigWithSchema,
+  redactedConfigDump,
   secretSchema,
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
@@ -166,7 +166,7 @@ export function makeS3Alias<
         ...(config.timeout !== undefined ? { timeout: config.timeout } : {}),
       }
     },
-    redact: (config) => redactConfigWithSchema(schema, config),
+    redact: (config) => redactedConfigDump(schema, config),
   }
   return Object.assign(schema.clone(), alias)
 }

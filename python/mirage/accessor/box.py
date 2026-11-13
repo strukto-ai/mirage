@@ -14,6 +14,7 @@
 
 from mirage.accessor.base import TokenAccessor
 from mirage.core.box.client import BoxTokenManager
+from mirage.core.box.constants import ALL_FILES_FOLDER_ID
 from mirage.vfs.box.config import BoxConfig
 
 
@@ -25,3 +26,4 @@ class BoxAccessor(TokenAccessor):
     ) -> None:
         self.config = config
         self.token_manager = token_manager
+        self.root_folder_id = config.root_folder_id or ALL_FILES_FOLDER_ID

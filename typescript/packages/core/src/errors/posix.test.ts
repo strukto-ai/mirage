@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { POSIX, posixErrno, posixPhrase } from './posix.ts'
-import { FS_CONDITIONS } from './types.ts'
+import type { FsCondition } from './types.ts'
 
 describe('the posix table', () => {
   it.each([
@@ -46,7 +46,7 @@ describe('the posix table', () => {
   })
 
   it('gives every row a positive number and a phrase', () => {
-    for (const cond of FS_CONDITIONS) {
+    for (const cond of Object.keys(POSIX) as FsCondition[]) {
       expect(posixErrno(cond)).toBeGreaterThan(0)
       expect(POSIX[cond].phrase).not.toBe('')
     }

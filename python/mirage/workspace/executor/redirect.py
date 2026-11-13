@@ -188,12 +188,17 @@ class _Fd(Enum):
 _TO_STDOUT = _Fd.TO_STDOUT
 _TO_STDERR = _Fd.TO_STDERR
 _CLOSED = _Fd.CLOSED
+_FdDest = _Fd | FileDescription | Inherited
 
 
 class _Unreadable(Enum):
     """A descriptor a read cannot use: closed, or open for writing only."""
 
     TOKEN = auto()
+
+
+_UNREADABLE = _Unreadable.TOKEN
+_Input = ByteSource | None | _Unreadable
 
 
 class PipeRecorder(Recorder):
@@ -472,8 +477,8 @@ class JobRoute(JobOutput):
 
     Args:
         recorder (Recorder): the redirected command's recorder.
-        outputs (dict[int, _Fd | FileDescription | Inherited]): where
-            the redirect pointed stdout and stderr.
+        outputs (dict[int, _FdDest]): where the redirect pointed stdout
+            and stderr.
         outer (JobConsole): where a job writes outside the redirect.
         dispatch (DispatchFn): dispatcher, for a file the job writes later.
         session (SessionState): the shell, for file creation.
@@ -482,7 +487,7 @@ class JobRoute(JobOutput):
     def __init__(
         self,
         recorder: Recorder,
-        outputs: dict[int, "_Fd | FileDescription | Inherited"],
+        outputs: dict[int, _FdDest],
         outer: JobConsole,
         dispatch: DispatchFn,
         context: EvaluationContext,
@@ -595,7 +600,7 @@ class JobRoute(JobOutput):
 
 async def _keep_output(
     recorder: PipeRecorder,
-    outputs: dict[int, "_Fd | FileDescription | Inherited"],
+    outputs: dict[int, _FdDest],
     dispatch: DispatchFn,
     session: SessionState,
 ) -> None:
@@ -607,8 +612,8 @@ async def _keep_output(
 
     Args:
         recorder (PipeRecorder): the command's recorder.
-        outputs (dict[int, _Fd | FileDescription | Inherited]): where
-            the redirect pointed each descriptor.
+        outputs (dict[int, _FdDest]): where the redirect pointed each
+            descriptor.
         dispatch (DispatchFn): operation dispatcher.
         session (SessionState): file creation mode.
     """
@@ -763,11 +768,7 @@ async def handle_redirect(
 
 def _open_descriptors(
     context: EvaluationContext, stdin: ByteSource | None
-) -> tuple[
-    dict[int, ByteSource | None | _Unreadable],
-    dict[int, _Fd | FileDescription | Inherited],
-    set[int],
-]:
+) -> tuple[dict[int, _Input], dict[int, _FdDest], set[int]]:
     """The descriptors a command starts from, before its redirections.
 
     Args:
@@ -778,12 +779,12 @@ def _open_descriptors(
         What each descriptor reads, where each writes, and the closed ones.
     """
     session = context.session
-    inputs: dict[int, ByteSource | None | _Unreadable] = {
+    inputs: dict[int, _Input] = {
         0: share(stdin),
-        1: _Unreadable.TOKEN,
-        2: _Unreadable.TOKEN,
+        1: _UNREADABLE,
+        2: _UNREADABLE,
     }
-    outputs: dict[int, _Fd | FileDescription | Inherited] = {
+    outputs: dict[int, _FdDest] = {
         0: _CLOSED,
         1: _TO_STDOUT,
         2: _TO_STDERR,
@@ -813,9 +814,7 @@ def _open_descriptors(
         if fd <= 2:
             continue
         inputs[fd] = (
-            descriptor.source
-            if descriptor.source is not None
-            else _Unreadable.TOKEN
+            descriptor.source if descriptor.source is not None else _UNREADABLE
         )
         outputs[fd] = _descriptor_output(descriptor)
         if descriptor.identity == CLOSED:
@@ -825,7 +824,7 @@ def _open_descriptors(
 
 def _output_recorder(
     dispatch: DispatchFn,
-    outputs: dict[int, _Fd | FileDescription | Inherited],
+    outputs: dict[int, _FdDest],
     files: list[FileDescription],
     piped: set[int],
     sink: JobConsole | None,
@@ -836,8 +835,7 @@ def _output_recorder(
 
     Args:
         dispatch (DispatchFn): the session's op dispatcher.
-        outputs (dict[int, _Fd | FileDescription | Inherited]): where each
-            descriptor writes.
+        outputs (dict[int, _FdDest]): where each descriptor writes.
         files (list[FileDescription]): the files the redirections opened.
         piped (set[int]): the descriptors reading a pipe.
         sink (JobConsole | None): the enclosing console, if any.
@@ -900,7 +898,7 @@ def _output_recorder(
 async def _before_drain(
     recorder: PipeRecorder,
     result: RedirectResult,
-    outputs: dict[int, _Fd | FileDescription | Inherited],
+    outputs: dict[int, _FdDest],
     files: list[FileDescription],
     name: str,
 ) -> None:
@@ -909,8 +907,7 @@ async def _before_drain(
     Args:
         recorder (PipeRecorder): the command's recorder.
         result (RedirectResult): what the command returned.
-        outputs (dict[int, _Fd | FileDescription | Inherited]): where each
-            descriptor writes.
+        outputs (dict[int, _FdDest]): where each descriptor writes.
         files (list[FileDescription]): the files the redirections opened.
         name (str): the command's name.
     """
@@ -1006,10 +1003,8 @@ class _Opened:
         session (SessionState): the session running the command.
         sink (JobConsole | None): where the command's output streams.
         stdin (ByteSource | None): the command's input.
-        inputs (dict[int, ByteSource | None | _Unreadable]): what each
-            descriptor reads.
-        outputs (dict[int, _Fd | FileDescription | Inherited]): where
-            each descriptor writes.
+        inputs (dict[int, _Input]): what each descriptor reads.
+        outputs (dict[int, _FdDest]): where each descriptor writes.
         closed (set[int]): the closed descriptors.
         files (list[FileDescription]): the files opened to write.
         targets (tuple[PathSpec, ...]): the paths named so far.
@@ -1017,8 +1012,8 @@ class _Opened:
         piped (set[int]): the descriptors reading a pipe.
         deferred (FileDescription | None): the final target, opened by
             the write of the command's output.
-        opening_stderr (_Fd | FileDescription | Inherited): where stderr
-            pointed when the deferred target would have opened.
+        opening_stderr (_FdDest): where stderr pointed when the deferred
+            target would have opened.
         complete_output (FileDescription | None): the final target of an
             output-only command.
     """
@@ -1027,15 +1022,15 @@ class _Opened:
     session: SessionState
     sink: JobConsole | None
     stdin: ByteSource | None
-    inputs: dict[int, ByteSource | None | _Unreadable]
-    outputs: dict[int, _Fd | FileDescription | Inherited]
+    inputs: dict[int, _Input]
+    outputs: dict[int, _FdDest]
     closed: set[int]
     files: list[FileDescription] = dataclasses.field(default_factory=list)
     targets: tuple[PathSpec, ...] = ()
     read_paths: dict[int, str] = dataclasses.field(default_factory=dict)
     piped: set[int] = dataclasses.field(default_factory=set)
     deferred: FileDescription | None = None
-    opening_stderr: _Fd | FileDescription | Inherited = _TO_STDERR
+    opening_stderr: _FdDest = _TO_STDERR
     complete_output: FileDescription | None = None
 
     def reopen(self, fd: int) -> None:
@@ -1134,7 +1129,7 @@ def _duplicate(opened: _Opened, r: Redirect, target: int) -> int | None:
     if target == FD_CLOSE:
         opened.closed.add(r.fd)
         opened.read_paths.pop(r.fd, None)
-        inputs[r.fd], outputs[r.fd] = _Unreadable.TOKEN, _CLOSED
+        inputs[r.fd], outputs[r.fd] = _UNREADABLE, _CLOSED
     elif target != r.fd:
         if target in opened.closed or target not in outputs:
             return target
@@ -1306,7 +1301,7 @@ async def _open_output(
     opened.files.append(file)
     for fd in [1, 2] if r.fd == FD_BOTH else [r.fd]:
         opened.reopen(fd)
-        opened.inputs[fd], opened.outputs[fd] = _Unreadable.TOKEN, file
+        opened.inputs[fd], opened.outputs[fd] = _UNREADABLE, file
     return None
 
 
@@ -1358,7 +1353,7 @@ async def _land_output(
     try:
         chunks = await recorder.take()
         if refused:
-            outputs: dict[int, _Fd | FileDescription | Inherited] = {
+            outputs: dict[int, _FdDest] = {
                 0: _CLOSED,
                 1: _TO_STDOUT,
                 2: _TO_STDERR,
@@ -1377,9 +1372,7 @@ async def _land_output(
             )
             io.exit_code = 1
 
-        def dest(
-            key: Channel | Inherited,
-        ) -> _Fd | FileDescription | Inherited:
+        def dest(key: Channel | Inherited) -> _FdDest:
             if not isinstance(key, Inherited):
                 return opened.outputs[1 if key == Channel.STDOUT else 2]
             if key.owner is not recorder:
@@ -1758,9 +1751,7 @@ def _output_only(name: str, args: tuple[str, ...]) -> bool:
     return name != "printf" or not args or not args[0].startswith("-")
 
 
-def _descriptor_output(
-    descriptor: Descriptor,
-) -> _Fd | FileDescription | Inherited:
+def _descriptor_output(descriptor: Descriptor) -> _FdDest:
     if descriptor.stream is not None:
         return descriptor.stream
     if descriptor.file is not None:
@@ -1777,8 +1768,8 @@ def _descriptor_output(
 
 
 def _describe(
-    output: _Fd | FileDescription | Inherited,
-    source: ByteSource | None | _Unreadable,
+    output: _FdDest,
+    source: _Input,
     owner: Recorder | None = None,
 ) -> Descriptor:
     """The binding a descriptor holds for the command a level runs.
@@ -1788,8 +1779,8 @@ def _describe(
     the command rebinds its own (``>f``); fds 1 and 2 stay the command's.
 
     Args:
-        output (_Fd | FileDescription | Inherited): where it writes.
-        source (ByteSource | None | _Unreadable): what it reads.
+        output (_FdDest): where it writes.
+        source (_Input): what it reads.
         owner (Recorder | None): the level, for a descriptor above 2.
     """
     if isinstance(output, Inherited):

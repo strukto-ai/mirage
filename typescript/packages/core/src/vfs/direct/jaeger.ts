@@ -34,24 +34,7 @@ export class JaegerVFS extends CoreJaegerVFS {
   constructor(config: JaegerConfig) {
     super()
     this.config = config
-    const transportOpts: { host?: string; timeout?: number } = {}
-    if (config.host !== undefined) transportOpts.host = config.host
-    if (config.timeout !== undefined) transportOpts.timeout = config.timeout
-    const accessorConfig: {
-      defaultTraceLimit?: number
-      defaultFromTimestamp?: string
-      defaultToTimestamp?: string
-    } = {}
-    if (config.defaultTraceLimit !== undefined) {
-      accessorConfig.defaultTraceLimit = config.defaultTraceLimit
-    }
-    if (config.defaultFromTimestamp !== undefined) {
-      accessorConfig.defaultFromTimestamp = config.defaultFromTimestamp
-    }
-    if (config.defaultToTimestamp !== undefined) {
-      accessorConfig.defaultToTimestamp = config.defaultToTimestamp
-    }
-    this.accessor = new JaegerAccessor(new HttpJaegerTransport(transportOpts), accessorConfig)
+    this.accessor = new JaegerAccessor(new HttpJaegerTransport(config), config)
   }
 
   override getState(): Promise<ConfigState<RedactedSchema<typeof JaegerConfig>>> {

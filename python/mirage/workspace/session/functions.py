@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from mirage.policy.types import Occurrence
-from mirage.shell.types import FunctionBody, TSNodeLike
+from mirage.shell.types import TSNodeLike
 
 
 def function_sources(value: Mapping[str, Any]) -> dict[str, str]:
@@ -58,11 +58,11 @@ class FunctionSite:
     lines: tuple[tuple[int, int] | None, ...] | None = None
 
 
-def _preorder(body: FunctionBody) -> list[TSNodeLike]:
+def _preorder(body: list[TSNodeLike]) -> list[TSNodeLike]:
     """A body's nodes, each before its children, in order.
 
     Args:
-        body (FunctionBody): the body's statements.
+        body (list[TSNodeLike]): the body's statements.
     """
     out: list[TSNodeLike] = []
     stack = list(reversed(body))
@@ -74,7 +74,9 @@ def _preorder(body: FunctionBody) -> list[TSNodeLike]:
 
 
 def site_lines(
-    rows: Mapping[int, tuple[int, int]] | None, base: int, body: FunctionBody
+    rows: Mapping[int, tuple[int, int]] | None,
+    base: int,
+    body: list[TSNodeLike],
 ) -> tuple[tuple[int, int] | None, ...] | None:
     """The lines a definition's body is numbered by in a body bash prints
     again, each from ``base``, the definition's own: a call parses the
@@ -86,7 +88,7 @@ def site_lines(
         rows (Mapping[int, tuple[int, int]] | None): the running body's
             lines by node id (``reread_lines``), None for rows as typed.
         base (int): the definition's line.
-        body (FunctionBody): the definition's body statements.
+        body (list[TSNodeLike]): the definition's body statements.
     """
     if rows is None:
         return None
@@ -99,7 +101,7 @@ def site_lines(
 
 
 def called_lines(
-    lines: Sequence[tuple[int, int] | None] | None, body: FunctionBody
+    lines: Sequence[tuple[int, int] | None] | None, body: list[TSNodeLike]
 ) -> dict[int, tuple[int, int]] | None:
     """``site_lines`` laid over a call's own parse of the body, by node id;
     None when there are none, or the call's parse is shaped otherwise (an
@@ -107,7 +109,7 @@ def called_lines(
 
     Args:
         lines (Sequence[tuple[int, int] | None] | None): the site's lines.
-        body (FunctionBody): the call's body statements.
+        body (list[TSNodeLike]): the call's body statements.
     """
     if lines is None:
         return None

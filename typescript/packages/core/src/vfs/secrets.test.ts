@@ -20,7 +20,7 @@ import {
   normalizeNonEmpty,
   parseConfigWithSchema,
   REDACTED_SECRET,
-  redactConfigWithSchema,
+  redactedConfigDump,
   refuseRepeatedFields,
   refuseUnknownKeys,
   secretSchema,
@@ -137,17 +137,17 @@ describe('refuseRepeatedFields', () => {
   })
 })
 
-describe('redactConfigWithSchema', () => {
+describe('redactedConfigDump', () => {
   it('redacts a record of secrets whole, as Python redacts dict[str, SecretStr]', () => {
     const schema = z.object({ env: z.record(z.string(), secretStr()), url: z.string() })
-    const redacted = redactConfigWithSchema(schema, { env: { TOKEN: 's' }, url: 'u' })
+    const redacted = redactedConfigDump(schema, { env: { TOKEN: 's' }, url: 'u' })
     expect(redacted).toEqual({ env: REDACTED_SECRET, url: 'u' })
     expect(hasRedactedSecret(redacted)).toBe(true)
   })
 
   it('leaves a record of plain strings as it is', () => {
     const schema = z.object({ labels: z.record(z.string(), z.string()) })
-    expect(redactConfigWithSchema(schema, { labels: { team: 'a' } })).toEqual({
+    expect(redactedConfigDump(schema, { labels: { team: 'a' } })).toEqual({
       labels: { team: 'a' },
     })
   })
@@ -170,7 +170,7 @@ it('infers redaction from optional, nullable, callback, and nested secret schema
     rows: z.array(z.object({ key: secretStr().default('default-key') })),
     public: z.string().default('visible'),
   })
-  const state = redactConfigWithSchema(schema, {
+  const state = redactedConfigDump(schema, {
     absent: null,
     provider: () => Promise.resolve('private'),
     headers: { Authorization: 'private' },

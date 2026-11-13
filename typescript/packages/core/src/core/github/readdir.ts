@@ -19,7 +19,6 @@ import { stripSlash } from '../../utils/slash.ts'
 import { GitHubApiError } from './client.ts'
 import { DEFER_STATUSES } from './constants.ts'
 import { fetchDirTree, fetchHead, refreshTree, rowOf, treeListing } from './tree.ts'
-import { makeTreeEntry } from './tree_entry.ts'
 
 /**
  * A folder's listing, with every folder below it as seeds.
@@ -60,5 +59,5 @@ export async function readdir(
     await fetchHead(accessor.account.transport, accessor.owner, accessor.repo, accessor.ref)
     throw enoent(path.virtual)
   }
-  return new DirListing({ entries: rows.map((row) => rowOf(makeTreeEntry(row), row.path)) })
+  return new DirListing({ entries: rows.map((row) => rowOf(row, row.path)) })
 }

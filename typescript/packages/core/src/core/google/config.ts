@@ -17,9 +17,6 @@ import type { ConfigOf } from '../../vfs/secrets.ts'
 import { secretSchema, secretStr } from '../../vfs/secrets.ts'
 import { timeoutShape } from '../api/config.ts'
 
-export const GOOGLE_CREDENTIAL_ERROR =
-  'GoogleConfig needs either accessToken (a token or a provider callable) or both clientId and refreshToken'
-
 export const GoogleConfig = z
   .object({
     ...timeoutShape,
@@ -96,7 +93,10 @@ export const GoogleConfig = z
     (config) =>
       config.accessToken !== undefined ||
       (config.clientId !== undefined && config.refreshToken !== undefined),
-    { message: GOOGLE_CREDENTIAL_ERROR },
+    {
+      message:
+        'GoogleConfig needs either accessToken (a token or a provider callable) or both clientId and refreshToken',
+    },
   )
 
 // Derived, not declared twice: the schema validates every install and

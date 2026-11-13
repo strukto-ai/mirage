@@ -153,10 +153,6 @@ interface WorkspaceIdParams {
   id: string
 }
 
-interface WorkspaceGetQuery {
-  verbose?: string
-}
-
 interface WorkspaceLogsQuery {
   session?: string
   limit?: string
@@ -782,7 +778,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
     })
   })
 
-  app.get<{ Params: WorkspaceIdParams; Querystring: WorkspaceGetQuery }>(
+  app.get<{ Params: WorkspaceIdParams; Querystring: { verbose?: string } }>(
     '/v1/workspaces/:id',
     async (req) => {
       const { verbose } = queryFlag(req.query, 'verbose')
