@@ -235,7 +235,8 @@ file, which runs on Monty inside the server, joins the two lists:
 
 - A pull request goes into New, Improved or Fixed by its title. A breaking
   change goes into its own group, first, and uses the first line of its
-  description, which tells customers what to do.
+  description, which tells customers what to do, or its title when the
+  description is empty.
 - An issue that a pull request names becomes a second link on that pull
   request's entry.
 - An issue that no pull request names gets its own entry, grouped by its
@@ -261,9 +262,10 @@ for pr in sorted(prs, key=lambda p: p["number"]):
     if not kind:
         dropped += 1
         continue
-    text = pr["body"].splitlines()[0] if kind == "Breaking" else m.group(4)
+    body = pr["body"] or ""
+    text = (body.splitlines() or [m.group(4)])[0] if kind == "Breaking" else m.group(4)
     links = [f"[#{pr['number']}]({pr['url']})"]
-    for key in re.findall(r"[A-Z]+-\d+", pr["body"]):
+    for key in re.findall(r"[A-Z]+-\d+", body):
         if key in issues:
             links.append(f"[{key}]({issues.pop(key)['url']})")
     groups[kind].append({"text": text[0].upper() + text[1:], "links": links})
@@ -339,13 +341,16 @@ one more write to `/work/release-notes.md` before it publishes.
 
 The team keeps its notes under a Notion page called Release Notes. The agent
 finds that page's ID with Notion's search API, creates a page under it from
-the Markdown file, and prints the new page's link to hand to a reviewer:
+the Markdown file, and prints the new page's link to hand to a reviewer. If
+no page or more than one has that title, `jq` stops with an error and the
+agent creates nothing, so it can ask which page to use:
 
 ```bash
 run <<'SH'
 parent=$(ntn api v1/search -d '{"query": "Release Notes"}' |
-  jq -r '.results[] | select(.properties.title.title[0].plain_text == "Release Notes") | .id')
-page=$(ntn pages create --parent "page:$parent" < /work/release-notes.md)
+  jq -r '[.results[] | select(.properties.title.title[0].plain_text == "Release Notes") | .id] |
+    if length == 1 then .[0] else error("\(length) pages are titled Release Notes") end') &&
+page=$(ntn pages create --parent "page:$parent" < /work/release-notes.md) &&
 ntn api "v1/pages/$page" | jq -r .url
 SH
 ```

@@ -261,7 +261,7 @@ python3: Permission denied
 
 ## 임베디드 터미널
 
-대부분의 경우 에이전트에게 필요한 것은 샌드박스가 아니라 터미널 같은 인터페이스뿐이며, Mirage는 이를 애플리케이션 서버에 내장합니다. 각 터미널은 고유한 작업 디렉터리, 환경, 히스토리를 가진 Mirage 세션이고 Python은 Monty로 프로세스 안에서 실행되므로, 컨테이너나 VM 없이 터미널이 시작됩니다. 다음은 Express 예시이며, FastAPI 버전은 [문서](https://docs.mirage.strukto.ai/home/examples/embedded-terminal)에 있습니다.
+대부분의 경우 에이전트에게 필요한 것은 샌드박스가 아니라 터미널 같은 인터페이스뿐이며, Mirage는 이를 애플리케이션 서버에 내장합니다. 각 터미널은 고유한 작업 디렉터리, 환경, 히스토리를 가진 Mirage 세션이고 Python은 Monty로 프로세스 안에서 실행되므로, 컨테이너나 VM 없이 터미널이 시작됩니다. 다음은 Express 예시이며, FastAPI 버전은 [문서](https://docs.mirage.strukto.ai/home/examples/lightweight-terminal)에 있습니다.
 
 ```bash
 npm install @struktoai/mirage-node @pydantic/monty express

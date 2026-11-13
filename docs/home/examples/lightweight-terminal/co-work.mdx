@@ -72,6 +72,7 @@ registers `himalaya`, `gws` and `slack`, each with one account.
         "smtp_port": int(env.get("SMTP_PORT", "587")),
         "username": env["EMAIL_USERNAME"],
         "password": env["EMAIL_PASSWORD"],
+        "sent_folder": env.get("EMAIL_SENT_FOLDER", "Sent"),
     })
     ws.register_cli("gws", GWS, {
         "client_id": env["GOOGLE_CLIENT_ID"],
@@ -131,6 +132,7 @@ registers `himalaya`, `gws` and `slack`, each with one account.
       smtpPort: Number(env.SMTP_PORT ?? 587),
       username: env.EMAIL_USERNAME,
       password: env.EMAIL_PASSWORD,
+      sentFolder: env.EMAIL_SENT_FOLDER ?? 'Sent',
     })
     ws.registerCli('gws', GWS, {
       clientId: env.GOOGLE_CLIENT_ID,
@@ -174,14 +176,18 @@ secret store instead:
 ```bash
 export IMAP_HOST=imap.example.com SMTP_HOST=smtp.example.com
 export EMAIL_USERNAME=recruiting@example.com EMAIL_PASSWORD=your-app-password
+export EMAIL_SENT_FOLDER=Sent
 export GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... GOOGLE_REFRESH_TOKEN=...
 export SLACK_BOT_TOKEN=xoxb-...
 ```
 
-The ports, the TLS switch and the two API addresses default to the services'
-own. Set them only for a self-hosted mail server or a proxy. A terminal has
-its own environment, not the server's, so the agent uses the three accounts
-without seeing their credentials.
+`EMAIL_SENT_FOLDER` names the folder the account keeps sent mail in: `Sent`
+on most servers, `[Gmail]/Sent Mail` on Gmail and `Sent Items` on Exchange.
+`himalaya` saves each sent message there. The ports, the TLS switch and the
+two API addresses default to the services' own. Set them only for a
+self-hosted mail server or a proxy. A terminal has its own environment, not
+the server's, so the agent uses the three accounts without seeing their
+credentials.
 
 The output below comes from sample data, so yours will differ.
 
@@ -212,9 +218,9 @@ mailbox:
 
 ```bash
 run <<'SH'
-himalaya --json envelope list | jq '.envelopes | length'
+himalaya --json envelope list --page-size 0 | jq '.envelopes | length'
 mkdir -p /work/replies
-himalaya --json envelope search subject '"interview times"' > /work/replies.json
+himalaya --json envelope search --page-size 0 subject '"interview times"' > /work/replies.json
 for id in $(jq -r '.envelopes[].id' /work/replies.json); do
   himalaya message read $id > /work/replies/$id.eml
 done
@@ -228,13 +234,16 @@ SH
 ```
 
 The inbox holds 8 messages. Six are replies; the other two are a note from
-Dana and a notice from a job board.
+Dana and a notice from a job board. `--page-size 0` returns every match
+instead of a page of 25, up to the newest 200 messages, the account's
+`max_messages`.
 
 ## Find the Offered Times
 
 The recruiting team asked each candidate for two times, one per line, written
 as `2026-11-16 10:00`. A short Python script takes each candidate's name and
-address from the `From:` line and the times from the body, saves them to
+address from the `From:` line, using the address as the name when there is
+none, and the times from the body, saves them to
 `/work/candidates.json` and prints a table:
 
 ```bash
@@ -244,11 +253,12 @@ import json, os, re
 candidates = []
 for name in sorted(os.listdir("/work/replies"), key=lambda n: int(n.split(".")[0])):
     text = open("/work/replies/" + name).read()
-    sender = re.search(r"^From: (.+) <(.+)>$", text, re.M)
+    sender = re.search(r"^From: (?:(.*) )?<?([^<>\s]+@[^<>\s]+)>?$", text, re.M)
+    who = sender.group(1) or sender.group(2)
     times = re.findall(r"^(\d{4}-\d\d-\d\d \d\d:\d\d)$", text, re.M)
-    candidates.append({"id": name.split(".")[0], "name": sender.group(1),
+    candidates.append({"id": name.split(".")[0], "name": who,
                        "email": sender.group(2), "times": times})
-    print("%-3s %-13s %s" % (name.split(".")[0], sender.group(1), ", ".join(times)))
+    print("%-3s %-13s %s" % (name.split(".")[0], who, ", ".join(times)))
 open("/work/candidates.json", "w").write(json.dumps(candidates))
 PY
 python3 /work/candidates.py
@@ -287,7 +297,7 @@ from datetime import datetime, timedelta
 busy = []
 for calendar in json.loads(open("/work/busy.json").read())["calendars"].values():
     for block in calendar["busy"]:
-        busy.append((datetime.fromisoformat(block["start"][:16]), datetime.fromisoformat(block["end"][:16])))
+        busy.append((datetime.fromisoformat(block["start"][:19]), datetime.fromisoformat(block["end"][:19])))
 plan = []
 for c in json.loads(open("/work/candidates.json").read()):
     c["start"] = None
@@ -317,8 +327,9 @@ Aisha Okafor  2026-11-19 10:00
 Jonas Weber   2026-11-20 14:00
 ```
 
-Google gives busy times in UTC. The script keeps their first 16 characters,
-the date and the minute, so it can compare them with the candidates' times.
+Google gives busy times in UTC, such as `2026-11-16T10:00:00Z`. The script
+keeps their first 19 characters, the date and the time to the second, so it
+can compare them with the candidates' times.
 Maya and Lucas both offered Monday at 10:00. Maya replied first and gets it,
 so Lucas gets his second time. Each of Priya's times clashes with at least
 one interviewer, so the agent leaves her for a person.
@@ -355,7 +366,8 @@ SH
 ## Confirm and Tell the Team
 
 The agent replies to each booked candidate in their own thread, then checks
-the Sent folder for the five replies. It writes the schedule to a file and
+the sent folder for the five replies. `mailbox list` gives that folder the
+role `sent`. It writes the schedule to a file and
 posts it to the hiring channel, `#hiring-backend`, by its Slack channel ID,
 and reads the post back:
 
@@ -365,7 +377,8 @@ jq -r '.[] | select(.start) | "\(.id) \(.start[0:16] | sub("T"; " at "))"' /work
 while read -r id when; do
   himalaya message reply $id --send --body "Thank you. Your interview is booked for $when UTC and lasts one hour. You will meet Dana Lee and Omar Haddad from the backend team." > /dev/null
 done
-himalaya --json envelope list -m Sent | jq -r '.envelopes[].to[0].name'
+sent=$(himalaya --json mailbox list | jq -r '.mailboxes[] | select(.role == "sent") | .id')
+himalaya --json envelope list -m "$sent" | jq -r '.envelopes[].to[0].name'
 jq -r '"Senior Backend Engineer interviews with Dana and Omar (UTC):",
   (.[] | "- \(.name): \(if .start then .start[0:16] | sub("T"; " ") else "no common time, needs a person" end)")' /work/plan.json > /work/summary.txt
 slack send-message --channel C07HB2Q9KX --text "$(cat /work/summary.txt)" > /dev/null
@@ -388,7 +401,7 @@ Senior Backend Engineer interviews with Dana and Omar (UTC):
 - Jonas Weber: 2026-11-20 14:00
 ```
 
-The first five lines are the recipients of the replies in the Sent folder,
+The first five lines are the recipients of the replies in the sent folder,
 newest first. The rest is the post in `#hiring-backend`.
 
 `himalaya message reply` without `--send` only prints the reply, which is a
