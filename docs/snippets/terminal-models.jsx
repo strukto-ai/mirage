@@ -249,7 +249,7 @@ export const SandboxesVsTerminals = () => {
         <div>
           <div className="font-semibold text-zinc-900 dark:text-zinc-100">Terminals in one server</div>
           <div className="text-zinc-600 dark:text-zinc-400" style={over ? { color: "var(--tm-refused)" } : undefined}>
-            1 process, {idle} idle and {busy} busy, {summary}
+            1 server, {idle} idle and {busy} busy, {summary}
           </div>
         </div>
       </div>

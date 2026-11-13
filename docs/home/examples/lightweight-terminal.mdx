@@ -205,22 +205,20 @@ What a terminal costs depends on what it is doing:
 | A terminal that is | Holds | Is limited by |
 | --- | --- | --- |
 | idle, between an agent's turns | its variables and history | memory, tens of kilobytes each |
-| waiting on a service, as in `curl` or `gh pr list` | the reply it is reading | memory |
-| working on data, as in `sort` or a Python script | the data in its pipes | the server's CPU, then memory |
+| waiting on a service, as in `curl` or `gh pr list` | the reply it is reading | memory, then CPU |
+| working on data, as in `sort` or `grep` | the data in its pipes | the server's CPU, then memory |
 
-- **Idle terminals are nearly free.** No process or thread waits for one. A
-  server with the memory that one sandbox reserves holds thousands of them,
-  so an agent can keep its terminal between turns.
+- **Idle terminals are nearly free.** An idle terminal has no process or
+  thread of its own, only a record of about 20 KB on Python and on
+  TypeScript. One server holds thousands of them, so an agent can keep its
+  terminal between turns.
 - **Terminals waiting on a service run at once.** A command that waits for a
   reply uses no CPU while it waits, and the server runs other terminals'
   commands in the meantime. See [Async](#async).
-- **Terminals working on data share the CPU.** Commands that sort, search or run
-  Python share the server's CPU, so each takes longer as more run together.
-  A command that needs a core to itself belongs on a machine: see
+- **Terminals working on data share the CPU.** Commands such as `sort` and
+  `grep` take turns on it, so each takes longer as more run together. A
+  command that needs a core to itself belongs on a machine: see
   [Runtime Routing](/home/examples/runtime-routing).
-- **Files in a memory mount are the server's memory.** A 2 MB log in a
-  memory mount is 2 MB that the server holds. For data you do not want in
-  memory, mount storage: see [VFS](/home/setup/vfs).
 
 Press each button to see four terminals run a command at the same moment:
 
