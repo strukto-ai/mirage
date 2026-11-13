@@ -15,7 +15,12 @@
 
 from mirage.machine.constants import not_running_hint
 from mirage.machine.docker.config import DockerConfig
-from mirage.machine.docker.constants import DOCKER_HINT, RUNNING_STATE
+from mirage.machine.docker.constants import (
+    CONTAINER_GONE,
+    DOCKER_HINT,
+    PAUSED_STATE,
+    RUNNING_STATE,
+)
 from mirage.machine.program import reported_state
 from mirage.machine.transport import ProgramMachine
 
@@ -29,6 +34,10 @@ class DockerMachine(ProgramMachine):
     and no daemon socket wiring; each line is one `docker exec -i`
     with the merged environment, the session cwd, real stdin, and
     separated stderr.
+
+    The container is yours: Mirage pauses it only when the workspace
+    pauses and its config says ``on_pause: pause`` or the call names it,
+    and the next connect unpauses it.
 
     Args:
         name (str): the machine's name, its key under ``machines:``.
@@ -55,7 +64,21 @@ class DockerMachine(ProgramMachine):
             ["inspect", "--format", "{{json .State}}", container]
         )
         state = reported_state(status, "docker inspect", ("Status",))
-        if state != RUNNING_STATE:
+        if state == PAUSED_STATE:
+            await self._change_state(["unpause", container])
+        elif state != RUNNING_STATE:
             raise RuntimeError(
                 not_running_hint("container", container, state, {})
             )
+        self._reached = True
+
+    def config_asks_to_pause(self) -> bool:
+        """Whether the config says ``on_pause: pause``."""
+        return self.config.on_pause == "pause"
+
+    async def _pause_machine(self) -> None:
+        """Freeze the container's processes, which frees its CPU and keeps
+        its memory; the next connect unpauses it."""
+        await self._change_state(
+            ["pause", self.config.container], CONTAINER_GONE
+        )

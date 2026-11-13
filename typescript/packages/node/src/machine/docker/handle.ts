@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { requireId } from '@struktoai/mirage-core/machine/config'
+import { checkOnPause, requireId } from '@struktoai/mirage-core/machine/config'
 import { registerMachine } from '@struktoai/mirage-core/machine/registry'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { DOCKER_CONFIG_FIELDS, type DockerConfig } from './config.ts'
 import { notRunningHint } from '@struktoai/mirage-core/machine/constants'
-import { DOCKER_HINT, RUNNING_STATE } from './constants.ts'
+import { CONTAINER_GONE, DOCKER_HINT, ON_PAUSE, PAUSED_STATE, RUNNING_STATE } from './constants.ts'
 import { reportedState } from '../program.ts'
 import { ProgramMachine } from '../transport.ts'
 
@@ -30,6 +30,10 @@ import { ProgramMachine } from '../transport.ts'
  * and no daemon socket wiring; each line is one `docker exec -i` with
  * the merged environment, the session cwd, real stdin, and separated
  * stderr.
+ *
+ * The container is yours: Mirage pauses it only when the workspace pauses
+ * and its config says `onPause: 'pause'` or the call names it, and the next
+ * connect unpauses it.
  */
 export class DockerMachine extends ProgramMachine<DockerConfig> {
   static override readonly configFields: ConfigFields = DOCKER_CONFIG_FIELDS
@@ -40,6 +44,7 @@ export class DockerMachine extends ProgramMachine<DockerConfig> {
   constructor(name: string, config?: DockerConfig) {
     super(name, config, DockerMachine.configFields)
     requireId('docker', 'container', this.config.container)
+    checkOnPause('docker', this.config.onPause, ON_PAUSE)
   }
 
   /** The container docker runs it in. */
@@ -55,7 +60,20 @@ export class DockerMachine extends ProgramMachine<DockerConfig> {
     const container = this.config.container
     const status = await this.execProgram(['inspect', '--format', '{{json .State}}', container])
     const state = reportedState(status, 'docker inspect', ['Status'])
-    if (state !== RUNNING_STATE) throw new Error(notRunningHint('container', container, state, {}))
+    if (state === PAUSED_STATE) await this.changeState(['unpause', container])
+    else if (state !== RUNNING_STATE)
+      throw new Error(notRunningHint('container', container, state, {}))
+    this.reached = true
+  }
+
+  /** Whether the config says `onPause: 'pause'`. */
+  override configAsksToPause(): boolean {
+    return this.config.onPause === 'pause'
+  }
+
+  /** Freeze the container's processes, which frees its CPU and keeps its memory; the next connect unpauses it. */
+  protected override async pauseMachine(): Promise<void> {
+    await this.changeState(['pause', this.config.container], CONTAINER_GONE)
   }
 }
 

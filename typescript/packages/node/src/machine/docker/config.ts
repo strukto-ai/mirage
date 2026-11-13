@@ -14,6 +14,8 @@
 
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { BASE_CONFIG_FIELDS, type MachineConfig } from '@struktoai/mirage-core/machine/config'
+import type { PauseAction } from '@struktoai/mirage-core/machine/types'
+import { ON_PAUSE } from './constants.ts'
 
 /** How to reach the user's running container. */
 export interface DockerConfig extends MachineConfig {
@@ -24,9 +26,12 @@ export interface DockerConfig extends MachineConfig {
    * installed.
    */
   container: string
+  /** `pause`: pause the container when the workspace pauses; unset leaves it as it is. */
+  onPause?: PauseAction
 }
 
 export const DOCKER_CONFIG_FIELDS: ConfigFields = {
   ...BASE_CONFIG_FIELDS,
   container: { type: 'string', required: true },
+  onPause: { type: 'string', options: ON_PAUSE },
 }

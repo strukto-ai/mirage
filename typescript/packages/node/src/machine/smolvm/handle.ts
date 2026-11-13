@@ -12,12 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { requireId } from '@struktoai/mirage-core/machine/config'
+import { checkOnPause, requireId } from '@struktoai/mirage-core/machine/config'
 import { registerMachine } from '@struktoai/mirage-core/machine/registry'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { SMOLVM_CONFIG_FIELDS, type SmolvmConfig } from './config.ts'
 import { notRunningHint } from '@struktoai/mirage-core/machine/constants'
-import { RUNNING_STATE, SMOLVM_HINT, STATE_HINTS } from './constants.ts'
+import {
+  MACHINE_GONE,
+  ON_PAUSE,
+  PAUSED_STATE,
+  RUNNING_STATE,
+  SMOLVM_HINT,
+  STATE_HINTS,
+} from './constants.ts'
 import { reportedState } from '../program.ts'
 import { ProgramMachine } from '../transport.ts'
 
@@ -35,6 +42,10 @@ import { ProgramMachine } from '../transport.ts'
  * machine was given at boot (`--volume`). Serve the workspace inside
  * the guest at the host's mount prefixes, the same contract every
  * provider in this family carries.
+ *
+ * Mirage pauses the machine only when the workspace pauses and its config
+ * says `onPause: 'pause'` or the call names it, and the next connect
+ * resumes it.
  */
 export class SmolvmMachine extends ProgramMachine<SmolvmConfig> {
   static override readonly configFields: ConfigFields = SMOLVM_CONFIG_FIELDS
@@ -45,6 +56,7 @@ export class SmolvmMachine extends ProgramMachine<SmolvmConfig> {
   constructor(name: string, config?: SmolvmConfig) {
     super(name, config, SmolvmMachine.configFields)
     requireId('smolvm', 'machine', this.config.machine)
+    checkOnPause('smolvm', this.config.onPause, ON_PAUSE)
   }
 
   /** The VM smolvm runs it in. */
@@ -57,18 +69,31 @@ export class SmolvmMachine extends ProgramMachine<SmolvmConfig> {
   }
 
   /**
-   * Probe the machine, refusing any state that cannot take a line.
+   * Probe the machine, resuming a paused one and refusing any other state
+   * that cannot take a line.
    *
    * `machine exec` would start a stopped machine on its own, but this
-   * family never manages sandbox lifecycle, so a machine that is not
-   * already running is an error rather than a boot.
+   * family never boots a machine, so a machine that is neither running nor
+   * paused is an error rather than a boot.
    */
   async connect(): Promise<void> {
     const machine = this.config.machine
     const status = await this.execProgram(['machine', 'status', '--name', machine, '--json'])
     const state = reportedState(status, 'smolvm machine status', ['state'])
-    if (state !== RUNNING_STATE)
+    if (state === PAUSED_STATE) await this.changeState(['machine', 'resume', '--name', machine])
+    else if (state !== RUNNING_STATE)
       throw new Error(notRunningHint('machine', machine, state, STATE_HINTS))
+    this.reached = true
+  }
+
+  /** Whether the config says `onPause: 'pause'`. */
+  override configAsksToPause(): boolean {
+    return this.config.onPause === 'pause'
+  }
+
+  /** Save the machine's memory and disks durably, then stop its VM; the next connect resumes it. */
+  protected override async pauseMachine(): Promise<void> {
+    await this.changeState(['machine', 'pause', '--name', this.config.machine], MACHINE_GONE)
   }
 }
 

@@ -14,7 +14,7 @@
 
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import type { MachineConfig } from '@struktoai/mirage-core/machine/config'
-import { MachineHandle } from '@struktoai/mirage-core/machine/handle'
+import { MachineHandle, logger } from '@struktoai/mirage-core/machine/handle'
 import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/machine/mixin'
 import type { MachinePipe } from '@struktoai/mirage-core/machine/types'
 import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
@@ -50,6 +50,25 @@ export abstract class ProgramMachine<C extends MachineConfig = MachineConfig>
       ...(errors !== null ? { errors } : {}),
       connection: true,
     })
+  }
+
+  /**
+   * Pause or resume the machine through the program, failing loud unless its
+   * stderr says the machine is already gone.
+   *
+   * @param args the arguments after the program.
+   * @param gone what the program's stderr says of a machine already gone,
+   *   which then counts as done; null fails on it too.
+   */
+  protected async changeState(args: string[], gone: string | null = null): Promise<void> {
+    const result = await this.execProgram(args)
+    if (result.exitCode === 0) return
+    const said = new TextDecoder().decode(result.stderr ?? new Uint8Array()).trim()
+    if (gone !== null && said.includes(gone)) {
+      logger.debug?.(`${this.machine.toString()}: already gone: ${said}`)
+      return
+    }
+    throw new Error(`${this.program} ${args.join(' ')} failed: ${said}`)
   }
 
   protected override execArgv(

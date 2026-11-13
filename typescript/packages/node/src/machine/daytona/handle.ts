@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
-import { MachineHandle } from '@struktoai/mirage-core/machine/handle'
-import { stdinPath, stdinRedirect } from './constants.ts'
-import { requireId } from '@struktoai/mirage-core/machine/config'
+import { MachineHandle, logger } from '@struktoai/mirage-core/machine/handle'
+import { ON_PAUSE, PAUSED_STATE, stdinPath, stdinRedirect } from './constants.ts'
+import { checkOnPause, requireId } from '@struktoai/mirage-core/machine/config'
 import { decodeOutput, encodeOutput, wrapLine } from '@struktoai/mirage-core/machine/constants'
 import { registerMachine } from '@struktoai/mirage-core/machine/registry'
 import type { RunResult } from '@struktoai/mirage-core/runtime/types'
@@ -36,17 +36,21 @@ import type { Daytona, Sandbox } from '@daytonaio/sdk'
  * stream gets its output at the end. The output is base64-encoded in the
  * sandbox, since the exec returns it as text (`encodeOutput`: the machine
  * needs dd and base64). close() releases the SDK client and never
- * touches the machine.
+ * touches the machine. Mirage pauses the sandbox only when the workspace
+ * pauses and its config says `onPause: 'pause'` or the call names it, and
+ * the next connect starts it again.
  */
 export class DaytonaMachine extends MachineHandle<DaytonaConfig> {
   static override readonly configFields: ConfigFields = DAYTONA_CONFIG_FIELDS
   static override readonly provider = 'daytona'
+  private sdk: DaytonaSdk | null = null
   private client: Daytona | null = null
   private sandbox: Sandbox | null = null
 
   constructor(name: string, config?: DaytonaConfig) {
     super(name, config, DaytonaMachine.configFields)
     requireId('daytona', 'sandboxId', this.config.sandboxId)
+    checkOnPause('daytona', this.config.onPause, ON_PAUSE)
   }
 
   /** The sandbox's id at Daytona. */
@@ -62,14 +66,41 @@ export class DaytonaMachine extends MachineHandle<DaytonaConfig> {
     })
   }
 
+  private async newClient(): Promise<Daytona> {
+    this.sdk ??= await this.loadSdk()
+    return new this.sdk.Daytona(
+      this.config.apiKey !== undefined ? { apiKey: this.config.apiKey } : undefined,
+    )
+  }
+
   async connect(): Promise<void> {
-    if (this.client === null) {
-      const sdk = await this.loadSdk()
-      this.client = new sdk.Daytona(
-        this.config.apiKey !== undefined ? { apiKey: this.config.apiKey } : undefined,
-      )
-    }
+    this.client ??= await this.newClient()
     this.sandbox = await this.client.get(this.config.sandboxId)
+    if (this.sandbox.state === PAUSED_STATE) await this.sandbox.start()
+    this.reached = true
+  }
+
+  /** Whether the config says `onPause: 'pause'`. */
+  override configAsksToPause(): boolean {
+    return this.config.onPause === 'pause'
+  }
+
+  /**
+   * Pause the sandbox, keeping its disk and memory, through a client of its
+   * own: close released the workspace's. Daytona pauses only VM sandboxes,
+   * and refuses any other. A sandbox already gone has nothing to pause.
+   */
+  protected override async pauseMachine(): Promise<void> {
+    const client = await this.newClient()
+    try {
+      const sandbox = await client.get(this.config.sandboxId)
+      await sandbox.pause()
+    } catch (error) {
+      if (this.sdk === null || !(error instanceof this.sdk.DaytonaNotFoundError)) throw error
+      logger.debug?.(`${this.machine.toString()}: sandbox already gone, nothing to pause`)
+    } finally {
+      await client[Symbol.asyncDispose]()
+    }
   }
 
   protected override async execArgv(
@@ -101,14 +132,17 @@ export class DaytonaMachine extends MachineHandle<DaytonaConfig> {
     await this.sandbox.fs.uploadFile(Buffer.from(data), path)
   }
 
-  /** Release the SDK client; the machine itself is the user's. */
+  /** Release the SDK client once a connect under way has settled; the machine itself is the user's. */
   override async close(): Promise<void> {
-    this.sandbox = null
-    if (this.client !== null) {
-      await this.client[Symbol.asyncDispose]()
-      this.client = null
+    try {
+      await super.close()
+    } finally {
+      this.sandbox = null
+      if (this.client !== null) {
+        await this.client[Symbol.asyncDispose]()
+        this.client = null
+      }
     }
-    await super.close()
   }
 }
 

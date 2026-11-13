@@ -88,6 +88,25 @@ msb exec mirage-box -- mirage workspace create /tmp/sandbox.yaml
 Matching paths alone does not share data; configure both workspaces to use
 the same backend.
 
+## Pausing the sandbox
+
+To pause the sandbox when the workspace pauses, set `on_pause: pause` on the
+machine:
+
+```yaml
+machines:
+  box:
+    provider: microsandbox
+    sandbox: mirage-box
+    on_pause: pause
+```
+
+`workspace.pause()` closes the workspace, then runs `msb pause`: the sandbox
+is suspended and its memory stays on the host. The next line resumes it with
+`msb resume`. Without `on_pause`, `workspace.pause()` leaves the sandbox
+running unless the call names the machine. See
+[Pause](/home/setup/machine/overview#pause).
+
 ## Notes
 
 - Keep the sandbox running while Mirage uses it. Each line runs its own

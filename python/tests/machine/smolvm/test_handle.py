@@ -47,6 +47,7 @@ class FakeSmolvmMachine(SmolvmMachine):
         self.state = state
         self.status_code = status_code
         self.status_stdout = status_stdout
+        self.refusal: bytes | None = None
         self.calls: list[tuple[list[str], bytes | None]] = []
 
     async def _exec_program(self, args, stdin=None, output=None, errors=None):
@@ -64,6 +65,10 @@ class FakeSmolvmMachine(SmolvmMachine):
                 b"",
                 0,
             )
+        if args[1] in ("pause", "resume"):
+            if self.refusal is not None:
+                return RunResult(b"", self.refusal, 1)
+            return RunResult(b"", b"", 0)
         script = args[-1]
         if output is not None:
             await output(f"out:{script}".encode())
@@ -96,6 +101,69 @@ async def test_connect_names_why_the_machine_cannot_take_a_line(fake, refusal):
     runtime = FakeSmolvmMachine(**fake, config={"machine": "vm"})
     with pytest.raises(RuntimeError, match=refusal):
         await runtime.connect()
+
+
+@pytest.mark.asyncio
+async def test_connect_resumes_a_paused_machine():
+    machine = FakeSmolvmMachine(state="paused", config={"machine": "vm"})
+    await machine.connect()
+    assert machine.calls[-1] == (["machine", "resume", "--name", "vm"], None)
+
+
+@pytest.mark.asyncio
+async def test_connect_fails_loud_when_the_resume_fails():
+    machine = FakeSmolvmMachine(state="paused", config={"machine": "vm"})
+    machine.refusal = b"Error: checkpoint footer mismatch"
+    with pytest.raises(RuntimeError, match="resume --name vm failed"):
+        await machine.connect()
+
+
+async def _reached(**config) -> FakeSmolvmMachine:
+    machine = FakeSmolvmMachine(config={"machine": "vm", **config})
+    await machine.connect()
+    await machine.close()
+    return machine
+
+
+@pytest.mark.asyncio
+async def test_pause_pauses_the_machine_it_reached():
+    machine = await _reached()
+    await machine.pause()
+    assert machine.calls[-1] == (["machine", "pause", "--name", "vm"], None)
+
+
+@pytest.mark.asyncio
+async def test_pause_leaves_alone_a_machine_it_never_reached():
+    machine = FakeSmolvmMachine(config={"machine": "vm"})
+    await machine.pause()
+    assert machine.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_machine_already_gone_counts_as_paused():
+    machine = await _reached()
+    machine.refusal = b"Error: vm not found: vm"
+    await machine.pause()
+
+
+@pytest.mark.asyncio
+async def test_any_other_pause_failure_is_raised():
+    machine = await _reached()
+    machine.refusal = b"Error: machine does not support portable checkpoints"
+    with pytest.raises(RuntimeError, match="portable checkpoints"):
+        await machine.pause()
+
+
+def _asks(**config) -> bool:
+    return SmolvmMachine(
+        "box", config={"machine": "vm", **config}
+    ).config_asks_to_pause()
+
+
+def test_only_on_pause_pause_asks_the_workspace_to_pause_it():
+    assert (_asks(on_pause="pause"), _asks()) == (True, False)
+    with pytest.raises(ValueError, match="smolvm on_pause must be one of"):
+        SmolvmMachine("box", config={"machine": "vm", "on_pause": "stop"})
 
 
 def test_machine_is_required():

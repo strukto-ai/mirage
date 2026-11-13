@@ -254,8 +254,16 @@ machine whose config asks. What a pause does is the provider's:
 | Machine | `pause()` does |
 | --- | --- |
 | E2B with `on_pause: pause` | Pauses the sandbox, keeping its disk and memory; the next line resumes it |
-| E2B without `on_pause` | Nothing: the sandbox keeps running, as after `close()` |
+| Daytona with `on_pause: pause` | Pauses a VM sandbox, keeping its disk and memory; the next line starts it again |
+| microsandbox with `on_pause: pause` | Suspends the sandbox, keeping its memory on the host; the next line resumes it |
+| smolvm with `on_pause: pause` | Saves the machine's memory and disks, then stops its VM; the next line resumes it |
+| Docker with `on_pause: pause` | Freezes the container's processes, which frees its CPU but not its memory; the next line unpauses it |
+| Any of these without `on_pause` | Nothing: the machine keeps running, as after `close()` |
 | Every other machine | Nothing: it is only disconnected |
+
+Mirage pauses only a machine the workspace reached, and a machine that is
+already gone counts as paused. A pause interrupts anything else running on the
+machine, so leave `on_pause` unset on a machine others share.
 
 To choose at pause time instead, name the machines to pause, whatever their
 config says; every other machine is only disconnected:

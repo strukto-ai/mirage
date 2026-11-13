@@ -20,7 +20,9 @@ from mirage.machine.microsandbox.config import MicrosandboxConfig
 from mirage.machine.microsandbox.constants import (
     INSPECT_TIMEOUT_SECONDS,
     MICROSANDBOX_HINT,
+    PAUSED_STATE,
     RUNNING_STATE,
+    SANDBOX_GONE,
     own_session,
 )
 from mirage.machine.program import (
@@ -38,7 +40,9 @@ class MicrosandboxMachine(ProgramMachine):
 
     The user starts the sandbox and serves its workspace at the same
     paths inside the guest. Mirage forwards commands, stdin, environment,
-    and cwd without managing the sandbox's lifecycle.
+    and cwd. It pauses the sandbox only when the workspace pauses and its
+    config says ``on_pause: pause`` or the call names it, and the next
+    connect resumes it.
 
     Args:
         name (str): the machine's name, its key under ``machines:``.
@@ -63,27 +67,39 @@ class MicrosandboxMachine(ProgramMachine):
         """Skip the connect-once latch: every exec probes the guest."""
 
     async def connect(self) -> None:
-        """Require a running sandbox before executing any commands."""
+        """Require a running sandbox before executing any commands,
+        resuming a paused one."""
+        sandbox = self.config.sandbox
         try:
             async with asyncio.timeout(INSPECT_TIMEOUT_SECONDS):
-                await self._connect()
+                status = await self._exec_program(
+                    ["status", sandbox, "--format", "json"]
+                )
         except TimeoutError as error:
             raise RuntimeError(
                 f"msb status timed out after {INSPECT_TIMEOUT_SECONDS} seconds"
             ) from error
-
-    async def _connect(self) -> None:
-        sandbox = self.config.sandbox
-        status = await self._exec_program(
-            ["status", sandbox, "--format", "json"]
-        )
         state = reported_state(status, "msb status", ("status",))
-        if state != RUNNING_STATE:
+        if state == PAUSED_STATE:
+            await self._change_state(["resume", sandbox, "--quiet"])
+        elif state != RUNNING_STATE:
             raise RuntimeError(
                 not_running_hint(
                     "sandbox", sandbox, state, {}, "start it with msb start"
                 )
             )
+        self._reached = True
+
+    def config_asks_to_pause(self) -> bool:
+        """Whether the config says ``on_pause: pause``."""
+        return self.config.on_pause == "pause"
+
+    async def _pause_machine(self) -> None:
+        """Suspend the sandbox, keeping its memory on the host; the next
+        connect resumes it."""
+        await self._change_state(
+            ["pause", self.config.sandbox, "--quiet"], SANDBOX_GONE
+        )
 
     async def _exec_argv(
         self,

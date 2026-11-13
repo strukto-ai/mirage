@@ -14,7 +14,9 @@
 
 from dataclasses import dataclass
 
-from mirage.machine.config import MachineConfig, require_id
+from mirage.machine.config import MachineConfig, check_on_pause, require_id
+from mirage.machine.daytona.constants import ON_PAUSE
+from mirage.machine.types import PauseAction
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -27,10 +29,14 @@ class DaytonaConfig(MachineConfig):
             image or snapshot with fuse3 and mirage installed.
         api_key (str | None): Daytona credential; None reads
             DAYTONA_API_KEY.
+        on_pause (PauseAction | None): ``pause`` pauses the sandbox when
+            the workspace pauses; None leaves it as it is.
     """
 
     sandbox_id: str
     api_key: str | None = None
+    on_pause: PauseAction | None = None
 
     def __post_init__(self) -> None:
         require_id("daytona", "sandbox_id", self.sandbox_id)
+        check_on_pause("daytona", self.on_pause, ON_PAUSE)

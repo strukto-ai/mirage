@@ -116,6 +116,25 @@ docker cp sandbox.yaml my-sandbox:/tmp/sandbox.yaml
 docker exec my-sandbox mirage workspace create /tmp/sandbox.yaml
 ```
 
+## Pausing the container
+
+To pause the container when the workspace pauses, set `on_pause: pause` on the
+machine:
+
+```yaml
+machines:
+  box:
+    provider: docker
+    container: my-sandbox
+    on_pause: pause
+```
+
+`workspace.pause()` closes the workspace, then runs `docker pause`: the
+container's processes are frozen and use no CPU, but it keeps its memory. The
+next line's connect runs `docker unpause`. Without `on_pause`,
+`workspace.pause()` leaves the container running unless the call names the
+machine. See [Pause](/home/setup/machine/overview#pause).
+
 ## Notes
 
 - `container` takes a name or an ID. The Docker CLI is the transport, so
