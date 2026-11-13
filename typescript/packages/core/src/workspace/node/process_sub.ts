@@ -24,7 +24,6 @@ import { getProcessSubBody, getProcessSubDirection } from '../../shell/helpers.t
 import { ProcessSubDirection, type TSNodeLike } from '../../shell/types.ts'
 import { runCancellable, mergeSignals } from '../../utils/abort.ts'
 import { concat } from '../../utils/bytes.ts'
-import { currentRequest } from '../../io/web/request.ts'
 import { DevVFS } from '../../vfs/dev/dev.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import type { ProcessSubLine } from '../frame.ts'
@@ -157,10 +156,6 @@ export class ProcessSubScope {
   private async finish(failed: boolean): Promise<void> {
     const held = this.heldInputs()
     const kept = failed ? new Map<string, AsyncLineIterator[]>() : held
-    // On an edge runtime nothing outlives the request that started it, so a
-    // producer the command no longer reads is joined here, its reader closed,
-    // rather than left to finish after the request has answered.
-    const edge = currentRequest() !== null
     for (const child of this.held) {
       if (kept.has(child.path)) continue
       if (failed || child.endpoint.readable) {
@@ -172,7 +167,7 @@ export class ProcessSubScope {
       await Promise.all([
         ...[...kept.values()].flat().map((lines) => lines.loadRest()),
         ...this.held
-          .filter((child) => failed || edge || kept.has(child.path) || !child.endpoint.readable)
+          .filter((child) => failed || kept.has(child.path) || !child.endpoint.readable)
           .map(async (child) => {
             try {
               await runCancellable(child.task, child.signal)

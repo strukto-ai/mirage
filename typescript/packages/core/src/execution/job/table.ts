@@ -915,6 +915,17 @@ export class JobTable {
   }
 
   /**
+   * Wait for the substitutions `request` started to end. On an edge runtime
+   * one still running once its request has answered never ends, so the
+   * request waits for them first.
+   */
+  async joinRequest(request: IncomingRequest): Promise<void> {
+    for (const process of [...this.substitutions.values()]) {
+      if (this.substitutionRequests.get(process) === request) await process.join()
+    }
+  }
+
+  /**
    * Drop how the jobs that left the list ended, as a bare `wait` does, which
    * leaves bash nothing to answer for their pids. Mirrors Python's
    * `forget_statuses`.

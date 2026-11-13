@@ -77,6 +77,7 @@ import {
   stopSignal,
 } from '../../utils/abort.ts'
 import { lineStatusWriter, runWithLineAbort } from '../abort.ts'
+import { currentRequest } from '../../io/web/request.ts'
 import type { Dispatcher } from '../dispatcher/index.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { RouteDecision } from '../../runtime/types.ts'
@@ -1658,8 +1659,8 @@ async function runParsedLine(
                 env.registry.memory,
                 () =>
                   runWithSystemClock(env.registry.systemClock, () =>
-                    runWithEnvLimit(env.registry.maxEnv, async () =>
-                      runCommandTree(
+                    runWithEnvLimit(env.registry.maxEnv, async () => {
+                      const ran = await runCommandTree(
                         deadline === null ? deps : { ...deps, signal: deadline.signal },
                         rootNode,
                         context,
@@ -1672,8 +1673,15 @@ async function runParsedLine(
                         ))
                           ? env.router.context(command, context.session, await judged())
                           : null,
-                      ),
-                    ),
+                      )
+                      // On an edge runtime nothing outlives the request that
+                      // started it, so a top-level line waits for the
+                      // substitutions its request started once its last
+                      // command has run, while they can still finish.
+                      const request = currentRequest()
+                      if (topLevel && request !== null) await deps.jobTable.joinRequest(request)
+                      return ran
+                    }),
                   ),
                 env.registry.bodyLimit,
               ),

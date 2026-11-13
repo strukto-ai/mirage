@@ -141,11 +141,11 @@ it.each([
   }
 })
 
-it('joins an unread producer before the command ends on an edge runtime', async () => {
+it('joins an unread producer once its line has run, on an edge runtime', async () => {
   const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
   const io = await inRequest(() =>
     ws.shell(
-      ': <(sleep .1; echo late > /done); (: <(sleep .05; echo late); wait "$!"; echo closed:$?)',
+      ': <(until [ -e /ready ]; do sleep .01; done; echo late > /done); touch /ready; (: <(sleep .05; echo late); wait "$!"; echo closed:$?)',
     ),
   )
   expect(new TextDecoder().decode(io.stdout)).toBe('closed:141\n')
