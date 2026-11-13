@@ -382,7 +382,7 @@ async def test_input_transport_failure_kills_only_its_command_and_disconnects(
 @pytest.mark.asyncio
 async def test_a_tagged_run_that_fails_is_stopped_by_its_tag():
     runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
-    await runtime._ensure_connected()
+    await runtime.ensure_connected()
     commands = FakeMachine.last.commands
     commands.input_error = RuntimeError("stdin transport failed")
     with pytest.raises(RuntimeError, match="stdin transport failed"):
@@ -421,7 +421,7 @@ async def test_a_cancelled_line_is_killed_and_stopped_by_its_own_tag(
         lambda: SimpleNamespace(hex="line"),
     )
     runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
-    await runtime._ensure_connected()
+    await runtime.ensure_connected()
     commands = FakeMachine.last.commands
     task = asyncio.create_task(
         runtime.exec_line("sleep", None, {}, "/workspace")
@@ -450,7 +450,7 @@ async def test_a_stop_that_times_out_starts_no_other_stop(monkeypatch):
         "mirage.machine.handle.MACHINE_STOP_WAIT_SECONDS", 0.01
     )
     runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
-    await runtime._ensure_connected()
+    await runtime.ensure_connected()
     async with asyncio.timeout(2):
         assert await runtime.stop("t", 15) is False
     assert [
@@ -556,7 +556,7 @@ async def test_a_sandbox_gone_mid_run_loses_the_connection_and_connects_again(
     where, error, said
 ):
     runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
-    await runtime._ensure_connected()
+    await runtime.ensure_connected()
     gone = FakeMachine.last.commands
     setattr(gone, where, error)
     result = await asyncio.wait_for(_line(runtime, "cat", b"\x01"), 5)

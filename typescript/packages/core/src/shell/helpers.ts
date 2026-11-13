@@ -25,10 +25,22 @@ export function getText(node: TSNodeLike): string {
   return node.text
 }
 
-/** Whether nothing but a separator follows `node` on its line, so bash runs it last, as the shell. */
+/**
+ * Whether bash runs `node` last in its shell, in the shell's place: the last statement of a line, of
+ * a subshell or of a substitution's body, or the last command of a `&&`/`||` list that is, with no
+ * redirect or `!` of its own and no `&` job in the shell before it.
+ */
 export function endsLine(node: TSNodeLike): boolean {
-  const root = treeRoot(node)
-  return /^[\s;]*$/.test(root.text.slice((node.endIndex ?? 0) - (root.startIndex ?? 0)))
+  let child = node
+  let above = node.parent ?? null
+  while (above?.type === NT.LIST) {
+    if (above.namedChildren.at(-1)?.id !== child.id) return false
+    child = above
+    above = above.parent ?? null
+  }
+  if (above == null || (above.type !== NT.PROGRAM && above.type !== NT.SUBSHELL)) return false
+  const statements = above.namedChildren.filter((c) => c.type !== NT.COMMENT)
+  return statements.at(-1)?.id === child.id && above.children.every((c) => c.type !== NT.BACKGROUND)
 }
 
 /** The root of the tree `node` belongs to. */

@@ -50,17 +50,26 @@ def get_text(node: TSNodeLike) -> str:
 
 
 def ends_line(node: TSNodeLike) -> bool:
-    """Whether nothing but a separator follows ``node`` on its line,
-    so bash runs it last, as the shell.
+    """Whether bash runs ``node`` last in its shell, in the shell's
+    place: the last statement of a line, of a subshell or of a
+    substitution's body, or the last command of a ``&&``/``||`` list
+    that is, with no redirect or ``!`` of its own and no ``&`` job in
+    the shell before it.
 
     Args:
         node (TSNodeLike): the command.
     """
-    root = node
-    while root.parent is not None:
-        root = root.parent
-    rest = (root.text or b"")[node.end_byte - root.start_byte :]
-    return not rest.strip(b" \t\r\n;")
+    child, above = node, node.parent
+    while above is not None and above.type == NT.LIST:
+        if above.named_children[-1].id != child.id:
+            return False
+        child, above = above, above.parent
+    if above is None or above.type not in (NT.PROGRAM, NT.SUBSHELL):
+        return False
+    statements = [c for c in above.named_children if c.type != NT.COMMENT]
+    return statements[-1].id == child.id and all(
+        c.type != NT.BACKGROUND for c in above.children
+    )
 
 
 def same_line(root: TSNodeLike, before: TSNodeLike, after: TSNodeLike) -> bool:

@@ -139,7 +139,7 @@ async def test_a_container_that_exits_under_a_line_cuts_it_short():
 @pytest.mark.asyncio
 async def test_a_cancelled_line_kills_its_process():
     box, machine = boxed(sleep=sleep)
-    await machine._ensure_connected()
+    await machine.ensure_connected()
     running = asyncio.create_task(machine.exec_line("sleep", None, {}, "/"))
     while not any(proc.line == "sleep" for proc in box.procs):
         await asyncio.sleep(0.01)
@@ -154,7 +154,7 @@ async def test_fails_a_line_with_the_error_start_raised():
     box = FakeContainer()
     machine = ContainerMachine("box", {}, box, over_quota)
     with pytest.raises(RuntimeError, match="monthly container time"):
-        await machine._ensure_connected()
+        await machine.ensure_connected()
     assert box.procs == []
 
 
@@ -162,7 +162,7 @@ async def test_fails_a_line_with_the_error_start_raised():
 async def test_without_a_container_or_a_relay_connecting_says_how_to_reach_one():
     machine = build_machine("box", {"provider": "cloudflare_container"})
     with pytest.raises(RuntimeError, match="set url and token"):
-        await machine._ensure_connected()
+        await machine.ensure_connected()
     assert NO_CONTAINER.startswith("cloudflare_container needs the container")
 
 

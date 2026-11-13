@@ -185,18 +185,28 @@ class ProcessHandle:
         machine: MachineName | None,
         runtime: str,
         instance: str | None = None,
+        command: str | None = None,
+        fd: dict[int, int] | None = None,
+        argv: tuple[int, ...] = (),
     ) -> bool:
         """Take the runner as the program it was started for
         (``one_command``), which runs on ``machine`` with ``runtime``, as
         bash execs a stage's or a job's one program in place. Its record
-        names both from then on, and it ignores only what the program
-        does (``program_ignores``).
+        names both from then on, the program's own command line in place
+        of the stage's text and what its substitutions wrote it, and it
+        ignores only what the program does (``program_ignores``).
 
         Args:
             machine (MachineName | None): where the program runs; None for
                 the workspace's own machine.
             runtime (str): what runs it.
             instance (str | None): what ``machine``'s provider calls it.
+            command (str | None): the program's words, expanded; None
+                keeps the stage's text.
+            fd (dict[int, int] | None): the pid writing each descriptor
+                a ``<( )`` gave the program, by number.
+            argv (tuple[int, ...]): the pids whose output became its
+                arguments.
 
         Returns:
             bool: whether the runner was the program's to take; False
@@ -216,6 +226,9 @@ class ProcessHandle:
                     else instance
                 ),
                 runtime=runtime,
+                command=command or self._record.command,
+                fd=fd or self._record.fd,
+                argv=argv or self._record.argv,
             )
             self._tell()
             return True

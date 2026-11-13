@@ -227,6 +227,9 @@ async def test_a_noted_record_reaches_every_store(stores):
         state=ProcessState.STOPPING,
         ancestors=(1, 3),
         machine_instance="tools-1",
+        stdin=2,
+        fd={63: 4},
+        argv=(5,),
     )
     a.note(_line(1))
     a.note(_line(1, ended_at=2.0))

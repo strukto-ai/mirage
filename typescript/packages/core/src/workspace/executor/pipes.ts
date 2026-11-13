@@ -143,6 +143,7 @@ export async function handlePipe(
     if (output === undefined) throw new Error('Missing pipeline segment')
     const upstream = pipes[i - 1]
     const input = i === 0 ? stdin : (upstream?.stream() ?? null)
+    if (i > 0) childEvaluation.frame.stdin = input
     const run = async (): Promise<void> => {
       let io = new IOResult()
       let childExec = new ExecutionNode({ command: cmd.text })
@@ -228,6 +229,7 @@ export async function handlePipe(
       },
       undefined,
       oneProgram(cmd, session),
+      i === 0 ? null : (stages[i - 1]?.record.id.pid ?? null),
     )
     child.processId = process.record.id.pid
     stages[i] = process

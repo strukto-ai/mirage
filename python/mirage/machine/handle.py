@@ -308,7 +308,7 @@ class MachineHandle:
             output (OutputFn | None): receives stdout as it arrives.
             errors (OutputFn | None): receives stderr as it arrives.
         """
-        await self._ensure_connected()
+        await self.ensure_connected()
         run = argv
         if self._mounts is not None:
             refusal = await self._mounts.validate(binding, ctx.cwd.virtual)
@@ -649,7 +649,7 @@ class MachineHandle:
         """
         try:
             async with asyncio.timeout(MACHINE_STOP_WAIT_SECONDS):
-                await self._ensure_connected()
+                await self.ensure_connected()
                 done = await self._exec_argv(
                     ("/bin/sh", "-c", stop_line(tag, signum)),
                     None,
@@ -751,10 +751,12 @@ class MachineHandle:
             wait (float): how long connecting and running may take.
         """
         async with asyncio.timeout(wait):
-            await self._ensure_connected()
+            await self.ensure_connected()
             return await self._setup(line)
 
-    async def _ensure_connected(self) -> None:
+    async def ensure_connected(self) -> None:
+        """Connect once; after a disconnect the next call connects
+        again."""
         async with self._connect_lock:
             if not self._connected:
                 await self.connect()

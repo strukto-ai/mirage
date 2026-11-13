@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from mirage.execution.job import JobTable
     from mirage.execution.line.handle import LineHandle
+    from mirage.execution.process.handle import ProcessHandle
     from mirage.io.types import ByteSource, IOResult
     from mirage.policy.types import HandOff
     from mirage.rs.session import ShellVars
@@ -55,6 +56,7 @@ class ExecuteFn(Protocol):
         call_stack: CallStack | None = None,
         job_table: JobTable | None = None,
         routing_decision: RouteDecision[RuntimeIdentity] | None = None,
+        started: Callable[[ProcessHandle], None] | None = None,
     ) -> IOResult: ...
 
 

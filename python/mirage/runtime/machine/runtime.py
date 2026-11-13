@@ -12,12 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import logging
+import uuid
 from collections.abc import Sequence
 from typing import Any
 
 from mirage.commands.config import Context
+from mirage.context.session_context import current_caller
 from mirage.execution.machine.table import MachineTable
 from mirage.execution.types import MachineName
+from mirage.machine.constants import FIFO_PREFIX, RUN_DRAIN_SECONDS
 from mirage.machine.handle import MachineHandle
 from mirage.runtime.base import Runtime
 from mirage.runtime.config import RuntimeConfig
@@ -25,6 +30,82 @@ from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.types import OutputFn, RunResult, RuntimeReach
 from mirage.types import PathSpec
+from mirage.utils.quote import shell_quote
+from mirage.workspace.files import Files
+
+logger = logging.getLogger(__name__)
+
+
+async def _feed(
+    handle: MachineHandle,
+    files: Files,
+    text: str,
+    fifo: str,
+    env: dict[str, str],
+) -> RunResult:
+    """Stream a process substitution into the named pipe on the machine
+    that stands for it, while the pipe is still there.
+
+    Args:
+        handle (MachineHandle): the machine.
+        files (Files): the session's files.
+        text (str): the substitution's ``/dev/fd/N``.
+        fifo (str): the named pipe.
+        env (dict[str, str]): the machine's environment.
+    """
+    quoted = shell_quote(fifo)
+    return await handle.exec_line(
+        f"[ -p {quoted} ] && exec cat > {quoted}",
+        await files.read(text, stream=True),
+        env,
+        "/",
+    )
+
+
+async def _unfeed(
+    handle: MachineHandle,
+    feeds: list[tuple[str, asyncio.Task[RunResult]]],
+    env: dict[str, str],
+) -> None:
+    """Remove the named pipes a run's substitutions fed, then stop their
+    feeds, each given ``RUN_DRAIN_SECONDS`` to end, whatever the machine
+    answers.
+
+    Args:
+        handle (MachineHandle): the machine.
+        feeds (list[tuple[str, asyncio.Task[RunResult]]]): each pipe and
+            the feed writing it.
+        env (dict[str, str]): the machine's environment.
+    """
+    try:
+        for fifo, _ in feeds:
+            quoted = shell_quote(fifo)
+            try:
+                await handle.exec_line(
+                    f"exec 3<>{quoted}; exec 3>&-; rm -f {quoted}",
+                    None,
+                    env,
+                    "/",
+                )
+            except Exception as exc:
+                logger.debug("%s: not removed: %s", fifo, exc)
+        if feeds:
+            await asyncio.wait(
+                {task for _, task in feeds}, timeout=RUN_DRAIN_SECONDS
+            )
+    finally:
+        for _, task in feeds:
+            task.cancel()
+        for (fifo, _), result in zip(
+            feeds,
+            await asyncio.gather(
+                *(task for _, task in feeds), return_exceptions=True
+            ),
+        ):
+            if isinstance(result, BaseException) and not isinstance(
+                result, asyncio.CancelledError
+            ):
+                logger.debug("%s: feed failed: %s", fifo, result)
 
 
 class RemoteRuntime(
@@ -174,9 +255,55 @@ class RemoteRuntime(
         output: OutputFn | None = None,
         errors: OutputFn | None = None,
     ) -> RunResult:
-        return await self.handle(ctx).run(
-            tuple(texts), ctx, self._binding, output, errors
+        """Run one program on the machine. A process substitution it
+        reads by path (``node read.js <(python3 gen.py)``) becomes a named
+        pipe on that machine, which Mirage feeds while the program runs,
+        as bash hands a program a pipe it shares.
+
+        Args:
+            engine (None): a machine keeps its own connection.
+            paths (list[PathSpec]): unused; the words name the paths.
+            texts (list[str]): the program and its words.
+            ctx (Context): the run's stdin, environment and cwd.
+            output (OutputFn | None): receives stdout as it arrives.
+            errors (OutputFn | None): receives stderr as it arrives.
+        """
+        handle = self.handle(ctx)
+        env = dict(handle.config.env)
+        evaluation = current_caller().evaluation
+        reads = (
+            {path for path, _ in evaluation.frame.writers if path is not None}
+            if evaluation is not None
+            else set()
         )
+        argv = list(texts)
+        feeds: list[tuple[str, asyncio.Task[RunResult]]] = []
+        try:
+            for at, text in enumerate(texts):
+                if ctx.vfs is None or text not in reads:
+                    continue
+                await handle.ensure_connected()
+                fifo = f"{FIFO_PREFIX}{uuid.uuid4().hex}"
+                made = await handle.exec_line(
+                    f"mkfifo -m 600 {shell_quote(fifo)}", None, env, "/"
+                )
+                if made.exit_code != 0:
+                    logger.debug("%s: mkfifo exited %d", fifo, made.exit_code)
+                    continue
+                argv[at] = fifo
+                feeds.append(
+                    (
+                        fifo,
+                        asyncio.create_task(
+                            _feed(handle, ctx.vfs, text, fifo, env)
+                        ),
+                    )
+                )
+            return await handle.run(
+                tuple(argv), ctx, self._binding, output, errors
+            )
+        finally:
+            await _unfeed(handle, feeds, env)
 
     async def settle(self) -> None:
         """Land what a line's programs left on every machine."""

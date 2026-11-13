@@ -83,7 +83,7 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
         kwargs["known_hosts"] = None
         return kwargs
 
-    async def _ensure_connected(self) -> None:
+    async def ensure_connected(self) -> None:
         async with self._connect_lock:
             if self._conn is None or self._conn.is_closed():
                 await self.connect()

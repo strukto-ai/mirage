@@ -767,6 +767,7 @@ function recurse(
         (forked) => {
           session.processId = forked.record.id.pid
           innerContext.frame.shell = forked
+          opts.started?.(forked)
         },
       )
       const code = await process.reap(opts.signal ?? null)

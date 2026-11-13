@@ -13,12 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Context } from '../commands/config.ts'
-import { currentCaller, runWithCaller } from '../context/session_context.ts'
+import {
+  currentCaller,
+  isProgramInvocation,
+  runWithCaller,
+  voiceName,
+} from '../context/session_context.ts'
 import { isAborting } from '../errors/fs.ts'
 import type { ProcessHandle } from '../execution/process/handle.ts'
 import type { MachineName } from '../execution/types.ts'
+import { SharedInput } from '../io/async_line_iterator.ts'
 import { liveEgress } from '../io/gateway.ts'
 import { FORK_FAILED, FORK_FAILED_STATUS } from '../shell/constants.ts'
+import { endsLine } from '../shell/helpers.ts'
 import { shellJoin } from '../shell/join.ts'
 import type { PathSpec } from '../types.ts'
 import { Activity } from '../utils/activity.ts'
@@ -227,8 +234,13 @@ export abstract class Runtime<E = unknown> {
   /**
    * Run a program past the workspace's reach as a process of its own, as
    * bash forks one: the process started for it when it is that process's
-   * one command (`ProcessHandle.take`), else a child of the running one, in
-   * its group, on this runtime's machine. A run the workspace reaches stays
+   * one command (`ProcessHandle.take`) or the last a forked shell runs
+   * (`endsLine`), as bash execs it in the shell's place, else a child of the
+   * running one, in its group, on this runtime's machine. Its record names
+   * the processes its command's substitutions started, each `<( )` by its
+   * descriptor (`fd`), each `$( )` as part of its arguments (`argv`), and the
+   * stage writing its pipe while it reads its stage's (`stdin`). A run the
+   * workspace reaches stays
    * in its shell's process, as does one outside a process. A child stopped
    * with its shell gets the signal the shell was stopped with, or the
    * interrupt it took; one stopped alone answers 128 plus its signal, and
@@ -246,12 +258,11 @@ export abstract class Runtime<E = unknown> {
     run: (ctx: Context) => Promise<RunResult>,
   ): Promise<RunResult> {
     const processes = this.binding?.processes ?? null
-    const { process: shell, session } = currentCaller()
+    const { process: shell, session, evaluation } = currentCaller()
     if (this.reach === 'workspace' || processes === null || shell == null || session == null)
       return run(ctx)
     const machine = this.machineFor(ctx)
     const instance = machine === null ? null : (processes.machineInstance?.(machine) ?? null)
-    if (shell.take(machine, this.name, instance)) return run(ctx)
     const line = ctx.flags.c
     const command =
       kind === 'line' && typeof line === 'string'
@@ -259,6 +270,32 @@ export abstract class Runtime<E = unknown> {
         : kind === 'process'
           ? shellJoin(texts)
           : shellJoin([ctx.spec?.name ?? this.name, ...(ctx.argv ?? [])])
+    const writers = evaluation?.frame.writers ?? []
+    const fd: Record<number, number> = {}
+    for (const [path, pid] of writers)
+      if (path !== null) fd[Number(path.slice(path.lastIndexOf('/') + 1))] = pid
+    const argv = writers.filter(([path]) => path === null).map(([, pid]) => pid)
+    const given = ctx.stdin instanceof SharedInput ? ctx.stdin.lines.input : ctx.stdin
+    const stdin =
+      evaluation?.frame.stdin != null && given === evaluation.frame.stdin
+        ? (shell.record.stdin ?? null)
+        : null
+    const node = session.lineNode
+    // A line's own process is its session's `$$`, which each of its lines
+    // takes in turn, so it stays the shell; and only the shell's own input
+    // runs its last command in place, not a line `eval`, `source` or a trap
+    // runs, each of which names its own parse.
+    if (
+      node !== null &&
+      shell.record.parent !== null &&
+      (session.parseHead === null ||
+        session.parseHead === `${voiceName(session)}: command substitution: `) &&
+      (session.exitTrap === null || session.exitTrapInherited) &&
+      !isProgramInvocation(session) &&
+      endsLine(node)
+    )
+      shell.oneCommand = true
+    if (shell.take(machine, this.name, instance, command, fd, argv)) return run(ctx)
     const stop = new AbortController()
     const signal =
       ctx.signal === undefined ? stop.signal : AbortSignal.any([ctx.signal, stop.signal])
@@ -280,6 +317,9 @@ export abstract class Runtime<E = unknown> {
         limit: session.processes.max,
         machine,
         runtime: this.name,
+        stdin,
+        fd,
+        argv,
       })
     } catch (error) {
       if ((error as { code?: unknown }).code !== 'EAGAIN') throw error

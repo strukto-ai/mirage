@@ -159,7 +159,7 @@ async def test_a_machine_built_from_a_url_runs_lines_through_the_relay():
     box = FakeContainer({"cat": cat})
     async with relay_server(box) as url:
         machine = ContainerMachine("box", {"url": url, "token": TOKEN})
-        await machine._ensure_connected()
+        await machine.ensure_connected()
         result = await asyncio.wait_for(
             machine.exec_line("cat", b"via the relay", {}, "/"), 5
         )

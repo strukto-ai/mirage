@@ -113,6 +113,20 @@
           }
         },
         {
+          "command": "perl -e 'open my $f, \"<\", $ARGV[0] or die \"open: $!\"; print <$f>' <(dash -c 'echo across')",
+          "expect": {
+            "exit": 0,
+            "stdout": "across\n"
+          }
+        },
+        {
+          "command": "( true; perl -e 'sleep 2' ) & sleep 0.5; ps -o ppid=,comm= | awk -v s=$$ '$2 == \"perl\" { print ($1 == s ? \"shell\" : \"other\") }'; wait",
+          "expect": {
+            "exit": 0,
+            "stdout": "shell\n"
+          }
+        },
+        {
           "command": "dash -c 'exec sleep 30' & perl -e 'sleep 31' & sleep 1; ps -o machine | sort -u",
           "expect": {
             "exit": 0,

@@ -24,9 +24,12 @@ from mirage.commands.config import Context
 from mirage.context.session_context import (
     bind_caller,
     current_caller,
+    is_program_invocation,
     reset_caller,
+    voice_name,
 )
 from mirage.execution.types import MachineName
+from mirage.io.async_line_iterator import SharedInput
 from mirage.io.gateway import live_egress
 from mirage.runtime.binding import WorkspaceBinding, refused_run
 from mirage.runtime.config import RuntimeConfig
@@ -42,6 +45,7 @@ from mirage.runtime.types import (
     RuntimeReach,
 )
 from mirage.shell.constants import FORK_FAILED, FORK_FAILED_STATUS
+from mirage.shell.helpers import ends_line
 from mirage.shell.join import shell_join
 from mirage.types import PathSpec
 from mirage.utils.activity import Activity
@@ -279,8 +283,14 @@ class Runtime(ABC, Generic[E]):
     ) -> RunResult:
         """Run a program past the workspace's reach as a process of its
         own, as bash forks one: the process started for it when it is
-        that process's one command (``ProcessHandle.take``), else a child
-        of the running one, in its group, on this runtime's machine. A
+        that process's one command (``ProcessHandle.take``) or the last
+        a forked shell runs (``ends_line``), as bash execs it in the
+        shell's place, else a child
+        of the running one, in its group, on this runtime's machine. Its
+        record names the processes its command's substitutions started,
+        each ``<( )`` by its descriptor (``fd``), each ``$( )`` as part
+        of its arguments (``argv``), and the stage writing its pipe
+        while it reads its stage's (``stdin``). A
         run the workspace reaches stays in its shell's process, as does
         one outside a process. A child stopped with its shell gets the
         signal the shell was stopped with, or the interrupt it took; one
@@ -311,8 +321,6 @@ class Runtime(ABC, Generic[E]):
             if machine is None or processes.machine_instance is None
             else processes.machine_instance(machine)
         )
-        if shell.take(machine, self.name, instance):
-            return await run()
         line = ctx.flags.get("c")
         if kind == "line" and isinstance(line, str):
             command = line
@@ -321,6 +329,45 @@ class Runtime(ABC, Generic[E]):
         else:
             head = ctx.spec.name if ctx.spec is not None else self.name
             command = shell_join([head, *ctx.argv])
+        frame = (
+            caller.evaluation.frame if caller.evaluation is not None else None
+        )
+        writers = frame.writers if frame is not None else []
+        given = (
+            ctx.stdin.lines.input
+            if isinstance(ctx.stdin, SharedInput)
+            else ctx.stdin
+        )
+        stdin = (
+            shell.record.stdin
+            if frame is not None
+            and frame.stdin is not None
+            and given is frame.stdin
+            else None
+        )
+        fd = {
+            int(path.rsplit("/", 1)[1]): pid
+            for path, pid in writers
+            if path is not None
+        }
+        argv = tuple(pid for path, pid in writers if path is None)
+        node = session._line_node
+        # A line's own process is its session's ``$$``, which each of its
+        # lines takes in turn, so it stays the shell; and only the shell's
+        # own input runs its last command in place, not a line ``eval``,
+        # ``source`` or a trap runs, each of which names its own parse.
+        if (
+            node is not None
+            and shell.record.parent is not None
+            and session._parse_head
+            in (None, f"{voice_name(session)}: command substitution: ")
+            and (session.exit_trap is None or session.exit_trap_inherited)
+            and not is_program_invocation(session)
+            and ends_line(node)
+        ):
+            shell.one_command = True
+        if shell.take(machine, self.name, instance, command, fd, argv):
+            return await run()
         done: list[RunResult] = []
 
         async def program() -> int:
@@ -337,6 +384,9 @@ class Runtime(ABC, Generic[E]):
                 limit=session.processes.max,
                 machine=machine,
                 runtime=self.name,
+                stdin=stdin,
+                fd=fd,
+                argv=argv,
             )
         except BlockingIOError:
             return RunResult(

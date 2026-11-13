@@ -140,6 +140,9 @@ class ProcessTable:
         one_command: bool = False,
         program_ignores: frozenset[int] = frozenset(),
         background: bool = False,
+        stdin: int | None = None,
+        fd: dict[int, int] | None = None,
+        argv: tuple[int, ...] = (),
     ) -> ProcessHandle:
         """Track a runner; its caller owns admission before command effects.
 
@@ -184,6 +187,11 @@ class ProcessTable:
                 as well, where ``ignores`` is more than a shell's.
             background (bool): it is a background job, as what it starts
                 is too.
+            stdin (int | None): the pid whose stdout is its stdin.
+            fd (dict[int, int] | None): the pid writing each descriptor a
+                ``<( )`` gave it, by number.
+            argv (tuple[int, ...]): the pids whose output became its
+                arguments.
 
         Raises:
             BlockingIOError: the session already holds ``limit``
@@ -246,6 +254,9 @@ class ProcessTable:
                         if self.machine_instance is None
                         else self.machine_instance(machine or self.machine)
                     ),
+                    stdin=stdin,
+                    fd=fd or {},
+                    argv=argv,
                 ),
                 run,
                 lambda done: self._retire(done, handle),
