@@ -279,6 +279,10 @@ async def _running_loop() -> asyncio.AbstractEventLoop:
     return asyncio.get_running_loop()
 
 
+async def _current_span_context() -> trace.SpanContext:
+    return trace.get_current_span().get_span_context()
+
+
 # Work handed to another loop runs there; a caller that is cancelled
 # cancels it there and returns only once it has settled.
 @pytest.mark.asyncio
@@ -326,14 +330,11 @@ async def test_on_loop_carries_the_callers_trace_context():
         trace_flags=trace.TraceFlags(trace.TraceFlags.SAMPLED),
     )
 
-    async def seen() -> trace.SpanContext:
-        return trace.get_current_span().get_span_context()
-
     token = otel_context.attach(
         trace.set_span_in_context(trace.NonRecordingSpan(caller))
     )
     try:
-        assert await on_loop(seen(), other) == caller
+        assert await on_loop(_current_span_context(), other) == caller
     finally:
         otel_context.detach(token)
         other.call_soon_threadsafe(other.stop)

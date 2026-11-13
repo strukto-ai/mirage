@@ -410,6 +410,10 @@ follows `OTEL_PROPAGATORS`, W3C trace context by default. In TypeScript,
 `NodeSDK` registers it and the context manager that carries the trace to the
 line; a provider you build yourself needs both:
 
+```bash
+npm install @opentelemetry/context-async-hooks @opentelemetry/core
+```
+
 ```typescript
 import { context, propagation } from '@opentelemetry/api'
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks'

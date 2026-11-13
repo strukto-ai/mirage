@@ -67,7 +67,7 @@ def test_an_open_span_wins_over_the_header():
 # across the hop to the workspace's own loop.
 @pytest.mark.asyncio
 async def test_a_shell_request_puts_its_line_in_the_callers_trace(
-    monkeypatch,
+    monkeypatch, tmp_path
 ):
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
@@ -75,10 +75,13 @@ async def test_a_shell_request_puts_its_line_in_the_callers_trace(
     monkeypatch.setattr(
         observer_module, "_tracer", lambda: provider.get_tracer("t")
     )
-    app = build_app(idle_grace_seconds=10.0)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    app = build_app(pid_file=tmp_path / "daemon.pid", idle_grace_seconds=10.0)
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client,
+    ):
         r = await client.post(
             "/v1/workspaces",
             json={
