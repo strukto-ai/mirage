@@ -1453,7 +1453,8 @@ class JobTable:
 
     def _records(self) -> dict[str, RecordFields]:
         """The live processes this workspace runs, as its record keeps
-        them: a program's with where it runs and its pid there."""
+        them: a program's with where it runs, what that machine's
+        provider called it and its pid there."""
         records: dict[str, RecordFields] = {}
         for handle in self.processes.live():
             record = handle.record
@@ -1465,6 +1466,7 @@ class JobTable:
                 "command": record.command,
                 "cwd": record.cwd.virtual,
                 "machine": str(record.machine),
+                "machine_instance": record.machine_instance,
                 "started_at": record.started_at,
                 "state": record.state.value,
                 "line": str(record.line) if record.line is not None else None,

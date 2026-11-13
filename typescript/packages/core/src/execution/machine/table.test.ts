@@ -20,8 +20,8 @@ import type { RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import type { MachinePid } from '../types.ts'
-import type { ProcessTable } from '../process/table.ts'
+import { MachineName, type MachinePid } from '../types.ts'
+import { ProcessTable } from '../process/table.ts'
 import { shownPid } from '../process/types.ts'
 import { MachineTable } from './table.ts'
 import type { MachineProcess } from './types.ts'
@@ -282,6 +282,34 @@ function sleepers(boxes: Record<string, Sleeper>): Workspace {
   }
   return new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC, machines: boxes })
 }
+
+describe('MachineTable stop', () => {
+  it("stops a lapsed host entry's program on its host", async () => {
+    const stopped: [number, number][] = []
+    const host = new MachineName('host', 'h')
+    const table = new MachineTable(
+      {},
+      null,
+      null,
+      (target, _seen, signum) => {
+        stopped.push([target.pid, signum])
+        return Promise.resolve(true)
+      },
+      null,
+      host,
+    )
+    const processes = new ProcessTable('w', host)
+    const record = {
+      pid: 2,
+      machine: 'host:laptop',
+      machine_instance: 'h',
+      machine_pid: { pid: 41, started: 1, exited: null },
+    }
+    expect(await table.stop(processes, record, 15)).toBe(true)
+    expect(await table.stop(processes, { ...record, machine_instance: 'other' }, 15)).toBe(false)
+    expect(stopped).toEqual([[41, 15]])
+  })
+})
 
 describe('MachineTable scans', () => {
   it('shows what a program started on its machine', async () => {

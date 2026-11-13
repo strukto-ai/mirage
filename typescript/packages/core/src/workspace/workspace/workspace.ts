@@ -800,8 +800,10 @@ export class Workspace {
     this.processTable.scanner = () => this.machineTable.scan(this.processTable, this.workspaceId)
     this.processTable.sender = (handle, signum) =>
       this.machineTable.send(this.processTable, handle, signum)
-    this.processTable.machineNames = () =>
-      this.machineTable.handles().map((h) => h.machine.toString())
+    this.processTable.machineNames = () => [
+      ...this.machineTable.handles().map((h) => h.machine.toString()),
+      ...this.hostEntries().map((machine) => machine.toString()),
+    ]
     this.processTable.machineResources = (machine, cpu) => this.machineTable.resources(machine, cpu)
     this.processTable.machineInstance = (machine) => this.machineTable.instance(machine)
   }
@@ -1571,6 +1573,16 @@ export class Workspace {
     return own ?? (await this.jobTable.store.getProcess(id))
   }
 
+  /** The machine each `host` entry names, the host under the entry's name, once each in entry order. */
+  private hostEntries(): MachineName[] {
+    const named = new Map<string, MachineName>()
+    for (const entry of this.runtimeWorld.entries) {
+      const machine = entry.machine
+      if (machine?.provider === HOST) named.set(machine.toString(), machine)
+    }
+    return [...named.values()]
+  }
+
   /**
    * The machines the workspace runs programs on, each as a check of it finds
    * it now: its own host first, which Mirage always manages, and each `host`
@@ -1581,10 +1593,7 @@ export class Workspace {
   async machines(machine?: MachineName): Promise<Machine[]> {
     const host = this.processTable.machine
     const hosts = new Map([[host.toString(), host]])
-    for (const entry of this.runtimeWorld.entries) {
-      const named = entry.machine
-      if (named?.provider === HOST) hosts.set(named.toString(), named)
-    }
+    for (const named of this.hostEntries()) hosts.set(named.toString(), named)
     const found: Machine[] = [...hosts.values()]
       .filter((each) => machine === undefined || machine.toString() === each.toString())
       .map((each) => ({ name: each, state: 'managed', checkedAt: this.clock.now() }))

@@ -1357,6 +1357,7 @@ export class JobTable {
         command: record.command,
         cwd: record.cwd.virtual,
         machine: record.machine.toString(),
+        machine_instance: record.machineInstance,
         started_at: record.startedAt,
         state: record.state,
         line: record.line?.toString() ?? null,

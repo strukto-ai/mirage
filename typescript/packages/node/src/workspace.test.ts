@@ -301,4 +301,23 @@ describe('a host scan', () => {
       await ws.close()
     }
   })
+
+  it('finds a program on any host entry', async () => {
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      { mode: MountMode.EXEC, machines: { one: { provider: 'host' }, two: { provider: 'host' } } },
+    )
+    const program = "python3 -c 'import time; time.sleep(30)'"
+    try {
+      await ws.shell(`${program} &`, { machine: 'two' })
+      const found = (await ws.shell('pgrep -a python3')).stdoutText
+      expect(found).toContain(program)
+      expect(found.trim().split(/\s+/).at(-1)).toBe('host:two')
+      const said = await ws.shell('ps --machine=two -o machine=,args=')
+      expect(said.stdoutText.trim().split(/\s+/)[0]).toBe('host:two')
+      expect((await ws.shell('pkill -x python3')).exitCode).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
 })

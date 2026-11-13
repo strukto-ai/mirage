@@ -22,7 +22,7 @@ from mirage import Workspace
 from mirage.execution.machine.table import MachineTable
 from mirage.execution.machine.types import MachineProcess, MachineState
 from mirage.execution.process.table import ProcessTable
-from mirage.execution.types import MachinePid
+from mirage.execution.types import MachineName, MachinePid
 from mirage.machine.constants import CHECK_LINE, CHECK_MARK
 from mirage.machine.handle import MachineHandle
 from mirage.runtime.types import RunResult
@@ -442,6 +442,52 @@ async def test_a_host_scan_finds_what_an_ended_program_left_running():
         assert (await ws.shell(f"kill -9 {held[0][1]}")).exit_code == 0
     finally:
         await ws.close()
+
+
+# Every host entry is in a search's scope, not only the one that wins a
+# command: a program a line ran on the second is found by name.
+@pytest.mark.asyncio
+async def test_a_search_finds_a_program_on_any_host_entry():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"one": {"provider": "host"}, "two": {"provider": "host"}},
+    )
+    program = "python3 -c 'import time; time.sleep(30)'"
+    try:
+        await ws.shell(f"{program} &", machine="two")
+        found = (await ws.shell("pgrep -a python3")).stdout.decode()
+        assert program in found and found.split()[-1] == "host:two"
+        said = await ws.shell("ps --machine=two -o machine=,args=")
+        assert said.stdout.decode().split()[0] == "host:two"
+        assert (await ws.shell("pkill -x python3")).exit_code == 0
+    finally:
+        await ws.close()
+
+
+# A lapsed workspace's program on a host entry is stopped by its pid when
+# the host its record names is this one, whatever the entry was called.
+@pytest.mark.asyncio
+async def test_a_lapsed_host_entrys_program_is_stopped_on_its_host():
+    stopped: list[tuple[int, int]] = []
+
+    async def stop_host(target: MachinePid, seen, signum: int) -> bool:
+        stopped.append((target.pid, signum))
+        return True
+
+    host = MachineName("host", "h")
+    table = MachineTable(stop_host=stop_host, host=host)
+    processes = ProcessTable("w", host)
+    record = {
+        "pid": 2,
+        "machine": "host:laptop",
+        "machine_instance": "h",
+        "machine_pid": {"pid": 41, "started": 1.0, "exited": None},
+    }
+    assert await table.stop(processes, record, 15)
+    elsewhere = {**record, "machine_instance": "other"}
+    assert not await table.stop(processes, elsewhere, 15)
+    assert stopped == [(41, 15)]
 
 
 @pytest.mark.asyncio

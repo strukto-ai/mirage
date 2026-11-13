@@ -886,7 +886,8 @@ class Workspace:
             self.machine_table.send(self.process_table, handle, signum)
         )
         self.process_table.machine_names = lambda: [
-            str(handle.machine) for handle in self.machine_table.handles()
+            *(str(handle.machine) for handle in self.machine_table.handles()),
+            *(str(machine) for machine in self._host_entries()),
         ]
         self.process_table.machine_resources = self.machine_table.resources
         self.process_table.machine_instance = self.machine_table.instance
@@ -2899,6 +2900,17 @@ class Workspace:
                 return record
         return await self.job_table.store.get_process(process_id)
 
+    def _host_entries(self) -> list[MachineName]:
+        """The machine each ``host`` entry names, the host under the
+        entry's name, once each in entry order."""
+        return list(
+            dict.fromkeys(
+                entry.machine
+                for entry in self._runtimes.entries
+                if entry.machine is not None and entry.machine.provider == HOST
+            )
+        )
+
     async def machines(
         self, machine: MachineName | None = None
     ) -> list[Machine]:
@@ -2912,17 +2924,8 @@ class Workspace:
             machine (MachineName | None): only this machine; None for every
                 one.
         """
-        host = self.process_table.machine
         hosts = dict.fromkeys(
-            [
-                host,
-                *(
-                    entry.machine
-                    for entry in self._runtimes.entries
-                    if entry.machine is not None
-                    and entry.machine.provider == HOST
-                ),
-            ]
+            [self.process_table.machine, *self._host_entries()]
         )
         found = [
             Machine(each, MachineState.MANAGED, self._clock.now())

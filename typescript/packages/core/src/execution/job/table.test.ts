@@ -1641,6 +1641,7 @@ describe('JobTable process plane', () => {
     const processes: ProcessTable = new ProcessTable(undefined, undefined, undefined, () => {
       a.processesChanged()
     })
+    processes.machineInstance = () => 'h'
     const a: JobTable = new JobTable(store, processes, null, new ManualClock())
     const b = publishing(store)
     const abort = new AbortController()
@@ -1655,6 +1656,7 @@ describe('JobTable process plane', () => {
     const record = (await b.remoteProcesses())[a.daemon]?.[String(job.pid)]
     expect([record?.command, record?.session]).toEqual(['sleep 30', 's'])
     expect([record?.program, record?.machine_pid]).toEqual([false, null])
+    expect(record?.machine_instance).toBe('h')
     expect(Math.abs((record?.seen_at as number) - Date.now() / 1000)).toBeLessThan(5)
     expect(await a.remoteProcesses()).toEqual({})
     expect(await a.kill(job.id, 's')).toBe(true)

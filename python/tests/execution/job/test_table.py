@@ -1316,6 +1316,7 @@ async def test_a_table_publishes_its_processes_while_it_runs_any(monkeypatch):
     monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
     store = RAMExecutionStore(lease_seconds=30.0)
     processes = ProcessTable(changed=lambda: a.processes_changed())
+    processes.machine_instance = lambda machine: "h"
     a = JobTable(store, processes, None, ManualClock())
     b = _publishing(store)
     job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
@@ -1327,6 +1328,7 @@ async def test_a_table_publishes_its_processes_while_it_runs_any(monkeypatch):
     record = (await b.remote_processes())[a.daemon][str(job.pid)]
     assert (record["command"], record["session"]) == ("sleep 30", "s")
     assert (record["program"], record["machine_pid"]) == (False, None)
+    assert record["machine_instance"] == "h"
     assert abs(float(record["seen_at"]) - time.time()) < 5
     assert await a.remote_processes() == {}
     assert await a.kill(job.id, "s")
