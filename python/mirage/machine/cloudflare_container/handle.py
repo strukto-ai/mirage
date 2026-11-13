@@ -27,6 +27,7 @@ from mirage.machine.cloudflare_container.constants import (
     CLOSING,
     NO_CONTAINER,
     NOT_ANSWERING,
+    SLEEP_RELAY,
     START_WAIT_SECONDS,
     STOPPED,
 )
@@ -46,7 +47,7 @@ from mirage.machine.constants import (
 )
 from mirage.machine.errors import ConnectionLostError
 from mirage.machine.handle import MachineHandle
-from mirage.machine.mixin import PipeTransportMixin
+from mirage.machine.mixin import PipeTransportMixin, SleepableMixin
 from mirage.machine.types import MachinePipe
 from mirage.runtime.types import OutputFn, RunResult
 
@@ -129,7 +130,7 @@ class PipeInput:
             await self._broken(exc)
 
 
-class ContainerMachine(MachineHandle, PipeTransportMixin):
+class ContainerMachine(MachineHandle, PipeTransportMixin, SleepableMixin):
     """A Cloudflare Container, reached through a ``ContainerRelay``.
 
     ``url`` and ``token`` name a relay route (``RelayContainer``); the
@@ -140,6 +141,11 @@ class ContainerMachine(MachineHandle, PipeTransportMixin):
     ``EXEC_PRELUDE``, its stdin always piped and closed once the input
     ends, stdout and stderr as the program wrote them. A ``mount_type``
     serves the workspace over one more exec whose pipes carry SFTP.
+
+    A host driving its own container may also give a ``sleep`` hook,
+    which ``Workspace.sleep()`` runs after the handle closes: the host
+    decides what sleep keeps and stops the container. A relay's container
+    is the user's, so it takes no hook and sleep only disconnects it.
 
     Once the container stops, a line it cut short loses its connection
     (129), and the next line starts it again.
@@ -152,6 +158,9 @@ class ContainerMachine(MachineHandle, PipeTransportMixin):
             a relay.
         start (Callable[[], Awaitable[None]] | None): starts that
             container when it is not running.
+        sleep (Callable[[], Awaitable[None]] | None): what
+            ``Workspace.sleep()`` does to that container once the handle
+            has closed.
     """
 
     provider = "cloudflare_container"
@@ -164,6 +173,7 @@ class ContainerMachine(MachineHandle, PipeTransportMixin):
         config: ContainerConfig | dict[str, str] | None = None,
         container: Container | None = None,
         start: Callable[[], Awaitable[None]] | None = None,
+        sleep: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         super().__init__(name, config)
         # Watches the container the last connect reached until it exits.
@@ -177,11 +187,14 @@ class ContainerMachine(MachineHandle, PipeTransportMixin):
         self._relay: RelayContainer | None = None
         self._container = container
         self._start = start
+        self._sleep = sleep
         url, token = self.config.url, self.config.token
         if url is None:
             return
         if container is not None:
             raise ValueError(BOTH)
+        if sleep is not None:
+            raise ValueError(SLEEP_RELAY)
         require_id(self.provider, "url", url)
         require_id(self.provider, "token", token or "")
         self._relay = RelayContainer(url, token or "")
@@ -422,6 +435,12 @@ class ContainerMachine(MachineHandle, PipeTransportMixin):
                 await asyncio.gather(watching, return_exceptions=True)
             if self._relay is not None:
                 await self._relay.close()
+
+    async def sleep(self) -> None:
+        """Run the host's sleep hook, if it gave one; without one, sleep
+        only disconnects."""
+        if self._sleep is not None:
+            await self._sleep()
 
     async def open_pipe(self, command: str) -> MachinePipe:
         if self._container is None:

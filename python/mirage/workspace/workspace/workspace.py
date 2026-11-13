@@ -441,6 +441,7 @@ class Workspace:
         self._closing = False
         self._async_closed = False
         self._state_dropped = False
+        self._machines_slept = False
         self._close_error: BaseException | None = None
         self._close_lock = asyncio.Lock()
         self._meta_lock = asyncio.Lock()
@@ -1955,10 +1956,32 @@ class Workspace:
                 "workspace was closed before delete; its state is kept"
             )
 
+    async def sleep(self) -> None:
+        """Close the workspace as ``close`` does, then put each machine
+        that can sleep to sleep: an E2B sandbox whose config says
+        ``on_sleep: pause``, or a container whose host gave a sleep hook.
+        Other machines are only disconnected, and the state is kept.
+
+        Raises:
+            RuntimeError: the workspace was closed first, which let its
+                machines go awake.
+        """
+        try:
+            await self._sync_bridge.close(
+                partial(self._close, drop_state=False, sleep=True)
+            )
+        finally:
+            await self._sync_bridge.ashutdown()
+        if not self._machines_slept:
+            raise RuntimeError(
+                "workspace was closed before sleep; its machines are awake"
+            )
+
     async def _close(
         self,
         drop_state: bool,
         blocked_loop: asyncio.AbstractEventLoop | None = None,
+        sleep: bool = False,
     ) -> None:
         """Release everything the workspace owns, exactly once
         (``close_workspace``); a later call answers as the first did.
@@ -1971,6 +1994,8 @@ class Workspace:
                 sync ``with`` block is exiting inside; its runners are
                 cancelled but not joined, and a metadata write there is
                 not waited for, since neither can run until this returns.
+            sleep (bool): put each machine that can sleep to sleep once
+                it is closed.
         """
         # Stop lifecycle mutations before teardown yields or captures its
         # close lists. Keep _closed separate so runtime journals can still
@@ -2001,6 +2026,7 @@ class Workspace:
                     raise self._close_error
                 return
             self._state_dropped = drop_state
+            self._machines_slept = sleep
             failures = [
                 result
                 for result in execution_results
@@ -2009,7 +2035,7 @@ class Workspace:
             try:
                 failures.extend(
                     await close_workspace(
-                        self._close_deps(drop_state, blocked_loop)
+                        self._close_deps(drop_state, blocked_loop, sleep)
                     )
                 )
             finally:
@@ -2030,6 +2056,7 @@ class Workspace:
         self,
         drop_state: bool,
         blocked_loop: asyncio.AbstractEventLoop | None = None,
+        sleep: bool = False,
     ) -> CloseDeps:
         """What closing releases (``close_workspace``).
 
@@ -2037,6 +2064,8 @@ class Workspace:
             drop_state (bool): delete the workspace's state too.
             blocked_loop (asyncio.AbstractEventLoop | None): the loop a
                 sync ``with`` block is exiting inside.
+            sleep (bool): put each machine that can sleep to sleep once
+                it is closed.
         """
         return CloseDeps(
             sessions=self._session_mgr,
@@ -2048,7 +2077,7 @@ class Workspace:
                 self._diff_pool.close,
                 self._script_policy.close,
                 self._runtimes.close,
-                self.machine_table.close,
+                partial(self.machine_table.close, sleep=sleep),
                 self._registry.clis.close,
             ],
             job_table=self.job_table,

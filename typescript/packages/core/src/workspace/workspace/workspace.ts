@@ -304,6 +304,8 @@ export class Workspace {
   private closing: Promise<void> | null = null
   private metaWrite: Promise<void> | null = null
   private stateDropped = false
+  // Whether the close that ran put the machines to sleep (`sleep`).
+  private machinesSlept = false
   // The stores this workspace's state lives in, whether the state store
   // built them or the caller passed one in directly: delete clears these,
   // not only what the state store would hand out.
@@ -652,7 +654,7 @@ export class Workspace {
       machines: this.machineTable,
     })
     this.closers.push(() => this.runtimeWorld.close())
-    this.closers.push(() => this.machineTable.close())
+    this.closers.push(() => this.machineTable.close(this.machinesSlept))
     this.closers.push(() => this.registry.clis.close())
     this.router = new Router(this.registry, this.runtimeWorld)
     this.registry.bindClocks()
@@ -2803,7 +2805,21 @@ export class Workspace {
     if (!this.stateDropped) throw new Error('workspace was closed before delete; its state is kept')
   }
 
-  private async runClose(dropState: boolean): Promise<void> {
+  /**
+   * Close the workspace as `close` does, then put each machine that can
+   * sleep to sleep: an E2B sandbox whose config says `onSleep: 'pause'`, or
+   * a container whose host gave a sleep hook. Other machines are only
+   * disconnected, and the state is kept. Throws when the workspace was
+   * closed first: its machines were let go awake.
+   */
+  async sleep(): Promise<void> {
+    this.closing ??= this.runClose(false, true)
+    await this.closing
+    if (!this.machinesSlept)
+      throw new Error('workspace was closed before sleep; its machines are awake')
+  }
+
+  private async runClose(dropState: boolean, sleep = false): Promise<void> {
     this.diffPool.stop()
     const executions = [...this.shellExecutions]
     for (const execution of executions) execution.cancel()
@@ -2820,6 +2836,7 @@ export class Workspace {
     // state or closes the store.
     await Promise.allSettled([this.metaWrite])
     this.stateDropped = dropState
+    this.machinesSlept = sleep
     try {
       await closeWorkspace({
         sessions: this.sessionManager,

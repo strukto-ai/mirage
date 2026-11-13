@@ -21,9 +21,11 @@ from mirage.machine.cloudflare_container import ContainerMachine
 from mirage.machine.cloudflare_container.constants import (
     BOTH,
     NO_CONTAINER,
+    SLEEP_RELAY,
     STOPPED,
 )
 from mirage.machine.constants import CHECK_LINE, EXEC_PRELUDE, PROCESS
+from mirage.machine.mixin import SleepableMixin
 from mirage.machine.registry import build_machine
 from mirage.types import PathSpec
 from tests.fixtures.cloudflare_container import FakeContainer, FakeProcess
@@ -193,3 +195,36 @@ async def test_a_pipe_sends_its_writes_in_order_and_stops_with_term():
     assert await asyncio.wait_for(pipe.reader.readexactly(2), 5) == b"ab"
     await pipe.stop()
     assert box.ran("sftp -e").killed == [15]
+
+
+@pytest.mark.asyncio
+async def test_sleep_runs_the_hosts_hook_once_after_close():
+    order: list[str] = []
+
+    async def start() -> None:
+        return None
+
+    async def sleep() -> None:
+        order.append("sleep")
+
+    machine = ContainerMachine("box", {}, FakeContainer(), start, sleep)
+    assert isinstance(machine, SleepableMixin)
+    await machine.close()
+    order.append("closed")
+    await machine.sleep()
+    assert order == ["closed", "sleep"]
+
+
+@pytest.mark.asyncio
+async def test_sleep_does_nothing_without_a_hook():
+    _, machine = boxed()
+    await machine.sleep()
+
+
+def test_a_relays_container_takes_no_sleep_hook():
+    async def sleep() -> None:
+        return None
+
+    url = "https://relay.example.workers.dev/box"
+    with pytest.raises(ValueError, match=SLEEP_RELAY):
+        ContainerMachine("box", {"url": url, "token": "t"}, None, None, sleep)

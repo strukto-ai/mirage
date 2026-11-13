@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ConfigFields, RuntimeConfig } from '../runtime/config.ts'
-import type { MountType } from './types.ts'
+import type { MountType, SleepAction } from './types.ts'
 import { MOUNT_TYPES } from './constants.ts'
 
 /**
@@ -51,6 +51,24 @@ export function checkMountType(runtime: string, mountType: unknown): MountType |
     )
   }
   return mountType as MountType
+}
+
+/**
+ * Fail loud on an `onSleep` other than the provider's own `options`; unset
+ * leaves the machine alone. Mirrors Python's `check_on_sleep`.
+ */
+export function checkOnSleep(
+  runtime: string,
+  onSleep: unknown,
+  options: readonly SleepAction[],
+): SleepAction | null {
+  if (onSleep === undefined || onSleep === null) return null
+  if (!options.includes(onSleep as SleepAction)) {
+    throw new Error(
+      `${runtime} onSleep must be one of ${options.join(', ')}, not ${JSON.stringify(onSleep)}`,
+    )
+  }
+  return onSleep as SleepAction
 }
 
 /** Whether a configured id is a string with something in it. Mirrors Python's `nonblank`. */

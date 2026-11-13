@@ -35,9 +35,12 @@ from mirage.core.api.client import SessionPool
 from mirage.execution.job import JobState
 from mirage.execution.ram import RAMExecutionStore
 from mirage.io import IOResult
+from mirage.machine.handle import MachineHandle
+from mirage.machine.mixin import SleepableMixin
 from mirage.runtime.base import Runtime
 from mirage.runtime.python.host.fs import HostFs
 from mirage.runtime.python.host.open import make_open
+from mirage.runtime.types import RunResult
 from mirage.shell.console import (
     Channel,
     ConsoleChunk,
@@ -1672,3 +1675,71 @@ async def test_execution_cleanup_failure_still_stops_diff_pool_and_other_resourc
     assert closed == ["cancel", "runtimes"]
     assert process is not None and process.returncode is not None
     assert not ws._diff_pool._entries
+
+
+class _Napper(MachineHandle, SleepableMixin):
+    """A machine that can sleep, recording its close and sleep in
+    ``log``."""
+
+    provider = "napper"
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+        self.log: list[str] = []
+
+    async def connect(self) -> None:
+        return None
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+    async def close(self) -> None:
+        await super().close()
+        self.log.append("close")
+
+    async def sleep(self) -> None:
+        self.log.append("sleep")
+
+
+class _Insomniac(_Napper):
+    """A machine whose sleep is refused, as a busy E2B node refuses a
+    pause."""
+
+    async def sleep(self) -> None:
+        self.log.append("sleep")
+        raise RuntimeError("pause refused")
+
+
+@pytest.mark.asyncio
+async def test_sleep_raises_a_machines_failed_sleep():
+    box = _Insomniac("box")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box})
+    with pytest.raises(RuntimeError, match="pause refused"):
+        await ws.sleep()
+    assert box.log == ["close", "sleep"]
+
+
+@pytest.mark.asyncio
+async def test_sleep_closes_the_workspace_then_puts_its_machines_to_sleep():
+    box = _Napper("box")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box})
+    await ws.sleep()
+    assert box.log == ["close", "sleep"]
+
+
+@pytest.mark.asyncio
+async def test_a_plain_close_leaves_machines_awake():
+    box = _Napper("box")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box})
+    await ws.close()
+    assert box.log == ["close"]
+
+
+@pytest.mark.asyncio
+async def test_sleep_after_close_refuses_rather_than_leave_machines_awake():
+    box = _Napper("box")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box})
+    await ws.close()
+    with pytest.raises(RuntimeError, match="closed before sleep"):
+        await ws.sleep()
+    assert box.log == ["close"]

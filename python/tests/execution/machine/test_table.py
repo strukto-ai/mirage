@@ -23,6 +23,7 @@ from mirage.execution.process.table import ProcessTable
 from mirage.execution.types import MachinePid
 from mirage.machine.constants import CHECK_LINE, CHECK_MARK
 from mirage.machine.handle import MachineHandle
+from mirage.machine.mixin import SleepableMixin
 from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.types import RunResult
 from mirage.types import MountMode
@@ -826,3 +827,106 @@ async def test_a_workspace_that_fails_to_build_holds_no_machine():
     await Workspace(
         {"/": RAMVFS()}, mode=MountMode.EXEC, machines={"a": box}
     ).close()
+
+
+class _Napper(_Box, SleepableMixin):
+    """A box that can sleep, recording its close and sleep in ``log``;
+    ``refused`` is why another table could not take it while it slept,
+    or None if it could."""
+
+    def __init__(
+        self,
+        name: str,
+        log: list[str],
+        fail_close: bool = False,
+        fail_sleep: bool = False,
+    ) -> None:
+        super().__init__(name, 0)
+        self.log = log
+        self.fail_close = fail_close
+        self.fail_sleep = fail_sleep
+        self.refused: str | None = None
+
+    async def close(self) -> None:
+        await super().close()
+        self.log.append(f"close {self.name}")
+        if self.fail_close:
+            raise RuntimeError(f"close {self.name} failed")
+
+    async def sleep(self) -> None:
+        self.log.append(f"sleep {self.name}")
+        try:
+            MachineTable({self.name: self})
+        except ValueError as exc:
+            self.refused = str(exc)
+        if self.fail_sleep:
+            raise RuntimeError(f"sleep {self.name} failed")
+
+
+@pytest.mark.asyncio
+async def test_a_sleeping_close_closes_every_handle_then_sleeps_those_that_can():
+    log: list[str] = []
+    table = MachineTable({"a": _Napper("a", log), "b": _Box("b", 0)})
+    table.hold_handles()
+    await table.close(sleep=True)
+    assert log == ["close a", "sleep a"]
+
+
+@pytest.mark.asyncio
+async def test_a_plain_close_sleeps_nothing():
+    log: list[str] = []
+    table = MachineTable({"a": _Napper("a", log)})
+    table.hold_handles()
+    await table.close()
+    assert log == ["close a"]
+
+
+@pytest.mark.asyncio
+async def test_a_handle_whose_close_failed_still_sleeps():
+    log: list[str] = []
+    table = MachineTable({"a": _Napper("a", log, fail_close=True)})
+    table.hold_handles()
+    with pytest.raises(RuntimeError, match="close a failed"):
+        await table.close(sleep=True)
+    assert log == ["close a", "sleep a"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_close_and_a_failed_sleep_are_both_raised():
+    log: list[str] = []
+    table = MachineTable(
+        {
+            "a": _Napper("a", log, fail_close=True),
+            "b": _Napper("b", log, fail_sleep=True),
+        }
+    )
+    table.hold_handles()
+    with pytest.raises(BaseExceptionGroup) as raised:
+        await table.close(sleep=True)
+    assert sorted(str(e) for e in raised.value.exceptions) == [
+        "close a failed",
+        "sleep b failed",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_sleeping_close_sleeps_no_handle_another_table_took():
+    log: list[str] = []
+    a = _Napper("a", log)
+    first = MachineTable({"a": a})
+    first.hold_handles()
+    await first.close()
+    again = MachineTable({"a": a})
+    again.hold_handles()
+    await first.close(sleep=True)
+    assert log == ["close a", "close a"]
+
+
+@pytest.mark.asyncio
+async def test_a_handle_is_held_until_it_has_slept():
+    a = _Napper("a", [])
+    table = MachineTable({"a": a})
+    table.hold_handles()
+    await table.close(sleep=True)
+    assert a.refused == "machine 'a' is already in another workspace"
+    MachineTable({"a": a})

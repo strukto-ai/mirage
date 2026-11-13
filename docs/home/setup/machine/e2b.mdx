@@ -136,7 +136,26 @@ The timeout you give the sandbox at creation, one hour above, sets when it
 ends. Mirage never makes a sandbox, kills one or sets its timeout. Reaching a
 sandbox resumes it if it is paused and keeps it alive at least 5 more
 minutes, as any E2B connect does, so reaching it near the end moves the end
-back. Stopping or closing the workspace leaves the sandbox running.
+back. Closing the workspace leaves the sandbox running.
+
+To pause the sandbox when the workspace sleeps, set `on_sleep: pause` on the
+machine:
+
+```yaml
+machines:
+  box:
+    provider: e2b
+    sandbox_id: ${E2B_SANDBOX_ID}
+    on_sleep: pause
+```
+
+`workspace.sleep()` closes the workspace, then pauses the sandbox: its disk
+and memory are kept and E2B stops billing its compute. The next line's
+connect resumes it, with at least 5 more minutes. Mirage pauses only a
+sandbox the workspace reached, and a sandbox that is already gone counts as
+asleep. A pause interrupts anything else running in the sandbox, so leave
+`on_sleep` unset when the sandbox is shared. Without it, `sleep()` leaves the
+sandbox running, as `close()` does. `pause` is the only value.
 
 Once the sandbox has ended, a line exits 1, and its error names the fix:
 

@@ -16,14 +16,14 @@ import { feed } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { abortable } from '../../utils/abort.ts'
 import { currentCaller } from '../../context/session_context.ts'
-import { MachineHandle } from '../handle.ts'
-import { PIPE_TRANSPORT, type PipeTransport } from '../mixin.ts'
+import { MachineHandle, logger } from '../handle.ts'
+import { PIPE_TRANSPORT, SLEEPABLE, type PipeTransport, type Sleepable } from '../mixin.ts'
 import { registerMachine } from '../registry.ts'
 import type { MachinePipe } from '../types.ts'
 import type { OutputFn, PipeWriter, RunResult } from '../../runtime/types.ts'
 import type { ConfigFields } from '../../runtime/config.ts'
 import { concat } from '../../utils/bytes.ts'
-import { requireId } from '../config.ts'
+import { checkOnSleep, requireId } from '../config.ts'
 import { ConnectionLostError } from '../errors.ts'
 import {
   decodeOutput,
@@ -35,7 +35,7 @@ import {
   stopSignal,
   wrapLine,
 } from '../constants.ts'
-import { CLOSED_INPUT, PTY_MARK, PTY_RAW, SANDBOX_GONE } from './constants.ts'
+import { CLOSED_INPUT, ON_SLEEP, PTY_MARK, PTY_RAW, SANDBOX_GONE } from './constants.ts'
 import { loadSdk, type E2bSdk } from './sdk.ts'
 import { E2B_CONFIG_FIELDS, type E2BConfig } from './config.ts'
 import type { CommandResult, Sandbox } from 'e2b'
@@ -138,21 +138,26 @@ class PtyWriter implements PipeWriter {
  * command runs until mirage's limits stop it. A `mountType` serves the
  * workspace over a PTY, since E2B's exec decodes output as text.
  *
- * The sandbox is yours: Mirage never extends or kills it. Once the SDK
+ * The sandbox is yours: Mirage never kills it, and pauses it only when its
+ * config says `onSleep: 'pause'` and the workspace sleeps. Once the SDK
  * says it is gone, connecting fails with how to replace it, and a line it
  * cut short loses its connection (129) with the same advice; the next line
  * connects again.
  */
-export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTransport {
+export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTransport, Sleepable {
   static override readonly configFields: ConfigFields = E2B_CONFIG_FIELDS
   readonly [PIPE_TRANSPORT] = true as const
+  readonly [SLEEPABLE] = true as const
   static override readonly provider = 'e2b'
   private sdk: E2bSdk | null = null
   private sandbox: Sandbox | null = null
+  // Set once a connect reaches the sandbox; sleep pauses only then.
+  private reached = false
 
   constructor(name: string, config?: E2BConfig) {
     super(name, config, E2BMachine.configFields)
     requireId('e2b', 'sandboxId', this.config.sandboxId)
+    checkOnSleep('e2b', this.config.onSleep, ON_SLEEP)
   }
 
   /** The sandbox's id at E2B. */
@@ -181,6 +186,23 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
     } catch (error) {
       const hint = this.gone(sdk, error)
       throw hint === null ? error : new Error(hint, { cause: error })
+    }
+    this.reached = true
+  }
+
+  /**
+   * Pause the sandbox when the config says `onSleep: 'pause'` and this handle
+   * reached it, keeping its disk and memory; the next connect resumes it. A
+   * sandbox already gone has nothing to pause.
+   */
+  async sleep(): Promise<void> {
+    if (this.config.onSleep !== 'pause' || !this.reached) return
+    const sdk = await this.ensureSdk()
+    try {
+      await sdk.Sandbox.pause(this.config.sandboxId, this.apiParams())
+    } catch (error) {
+      if (!(error instanceof sdk.SandboxNotFoundError)) throw error
+      logger.debug?.(`${this.machine.toString()}: sandbox already gone, nothing to pause`)
     }
   }
 

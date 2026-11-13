@@ -29,3 +29,14 @@ class PipeTransportMixin(ABC):
         Args:
             command (str): the shell command.
         """
+
+
+class SleepableMixin(ABC):
+    """A machine a workspace can put to sleep when it lets go of it: what
+    sleep does is the provider's, and a machine without this is only
+    disconnected."""
+
+    @abstractmethod
+    async def sleep(self) -> None:
+        """Put the machine to sleep when its workspace sleeps: what that
+        does is the provider's; the next connect brings it back."""

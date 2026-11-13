@@ -266,6 +266,10 @@ async def test_types_are_read_off_the_config_schemas(client):
     assert ssh["mount_type"]["options"] == ["ssh", "fuse", "both"]
     assert ssh["private_key"]["secret"] is True
     assert "env" not in ssh
+    assert "on_sleep" not in ssh
+    e2b = {f["name"]: f for f in machines["e2b"]}
+    assert e2b["on_sleep"]["options"] == ["pause"]
+    assert e2b["on_sleep"]["required"] is False
 
 
 @pytest.mark.asyncio

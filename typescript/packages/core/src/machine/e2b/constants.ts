@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SleepAction } from '../types.ts'
+
 // A PTY carries a served prefix's SFTP where a provider's exec decodes
 // output as text (E2B): the terminal goes raw, so bytes pass unchanged,
 // and the marker ends the shell's own output before sshfs starts.
@@ -21,6 +23,9 @@ export const PTY_RAW = "stty raw -echo -iexten; printf '\\001mirage-sftp\\002'; 
 // envd reports a write to an input the command has closed (head) as the
 // broken-pipe or closed-file text inside a generic INTERNAL error.
 export const CLOSED_INPUT = ['broken pipe', 'file already closed'] as const
+
+// What `onSleep` takes for a sandbox: pause it, keeping its disk and memory.
+export const ON_SLEEP: readonly SleepAction[] = ['pause']
 
 // Why a sandbox the SDK says is gone cannot take a line, by how it said so,
 // with the fix: the sandbox is the user's, and Mirage never makes one.

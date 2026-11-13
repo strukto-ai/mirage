@@ -36,7 +36,15 @@ import { concat } from '../../utils/bytes.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BOTH, NOT_ANSWERING, NO_CONTAINER, START_WAIT_SECONDS, STOPPED } from './constants.ts'
+import {
+  BOTH,
+  NOT_ANSWERING,
+  NO_CONTAINER,
+  SLEEP_RELAY,
+  START_WAIT_SECONDS,
+  STOPPED,
+} from './constants.ts'
+import { isSleepable } from '../mixin.ts'
 import { ContainerMachine } from './handle.ts'
 import type { Container, ExecOptions, ExecProcess } from './types.ts'
 
@@ -857,5 +865,43 @@ describe('ContainerMachine in a workspace', () => {
     } finally {
       await ws.close()
     }
+  })
+})
+
+describe('ContainerMachine sleep', () => {
+  it('runs the host’s sleep hook once, after close', async () => {
+    const box = new FakeContainer()
+    const order: string[] = []
+    const machine = new ContainerMachine(
+      'box',
+      {},
+      box,
+      () => Promise.resolve(),
+      () => {
+        order.push('sleep')
+        return Promise.resolve()
+      },
+    )
+    expect(isSleepable(machine)).toBe(true)
+    await machine.close()
+    order.push('closed')
+    await machine.sleep()
+    expect(order).toEqual(['closed', 'sleep'])
+  })
+
+  it('does nothing on sleep without a hook', async () => {
+    const { machine, start } = boxed()
+    await machine.sleep()
+    expect(start).not.toHaveBeenCalled()
+  })
+
+  it('refuses a sleep hook for a relay’s container', () => {
+    const url = 'https://relay.example.workers.dev/box'
+    expect(
+      () =>
+        new ContainerMachine('box', { url, token: 't' }, undefined, undefined, () =>
+          Promise.resolve(),
+        ),
+    ).toThrow(SLEEP_RELAY)
   })
 })

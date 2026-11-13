@@ -205,6 +205,21 @@ there, and for `ps`, `kill` and the like when they ask it. An error it
 throws, such as a quota of your own, fails that line with the error's
 message.
 
+To stop the container when the workspace sleeps, pass a sleep function as
+the fifth argument and call `workspace.sleep()` instead of `close()`:
+
+```typescript
+new ContainerMachine('box', { mountType: 'ssh' }, this.ctx.container, start, async () => {
+  await this.ctx.container?.destroy()
+})
+```
+
+`sleep()` closes the workspace, unmounting what the container was served,
+then calls the function, while the container is still running. What it keeps
+is yours to decide: Cloudflare has no pause, so a stopped container's next
+start has a fresh disk. A relay's container is the user's, so a handle with a
+`url` takes no sleep function, and `sleep()` only disconnects it.
+
 ## Configuration
 
 | Field | Description |
@@ -241,4 +256,5 @@ port, key or network is needed in the container, so it works with
 - Output comes back as the program wrote it, binary included, with stdout
   and stderr separate. Without piped input, stdin starts closed.
 - Closing the workspace leaves a running container running and starts no
-  stopped one. Stop it from the Durable Object.
+  stopped one. Stop it from the Durable Object, or give the handle a sleep
+  function and call `workspace.sleep()`.

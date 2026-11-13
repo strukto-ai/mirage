@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MachineHandle } from '../../machine/handle.ts'
+import { isSleepable } from '../../machine/mixin.ts'
 import { buildMachine } from '../../machine/registry.ts'
 import { MAX_PROCESSES } from '../process/constants.ts'
 import { CONTINUE_SIGNALS, STOP_SIGNALS } from '../../shell/constants.ts'
@@ -503,10 +504,22 @@ export class MachineTable {
     }
   }
 
-  /** Close every handle: unmount what each was served, and let go of it for another workspace. */
-  async close(): Promise<void> {
-    for (const handle of this.handles()) if (HOLDERS.get(handle) === this) HOLDERS.delete(handle)
+  /**
+   * Close every handle: unmount what each was served, and let go of it for
+   * another workspace. With `sleep`, each sleepable handle this table held
+   * is then put to sleep, held until it has slept so no other workspace
+   * takes it first; a handle whose close failed still sleeps.
+   *
+   * @param sleep put each sleepable handle to sleep after closing it.
+   */
+  async close(sleep = false): Promise<void> {
+    const held = this.handles().filter((handle) => HOLDERS.get(handle) === this)
+    if (!sleep) for (const handle of held) HOLDERS.delete(handle)
     const results = await Promise.allSettled(this.handles().map((h) => h.close()))
+    if (sleep) {
+      results.push(...(await Promise.allSettled(held.filter(isSleepable).map((h) => h.sleep()))))
+      for (const handle of held) HOLDERS.delete(handle)
+    }
     const failures = results.flatMap((r) => (r.status === 'rejected' ? [r.reason as unknown] : []))
     if (failures.length === 1) throw failures[0] as Error
     if (failures.length > 1) throw new AggregateError(failures, 'machine close failed')

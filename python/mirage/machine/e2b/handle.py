@@ -41,7 +41,7 @@ from mirage.machine.e2b.constants import (
 )
 from mirage.machine.errors import ConnectionLostError
 from mirage.machine.handle import MachineHandle
-from mirage.machine.mixin import PipeTransportMixin
+from mirage.machine.mixin import PipeTransportMixin, SleepableMixin
 from mirage.machine.types import MachinePipe
 from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.types import OutputFn, RunResult
@@ -127,7 +127,7 @@ class PtyWriter:
                 return
 
 
-class E2BMachine(MachineHandle, PipeTransportMixin):
+class E2BMachine(MachineHandle, PipeTransportMixin, SleepableMixin):
     """A running E2B sandbox, reached through its SDK.
 
     You create the sandbox yourself (`e2b sandbox spawn` or the SDK);
@@ -142,8 +142,9 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
     it. A ``mount_type`` serves the workspace over a PTY, since E2B's
     exec decodes output as text.
 
-    The sandbox is yours: Mirage never extends or kills it. Once the SDK
-    says it is gone, connecting fails with how to replace it, and a line
+    The sandbox is yours: Mirage never kills it, and pauses it only when
+    its config says ``on_sleep: pause`` and the workspace sleeps. Once
+    the SDK says it is gone, connecting fails with how to replace it, and a line
     it cut short loses its connection (129) with the same advice; the
     next line connects again.
 
@@ -157,6 +158,8 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
     config: E2BConfig
 
     _sandbox: Any = None
+    # Set once a connect reaches the sandbox; sleep pauses only then.
+    _reached: bool = False
 
     @property
     def instance(self) -> str:
@@ -178,6 +181,24 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
             if (hint := self._gone(exc)) is None:
                 raise
             raise RuntimeError(hint) from exc
+        self._reached = True
+
+    async def sleep(self) -> None:
+        """Pause the sandbox when the config says ``on_sleep: pause`` and
+        this handle reached it, keeping its disk and memory; the next
+        connect resumes it. A sandbox already gone has nothing to pause."""
+        if self.config.on_sleep != "pause" or not self._reached:
+            return
+        try:
+            await sdk.AsyncSandbox.pause(
+                self.config.sandbox_id, **self._api_params()
+            )
+        except sdk.SandboxNotFoundException:
+            logger.debug(
+                "%s: sandbox already gone, nothing to pause",
+                self.machine,
+                exc_info=True,
+            )
 
     def _gone(self, exc: BaseException) -> str | None:
         """How to replace the sandbox when ``exc`` says it is gone, else

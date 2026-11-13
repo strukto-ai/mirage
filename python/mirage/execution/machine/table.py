@@ -35,6 +35,7 @@ from mirage.execution.types import (
     ProcessId,
 )
 from mirage.machine.handle import MachineHandle
+from mirage.machine.mixin import SleepableMixin
 from mirage.machine.registry import build_machine
 from mirage.shell.constants import CONTINUE_SIGNALS, STOP_SIGNALS
 from mirage.workspace.record.types import RecordFields
@@ -612,17 +613,41 @@ class MachineTable:
                 del self._found[key]
                 gone.set()
 
-    async def close(self) -> None:
+    async def close(self, sleep: bool = False) -> None:
         """Close every handle: unmount what each was served, and let go
-        of it for another workspace."""
-        for handle in self._handles.values():
-            held = _HOLDERS.get(handle)
-            if held is not None and held() is self:
-                del _HOLDERS[handle]
-        results = await asyncio.gather(
-            *(handle.close() for handle in self._handles.values()),
-            return_exceptions=True,
-        )
+        of it for another workspace. With ``sleep``, each sleepable handle
+        this table held is then put to sleep, held until it has slept so
+        no other workspace takes it first; a handle whose close failed
+        still sleeps.
+
+        Args:
+            sleep (bool): put each sleepable handle to sleep after
+                closing it.
+        """
+        held = [
+            handle
+            for handle in self._handles.values()
+            if (ref := _HOLDERS.get(handle)) is not None and ref() is self
+        ]
+        if not sleep:
+            _release(held)
+        try:
+            results = await asyncio.gather(
+                *(handle.close() for handle in self._handles.values()),
+                return_exceptions=True,
+            )
+            if sleep:
+                results += await asyncio.gather(
+                    *(
+                        handle.sleep()
+                        for handle in held
+                        if isinstance(handle, SleepableMixin)
+                    ),
+                    return_exceptions=True,
+                )
+        finally:
+            if sleep:
+                _release(held)
         failures = [r for r in results if isinstance(r, BaseException)]
         if failures:
             raise (
@@ -630,6 +655,16 @@ class MachineTable:
                 if len(failures) == 1
                 else BaseExceptionGroup("machine close failed", failures)
             )
+
+
+def _release(held: list[MachineHandle]) -> None:
+    """Let go of the handles a table held when its close began.
+
+    Args:
+        held (list[MachineHandle]): those handles.
+    """
+    for handle in held:
+        _HOLDERS.pop(handle, None)
 
 
 def _program_row(

@@ -21,6 +21,12 @@ NO_CONTAINER = (
 # A container handed in has no relay to name.
 BOTH = "cloudflare_container takes a container or a relay url, not both"
 
+# A relay's container is the user's, so nothing here sleeps it.
+SLEEP_RELAY = (
+    "cloudflare_container takes no sleep hook with a relay url: "
+    "a relay's container is the user's"
+)
+
 # What a line the container stopped under says, after the provider's name.
 STOPPED = "the container stopped; the next line starts it again"
 

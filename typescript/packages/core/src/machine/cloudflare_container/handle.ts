@@ -28,7 +28,7 @@ import {
 } from '../constants.ts'
 import { ConnectionLostError } from '../errors.ts'
 import { MachineHandle, logger } from '../handle.ts'
-import { PIPE_TRANSPORT, type PipeTransport } from '../mixin.ts'
+import { PIPE_TRANSPORT, SLEEPABLE, type PipeTransport, type Sleepable } from '../mixin.ts'
 import { registerMachine } from '../registry.ts'
 import type { MachinePipe } from '../types.ts'
 import type { OutputFn, RunResult } from '../../runtime/types.ts'
@@ -43,6 +43,7 @@ import {
   CLOSING,
   NO_CONTAINER,
   NOT_ANSWERING,
+  SLEEP_RELAY,
   START_WAIT_SECONDS,
   STOPPED,
 } from './constants.ts'
@@ -118,14 +119,23 @@ async function drain(
  * program wrote them. A `mountType` serves the workspace over one more exec
  * whose pipes carry SFTP.
  *
+ * In the Durable Object the host may also give a `sleep` hook, which
+ * `Workspace.sleep()` runs after the handle closes: the host decides what
+ * sleep keeps and stops the container. A relay's container is the user's,
+ * so it takes no hook and sleep only disconnects it.
+ *
  * A handle with neither fails to connect, saying how to build one. Once
  * the container stops, a line it cut short loses its connection (129), and
  * the next line starts it again.
  */
-export class ContainerMachine extends MachineHandle<ContainerConfig> implements PipeTransport {
+export class ContainerMachine
+  extends MachineHandle<ContainerConfig>
+  implements PipeTransport, Sleepable
+{
   static override readonly provider = 'cloudflare_container'
   static override readonly configFields: ConfigFields = CONTAINER_CONFIG_FIELDS
   readonly [PIPE_TRANSPORT] = true as const
+  readonly [SLEEPABLE] = true as const
   // Settles once the container the last connect reached has exited.
   private exited: Promise<void> | null = null
   // What each exec still running is told when the container exits, and how many exits there have been.
@@ -135,6 +145,7 @@ export class ContainerMachine extends MachineHandle<ContainerConfig> implements 
   private closing = false
   private readonly container: Container | undefined
   private readonly start: (() => Promise<void>) | undefined
+  private readonly sleepHook: (() => Promise<void>) | undefined
   private readonly relay: RelayContainer | null = null
 
   /**
@@ -143,21 +154,26 @@ export class ContainerMachine extends MachineHandle<ContainerConfig> implements 
    *   and outside its Durable Object the relay that reaches it.
    * @param container the Durable Object's own `ctx.container`.
    * @param start starts the container when it is not running.
+   * @param sleep what `Workspace.sleep()` does to the container once the
+   *   handle has closed, in the Durable Object only.
    */
   constructor(
     name: string,
     config?: ContainerConfig,
     container?: Container,
     start?: () => Promise<void>,
+    sleep?: () => Promise<void>,
   ) {
     super(name, config, ContainerMachine.configFields)
     const { url, token } = this.config
     if (url === undefined) {
       this.container = container
       this.start = start
+      this.sleepHook = sleep
       return
     }
     if (container !== undefined) throw new Error(BOTH)
+    if (sleep !== undefined) throw new Error(SLEEP_RELAY)
     requireId('cloudflare_container', 'url', url)
     requireId('cloudflare_container', 'token', token)
     const relay = new RelayContainer(url, token ?? '')
@@ -386,6 +402,11 @@ export class ContainerMachine extends MachineHandle<ContainerConfig> implements 
       this.exited = null
       await this.relay?.close()
     }
+  }
+
+  /** Run the host's sleep hook, if it gave one; without one, sleep only disconnects. */
+  async sleep(): Promise<void> {
+    await this.sleepHook?.()
   }
 
   async openPipe(command: string): Promise<MachinePipe> {

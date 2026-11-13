@@ -20,6 +20,8 @@ import { Workspace } from '../../workspace.ts'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Limit, MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { E2BMachine } from '@struktoai/mirage-core/machine/e2b/handle'
+import type { E2BConfig } from '@struktoai/mirage-core/machine/e2b/config'
+import { isSleepable } from '@struktoai/mirage-core/machine/mixin'
 import { ProcessTable } from '@struktoai/mirage-core/execution/process/table'
 import { runAsProcess } from '@struktoai/mirage-core/context/session_context'
 import type { E2bSdk } from '@struktoai/mirage-core/machine/e2b/sdk'
@@ -237,6 +239,8 @@ class FakeMachine {
   static connected: [string, Record<string, unknown>][] = []
   static refusal: Error | null = null
   static last: FakeMachine
+  static paused: [string, Record<string, unknown>][] = []
+  static pauseRefusal: Error | null = null
   readonly commands = new FakeCommands()
   readonly pty = new FakePty()
   static async connect(sandboxId: string, params: Record<string, unknown>): Promise<FakeMachine> {
@@ -245,6 +249,12 @@ class FakeMachine {
     if (FakeMachine.refusal) throw FakeMachine.refusal
     FakeMachine.last = new FakeMachine()
     return FakeMachine.last
+  }
+  static async pause(sandboxId: string, params: Record<string, unknown>): Promise<boolean> {
+    FakeMachine.paused.push([sandboxId, params])
+    await Promise.resolve()
+    if (FakeMachine.pauseRefusal) throw FakeMachine.pauseRefusal
+    return true
   }
 }
 
@@ -269,6 +279,8 @@ beforeEach(() => {
   FakeMachine.connected = []
   FakeMachine.refusal = null
   FakeMachine.last = new FakeMachine()
+  FakeMachine.paused = []
+  FakeMachine.pauseRefusal = null
   vi.restoreAllMocks()
 })
 
@@ -1007,4 +1019,52 @@ it('passes on a streamed tail without a newline', async () => {
     0,
     { out: ['a', 'mirage: tail\n'], err: ['b', 'mirage: etail\n'] },
   ])
+})
+
+describe('E2BMachine sleep', () => {
+  async function reached(config: Partial<E2BConfig> = {}): Promise<FakedE2BMachine> {
+    const machine = new FakedE2BMachine('box', { sandboxId: 'sb-live', apiKey: 'k-123', ...config })
+    await machine.connect()
+    await machine.close()
+    return machine
+  }
+
+  it('is sleepable', () => {
+    expect(isSleepable(makeRuntime())).toBe(true)
+  })
+  it('pauses the sandbox it reached when onSleep says pause', async () => {
+    await (await reached({ onSleep: 'pause' })).sleep()
+    expect(FakeMachine.paused).toEqual([['sb-live', { apiKey: 'k-123' }]])
+  })
+  it('leaves the sandbox alone without onSleep', async () => {
+    await (await reached()).sleep()
+    expect(FakeMachine.paused).toEqual([])
+  })
+  it('leaves alone a sandbox it never reached', async () => {
+    const machine = new FakedE2BMachine('box', { sandboxId: 'sb-live', onSleep: 'pause' })
+    await machine.sleep()
+    expect(FakeMachine.paused).toEqual([])
+  })
+  it('leaves alone a sandbox its connect never reached', async () => {
+    const machine = new FakedE2BMachine('box', { sandboxId: 'sb-live', onSleep: 'pause' })
+    FakeMachine.refusal = new Error('refused')
+    await expect(machine.connect()).rejects.toThrow('refused')
+    await machine.sleep()
+    expect(FakeMachine.paused).toEqual([])
+  })
+  it('takes no onSleep other than pause', () => {
+    expect(() => new FakedE2BMachine('box', { sandboxId: 'sb', onSleep: 'stop' as never })).toThrow(
+      'e2b onSleep must be one of pause, not "stop"',
+    )
+  })
+  it('counts a sandbox already gone as asleep', async () => {
+    const machine = await reached({ onSleep: 'pause' })
+    FakeMachine.pauseRefusal = new FakeSandboxNotFoundError('gone')
+    await expect(machine.sleep()).resolves.toBeUndefined()
+  })
+  it('raises any other pause failure', async () => {
+    const machine = await reached({ onSleep: 'pause' })
+    FakeMachine.pauseRefusal = new Error('node busy')
+    await expect(machine.sleep()).rejects.toThrow('node busy')
+  })
 })

@@ -18,6 +18,9 @@ import { CommandSpec, Argument } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { CapacityState } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { MachineHandle } from '../../machine/handle.ts'
+import { SLEEPABLE, type Sleepable } from '../../machine/mixin.ts'
+import type { RunResult } from '../../runtime/types.ts'
 import type { JobRunner } from '../../execution/job/index.ts'
 import { RAMExecutionStore } from '../../execution/ram.ts'
 import {
@@ -880,5 +883,69 @@ describe('capture barrier', () => {
     } finally {
       await ws.close()
     }
+  })
+})
+
+/** A machine that can sleep, recording its close and sleep in `log`. */
+class Napper extends MachineHandle implements Sleepable {
+  static override readonly provider = 'napper'
+  readonly [SLEEPABLE] = true as const
+  readonly log: string[] = []
+
+  connect(): Promise<void> {
+    return Promise.resolve()
+  }
+
+  protected override execArgv(): Promise<RunResult> {
+    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+  }
+
+  override async close(): Promise<void> {
+    await super.close()
+    this.log.push('close')
+  }
+
+  sleep(): Promise<void> {
+    this.log.push('sleep')
+    return Promise.resolve()
+  }
+}
+
+/** A machine whose sleep is refused, as a busy E2B node refuses a pause. */
+class Insomniac extends Napper {
+  override sleep(): Promise<void> {
+    this.log.push('sleep')
+    return Promise.reject(new Error('pause refused'))
+  }
+}
+
+describe('sleep', () => {
+  it('raises a machine’s failed sleep', async () => {
+    const box = new Insomniac('box')
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC, machines: { box } })
+    await expect(ws.sleep()).rejects.toThrow('pause refused')
+    expect(box.log).toEqual(['close', 'sleep'])
+  })
+
+  it('closes the workspace, then puts its machines to sleep', async () => {
+    const box = new Napper('box')
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC, machines: { box } })
+    await ws.sleep()
+    expect(box.log).toEqual(['close', 'sleep'])
+  })
+
+  it('leaves machines awake on a plain close', async () => {
+    const box = new Napper('box')
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC, machines: { box } })
+    await ws.close()
+    expect(box.log).toEqual(['close'])
+  })
+
+  it('refuses after close rather than leave its machines awake quietly', async () => {
+    const box = new Napper('box')
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC, machines: { box } })
+    await ws.close()
+    await expect(ws.sleep()).rejects.toThrow('closed before sleep')
+    expect(box.log).toEqual(['close'])
   })
 })

@@ -16,6 +16,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { CHECK_LINE, CHECK_MARK } from '../../machine/constants.ts'
 import type * as machineConstants from '../../machine/constants.ts'
 import { MachineHandle } from '../../machine/handle.ts'
+import { SLEEPABLE, type Sleepable } from '../../machine/mixin.ts'
 import { RemoteRuntime } from '../../runtime/machine/runtime.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
@@ -853,5 +854,105 @@ describe('MachineTable scans', () => {
       { '/': new RAMVFS() },
       { mode: MountMode.EXEC, machines: { a: box } },
     ).close()
+  })
+})
+
+/**
+ * A box that can sleep, recording its close and sleep in `log`; `failClose`
+ * and `failSleep` make either refuse, and `refused` is why another table
+ * could not take it while it slept, or null if it could.
+ */
+class Napper extends Box implements Sleepable {
+  readonly [SLEEPABLE] = true as const
+  refused: string | null = null
+
+  constructor(
+    name: string,
+    readonly log: string[],
+    readonly failClose = false,
+    readonly failSleep = false,
+  ) {
+    super(name, 0)
+  }
+
+  override async close(): Promise<void> {
+    await super.close()
+    this.log.push(`close ${this.name}`)
+    if (this.failClose) throw new Error(`close ${this.name} failed`)
+  }
+
+  sleep(): Promise<void> {
+    this.log.push(`sleep ${this.name}`)
+    try {
+      new MachineTable({ [this.name]: this })
+    } catch (error) {
+      this.refused = (error as Error).message
+    }
+    return this.failSleep
+      ? Promise.reject(new Error(`sleep ${this.name} failed`))
+      : Promise.resolve()
+  }
+}
+
+describe('MachineTable sleep', () => {
+  it('closes every handle, then sleeps the ones that can', async () => {
+    const log: string[] = []
+    const table = new MachineTable({ a: new Napper('a', log), b: new Box('b', 0) })
+    table.holdHandles()
+    await table.close(true)
+    expect(log).toEqual(['close a', 'sleep a'])
+  })
+
+  it('sleeps nothing on a plain close', async () => {
+    const log: string[] = []
+    const table = new MachineTable({ a: new Napper('a', log) })
+    table.holdHandles()
+    await table.close()
+    expect(log).toEqual(['close a'])
+  })
+
+  it('still sleeps a handle whose close failed, and raises the close', async () => {
+    const log: string[] = []
+    const table = new MachineTable({ a: new Napper('a', log, true) })
+    table.holdHandles()
+    await expect(table.close(true)).rejects.toThrow('close a failed')
+    expect(log).toEqual(['close a', 'sleep a'])
+  })
+
+  it('raises every failure when a close and a sleep both fail', async () => {
+    const log: string[] = []
+    const table = new MachineTable({
+      a: new Napper('a', log, true),
+      b: new Napper('b', log, false, true),
+    })
+    table.holdHandles()
+    const failure = await table.close(true).catch((e: unknown) => e)
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect((failure as AggregateError).errors.map((e: Error) => e.message).sort()).toEqual([
+      'close a failed',
+      'sleep b failed',
+    ])
+  })
+
+  it('sleeps no handle another workspace has taken since it let go', async () => {
+    const log: string[] = []
+    const a = new Napper('a', log)
+    const first = new MachineTable({ a })
+    first.holdHandles()
+    await first.close()
+    new MachineTable({ a }).holdHandles()
+    await first.close(true)
+    expect(log).toEqual(['close a', 'close a'])
+  })
+
+  it('holds a handle until it has slept, then lets another workspace take it', async () => {
+    const a = new Napper('a', [])
+    const table = new MachineTable({ a })
+    table.holdHandles()
+    await table.close(true)
+    expect(a.refused).toBe("machine 'a' is already in another workspace")
+    expect(() => {
+      new MachineTable({ a }).holdHandles()
+    }).not.toThrow()
   })
 })
