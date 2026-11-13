@@ -64,7 +64,7 @@ describe('colrm across chunks', () => {
     [[[0x61, 0xc3], [0x62]], 2, null, [0x61], 1],
   ])('%j', async (parts, start, stop, stdout, code) => {
     const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
-    const args = stop === null ? `${String(start)}` : `${String(start)} ${String(stop)}`
+    const args = stop === null ? String(start) : `${String(start)} ${String(stop)}`
     const io = await ws.shell(`colrm ${args}`, {
       stdin: arriving(parts.map((part) => Uint8Array.from(part))),
       env: { LC_ALL: 'C.UTF-8' },

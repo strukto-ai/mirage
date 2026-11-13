@@ -30,7 +30,7 @@ function colrm(
   return [
     runStream(
       'colrm',
-      { args: texts.map(byteView), utf8: utf8Locale(ctx.env) },
+      { args: texts.map((text) => byteView(text)), utf8: utf8Locale(ctx.env) },
       resolveSource(ctx.stdin),
     ),
     new IOResult(),

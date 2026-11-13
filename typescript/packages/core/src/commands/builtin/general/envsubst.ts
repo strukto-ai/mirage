@@ -32,15 +32,12 @@ function envsubst(
   const env = variables
     ? {}
     : Object.fromEntries(
-        Object.entries(ctx.env ?? {}).map(([name, value]) => [
-          byteView(name),
-          byteView(value),
-        ]),
+        Object.entries(ctx.env ?? {}).map(([name, value]) => [byteView(name), byteView(value)]),
       )
   return [
     runStream(
       'envsubst',
-      { args: texts.map(byteView), variables, env },
+      { args: texts.map((text) => byteView(text)), variables, env },
       variables ? new Uint8Array() : resolveSource(ctx.stdin),
     ),
     new IOResult(),
