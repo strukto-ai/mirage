@@ -840,11 +840,13 @@ class _Napper(_Box, SleepableMixin):
         log: list[str],
         fail_close: bool = False,
         fail_sleep: bool = False,
+        gate: asyncio.Event | None = None,
     ) -> None:
         super().__init__(name, 0)
         self.log = log
         self.fail_close = fail_close
         self.fail_sleep = fail_sleep
+        self.gate = gate
         self.refused: str | None = None
 
     async def close(self) -> None:
@@ -859,6 +861,9 @@ class _Napper(_Box, SleepableMixin):
             MachineTable({self.name: self})
         except ValueError as exc:
             self.refused = str(exc)
+        if self.gate is not None:
+            await self.gate.wait()
+            self.log.append(f"slept {self.name}")
         if self.fail_sleep:
             raise RuntimeError(f"sleep {self.name} failed")
 
@@ -930,3 +935,35 @@ async def test_a_handle_is_held_until_it_has_slept():
     await table.close(sleep=True)
     assert a.refused == "machine 'a' is already in another workspace"
     MachineTable({"a": a})
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_sleeping_close_still_sleeps_its_machines():
+    log: list[str] = []
+    gate = asyncio.Event()
+    table = MachineTable({"a": _Napper("a", log, gate=gate)})
+    table.hold_handles()
+    closing = asyncio.ensure_future(table.close(sleep=True))
+    while "sleep a" not in log:
+        await asyncio.sleep(0)
+    closing.cancel()
+    gate.set()
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert log == ["close a", "sleep a", "slept a"]
+
+
+@pytest.mark.asyncio
+async def test_a_sleeping_close_waits_for_the_signals_queued_for_its_machines():
+    log: list[str] = []
+    table = MachineTable({"a": _Napper("a", log)})
+    table.hold_handles()
+    signal = table._signaling["box:a"]
+    await signal.acquire()
+    closing = asyncio.ensure_future(table.close(sleep=True))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert log == []
+    signal.release()
+    await closing
+    assert log == ["close a", "sleep a"]

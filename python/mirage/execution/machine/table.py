@@ -629,25 +629,15 @@ class MachineTable:
             for handle in self._handles.values()
             if (ref := _HOLDERS.get(handle)) is not None and ref() is self
         ]
-        if not sleep:
-            _release(held)
-        try:
+        if sleep:
+            results = await asyncio.shield(self._close_then_sleep(held))
+        else:
+            for handle in held:
+                _HOLDERS.pop(handle, None)
             results = await asyncio.gather(
                 *(handle.close() for handle in self._handles.values()),
                 return_exceptions=True,
             )
-            if sleep:
-                results += await asyncio.gather(
-                    *(
-                        handle.sleep()
-                        for handle in held
-                        if isinstance(handle, SleepableMixin)
-                    ),
-                    return_exceptions=True,
-                )
-        finally:
-            if sleep:
-                _release(held)
         failures = [r for r in results if isinstance(r, BaseException)]
         if failures:
             raise (
@@ -656,15 +646,39 @@ class MachineTable:
                 else BaseExceptionGroup("machine close failed", failures)
             )
 
+    async def _close_then_sleep(
+        self, held: list[MachineHandle]
+    ) -> list[BaseException | None]:
+        """Close every handle and sleep the sleepable ones this table
+        held, once the signals still queued for its machines have run, so
+        none reaches a machine after it sleeps; the handles stay held
+        until then. Shielded by ``close``, so a caller's cancel never
+        leaves its machines awake.
 
-def _release(held: list[MachineHandle]) -> None:
-    """Let go of the handles a table held when its close began.
-
-    Args:
-        held (list[MachineHandle]): those handles.
-    """
-    for handle in held:
-        _HOLDERS.pop(handle, None)
+        Args:
+            held (list[MachineHandle]): the handles this table held when
+                its close began.
+        """
+        for lock in list(self._signaling.values()):
+            async with lock:
+                pass
+        try:
+            results = await asyncio.gather(
+                *(handle.close() for handle in self._handles.values()),
+                return_exceptions=True,
+            )
+            results += await asyncio.gather(
+                *(
+                    handle.sleep()
+                    for handle in held
+                    if isinstance(handle, SleepableMixin)
+                ),
+                return_exceptions=True,
+            )
+            return results
+        finally:
+            for handle in held:
+                _HOLDERS.pop(handle, None)
 
 
 def _program_row(

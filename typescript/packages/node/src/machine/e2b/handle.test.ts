@@ -1052,6 +1052,12 @@ describe('E2BMachine sleep', () => {
     await machine.sleep()
     expect(FakeMachine.paused).toEqual([])
   })
+  it('leaves alone a sandbox only an earlier workspace reached', async () => {
+    const machine = await reached({ onSleep: 'pause' })
+    await machine.close()
+    await machine.sleep()
+    expect(FakeMachine.paused).toEqual([])
+  })
   it('takes no onSleep other than pause', () => {
     expect(() => new FakedE2BMachine('box', { sandboxId: 'sb', onSleep: 'stop' as never })).toThrow(
       'e2b onSleep must be one of pause, not "stop"',

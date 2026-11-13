@@ -197,17 +197,18 @@ async def test_a_pipe_sends_its_writes_in_order_and_stops_with_term():
     assert box.ran("sftp -e").killed == [15]
 
 
+async def _nothing() -> None:
+    return None
+
+
 @pytest.mark.asyncio
 async def test_sleep_runs_the_hosts_hook_once_after_close():
     order: list[str] = []
 
-    async def start() -> None:
-        return None
-
     async def sleep() -> None:
         order.append("sleep")
 
-    machine = ContainerMachine("box", {}, FakeContainer(), start, sleep)
+    machine = ContainerMachine("box", {}, FakeContainer(), _nothing, sleep)
     assert isinstance(machine, SleepableMixin)
     await machine.close()
     order.append("closed")
@@ -222,9 +223,8 @@ async def test_sleep_does_nothing_without_a_hook():
 
 
 def test_a_relays_container_takes_no_sleep_hook():
-    async def sleep() -> None:
-        return None
-
     url = "https://relay.example.workers.dev/box"
     with pytest.raises(ValueError, match=SLEEP_RELAY):
-        ContainerMachine("box", {"url": url, "token": "t"}, None, None, sleep)
+        ContainerMachine(
+            "box", {"url": url, "token": "t"}, None, None, _nothing
+        )

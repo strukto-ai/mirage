@@ -514,15 +514,32 @@ export class MachineTable {
    */
   async close(sleep = false): Promise<void> {
     const held = this.handles().filter((handle) => HOLDERS.get(handle) === this)
-    if (!sleep) for (const handle of held) HOLDERS.delete(handle)
-    const results = await Promise.allSettled(this.handles().map((h) => h.close()))
-    if (sleep) {
-      results.push(...(await Promise.allSettled(held.filter(isSleepable).map((h) => h.sleep()))))
+    let results: PromiseSettledResult<void>[]
+    if (sleep) results = await this.closeThenSleep(held)
+    else {
       for (const handle of held) HOLDERS.delete(handle)
+      results = await Promise.allSettled(this.handles().map(async (h) => h.close()))
     }
     const failures = results.flatMap((r) => (r.status === 'rejected' ? [r.reason as unknown] : []))
     if (failures.length === 1) throw failures[0] as Error
     if (failures.length > 1) throw new AggregateError(failures, 'machine close failed')
+  }
+  /**
+   * Close every handle and sleep the sleepable ones this table held, once
+   * the signals still queued for its machines have run, so none reaches a
+   * machine after it sleeps; the handles stay held until then.
+   */
+  private async closeThenSleep(held: MachineHandle[]): Promise<PromiseSettledResult<void>[]> {
+    await Promise.allSettled(this.signaling.values())
+    try {
+      const results = await Promise.allSettled(this.handles().map(async (h) => h.close()))
+      results.push(
+        ...(await Promise.allSettled(held.filter(isSleepable).map(async (h) => h.sleep()))),
+      )
+      return results
+    } finally {
+      for (const handle of held) HOLDERS.delete(handle)
+    }
   }
 }
 

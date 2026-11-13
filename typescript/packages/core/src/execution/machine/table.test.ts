@@ -945,6 +945,34 @@ describe('MachineTable sleep', () => {
     expect(log).toEqual(['close a', 'close a'])
   })
 
+  it('lets go of its handles when a sleep throws before it returns a promise', async () => {
+    const a = new Napper('a', [])
+    a.sleep = () => {
+      throw new Error('sleep threw')
+    }
+    const table = new MachineTable({ a })
+    table.holdHandles()
+    await expect(table.close(true)).rejects.toThrow('sleep threw')
+    expect(() => new MachineTable({ a })).not.toThrow()
+  })
+
+  it('waits for the signals queued for its machines before it sleeps them', async () => {
+    const log: string[] = []
+    const table = new MachineTable({ a: new Napper('a', log) })
+    table.holdHandles()
+    let release = (): void => undefined
+    const queued = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    ;(table as unknown as { signaling: Map<string, Promise<void>> }).signaling.set('box:a', queued)
+    const closing = table.close(true)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(log).toEqual([])
+    release()
+    await closing
+    expect(log).toEqual(['close a', 'sleep a'])
+  })
+
   it('holds a handle until it has slept, then lets another workspace take it', async () => {
     const a = new Napper('a', [])
     const table = new MachineTable({ a })

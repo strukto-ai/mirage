@@ -158,8 +158,10 @@ class E2BMachine(MachineHandle, PipeTransportMixin, SleepableMixin):
     config: E2BConfig
 
     _sandbox: Any = None
-    # Set once a connect reaches the sandbox; sleep pauses only then.
+    # Set by a connect that reached the sandbox; close hands it to
+    # ``_pausable`` for the sleep after.
     _reached: bool = False
+    _pausable: bool = False
 
     @property
     def instance(self) -> str:
@@ -183,11 +185,21 @@ class E2BMachine(MachineHandle, PipeTransportMixin, SleepableMixin):
             raise RuntimeError(hint) from exc
         self._reached = True
 
+    async def close(self) -> None:
+        """Close as any machine does, letting the sleep after it pause only
+        what this workspace reached."""
+        self._pausable = self._reached
+        self._reached = False
+        await super().close()
+
     async def sleep(self) -> None:
         """Pause the sandbox when the config says ``on_sleep: pause`` and
-        this handle reached it, keeping its disk and memory; the next
-        connect resumes it. A sandbox already gone has nothing to pause."""
-        if self.config.on_sleep != "pause" or not self._reached:
+        the workspace that just closed reached it, keeping its disk and
+        memory; the next connect resumes it. A sandbox already gone has
+        nothing to pause."""
+        pausable = self._pausable
+        self._pausable = False
+        if self.config.on_sleep != "pause" or not pausable:
             return
         try:
             await sdk.AsyncSandbox.pause(
