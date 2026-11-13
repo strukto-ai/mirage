@@ -1,0 +1,408 @@
+---
+title: Co-Work
+icon: users
+description: An agent schedules candidate interviews from a recruiting inbox, two calendars and a Slack channel.
+---
+
+A recruiting team gets the same chore with every role: candidates reply with
+the times they can interview, and someone matches those times against the
+interviewers' calendars, books the interviews, writes back to each candidate
+and tells the hiring channel. An agent with a
+[lightweight terminal](/home/examples/lightweight-terminal) can do that
+round. Each service is a command: [`himalaya`](/python/cli/himalaya) reads and
+sends mail, [`gws`](/python/cli/gws) calls Google Calendar, and
+[`slack`](/python/cli/slack) posts to Slack. These are Mirage CLIs, so they
+call the services' APIs from your server process, and Python runs in-process
+on [Monty](/home/setup/runtime/monty). Nothing here needs a sandbox.
+
+The lines on this page are what an agent would send. A company is hiring a
+senior backend engineer. Six candidates have replied to the recruiting inbox
+with two times each for the week of 16 November 2026, and two engineers,
+Dana Lee and Omar Haddad, run every interview. All times are in UTC.
+
+## Installation
+
+`himalaya` needs the `email` extra in Python and three mail libraries in
+Node:
+
+<Tabs>
+  <Tab title="FastAPI" icon="/images/python-logo.svg">
+    ```bash
+    pip install 'mirage-ai[monty,email]' fastapi uvicorn
+    ```
+  </Tab>
+  <Tab title="Express" icon="/images/typescript-logo.svg">
+    ```bash
+    npm install @struktoai/mirage-node @pydantic/monty express imapflow mailparser nodemailer
+    ```
+  </Tab>
+</Tabs>
+
+## Server
+
+This is the server from the
+[Overview](/home/examples/lightweight-terminal#server) with one addition: it
+registers `himalaya`, `gws` and `slack`, each with one account.
+
+<Tabs>
+  <Tab title="FastAPI" icon="/images/python-logo.svg">
+    ```python app.py
+    import os
+    from contextlib import asynccontextmanager
+
+    from fastapi import FastAPI
+    from pydantic import BaseModel
+
+    from mirage import RAMVFS, MountMode, Workspace
+    from mirage.commands.cli.builtin.gws import GWS
+    from mirage.commands.cli.builtin.himalaya import HIMALAYA
+    from mirage.commands.cli.builtin.slack import SLACK
+    from mirage.runtime.python.monty import MontyRuntime
+
+    env = os.environ
+    ws = Workspace(
+        {"/work": (RAMVFS(), MountMode.EXEC)},
+        runtimes=[MontyRuntime(captures=["python", "python3"])],
+    )
+    ws.register_cli("himalaya", HIMALAYA, {
+        "imap_host": env["IMAP_HOST"],
+        "imap_port": int(env.get("IMAP_PORT", "993")),
+        "use_ssl": env.get("IMAP_SSL", "true") == "true",
+        "smtp_host": env["SMTP_HOST"],
+        "smtp_port": int(env.get("SMTP_PORT", "587")),
+        "username": env["EMAIL_USERNAME"],
+        "password": env["EMAIL_PASSWORD"],
+    })
+    ws.register_cli("gws", GWS, {
+        "client_id": env["GOOGLE_CLIENT_ID"],
+        "client_secret": env["GOOGLE_CLIENT_SECRET"],
+        "refresh_token": env["GOOGLE_REFRESH_TOKEN"],
+        "api_base": env.get("GOOGLE_API_BASE"),
+    })
+    ws.register_cli("slack", SLACK, {
+        "token": env["SLACK_BOT_TOKEN"],
+        "base_url": env.get("SLACK_API_URL", "https://slack.com/api"),
+    })
+
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        await ws.close()
+
+
+    app = FastAPI(lifespan=lifespan)
+
+
+    class Run(BaseModel):
+        command: str
+
+
+    @app.post("/sessions/{session_id}")
+    async def create(session_id: str) -> None:
+        ws.create_session(session_id)
+
+
+    @app.post("/sessions/{session_id}/run")
+    async def run(session_id: str, body: Run) -> dict:
+        r = await ws.shell(body.command, session_id=session_id)
+        return {"stdout": await r.stdout_str(), "stderr": await r.stderr_str(), "exit_code": r.exit_code}
+    ```
+
+    ```bash
+    uvicorn app:app --port 3000
+    ```
+  </Tab>
+  <Tab title="Express" icon="/images/typescript-logo.svg">
+    ```typescript app.mjs
+    import express from 'express'
+    import { GWS, HIMALAYA, MontyRuntime, MountMode, RAMVFS, SLACK, Workspace } from '@struktoai/mirage-node'
+
+    const env = process.env
+    const ws = new Workspace(
+      { '/work': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: [new MontyRuntime({ captures: ['python', 'python3'] })] },
+    )
+    ws.registerCli('himalaya', HIMALAYA, {
+      imapHost: env.IMAP_HOST,
+      imapPort: Number(env.IMAP_PORT ?? 993),
+      useSsl: (env.IMAP_SSL ?? 'true') === 'true',
+      smtpHost: env.SMTP_HOST,
+      smtpPort: Number(env.SMTP_PORT ?? 587),
+      username: env.EMAIL_USERNAME,
+      password: env.EMAIL_PASSWORD,
+    })
+    ws.registerCli('gws', GWS, {
+      clientId: env.GOOGLE_CLIENT_ID,
+      clientSecret: env.GOOGLE_CLIENT_SECRET,
+      refreshToken: env.GOOGLE_REFRESH_TOKEN,
+      apiBase: env.GOOGLE_API_BASE,
+    })
+    ws.registerCli('slack', SLACK, { token: env.SLACK_BOT_TOKEN, baseUrl: env.SLACK_API_URL })
+
+    const app = express()
+    app.use(express.json())
+
+    app.post('/sessions/:id', (req, res) => {
+      ws.createSession(req.params.id)
+      res.sendStatus(201)
+    })
+
+    app.post('/sessions/:id/run', async (req, res) => {
+      const r = await ws.shell(req.body.command, { sessionId: req.params.id })
+      res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
+    })
+
+    app.listen(3000, '127.0.0.1')
+    ```
+
+    ```bash
+    node app.mjs
+    ```
+  </Tab>
+</Tabs>
+
+To run this page you need three accounts: a mailbox the agent reads and sends
+from over IMAP and SMTP, a Google account with Calendar access that can see
+both interviewers' free and busy times, and a Slack bot that is a member of the
+hiring channel. [Email](/home/setup/email), [Google](/home/setup/google) and
+[Slack](/home/setup/slack) show how to get each credential. The server reads
+them from environment variables, and
+[Service Credentials](/home/service-credentials) shows how to keep them in a
+secret store instead:
+
+```bash
+export IMAP_HOST=imap.example.com SMTP_HOST=smtp.example.com
+export EMAIL_USERNAME=recruiting@example.com EMAIL_PASSWORD=your-app-password
+export GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... GOOGLE_REFRESH_TOKEN=...
+export SLACK_BOT_TOKEN=xoxb-...
+```
+
+The ports, the TLS switch and the two API addresses default to the services'
+own. Set them only for a self-hosted mail server or a proxy. A terminal has
+its own environment, not the server's, so the agent uses the three accounts
+without seeing their credentials.
+
+The output below comes from sample data, so yours will differ.
+
+## Usage
+
+Create a terminal, and define `run`, which sends lines to it and prints what
+they print. It needs [`jq`](https://jqlang.org):
+
+```bash
+curl -X POST localhost:3000/sessions/a
+
+run() {
+  jq -Rs '{command: .}' |
+    curl -s localhost:3000/sessions/a/run -H 'content-type: application/json' -d @- |
+    jq -j '.stdout, .stderr'
+}
+```
+
+The lines between `SH` and `SH` in the blocks below run in the terminal on
+the server, not in the shell that calls `run`.
+
+## Read the Inbox
+
+The agent counts the messages in the inbox, then searches for the candidates'
+replies by subject. It saves each reply to a file under `/work/replies`,
+named by its message ID, so later steps read the files instead of the
+mailbox:
+
+```bash
+run <<'SH'
+himalaya --json envelope list | jq '.envelopes | length'
+mkdir -p /work/replies
+himalaya --json envelope search subject '"interview times"' > /work/replies.json
+for id in $(jq -r '.envelopes[].id' /work/replies.json); do
+  himalaya message read $id > /work/replies/$id.eml
+done
+ls /work/replies | wc -l
+SH
+```
+
+```text
+8
+6
+```
+
+The inbox holds 8 messages. Six are replies; the other two are a note from
+Dana and a notice from a job board.
+
+## Find the Offered Times
+
+The recruiting team asked each candidate for two times, one per line, written
+as `2026-11-16 10:00`. A short Python script takes each candidate's name and
+address from the `From:` line and the times from the body, saves them to
+`/work/candidates.json` and prints a table:
+
+```bash
+run <<'SH'
+cat > /work/candidates.py <<'PY'
+import json, os, re
+candidates = []
+for name in sorted(os.listdir("/work/replies"), key=lambda n: int(n.split(".")[0])):
+    text = open("/work/replies/" + name).read()
+    sender = re.search(r"^From: (.+) <(.+)>$", text, re.M)
+    times = re.findall(r"^(\d{4}-\d\d-\d\d \d\d:\d\d)$", text, re.M)
+    candidates.append({"id": name.split(".")[0], "name": sender.group(1),
+                       "email": sender.group(2), "times": times})
+    print("%-3s %-13s %s" % (name.split(".")[0], sender.group(1), ", ".join(times)))
+open("/work/candidates.json", "w").write(json.dumps(candidates))
+PY
+python3 /work/candidates.py
+SH
+```
+
+```text
+2   Maya Chen     2026-11-16 10:00, 2026-11-17 14:00
+3   Lucas Ortega  2026-11-16 10:00, 2026-11-16 15:00
+4   Priya Raman   2026-11-17 09:00, 2026-11-19 16:00
+6   Tom Becker    2026-11-18 11:00, 2026-11-18 13:00
+7   Aisha Okafor  2026-11-19 10:00, 2026-11-19 14:00
+8   Jonas Weber   2026-11-20 09:00, 2026-11-20 14:00
+```
+
+The first column is the message ID, which the agent uses later to reply in
+the same thread. The candidates are in the order they replied.
+
+## Check the Calendars
+
+Google Calendar's free/busy query returns the times each person is busy,
+without the details of their meetings. The agent asks for both interviewers
+for the whole week and saves the answer to a file. Monty has no network, so
+the Python script reads that file. For each candidate, in the order they
+replied, it picks the first offered hour when neither interviewer is busy.
+A booked hour counts as busy for the candidates after it:
+
+```bash
+run <<'SH'
+gws calendar freebusy query --json '{"timeMin": "2026-11-16T00:00:00Z", "timeMax": "2026-11-21T00:00:00Z",
+  "items": [{"id": "dana.lee@example.com"}, {"id": "omar.haddad@example.com"}]}' > /work/busy.json
+jq -r '.calendars | to_entries[] | "\(.key): \(.value.busy | length) busy blocks"' /work/busy.json
+cat > /work/plan.py <<'PY'
+import json
+from datetime import datetime, timedelta
+busy = []
+for calendar in json.loads(open("/work/busy.json").read())["calendars"].values():
+    for block in calendar["busy"]:
+        busy.append((datetime.fromisoformat(block["start"][:16]), datetime.fromisoformat(block["end"][:16])))
+plan = []
+for c in json.loads(open("/work/candidates.json").read()):
+    c["start"] = None
+    for time in c["times"]:
+        start = datetime.fromisoformat(time)
+        end = start + timedelta(hours=1)
+        if all(e <= start or s >= end for s, e in busy):
+            busy.append((start, end))
+            c["start"], c["end"] = start.isoformat(), end.isoformat()
+            break
+    plan.append(c)
+    print("%-13s %s" % (c["name"], c["start"][:16].replace("T", " ") if c["start"] else "no common time"))
+open("/work/plan.json", "w").write(json.dumps(plan))
+PY
+python3 /work/plan.py
+SH
+```
+
+```text
+dana.lee@example.com: 7 busy blocks
+omar.haddad@example.com: 4 busy blocks
+Maya Chen     2026-11-16 10:00
+Lucas Ortega  2026-11-16 15:00
+Priya Raman   no common time
+Tom Becker    2026-11-18 13:00
+Aisha Okafor  2026-11-19 10:00
+Jonas Weber   2026-11-20 14:00
+```
+
+Google gives busy times in UTC. The script keeps their first 16 characters,
+the date and the minute, so it can compare them with the candidates' times.
+Maya and Lucas both offered Monday at 10:00. Maya replied first and gets it,
+so Lucas gets his second time. Each of Priya's times clashes with at least
+one interviewer, so the agent leaves her for a person.
+
+## Book the Interviews
+
+`jq` turns each booked row of the plan into a Calendar event, one per line,
+with the candidate and both interviewers as guests. The agent creates the
+events on the recruiting calendar, then lists that calendar to check them:
+
+```bash
+run <<'SH'
+jq -c '.[] | select(.start) | {
+  summary: "Interview: \(.name), Senior Backend Engineer",
+  start: {dateTime: "\(.start)Z"}, end: {dateTime: "\(.end)Z"},
+  attendees: [{email: .email}, {email: "dana.lee@example.com"}, {email: "omar.haddad@example.com"}]
+}' /work/plan.json > /work/events.jsonl
+while read -r event; do
+  gws calendar events insert --params '{"calendarId": "recruiting@example.com"}' --json "$event" > /dev/null
+done < /work/events.jsonl
+gws calendar events list --params '{"calendarId": "recruiting@example.com", "timeMin": "2026-11-16T00:00:00Z", "singleEvents": true, "orderBy": "startTime"}' |
+  jq -r '.items[] | "\(.start.dateTime[0:16] | sub("T"; " ")) \(.summary) (\(.attendees | length) guests)"'
+SH
+```
+
+```text
+2026-11-16 10:00 Interview: Maya Chen, Senior Backend Engineer (3 guests)
+2026-11-16 15:00 Interview: Lucas Ortega, Senior Backend Engineer (3 guests)
+2026-11-18 13:00 Interview: Tom Becker, Senior Backend Engineer (3 guests)
+2026-11-19 10:00 Interview: Aisha Okafor, Senior Backend Engineer (3 guests)
+2026-11-20 14:00 Interview: Jonas Weber, Senior Backend Engineer (3 guests)
+```
+
+## Confirm and Tell the Team
+
+The agent replies to each booked candidate in their own thread, then checks
+the Sent folder for the five replies. It writes the schedule to a file and
+posts it to the hiring channel, `#hiring-backend`, by its Slack channel ID,
+and reads the post back:
+
+```bash
+run <<'SH'
+jq -r '.[] | select(.start) | "\(.id) \(.start[0:16] | sub("T"; " at "))"' /work/plan.json |
+while read -r id when; do
+  himalaya message reply $id --send --body "Thank you. Your interview is booked for $when UTC and lasts one hour. You will meet Dana Lee and Omar Haddad from the backend team." > /dev/null
+done
+himalaya --json envelope list -m Sent | jq -r '.envelopes[].to[0].name'
+jq -r '"Senior Backend Engineer interviews with Dana and Omar (UTC):",
+  (.[] | "- \(.name): \(if .start then .start[0:16] | sub("T"; " ") else "no common time, needs a person" end)")' /work/plan.json > /work/summary.txt
+slack send-message --channel C07HB2Q9KX --text "$(cat /work/summary.txt)" > /dev/null
+slack read-messages --channel C07HB2Q9KX --limit 1 | jq -r '.[0].text'
+SH
+```
+
+```text
+Jonas Weber
+Aisha Okafor
+Tom Becker
+Lucas Ortega
+Maya Chen
+Senior Backend Engineer interviews with Dana and Omar (UTC):
+- Maya Chen: 2026-11-16 10:00
+- Lucas Ortega: 2026-11-16 15:00
+- Priya Raman: no common time, needs a person
+- Tom Becker: 2026-11-18 13:00
+- Aisha Okafor: 2026-11-19 10:00
+- Jonas Weber: 2026-11-20 14:00
+```
+
+The first five lines are the recipients of the replies in the Sent folder,
+newest first. The rest is the post in `#hiring-backend`.
+
+`himalaya message reply` without `--send` only prints the reply, which is a
+safe way for an agent to show a draft before it sends.
+
+The round ends with what the agent can report:
+
+- Five interviews are booked, each on the recruiting calendar with the
+  candidate, Dana and Omar as guests, and each candidate has a confirmation
+  in their thread.
+- Lucas Ortega's first time was taken by Maya Chen, so he has his second,
+  Monday at 15:00.
+- Priya Raman cannot be scheduled: Dana or Omar is busy at each of her times.
+  A person needs to ask her for more times or move a meeting.
+- `#hiring-backend` has the full schedule.
+
+To set up these and the other bundled CLIs, see [CLIs](/home/setup/clis).

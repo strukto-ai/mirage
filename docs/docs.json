@@ -82,7 +82,18 @@
           {
             "group": "Examples",
             "pages": [
-              "home/examples/embedded-terminal",
+              {
+                "group": "Lightweight Terminal",
+                "icon": "terminal",
+                "pages": [
+                  "home/examples/lightweight-terminal",
+                  "home/examples/lightweight-terminal/code-review",
+                  "home/examples/lightweight-terminal/co-work",
+                  "home/examples/lightweight-terminal/alert-triage",
+                  "home/examples/lightweight-terminal/release-notes",
+                  "home/examples/lightweight-terminal/log-triage"
+                ]
+              },
               "home/examples/policy-security",
               "home/examples/runtime-routing"
             ]

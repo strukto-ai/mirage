@@ -1,0 +1,177 @@
+---
+title: Log Triage
+icon: magnifying-glass-chart
+description: An agent finds where the errors are in service logs, without reading the logs.
+---
+
+An on-call engineer asks an agent where the errors are. A service log is
+tens of thousands of lines, and an agent that reads it all spends its time
+and its context window on lines that say nothing. A person would not do that.
+They count and filter with `grep`, `awk` and `sort`, and read only the
+answers.
+
+An agent with a [lightweight terminal](/home/examples/lightweight-terminal)
+does the same. The logs are files, the terminal runs the counting next to
+them, and only the answers come back. Nothing here needs a sandbox or a
+package beyond the Overview's install line: the commands are Mirage's shell,
+and Python runs on [Monty](/home/setup/runtime/monty) inside the server.
+
+The lines on this page are what an agent would send. They find which of
+three services produces the errors, when it started, and how slow the API
+is.
+
+## Server
+
+This page uses the server from the
+[Overview](/home/examples/lightweight-terminal#server) unchanged.
+
+## Usage
+
+Create a terminal, and define `run`, which sends lines to it and prints what
+they print. It needs [`jq`](https://jqlang.org):
+
+```bash
+curl -X POST localhost:3000/sessions/a
+
+run() {
+  jq -Rs '{command: .}' |
+    curl -s localhost:3000/sessions/a/run -H 'content-type: application/json' -d @- |
+    jq -j '.stdout, .stderr'
+}
+```
+
+The lines between `SH` and `SH` in the blocks below run in the terminal on
+the server, not in the shell that calls `run`.
+
+## Make Some Logs
+
+This block stands in for your services' logs. In production the files would
+already exist. Here the block writes, in memory under `/work`, three
+services' logs of 20,000 lines each, with `seq` to count and `awk` to format
+each line as a date, a time, a level, a service name and a request. The
+`worker` service has a burst of errors on 12 November between 10:00 and
+13:59 for the agent to find.
+
+```bash
+run <<'SH'
+mkdir -p /work/logs && cd /work/logs
+for svc in api worker web; do
+  seq 1 20000 | awk -v svc=$svc '{
+    day = 1 + int($1 / 1000)
+    k = $1 % 1000
+    every = (svc == "worker") ? 31 : ((svc == "api") ? 97 : 211)
+    if (svc == "worker" && $1 >= 11417 && $1 < 11584) every = 2
+    lvl = ($1 % every == 0) ? "ERROR" : (($1 % 13 == 0) ? "WARN" : "INFO")
+    printf "2026-11-%02d %02d:%02d:%02d %s %s request %d took %dms\n", day, int(k * 24 / 1000), (k * 7) % 60, (k * 13) % 60, lvl, svc, $1, ($1 * 37) % 900
+  }' > $svc.log
+done
+wc -c *.log
+head -n 2 worker.log
+SH
+```
+
+```text
+1066654 api.log
+1066542 web.log
+1127171 worker.log
+3260367 total
+2026-11-01 00:07:13 INFO worker request 1 took 37ms
+2026-11-01 00:14:26 INFO worker request 2 took 74ms
+```
+
+## Count the Errors
+
+The first question is which service has the errors. `grep -c` counts the
+lines that match in each file. A longer pipe counts them by the service
+name, which is the fourth word of each line, so that `uniq -c` can total
+them and `sort -rn` can put the largest first:
+
+```bash
+run <<'SH'
+cd /work/logs
+grep -c ERROR *.log
+grep -h ERROR *.log | awk '{print $4}' | sort | uniq -c | sort -rn
+SH
+```
+
+```text
+api.log:206
+web.log:94
+worker.log:723
+    723 worker
+    206 api
+     94 web
+```
+
+The `worker` service has 723 of the 1,023 errors, more than three times the
+`api` service's 206. The agent has not read a log line yet. Next it asks
+which days those errors fall on:
+
+```bash
+run <<'SH'
+cd /work/logs
+grep -h ERROR worker.log | awk '{print $1}' | sort | uniq -c | sort -rn | head -3
+SH
+```
+
+```text
+    111 2026-11-12
+     33 2026-11-20
+     33 2026-11-16
+```
+
+One day stands out: 12 November has 111 errors, and every other day has 33
+or fewer. The agent counts that day's errors by hour, keeping the hours with
+more than five, and then reads one error:
+
+```bash
+run <<'SH'
+cd /work/logs
+grep -h ERROR worker.log | grep '^2026-11-12' | cut -c12-13 | sort | uniq -c | awk '$1 > 5'
+grep -h ERROR worker.log | grep '^2026-11-12 11' | head -n 1
+SH
+```
+
+```text
+     21 10
+     20 11
+     21 12
+     21 13
+2026-11-12 11:40:40 ERROR worker request 11460 took 120ms
+```
+
+## Measure the Latency
+
+Counting works for words. For numbers the agent writes a short Python file
+and runs it on Monty. This one reads the `api` log, takes the milliseconds
+from each line and prints the 95th percentile, the time within which 95
+requests in 100 finish:
+
+```bash
+run <<'SH'
+cat > /work/latency.py <<'PY'
+import re
+ms = sorted(int(m.group(1)) for line in open("/work/logs/api.log") if (m := re.search(r"took (\d+)ms", line)))
+print(len(ms), "requests, p95", ms[int(len(ms) * 0.95)], "ms")
+PY
+python3 /work/latency.py
+SH
+```
+
+```text
+20000 requests, p95 854 ms
+```
+
+The agent can report three findings:
+
+- The `worker` service logged 723 of the 1,023 errors. On 12 November it
+  logged 111, and 83 of them fall between 10:00 and 13:59, against one or
+  two an hour outside that window.
+- `api` logged 206 errors and `web` 94 over the same 20 days.
+- The `api` 95th-percentile latency is 854 ms over 20,000 requests.
+
+To get there the agent read 263 bytes of output. The three logs hold
+3,260,367 bytes, and they stayed in the terminal.
+
+The logs here are held in memory. To point the same terminal at real
+storage, see [VFS](/home/setup/vfs).
