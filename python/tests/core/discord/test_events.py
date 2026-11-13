@@ -57,13 +57,13 @@ def _hook(monkeypatch) -> tuple[DiscordEventHook, list[str]]:
         "/channels/555": {"id": "555", "name": "voice", "type": 2},
     }
 
-    async def fake_get(accessor, endpoint, params=None):
+    async def fake_get(accessor, method, endpoint, params=None):
         calls.append(endpoint)
         if endpoint not in objects:
             raise ApiError("HTTP 404", 404)
         return dict(objects[endpoint])
 
-    monkeypatch.setattr("mirage.core.discord.events.discord_get", fake_get)
+    monkeypatch.setattr("mirage.core.discord.events.discord_request", fake_get)
     accessor = DiscordAccessor(DiscordConfig(token="t"))
     hook = DiscordEventHook(accessor)
     hook.objects = objects

@@ -92,8 +92,6 @@ export function loadScriptSource(value: string, host: ConfigHost): ScriptSource 
   return new ScriptSource(host.readScript(path), language, path.endsWith('.mjs'))
 }
 
-type RuntimeClass = new (options?: RuntimeOptions<never>) => Runtime
-
 /**
  * Load the `Runtime` subclass a `source:Class` reference names.
  *
@@ -101,15 +99,18 @@ type RuntimeClass = new (options?: RuntimeOptions<never>) => Runtime
  * deployment ships a runtime as a file and names it from yaml with no
  * host program calling `registerRuntime`. The class is constructed with
  * the uniform `(captures, config)` options like a builtin, so the entry's
- * other keys reach it unchanged. Mirrors `_runtime_class` in
+ * other keys reach it unchanged. Mirrors `_load_runtime_class` in
  * `mirage/config.py`.
  */
-async function loadRuntimeClass(ref: string, host: ConfigHost): Promise<RuntimeClass> {
+async function loadRuntimeClass(
+  ref: string,
+  host: ConfigHost,
+): Promise<new (options?: RuntimeOptions<never>) => Runtime> {
   const loaded = await host.loadRef(ref)
   if (typeof loaded !== 'function' || !(loaded.prototype instanceof Runtime)) {
     throw new Error(`${JSON.stringify(ref)} is not a Runtime subclass`)
   }
-  return loaded as RuntimeClass
+  return loaded as new (options?: RuntimeOptions<never>) => Runtime
 }
 
 /**

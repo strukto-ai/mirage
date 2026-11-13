@@ -643,6 +643,7 @@ impl Grep {
         };
         held.clear();
         held.extend_from_slice(text);
+        crate::release_capacity(&mut held);
         input.before.push_back(Held {
             number,
             offset,
@@ -1174,6 +1175,47 @@ mod tests {
         let (out, _, status) = grep(config, &[b"a\nb\nc\nd\na\n"]);
         assert_eq!(out, "1:a\n2-b\n--\n5:a\n");
         assert_eq!(status, 0);
+    }
+
+    #[test]
+    fn small_context_replaces_a_large_line_with_exact_positions() {
+        let large = vec![b'x'; 512 * 1024];
+        for before in [0, 1, 100] {
+            let config = format!(
+                r#"{{"patterns":["hit"],"syntax":"basic","before":{before},"line_numbers":true,"byte_offsets":true}}"#
+            );
+            let mut chunks = vec![large.as_slice(), b"\n"];
+            chunks.extend(std::iter::repeat_n(b"small\n".as_slice(), 100));
+            chunks.push(b"hit\n");
+            let mut expected = String::new();
+            for line in 102 - before..102 {
+                let offset = large.len() + 1 + (line - 2) * 6;
+                expected.push_str(&format!("{line}-{offset}-small\n"));
+            }
+            expected.push_str(&format!("102:{}:hit\n", large.len() + 601));
+            assert_eq!(grep(&config, &chunks), (expected, String::new(), 0));
+        }
+    }
+
+    #[test]
+    fn alternating_context_sizes_survive_repeated_files() {
+        let config = br#"{"patterns":["hit"],"syntax":"basic","before":1,"line_numbers":true}"#;
+        let mut stream = open("grep", config).expect("opens");
+        let mut large = vec![b'x'; 1024 * 1024];
+        large.push(b'\n');
+        for _ in 0..3 {
+            stream.begin(br#"{"label":"in"}"#).expect("begins");
+            let mut out = Vec::new();
+            for chunk in [large.as_slice(), b"small\n", large.as_slice(), b"hit\n"] {
+                stream.feed(chunk, &mut out).expect("feeds");
+                crate::drain_all(stream.as_mut(), &mut out);
+            }
+            stream.finish(&mut out).expect("finishes");
+            crate::drain_all(stream.as_mut(), &mut out);
+            let expected = [b"3-".as_slice(), &large, b"4:hit\n"].concat();
+            assert_eq!(out, expected);
+            assert_eq!(stream.status(), 0);
+        }
     }
 
     #[test]

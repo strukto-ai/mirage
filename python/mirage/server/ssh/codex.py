@@ -71,7 +71,6 @@ Message = dict[str, JsonValue]
 Handler = Callable[[Message], Awaitable[JsonValue]]
 
 FILE_SCHEME = "file://"
-NS_PER_MS = 1_000_000
 WRITE = OpenMode(
     readable=False,
     writable=True,
@@ -240,8 +239,8 @@ async def metadata(core: MountCore, path: str) -> Message:
         "isFile": stat.S_ISREG(st.mode),
         "isSymlink": link,
         "size": st.size,
-        "createdAtMs": st.ctime // NS_PER_MS,
-        "modifiedAtMs": st.mtime // NS_PER_MS,
+        "createdAtMs": st.ctime // 1_000_000,
+        "modifiedAtMs": st.mtime // 1_000_000,
     }
 
 

@@ -94,8 +94,9 @@ class TransitionRule:
     local time of day it happens at.
 
     A rule GNU date refused keeps the fields read of it (see
-    ``_weekday_rule``), which may sit outside POSIX's ranges; ``at``
-    places those where GNU date 9.7 was measured to put them.
+    ``_weekday_rule``), which may sit outside POSIX's ranges;
+    ``transition_at`` places those where GNU date 9.7 was measured to
+    put them.
 
     Args:
         kind (str): ``M`` for month/week/weekday, ``J`` for a Julian
@@ -121,20 +122,22 @@ class TransitionRule:
     day: int = 0
     seconds: int = 2 * _HOUR
 
-    def at(self, year: int) -> datetime:
-        """The transition's wall-clock moment in ``year``.
 
-        Args:
-            year (int): the calendar year.
-        """
-        if self.kind == "M":
-            day = _weekday_in_month(year, self.month, self.week, self.weekday)
-        elif self.kind == "J":
-            day = _julian_date(year, self.day)
-        else:
-            day = date(year, 1, 1) + timedelta(days=self.day)
-        midnight = datetime(day.year, day.month, day.day)
-        return midnight + timedelta(seconds=self.seconds)
+def transition_at(rule: TransitionRule, year: int) -> datetime:
+    """The transition's wall-clock moment in ``year``.
+
+    Args:
+        rule (TransitionRule): the transition.
+        year (int): the calendar year.
+    """
+    if rule.kind == "M":
+        day = _weekday_in_month(year, rule.month, rule.week, rule.weekday)
+    elif rule.kind == "J":
+        day = _julian_date(year, rule.day)
+    else:
+        day = date(year, 1, 1) + timedelta(days=rule.day)
+    midnight = datetime(day.year, day.month, day.day)
+    return midnight + timedelta(seconds=rule.seconds)
 
 
 # What a DST zone falls back to when its string names no rule, or only a
@@ -197,8 +200,8 @@ class PosixZone(tzinfo):
         Args:
             utc (datetime): the moment, naive, on the UTC clock.
         """
-        start = self._start.at(utc.year) - self._std_offset
-        end = self._end.at(utc.year) - self._dst_offset
+        start = transition_at(self._start, utc.year) - self._std_offset
+        end = transition_at(self._end, utc.year) - self._dst_offset
         # The year's two changes in order, an end after a start at the
         # same instant: the latest one passed sets the state, and before
         # either the year's last change still holds from the year before.
@@ -233,8 +236,8 @@ class PosixZone(tzinfo):
         Args:
             year (int): the UTC year.
         """
-        start = self._start.at(year) - self._std_offset
-        end = self._end.at(year) - self._dst_offset
+        start = transition_at(self._start, year) - self._std_offset
+        end = transition_at(self._end, year) - self._dst_offset
         return timegm(start.timetuple()), timegm(end.timetuple())
 
     def utcoffset(self, dt: datetime | None) -> timedelta:
@@ -677,28 +680,6 @@ def _reading(zone: ZoneInfo, at: datetime) -> tuple[int, str]:
     )
 
 
-def _first_shown(
-    zone: ZoneInfo, before: datetime, after: datetime, reading: tuple[int, str]
-) -> datetime:
-    """The first second in ``(before, after]`` at which ``zone`` shows
-    ``reading``, by bisection: it shows something else at ``before``
-    and ``reading`` at ``after``.
-
-    Args:
-        zone (ZoneInfo): the zone.
-        before (datetime): a moment showing another reading.
-        after (datetime): a moment showing ``reading``.
-        reading (tuple[int, str]): the offset and abbreviation sought.
-    """
-    while after - before > timedelta(seconds=1):
-        middle = before + (after - before) // 2
-        if _reading(zone, middle) == reading:
-            after = middle
-        else:
-            before = middle
-    return after
-
-
 def zone_abbreviations(
     name: str, step: timedelta = _DAY
 ) -> list[tuple[int, str, int]]:
@@ -737,11 +718,13 @@ def zone_abbreviations(
         reading = _reading(zone, at)
         offset, abbrev = reading
         if current.get(offset) != abbrev:
-            since = (
-                at
-                if at == previous
-                else _first_shown(zone, previous, at, reading)
-            )
+            before, since = previous, at
+            while since - before > timedelta(seconds=1):
+                middle = before + (since - before) // 2
+                if _reading(zone, middle) == reading:
+                    since = middle
+                else:
+                    before = middle
             rows.append((offset, abbrev, int(since.timestamp())))
             current[offset] = abbrev
         previous = at

@@ -6,7 +6,7 @@ import { LEAVES, parts, runVars, safeName } from './pathing.ts'
 import { RUN_EXISTS } from './queries.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { Named, FileMetadata } from './types.ts'
+import type { FileMetadata } from './types.ts'
 
 export function row(
   name: string,
@@ -69,7 +69,7 @@ export async function readdir(
   const path = pathSpec.pattern ? pathSpec.dir : pathSpec
   const ps = parts(accessor, path)
   if (ps.length === 0) return [...new Set(accessor.config.entities)].map((e) => row(e, true))
-  let nodes: Named[]
+  let nodes: { name: string }[]
   if (ps.length === 1) nodes = await accessor.client.projects(ps[0] ?? '', limit)
   else if (ps.length === 2) nodes = await accessor.client.runs(ps[0] ?? '', ps[1] ?? '', limit)
   else if (ps.length === 3) {

@@ -200,20 +200,10 @@ async function deleteRow(
     await dispatch(op, ps)
     return true
   } catch (err) {
-    errors.push(encodeText(`find: cannot delete '${path}': ${refusalWhy(err)}\n`))
+    const why = err instanceof PolicyDenied ? err.message : strerrorOf(err)
+    errors.push(encodeText(`find: cannot delete '${path}': ${why}\n`))
     return false
   }
-}
-
-/**
- * How a row's failure is worded: GNU uses the errno text, and a policy
- * refusal carries its reason in that place (`frozen`, not the
- * `Permission denied` its EACCES code would spell), which is what the
- * python twin reads off `strerror or str(exc)`.
- */
-function refusalWhy(err: unknown): string {
-  if (err instanceof PolicyDenied) return err.message
-  return strerrorOf(err)
 }
 
 /**
@@ -245,7 +235,11 @@ async function rowStat(
   try {
     st = link ?? (await statPath(ps))
   } catch (err) {
-    errors.push(encodeText(`find: '${path}': ${refusalWhy(err)}\n`))
+    // GNU words it with the errno text; a policy refusal carries its
+    // reason there (`frozen`, not the `Permission denied` its EACCES
+    // code would spell).
+    const why = err instanceof PolicyDenied ? err.message : strerrorOf(err)
+    errors.push(encodeText(`find: '${path}': ${why}\n`))
     return null
   }
   if (st === null) {

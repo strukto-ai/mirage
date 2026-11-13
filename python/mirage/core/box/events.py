@@ -26,7 +26,7 @@ from mirage.core.box.constants import (
     PLACE_EVENTS,
     TRASH_EVENTS,
 )
-from mirage.core.box.resolve import mount_relative_key, root_id
+from mirage.core.box.resolve import mount_relative_key
 from mirage.events.base import DeltaHook
 from mirage.events.delta import events_under, lost_at
 from mirage.events.payload import event_at, field, text_field
@@ -312,7 +312,7 @@ class BoxEventHook:
         if source is None:
             return ()
         is_dir = source.get("type") == "folder"
-        mount_root = root_id(self._accessor)
+        mount_root = self._accessor.root_folder_id
         if is_dir and str(source["id"]) == mount_root:
             if (
                 event_type in TRASH_EVENTS

@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it } from 'vitest'
-import { runWithMountGate } from '../../../context/session_context.ts'
+import { currentCaller, runWithCaller, runWithMountGate } from '../../../context/session_context.ts'
 import { eacces, enoent } from '../../../errors/fs.ts'
 import { GlobLimitError } from '../../../errors/types.ts'
+import { yieldBytes } from '../../../io/stream.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { runWithRevisions } from '../../../observe/context.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { BatchedRAM, readers } from '../../../test-utils.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
@@ -27,7 +27,6 @@ import { Files } from '../../../workspace/files.ts'
 import type { MountRow } from '../../../workspace/types.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import type { Context } from '../../config.ts'
-import { singleChunk } from '../utils/operands.ts'
 import {
   type CommandFiles,
   commandFiles,
@@ -86,7 +85,7 @@ function keyed(backend: Backend, calls: string[] = []): DispatchFn {
     if (name === 'stat') return done(hit === undefined ? null : stat({ size: hit.length }))
     if (name !== 'read') return done(null)
     if (kwargs.stream === true)
-      return done(hit === undefined ? throwing(enoent(p)) : singleChunk(ENC.encode(hit)))
+      return done(hit === undefined ? throwing(enoent(p)) : yieldBytes(ENC.encode(hit)))
     return hit === undefined ? Promise.reject(enoent(p)) : done(ENC.encode(hit))
   }
 }
@@ -263,7 +262,7 @@ describe('fileSize', () => {
       expect(commandFiles(ctx).answers('read_range')).toBe(true)
       const run = withReading(ctx, {
         split: true,
-        stream: () => singleChunk(ENC.encode('raw rendered')),
+        stream: () => yieldBytes(ENC.encode('raw rendered')),
       })
       const files = commandFiles(run)
       expect(files.answers('read_range')).toBe(false)
@@ -296,7 +295,9 @@ describe('fileSize', () => {
     const ctx = contextFor(answering(st, now, warm))
     const bound = fileSize(await guarded(ctx), ctx)
     const pins = pinned ? new Map([['/f', 'v1']]) : null
-    expect(await runWithRevisions(pins, () => bound(at('/f')))).toBe(size)
+    expect(
+      await runWithCaller({ ...currentCaller(), revisions: { map: pins } }, () => bound(at('/f'))),
+    ).toBe(size)
   })
 })
 

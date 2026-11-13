@@ -20,7 +20,8 @@ import { decodeOutput, encodeOutput, wrapLine } from '@struktoai/mirage-core/mac
 import { registerMachine } from '@struktoai/mirage-core/machine/registry'
 import type { RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
-import { loadSdk, type DaytonaSdk } from './sdk.ts'
+import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
+import type { DaytonaSdk } from './sdk.ts'
 import { DAYTONA_CONFIG_FIELDS, type DaytonaConfig } from './config.ts'
 import type { Daytona, Sandbox } from '@daytonaio/sdk'
 
@@ -55,7 +56,10 @@ export class DaytonaMachine extends MachineHandle<DaytonaConfig> {
 
   // The SDK loader as a seam: tests substitute a fake module here.
   protected loadSdk(): Promise<DaytonaSdk> {
-    return loadSdk()
+    return loadOptionalPeer(() => import('@daytonaio/sdk'), {
+      feature: "the 'daytona' runtime",
+      packageName: '@daytonaio/sdk',
+    })
   }
 
   async connect(): Promise<void> {

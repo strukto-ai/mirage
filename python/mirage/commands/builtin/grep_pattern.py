@@ -12,16 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 
 from mirage.commands.builtin.types import RegexSyntax
-from mirage.commands.builtin.utils.operands import materialized_read
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
+from mirage.io.types import materialize
 from mirage.rs.errors import RegexError
 from mirage.rs.regex import LineRegex, LineSyntax
 from mirage.shell.bytes import decode_text
-from mirage.types import PathSpec, PolymorphicReadFn
+from mirage.types import PathSpec
 
 NEVER_MATCH = r"(?!)"
 # The matcher options, as GNU grep names them: each one picks the
@@ -53,7 +53,7 @@ def pattern_arg(texts: Sequence[str], flags: FlagView) -> str | None:
 async def resolve_pattern(
     texts: Sequence[str],
     flags: FlagView,
-    read_bytes: PolymorphicReadFn,
+    stream: Callable[[PathSpec], AsyncIterator[bytes]],
     usage: str,
 ) -> tuple[str, bool]:
     """Resolve the search pattern from -e/positional/-f flag arguments.
@@ -61,7 +61,8 @@ async def resolve_pattern(
     Args:
         texts (Sequence[str]): positional TEXT operands.
         flags (FlagView): typed view over raw flag kwargs.
-        read_bytes (PolymorphicReadFn): bound reader for -f pattern files.
+        stream (Callable[[PathSpec], AsyncIterator[bytes]]): reads a -f
+            pattern file.
         usage (str): usage error message when no pattern was supplied.
 
     Returns:
@@ -76,9 +77,10 @@ async def resolve_pattern(
         raw = (
             pattern_file if isinstance(pattern_file, list) else [pattern_file]
         )
-        read = materialized_read(read_bytes)
         for pf in [item for item in raw if isinstance(item, PathSpec)]:
-            pattern = merge_pattern_list(pattern, await read(pf))
+            pattern = merge_pattern_list(
+                pattern, await materialize(stream(pf))
+            )
         if pattern is None:
             return NEVER_MATCH, True
     if pattern is None:

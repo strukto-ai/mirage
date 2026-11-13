@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { ContentType, FileType, type FileStat } from '../../types.ts'
 import { FakeDiscordTransport, type Responder } from '../../../tests/vfs/discord/_test_util.ts'
 import { mountDiscord } from '../../../tests/workspace/fixtures/chat_fixture.ts'
-import type { DiscordResponse, DiscordTransport } from './client.ts'
+import type { DiscordTransport } from './client.ts'
 
 const GUILD = '/mnt/discord/My Server__G1'
 const CHANNEL = `${GUILD}/channels/general__C1`
@@ -25,7 +25,7 @@ async function stat(t: DiscordTransport, path: string): Promise<FileStat> {
   return (await mountDiscord(t).dispatch('stat', path)) as FileStat
 }
 
-function api(answers: Record<string, DiscordResponse>): FakeDiscordTransport {
+function api(answers: Record<string, unknown>): FakeDiscordTransport {
   const responder: Responder = (_m, endpoint) => answers[endpoint] ?? null
   return new FakeDiscordTransport(responder)
 }
@@ -169,7 +169,7 @@ describe('stat unknown', () => {
 describe('discord stat parent-listing failures', () => {
   class FailingTransport implements DiscordTransport {
     constructor(private readonly err: Error) {}
-    call(): Promise<DiscordResponse> {
+    call(): Promise<unknown> {
       return Promise.reject(this.err)
     }
   }

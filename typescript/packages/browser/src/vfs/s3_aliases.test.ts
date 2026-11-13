@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { redactedConfigDump } from '@struktoai/mirage-core/vfs/secrets'
 import { describe, expect, it } from 'vitest'
 import { AliyunConfig } from './aliyun/config.ts'
 import { BackblazeConfig } from './backblaze/config.ts'
@@ -222,7 +222,7 @@ describe('browser S3 aliases with their own rule', () => {
 
 describe('browser S3 alias redaction', () => {
   it('hides the presigned-url provider', () => {
-    const redacted = redactConfigWithSchema(AliyunConfig, {
+    const redacted = redactedConfigDump(AliyunConfig, {
       ...BASE,
       region: 'cn-hangzhou',
     }) as unknown as Record<string, unknown>

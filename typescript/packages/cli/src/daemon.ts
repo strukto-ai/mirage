@@ -19,15 +19,13 @@ import { registerConfigCommands } from './config.ts'
 import { makeClient } from './client.ts'
 import { emit, fail, formatAge } from './output.ts'
 
-interface DaemonStatus {
+function formatStatus(d: {
   running: boolean
   pid: number | null
   url: string
   uptime_ms?: number
   workspaces?: number
-}
-
-function formatStatus(d: DaemonStatus): string {
+}): string {
   if (!d.running) return `Daemon not running. URL: ${d.url}`
   const parts: string[] = [`Running. PID ${d.pid !== null ? String(d.pid) : '?'}`]
   if (d.uptime_ms !== undefined) {
@@ -98,13 +96,13 @@ export function registerDaemonCommands(program: Command): void {
       try {
         const r = await c.request('GET', '/v1/health')
         if (r.status !== 200) {
-          emit({ running: false, pid, url } as DaemonStatus, formatStatus)
+          emit({ running: false, pid, url }, formatStatus)
           process.exit(1)
         }
-        const body = (await r.json()) as Record<string, unknown>
-        emit({ running: true, pid, url, ...body } as DaemonStatus, formatStatus)
+        const body = (await r.json()) as { uptime_ms?: number; workspaces?: number }
+        emit({ running: true, pid, url, ...body }, formatStatus)
       } catch {
-        emit({ running: false, pid, url } as DaemonStatus, formatStatus)
+        emit({ running: false, pid, url }, formatStatus)
         process.exit(1)
       }
     })

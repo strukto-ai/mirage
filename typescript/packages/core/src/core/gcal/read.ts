@@ -20,13 +20,7 @@ import { makeRead } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { compactJsonBytes } from '../render/json.ts'
 import { dayBounds } from './day.ts'
-import {
-  bucketZone,
-  type CalendarEntryRow,
-  calendarIndex,
-  calendarPayload,
-  scopedBucket,
-} from './readdir.ts'
+import { bucketZone, calendarIndex, calendarPayload, scopedBucket } from './readdir.ts'
 import { detectScope } from './scope.ts'
 
 async function readCalendarJson(
@@ -47,7 +41,7 @@ async function readCalendarJson(
  */
 function eventOf(
   accessor: GCalAccessor,
-  calendars: Map<string, CalendarEntryRow>,
+  calendars: Map<string, Record<string, JsonValue>>,
   match: ScopeMatch,
   path: PathSpec,
 ): [string, string, string] {

@@ -13,16 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
 import { ioToExecuteResponse, ioToFileInfos, ioToGrepMatches } from './convert.ts'
 
-interface FakeIO {
-  stdoutText: string
-  stderrText: string
-  exitCode: number | null
-}
-
-function fakeIO(stdout = '', stderr = '', exitCode: number | null = 0): FakeIO {
-  return { stdoutText: stdout, stderrText: stderr, exitCode }
+function fakeIO(stdout = '', stderr = '', exitCode = 0): ExecuteResult {
+  const enc = new TextEncoder()
+  return new ExecuteResult(enc.encode(stdout), enc.encode(stderr), exitCode)
 }
 
 describe('ioToExecuteResponse', () => {

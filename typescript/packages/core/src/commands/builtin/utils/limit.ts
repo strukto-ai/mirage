@@ -13,12 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { concat } from '../../../utils/bytes.ts'
-import { chunks } from '../../../io/cooperative.ts'
 import { closeQuietly, ensureStream } from '../../../io/stream.ts'
 import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
 import { type Limit, OnExceed } from '../../../types.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
-import type { Context } from '../../config.ts'
 
 const ENC = new TextEncoder()
 
@@ -26,24 +24,6 @@ const TIMED_OUT = Symbol('timed-out')
 
 /** The start of the notice a command's capped output ends its stderr with. */
 export const TRUNCATION_NOTICE = 'output truncated at limit'
-
-function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
-  return new Promise<T | typeof TIMED_OUT>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      resolve(TIMED_OUT)
-    }, ms)
-    promise.then(
-      (value) => {
-        clearTimeout(timer)
-        resolve(value)
-      },
-      (err: unknown) => {
-        clearTimeout(timer)
-        reject(err instanceof Error ? err : new Error(String(err)))
-      },
-    )
-  })
-}
 
 /**
  * Wait for `promise` until its deadline, then throw a timeout error. The call
@@ -63,7 +43,24 @@ export async function runWithTimeout<T>(
   const left = seconds * 1000 - (start === undefined ? 0 : performance.now() - start)
   // Spent before the call: a race against no time left loses to a call that
   // settles in a microtask.
-  const result = left > 0 ? await withDeadline(promise, left) : TIMED_OUT
+  const result =
+    left > 0
+      ? await new Promise<T | typeof TIMED_OUT>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            resolve(TIMED_OUT)
+          }, left)
+          promise.then(
+            (value) => {
+              clearTimeout(timer)
+              resolve(value)
+            },
+            (err: unknown) => {
+              clearTimeout(timer)
+              reject(err instanceof Error ? err : new Error(String(err)))
+            },
+          )
+        })
+      : TIMED_OUT
   if (result === TIMED_OUT) {
     void promise.then(
       async (late) => {
@@ -203,13 +200,4 @@ export async function guardOutput(
   const guarded = guardIO(stdout, io, limit)
   const data = guarded === null ? null : await materialize(guarded)
   return [data, io.stderr, io.exitCode]
-}
-
-/** An invocation's input under its abort; `split` as in chunks. */
-export function guardInput(
-  source: ByteSource,
-  ctx: Pick<Context, 'signal'>,
-  split = true,
-): AsyncIterable<Uint8Array> {
-  return chunks(source, ctx.signal, split)
 }

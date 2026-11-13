@@ -212,7 +212,7 @@ export type { SmolvmConfig } from './machine/smolvm/config.ts'
 export { SmolvmMachine } from './machine/smolvm/handle.ts'
 export type { SSHMachineConfig } from './machine/ssh/config.ts'
 export { SSHMachine } from './machine/ssh/handle.ts'
-export { isModulePath, loadAttr, MODULE_SUFFIXES, splitRef } from './utils/loader.ts'
+export { isModulePath, loadAttr, splitRef } from './utils/loader.ts'
 export type { DropboxConfig } from '@struktoai/mirage-core/vfs/direct/dropbox'
 export { EmailVFS } from '@struktoai/mirage-core/vfs/email/email'
 export {

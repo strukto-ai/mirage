@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { parseConfigWithSchema, redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { parseConfigWithSchema, redactedConfigDump } from '@struktoai/mirage-core/vfs/secrets'
 import { describe, expect, it } from 'vitest'
 import { SSHConfig } from './config.ts'
 
@@ -31,7 +31,7 @@ describe('SSHConfig', () => {
   })
 
   it('redacts password but not identityFile path', () => {
-    const c = redactConfigWithSchema(SSHConfig, {
+    const c = redactedConfigDump(SSHConfig, {
       host: 'example.com',
       password: 'secret',
       identityFile: '~/.ssh/id_ed25519',
@@ -47,7 +47,7 @@ describe('SSHConfig', () => {
   })
 
   it('redacts passphrase too', () => {
-    const c = redactConfigWithSchema(SSHConfig, {
+    const c = redactedConfigDump(SSHConfig, {
       host: 'example.com',
       passphrase: 'mypass',
     })

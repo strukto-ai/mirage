@@ -15,7 +15,6 @@
 import asyncio
 import json
 import logging
-from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, Query, Request, Response
@@ -108,45 +107,6 @@ def _check_placement(ws: Workspace, req: ShellRequest) -> None:
             ) from exc
 
 
-def _build_shell_kwargs(
-    req: ShellRequest, stdin: ByteSource | None
-) -> dict[str, Any]:
-    kwargs: dict[str, Any] = {
-        "command": req.command,
-        "record": req.record is not False,
-    }
-    if req.cwd is not None:
-        kwargs["cwd"] = req.cwd
-    if req.runtime is not None:
-        kwargs["runtime"] = req.runtime
-    if req.machine is not None:
-        kwargs["machine"] = req.machine
-    if stdin is not None:
-        kwargs["stdin"] = stdin
-    return kwargs
-
-
-async def _invoke_shell(
-    ws: Workspace,
-    kwargs: dict[str, Any],
-    scope: LineHandle,
-    opened: Callable[[ShellExecution | None], None] | None = None,
-) -> JsonValue:
-    if opened is None:
-        result = await ws.shell(**kwargs, line_handle=scope)
-    else:
-        execution = await ws.shell(**kwargs, line_handle=scope, stream=True)
-        # The response reads the events and closes the execution; the job
-        # waits for its status, and a cancelled job stops it.
-        opened(execution)
-        try:
-            result = await execution.wait()
-        except asyncio.CancelledError:
-            execution.cancel()
-            raise
-    return {**await io_result_to_dict(result), "line_id": str(scope.id)}
-
-
 @router.post("")
 async def shell(
     workspace_id: str,
@@ -202,9 +162,16 @@ async def shell(
         if upload is not None:
             await _finish_upload(upload, part)
         raise
-    kwargs = _build_shell_kwargs(req_obj, stdin)
     session_id = session_id or entry.runner.ws.default_session_id
-    kwargs["session_id"] = session_id
+    kwargs: dict[str, Any] = {
+        "command": req_obj.command,
+        "session_id": session_id,
+        "stdin": stdin,
+        "cwd": req_obj.cwd,
+        "record": req_obj.record is not False,
+        "runtime": req_obj.runtime,
+        "machine": req_obj.machine,
+    }
     loop = asyncio.get_running_loop()
     opened: asyncio.Future[ShellExecution | None] = loop.create_future()
 
@@ -217,13 +184,27 @@ async def shell(
 
         loop.call_soon_threadsafe(give)
 
+    async def invoke(scope: LineHandle) -> JsonValue:
+        ws = entry.runner.ws
+        if not stream:
+            result = await ws.shell(**kwargs, line_handle=scope)
+        else:
+            execution = await ws.shell(
+                **kwargs, line_handle=scope, stream=True
+            )
+            # The response reads the events and closes the execution; the
+            # job waits for its status, and a cancelled job stops it.
+            hand(execution)
+            try:
+                result = await execution.wait()
+            except asyncio.CancelledError:
+                execution.cancel()
+                raise
+        return {**await io_result_to_dict(result), "line_id": str(scope.id)}
+
     async def run(scope: LineHandle) -> JsonValue:
         try:
-            return await entry.runner.call(
-                _invoke_shell(
-                    entry.runner.ws, kwargs, scope, hand if stream else None
-                )
-            )
+            return await entry.runner.call(invoke(scope))
         finally:
             if stream:
                 hand(None)

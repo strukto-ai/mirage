@@ -24,7 +24,7 @@ import {
   type Context,
 } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { guardInput } from '../utils/limit.ts'
+import { chunks } from '../../../io/cooperative.ts'
 import type { FactsFn, GenericCommand } from './adapter.ts'
 import { BUILDERS } from './builders/index.ts'
 import { type Reading, withReading } from './files.ts'
@@ -50,7 +50,7 @@ function bind(b: GenericCommand, vfs: string | null, stream: Reading['stream']):
       stdin:
         ctx.stdin === null || (b.givesBack === true && ctx.stdin instanceof SharedInput)
           ? ctx.stdin
-          : guardInput(ctx.stdin, ctx, reading.split),
+          : chunks(ctx.stdin, ctx.signal, reading.split),
     }
     return b.fn(accessor, paths, texts, withReading(run, reading))
   }

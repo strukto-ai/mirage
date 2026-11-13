@@ -16,23 +16,17 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { eisdir, enoent, enotdir } from '../../errors/fs.ts'
 import { type FileStat, FileType, type PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
+import { FOLDER_MIME } from '../google/drive.ts'
 import type { DriveApi } from './api.ts'
 import { liveRow, statFromItem } from './readdir.ts'
 import type { DriveNode } from './resolve.ts'
-import {
-  driveTargetName,
-  eaccesOnDenied,
-  isFolder,
-  nodeFromItem,
-  nodeOf,
-  parentFolder,
-} from './resolve.ts'
+import { driveTargetName, eaccesOnDenied, nodeFromItem, nodeOf, parentFolder } from './resolve.ts'
 
 async function copyChildren(drive: DriveApi, src: DriveNode, dstFolderId: string): Promise<void> {
   const children = await drive.listFiles({ folderId: src.id, driveId: src.driveId })
   for (const item of children) {
     const child = nodeFromItem(item, src.driveId)
-    if (isFolder(child)) {
+    if (child.mimeType === FOLDER_MIME) {
       const created = await drive.createFolder(child.name, dstFolderId)
       await copyChildren(drive, child, created.id)
     } else {
@@ -62,7 +56,7 @@ export const copy = eaccesOnDenied(async function (
   const dstEntry = await liveRow(accessor, dst, handed.dstEntry)
   const dstKey = dst.vfsPath
   const basename = dstKey.includes('/') ? dstKey.slice(dstKey.lastIndexOf('/') + 1) : dstKey
-  if (isFolder(srcNode)) {
+  if (srcNode.mimeType === FOLDER_MIME) {
     if (dstEntry !== null && dstEntry.type !== FileType.DIRECTORY) throw enotdir(dst)
     let made: FileStat | null = null
     let dstId: string

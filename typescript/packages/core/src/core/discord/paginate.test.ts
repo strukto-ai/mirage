@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
-import type { DiscordMethod, DiscordResponse, DiscordTransport } from './client.ts'
+import type { DiscordMethod, DiscordTransport } from './client.ts'
 import { afterIdPages } from './paginate.ts'
 
 class PageTransport implements DiscordTransport {
@@ -24,7 +24,7 @@ class PageTransport implements DiscordTransport {
     _method: DiscordMethod,
     _endpoint: string,
     params?: Record<string, string | number>,
-  ): Promise<DiscordResponse> {
+  ): Promise<unknown> {
     const after = String(params?.after ?? '')
     this.afters.push(after)
     return Promise.resolve(this.pages[after] ?? [])

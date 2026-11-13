@@ -25,19 +25,6 @@ import { parseConfigWithSchema, refuseUnknownKeys } from '@struktoai/mirage-core
 import type { OPFSVFSOptions } from './opfs/opfs.ts'
 import type { RedisVFSOptions } from './redis/redis.ts'
 
-// The backends that take their options without a schema, and the option
-// names each takes, so a key outside these is refused rather than ignored,
-// the way python refuses a constructor keyword its class does not take.
-const OPFS_OPTIONS: readonly (keyof OPFSVFSOptions)[] = ['root', 'capacity']
-const REDIS_OPTIONS: readonly (keyof RedisVFSOptions)[] = [
-  'url',
-  'token',
-  'keyPrefix',
-  'fetchImpl',
-  'capacity',
-  'maxRequestBytes',
-]
-
 /**
  * The browser's VFS table: the backends core implements (`REGISTRY` in
  * `@struktoai/mirage-core/vfs/registry`) plus the ones this package
@@ -45,7 +32,9 @@ const REDIS_OPTIONS: readonly (keyof RedisVFSOptions)[] = [
  * and the Node TS counterpart at `@struktoai/mirage-node/vfs/registry`.
  *
  * Configs are normalized from Python-style snake_case to TS camelCase so
- * the same YAML schema works across both runtimes.
+ * the same YAML schema works across both runtimes. A backend that takes its
+ * options without a schema names the ones it takes, so a key outside them is
+ * refused, as Python refuses a constructor keyword, rather than ignored.
  *
  * The S3 entry expects a browser-shaped config — bucket + a
  * `presignedUrlProvider` function. Since functions can't be encoded
@@ -55,7 +44,7 @@ const REDIS_OPTIONS: readonly (keyof RedisVFSOptions)[] = [
 const REGISTRY: Record<string, VFSFactory> = {
   ...CORE_REGISTRY,
   opfs: async (config) => {
-    refuseUnknownKeys(config, OPFS_OPTIONS)
+    refuseUnknownKeys(config, ['root', 'capacity'] satisfies (keyof OPFSVFSOptions)[])
     const { OPFSVFS } = await import('./opfs/opfs.ts')
     const norm = normalizeFields(config)
     return new OPFSVFS(norm)
@@ -156,7 +145,14 @@ const REGISTRY: Record<string, VFSFactory> = {
     return new MongoDBVFS(parseConfigWithSchema(MongoDBConfig, config))
   },
   redis: async (config) => {
-    refuseUnknownKeys(config, REDIS_OPTIONS)
+    refuseUnknownKeys(config, [
+      'url',
+      'token',
+      'keyPrefix',
+      'fetchImpl',
+      'capacity',
+      'maxRequestBytes',
+    ] satisfies (keyof RedisVFSOptions)[])
     const { RedisVFS } = await import('./redis/redis.ts')
     return new RedisVFS(normalizeFields(config) as unknown as RedisVFSOptions)
   },

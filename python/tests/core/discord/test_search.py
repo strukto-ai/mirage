@@ -39,7 +39,7 @@ def test_search_returns_messages():
         {"id": "200", "content": "hello again", "author": {"username": "b"}},
     ]
     with patch(
-        "mirage.core.discord.paginate.discord_get",
+        "mirage.core.discord.paginate.discord_request",
         new_callable=AsyncMock,
         return_value=_make_search_response(msgs),
     ):
@@ -52,7 +52,7 @@ def test_search_returns_messages():
 def test_search_with_channel_filter():
     msgs = [{"id": "300", "content": "test", "author": {"username": "c"}}]
     with patch(
-        "mirage.core.discord.paginate.discord_get",
+        "mirage.core.discord.paginate.discord_request",
         new_callable=AsyncMock,
         return_value=_make_search_response(msgs),
     ) as mock:
@@ -60,14 +60,14 @@ def test_search_with_channel_filter():
             search_guild(_accessor(), "G1", "test", channel_id="C1")
         )
     assert len(results) == 1
-    call_params = mock.call_args[1].get("params") or mock.call_args[0][2]
+    call_params = mock.call_args[1].get("params") or mock.call_args[0][3]
     assert call_params["channel_id"] == "C1"
     assert call_params["content"] == "test"
 
 
 def test_search_empty_results():
     with patch(
-        "mirage.core.discord.paginate.discord_get",
+        "mirage.core.discord.paginate.discord_request",
         new_callable=AsyncMock,
         return_value={"messages": [], "total_results": 0},
     ):
@@ -81,7 +81,7 @@ def test_search_sorted_oldest_first():
         {"id": "100", "content": "older", "author": {"username": "b"}},
     ]
     with patch(
-        "mirage.core.discord.paginate.discord_get",
+        "mirage.core.discord.paginate.discord_request",
         new_callable=AsyncMock,
         return_value=_make_search_response(msgs),
     ):
@@ -96,7 +96,7 @@ def test_search_respects_limit():
         for i in range(10)
     ]
     with patch(
-        "mirage.core.discord.paginate.discord_get",
+        "mirage.core.discord.paginate.discord_request",
         new_callable=AsyncMock,
         return_value=_make_search_response(msgs, total=10),
     ):
@@ -122,7 +122,7 @@ def test_search_paginates():
         _make_search_response(page2, total=30),
     ]
     with patch(
-        "mirage.core.discord.paginate.discord_get",
+        "mirage.core.discord.paginate.discord_request",
         new_callable=AsyncMock,
         side_effect=responses,
     ):

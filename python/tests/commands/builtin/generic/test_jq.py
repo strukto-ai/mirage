@@ -6,7 +6,6 @@ import pytest
 from mirage.commands.builtin.generic import jq as jq_module
 from mirage.commands.builtin.generic.jq import (
     ModuleFiles,
-    jq,
     jq_generic,
     link_modules,
     option_tape,
@@ -20,7 +19,7 @@ from mirage.io.errors import MemoryExhausted
 from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.spool import ByteSpool
 from mirage.io.stream import yield_bytes
-from mirage.io.types import IOResult, materialize
+from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.errors import StreamRefusal
 from mirage.types import PathSpec
 
@@ -98,6 +97,18 @@ async def _line(*words: str, stream=None) -> tuple[bytes, bytes, int]:
 async def _unread(path: PathSpec):
     raise AssertionError(f"{path.virtual} should not be read")
     yield b""
+
+
+async def jq(
+    paths: list[PathSpec],
+    *texts: str,
+    stream,
+    stdin: ByteSource | None = None,
+    **flags: FlagValue,
+):
+    return await jq_generic(
+        paths, list(texts), Context(stdin=stdin, flags=flags), stream
+    )
 
 
 async def _run(paths: list[str], *texts: str, **flags: FlagValue) -> tuple:

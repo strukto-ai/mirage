@@ -21,9 +21,7 @@ from yarl import URL
 from mirage.accessor.notion import NotionAccessor
 from mirage.core.notion.client import (
     NotionAPIError,
-    notion_get,
-    notion_headers,
-    notion_post,
+    notion_request,
     paginate_list,
     paginate_post,
 )
@@ -32,13 +30,6 @@ from mirage.core.notion.config import NotionConfig
 BASE = "https://api.notion.com/v1"
 CONFIG = NotionConfig(api_key="ntn_test123")
 ACCESSOR = NotionAccessor(CONFIG)
-
-
-def test_notion_headers():
-    headers = notion_headers(CONFIG)
-    assert headers["Authorization"] == "Bearer ntn_test123"
-    assert headers["Notion-Version"] == "2025-09-03"
-    assert headers["Content-Type"] == "application/json"
 
 
 def test_notion_api_error():
@@ -52,7 +43,7 @@ def test_notion_api_error():
 async def test_paginate_post_stops_at_max_results():
     calls = []
 
-    async def fake_notion_post(accessor, path, body):
+    async def fake_request(accessor, method, path, body):
         calls.append(dict(body))
         return {
             "results": [{"n": len(calls) * 2 - 1}, {"n": len(calls) * 2}],
@@ -60,7 +51,7 @@ async def test_paginate_post_stops_at_max_results():
             "next_cursor": f"c{len(calls)}",
         }
 
-    with patch("mirage.core.notion.client.notion_post", new=fake_notion_post):
+    with patch("mirage.core.notion.client.notion_request", new=fake_request):
         results = await paginate_post(
             ACCESSOR, "/search", {}, page_size=250, max_results=3
         )
@@ -75,7 +66,7 @@ async def test_paginate_list_rides_one_session_across_pages():
     opened and closed its own ClientSession."""
     seen: list[NotionAccessor] = []
 
-    async def fake_notion_get(accessor, path, params=None):
+    async def fake_request(accessor, method, path, params=None):
         seen.append(accessor)
         more = len(seen) == 1
         return {
@@ -84,7 +75,7 @@ async def test_paginate_list_rides_one_session_across_pages():
             "next_cursor": "c1" if more else None,
         }
 
-    with patch("mirage.core.notion.client.notion_get", new=fake_notion_get):
+    with patch("mirage.core.notion.client.notion_request", new=fake_request):
         rows = await paginate_list(ACCESSOR, "/blocks/b1/children")
     assert [r["n"] for r in rows] == [1, 2]
     assert len(seen) == 2
@@ -92,20 +83,21 @@ async def test_paginate_list_rides_one_session_across_pages():
 
 
 @pytest.mark.asyncio
-async def test_notion_get_returns_the_body_and_sends_the_headers():
+async def test_a_get_returns_the_body_and_sends_the_headers():
     async with NotionAccessor(CONFIG) as accessor:
         with aioresponses() as m:
             m.get(f"{BASE}/users/me", payload={"object": "user", "id": "u1"})
-            result = await notion_get(accessor, "/users/me")
+            result = await notion_request(accessor, "GET", "/users/me")
             sent = m.requests[("GET", URL(f"{BASE}/users/me"))]
     assert result == {"object": "user", "id": "u1"}
     headers = sent[0].kwargs["headers"]
     assert headers["Authorization"] == "Bearer ntn_test123"
     assert headers["Notion-Version"] == "2025-09-03"
+    assert headers["Content-Type"] == "application/json"
 
 
 @pytest.mark.asyncio
-async def test_notion_get_maps_an_error_body():
+async def test_a_get_maps_an_error_body():
     async with NotionAccessor(CONFIG) as accessor:
         with aioresponses() as m:
             m.get(
@@ -118,7 +110,7 @@ async def test_notion_get_maps_an_error_body():
                 },
             )
             with pytest.raises(NotionAPIError) as exc:
-                await notion_get(accessor, "/pages/p1")
+                await notion_request(accessor, "GET", "/pages/p1")
     assert str(exc.value) == "Could not find page"
     assert exc.value.status == 404
     assert exc.value.code == "object_not_found"
@@ -130,17 +122,17 @@ async def test_notion_error_without_a_message_reports_the_status():
         with aioresponses() as m:
             m.get(f"{BASE}/pages/p1", status=502, body="bad gateway")
             with pytest.raises(NotionAPIError) as exc:
-                await notion_get(accessor, "/pages/p1")
+                await notion_request(accessor, "GET", "/pages/p1")
     assert str(exc.value) == "Notion API error: HTTP 502"
     assert exc.value.code is None
 
 
 @pytest.mark.asyncio
-async def test_notion_post_sends_an_empty_object_for_no_body():
+async def test_a_post_sends_an_empty_object_for_no_body():
     async with NotionAccessor(CONFIG) as accessor:
         with aioresponses() as m:
             m.post(f"{BASE}/search", payload={"results": []})
-            await notion_post(accessor, "/search")
+            await notion_request(accessor, "POST", "/search")
             sent = m.requests[("POST", URL(f"{BASE}/search"))]
     assert sent[0].kwargs["json"] == {}
 
@@ -168,7 +160,7 @@ async def test_truncated_query_is_not_successful_partial_listing():
     async def post(*args, **kwargs):
         return next(pages)
 
-    with patch("mirage.core.notion.client.notion_post", new=post):
+    with patch("mirage.core.notion.client.notion_request", new=post):
         with pytest.raises(NotionAPIError, match="query_result_limit_reached"):
             await paginate_post(ACCESSOR, "/data_sources/ds/query")
 
@@ -191,7 +183,9 @@ async def test_rate_limit_honors_retry_after_and_stops_after_three_retries():
                 payload={"message": "slow"},
             )
             http.get(url, payload={"id": "p"})
-            assert await notion_get(accessor, "/pages/p") == {"id": "p"}
+            assert await notion_request(accessor, "GET", "/pages/p") == {
+                "id": "p"
+            }
             sleep.assert_awaited_once_with(2.0)
         sleep.reset_mock()
         with (
@@ -200,6 +194,6 @@ async def test_rate_limit_honors_retry_after_and_stops_after_three_retries():
         ):
             http.get(url, status=429, repeat=True, payload={"message": "slow"})
             with pytest.raises(NotionAPIError, match="slow"):
-                await notion_get(accessor, "/pages/p")
+                await notion_request(accessor, "GET", "/pages/p")
             assert sleep.await_count == 3
             assert len(http.requests[("GET", URL(url))]) == 4

@@ -36,7 +36,8 @@ import {
   wrapLine,
 } from '../constants.ts'
 import { CLOSED_INPUT, PTY_MARK, PTY_RAW, SANDBOX_GONE } from './constants.ts'
-import { loadSdk, type E2bSdk } from './sdk.ts'
+import { loadOptionalPeer } from '../../utils/optional_peer.ts'
+import type { E2bSdk } from './sdk.ts'
 import { E2B_CONFIG_FIELDS, type E2BConfig } from './config.ts'
 import type { CommandResult, Sandbox } from 'e2b'
 
@@ -162,7 +163,10 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
 
   // The SDK loader as a seam: tests substitute a fake module here.
   protected loadSdk(): Promise<E2bSdk> {
-    return loadSdk()
+    return loadOptionalPeer(() => import('e2b'), {
+      feature: "the 'e2b' runtime",
+      packageName: 'e2b',
+    })
   }
 
   private async ensureSdk(): Promise<E2bSdk> {

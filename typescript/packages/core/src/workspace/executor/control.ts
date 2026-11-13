@@ -44,7 +44,6 @@ import { frame, sessionView, visibleEnv } from '../session/state.ts'
 import { drive } from '../session/task.ts'
 import { ExecutionNode } from '../types.ts'
 import { readReply } from './builtins/read/index.ts'
-import type { ExecuteStringFn } from './builtins/types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { runProgram, runStatement } from './background.ts'
 import {
@@ -102,7 +101,7 @@ export async function executeBody(
   jobTable: JobTable | null,
   handed: HandOff | null,
   decisions: Decisions | null,
-  executeFn: ExecuteStringFn | null = null,
+  executeFn: ExecuteFn | null = null,
   sink: JobConsole | null = null,
   bound: ReturnType<typeof fd0Binding> = fd0Binding(context.session),
   leading: Uint8Array = new Uint8Array(),
@@ -242,7 +241,7 @@ export async function trailed(
  * Python's returning.
  */
 export async function returning(
-  executeFn: ExecuteStringFn | null,
+  executeFn: ExecuteFn | null,
   session: SessionState,
   stdin: ByteSource | null,
   callStack: CallStack,

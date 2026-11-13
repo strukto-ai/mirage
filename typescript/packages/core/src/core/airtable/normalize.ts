@@ -12,27 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { JsonObject } from '../../types.ts'
+import { isRecord } from '../../utils/records.ts'
 import { jsonlBytes } from '../render/json.ts'
 
-export type Row = Record<string, unknown>
-
-/** Whether a decoded JSON value is an object. */
-export function isRow(value: unknown): value is Row {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 /** A decoded JSON object, or an empty one for anything else. */
-export function asRow(value: unknown): Row {
-  return isRow(value) ? value : {}
+export function asRow(value: unknown): JsonObject {
+  return isRecord(value) ? value : {}
 }
 
 /** The objects of a decoded JSON array; anything else holds none. */
-export function asRows(value: unknown): Row[] {
-  return Array.isArray(value) ? value.filter(isRow) : []
+export function asRows(value: unknown): JsonObject[] {
+  return Array.isArray(value) ? value.filter(isRecord) : []
 }
 
 /** One base as the listing names it: id, name and permission level. */
-export function normalizeBaseSummary(base: Row): Row {
+export function normalizeBaseSummary(base: JsonObject): JsonObject {
   return {
     base_id: base.id ?? null,
     base_name: base.name ?? null,
@@ -41,7 +36,7 @@ export function normalizeBaseSummary(base: Row): Row {
 }
 
 /** base.json: the base and the tables it holds. */
-export function normalizeBase(base: Row, tables: readonly Row[]): Row {
+export function normalizeBase(base: JsonObject, tables: readonly JsonObject[]): JsonObject {
   return {
     ...normalizeBaseSummary(base),
     tables: tables.map((table) => ({
@@ -53,7 +48,7 @@ export function normalizeBase(base: Row, tables: readonly Row[]): Row {
 }
 
 /** One column: its id, name, type and the type's options. */
-export function normalizeField(column: Row): Row {
+export function normalizeField(column: JsonObject): JsonObject {
   return {
     field_id: column.id ?? null,
     field_name: column.name ?? null,
@@ -64,7 +59,7 @@ export function normalizeField(column: Row): Row {
 }
 
 /** One saved view: its id, name and kind (grid, kanban, ...). */
-export function normalizeView(view: Row): Row {
+export function normalizeView(view: JsonObject): JsonObject {
   return {
     view_id: view.id ?? null,
     view_name: view.name ?? null,
@@ -73,7 +68,7 @@ export function normalizeView(view: Row): Row {
 }
 
 /** table.json: the column schema and the saved views. */
-export function normalizeTable(table: Row, baseId: string): Row {
+export function normalizeTable(table: JsonObject, baseId: string): JsonObject {
   return {
     table_id: table.id ?? null,
     table_name: table.name ?? null,
@@ -91,7 +86,7 @@ export function normalizeTable(table: Row, baseId: string): Row {
  * sends one), a link is a list of record ids, and an attachment's url is the
  * API's own, which expires two hours after it was fetched.
  */
-export function normalizeRecord(record: Row): Row {
+export function normalizeRecord(record: JsonObject): JsonObject {
   return {
     record_id: record.id ?? null,
     created_time: record.createdTime ?? null,
@@ -100,7 +95,7 @@ export function normalizeRecord(record: Row): Row {
 }
 
 /** One comment on a record, with its author flattened. */
-export function normalizeComment(comment: Row): Row {
+export function normalizeComment(comment: JsonObject): JsonObject {
   const who = asRow(comment.author)
   return {
     comment_id: comment.id ?? null,
@@ -114,16 +109,16 @@ export function normalizeComment(comment: Row): Row {
 }
 
 /** One deleted record, as the delete answer names it. */
-export function normalizeDeletion(row: Row): Row {
+export function normalizeDeletion(row: JsonObject): JsonObject {
   return { record_id: row.id ?? null, deleted: row.deleted ?? null }
 }
 
 /** Render records one per line, in the order they were listed. */
-export function recordsJsonl(listed: readonly Row[]): Uint8Array {
+export function recordsJsonl(listed: readonly JsonObject[]): Uint8Array {
   return jsonlBytes(listed.map(normalizeRecord))
 }
 
 /** Render deleted records one per line, in the order they were deleted. */
-export function deletionsJsonl(rows: readonly Row[]): Uint8Array {
+export function deletionsJsonl(rows: readonly JsonObject[]): Uint8Array {
   return jsonlBytes(rows.map(normalizeDeletion))
 }

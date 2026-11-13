@@ -20,10 +20,7 @@ import { readdir as githubReaddir } from '../../core/github/readdir.ts'
 import { fetchDefaultBranch } from '../../core/github/repo.ts'
 import { filesContaining as githubFilesContaining } from '../../core/github/search.ts'
 import { stat as githubStat, tree as githubTree } from '../../core/github/stat.ts'
-import {
-  fetchTree as fetchGitHubTree,
-  buildTreeMap as githubBuildTreeMap,
-} from '../../core/github/tree.ts'
+import { fetchTree as fetchGitHubTree } from '../../core/github/tree.ts'
 import { type ByteSource } from '../../io/types.ts'
 import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import { ListingVersion, VFSName } from '../../types.ts'
@@ -97,7 +94,6 @@ export class GitHubVFS extends BaseVFS {
       config.repo,
       ref,
     )
-    const treeMap = githubBuildTreeMap(tree)
     const accessor = new GitHubAccessor({
       account,
       owner: config.owner,
@@ -105,7 +101,7 @@ export class GitHubVFS extends BaseVFS {
       ref,
       defaultBranch,
       truncated,
-      tree: treeMap,
+      tree,
     })
     return new GitHubVFS(config, accessor)
   }

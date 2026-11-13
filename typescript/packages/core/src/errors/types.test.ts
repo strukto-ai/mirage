@@ -15,7 +15,6 @@
 import { describe, expect, it } from 'vitest'
 
 import { POSIX } from './posix.ts'
-import { FS_CONDITIONS } from './types.ts'
 
 describe('the condition vocabulary', () => {
   it('is covered by the posix table exactly', () => {
@@ -23,11 +22,7 @@ describe('the condition vocabulary', () => {
     // base is pinned here; each runtime dialect pins its own totality
     // beside its boundary (runtime/js/wasi.test.ts for the preview1
     // wire, runtime/python/monty/errors.test.ts for CPython).
-    expect(Object.keys(POSIX).sort()).toEqual([...FS_CONDITIONS].sort())
-  })
-
-  it('names the probed conditions', () => {
-    expect(new Set(FS_CONDITIONS)).toEqual(
+    expect(new Set(Object.keys(POSIX))).toEqual(
       new Set([
         'EBADF',
         'ENOENT',

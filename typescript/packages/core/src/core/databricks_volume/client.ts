@@ -35,7 +35,6 @@ const DirectoryPage = z.object({
   contents: z.array(DirectoryEntry).default([]),
   next_page_token: z.string().nullish(),
 })
-const RESPONSE = z.object({ headers: z.record(z.string(), z.string()) })
 
 function url(accessor: DatabricksVolumeAccessor, endpoint: Endpoint, path: string): string {
   const encoded = path
@@ -83,9 +82,9 @@ export async function getMetadata(
   accessor: DatabricksVolumeAccessor,
   path: string,
 ): Promise<FileMetadata> {
-  const response = RESPONSE.parse(
-    await request(accessor, 'HEAD', 'files', path, { read: 'response' }),
-  )
+  const response = z
+    .object({ headers: z.record(z.string(), z.string()) })
+    .parse(await request(accessor, 'HEAD', 'files', path, { read: 'response' }))
   const length = response.headers['content-length']
   const parsed = length === undefined || length === '' ? null : Number(length)
   return {

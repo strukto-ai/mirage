@@ -13,5 +13,4 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export { classify } from './classify.ts'
-export { FS_CONDITIONS } from './types.ts'
 export type { FsCondition } from './types.ts'

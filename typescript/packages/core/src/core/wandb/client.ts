@@ -2,7 +2,7 @@ import { apiRequest, stallTimeout } from '../api/client.ts'
 import { eacces, enoent } from '../../errors/fs.ts'
 import { WandbAPIError } from './errors.ts'
 import type { WandbConfig } from './config.ts'
-import type { Named, Run, RunFile, FileMetadata, RunVariables } from './types.ts'
+import type { Run, RunFile, FileMetadata, RunVariables } from './types.ts'
 import { PROJECTS, RUNS, RUN, FILE, FILES, HISTORY, HISTORY_KEYS } from './queries.ts'
 
 function responseError(response: Response): Error {
@@ -64,10 +64,10 @@ export class WandbClient {
     }
     throw new WandbAPIError('W&B pagination limit exceeded')
   }
-  projects(entity: string, limit?: number): Promise<Named[]> {
+  projects(entity: string, limit?: number): Promise<{ name: string }[]> {
     return this.pages(PROJECTS, { entity }, ['models'], limit)
   }
-  runs(entity: string, project: string, limit?: number): Promise<Named[]> {
+  runs(entity: string, project: string, limit?: number): Promise<{ name: string }[]> {
     return this.pages(RUNS, { entity, project }, ['project', 'runs'], limit)
   }
   async run(variables: RunVariables, query = RUN): Promise<Run> {

@@ -27,7 +27,6 @@ const RATE_LIMIT_RETRY: RetryPolicy = {
 }
 
 export type DiscordMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
-export type DiscordResponse = unknown
 
 export class DiscordApiError extends ApiError {
   declare readonly status: number
@@ -89,12 +88,12 @@ export interface DiscordTransport {
     endpoint: string,
     params?: Record<string, string | number>,
     body?: Record<string, unknown>,
-  ): Promise<DiscordResponse>
+  ): Promise<unknown>
   postFiles?(
     endpoint: string,
     body: Record<string, unknown>,
     files: readonly DiscordFile[],
-  ): Promise<DiscordResponse>
+  ): Promise<unknown>
 }
 
 export abstract class HttpDiscordTransport implements DiscordTransport {
@@ -111,7 +110,7 @@ export abstract class HttpDiscordTransport implements DiscordTransport {
     endpoint: string,
     params?: Record<string, string | number>,
     body?: Record<string, unknown>,
-  ): Promise<DiscordResponse> {
+  ): Promise<unknown> {
     const base = this.baseUrl().replace(/\/$/, '')
     const auth = await this.authHeaders()
     const headers: Record<string, string> = { ...auth }
@@ -136,7 +135,7 @@ export abstract class HttpDiscordTransport implements DiscordTransport {
     endpoint: string,
     body: Record<string, unknown>,
     files: readonly DiscordFile[],
-  ): Promise<DiscordResponse> {
+  ): Promise<unknown> {
     const base = this.baseUrl().replace(/\/$/, '')
     const form = new FormData()
     const payload = { ...body, attachments: files.map((f, i) => ({ id: i, filename: f.name })) }

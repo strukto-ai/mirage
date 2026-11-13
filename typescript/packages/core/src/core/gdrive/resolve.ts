@@ -16,7 +16,7 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { type FileStat, FileType, type PathSpec } from '../../types.ts'
 import { eacces, enoent, enotdir } from '../../errors/fs.ts'
 import { GoogleApiError } from '../google/client.ts'
-import { FOLDER_MIME, MIME_TO_EXT } from '../google/drive.ts'
+import { MIME_TO_EXT } from '../google/drive.ts'
 import type { DriveFile } from '../google/drive.ts'
 import { stripSlash } from '../../utils/slash.ts'
 
@@ -28,8 +28,6 @@ export interface DriveNode {
   driveId: string | null
 }
 
-const ROOT_DRIVE_IDS = new WeakMap<GDriveAccessor, string | null>()
-
 // The mount root's [folder id, shared drive id]. An unscoped mount roots at
 // My Drive. A folderId scope may point inside a Shared Drive (or be a Shared
 // Drive id itself); its driveId is fetched once via files.get and memoized
@@ -38,11 +36,11 @@ const ROOT_DRIVE_IDS = new WeakMap<GDriveAccessor, string | null>()
 export async function rootContext(accessor: GDriveAccessor): Promise<[string, string | null]> {
   const folderId = accessor.tokenManager.config.folderId
   if (folderId === undefined || folderId === '') return ['root', null]
-  if (!ROOT_DRIVE_IDS.has(accessor)) {
+  if (accessor.rootDriveId === undefined) {
     const item = await accessor.drive.getFile(folderId)
-    ROOT_DRIVE_IDS.set(accessor, item.driveId ?? null)
+    accessor.rootDriveId = item.driveId ?? null
   }
-  return [folderId, ROOT_DRIVE_IDS.get(accessor) ?? null]
+  return [folderId, accessor.rootDriveId]
 }
 
 // Map a Drive HTTP 403 during a mutation to EACCES. Drive access is per-item
@@ -65,10 +63,6 @@ export function eaccesOnDenied<A extends unknown[], R>(
       throw err
     }
   }
-}
-
-export function isFolder(node: DriveNode): boolean {
-  return node.mimeType === FOLDER_MIME
 }
 
 // Destination Drive name for moving/copying an item to a vfs basename: a

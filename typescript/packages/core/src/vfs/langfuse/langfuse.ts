@@ -55,24 +55,7 @@ export class LangfuseVFS extends BaseVFS {
   constructor(config: LangfuseConfig) {
     super()
     this.config = config
-    const transportOpts: { publicKey: string; secretKey: string; host?: string; timeout?: number } =
-      {
-        publicKey: config.publicKey,
-        secretKey: config.secretKey,
-      }
-    if (config.host !== undefined) transportOpts.host = config.host
-    if (config.timeout !== undefined) transportOpts.timeout = config.timeout
-    const accessorConfig: {
-      defaultTraceLimit?: number
-      defaultFromTimestamp?: string
-    } = {}
-    if (config.defaultTraceLimit !== undefined) {
-      accessorConfig.defaultTraceLimit = config.defaultTraceLimit
-    }
-    if (config.defaultFromTimestamp !== undefined) {
-      accessorConfig.defaultFromTimestamp = config.defaultFromTimestamp
-    }
-    this.accessor = new LangfuseAccessor(new HttpLangfuseTransport(transportOpts), accessorConfig)
+    this.accessor = new LangfuseAccessor(new HttpLangfuseTransport(config), config)
   }
 
   override readdir(path: PathSpec): Promise<FileStat[] | DirListing> {

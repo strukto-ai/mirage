@@ -17,7 +17,7 @@ from typing import Any
 import aiohttp
 
 from mirage.accessor.notion import NotionAccessor
-from mirage.core.notion.client import notion_get, notion_post
+from mirage.core.notion.client import notion_request
 from mirage.types import JsonValue
 
 
@@ -30,7 +30,7 @@ async def create_file_upload(
         accessor (NotionAccessor): the install's accessor.
         body (dict[str, JsonValue]): the upload's mode and metadata.
     """
-    return await notion_post(accessor, "/file_uploads", body)
+    return await notion_request(accessor, "POST", "/file_uploads", body)
 
 
 async def send_file_part(
@@ -64,8 +64,8 @@ async def send_file_part(
         content_type=content_type,
     )
     form.add_field("part_number", str(part_number))
-    return await notion_post(
-        accessor, f"/file_uploads/{upload_id}/send", form=form
+    return await notion_request(
+        accessor, "POST", f"/file_uploads/{upload_id}/send", form=form
     )
 
 
@@ -78,7 +78,9 @@ async def complete_file_upload(
         accessor (NotionAccessor): the install's accessor.
         upload_id (str): the upload's id.
     """
-    return await notion_post(accessor, f"/file_uploads/{upload_id}/complete")
+    return await notion_request(
+        accessor, "POST", f"/file_uploads/{upload_id}/complete"
+    )
 
 
 async def get_file_upload(
@@ -90,7 +92,7 @@ async def get_file_upload(
         accessor (NotionAccessor): the install's accessor.
         upload_id (str): the upload's id.
     """
-    return await notion_get(accessor, f"/file_uploads/{upload_id}")
+    return await notion_request(accessor, "GET", f"/file_uploads/{upload_id}")
 
 
 async def list_file_uploads(accessor: NotionAccessor) -> dict[str, Any]:
@@ -99,4 +101,4 @@ async def list_file_uploads(accessor: NotionAccessor) -> dict[str, Any]:
     Args:
         accessor (NotionAccessor): the install's accessor.
     """
-    return await notion_get(accessor, "/file_uploads")
+    return await notion_request(accessor, "GET", "/file_uploads")

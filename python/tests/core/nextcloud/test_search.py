@@ -8,7 +8,7 @@ from mirage.core.nextcloud.search import search_files
 from mirage.core.nextcloud.search.constants import SEARCH_PAGE_SIZE
 from mirage.core.nextcloud.search.query import request_body
 from mirage.core.nextcloud.search.target import relative_path, search_target
-from mirage.types import FindType, PathSpec
+from mirage.types import PathSpec
 from mirage.vfs.nextcloud import NextcloudConfig
 
 _DAV_NAMESPACE = "DAV:"
@@ -130,13 +130,13 @@ async def test_search_files_lists_every_entry_a_page_at_a_time(
     assert entries is not None
     assert len(entries) == SEARCH_PAGE_SIZE + 1
     assert (entries[0].kind, entries[0].size, entries[0].modified) == (
-        FindType.FILE,
+        "f",
         42,
         "2026-07-11T12:00:00+00:00",
     )
     assert (entries[-1].key, entries[-1].kind, entries[-1].size) == (
         "/Accounting/final invoices",
-        FindType.DIRECTORY,
+        "d",
         None,
     )
     requests = httpx_mock.get_requests()

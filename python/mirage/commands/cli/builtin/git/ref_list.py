@@ -26,11 +26,12 @@ from dulwich.refs import Ref
 from dulwich.repo import BaseRepo
 from dulwich.walk import Walker
 
+from mirage.commands.cli.builtin.git.constants import FANOUT_LEN
 from mirage.commands.cli.builtin.git.errors import GitError
 from mirage.commands.cli.builtin.git.format import short
 from mirage.commands.cli.builtin.git.io import read_names, read_optional
 from mirage.commands.cli.builtin.git.mailmap import load_mailmap
-from mirage.commands.cli.builtin.git.objects import FANOUT_LEN, abbrev_for
+from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.ref_fields import (
     abbreviation_requests,
     mailmapped,

@@ -13,10 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { JaegerAccessor, type JaegerAccessorConfig } from '../../accessor/jaeger.ts'
+import { JaegerAccessor } from '../../accessor/jaeger.ts'
 import { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { JaegerTransport } from './client.ts'
+import type { JaegerConfig } from '../../vfs/jaeger/config.ts'
 
 const TRACE_A = 'a'.repeat(32)
 
@@ -38,7 +39,7 @@ class RecordingTransport implements JaegerTransport {
   }
 }
 
-function accessor(transport: JaegerTransport, config: JaegerAccessorConfig = {}) {
+function accessor(transport: JaegerTransport, config: JaegerConfig = {}) {
   return new JaegerAccessor(transport, config)
 }
 

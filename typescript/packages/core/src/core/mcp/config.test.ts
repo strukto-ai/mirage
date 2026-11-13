@@ -14,11 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import {
-  parseConfigWithSchema,
-  REDACTED_SECRET,
-  redactConfigWithSchema,
-} from '../../vfs/secrets.ts'
+import { parseConfigWithSchema, REDACTED_SECRET, redactedConfigDump } from '../../vfs/secrets.ts'
 import { MCPAuth, MCPConfig } from './config.ts'
 
 describe('MCPConfig', () => {
@@ -71,7 +67,7 @@ describe('MCPConfig', () => {
     expect(MCPConfig).toBeInstanceOf(z.ZodObject)
     expect(MCPAuth).toBeInstanceOf(z.ZodObject)
     const config = { url: 'http://x/mcp', auth: { type: 'header', name: 'x-api-key', token: 's' } }
-    expect(redactConfigWithSchema(MCPConfig, config)).toEqual({
+    expect(redactedConfigDump(MCPConfig, config)).toEqual({
       url: 'http://x/mcp',
       auth: { type: 'header', name: 'x-api-key', token: REDACTED_SECRET },
     })

@@ -33,7 +33,7 @@ async def test_list_members(accessor):
         {"user": {"id": "U002", "username": "bob"}},
     ]
     with patch(
-        "mirage.core.discord.paginate.discord_get",
+        "mirage.core.discord.paginate.discord_request",
         new_callable=AsyncMock,
         return_value=mock_data,
     ) as mock_get:
@@ -43,7 +43,7 @@ async def test_list_members(accessor):
     assert result[0]["user"]["username"] == "alice"
     mock_get.assert_called_once()
     args, kwargs = mock_get.call_args
-    assert args[1] == "/guilds/G001/members"
+    assert args[1:] == ("GET", "/guilds/G001/members")
     assert kwargs["params"]["after"] == "0"
     assert kwargs["params"]["limit"] == 1000
 
@@ -54,7 +54,7 @@ async def test_search_members(accessor):
         {"user": {"id": "U001", "username": "alice"}},
     ]
     with patch(
-        "mirage.core.discord.members.discord_get",
+        "mirage.core.discord.members.discord_request",
         new_callable=AsyncMock,
         return_value=mock_data,
     ) as mock_get:
@@ -64,6 +64,7 @@ async def test_search_members(accessor):
     assert result[0]["user"]["username"] == "alice"
     mock_get.assert_called_once_with(
         accessor,
+        "GET",
         "/guilds/G001/members/search",
         params={"query": "ali", "limit": 100},
     )
@@ -77,7 +78,7 @@ async def test_list_members_pages_no_further_than_stop_at(accessor):
         [{"user": {"id": "U002", "username": "bob"}}],
     ]
     with patch(
-        "mirage.core.discord.paginate.discord_get",
+        "mirage.core.discord.paginate.discord_request",
         new_callable=AsyncMock,
         side_effect=pages,
     ) as asked:

@@ -25,11 +25,9 @@ import { sortedJson } from '../../utils/sort.ts'
 import type { DeltaHook } from '../../events/base.ts'
 import { eventsUnder, lostAt } from '../../events/delta.ts'
 import { eventAt, field } from '../../events/payload.ts'
-import { eventsNow, eventsSince, type BoxEvent, type BoxItem, type BoxSearchItem } from './api.ts'
+import { eventsNow, eventsSince, type BoxEvent, type BoxFileInfo } from './api.ts'
 import { EVENT_REPLAY_DAYS, EVENT_STREAM, PLACE_EVENTS, TRASH_EVENTS } from './constants.ts'
 import { mountRelativeKey } from './resolve.ts'
-
-type BoxSource = BoxItem & Pick<BoxSearchItem, 'path_collection'>
 
 /**
  * The key an item is remembered by: its type and its Box id.
@@ -53,12 +51,12 @@ function rebase(key: string, old: string, next: string): string {
  * that places it. Web links, users and collaborations are not paths on the
  * mount.
  */
-function sourceOf(value: unknown): BoxSource | null {
+function sourceOf(value: unknown): BoxFileInfo | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null
-  const source = value as Partial<BoxSource>
+  const source = value as Partial<BoxFileInfo>
   if (source.type !== 'file' && source.type !== 'folder') return null
   if (typeof source.id !== 'string' || source.id === '') return null
-  return source as BoxSource
+  return source as BoxFileInfo
 }
 
 /**

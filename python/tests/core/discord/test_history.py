@@ -39,7 +39,7 @@ async def test_get_history_jsonl(accessor):
         {"id": "1196242344345600100", "content": "first"},
     ]
     with patch(
-        "mirage.core.discord.paginate.discord_get",
+        "mirage.core.discord.paginate.discord_request",
         new_callable=AsyncMock,
         return_value=messages,
     ):
@@ -57,7 +57,7 @@ async def test_get_history_jsonl(accessor):
 @pytest.mark.asyncio
 async def test_get_history_empty(accessor):
     with patch(
-        "mirage.core.discord.paginate.discord_get",
+        "mirage.core.discord.paginate.discord_request",
         new_callable=AsyncMock,
         return_value=[],
     ):
@@ -70,7 +70,7 @@ async def test_get_history_empty(accessor):
 async def test_messages_after_an_id_start_past_it(accessor):
     later = str(snowflake_at(1705320000) + 5)
     with patch(
-        "mirage.core.discord.paginate.discord_get",
+        "mirage.core.discord.paginate.discord_request",
         new_callable=AsyncMock,
         return_value=[],
     ) as get:

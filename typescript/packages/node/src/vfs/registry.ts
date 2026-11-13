@@ -31,12 +31,6 @@ import type { RedisVFSOptions } from './redis/redis.ts'
 import type { SqlVFSOptions } from './sql/sql.ts'
 import './s3/s3.ts'
 
-// The backends that take their options without a schema, and the option
-// names each takes. Python builds them from constructor keywords,
-// so a key outside these is refused on both sides rather than ignored here.
-const DISK_OPTIONS: readonly (keyof DiskVFSOptions)[] = ['root', 'folderVersions', 'capacity']
-const REDIS_OPTIONS: readonly (keyof RedisVFSOptions)[] = ['url', 'keyPrefix', 'capacity']
-
 /**
  * Node's VFS table: the backends core implements (`REGISTRY` in
  * `@struktoai/mirage-core/vfs/registry`), the ones core wires for a host
@@ -50,19 +44,25 @@ const REDIS_OPTIONS: readonly (keyof RedisVFSOptions)[] = ['url', 'keyPrefix', '
  *
  * Configs are normalized from Python-style snake_case (used in YAML and
  * by the Python `mirage.config` loader) to TS-idiomatic camelCase. So
- * the same YAML file works in both Python and TS.
+ * the same YAML file works in both Python and TS. A backend that takes its
+ * options without a schema names the ones it takes, so a key outside them is
+ * refused, as Python refuses a constructor keyword, rather than ignored.
  */
 const REGISTRY: Record<string, VFSFactory> = {
   ...CORE_REGISTRY,
   ...DIRECT_REGISTRY,
   disk: async (config) => {
-    refuseUnknownKeys(config, DISK_OPTIONS)
+    refuseUnknownKeys(config, [
+      'root',
+      'folderVersions',
+      'capacity',
+    ] satisfies (keyof DiskVFSOptions)[])
     const { DiskVFS } = await import('./disk/disk.ts')
     const norm = normalizeFields(config) as unknown as DiskVFSOptions
     return new DiskVFS(norm)
   },
   redis: async (config) => {
-    refuseUnknownKeys(config, REDIS_OPTIONS)
+    refuseUnknownKeys(config, ['url', 'keyPrefix', 'capacity'] satisfies (keyof RedisVFSOptions)[])
     const { RedisVFS } = await import('./redis/redis.ts')
     const norm = normalizeFields(config)
     return new RedisVFS(norm)

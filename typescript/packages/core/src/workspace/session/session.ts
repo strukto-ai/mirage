@@ -19,7 +19,7 @@ import { commandLimitsToJSON, parseCommandLimits } from '../../policy/builtin/ou
 import type { AdmissionRules, Decision, HideReason, ProfileScripts } from '../../policy/types.ts'
 import {
   DEFAULT_PROCESS_PERMISSIONS,
-  parseProcessPermissions,
+  layerProcesses,
   type ProcessPermissions,
 } from '../../execution/process/config.ts'
 import { ShellVars } from '../../rs/session.ts'
@@ -649,7 +649,7 @@ export class SessionState {
     this.profile = init.profile ?? null
     this.commandLimits = { ...init.commandLimits }
     this.network = init.network ?? null
-    this.processes = parseProcessPermissions(init.processes ?? DEFAULT_PROCESS_PERMISSIONS)
+    this.processes = layerProcesses([init.processes])
     this.decisions = init.decisions ?? []
     this.generation = init.generation ?? 0
     this.lastBgJobId = init.lastBgJobId ?? null
@@ -1229,7 +1229,7 @@ export class SessionState {
     return_trap?: string | null
   }): SessionState {
     const commands = data.commands != null ? commandsFromDict(data.commands) : null
-    const processes = parseProcessPermissions(data.processes ?? DEFAULT_PROCESS_PERMISSIONS)
+    const processes = layerProcesses([data.processes])
     const vars =
       data.env !== undefined || data.var_attrs !== undefined || data.managed != null
         ? restoredVars(

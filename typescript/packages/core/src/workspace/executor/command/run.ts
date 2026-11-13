@@ -14,7 +14,7 @@
 
 import { shellVoice } from '../../../shell/voice.ts'
 import { UsageError } from '../../../commands/errors.ts'
-import type { CommandSpec } from '../../../commands/spec/types.ts'
+import type { CommandSpec, FlagValue } from '../../../commands/spec/types.ts'
 import { readFailExitCode } from '../../../commands/spec/usage.ts'
 import { sessionAccess } from '../../../context/session_context.ts'
 import { formatFsError } from '../../../errors/render.ts'
@@ -42,7 +42,6 @@ import type { SessionState } from '../../session/session.ts'
 import { envSnapshot, sessionView } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
 import { parseFlags } from './flags.ts'
-import type { Flags } from './types.ts'
 
 export interface RunOnMountCtx {
   admission: EntryGate | null
@@ -161,8 +160,8 @@ function lineRuntimeFor(
 // `multiple: true` on find value-flags makes parseToKwargs emit arrays;
 // bespoke backend wrappers read these as scalars. Migrated backends read the
 // expression from `texts` and ignore flagKwargs.
-function scalarFindFlags(flagKwargs: Flags): Flags {
-  const out: Flags = { ...flagKwargs }
+function scalarFindFlags(flagKwargs: Record<string, FlagValue>): Record<string, FlagValue> {
+  const out = { ...flagKwargs }
   for (const [key, value] of Object.entries(out)) {
     if (Array.isArray(value)) {
       const last = value.at(-1)
@@ -187,7 +186,7 @@ export async function runOnMount(
   cmdName: string,
   paths: PathSpec[],
   texts: string[],
-  flagKwargs: Flags,
+  flagKwargs: Record<string, FlagValue>,
   opts: {
     signal?: AbortSignal
     stdin?: ByteSource | null

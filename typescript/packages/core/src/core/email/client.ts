@@ -150,81 +150,6 @@ const DATE_KEYS: Record<string, 'on' | 'since' | 'before' | 'sentOn' | 'sentSinc
     SENTBEFORE: 'sentBefore',
   }
 
-class CriteriaParser {
-  private index = 0
-
-  constructor(private readonly tokens: string[]) {}
-
-  private peek(): string | undefined {
-    return this.tokens[this.index]
-  }
-
-  private take(): string {
-    const token = this.peek()
-    if (token === undefined) throw new Error('email: truncated IMAP search criteria')
-    this.index += 1
-    return token
-  }
-
-  atEnd(): boolean {
-    return this.index >= this.tokens.length
-  }
-
-  /**
-   * One or more keys juxtaposed, which IMAP reads as AND.
-   *
-   * imapflow ANDs the keys of one object, so a plain merge works until the
-   * same key appears twice (`SUBJECT a SUBJECT b`). De Morgan expresses
-   * that case without dropping either half, which a merge would do
-   * silently.
-   */
-  parseSequence(stopAtParen = false): SearchQuery {
-    let query: SearchQuery | null = null
-    while (!this.atEnd()) {
-      if (stopAtParen && this.peek() === ')') break
-      const next = this.parseKey()
-      if (query === null) {
-        query = next
-        continue
-      }
-      const left: SearchQuery = query
-      query = Object.keys(next).some((key) => key in left)
-        ? { not: { or: [{ not: left }, { not: next }] } }
-        : { ...left, ...next }
-    }
-    return query ?? { all: true }
-  }
-
-  parseKey(): SearchQuery {
-    const token = this.take()
-    if (token === '(') {
-      const inner = this.parseSequence(true)
-      if (this.peek() !== ')') throw new Error('email: unbalanced IMAP search criteria')
-      this.index += 1
-      return inner
-    }
-    const word = token.toUpperCase()
-    if (word === 'ALL') return { all: true }
-    if (word === 'NOT') return { not: this.parseKey() }
-    if (word === 'OR') return { or: [this.parseKey(), this.parseKey()] }
-    if (word === 'UNSEEN') return { seen: false }
-    if (word === 'KEYWORD') return { keyword: this.take() }
-    const flag = FLAG_KEYS[word]
-    if (flag !== undefined) return { [flag]: true }
-    const textKey = TEXT_KEYS[word]
-    if (textKey !== undefined) return { [textKey]: this.take() }
-    const dateKey = DATE_KEYS[word]
-    if (dateKey !== undefined) {
-      const parsed = parseImapDate(this.take())
-      if (parsed === null) throw new Error(`email: bad date in IMAP search criteria: ${token}`)
-      return { [dateKey]: parsed }
-    }
-    // Never fall through silently: a dropped key would widen the search
-    // and quietly return the wrong messages.
-    throw new Error(`email: unsupported IMAP search key '${token}'`)
-  }
-}
-
 /**
  * Spells a value as an RFC 3501 quoted string.
  *
@@ -244,7 +169,71 @@ export function quoteString(value: string): string {
 
 export function parseSearchCriteria(criteria: string): SearchQuery {
   if (criteria === 'ALL' || criteria === '') return { all: true }
-  return new CriteriaParser(tokenizeCriteria(criteria)).parseSequence()
+  const tokens = tokenizeCriteria(criteria)
+  let index = 0
+
+  function take(): string {
+    const token = tokens[index]
+    if (token === undefined) throw new Error('email: truncated IMAP search criteria')
+    index += 1
+    return token
+  }
+
+  /**
+   * One or more keys juxtaposed, which IMAP reads as AND.
+   *
+   * imapflow ANDs the keys of one object, so a plain merge works until the
+   * same key appears twice (`SUBJECT a SUBJECT b`). De Morgan expresses
+   * that case without dropping either half, which a merge would do
+   * silently.
+   */
+  function parseSequence(stopAtParen: boolean): SearchQuery {
+    let query: SearchQuery | null = null
+    while (index < tokens.length) {
+      if (stopAtParen && tokens[index] === ')') break
+      const next = parseKey()
+      if (query === null) {
+        query = next
+        continue
+      }
+      const left: SearchQuery = query
+      query = Object.keys(next).some((key) => key in left)
+        ? { not: { or: [{ not: left }, { not: next }] } }
+        : { ...left, ...next }
+    }
+    return query ?? { all: true }
+  }
+
+  function parseKey(): SearchQuery {
+    const token = take()
+    if (token === '(') {
+      const inner = parseSequence(true)
+      if (tokens[index] !== ')') throw new Error('email: unbalanced IMAP search criteria')
+      index += 1
+      return inner
+    }
+    const word = token.toUpperCase()
+    if (word === 'ALL') return { all: true }
+    if (word === 'NOT') return { not: parseKey() }
+    if (word === 'OR') return { or: [parseKey(), parseKey()] }
+    if (word === 'UNSEEN') return { seen: false }
+    if (word === 'KEYWORD') return { keyword: take() }
+    const flag = FLAG_KEYS[word]
+    if (flag !== undefined) return { [flag]: true }
+    const textKey = TEXT_KEYS[word]
+    if (textKey !== undefined) return { [textKey]: take() }
+    const dateKey = DATE_KEYS[word]
+    if (dateKey !== undefined) {
+      const parsed = parseImapDate(take())
+      if (parsed === null) throw new Error(`email: bad date in IMAP search criteria: ${token}`)
+      return { [dateKey]: parsed }
+    }
+    // Never fall through silently: a dropped key would widen the search
+    // and quietly return the wrong messages.
+    throw new Error(`email: unsupported IMAP search key '${token}'`)
+  }
+
+  return parseSequence(false)
 }
 
 function tokenizeCriteria(criteria: string): string[] {

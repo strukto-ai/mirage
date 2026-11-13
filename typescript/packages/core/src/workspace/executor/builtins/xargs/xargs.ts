@@ -62,7 +62,8 @@ import { ExecutionNode } from '../../../types.ts'
 import { pump } from '../../background.ts'
 import { readScriptBytes } from '../script/script.ts'
 import { absPath } from '../shared.ts'
-import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
+import type { BuiltinCall } from '../types.ts'
+import type { ExecuteFn } from '../../../expand/types.ts'
 
 // The sizes GNU findutils 4.10 reports with --show-limits on Linux with an
 // 8 MiB stack: exec takes 2 MiB of arguments and environment, 2 KiB of
@@ -986,7 +987,7 @@ async function drainChild(
  * order their output is written in.
  */
 async function* runLines(
-  executeFn: ExecuteStringFn,
+  executeFn: ExecuteFn,
   events: (signal: AbortSignal) => AsyncGenerator<XargsEvent>,
   context: EvaluationContext,
   procs: number,
@@ -1171,7 +1172,7 @@ async function* runLines(
  * whitespace and executing $(...) found in input.
  */
 export async function handleXargs(
-  executeFn: ExecuteStringFn,
+  executeFn: ExecuteFn,
   args: readonly string[],
   context: EvaluationContext,
   stdin: ByteSource | null,

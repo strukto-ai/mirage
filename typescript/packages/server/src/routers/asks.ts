@@ -19,20 +19,6 @@ import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { HttpError, validationError } from '../errors.ts'
 import { requireEntry, sessionOf, queryFlag } from './vfs.ts'
 
-interface WsIdParams {
-  wsId: string
-}
-
-interface WsAskParams {
-  wsId: string
-  askId: string
-}
-
-interface ListAsksQuery {
-  session_id?: string
-  all?: string
-}
-
 /** An answer to one waiting ask. */
 const AnswerAskRequest = z.object({
   answer: z.enum(['allow', 'deny']),
@@ -78,7 +64,7 @@ export function registerAsksRoutes(
     registry: WorkspaceRegistry
   },
 ): void {
-  app.get<{ Params: WsIdParams; Querystring: ListAsksQuery }>(
+  app.get<{ Params: { wsId: string }; Querystring: { session_id?: string; all?: string } }>(
     '/v1/workspaces/:wsId/asks',
     async (req): Promise<AskList> => {
       // The workspace's asks: pending by default, every decision under
@@ -95,7 +81,7 @@ export function registerAsksRoutes(
     },
   )
 
-  app.post<{ Params: WsAskParams; Body: unknown }>(
+  app.post<{ Params: { wsId: string; askId: string }; Body: unknown }>(
     '/v1/workspaces/:wsId/asks/:askId',
     async (req) => {
       // Answer one waiting ask, allow or deny, and return the settled

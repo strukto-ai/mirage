@@ -99,14 +99,9 @@ function relativeTo(root: string, path: string): string {
   return path.startsWith(prefix) ? path.slice(prefix.length) : (path.split('/').pop() ?? path)
 }
 
-function extOf(path: string): string {
-  const dot = path.lastIndexOf('.')
-  if (dot < 0) return ''
-  return path.slice(dot + 1).toLowerCase()
-}
-
 function mimeFor(path: string): string {
-  const ext = extOf(path)
+  const dot = path.lastIndexOf('.')
+  const ext = dot < 0 ? '' : path.slice(dot + 1).toLowerCase()
   if (ext === 'json' || ext === 'jsonl') return 'application/json'
   if (ext === 'csv') return 'text/csv'
   if (ext === 'html' || ext === 'htm') return 'text/html'
@@ -121,14 +116,6 @@ function mimeFor(path: string): string {
 function isTextMime(mimeType: string): boolean {
   return mimeType.startsWith('text/') || mimeType === 'application/json'
 }
-
-const ANTHROPIC_BINARY_MIMES = new Set([
-  'application/pdf',
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-])
 
 /**
  * Options for `LangchainWorkspace`: `sandboxId` sets the backend's `id`
@@ -197,9 +184,7 @@ export class LangchainWorkspace implements SandboxBackendProtocol {
       return { error: err instanceof Error ? err.message : String(err) }
     }
     if (!isTextMime(mimeType)) {
-      if (ANTHROPIC_BINARY_MIMES.has(mimeType)) {
-        return { content: bytes, mimeType }
-      }
+      if (mimeType !== 'application/octet-stream') return { content: bytes, mimeType }
       return {
         error: `Binary file '${filePath}' (${mimeType}, ${String(bytes.length)} bytes). Use shell commands (head, file, wc, od) via execute() to inspect.`,
       }

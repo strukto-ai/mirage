@@ -23,13 +23,14 @@ from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.mode import DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parse_chmod
 from mirage.utils.quote import shell_quote_always
 from mirage.workspace.executor.builtins.metadata.metadata import (
-    apply_attrs,
     before_recursive_change,
+    permission_error,
     preserves_root,
     reference_operands,
     reference_stat,
     resolve_operand,
     root_refusal,
+    setattr_via,
     traversal,
     unfollowed_error,
     unread_error,
@@ -206,11 +207,16 @@ async def handle_chmod(
                     "chmod", f"chmod: invalid mode: '{mode_text}'\n", 1
                 )
             name = walked_name(target.raw_path, resolved, path)
-            before = len(errors)
-            await apply_attrs(
-                dispatch, "chmod", path, name, errors, mode=new_mode
-            )
-            failed = len(errors) > before
+            failed = False
+            try:
+                await setattr_via(dispatch, path, mode=new_mode)
+            except PermissionError as exc:
+                errors.append(
+                    permission_error(
+                        "chmod", "changing permissions of", name, exc
+                    )
+                )
+                failed = True
             if report == "verbose" or (
                 report == "changes"
                 and not failed

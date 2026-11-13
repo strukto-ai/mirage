@@ -29,7 +29,8 @@ import { ExecutionNode } from '../../../types.ts'
 import { ended, returning } from '../../control.ts'
 import { scopePath } from '../scope.ts'
 import { builtinUsage } from '../shared.ts'
-import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
+import type { BuiltinCall } from '../types.ts'
+import type { ExecuteFn } from '../../../expand/types.ts'
 import { readScriptText, scriptError } from './script.ts'
 
 /**
@@ -43,7 +44,7 @@ import { readScriptText, scriptError } from './script.ts'
  */
 export async function handleSource(
   dispatch: DispatchFn,
-  executeFn: ExecuteStringFn,
+  executeFn: ExecuteFn,
   path: string | PathSpec,
   session: SessionState,
   args: string[] = [],

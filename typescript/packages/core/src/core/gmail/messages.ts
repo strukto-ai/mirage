@@ -16,15 +16,10 @@ import { decodeBase64 } from '../../utils/base64.ts'
 import { type TokenManager, gmailBase, googleGet, googleRequest } from '../google/client.ts'
 import { compactJsonBytes } from '../render/json.ts'
 
-export interface GmailHeader {
-  name?: string
-  value?: string
-}
-
 export interface GmailPayload {
   mimeType?: string
   body?: { data?: string; size?: number; attachmentId?: string }
-  headers?: GmailHeader[]
+  headers?: { name?: string; value?: string }[]
   filename?: string
   parts?: GmailPayload[]
 }
@@ -112,7 +107,7 @@ export function decodeBody(payload: GmailPayload | undefined): string {
   return ''
 }
 
-export function extractHeader(headers: GmailHeader[] | undefined, name: string): string {
+export function extractHeader(headers: GmailPayload['headers'], name: string): string {
   if (headers === undefined) return ''
   const lower = name.toLowerCase()
   for (const h of headers) {

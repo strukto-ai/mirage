@@ -34,7 +34,7 @@ def accessor():
 @pytest.mark.asyncio
 async def test_list_guilds_stream_walks_pages(accessor):
     with patch(
-        "mirage.core.discord.paginate.discord_get",
+        "mirage.core.discord.paginate.discord_request",
         new_callable=AsyncMock,
         side_effect=[[{"id": "G1"}, {"id": "G2"}], [{"id": "G3"}]],
     ):
@@ -49,7 +49,7 @@ async def test_list_members_stream_walks_user_ids(accessor):
     page1 = [{"user": {"id": "U1"}}, {"user": {"id": "U2"}}]
     page2 = [{"user": {"id": "U3"}}]
     with patch(
-        "mirage.core.discord.paginate.discord_get",
+        "mirage.core.discord.paginate.discord_request",
         new_callable=AsyncMock,
         side_effect=[page1, page2],
     ) as mock:
@@ -68,7 +68,7 @@ async def test_stream_messages_for_day_filters_by_date(accessor):
     in_range = [{"id": str(before_int - 1000), "content": "ok"}]
     out_of_range = [{"id": str(before_int + 1000), "content": "next-day"}]
     with patch(
-        "mirage.core.discord.paginate.discord_get",
+        "mirage.core.discord.paginate.discord_request",
         new_callable=AsyncMock,
         return_value=in_range + out_of_range,
     ):
@@ -91,7 +91,7 @@ async def test_search_guild_stream_flattens_contexts(accessor):
     }
     p2 = {"messages": [[{"id": "3"}]], "total_results": 30}
     with patch(
-        "mirage.core.discord.paginate.discord_get",
+        "mirage.core.discord.paginate.discord_request",
         new_callable=AsyncMock,
         side_effect=[p1, p2],
     ):

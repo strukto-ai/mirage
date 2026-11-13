@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
-import type { DiscordMethod, DiscordResponse, DiscordTransport } from './client.ts'
+import type { DiscordMethod, DiscordTransport } from './client.ts'
 import { addReaction } from './react.ts'
 
 interface RecordedCall {
@@ -31,7 +31,7 @@ class FakeDiscordTransport implements DiscordTransport {
     endpoint: string,
     params?: Record<string, string | number>,
     body?: Record<string, unknown>,
-  ): Promise<DiscordResponse> {
+  ): Promise<unknown> {
     this.calls.push({
       method,
       endpoint,

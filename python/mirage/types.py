@@ -68,13 +68,6 @@ def _min_positive(values: Iterable[float | int | None]) -> float | int | None:
     return min(positives) if positives else None
 
 
-class FindType(str, Enum):
-    """POSIX `find -type` flag values (`-type d`, `-type f`)."""
-
-    DIRECTORY = "d"
-    FILE = "f"
-
-
 class LsSortBy(str, Enum):
     """`ls` sort keys: NAME is the default, TIME `-t`, SIZE `-S`, VERSION
     `-v`, EXTENSION `-X`, WIDTH `--sort=width`, and NONE `-U`."""
@@ -321,7 +314,6 @@ JsonValue: TypeAlias = (
 # resume from (None for the first page) and returns the decoded reply.
 PageFetch: TypeAlias = Callable[[str | None], Awaitable[dict[str, Any]]]
 
-ReadBytesFn: TypeAlias = Callable[..., Awaitable[bytes]]
 ReadStreamFn: TypeAlias = Callable[..., AsyncIterator[bytes]]
 # A "polymorphic" reader is the loose `read` contract head/tail/wc
 # accept: a backend may hand back materialized bytes, an awaitable of

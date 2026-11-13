@@ -18,7 +18,7 @@ from typing import Any
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index.scope import sole_command_started
-from mirage.core.discord.client import discord_get
+from mirage.core.discord.client import discord_request
 from mirage.core.discord.paginate import after_id_pages
 from mirage.core.render.json import jsonl_bytes
 from mirage.core.time_range import TimeRange
@@ -200,8 +200,8 @@ async def fetch_recent_messages(
     Returns:
         list[dict]: messages sorted oldest-first.
     """
-    page = await discord_get(
-        accessor, f"/channels/{channel_id}/messages", {"limit": limit}
+    page = await discord_request(
+        accessor, "GET", f"/channels/{channel_id}/messages", {"limit": limit}
     )
     items = (
         [m for m in page if isinstance(m, dict)]
