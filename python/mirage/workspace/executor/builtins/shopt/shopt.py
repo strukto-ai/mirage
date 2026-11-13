@@ -78,6 +78,7 @@ async def handle_shopt(
         mark (AliasMark | None): the read running it, whose commands keep
             ``expand_aliases`` as that read began; None outside a read.
     """
+    session.sync_shopts()
     scan = scan_options(args, "pqosu")
     if scan.bad is not None:
         return fail(

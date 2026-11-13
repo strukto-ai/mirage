@@ -29,6 +29,7 @@ class CallFrame:
     loop_level: int = 0
     sourced: bool = False
     closed: bool = False
+    replaced_args: bool = False
     call_line: int = 0
 
 

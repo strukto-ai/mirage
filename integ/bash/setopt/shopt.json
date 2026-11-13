@@ -139,6 +139,76 @@
         "stdout": "rc=0\nextglob        \toff\nrc=1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "nocasematch_shell_patterns",
+      "seq": 1380026,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(shopt -s nocasematch; v=FoO; [[ $v == f* ]] && echo glob; [[ $v =~ ^(f.o)$ ]] && echo \"${BASH_REMATCH[1]}\"; case $v in f*) echo case;; esac; echo \"${v//o/[_&]}\"; [[ a == [[:upper:]] ]]; echo class:$?; LC_ALL=C; [[ _ == [A-z] ]]; echo range:$?; [[ b == [A-Z] ]]; echo fold:$?; case _ in [A-z]) echo in;; *) echo out;; esac; shopt -u nocasematch; [[ $v == f* ]]; echo off:$?)",
+      "expect": {
+        "exit": 0,
+        "stdout": "glob\nFoO\ncase\nF[_o][_O]\nclass:1\nrange:1\nfold:0\nout\noff:1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "localvar_inherit_follows_the_callers_local",
+      "seq": 1380028,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(f() { local v; echo \"${v-unset}\"; }; g() { local v=outer; shopt -s localvar_inherit; f; shopt -u localvar_inherit; f; echo \"$v\"; }; g; a=(one two); declare -A m=([k]=v); h() { shopt -s localvar_inherit; local -a a; local -A m; declare -p a m; }; h)",
+      "expect": {
+        "exit": 0,
+        "stdout": "outer\nunset\nouter\ndeclare -a a=([0]=\"one\" [1]=\"two\")\ndeclare -A m=([k]=\"v\" )\n",
+        "stderr": ""
+      }
     }
   ]
 }

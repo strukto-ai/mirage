@@ -95,6 +95,14 @@ impl<H: Host> Expander<'_, H> {
         self.diagnostics.push(Diagnostic::Bytes(ran.stderr));
         self.shell.status = ran.status;
         let mut out = ran.stdout;
+        if out.contains(&0) {
+            out.retain(|&byte| byte != 0);
+            self.diagnostics
+                .push(Diagnostic::Bytes(crate::interp::voiced(
+                    self.shell.vars.voice(),
+                    "warning: command substitution: ignored null byte in input\n",
+                )));
+        }
         while out.last() == Some(&b'\n') {
             out.pop();
         }

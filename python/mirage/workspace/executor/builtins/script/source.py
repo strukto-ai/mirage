@@ -16,7 +16,8 @@ from collections.abc import Callable
 from typing import Any
 
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import fs_strerror
+from mirage.errors.fs import enoent, fs_strerror
+from mirage.errors.types import NoMountError
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
@@ -38,8 +39,47 @@ from mirage.workspace.session.budget import args_bytes, check_env, frames_bytes
 from mirage.workspace.session.state import (
     positional_params,
     set_positional_params,
+    visible_env,
 )
 from mirage.workspace.types import ExecutionNode
+
+
+async def _source_file(
+    dispatch: DispatchFn, session: SessionState, path: str | PathSpec
+) -> tuple[str, str]:
+    """The file ``source`` reads, as ``BASH_SOURCE`` names it, and its
+    text: a name with no slash is looked up on PATH first under
+    ``sourcepath``, then, outside posix mode, in the working directory.
+
+    Args:
+        dispatch (DispatchFn): op dispatcher, used to read the file.
+        session (SessionState): shell session state.
+        path (str | PathSpec): the operand as typed.
+    """
+    name = word_text(path)
+    if "/" not in name and session.shopts.get("sourcepath", True):
+        search = visible_env(session).get("PATH")
+        if search is not None:
+            for directory in search.split(":"):
+                candidate = (
+                    f"{directory.rstrip('/')}/{name}" if directory else name
+                )
+                try:
+                    return candidate, await read_script_text(
+                        dispatch, candidate, session.cwd
+                    )
+                except (
+                    FileNotFoundError,
+                    NotADirectoryError,
+                    IsADirectoryError,
+                    NoMountError,
+                ):
+                    continue
+            if session.shell_options.get("posix"):
+                raise enoent(name)
+    return name, await read_script_text(
+        dispatch, _scope_path(path), session.cwd
+    )
 
 
 async def handle_source(
@@ -57,12 +97,11 @@ async def handle_source(
 
     Unlike a nested shell, a sourced file *is* the caller, so whatever
     it sets stays set: `source f` where f runs `set -x` leaves the
-    caller tracing. Only the positional parameters come back, because
-    bash restores those and nothing else. It runs in a frame of its own,
-    which ``return`` ends, ``FUNCNAME`` names ``source`` and the RETURN
-    action runs in as it returns; a ``break`` in it ends a caller's loop.
-    An empty name fails as a missing file does, and bash blames a file it
-    cannot read on itself, not the builtin.
+    caller tracing. It runs in a frame of its own, which ``return``
+    ends, ``FUNCNAME`` names ``source`` and the RETURN action runs in as
+    it returns; a ``break`` in it ends a caller's loop. An empty name
+    fails as a missing file does, and bash blames a file it cannot read
+    on itself, not the builtin.
 
     Args:
         dispatch (DispatchFn): op dispatcher, used to read the file.
@@ -70,10 +109,10 @@ async def handle_source(
         path (str | PathSpec): the script to source.
         session (SessionState): shell session state.
         args (list[str] | None): positional parameters to expose to the
-            script. When given they replace ``$1..$#`` for the duration
-            of the source and are restored afterwards, matching bash;
-            when omitted the parameters in scope are the script's, and
-            a ``shift`` or ``set --`` in it changes them.
+            script, which replace ``$1..$#`` while it runs; a ``set --``
+            in it outside a function replaces the caller's too. When
+            omitted the parameters in scope are the script's, and a
+            ``shift`` or ``set --`` in it changes them.
         stdin (ByteSource | None): the caller's standard input, which
             the script's statements read in turn.
         call_stack (CallStack | None): the caller's frames, which the
@@ -89,7 +128,7 @@ async def handle_source(
             shell_voice(), "No such file or directory", 1, command="source "
         )
     try:
-        script = await read_script_text(dispatch, raw, session.cwd)
+        origin, script = await _source_file(dispatch, session, path)
     except IsADirectoryError:
         return script_error(
             f"{shell_voice()}{name}",
@@ -118,7 +157,9 @@ async def handle_source(
     # Its diagnostics name the file, as spelled, and count its own lines.
     outer_name = session._parse_name
     outer_head = session._parse_head
-    session._parse_name = word_text(path)
+    outer_sources = session.source_files
+    session.source_files = (origin, *outer_sources)
+    session._parse_name = origin
     session._parse_head = f"{session._parse_name}: "
     session._parse_from = 0
     try:
@@ -148,7 +189,13 @@ async def handle_source(
         if session.function_names is not None:
             session.function_names = outer_names
         session.call_lines = outer_lines
+        session.source_files = outer_sources
+        # A file sourced with no arguments shares its caller's, so a `set
+        # --` in it is the caller's own; one given arguments hands back
+        # what a `set --` made of them, outside a function only.
         if not args:
+            cs.current.replaced_args |= frame.replaced_args
+        if not args or (frame.replaced_args and not cs.function_depth):
             set_positional_params(session, cs, frame.positional)
     return (
         stdout,

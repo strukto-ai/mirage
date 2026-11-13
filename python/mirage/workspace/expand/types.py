@@ -56,7 +56,7 @@ class ExecuteFn(Protocol):
         call_stack: CallStack | None = None,
         job_table: JobTable | None = None,
         routing_decision: RouteDecision[RuntimeIdentity] | None = None,
-        started: Callable[[ProcessHandle], None] | None = None,
+        started: Callable[[ProcessHandle, SessionState], None] | None = None,
     ) -> IOResult: ...
 
 

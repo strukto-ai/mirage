@@ -18,22 +18,29 @@ from collections.abc import AsyncIterator
 from functools import partial
 
 from mirage.core.dev.pipe import DevicePipe
+from mirage.execution.job import JobTable
+from mirage.execution.job.waits import Hold
 from mirage.execution.process.handle import ProcessHandle
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.errors import PipeClosed
-from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.shell.console import Channel, JobConsole, Terminal
+from mirage.io.pipe import BytePipe
+from mirage.io.types import ByteSource, materialize
+from mirage.shell.console import Channel, JobConsole
+from mirage.shell.constants import FD_STDOUT
 from mirage.shell.helpers import (
     get_process_sub_body,
     get_process_sub_direction,
 )
+from mirage.shell.parse.program import retain_programs
 from mirage.shell.types import ProcessSubDirection, TSNodeLike
 from mirage.vfs.dev.dev import DevVFS
 from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.background import capture_hold, job_streams
+from mirage.workspace.executor.builtins.exec import ForkRoute
 from mirage.workspace.frame import ProcessSubLine
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.node.types import Substitution
-from mirage.workspace.types import ExecutionNode
+from mirage.workspace.session import SessionState
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +51,14 @@ class SubstitutionConsole(JobConsole):
         self.endpoint = endpoint
         self.target = target
 
+    def pipe_for(self, channel: Channel) -> BytePipe | None:
+        if channel == Channel.STDOUT and self.endpoint.readable:
+            return self.endpoint.pipe
+        return self.target.pipe_for(channel)
+
     async def emit(self, channel: Channel, data: bytes) -> None:
         if channel == Channel.STDOUT and self.endpoint.readable:
-            try:
-                await self.endpoint.pipe.write(data)
-            except PipeClosed as exc:
-                raise asyncio.CancelledError() from exc
+            await self.endpoint.pipe.write(data)
         else:
             await self.target.emit(channel, data)
 
@@ -80,12 +89,11 @@ class ProcessSubScope:
         self,
         context: EvaluationContext,
         registry: MountRegistry,
-        sink: JobConsole | None = None,
+        jobs: JobTable,
     ) -> None:
+        self.jobs = jobs
         self.context = context
         self.registry = registry
-        self.sink = sink
-        self.capture = Terminal()
         self.held: list[Substitution] = []
         self.closed = False
 
@@ -99,24 +107,60 @@ class ProcessSubScope:
             get_process_sub_direction(node) != ProcessSubDirection.OUTPUT
         )
         path, allocation = dev.allocate_input(endpoint)
-        output = SubstitutionConsole(endpoint, self.sink or self.capture)
+        session = self.context.session
+        # A producer is a child of the shell, as bash forks it: what it
+        # writes past its pipe goes where that shell's jobs write, into
+        # the statement running then or, once that has ended, on out.
+        jobs = ForkRoute(session.job_output or session.tty.jobs, session)
+        output = SubstitutionConsole(endpoint, jobs)
         writers = self.context.frame.writers
         begun: asyncio.Future[None] = (
             asyncio.get_running_loop().create_future()
         )
+        holds: list[Hold] = []
 
-        def started(process: ProcessHandle) -> None:
+        def started(process: ProcessHandle, shell: SessionState) -> None:
+            pid = process.record.pid
             if endpoint.readable:
-                writers.append((path, process.record.pid))
+                writers.append((path, pid))
+            session.last_bg_job_id = pid
+            self.jobs.track_substitution(process)
+            shell.holds.extend(holds)
             if not begun.done():
                 begun.set_result(None)
 
+        release = retain_programs([node])
         task = asyncio.create_task(
             self._run(
                 node, partial(execute_line, started=started), endpoint, output
             )
         )
+
+        def finished(task: asyncio.Task[None]) -> None:
+            release()
+            if (
+                not task.cancelled()
+                and (error := task.exception()) is not None
+            ):
+                logger.debug("process substitution failed", exc_info=error)
+
+        task.add_done_callback(finished)
         self.held.append(Substitution(dev, path, allocation, endpoint, task))
+        # Like a job, it holds open a capture (`$( )`, a pipe stage) one of
+        # its streams leads into, which waits for it until it ends or its
+        # shell points them elsewhere.
+        streams = job_streams(node, session)
+        if endpoint.readable:
+            streams.pop(FD_STDOUT, None)
+        waits = session.job_waits
+        if waits is not None:
+
+            async def ended() -> None:
+                await asyncio.wait((task,))
+
+            hold = capture_hold(waits, jobs, streams, ended)
+            if hold is not None:
+                holds.append(hold)
         # A `<( )` the command reads starts first, as bash forks it, so
         # the command's program knows the process writing the path; a
         # `>( )` starts after the command, so it cannot close its pipe
@@ -125,6 +169,8 @@ class ProcessSubScope:
             await asyncio.wait(
                 (begun, task), return_when=asyncio.FIRST_COMPLETED
             )
+            if task.done():
+                await task
         return path
 
     async def _run(
@@ -163,7 +209,8 @@ class ProcessSubScope:
                 continue
             if failed or child.endpoint.readable:
                 child.endpoint.pipe.close_reader()
-                child.task.cancel()
+                if failed:
+                    child.task.cancel()
             else:
                 child.endpoint.pipe.end()
         try:
@@ -173,7 +220,14 @@ class ProcessSubScope:
                     for readers in kept.values()
                     for lines in readers
                 ),
-                *(child.task for child in self.held),
+                *(
+                    child.task
+                    for child in self.held
+                    if failed
+                    or child.path in kept
+                    or not child.endpoint.readable
+                    or child.task.done()
+                ),
                 return_exceptions=True,
             )
             for result in results:
@@ -208,22 +262,10 @@ class ProcessSubScope:
             source.pipe = None
         return held
 
-    async def settle(self) -> tuple[bytes, bytes]:
-        """End the substitutions as a finished command does, for a node
-        ``exit``, ``return`` or ``break`` leaves, and return what they
-        wrote to the capture, stdout then stderr.
-        """
-        await self.close()
-        return self.capture.take()
+    def own(self, stdout: ByteSource | None) -> ByteSource | None:
+        return self._output(stdout) if self.held else stdout
 
-    def own(
-        self, stdout: ByteSource | None, io: IOResult, node: ExecutionNode
-    ) -> ByteSource | None:
-        return self._output(stdout, io, node) if self.held else stdout
-
-    async def _output(
-        self, stdout: ByteSource | None, io: IOResult, node: ExecutionNode
-    ) -> AsyncIterator[bytes]:
+    async def _output(self, stdout: ByteSource | None) -> AsyncIterator[bytes]:
         completed = False
         try:
             if isinstance(stdout, bytes):
@@ -235,9 +277,3 @@ class ProcessSubScope:
             completed = True
         finally:
             await self.close(not completed)
-            out, err = self.capture.take()
-            if err:
-                io.stderr = await materialize(io.stderr) + err
-                node.stderr = io.stderr
-            if completed and out:
-                yield out

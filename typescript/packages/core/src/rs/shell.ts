@@ -746,6 +746,7 @@ export interface ShellFrame {
   readonly pipeStatus: readonly number[]
   readonly functionNames: readonly string[] | null
   readonly callLines: readonly number[]
+  readonly sourceFiles: readonly string[]
   readonly paren: boolean
   readonly memoryRoom: number | null
   readonly line: number
@@ -865,6 +866,7 @@ export class Shell {
       frame.pipeStatus,
       frame.functionNames,
       frame.callLines,
+      frame.sourceFiles,
       frame.paren,
       frame.memoryRoom,
       frame.line,
@@ -969,6 +971,11 @@ export class Shell {
 
   isReadonly(name: string, followRef: boolean): boolean {
     return this.call('is_readonly', name, followRef) as boolean
+  }
+
+  /** The `dotglob` setting the last write to GLOBIGNORE made, once; null for none. */
+  takeDotglob(): boolean | null {
+    return this.call('take_dotglob') as boolean | null
   }
 
   /** The stamp the records and the names hidden from them carry, fresh on every change. */
@@ -1495,8 +1502,8 @@ export class ShellTask {
     this.land(this.call('answer_substituted', stdout, stderr, status))
   }
 
-  answerPath(path: string): void {
-    this.land(this.call('answer_path', path))
+  answerPath(path: string, pid: number | null = null): void {
+    this.land(this.call('answer_path', path, pid))
   }
 
   /**

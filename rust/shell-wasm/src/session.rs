@@ -701,6 +701,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 .map(|(name, var)| Item::list([Item::text(name), host::record_out(var)])),
         ),
         "len" => Item::int(shell.store()?.records().count()),
+        "take_dotglob" => Item::opt(shell.store_mut()?.take_dotglob(), Item::Bool),
         "stamp" => Item::int(shell.store()?.stamp()),
         "contains" => Item::Bool(shell.store()?.record(&args.string()?).is_some()),
         "held" => Item::int(shell.0.held()),
@@ -866,6 +867,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 pipe_status,
                 function_names,
                 call_lines,
+                source_files: words(args.list()?)?,
                 paren: args.flag()?,
                 memory_room: optional_size(args.maybe()?)?,
                 line: size(args.int()?)?,
@@ -953,7 +955,12 @@ fn task_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             stderr: args.bytes()?,
             status: status(args.int()?)?,
         }),
-        "answer_path" => Answer::Path(args.bytes()?),
+        "answer_path" => Answer::Path(
+            args.bytes()?,
+            args.maybe()?
+                .map(|item| one(item, Args::handle))
+                .transpose()?,
+        ),
         "answer_subscript" => {
             let text = args
                 .maybe()?

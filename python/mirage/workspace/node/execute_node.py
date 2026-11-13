@@ -116,7 +116,6 @@ from mirage.workspace.executor.control import (
     handle_if,
     handle_select,
     handle_while,
-    trailed,
 )
 from mirage.workspace.executor.pipes import (
     handle_connection,
@@ -859,6 +858,9 @@ async def execute_node(
     # runs its EXIT action when the node ends, its evaluator bound the
     # way `_execute_node` binds it for the node's own lines.
     if ends_shell:
+        if node.type == NT.REDIRECTED_STATEMENT:
+            whole = get_redirects(node)[0]
+            context.frame.ending = None if whole is None else whole.id
         return await end_shell(
             partial(
                 execute_fn,
@@ -904,7 +906,7 @@ async def execute_node(
     )
     # The node's own `<(...)` files go when it ends, so a command still
     # reading one is read out first.
-    process_subs = ProcessSubScope(context, registry, sink)
+    process_subs = ProcessSubScope(context, registry, job_table)
     previous = context.frame.process_sub
     context.frame.process_sub = process_subs.open
     writers = context.frame.writers
@@ -943,11 +945,11 @@ async def execute_node(
             finally:
                 context.frame.diagnostics = outer
                 context.frame.reports = outer_reports
-        return process_subs.own(stdout, io, exec_node), io, exec_node
-    except Unwinding as sig:
+        return process_subs.own(stdout), io, exec_node
+    except Unwinding:
         # `exit`, `return` or `break` ends the node as its last command
         # did: output consumers finish, rather than being cut off.
-        await trailed(sig, *await process_subs.settle())
+        await process_subs.close()
         raise
     except BaseException:
         await process_subs.close(True)
@@ -1163,7 +1165,8 @@ async def _fork_subshell(
     if context.frame.shell is None and owner is not None:
         # The whole of what its runner runs (`( sleep 3; echo x ) &`)
         # is the runner itself, as bash forks a job's subshell once:
-        # it keeps the INT its job ignores.
+        # it keeps the INT its job ignores, and the captures it holds.
+        child.session.holds = session.holds
         forked(owner)
         await run_subshell()
         return results[0]

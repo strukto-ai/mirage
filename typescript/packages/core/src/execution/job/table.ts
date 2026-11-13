@@ -15,6 +15,8 @@
 import type { ProcessPermissions } from '../process/config.ts'
 import type { ProcessHandle } from '../process/handle.ts'
 import { ProcessTable } from '../process/table.ts'
+import { shownMachine } from '../process/types.ts'
+import { currentRequest, type IncomingRequest } from '../../io/web/request.ts'
 import { PathSpec } from '../../types.ts'
 import { JobConsole } from '../../shell/console/index.ts'
 import {
@@ -130,6 +132,10 @@ function heldConsoles(fields: RecordFields | null): Set<string> {
  * caller with no session (a bare table in a test) shares.
  */
 export class JobTable {
+  private readonly substitutions = new Map<number, ProcessHandle>()
+  // The substitutions each edge-runtime request started that still run, on
+  // the plane, so a request finds the ones its child shells started too.
+  private readonly requestSubstitutions = new WeakMap<IncomingRequest, Set<ProcessHandle>>()
   store: ExecutionStore
   // The id of the daemon this table runs on, which its lease names.
   readonly daemon: string
@@ -686,6 +692,9 @@ export class JobTable {
         this.jobs.delete(sessionId)
         this.marks.delete(sessionId)
         this.statuses.delete(sessionId)
+        for (const [pid, child] of this.substitutions) {
+          if (child.record.sessionId === sessionId) this.substitutions.delete(pid)
+        }
         this.processes.revokeSession(sessionId)
         return [...stopped.values()]
       }
@@ -847,21 +856,80 @@ export class JobTable {
     jobs: readonly JobHandle[],
     runningStatus: number | null = null,
   ): void {
-    let kept = this.statuses.get(sessionId)
-    if (kept === undefined) {
-      kept = new Map()
-      this.statuses.set(sessionId, kept)
-    }
     for (const job of jobs) {
       const code = job.state === 'running' ? runningStatus : job.exitCode
       if (code === null) continue
       for (const [pid, machine] of job.namedPids) {
-        const held = kept.get(pid) ?? new Map<string, number>()
-        kept.set(pid, held.set(machine, code))
+        this.saveStatus(sessionId, pid, machine, code)
       }
     }
+  }
+
+  private saveStatus(sessionId: string, pid: number, machine: string, code: number): void {
+    const kept = this.statuses.get(sessionId) ?? new Map<number, Map<string, number>>()
+    this.statuses.set(sessionId, kept)
+    const codes = kept.get(pid) ?? new Map<string, number>()
+    kept.set(pid, codes.set(machine, code))
     for (const pid of [...kept.keys()].slice(0, Math.max(0, kept.size - SAVED_STATUSES)))
       kept.delete(pid)
+  }
+
+  /**
+   * Keep how a process substitution ends under its pid, which a `wait` from
+   * the session that started it answers. Mirrors Python's
+   * `track_substitution`.
+   */
+  trackSubstitution(process: ProcessHandle): void {
+    const pid = process.record.id.pid
+    this.substitutions.set(pid, process)
+    const request = currentRequest()
+    let started: Set<ProcessHandle> | undefined
+    if (request !== null) {
+      started = this.plane.requestSubstitutions.get(request) ?? new Set()
+      this.plane.requestSubstitutions.set(request, started.add(process))
+    }
+    // Its table runs the hook that tracks it just before starting it, so it
+    // has something to join a microtask later.
+    queueMicrotask(() => {
+      void process.join().then((record) => {
+        started?.delete(process)
+        if (this.substitutions.get(pid) !== process) return
+        this.substitutions.delete(pid)
+        if (record.exit !== null)
+          this.saveStatus(record.sessionId, pid, shownMachine(record), record.exit)
+      })
+    })
+  }
+
+  /**
+   * Wait until the process substitution `pid` the shell `shell` started
+   * ends, or each it started without one. A shell waits only for its own, as
+   * bash does: never for another pipeline stage's.
+   */
+  async waitSubstitution(sessionId: string, shell: number | null, pid?: number): Promise<void> {
+    const request = currentRequest()
+    for (const [child, process] of [...this.substitutions]) {
+      const { record } = process
+      if (record.sessionId !== sessionId || record.parent !== shell || (pid ?? child) !== child)
+        continue
+      // On an edge runtime a substitution an earlier request started cannot
+      // end once that request has answered, and a wake from one still live
+      // would run this waiter inside it: a request waits for its own only.
+      if (request !== null && this.plane.requestSubstitutions.get(request)?.has(process) !== true)
+        continue
+      await process.join()
+    }
+  }
+
+  /**
+   * Wait for the substitutions `request` started to end, in child shells
+   * (`( )`, `$( )`) too. On an edge runtime one still running once its
+   * request has answered never ends, so the request waits for them first.
+   */
+  async joinRequest(request: IncomingRequest): Promise<void> {
+    // One started while this waits is still reached: the loop reads the set
+    // as it changes.
+    for (const process of this.plane.requestSubstitutions.get(request) ?? []) await process.join()
   }
 
   /**

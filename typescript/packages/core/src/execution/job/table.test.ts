@@ -39,6 +39,7 @@ import { JobHandle, type JobResult, type JobRunner } from './handle.ts'
 import { ManualClock } from '../../utils/clock.ts'
 import { generationOf, type RecordFields } from '../../workspace/record/types.ts'
 import { FIRST_PID } from '../process/constants.ts'
+import { inRequest } from '../../io/web/request.ts'
 
 const dec = (b: Uint8Array | undefined): string =>
   b === undefined ? '' : new TextDecoder().decode(b)
@@ -2279,5 +2280,31 @@ describe('JobTable process plane', () => {
     expect(job.pid).toBe(pid + 1)
     await a.killAll()
     await a.close()
+  })
+})
+
+describe('JobTable.waitSubstitution', () => {
+  it("waits on an edge runtime only for the request's own substitutions", async () => {
+    const jt = new JobTable()
+    const start = (run: () => Promise<number>) =>
+      jt.processes.start({
+        sessionId: 's',
+        command: 'sub',
+        cwd: PathSpec.fromStrPath('/'),
+        cancel: () => undefined,
+        run,
+        started: (process) => {
+          jt.trackSubstitution(process)
+        },
+      })
+    await inRequest(() => {
+      start(() => new Promise<number>(() => undefined))
+      return Promise.resolve()
+    })
+    await inRequest(async () => {
+      const own = start(() => Promise.resolve(7))
+      await jt.waitSubstitution('s', null)
+      expect([...jt.savedStatuses('s', own.record.id.pid).values()]).toEqual([7])
+    })
   })
 })

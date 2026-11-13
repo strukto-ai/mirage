@@ -1102,3 +1102,84 @@ async def test_ppid_is_the_shell_that_started_this_one():
         assert said.stderr == b"bash: line 1: PPID: readonly variable\n"
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, expected",
+    [
+        (
+            "(sleep .05; echo kept >&2) & exec 2>/m/log; sleep .2; "
+            'exec 2>&1; echo "log=[$(cat /m/log)]"',
+            (b"log=[]\n", b"kept\n"),
+        ),
+        (
+            "(sleep .05; echo kept) & exec 3>&1 >/m/log; sleep .2; "
+            'exec >&3; echo "log=[$(cat /m/log)]"',
+            (b"kept\nlog=[]\n", b""),
+        ),
+    ],
+)
+async def test_a_job_keeps_the_stream_its_shell_had_when_it_started(
+    line, expected
+):
+    ws = _workspace()
+    try:
+        res = await ws.shell(line)
+        assert (
+            await res.materialize_stdout(),
+            await res.materialize_stderr(),
+        ) == expected
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "job",
+    [
+        "{ exec >/dev/null; sleep .3; touch /m/held; } &",
+        "(exec >/dev/null; sleep .3; touch /m/held) &",
+        "{ exec >/dev/null 2>&1; sleep .3; touch /m/held; } 2>&1 >/dev/null &",
+    ],
+)
+async def test_a_capture_lets_go_of_a_job_that_closed_its_stdout(job):
+    ws = _workspace()
+    try:
+        res = await ws.shell(
+            f"x=$( {job} ); [ -e /m/held ] && echo waited || echo closed; "
+            "sleep .5"
+        )
+        assert await res.materialize_stdout() == b"closed\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_capture_waits_for_a_job_whose_subshell_closed_only_its_copy():
+    ws = _workspace()
+    try:
+        res = await ws.shell(
+            'x=$( { (exec >/dev/null); sleep .1; echo held; } & ); echo "[$x]"'
+        )
+        assert await res.materialize_stdout() == b"[held]\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "job",
+    [
+        "{ exec 4>/dev/null; sleep .1; echo held >&3; } 3>&1 >/dev/null &",
+        "{ exec 0>&1 >/dev/null; sleep .1; echo held >&0; } &",
+        "{ { exec >/dev/null; } >/dev/null; sleep .1; echo held; } &",
+    ],
+)
+async def test_a_capture_waits_for_a_job_still_writing_into_it(job):
+    ws = _workspace()
+    try:
+        res = await ws.shell(f'x=$( {job} ); echo "[$x]"')
+        assert await res.materialize_stdout() == b"[held]\n"
+    finally:
+        await ws.close()

@@ -44,6 +44,7 @@ from mirage.shell.console import JobConsole, JobOutput
 from mirage.shell.console.pipe import PipeConsole
 from mirage.shell.console.types import Channel
 from mirage.shell.constants import (
+    FD_STDIN,
     SIGPIPE_STATUS,
 )
 from mirage.shell.descriptors import Recorder
@@ -65,7 +66,12 @@ from mirage.workspace.executor.builtins.exec import (
     divert_statement,
     diverted_file,
 )
-from mirage.workspace.executor.control import Unwinding, carried, ended
+from mirage.workspace.executor.control import (
+    LoopSignal,
+    Unwinding,
+    carried,
+    ended,
+)
 from mirage.workspace.executor.statement import (
     answer_closed,
     as_written,
@@ -150,16 +156,32 @@ async def handle_pipe(
     # Each segment is a child shell: bash forks one per stage, which a
     # signal stops on its own, its status 128 plus it, and which hands a
     # QUIT to the program it runs right now (``run_program``).
-    children = [child_context(context) for _ in commands]
+    owner = current_caller().process
+    lastpipe = session.shopts.get("lastpipe", False) and not (
+        session.shell_options.get("monitor") or (owner and owner.pipeline)
+    )
+    children = [
+        context
+        if lastpipe and i == len(commands) - 1
+        else child_context(context)
+        for i in range(len(commands))
+    ]
     stages: list[ProcessHandle | None] = [None for _ in commands]
+    # The `break` or `continue` the last stage, run in this shell, unwound
+    # with: it goes on past the pipeline once the other stages end, with
+    # what they wrote, as bash waits for them; a `return` or `exit` there
+    # leaves at once.
+    unwinding: list[LoopSignal] = []
 
     async def run_segment(i: int, cmd: TSNodeLike) -> int:
         child_evaluation = children[i]
         child = child_evaluation.session
-        inherit_traps(child)
-        child.terminal_output = (
-            session.terminal_output and i == len(commands) - 1
-        )
+        in_parent = child_evaluation is context
+        if not in_parent:
+            inherit_traps(child)
+            child.terminal_output = (
+                session.terminal_output and i == len(commands) - 1
+            )
         token = set_current_evaluation(child_evaluation)
         output = pipes[i]
         input_stream = stdin if i == 0 else pipes[i - 1].stream()
@@ -167,8 +189,12 @@ async def handle_pipe(
             child_evaluation.frame.stdin = input_stream
         io = IOResult()
         child_exec = ExecutionNode()
-        stage_stack = (call_stack or CallStack()).fork(
-            paren=None if simple_command(cmd) else True
+        stage_stack = (
+            call_stack
+            if in_parent
+            else (call_stack or CallStack()).fork(
+                paren=None if simple_command(cmd) else True
+            )
         )
         # A job a stage before the last starts writes into the pipe, and
         # the reader sees end of input only once the job has closed it.
@@ -184,6 +210,19 @@ async def handle_pipe(
             child.job_output = waits.output
             child.job_waits = waits
         rest = session.job_output or session.tty.jobs
+        if in_parent:
+            # bash dups the pipe onto its own fd 0 for the stage it runs
+            # itself and puts fd 0 back after, so an `exec <` there ends
+            # with the stage; the input it replaced stays open till then.
+            fd0 = (
+                session.exec_stdin,
+                session.exec_stdin_unreadable,
+                session.exec_stdin_identity,
+                session.descriptors.get(FD_STDIN),
+            )
+            borrowed = session._borrowed
+            if session.exec_stdin is not None:
+                session._borrowed = [*borrowed, session.exec_stdin]
 
         async def statement() -> tuple[
             ByteSource | None, IOResult, ExecutionNode
@@ -195,13 +234,16 @@ async def handle_pipe(
             return None, io, ran
 
         try:
-            stdout, io, child_exec = await end_shell(
-                execute_fn,
-                child,
-                input_stream,
-                stage_stack,
-                run_program(cmd, child_evaluation, statement),
-            )
+            if in_parent:
+                stdout, io, child_exec = await statement()
+            else:
+                stdout, io, child_exec = await end_shell(
+                    execute_fn,
+                    child,
+                    input_stream,
+                    stage_stack,
+                    run_program(cmd, child_evaluation, statement),
+                )
             await pump(output, Channel.STDOUT, stdout, io)
             await pump(output, Channel.STDERR, io.stderr)
             if waits is not None:
@@ -209,14 +251,20 @@ async def handle_pipe(
         except PipeClosed:
             io.exit_code = SIGPIPE_STATUS
         except Unwinding as sig:
-            # A stage is a subshell: whatever unwinds ends it there, a
-            # simple command the top shell forked as that shell would.
-            unwound = ended(sig, simple_command(cmd) and not forked)
-            io.exit_code = unwound.exit_code
-            await pump(output, Channel.STDOUT, unwound.stdout)
-            await pump(output, Channel.STDERR, unwound.stderr)
-            if waits is not None:
-                await waits.join(rest)
+            if in_parent:
+                if not isinstance(sig, LoopSignal):
+                    stderr = await output.snapshot(Channel.STDERR)
+                    raise await carried(sig, None, IOResult(stderr=stderr))
+                unwinding.append(sig)
+            else:
+                # A stage is a subshell: whatever unwinds ends it there, a
+                # simple command the top shell forked as that shell would.
+                unwound = ended(sig, simple_command(cmd) and not forked)
+                io.exit_code = unwound.exit_code
+                await pump(output, Channel.STDOUT, unwound.stdout)
+                await pump(output, Channel.STDERR, unwound.stderr)
+                if waits is not None:
+                    await waits.join(rest)
         except BaseException as error:
             # One a signal stopped closes its pipe as a killed child does:
             # the reader sees the end, not the stop.
@@ -240,7 +288,22 @@ async def handle_pipe(
             ios[i] = io
             child_nodes[i] = child_exec
             reset_caller(token)
-            await child.close_inputs()
+            if in_parent:
+                left = session.open_inputs()
+                (
+                    session.exec_stdin,
+                    session.exec_stdin_unreadable,
+                    session.exec_stdin_identity,
+                    descriptor,
+                ) = fd0
+                if descriptor is None:
+                    session.descriptors.pop(FD_STDIN, None)
+                else:
+                    session.descriptors[FD_STDIN] = descriptor
+                session._borrowed = borrowed
+                await session.release_inputs(left)
+            else:
+                await child.close_inputs()
         return io.exit_code
 
     async def reaped(i: int, process: ProcessHandle) -> int:
@@ -252,7 +315,7 @@ async def handle_pipe(
     failed = False
     try:
         for i, cmd in enumerate(commands):
-            if processes is None:
+            if processes is None or children[i] is context:
                 tasks.append(asyncio.create_task(run_segment(i, cmd)))
                 continue
             writer = stages[i - 1] if i > 0 else None
@@ -305,6 +368,9 @@ async def handle_pipe(
             # the next line reads on from it.
             if stdin is not session.exec_stdin:
                 await discard_streams(stdin)
+    if unwinding:
+        stderr = b"".join([await materialize(io.stderr) for io in ios])
+        raise await carried(unwinding[0], last_stdout, IOResult(stderr=stderr))
 
     last_io = ios[-1]
     # Parked for the boundary that closes this statement to claim as

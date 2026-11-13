@@ -181,6 +181,7 @@ class JobTable:
         # claim or another daemon tries them again.
         self._left: dict[str, RecordFields] = {}
         self._jobs: dict[str, dict[int, JobHandle]] = {}
+        self._substitutions: dict[tuple[str, int], ProcessHandle] = {}
         self._statuses: dict[str, dict[int, dict[str, int]]] = {}
         self._marks: dict[str, tuple[int | None, int | None]] = {}
         # Jobs `disown` removed from the table while they still run, and
@@ -700,6 +701,9 @@ class JobTable:
                 self._jobs.pop(session_id, None)
                 self._marks.pop(session_id, None)
                 self._statuses.pop(session_id, None)
+                for key in list(self._substitutions):
+                    if key[0] == session_id:
+                        del self._substitutions[key]
                 self.processes.revoke_session(session_id)
                 return list(stopped.values())
         raise RuntimeError(
@@ -863,7 +867,6 @@ class JobTable:
                 once it has left, as a disowned one does; None keeps
                 nothing for it.
         """
-        kept = self._statuses.setdefault(session_id, {})
         for job in jobs:
             code = (
                 running_status
@@ -872,9 +875,61 @@ class JobTable:
             )
             if code is not None:
                 for pid, machine in job.named_pids:
-                    kept.setdefault(pid, {})[machine] = code
+                    self._save_status(session_id, pid, machine, code)
+
+    def _save_status(
+        self, session_id: str, pid: int, machine: str, code: int
+    ) -> None:
+        kept = self._statuses.setdefault(session_id, {})
+        kept.setdefault(pid, {})[machine] = code
         for pid in list(kept)[: max(0, len(kept) - SAVED_STATUSES)]:
             del kept[pid]
+
+    def track_substitution(self, process: ProcessHandle) -> None:
+        """Keep how a process substitution ends under its pid, which a
+        ``wait`` from the session that started it answers.
+
+        Args:
+            process (ProcessHandle): the substitution's process.
+        """
+        session_id, pid = process.record.session_id, process.record.pid
+        self._substitutions[(session_id, pid)] = process
+
+        def finished(_: asyncio.Task[int]) -> None:
+            if self._substitutions.get((session_id, pid)) is not process:
+                return
+            del self._substitutions[(session_id, pid)]
+            ended = process.record
+            if ended.exit is not None:
+                self._save_status(
+                    session_id, pid, ended.shown_machine, ended.exit
+                )
+
+        # Its table runs the hook that tracks it just before starting it,
+        # so its task is there a turn later.
+        asyncio.get_running_loop().call_soon(
+            lambda: process.task.add_done_callback(finished)
+        )
+
+    async def wait_substitution(
+        self, session_id: str, shell: int | None, pid: int | None = None
+    ) -> None:
+        """Wait until the process substitution ``pid`` the shell ``shell``
+        started ends, or each it started without one. A shell waits only
+        for its own, as bash does: never for another pipeline stage's.
+
+        Args:
+            session_id (str): the session that started them.
+            shell (int | None): the pid of the waiting shell.
+            pid (int | None): the substitution's pid; None for every one.
+        """
+        for (scope, child), process in list(self._substitutions.items()):
+            if (
+                scope == session_id
+                and process.record.parent == shell
+                and (pid is None or child == pid)
+            ):
+                await process.join()
 
     def forget_statuses(self, session_id: str = "") -> None:
         """Drop how the jobs that left the list ended, as a bare ``wait``

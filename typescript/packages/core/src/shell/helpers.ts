@@ -561,13 +561,18 @@ function parseFileRedirect(child: TSNodeLike): Redirect {
       fd = parseInt(getText(c), 10)
     } else if (REDIRECT_OPERATORS.has(c.type)) {
       op = c.type
-    } else if (c.type === NT.NUMBER) {
+    } else if (
+      c.type === NT.NUMBER &&
+      op !== null &&
+      DUP_OPERATORS.has(op) &&
+      /^[0-9]+$/.test(getText(c))
+    ) {
       dupFd = parseInt(getText(c), 10)
     }
   }
 
   for (const c of child.namedChildren) {
-    if (TARGET_TYPES.has(c.type)) {
+    if (TARGET_TYPES.has(c.type) || (c.type === NT.NUMBER && dupFd === null)) {
       target = getText(c)
       targetNode = c
       break
@@ -584,17 +589,26 @@ function parseFileRedirect(child: TSNodeLike): Redirect {
       deferred: child.heredoc.deferred,
     })
   }
-  // `>&word` with a word rather than a number is bash's other spelling
-  // of `&>word`, bare or on descriptor 1 (`1>&word` sends both streams
-  // too, pinned on bash 5.2). On any other explicit descriptor bash
-  // refuses it as `word: ambiguous redirect`, before the command runs and
-  // before any file opens, so the parse keeps the word for the message
-  // rather than turning `3>&foo` into a both-streams file.
-  const wordDup = op === NT.REDIRECT_STDERR && dupFd === null && targetNode !== null
-  if (wordDup && fd !== null && fd !== FD_STDOUT) {
-    return new Redirect({ fd, target, targetNode, kind: RedirectKind.AMBIGUOUS })
+  if (op !== null && DUP_OPERATORS.has(op) && dupFd === null && targetNode !== null) {
+    const reading = op === NT.REDIRECT_DUP_IN
+    fd ??= reading ? FD_STDIN : FD_STDOUT
+    const moved = /^([0-9]+)-$/.exec(target)
+    if (moved !== null) {
+      return new Redirect({
+        fd,
+        target: Number(moved[1]),
+        kind: reading ? RedirectKind.STDIN : RedirectKind.STDOUT,
+        move: true,
+      })
+    }
+    return new Redirect({
+      fd,
+      target,
+      targetNode,
+      kind: reading ? RedirectKind.DUP_INPUT : RedirectKind.DUP_OUTPUT,
+    })
   }
-  if ((op !== null && BOTH_OPERATORS.has(op)) || wordDup) {
+  if (op !== null && BOTH_OPERATORS.has(op)) {
     return new Redirect({
       fd: FD_BOTH,
       target,

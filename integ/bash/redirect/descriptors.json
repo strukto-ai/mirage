@@ -1499,6 +1499,96 @@
         "stderr": "bash: line 1: /data/fd_readwrite_create: Operation not supported\n"
       },
       "note": "Read-write redirection opens a missing file through append-open. Without native create-only it refuses and leaves no file, while an existing read-write target still preserves its contents under noclobber."
+    },
+    {
+      "id": "redirect_numeric_file_operands",
+      "seq": 1380020,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "(mkdir -p {mount}/redirect_numeric_file_operands; printf x > {mount}/redirect_numeric_file_operands/2026; cd {mount}/redirect_numeric_file_operands; printf data > 2026; printf '%s|%s\\n' \"$(<2026)\" \"$(cat < 2026)\"; printf more >>2026; cat 2026)",
+      "expect": {
+        "exit": 0,
+        "stdout": "data|data\ndatamore",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_expanded_descriptor_operands",
+      "seq": 1380021,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "(mkdir -p {mount}/redirect_expanded_descriptor_operands; : > {mount}/redirect_expanded_descriptor_operands/log; cd {mount}/redirect_expanded_descriptor_operands; fd=3; exec 3>log; printf '%s' ok >&\"$fd\"; printf '|%s|%s\\n' \"$(<log)\" \"$(test -e 3; echo $?)\"; exec 4<log; fd=4; cat <&\"$fd\"; fd=-; : 4<&\"$fd\"; cat <&4; fd=; : >&\"$fd\"; echo empty:$?; (exec 3<&\"$fd\"); echo explicit:$?)",
+      "expect": {
+        "exit": 0,
+        "stdout": "|ok|1\nokempty:1\nexplicit:1\n",
+        "stderr": "bash: line 1: \"$fd\": Bad file descriptor\nbash: line 1: 3: Bad file descriptor\n"
+      }
+    },
+    {
+      "id": "redirect_descriptor_moves",
+      "seq": 1380030,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "(exec 3>{mount}/fd_move_out; echo hi >&3; exec 4>&3-; echo more >&4; echo x >&3; echo closed:$?; cat {mount}/fd_move_out; printf 'abc\\n' > {mount}/fd_move_in; exec 5<{mount}/fd_move_in; cat <&5-; cat <&5; echo kept:$?; rm {mount}/fd_move_out {mount}/fd_move_in)",
+      "expect": {
+        "exit": 0,
+        "stdout": "closed:1\nhi\nmore\nabc\nkept:0\n",
+        "stderr": "bash: line 1: 3: Bad file descriptor\n"
+      }
     }
   ]
 }

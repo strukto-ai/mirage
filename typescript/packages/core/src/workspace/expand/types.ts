@@ -56,7 +56,7 @@ export type ExecuteFn = (
     callStack?: CallStack
     jobTable?: JobTable
     routingDecision?: RouteDecision<Runtime>
-    started?: (process: ProcessHandle) => void
+    started?: (process: ProcessHandle, session: SessionState) => void
   },
 ) => Promise<IOResult>
 

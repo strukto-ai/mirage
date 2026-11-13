@@ -135,7 +135,8 @@ export async function handleMapfile(
     seen++
     if (seen <= skip) continue
     const record = found && !strip ? concat([data, Uint8Array.of(delim)]) : data
-    const text = decodeText(record)
+    const nul = record.indexOf(0)
+    const text = decodeText(nul < 0 ? record : record.subarray(0, nul))
     if (callback !== null && (stored + 1) % quantum === 0) {
       // bash runs the callback before the record lands, on the array as
       // read so far, and keeps what the callback did to it. The record is

@@ -51,7 +51,12 @@ def pattern_parts(pattern: str) -> list[str]:
 
 
 def fnmatch(
-    name: str, pattern: str, *, extglob: bool = False, period: bool = False
+    name: str,
+    pattern: str,
+    *,
+    extglob: bool = False,
+    period: bool = False,
+    nocase: bool = False,
 ) -> bool:
     """Match a case-sensitive shell pattern.
 
@@ -61,7 +66,7 @@ def fnmatch(
         extglob (bool): recognize extended pattern groups.
         period (bool): require an explicit initial pathname dot.
     """
-    return glob_matcher(pattern, extglob, period).matches(name)
+    return glob_matcher(pattern, extglob, period, nocase=nocase).matches(name)
 
 
 def fnmatchcase(name: str, pattern: str) -> bool:

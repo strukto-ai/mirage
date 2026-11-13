@@ -56,7 +56,7 @@ pub enum Ask {
 /// The host's answer to an `Ask`.
 pub enum Answer {
     Substituted(Substitution),
-    Path(Vec<u8>),
+    Path(Vec<u8>, Option<u32>),
     Resumed,
     /// The subscript's text, None when the host failed, and the shell it
     /// held meanwhile.
@@ -158,7 +158,10 @@ impl Host for Line {
             })
             .await
         {
-            Answer::Path(path) => Ok(path),
+            Answer::Path(path, pid) => {
+                shell.last_job = pid;
+                Ok(path)
+            }
             Answer::Failed(fault) => Err(fault),
             _ => Err(Fault::Host("an answer that is no path")),
         }

@@ -188,6 +188,8 @@ async def run_shell_function(
         None if site is None else called_lines(site.lines, func_body)
     )
     session._parse_name = "environment" if site is None else site.name
+    outer_sources = session.source_files
+    session.source_files = (session._parse_name, *outer_sources)
     session._alias_view = (
         dict(site.aliases)
         if site is not None and site.aliases is not None
@@ -254,6 +256,7 @@ async def run_shell_function(
         cs.pop()
         if session.function_names is not None:
             session.function_names = outer_names
+        session.source_files = outer_sources
         session.call_lines = outer_lines
         restore_function_traps(session, lifted)
         shell.leave(outer_scope)
