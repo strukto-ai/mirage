@@ -31,7 +31,7 @@ async def test_a_stop_holds_a_busy_program():
     ws = Workspace(
         {"/d": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=["monty", "workspace"],
+        machines=[MontyRuntime()],
     )
     program = (
         "import time\n"
@@ -258,7 +258,9 @@ def test_workspace_explicit_monty_fails_loud(monkeypatch):
 
     monkeypatch.setattr(monty_module, "pydantic_monty", None)
     with pytest.raises(ImportError, match="monty' extra"):
-        Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=["monty"])
+        Workspace(
+            {"/data": RAMVFS()}, mode=MountMode.EXEC, machines=[MontyRuntime()]
+        )
 
 
 @pytest.mark.asyncio
@@ -267,7 +269,7 @@ async def test_a_bound_run_takes_the_callers_cwd_not_the_sessions():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[runtime, "workspace"],
+        machines=[runtime],
     )
     try:
         assert (await ws.shell("mkdir /data/sub; cd /data")).exit_code == 0

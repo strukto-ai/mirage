@@ -113,7 +113,7 @@ export interface CLISnapshot {
     language: string
     module: boolean
   }
-  runtime?: string | null
+  machine?: string | null
   /** The tool list an MCP install was built from, so a load rebuilds it without the server. */
   mcp?: {
     title: string

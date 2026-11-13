@@ -88,7 +88,7 @@ so a read of an undeclared option fails rather than looking like an omitted flag
 | --- | --- | --- |
 | Leaf | `CommandSpec.arguments`, a `CLIHandler` binding | Paths and text as arguments, parsed flags on `ctx` |
 | Group | `subcommands`, optional inherited options | Dispatches to a leaf |
-| Script CLI | `CLI.script`, optional runtime | Raw argv, stdin and environment |
+| Script CLI | `CLI.script`, optional machine | Raw argv, stdin and environment |
 
 A typed node is a leaf or a group. Names and aliases are single words;
 child names and aliases share one namespace. Options cannot collide across
@@ -159,7 +159,7 @@ that with policy; shell functions can otherwise shadow it like they do in bash.
 
 Registered on a mount, a typed CLI serves its verbs there as a command
 tree. Its leaves get the mount's accessor, so the tree declares no
-`configModel`, `accessor`, `script` or `runtime`:
+`configModel`, `accessor`, `script` or `machine`:
 
 ```typescript
 import { MountMode, RAMVFS } from '@struktoai/mirage-node'
@@ -312,7 +312,7 @@ imports:
 clis:
   pager:
     script: ./cli/pager.py
-    runtime: pyodide
+    machine: py
     config:
       width: 80
 ```
@@ -325,7 +325,7 @@ documents its own options, including `--help`.
 
 Slot 0 is the installed name on pyodide, monty, and quickjs, so two installs can
 identify themselves and user-facing errors can name the invoked program. The
-Node-only local runtime runs CPython with `-c`, which owns `sys.argv[0]`;
+Node-only `host` machine runs CPython with `-c`, which owns `sys.argv[0]`;
 arguments still begin at index 1. A YAML script declares no Mirage grammar, so
 every option reaches the program unchanged. A script CLI constructed in code
 may supply a `CommandSpec` to opt into Mirage parsing and generated help.
@@ -339,7 +339,7 @@ Runtime argument spellings differ:
 | quickjs | `scriptArgs` | `std.in` |
 
 The sandboxed runtimes provide files plus compute, not arbitrary networking or
-Node builtins. The Node-only `local` runtime selects the host interpreter when
+Node builtins. The Node-only `host` machine selects the host interpreter when
 that broader authority is intentional.
 
 ## Authoring reference
@@ -356,7 +356,7 @@ and [`CommandSpec` and `Argument`](https://github.com/strukto-ai/mirage/blob/mai
 | `CLI.handlers` | Canonical leaf paths mapped to `CLIHandler` bindings. |
 | `CLI.configModel` | Zod schema or normalizer for per-install account validation. |
 | `CLI.accessor` | Builds the install's accessor from its validated config, once per install; closed when the install goes. Default `NOOPAccessor`. |
-| `CLI.script`, `CLI.runtime` | Embedded script and optional runtime; used instead of typed handlers. |
+| `CLI.script`, `CLI.machine` | Embedded script and the machine that runs it, if pinned; used instead of typed handlers. |
 | `CLIHandler.fn` | Leaf handler, called as `fn(accessor, paths, texts, ctx)`. |
 | `CLIHandler.write`, `CLIHandler.limit` | Mutation classification and optional execution-limit category. |
 

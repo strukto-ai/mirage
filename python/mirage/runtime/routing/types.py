@@ -18,10 +18,10 @@ from typing import Any
 from mirage.policy.profile import ProfilePolicy
 from mirage.policy.types import Route, RouteContext
 
-# What a route policy callable answers: a runtime name places the line,
-# a Route places it on a runtime, a machine or both, None leaves each
-# command to its first capturer. Refusing a line is a policy's (a
-# pre_execute Deny), not the router's. Mirrors the TS RouteVerdict.
+# What a route policy callable answers: a machine's name or a Route
+# places the line on that machine, None leaves each command to its first
+# capturer. Refusing a line is a policy's (a pre_execute Deny), not the
+# router's. Mirrors the TS RouteVerdict.
 RouteVerdict = str | Route | None
 
 # The route policy, answering "who takes this line?". In code: a
@@ -33,7 +33,7 @@ RouteVerdict = str | Route | None
 #     def policy(ctx: RouteContext) -> str | Route | None:
 #         names = [c.command for c in ctx.commands]
 #         if "train.py" in ctx.line:
-#             return Route("remote", machine="gpu")
+#             return Route("gpu", reason="training runs on the GPU box")
 #         return "wasi" if "python3" in names else None
 #
 #     Workspace(..., route_policy=policy)

@@ -1545,7 +1545,7 @@ export function explainedLine(
   line: string,
   judged: readonly Judged[],
   verdicts: readonly Judged[],
-  placedOf: (one: Judged) => [string, string],
+  placedOf: (one: Judged) => string,
   reparse: (line: string) => TSNodeLike,
   wholeLine = false,
 ): ShellExplanation {
@@ -1661,7 +1661,7 @@ function scopeNode(
   kind: string,
   scope: Scope,
   scopes: readonly Scope[],
-  placedOf: (one: Judged) => [string, string],
+  placedOf: (one: Judged) => string,
   reparse: (line: string) => TSNodeLike,
 ): ShellNode {
   const text = scope.source
@@ -1720,11 +1720,11 @@ function commandOf(
   one: Judged,
   text: string,
   children: readonly ShellNode[],
-  placedOf: (one: Judged) => [string, string],
+  placedOf: (one: Judged) => string,
 ): CommandExplanation {
   const judgment = one.judgment
   const [outcome, reason, source] = verdictOf(judgment)
-  const [runtime, machine] = placedOf(one)
+  const machine = placedOf(one)
   return {
     type: 'command',
     command: judgment.command,
@@ -1736,7 +1736,6 @@ function commandOf(
     source,
     answers: judgment.answers,
     decision: judgment.decision,
-    runtime,
     machine,
     text,
     children,

@@ -274,7 +274,7 @@ describe('a host scan', () => {
   it('finds what an ended program left running', async () => {
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [new LocalRuntime(), 'workspace'] },
+      { mode: MountMode.EXEC, machines: [new LocalRuntime()] },
     )
     const spawn =
       'import subprocess as s; ' +

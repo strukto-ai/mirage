@@ -26,6 +26,7 @@ import { vfsCall } from '../vfs/call.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Effect } from '../vfs/types.ts'
 import { Workspace } from './workspace/workspace.ts'
+import { buildRuntime } from '../runtime/table.ts'
 
 // Mirrors python/tests/e2e/test_cli_dispatch.py.
 
@@ -195,7 +196,7 @@ function buildScriptWorkspace(): Workspace {
     { '/data': ram },
     {
       mode: MountMode.WRITE,
-      runtimes: ['monty', 'quickjs', 'workspace'],
+      machines: [buildRuntime('monty'), buildRuntime('quickjs')],
     },
   )
 }

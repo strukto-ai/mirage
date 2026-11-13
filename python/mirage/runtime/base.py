@@ -366,7 +366,7 @@ class Runtime(ABC, Generic[E]):
             and ends_line(node)
         ):
             shell.one_command = True
-        if shell.take(machine, self.name, instance, command, fd, argv):
+        if shell.take(machine, instance, command, fd, argv):
             return await run()
         done: list[RunResult] = []
 
@@ -383,7 +383,7 @@ class Runtime(ABC, Generic[E]):
                 parent=shell.record.pid,
                 limit=session.processes.max,
                 machine=machine,
-                runtime=self.name,
+                program=True,
                 stdin=stdin,
                 fd=fd,
                 argv=argv,

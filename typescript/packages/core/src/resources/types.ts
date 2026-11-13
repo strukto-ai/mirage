@@ -15,14 +15,14 @@
 import type { JsonValue } from '../types.ts'
 
 /** A kind whose entries hold a type's fields, some of them sealed. */
-export type EntryKind = 'vfs' | 'cli' | 'runtime' | 'machine' | 'store'
+export type EntryKind = 'vfs' | 'cli' | 'machine' | 'store'
 
 /** Every kind of saved config a store keeps. */
 export type ResourceKind = EntryKind | 'policy' | 'template'
 
 export type Fields = Record<string, JsonValue>
 
-/** A vfs, cli, runtime, machine or store entry as the API answers it: sealed fields by name only. */
+/** A vfs, cli, machine or store entry as the API answers it: sealed fields by name only. */
 export interface Entry {
   readonly name: string
   readonly type: string

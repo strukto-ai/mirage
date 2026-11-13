@@ -5,100 +5,101 @@ description: Choose where Python, JavaScript and other programs run and which fi
 icon: microchip
 ---
 
-A runtime runs the programs in a line. Mirage's own commands (`grep`, `cat`, pipes, redirects) run in the workspace itself; `python3`, `node` and any other program go to the runtime that captures them. Each runtime reaches the workspace's files its own way.
+A runtime runs the programs in a line. Mirage's own commands (`grep`, `cat`, pipes, redirects) run in the workspace itself; `python3`, `node` and any other program go to the machine that captures them, and the runtime on it runs them. Each runtime reaches the workspace's files its own way.
 
 <div className="my-6">
   <img noZoom src="/images/runtime-light.svg" alt="Monty, WASI, Pyodide and QuickJS access workspace files directly. Host programs use a FUSE folder. Machines connect through SSH or FUSE." className="block dark:hidden w-full" />
   <img noZoom src="/images/runtime-dark.svg" alt="Monty, WASI, Pyodide and QuickJS access workspace files directly. Host programs use a FUSE folder. Machines connect through SSH or FUSE." className="hidden dark:block w-full" />
 </div>
 
-| Runtime | Runs | Where | SDK |
+| Runtime | Runs | Machine | SDK |
 | --- | --- | --- | --- |
-| `workspace` | Mirage's own commands | Mirage workspace | both |
-| [`monty`](/home/setup/runtime/monty) | `python3`, a Python subset | Mirage workspace | both |
-| [`wasi`](/home/setup/runtime/wasi) | `python3`, CPython in WebAssembly | Mirage workspace | Python |
-| [`pyodide`](/home/setup/runtime/pyodide) | `python3`, CPython in WebAssembly | Mirage workspace | TypeScript |
-| [`quickjs`](/home/setup/runtime/quickjs) | `node` and `js`, with Node.js's common APIs | Mirage workspace | both |
-| [`local`](/home/setup/runtime/local) | host programs such as `python3`, `node` or `tsx` | host | Python, Node |
-| [`machine`](/home/setup/machine/overview) | native programs | a [machine](/home/setup/machine/overview): a container, VM, cloud sandbox or SSH host | Python, Node; E2B also in the browser |
-| [`sandlock`](/home/setup/runtime/sandlock) | native programs | this Linux host, confined | Python, Node |
+| [Monty](/home/setup/runtime/monty) | `python3`, a Python subset | `provider: worker`, worker processes Mirage starts (`in_process` on Cloudflare Workers) | both |
+| [WASI](/home/setup/runtime/wasi) | `python3`, CPython in WebAssembly | `provider: in_process`, `runtime: wasi` | Python |
+| [Pyodide](/home/setup/runtime/pyodide) | `python3`, CPython in WebAssembly | `provider: in_process`, `runtime: pyodide` | TypeScript |
+| [QuickJS](/home/setup/runtime/quickjs) | `node` and `js`, with Node.js's common APIs | `provider: in_process`, `runtime: quickjs` | both |
+| [Host](/home/setup/runtime/host) | host programs such as `python3`, `node` or `tsx`, confined by a `sandbox` on Linux | `provider: host` | Python, Node |
+| [Machine](/home/setup/machine/overview) | native programs | a container, VM, cloud sandbox or SSH host: `provider: docker`, `ssh`, `e2b` and the rest | Python, Node; E2B also in the browser |
 
 ## Routing
 
-`runtimes` is an ordered list: the first runtime whose `captures` name a program runs it, and `workspace` takes the rest. Without the key, the list is `[workspace]` on every host, so `python3`, `node` and `js` answer `command not found` (exit 127) until an entry captures them. [Cloudflare Workers](/typescript/cloudflare-quickstart) runs no QuickJS.
+`machines` is ordered: the first machine whose `captures` name a program runs
+it, and Mirage runs the rest itself. Without the key, `python3`, `node` and
+`js` answer `command not found` (exit 127) until a machine captures them.
+[Cloudflare Workers](/typescript/cloudflare-quickstart) runs no QuickJS.
 
 ```yaml
 machines:
+  py:
+    provider: worker
   box:
     provider: docker
     container: my-sandbox
     mount_type: ssh
-runtimes:
-  - monty
-  - name: remote
-    machine: box
-  - workspace
 ```
 
-An entry is a name, or a mapping with `name`, `captures` and `config`; a
-`machine` entry names its `machine` instead of taking `config`. The
-name is a runtime Mirage ships, one you registered in code, or
-a `./file.py:Class` (Python) or `./file.mjs:Class` (TypeScript) reference to
-[your own runtime](/home/setup/runtime/custom). Config keys are snake_case in YAML for both SDKs, and a
-runtime rejects a key it does not know.
+Each entry names its `provider`: `in_process` with the `runtime` it runs,
+`worker` for Monty, `host` for the host's own programs, or a
+[machine provider](/home/setup/machine/overview). An `in_process` runtime is
+one Mirage ships, one you registered in code, or a `./file.py:Class`
+(Python) or `./file.mjs:Class` (TypeScript) reference to
+[your own runtime](/home/setup/runtime/custom). The entry's other keys are its
+settings, snake_case in YAML for both SDKs; a key it does not take is
+refused.
 
-To choose a runtime for each command line, see [Route Runtime](/home/policy/route-runtime).
+To choose a machine for each command line, see [Route Machine](/home/policy/route-machine).
 
 ## Captures
 
-`captures` lists the programs a runtime takes:
+`captures` lists the programs a machine takes:
 
 | Entry | Takes |
 | --- | --- |
 | A name, such as `python3` or `ffmpeg` | That program |
 | `@python`, `@js` | `python3` and `python`, or `node` and `js` |
 | `@external` | Every program Mirage does not have itself, such as `gcc`, `ffmpeg`, `perl` or a vendor CLI |
-| `@line` | The whole line, Mirage's own commands included (any runtime that runs a shell line) |
+| `@line` | The whole line, Mirage's own commands included (any machine that runs a shell line) |
 
-| Runtime | Default `captures` |
+| Machine | Default `captures` |
 | --- | --- |
-| `monty`, `wasi`, `pyodide`, `local` | `@python` |
-| `quickjs` | `@js` |
-| `sandlock`, `machine` | `@external` |
+| Monty, WASI, Pyodide, `host` | `@python` |
+| QuickJS | `@js` |
+| `host` with a `sandbox`, a machine provider | `@external` |
 
 - Mirage's own commands (`cat`, `grep`, `sha1sum`), pipes and redirects stay
-  in Mirage. Name `cat`, `grep`, `ps` or `kill` to run it on a runtime
+  in Mirage. Name `cat`, `grep`, `ps` or `kill` to run it on a machine
   instead; `cd`, `export`, `echo`, `ln`, functions and installed CLIs stay
   in Mirage even when named.
 - `@external` does not take `python`, `python3`, `node` or `js`: Mirage has
-  those itself and gives them to the Python or JavaScript runtime in the list.
+  those itself and gives them to the Python or JavaScript machine in the list.
   Name them, or `@python` or `@js`, to send them somewhere else. A tool such
-  as `pip` is an ordinary program: capture it on the same runtime when
+  as `pip` is an ordinary program: capture it on the same machine when
   packages must land there, as in `captures: ["@python", "pip", "pip3"]`.
-- `monty`, `wasi`, `pyodide` and `quickjs` take only their own interpreter's
+- Monty, WASI, Pyodide and QuickJS take only their own interpreter's
   names; naming another program on one is refused when the workspace is
-  built. `local`, `sandlock` and `machine` take any name.
+  built. A `host` machine and a machine provider take any name.
 - Mirage matches the program each command really runs, after expanding its
   words, so `python3` is captured in `$P x`, `env python3 x`,
   `timeout 5 python3 x`, `sh -c 'python3 x'` and `xargs python3`. Each command
   on a line matches on its own, so `cat a.txt | python3 x` sends only `python3`.
 - `nice`, `nohup`, `stdbuf`, `ionice` and `setsid` run their program where
   it runs alone: `nice gcc x.c` where `gcc` is taken, `nice grep` in Mirage.
-  On a runtime the wrapper goes with it, and permission rules and a
+  On a machine the wrapper goes with it, and permission rules and a
   `pre_command` route answer for the program.
 - An absolute path Mirage has no file for, such as `/usr/bin/ffmpeg`, goes to
-  the `@external` runtime. A profile's `commands.allow` refuses it, since the
+  the `@external` machine. A profile's `commands.allow` refuses it, since the
   list can only name what it can read.
-- Under `local`, `sandlock` and `machine`, a program a captured program
+- On a `host` machine or a machine provider, a program a captured program
   starts runs there: `make` running `gcc`, or a script calling `subprocess`. Capture the
-  launcher on the same runtime as the tool. A Pyodide script's `subprocess`
+  launcher on the same machine as the tool. A Pyodide script's `subprocess`
   calls go back through Mirage's routing like any other command.
 - An alias is captured as the word it expands to, once `shopt -s
   expand_aliases` is on and the alias was defined on an earlier line.
-- If two runtimes take the same name or group, the first wins and Mirage
+- If two machines take the same name or group, the first wins and Mirage
   logs a warning.
-- A program no runtime takes exits 127, `command not found`.
-- A `workspace` entry with `captures` runs only those mount commands itself:
+- A program no machine takes exits 127, `command not found`.
+- A `workspace` machine, `provider: in_process` with no `runtime`, with
+  `captures` runs only those mount commands itself:
   another mount command, such as `ls`, exits 126, `no runtime accepted this
   line`, and an unknown program exits 127. The shell's own words (`cd`,
   `export`, `echo`) still run.
@@ -112,10 +113,7 @@ machines:
   box:
     provider: docker
     container: my-sandbox
-runtimes:
-  - name: remote
     captures: ["@python", "@external"]
-    machine: box
 ```
 
 Here `python3 job.py | grep error` runs `python3` in the container and
@@ -127,11 +125,11 @@ Here `python3 job.py | grep error` runs `python3` in the container and
 | --- | --- | --- |
 | Monty, WASI, QuickJS | directly | no host files or network |
 | Pyodide | directly | Browser programs retain JavaScript and network access; `init_module` enables host access. See [containment](/typescript/runtime/python#containment). |
-| `local`, Sandlock | a [FUSE folder](/home/setup/fuse) you mount | the host's disk and network; under Sandlock, only the paths you grant |
-| `machine` | SFTP and `sshfs` with `mount_type: ssh` (`docker`, `e2b`, `cloudflare_container`, `ssh`, `kubernetes`, `smolvm`, `apple_container`, `microsandbox`), or a Mirage inside the machine | that machine's disk and network |
+| `host` | a [FUSE folder](/home/setup/fuse) you mount | the host's disk and network; under a `sandbox`, only the paths you grant |
+| A machine provider | SFTP and `sshfs` with `mount_type: ssh` (`docker`, `e2b`, `cloudflare_container`, `ssh`, `kubernetes`, `smolvm`, `apple_container`, `microsandbox`), or a Mirage inside the machine | that machine's disk and network |
 
 Mount modes, profiles and policies apply to every file call that reaches the
-workspace. A host runtime or a machine also has its own files and network,
+workspace. A `host` machine or a machine provider's also has its own files and network,
 which they do not cover. Pyodide has its own containment limits; use a machine
 with a process and kernel boundary for hostile code.
 
@@ -154,7 +152,7 @@ read a workspace file and write one back:
 ```
 
 Monty, WASI, Pyodide and QuickJS access workspace files automatically.
-For `local` and Sandlock, first mount a [FUSE folder](/home/setup/fuse).
+For a `host` machine, first mount a [FUSE folder](/home/setup/fuse).
 For a machine, finish its provider page's **Connecting the workspace** steps
 first.
 
@@ -170,12 +168,12 @@ command_limits:
     timeout_seconds: 30
 ```
 
-The deadline also stops the run in Monty, WASI, Pyodide, QuickJS, `local`,
-Sandlock and on a machine; see [machine timeouts](/home/setup/machine/overview#timeouts)
+The deadline also stops the run in Monty, WASI, Pyodide, QuickJS, on a `host`
+machine and on a machine provider's; see [machine timeouts](/home/setup/machine/overview#timeouts)
 for what a machine needs.
 
-If a host or remote runtime cannot enforce the session's file restrictions,
+If a `host` machine or a machine provider cannot enforce the session's file restrictions,
 Mirage refuses to launch the program as a policy refuses a command:
-`<runtime>: Permission denied`, exit 126. See
+`<provider>: Permission denied`, exit 126, naming a `host` machine by its own name. See
 [machine file permissions](/home/setup/machine/overview#ssh)
 for restrictions that affect runtime selection.

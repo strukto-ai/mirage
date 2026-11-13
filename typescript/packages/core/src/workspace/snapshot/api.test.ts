@@ -228,7 +228,7 @@ describe('Workspace.snapshot', () => {
 })
 
 it('preserves the I/O buffer limit through copy and snapshot', async () => {
-  const ws = new Workspace({}, { io: { bufferBytes: 262144 }, runtimes: ['workspace'] })
+  const ws = new Workspace({}, { io: { bufferBytes: 262144 }, machines: [] })
   const copies: Workspace[] = []
   try {
     copies.push(await ws.copy())

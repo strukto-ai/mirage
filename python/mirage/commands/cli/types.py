@@ -73,7 +73,7 @@ class CLI:
             accessor from its validated config, once per install; a CLI
             that reaches no service keeps ``NOOPAccessor``.
         script (ScriptSource | None): program owning the whole installation.
-        runtime (str | None): runtime executing that script.
+        machine (str | None): the machine whose engine runs that script.
         mcp (MCPSource | None): the MCP tool list the tree was built
             from, so a snapshot rebuilds it without the server.
     """
@@ -83,7 +83,7 @@ class CLI:
     config_model: type[BaseModel] | None = None
     accessor: Callable[..., Accessor] = NOOPAccessor
     script: ScriptSource | None = None
-    runtime: str | None = None
+    machine: str | None = None
     mcp: MCPSource | None = None
 
     def __post_init__(self) -> None:
@@ -125,9 +125,9 @@ def _validate_cli(cli: CLI) -> None:
             raise ValueError(
                 f"cli {name!r}: a node takes fn or script, not both"
             )
-    elif cli.runtime is not None:
+    elif cli.machine is not None:
         raise ValueError(
-            f"cli {name!r}: runtime names the entry that runs script; it takes script"
+            f"cli {name!r}: machine names where script runs; it takes script"
         )
     leaves = _validate_tree(cli.spec, (), {})
     missing = leaves - cli.handlers.keys()

@@ -14,6 +14,7 @@
 
 import weakref
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import Any
 
 from mirage.execution.machine.table import MachineTable
@@ -34,7 +35,7 @@ def machine_runtime(handle: MachineHandle) -> RemoteRuntime:
     Args:
         handle (MachineHandle): the machine.
     """
-    runtime = RemoteRuntime(captures_of(handle), machine=handle.name)
+    runtime = RemoteRuntime(handle.name, captures_of(handle))
     table = _TABLES.get(handle)
     if table is None:
         table = _TABLES[handle] = MachineTable({handle.name: handle})
@@ -42,17 +43,17 @@ def machine_runtime(handle: MachineHandle) -> RemoteRuntime:
     return runtime
 
 
-def on(handle: MachineHandle, *rest: Any) -> dict[str, Any]:
+def on(handle: MachineHandle) -> dict[str, Any]:
     """The workspace arguments that run one machine's programs, capturing
-    what a fake handle's ``captures`` names, the other runtime entries
-    after it.
+    what a fake handle's ``captures`` names.
 
     Args:
         handle (MachineHandle): the machine.
-        rest (Any): the entries listed after it.
     """
-    entry = RemoteRuntime(captures_of(handle), machine=handle.name)
-    return {"machines": {handle.name: handle}, "runtimes": [entry, *rest]}
+    captures = captures_of(handle)
+    if captures is not None:
+        handle.config = replace(handle.config, captures=tuple(captures))
+    return {"machines": {handle.name: handle}}
 
 
 def captures_of(handle: MachineHandle) -> Sequence[str] | None:

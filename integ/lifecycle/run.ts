@@ -87,7 +87,7 @@ interface Case {
     mode: MountMode
     profiles?: Record<string, unknown>
     processes?: WorkspaceOptions['processes']
-    runtimes?: string[]
+    machines?: Record<string, Record<string, unknown>>
     clis?: Record<string, { cli: string }>
   }
   steps: Step[]
@@ -124,11 +124,12 @@ type Step = (
       op: 'register_cli'
       name: string
       script: ScriptDocument
-      runtime?: string
+      machine?: string
       config?: Record<string, unknown>
     }
   | { op: 'register_command'; path: string; name: string; write?: boolean; stdout?: string }
-  | { op: 'unregister_cli' | 'add_runtime' | 'remove_runtime' | 'stream_cli_stats'; name: string }
+  | { op: 'unregister_cli' | 'remove_machine' | 'stream_cli_stats'; name: string }
+  | { op: 'add_machine'; name: string; machine: Record<string, unknown> }
   | {
       op: 'register_stream_cli'
       name: string
@@ -146,7 +147,7 @@ type Step = (
       op:
         | 'mounts'
         | 'clis'
-        | 'runtimes'
+        | 'machines'
         | 'close'
         | 'snapshot'
         | 'checkout'
@@ -182,7 +183,7 @@ class RulePolicy implements Policy {
       if (key !== subject && !(line && subject.includes(key))) continue
       if ('deny' in answer) return { kind: 'deny', reason: answer.deny }
       if ('ask' in answer) return { kind: 'ask', reason: answer.ask }
-      if ('route' in answer) return { kind: 'route', runtime: answer.route }
+      if ('route' in answer) return { kind: 'route', machine: answer.route }
       return new Limit({
         maxBytes: answer.limit.max_bytes ?? null,
         maxLines: answer.limit.max_lines ?? null,
@@ -456,7 +457,7 @@ function answered(answers: readonly (Deny | Ask | Route)[]): Record<string, stri
     kind: a.kind,
     policy: a.policy ?? '',
     reason: a.reason ?? '',
-    ...(a.kind === 'route' ? { runtime: a.runtime } : {}),
+    ...(a.kind === 'route' ? { machine: a.machine } : {}),
   }))
 }
 
@@ -480,7 +481,7 @@ function explained(expl: ShellExplanation | VfsExplanation): Record<string, unkn
       command: c.command,
       outcome: c.outcome,
       answers: answered(c.answers),
-      runtime: c.runtime,
+      machine: c.machine,
     })),
   }
 }
@@ -582,7 +583,7 @@ async function action(
         new CLI({
           spec: new CommandSpec({ name: step.name }),
           script: new ScriptSource(step.script.source, step.script.language),
-          ...(step.runtime !== undefined ? { runtime: step.runtime } : {}),
+          ...(step.machine !== undefined ? { machine: step.machine } : {}),
         }),
         step.config ?? null,
       )
@@ -605,13 +606,13 @@ async function action(
       break
     case 'clis':
       return [...ws.clis().keys()].sort()
-    case 'add_runtime':
-      return ws.addRuntime(step.name).name
-    case 'remove_runtime':
-      await ws.removeRuntime(step.name)
+    case 'add_machine':
+      return ws.addMachine(step.name, step.machine).name
+    case 'remove_machine':
+      await ws.removeMachine(step.name)
       break
-    case 'runtimes':
-      return ws.runtimes().map((entry) => entry.name)
+    case 'machines':
+      return ws.engines().map((entry) => entry.name)
     case 'register_policy': {
       if (policies.has(step.id)) throw new Error('policy already registered')
       const policy = new RulePolicy(step)
@@ -846,7 +847,7 @@ async function run(host: Host, testCase: Case): Promise<number> {
     ...(testCase.settings.processes !== undefined
       ? { processes: testCase.settings.processes }
       : {}),
-    ...(testCase.settings.runtimes !== undefined ? { runtimes: testCase.settings.runtimes } : {}),
+    ...(testCase.settings.machines !== undefined ? { machines: testCase.settings.machines } : {}),
   })
   for (const [name, block] of Object.entries(testCase.settings.clis ?? {})) {
     ws.registerCli(name, cliSpecFor(block.cli))

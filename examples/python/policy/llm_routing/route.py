@@ -1,9 +1,9 @@
 TASK = (
-    "Pick the runtime that can run the Python code in this line, monty "
+    "Pick the machine that can run the Python code in this line, monty "
     "when it can."
 )
 
-RUNTIMES = {
+MACHINES = {
     "monty": (
         "Mirage's sandboxed Python: a subset of the language and part of "
         "the standard library, with no packages, network or subprocesses"
@@ -17,5 +17,5 @@ RUNTIMES = {
 
 async def pre_execute(ctx):
     if any(c["command"] == "python3" for c in ctx["commands"]):
-        choice = await parse_runtime(TASK, RUNTIMES, ctx["line"])
+        choice = await parse_machine(TASK, MACHINES, ctx["line"])
         return {"kind": "route", **choice}

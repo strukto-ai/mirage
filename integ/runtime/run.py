@@ -63,7 +63,7 @@ from mirage.policy.types import (  # noqa: E402
 from mirage.runtime.base import Runtime  # noqa: E402
 from mirage.runtime.mixin import LineExecutorMixin  # noqa: E402
 from mirage.runtime.python.host.fs import HostFs  # noqa: E402
-from mirage.runtime.table import build_runtime, register_runtime  # noqa: E402
+from mirage.runtime.table import register_runtime  # noqa: E402
 from mirage.runtime.types import (  # noqa: E402
     OutputFn,
     RunResult,
@@ -184,6 +184,9 @@ RUNTIME_ENTRY: dict[str, dict[str, Any]] = {
         "config": {"pod": "${MIRAGE_INTEG_KUBERNETES_POD}"},
     },
 }
+# The machine provider each of Mirage's own runtimes runs on, when it is
+# not in process. Mirrors run.ts ENGINE_PROVIDERS.
+ENGINE_PROVIDERS = {"monty": "worker", "local": "host"}
 MACHINE_PROVIDERS = frozenset(
     {
         "docker",
@@ -232,7 +235,7 @@ class EchoBox(Runtime[None], LineExecutorMixin[None]):
 
 
 # Registered the way a host registers its own runtime, so a case names
-# it by string like a builtin, `build_runtime` resolves it, and the
+# it by string like a builtin, a machine's `runtime` resolves it, and the
 # unknown-name refusal lists it. The registry suite pins that entry point.
 register_runtime(EchoBox.name, EchoBox)
 
@@ -291,13 +294,13 @@ class DenyFlag(Policy):
 
 class PlaceLine(Policy):
     """Test-only pre_execute policy: place a line holding a word on a
-    runtime, or refuse it when the entry names a ``deny`` reason."""
+    machine, or refuse it when the entry names a ``deny`` reason."""
 
     HOOK = "pre_execute"
 
     def __init__(self, spec: dict[str, Any]) -> None:
         self._contains = spec["contains"]
-        self._runtime = spec.get("runtime", "")
+        self._machine = spec.get("machine", "")
         self._deny = spec.get("deny")
 
     def decide(self, ctx: RouteContext) -> Deny | Route | None:
@@ -305,21 +308,21 @@ class PlaceLine(Policy):
             return None
         if self._deny is not None:
             return Deny(self._deny)
-        return Route(self._runtime)
+        return Route(self._machine)
 
 
 class PlaceCommand(Policy):
     """Test-only pre_command policy: place the commands of one name on a
-    runtime."""
+    machine."""
 
     HOOK = "pre_command"
 
     def __init__(self, spec: dict[str, Any]) -> None:
         self._contains = spec["contains"]
-        self._runtime = spec["runtime"]
+        self._machine = spec["machine"]
 
     def decide(self, ctx: CommandContext) -> Route | None:
-        return Route(self._runtime) if ctx.command == self._contains else None
+        return Route(self._machine) if ctx.command == self._contains else None
 
 
 class LockWrites(Policy):
@@ -894,25 +897,6 @@ async def _build_vfs(spec: dict[str, Any], run_id: str) -> Any:
     raise ValueError(f"unknown VFS kind: {kind!r}")
 
 
-def _build_entry(entry: Any) -> Any:
-    """One world runtimes entry: a name string or the uniform mapping.
-
-    Args:
-        entry (Any): ``"monty"`` or ``{"name", "captures", "config",
-            "machine"}``, the same contract as a yaml entry.
-    """
-    if isinstance(entry, str):
-        return entry
-    options: dict[str, Any] = {}
-    if "captures" in entry:
-        options["captures"] = tuple(entry["captures"])
-    if "config" in entry:
-        options["config"] = _expand(entry["config"])
-    if "machine" in entry:
-        options["machine"] = entry["machine"]
-    return build_runtime(entry["name"], **options)
-
-
 def _install_clis(ws: Workspace, clis: dict[str, Any]) -> None:
     """Install the world's script CLIs, the yaml ``clis:`` shape inline.
 
@@ -922,7 +906,7 @@ def _install_clis(ws: Workspace, clis: dict[str, Any]) -> None:
 
     Args:
         ws (Workspace): the workspace being built.
-        clis (dict[str, Any]): head word -> {script, language, runtime,
+        clis (dict[str, Any]): head word -> {script, language, machine,
             config}.
     """
     for name, entry in clis.items():
@@ -931,7 +915,7 @@ def _install_clis(ws: Workspace, clis: dict[str, Any]) -> None:
             script=ScriptSource(
                 entry["script"], language=entry.get("language", "python")
             ),
-            runtime=entry.get("runtime"),
+            machine=entry.get("machine"),
         )
         ws.register_cli(name, spec, entry.get("config"))
 
@@ -983,8 +967,6 @@ async def _build_workspace(world: dict[str, Any], run_id: str) -> Workspace:
         kwargs["session_id"] = world["session_id"]
     if "machines" in world:
         kwargs["machines"] = _expand(world["machines"])
-    if "runtimes" in world:
-        kwargs["runtimes"] = [_build_entry(e) for e in world["runtimes"]]
     if "route_policy" in world:
         route = world["route_policy"]
         kwargs["route_policy"] = {
@@ -1276,8 +1258,9 @@ async def _perform_step(
             Bucket=BUCKET, Key=put["key"], Body=put["body"].encode()
         )
         return []
-    if "add_runtime" in step:
-        ws.add_runtime(step["add_runtime"])
+    if "add_machine" in step:
+        for name, spec in step["add_machine"].items():
+            ws.add_machine(name, spec)
         return []
     if "wait_job" in step:
         await ws.job_table.wait(step["wait_job"], ws.default_session_id)
@@ -1340,8 +1323,6 @@ async def _perform_step(
     kwargs: dict[str, Any] = {}
     if session_id is not None:
         kwargs["session_id"] = session_id
-    if "runtime" in step:
-        kwargs["runtime"] = step["runtime"]
     if "machine" in step:
         kwargs["machine"] = step["machine"]
     if "stdin" in step:
@@ -1498,19 +1479,10 @@ def _for_runtime(case: dict[str, Any], runtime: str) -> dict[str, Any] | None:
         return None
     world = copy.deepcopy(case.get("world", {}))
     if not on_host:
-        entry = _entry(runtime, case.get("entry", {}))
-        if runtime in MACHINE_PROVIDERS and isinstance(entry, dict):
-            config = entry.pop("config", {})
-            world["machines"] = {
-                name: {"provider": runtime, **config}
-                for name in (runtime, *case.get("also_machines", []))
-            }
-            entry = {**entry, "name": "remote", "machine": runtime}
-        world["runtimes"] = [
-            entry,
-            *({"name": "remote", **e} for e in case.get("also_entries", [])),
-            "workspace",
-        ]
+        world["machines"] = {
+            **_machines(runtime, case),
+            **world.get("machines", {}),
+        }
     variant = {
         **case,
         "id": f"{case['id']}@{runtime}",
@@ -1527,24 +1499,39 @@ def _for_runtime(case: dict[str, Any], runtime: str) -> dict[str, Any] | None:
     return variant
 
 
-def _entry(runtime: str, override: dict[str, Any]) -> Any:
-    """The world entry for one runtime of a case's matrix.
+def _machines(runtime: str, case: dict[str, Any]) -> dict[str, Any]:
+    """The machines one runtime of a case's matrix runs on, by name.
+
+    The runtime's machine takes its name and runs it from its
+    ``RUNTIME_ENTRY``, the case's ``entry`` captures and config laid
+    over it. A machine provider's variant adds the case's
+    ``also_machines``, each capturing what an ``also_entries`` entry
+    names for it and nothing else.
 
     Args:
-        runtime (str): the runtime's name.
-        override (dict[str, Any]): the case's ``entry``: ``captures``
-            replace the runtime's, ``config`` keys join its config.
+        runtime (str): one name from the case's ``runtimes``.
+        case (dict[str, Any]): the case as the suite spells it.
     """
     base = RUNTIME_ENTRY.get(runtime, {})
-    if not base and not override:
-        return runtime
-    entry = {"name": runtime, **base, **override}
-    if "config" in base or "config" in override:
-        entry["config"] = {
-            **base.get("config", {}),
-            **override.get("config", {}),
-        }
-    return entry
+    override = case.get("entry", {})
+    config = {**base.get("config", {}), **override.get("config", {})}
+    captures = override.get("captures", base.get("captures"))
+    if runtime in MACHINE_PROVIDERS:
+        spec: dict[str, Any] = {"provider": runtime, **config}
+    elif runtime == "sandlock":
+        spec = {"provider": "host", "sandbox": config}
+    elif runtime in ENGINE_PROVIDERS:
+        spec = {"provider": ENGINE_PROVIDERS[runtime], **config}
+    else:
+        spec = {"provider": "in_process", "runtime": runtime, **config}
+    if captures is not None:
+        spec["captures"] = captures
+    machines = {runtime: spec}
+    for name in case.get("also_machines", []):
+        machines[name] = {"provider": runtime, **config, "captures": []}
+    for entry in case.get("also_entries", []):
+        machines[entry["machine"]]["captures"] = entry["captures"]
+    return machines
 
 
 def _variants(case: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1798,7 +1785,7 @@ async def _run_case(suite: str, case: dict[str, Any]) -> list[str]:
     handles = RetainedHandles(ws)
     problems: list[str] = []
     try:
-        runtimes = {runtime.name: runtime for runtime in ws.runtimes()}
+        runtimes = {runtime.name: runtime for runtime in ws.engines()}
         for name, operations in case.get("filesystem", {}).items():
             supported = runtimes[name].filesystem
             for operation, expected in operations.items():

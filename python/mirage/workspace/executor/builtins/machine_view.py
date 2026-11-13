@@ -16,7 +16,6 @@ import asyncio
 import logging
 from dataclasses import dataclass, replace
 
-from mirage.commands.config import Context
 from mirage.commands.spec.help import render_help
 from mirage.commands.spec.shell import (
     SHELL_SPECS,
@@ -106,13 +105,7 @@ def _default_machine(
             return host
         if runtime is None or reach != "remote":
             continue
-        try:
-            found = Runtime.require(runtime).machine_for(
-                Context(machine=routing.machine)
-            )
-        except Exception as exc:
-            logger.debug("no default machine: %s", exc)
-            continue
+        found = Runtime.require(runtime).machine
         if found is not None:
             return str(found)
     return every[0]
@@ -121,8 +114,8 @@ def _default_machine(
 def machine_scope(
     processes: ProcessTable, name: str | None, workspace: bool = False
 ) -> MachineScope | None:
-    """Which machines a command answers for: the one ``--machine`` or
-    the line's placement names; in a command substitution, whose reader
+    """Which machines a command answers for: the one ``--machine``
+    names; in a command substitution, whose reader
     is a script, only the default one, the workspace when there is no
     machine; otherwise every one. The host
     counts only while a runtime runs programs on it, so a workspace that
@@ -152,14 +145,6 @@ def machine_scope(
             return MachineScope((), True, True)
         named = [machine for machine in every if names_machine(machine, name)]
         return MachineScope((named[0],), True) if named else None
-    if routing is not None and routing.machine is not None:
-        placed = [
-            machine
-            for machine in every
-            if names_machine(machine, routing.machine)
-        ]
-        if placed:
-            return MachineScope((placed[0],), True)
     substituted = (
         frame is not None and frame.substitution and routing is not None
     )

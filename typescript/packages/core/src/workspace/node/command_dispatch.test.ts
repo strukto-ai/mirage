@@ -19,7 +19,6 @@ import { MachineHandle } from '../../machine/handle.ts'
 import type { Policy } from '../../policy/base.ts'
 import { Outcome, Scope } from '../../policy/index.ts'
 import type { CommandContext, Route } from '../../policy/types.ts'
-import { RemoteRuntime } from '../../runtime/machine/runtime.ts'
 import { Runtime } from '../../runtime/base.ts'
 import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import { LanguageRuntime } from '../../runtime/language.ts'
@@ -30,6 +29,7 @@ import { MountMode } from '../../types.ts'
 import { parse, syntaxRefusal } from '../../shell/parse/parse.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { parserAliases } from './command_dispatch.ts'
+import { buildRuntime } from '../../runtime/table.ts'
 
 const DEC = new TextDecoder()
 
@@ -114,7 +114,7 @@ describe('a prefix assignment', () => {
     async (line) => {
       const ws = new Workspace(
         { '/data': new RAMVFS() },
-        { mode: MountMode.EXEC, runtimes: [new ShellsOut()] },
+        { mode: MountMode.EXEC, machines: [new ShellsOut()] },
       )
       try {
         expect(text((await ws.shell(line)).stdout)).toBe('one\n')
@@ -192,7 +192,7 @@ async function withBox(
   run: (ws: Workspace, box: Box) => Promise<void>,
 ): Promise<void> {
   const box = new Box()
-  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [box] })
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, machines: [box] })
   try {
     ws.createSession('s', { profile })
     await run(ws, box)
@@ -349,8 +349,10 @@ describe('a wrapper whose program is routed', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        machines: { a: new Named('a'), b: new Named('b') },
-        runtimes: [new RemoteRuntime({ captures: ['hostname'], machine: 'a' }), 'workspace'],
+        machines: {
+          a: new Named('a', { captures: ['hostname'] }),
+          b: new Named('b', { captures: ['hostname'] }),
+        },
         policies: [new HostnameOn(machine)],
       },
     )
@@ -368,7 +370,7 @@ describe('a wrapper whose program is routed', () => {
     const other = new OtherBox()
     const ws = new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [box, other], policies: [new HostnameTo('other')] },
+      { mode: MountMode.EXEC, machines: [box, other], policies: [new HostnameTo('other')] },
     )
     try {
       const io = await ws.shell('nohup nice -n 5 hostname -s')
@@ -384,7 +386,11 @@ describe('a wrapper whose program is routed', () => {
     const box = new Box()
     const ws = new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [box, 'monty'], policies: [new PythonOnMonty()] },
+      {
+        mode: MountMode.EXEC,
+        machines: [box, buildRuntime('monty')],
+        policies: [new PythonOnMonty()],
+      },
     )
     try {
       const io = await ws.shell("nohup python3 -c 'print(1)'")
@@ -411,8 +417,10 @@ function routedWs(routes: Record<string, Route>): Workspace {
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      machines: { a: new Named('a'), b: new Named('b') },
-      runtimes: [new RemoteRuntime({ captures: ['find', 'hostname'], machine: 'a' }), 'workspace'],
+      machines: {
+        a: new Named('a', { captures: ['find', 'hostname'] }),
+        b: new Named('b', { captures: ['find', 'hostname'] }),
+      },
       policies: [new Routes(routes)],
     },
   )
@@ -432,7 +440,7 @@ describe('routes under one wrapper', () => {
     [
       {
         nice: { kind: 'route', machine: 'b' },
-        hostname: { kind: 'route', runtime: 'machine' },
+        hostname: { kind: 'route', machine: 'machine' },
       },
       'nohup nice hostname',
     ],
@@ -448,7 +456,7 @@ describe('routes under one wrapper', () => {
     try {
       const io = await ws.shell(line)
       expect([io.exitCode, text(io.stdout)]).toEqual([126, ''])
-      expect(io.decision?.reason.startsWith('policies place the line on different runtimes')).toBe(
+      expect(io.decision?.reason.startsWith('policies place the line on different machines')).toBe(
         true,
       )
     } finally {
@@ -478,16 +486,16 @@ class OtherBox extends Box {
 }
 
 class HostnameTo implements Policy {
-  constructor(private readonly runtime: string) {}
+  constructor(private readonly machine: string) {}
 
   preCommand(ctx: CommandContext): Route | null {
-    return ctx.command === 'hostname' ? { kind: 'route', runtime: this.runtime } : null
+    return ctx.command === 'hostname' ? { kind: 'route', machine: this.machine } : null
   }
 }
 
 class PythonOnMonty implements Policy {
   preCommand(ctx: CommandContext): Route | null {
-    return ctx.command === 'python3' ? { kind: 'route', runtime: 'monty' } : null
+    return ctx.command === 'python3' ? { kind: 'route', machine: 'monty' } : null
   }
 }
 
@@ -530,10 +538,7 @@ describe('a path no file of Mirage answers', () => {
   })
 
   it("is the shell's without an external runtime", async () => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: ['workspace'] },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, machines: [] })
     try {
       const io = await ws.shell('/opt/tool a')
       expect(io.exitCode).toBe(127)

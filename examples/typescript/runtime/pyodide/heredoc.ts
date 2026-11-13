@@ -15,7 +15,7 @@
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 async function main(): Promise<void> {
-  const ws = new Workspace({ '/ram': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: ['pyodide'] })
+  const ws = new Workspace({ '/ram': new RAMVFS() }, { mode: MountMode.EXEC, machines: { py: { provider: 'in_process', runtime: 'pyodide' } } })
 
   console.log('python3 heredoc patterns (commonly emitted by AI agents)\n')
 

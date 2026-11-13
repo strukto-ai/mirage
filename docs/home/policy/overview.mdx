@@ -19,11 +19,11 @@ policy is a class with a pair of methods for each thing an agent does, or
 
 A `pre_` method runs before the action executes; a `post_` method runs afterward
 with the execution result. A policy decision can permit, refuse, [request host approval](/home/policy/policies#asks),
-bound the output, or select the target runtime. No policy can permit what
+bound the output, or select the target machine. No policy can permit what
 another refuses.
 
 Policies evaluate in sequence: built-in checks first (mount modes, path restrictions,
-[runtime routing](/home/policy/route-runtime)), followed by the session profile, and finally
+[machine routing](/home/policy/route-machine)), followed by the session profile, and finally
 the workspace policies in the order they were added.
 
 ## Why not a tool-call check
@@ -47,8 +47,6 @@ filesystem, so it sees what that string only implies.
   sandboxed on monty or Python on wasm, with the same context as JSON.
 - [Explain](/home/policy/explain): what the agent sees of policy, and how
   it asks what a line would do before running it.
-- [Route Runtime](/home/policy/route-runtime): choose the runtime for a
-  line, from a script.
 - [Route Machine](/home/policy/route-machine): choose the machine for a
   line, from a script.
 - [Route Network](/home/policy/route-network): send a connection to one

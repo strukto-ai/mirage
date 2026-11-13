@@ -80,7 +80,7 @@ import {
 } from '../../execution/types.ts'
 import type { SessionProcesses } from '../../execution/process/session.ts'
 import { DiffPool } from '../../rs/diff_pool.ts'
-import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
+import type { Runtime } from '../../runtime/base.ts'
 import {
   captureBinding,
   restrictedMountsFor,
@@ -91,7 +91,7 @@ import { PrefixResolver } from '../../runtime/resolver.ts'
 import { MachineTable } from '../../execution/machine/table.ts'
 import type { MachineProcess } from '../../execution/machine/types.ts'
 import type { Machine } from '../../execution/machine/types.ts'
-import { wholeLineRuntime } from '../../runtime/table.ts'
+import { splitMachines, wholeLineRuntime, type MachineSpec } from '../../runtime/table.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { SecretSource } from '../../secrets/config.ts'
 import { SecretsError } from '../../secrets/errors.ts'
@@ -355,7 +355,7 @@ export class Workspace {
   constructor(mounts: Record<string, MountSpec>, options: WorkspaceOptions = {}) {
     if ('python' in options) {
       throw new Error(
-        "the 'python' workspace option was removed: configure the engine on its runtimes entry, " +
+        "the 'python' workspace option was removed: configure the runtime on its machine, " +
           'e.g. new PyodideRuntime({ config: { denyPackages } })',
       )
     }
@@ -634,8 +634,9 @@ export class Workspace {
       null,
       this.processTable,
     )
+    const [handles, entries] = splitMachines(options.machines)
     this.machineTable = new MachineTable(
-      options.machines,
+      handles,
       (groups) => this.scanHost(groups),
       (target, signum) => this.signalHost(target, signum),
       (target, seenAt, signum) => this.stopHostRun(target, seenAt, signum),
@@ -647,7 +648,7 @@ export class Workspace {
     }
     this.runtimeWorld = new Runtimes({
       registry: this.registry,
-      entries: options.runtimes,
+      entries,
       binding: this.runtimeBinding,
       machines: this.machineTable,
     })
@@ -838,8 +839,8 @@ export class Workspace {
     return this.sandboxMounts().filter((prefix) => pathVisible(vis, rstripSlash(prefix) || '/'))
   }
 
-  /** The ordered runtime world, first capturer first. */
-  runtimes(): readonly Runtime[] {
+  /** The runtime each machine runs, first capturer first, each named for its machine. */
+  engines(): readonly Runtime[] {
     return this.runtimeWorld.entries
   }
 
@@ -893,14 +894,14 @@ export class Workspace {
     return LOCAL_MACHINE
   }
 
-  /** Add a runtime entry to the workspace's ordered set; `Runtimes.add` places it. */
-  addRuntime(runtime: RuntimeEntry): Runtime {
+  /** Add a machine to the workspace's ordered set; `Runtimes.add` places it. */
+  addMachine(name: string, spec: MachineSpec): Runtime {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
-    return this.runtimeWorld.add(runtime)
+    return this.runtimeWorld.add(name, spec)
   }
 
-  /** Remove a runtime entry, closing it once its runs finish; `workspace` is permanent. */
-  async removeRuntime(name: string): Promise<void> {
+  /** Remove a machine, closing its runtime once its runs finish; `workspace` is permanent. */
+  async removeMachine(name: string): Promise<void> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     await this.runtimeWorld.remove(name)
   }
@@ -1684,7 +1685,7 @@ export class Workspace {
           line,
           judged,
           wholeLine ? judged : verdicts,
-          (one) => (wholeLine ? this.router.placementFor(one, this.router.unplaced()) : ['', '']),
+          (one) => (wholeLine ? this.router.placementFor(one, this.router.unplaced()) : ''),
           reparse,
           wholeLine,
         )
@@ -1713,7 +1714,7 @@ export class Workspace {
       if ('kind' in placed) {
         const refused = placementRefused(placed, line)
         return {
-          ...explainedLine(line, judged, verdicts, () => ['', ''], reparse),
+          ...explainedLine(line, judged, verdicts, () => '', reparse),
           answers,
           outcome: placed.kind === 'pending' ? Outcome.ASK : Outcome.DENY,
           reason: placed.reason,
@@ -2734,12 +2735,12 @@ export class Workspace {
       // instance, and without the block the copy would answer the
       // first read with "unknown secrets source". Policy instances and
       // the route policy stay behind: a policy is a live host object whose
-      // state two workspaces must not share, and the route names runtime
-      // instances the copy does not carry; the entries named by string are
-      // rebuilt. The policy functions travel, the host's code as a CLI's
+      // state two workspaces must not share, and the route names machines
+      // the copy does not carry; the runtimes built from a machines: entry
+      // are rebuilt. The policy functions travel, the host's code as a CLI's
       // spec is. A caller's own profile table brings its own default.
       secrets: options.secrets ?? this.declaredSecretSources,
-      runtimes: options.runtimes ?? this.runtimeWorld.named(),
+      machines: options.machines ?? this.runtimeWorld.specs(),
       policyFunctions: options.policyFunctions ?? this.policyFunctions,
       clock: options.clock ?? this.clock,
       ids: options.ids ?? this.ids,

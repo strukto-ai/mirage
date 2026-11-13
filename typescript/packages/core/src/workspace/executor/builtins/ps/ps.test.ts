@@ -248,10 +248,10 @@ it.each([false, true])('ps shows where a program runs (host %s)', async (host) =
     if (process == null) throw new Error('the job has no process')
     process.oneCommand = true
     if (host) {
-      expect(process.take(null, 'local')).toBe(true)
+      expect(process.take(null)).toBe(true)
       process.setMachinePid({ pid: 4242, started: 1 })
     } else {
-      expect(process.take(new MachineName('docker', 'tools'), 'docker')).toBe(true)
+      expect(process.take(new MachineName('docker', 'tools'))).toBe(true)
     }
     const machine = host ? ws.processTable.machine.toString() : 'docker:tools'
     const own = stdoutStr(await ws.shell('ps', { sessionId: 's' })).split('\n')

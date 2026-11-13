@@ -1379,7 +1379,6 @@ async function runOnLineRuntime(
             runWithSystemClock(env.registry.systemClock, () =>
               runWholeLine(
                 lineRuntime,
-                decision.machine,
                 command,
                 stdin,
                 effectiveSession,

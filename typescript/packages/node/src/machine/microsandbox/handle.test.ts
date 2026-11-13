@@ -241,7 +241,7 @@ describe.skipIf(!MOUNT_SANDBOX)('real guest workspace mounts', () => {
         {
           mode: MountMode.EXEC,
           profiles: { agent: { paths: { hide: [`${prefix}/secret.txt`] } } },
-          ...on(runtime, 'workspace'),
+          ...on(runtime),
         },
       )
       try {
@@ -347,7 +347,6 @@ describe.skipIf(!SANDBOX)('MicrosandboxMachine real guest', () => {
         mode: MountMode.EXEC,
         ...on(
           captured(new MicrosandboxMachine('box', { sandbox: SANDBOX }), ['python3', '@external']),
-          'workspace',
         ),
       },
     )

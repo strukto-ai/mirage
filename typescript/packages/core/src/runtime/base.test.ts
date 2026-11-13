@@ -119,7 +119,7 @@ class SeenRuntime extends Runtime implements ProcessExecutorMixin {
 
 async function seen(line: string, reach: RuntimeReach = 'remote'): Promise<[Process, string]> {
   const runtime = new SeenRuntime(reach)
-  const ws = new Workspace({ '/data': new RAMVFS() }, { runtimes: [runtime, 'workspace'] })
+  const ws = new Workspace({ '/data': new RAMVFS() }, { machines: [runtime] })
   try {
     const out = DEC.decode((await ws.shell(line)).stdout)
     const [process, ...more] = runtime.seen
@@ -144,34 +144,34 @@ describe('Runtime.execute', () => {
   it('runs a program past the workspace as a process of its own', async () => {
     const box = new MachineName('box', 'b1')
     const [alone, line] = await seen('probe; echo $$')
-    expect([alone.parent, alone.command, alone.machine, alone.runtime]).toEqual([
+    expect([alone.parent, alone.command, alone.machine, alone.program]).toEqual([
       Number(line),
       'probe',
       box,
-      'seen',
+      true,
     ])
     const [stage, shell] = await seen('echo $$; probe | cat')
-    expect([stage.parent, stage.command, stage.runtime]).toEqual([Number(shell), 'probe', 'seen'])
+    expect([stage.parent, stage.command, stage.program]).toEqual([Number(shell), 'probe', true])
     const [job, pid] = await seen('probe & echo $!; wait')
-    expect([job.id.pid, job.runtime]).toEqual([Number(pid), 'seen'])
+    expect([job.id.pid, job.program]).toEqual([Number(pid), true])
     const [replaced, execd] = await seen('exec probe & echo $!; wait')
-    expect([replaced.id.pid, replaced.runtime]).toEqual([Number(execd), 'seen'])
+    expect([replaced.id.pid, replaced.program]).toEqual([Number(execd), true])
     const [forked, found] = await seen('find /data -maxdepth 0 -exec probe {} \\; & echo $!; wait')
-    expect([forked.parent, forked.runtime]).toEqual([Number(found), 'seen'])
+    expect([forked.parent, forked.program]).toEqual([Number(found), true])
     const [batched, xargs] = await seen('/usr/bin/xargs probe </dev/null & echo $!; wait')
-    expect([batched.parent, batched.runtime]).toEqual([Number(xargs), 'seen'])
+    expect([batched.parent, batched.program]).toEqual([Number(xargs), true])
   })
 
   // A runtime the workspace reaches runs its program in its shell's process.
   it('keeps a program the workspace reaches in its shell', async () => {
     const [process, line] = await seen('echo $$; probe', 'workspace')
-    expect([process.id.pid, process.runtime]).toEqual([Number(line), null])
+    expect([process.id.pid, process.program]).toEqual([Number(line), false])
   })
 
   // A program's process stopped with its shell ends by the shell's signal.
   it("ends a program's process by its shell's signal", async () => {
     const runtime = new SeenRuntime()
-    const ws = new Workspace({ '/data': new RAMVFS() }, { runtimes: [runtime, 'workspace'] })
+    const ws = new Workspace({ '/data': new RAMVFS() }, { machines: [runtime] })
     try {
       const line = ws.shell('true; hold')
       await until(() => runtime.seen.length > 0)
@@ -192,7 +192,7 @@ describe('Runtime.execute', () => {
   // shell goes on.
   it("leaves the shell running when a program's process is stopped alone", async () => {
     const runtime = new SeenRuntime()
-    const ws = new Workspace({ '/data': new RAMVFS() }, { runtimes: [runtime, 'workspace'] })
+    const ws = new Workspace({ '/data': new RAMVFS() }, { machines: [runtime] })
     try {
       const line = ws.shell('true; hold; echo after $?')
       await until(() => runtime.seen.length > 0)

@@ -299,13 +299,3 @@ async def test_a_machine_keeps_its_credential_sealed(client):
     )
     assert r.status_code == 201, r.text
     assert r.json()["config"] == {"sandbox_id": "s1"}
-
-
-@pytest.mark.asyncio
-async def test_a_runtime_answers_with_captures(client):
-    r = await client.post(
-        "/v1/runtimes",
-        json={"name": "py", "type": "monty", "fields": {}},
-    )
-    assert r.status_code == 201, r.text
-    assert r.json()["captures"] == []

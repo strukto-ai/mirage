@@ -161,16 +161,15 @@ export class ProcessHandle {
 
   /**
    * Take the runner as the program it was started for (`oneCommand`),
-   * which runs on `machine` with `runtime`, as bash execs a stage's or a
-   * job's one program in place. Its record names both from then on, the
-   * program's own command line in place of the stage's text and what its
-   * substitutions wrote it, and it ignores only what the program does
-   * (`programIgnores`). Answers whether the
-   * runner was the program's to take: false for one started for more than
-   * one command, or taken already.
+   * which a runtime runs on `machine`, as bash execs a stage's or a job's
+   * one program in place. Its record names the machine and the program
+   * from then on, the program's own command line in place of the stage's
+   * text and what its substitutions wrote it, and it ignores only what the
+   * program does (`programIgnores`). Answers whether the runner was the
+   * program's to take: false for one started for more than one command,
+   * or taken already.
    *
    * @param machine where the program runs; null for the workspace's own.
-   * @param runtime what runs it.
    * @param instance what `machine`'s provider calls it.
    * @param command the program's words, expanded; null keeps the stage's text.
    * @param fd the pid writing each descriptor a `<( )` gave the program, by number.
@@ -178,7 +177,6 @@ export class ProcessHandle {
    */
   take(
     machine: MachineName | null,
-    runtime: string,
     instance: string | null = null,
     command: string | null = null,
     fd: Readonly<Record<number, number>> | null = null,
@@ -191,7 +189,7 @@ export class ProcessHandle {
       ...this.current,
       machine: machine ?? this.current.machine,
       machineInstance: machine === null ? (this.current.machineInstance ?? null) : instance,
-      runtime,
+      program: true,
       command: command ?? this.current.command,
       fd: fd ?? this.current.fd ?? {},
       argv: argv.length > 0 ? argv : (this.current.argv ?? []),

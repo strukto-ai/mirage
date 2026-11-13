@@ -452,11 +452,11 @@ describe('workspaces router', () => {
   it('runs a policy file the way it runs its policies', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-policy-file-'))
     writeFileSync(
-      join(dir, 'no_runtimes.py'),
+      join(dir, 'no_machines.py'),
       [
         'def pre_workspace(ctx):',
-        '    if "runtimes" in ctx["config"]:',
-        '        return {"kind": "deny", "reason": "runtimes are the server\'s"}',
+        '    if "machines" in ctx["config"]:',
+        '        return {"kind": "deny", "reason": "machines are the server\'s"}',
       ].join('\n'),
     )
     writeFileSync(
@@ -469,15 +469,17 @@ describe('workspaces router', () => {
     )
     writeFileSync(
       join(dir, 'policy.yaml'),
-      'pre_workspace:\n  - script: no_runtimes.py\npre_command:\n  - script: no_cat.py\n',
+      'pre_workspace:\n  - script: no_machines.py\npre_command:\n  - script: no_cat.py\n',
     )
     const app = buildApp({ policyFile: join(dir, 'policy.yaml') })
     const post = (url: string, payload: object) => app.inject({ method: 'POST', url, payload })
     try {
-      const refused = await post('/v1/workspaces', { config: { ...RAM, runtimes: ['monty'] } })
+      const refused = await post('/v1/workspaces', {
+        config: { ...RAM, machines: { py: { provider: 'worker' } } },
+      })
       expect([refused.statusCode, refused.json()]).toEqual([
         403,
-        { error: { code: 'policy_refused', message: "runtimes are the server's" } },
+        { error: { code: 'policy_refused', message: "machines are the server's" } },
       ])
       const made = await post('/v1/workspaces', { config: RAM })
       expect(made.statusCode).toBe(201)
@@ -716,7 +718,7 @@ describe('workspaces router', () => {
           id: 'cli-ws',
           config: {
             mounts: { '/': { vfs: 'ram', mode: 'write' } },
-            runtimes: ['monty', 'workspace'],
+            machines: { monty: { provider: 'worker' } },
             clis: { pager: { script } },
           },
         },
@@ -736,7 +738,7 @@ describe('workspaces router', () => {
     }
   }, 60_000)
 
-  describe.each(['initModule', 'init_module'])('request runtime %s', (key) => {
+  describe.each(['initModule', 'init_module'])('request machine %s', (key) => {
     it.each(['local', 'token'] as const)('rejects host initializers with %s auth', async (mode) => {
       const stateRoot = mkdtempSync(join(tmpdir(), 'mir-init-'))
       const app = buildApp({ stateRoot, authConfig: { mode, bearerToken: 'test-token' } })
@@ -749,13 +751,13 @@ describe('workspaces router', () => {
           payload: {
             config: {
               mounts: { '/': { vfs: 'ram', mode: 'write' } },
-              runtimes: [
-                'workspace',
-                {
-                  name: 'pyodide',
-                  config: { [key]: 'data:text/javascript,export default () => {}' },
+              machines: {
+                py: {
+                  provider: 'in_process',
+                  runtime: 'pyodide',
+                  [key]: 'data:text/javascript,export default () => {}',
                 },
-              ],
+              },
             },
           },
         })
@@ -784,7 +786,9 @@ describe('workspaces router', () => {
         payload: {
           config: {
             mounts: { '/': { vfs: 'ram', mode: 'write' } },
-            runtimes: [{ name: 'pyodide', config: { auto_load_from_imports: false } }, 'workspace'],
+            machines: {
+              py: { provider: 'in_process', runtime: 'pyodide', auto_load_from_imports: false },
+            },
           },
         },
       })

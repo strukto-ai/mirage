@@ -16,7 +16,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { CHECK_LINE, CHECK_MARK } from '../../machine/constants.ts'
 import type * as machineConstants from '../../machine/constants.ts'
 import { MachineHandle } from '../../machine/handle.ts'
-import { RemoteRuntime } from '../../runtime/machine/runtime.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
@@ -274,15 +273,14 @@ async function started(box: Sleeper): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 10))
 }
 
+// Each box captures `train`, so the first listed takes it and a line can
+// name another.
 function sleepers(boxes: Record<string, Sleeper>): Workspace {
-  return new Workspace(
-    { '/': new RAMVFS() },
-    {
-      mode: MountMode.EXEC,
-      machines: boxes,
-      runtimes: [new RemoteRuntime({ captures: ['train'], machine: Object.keys(boxes)[0] ?? '' })],
-    },
-  )
+  for (const box of Object.values(boxes)) {
+    const held = box as { config: Sleeper['config'] }
+    held.config = { ...held.config, captures: ['train'] }
+  }
+  return new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC, machines: boxes })
 }
 
 describe('MachineTable scans', () => {
@@ -307,7 +305,7 @@ describe('MachineTable scans', () => {
       ])
       expect([rows[2]?.[0], rows[3]?.[0]]).toEqual(['412', '413'])
       const [program, found] = ws.processTable.records().slice(-2)
-      expect([found?.runtime, found?.parent]).toEqual([null, program?.id.pid])
+      expect([found?.program, found?.parent]).toEqual([false, program?.id.pid])
       const killed = await ws.shell(`kill -USR1 413; kill -0 ${String(pid)}; echo $?`)
       expect(DEC.decode(killed.stdout)).toBe('0\n')
       expect(box.sent).toEqual([[{ pid: 413, started: 101, exited: null }, 10]])
@@ -486,7 +484,7 @@ describe('MachineTable scans', () => {
       const found = ws.processTable
         .live()
         .map((p) => p.record)
-        .filter((r) => r.sessionId === 'capped' && r.runtime === null)
+        .filter((r) => r.sessionId === 'capped' && !r.program)
       expect(found.map((r) => r.machinePid?.pid)).toEqual([413])
       const said = await ws.shell('(echo room)', { sessionId: 'capped' })
       expect([DEC.decode(said.stdout), said.exitCode]).toEqual(['room\n', 0])
@@ -838,17 +836,6 @@ describe('MachineTable scans', () => {
           { mode: MountMode.EXEC, machines: { a: box, b: { provider: 'nope' } } },
         ),
     ).toThrow('nope')
-    expect(
-      () =>
-        new Workspace(
-          { '/': new RAMVFS() },
-          {
-            mode: MountMode.EXEC,
-            machines: { a: box },
-            runtimes: [new RemoteRuntime({ machine: 'c' }), 'workspace'],
-          },
-        ),
-    ).toThrow("unknown machine: 'c'")
     await new Workspace(
       { '/': new RAMVFS() },
       { mode: MountMode.EXEC, machines: { a: box } },

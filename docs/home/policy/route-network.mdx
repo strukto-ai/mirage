@@ -32,7 +32,7 @@ A second workspace on the same server can route `localhost:5003` to
 - [`allowed_domains`, `denied_domains`](/home/configuration/workspace#network) and
   [`pre_network`](/home/policy/policies#pre_network-and-post_network)
   policies check where the route goes, not the address the agent typed.
-- `local` and Sandlock runtimes don't run in a workspace with routes, and
+- `host` machines don't run in a workspace with routes, and
   programs on a [machine](/home/setup/machine/overview) aren't routed.
 - In a browser, a route for an `https` or `wss` address can change only
   the port.

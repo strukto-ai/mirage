@@ -46,19 +46,15 @@ def _route_policy(route) -> RoutePolicy:
 
 
 @pytest.mark.asyncio
-async def test_a_runtime_name_places_the_line_and_none_says_nothing():
+async def test_a_machine_name_places_the_line_and_none_says_nothing():
     policy = _route_policy(_heavy_on_beta)
     assert await policy.pre_execute(_line("python3 heavy")) == Route("beta")
     assert await policy.pre_execute(_line("echo hi")) is None
 
 
 @pytest.mark.asyncio
-async def test_a_route_places_the_line_on_a_runtime_a_machine_or_both():
-    for route in (
-        Route("beta"),
-        Route(machine="box"),
-        Route("beta", machine="box"),
-    ):
+async def test_a_route_places_the_line_on_a_machine():
+    for route in (Route("beta"), Route(machine="box", reason="heavy")):
         policy = _route_policy(lambda ctx, route=route: route)
         assert await policy.pre_execute(_line("python3 heavy")) == route
 
@@ -73,14 +69,14 @@ async def test_anything_but_a_name_a_route_or_none_is_the_deployments_mistake(
 ):
     # Refusing a line is a policy's answer, not the router's; a route
     # policy that answers anything else is misconfigured, not a refusal.
-    with pytest.raises(RouteError, match="a runtime name, a Route or None"):
+    with pytest.raises(RouteError, match="a machine name, a Route or None"):
         await _route_policy(lambda ctx: verdict).pre_execute(_line("echo hi"))
 
 
 ROUTE_HEAVY = """
 def pre_execute(ctx):
     if "heavy" in ctx["line"]:
-        return {"kind": "route", "runtime": "beta"}
+        return {"kind": "route", "machine": "beta"}
 """
 
 

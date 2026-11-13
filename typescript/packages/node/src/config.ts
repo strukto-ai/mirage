@@ -127,8 +127,8 @@ export function loadPolicyFile(path: string, env?: Record<string, string>): Prof
  * directory.
  *
  * A path-form `script`, a `cli: ./tool.mjs:TREE`, a
- * `vfs: ./wiki.mjs:WikiVFS` and a runtime entry's
- * `name: ./box.mjs:EchoBox` in a config file all mean "next to the file"
+ * `vfs: ./wiki.mjs:WikiVFS` and a machine's
+ * `runtime: ./box.mjs:EchoBox` in a config file all mean "next to the file"
  * (the docker build-context model), never "wherever the server happens
  * to run". In-memory object configs are untouched. Exported so
  * the CLI applies the same rebase to a `load`/`clone` override, which is
@@ -138,14 +138,10 @@ export function loadPolicyFile(path: string, env?: Record<string, string>): Prof
  */
 export function absolutizeScripts(raw: Record<string, unknown>, base: string): void {
   if (isPlainObject(raw.route_policy)) absolutizeScriptKey(raw.route_policy, base)
-  if (Array.isArray(raw.runtimes)) {
-    raw.runtimes.forEach((entry: unknown, i: number) => {
-      if (isPlainObject(entry)) {
-        absolutizeCodeRef(entry, 'name', base)
-      } else if (typeof entry === 'string') {
-        ;(raw.runtimes as unknown[])[i] = rebaseCodeRef(entry, base)
-      }
-    })
+  if (isPlainObject(raw.machines)) {
+    for (const block of Object.values(raw.machines)) {
+      if (isPlainObject(block)) absolutizeCodeRef(block, 'runtime', base)
+    }
   }
   if (isPlainObject(raw.clis)) {
     for (const block of Object.values(raw.clis)) {
@@ -186,7 +182,7 @@ function absolutizeScriptKey(entry: Record<string, unknown>, base: string): void
  * Rebase a path-form colon reference under `key` onto `base`.
  *
  * `cli: ./tool.mjs:TREE`, `vfs: ./wiki.mjs:WikiVFS` and a
- * runtime entry's `name: ./box.mjs:EchoBox` all mean "next to the config
+ * machine's `runtime: ./box.mjs:EchoBox` all mean "next to the config
  * file", the same build-context rule `script:` follows; without this the
  * pointer reaches `loadAttr` relative and
  * resolves against the server process's cwd. A package specifier
@@ -202,9 +198,7 @@ function absolutizeCodeRef(entry: Record<string, unknown>, key: string, base: st
 /**
  * `ref` with a relative path-form source rebased onto `base`. Anything
  * that is not a relative path-form reference (a bare name, a package
- * specifier, an absolute path) comes back unchanged, so the bare string
- * runtime entry (`- ./box.mjs:EchoBox` beside `- monty`) reads the same
- * way the keyed forms do.
+ * specifier, an absolute path) comes back unchanged.
  */
 function rebaseCodeRef(ref: string, base: string): string {
   if (!ref.includes(':')) return ref

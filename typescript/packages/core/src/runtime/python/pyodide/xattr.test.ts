@@ -26,10 +26,7 @@ const DEC = new TextDecoder()
 describe('pyodide extended attributes', { timeout: 120_000 }, () => {
   it('are served by the dispatcher through the worker', async () => {
     const rt = new PyodideRuntime()
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [rt, 'workspace'] },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, machines: [rt] })
     try {
       await ws.shell('echo hi > /data/f && setfattr -n user.tag -v shell /data/f')
       const guest = [

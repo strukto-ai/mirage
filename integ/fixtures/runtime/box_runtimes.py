@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 # Runtimes a deployment ships as a file and names from yaml
-# (`runtimes: [{name: ./box_runtimes.py:EchoBox}]`), one per tier the
+# (`machines: {box: {runtime: ./box_runtimes.py:EchoBox}}`), one per tier the
 # workspace can route to. EchoBox takes whole lines (the line-executor
 # entry point every sandbox provider uses) and answers with the raw line, so a
 # case can see exactly what reached it. ShoutPython is an interpreter

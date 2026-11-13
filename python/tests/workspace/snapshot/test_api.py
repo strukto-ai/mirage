@@ -262,7 +262,7 @@ async def test_a_missing_key_is_file_not_found(store):
 
 @pytest.mark.asyncio
 async def test_io_buffer_limit_survives_copy_and_snapshot():
-    ws = Workspace({}, io={"buffer_bytes": 262144}, runtimes=["workspace"])
+    ws = Workspace({}, io={"buffer_bytes": 262144}, machines=[])
     copies = []
     try:
         copies.append(await ws.copy())

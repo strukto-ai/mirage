@@ -77,7 +77,8 @@ export abstract class Runtime<E = unknown> {
    * dataclass.
    */
   static readonly configFields: ConfigFields = {}
-  abstract readonly name: string
+  /** The machine it runs for: its registry name until a `machines:` entry names it. */
+  abstract name: string
   readonly captures: readonly string[]
   /**
    * Which entry points this runtime's code has to the outside world (see
@@ -295,7 +296,7 @@ export abstract class Runtime<E = unknown> {
       endsLine(node)
     )
       shell.oneCommand = true
-    if (shell.take(machine, this.name, instance, command, fd, argv)) return run(ctx)
+    if (shell.take(machine, instance, command, fd, argv)) return run(ctx)
     const stop = new AbortController()
     const signal =
       ctx.signal === undefined ? stop.signal : AbortSignal.any([ctx.signal, stop.signal])
@@ -316,7 +317,7 @@ export abstract class Runtime<E = unknown> {
         parent: shell.record.id.pid,
         limit: session.processes.max,
         machine,
-        runtime: this.name,
+        program: true,
         stdin,
         fd,
         argv,
@@ -461,6 +462,3 @@ export abstract class Runtime<E = unknown> {
     await this.closeEngine(engine)
   }
 }
-
-/** A workspace runtimes-list entry: an instance or a name shorthand. */
-export type RuntimeEntry = Runtime | string

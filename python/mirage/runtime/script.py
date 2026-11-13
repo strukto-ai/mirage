@@ -43,8 +43,8 @@ def script_engine(
     Args:
         script (ScriptSource): the program, carrying its language.
         runtime (str): the runtime the config named.
-        config (Mapping[str, Any] | None): its settings, the ``config``
-            block a ``runtimes`` entry carries.
+        config (Mapping[str, Any] | None): its settings, the fields a
+            machine entry gives its engine.
 
     Raises:
         ValueError: the named runtime is unknown, runs no programs,

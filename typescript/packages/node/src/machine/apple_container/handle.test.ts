@@ -27,7 +27,6 @@ import { isLineExecutor, isProcessExecutor } from '@struktoai/mirage-core/runtim
 import { describe, expect, it, vi } from 'vitest'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import type { Route, RouteContext } from '@struktoai/mirage-core/policy/types'
-import { RemoteRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
 import type { AppleContainerConfig } from './config.ts'
 import { AppleContainerMachine } from './handle.ts'
 import { Workspace } from '../../workspace.ts'
@@ -360,15 +359,20 @@ class OwnBox implements Policy {
 
 it('gives each session a container of its own through a route', async () => {
   const boxes = {
-    agent_a: new FakeAppleContainerMachine('agent_a', { container: 'box-agent_a' }),
-    agent_b: new FakeAppleContainerMachine('agent_b', { container: 'box-agent_b' }),
+    agent_a: new FakeAppleContainerMachine('agent_a', {
+      container: 'box-agent_a',
+      captures: ['uname'],
+    }),
+    agent_b: new FakeAppleContainerMachine('agent_b', {
+      container: 'box-agent_b',
+      captures: ['uname'],
+    }),
   }
   const ws = new Workspace(
     { '/d': new RAMVFS() },
     {
       mode: MountMode.EXEC,
       machines: boxes,
-      runtimes: [new RemoteRuntime({ captures: ['uname'] }), 'workspace'],
       policies: [new OwnBox()],
     },
   )

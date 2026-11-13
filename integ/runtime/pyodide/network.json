@@ -3,10 +3,12 @@
     {
       "id": "guest_sockets_refuse",
       "world": {
-        "runtimes": [
-          "pyodide",
-          "workspace"
-        ]
+        "machines": {
+          "pyodide": {
+            "provider": "in_process",
+            "runtime": "pyodide"
+          }
+        }
       },
       "hosts": [
         "typescript"

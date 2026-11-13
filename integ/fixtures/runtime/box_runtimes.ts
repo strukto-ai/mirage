@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 // The typed twin of box_runtimes.mjs, loaded through Node's own type
-// stripping (`runtimes: [{name: ./box_runtimes.ts:EchoBox}]`), so it uses
+// stripping (`machines: {box: {runtime: ./box_runtimes.ts:EchoBox}}`), so it uses
 // only erasable syntax: no enums, no parameter properties.
 import {
   type Context,

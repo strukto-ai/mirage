@@ -673,7 +673,7 @@ def restricted(runtime, profile):
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
         profiles={"agent": profile},
-        **on(runtime, "workspace"),
+        **on(runtime),
     )
 
 

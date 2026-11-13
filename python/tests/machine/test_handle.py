@@ -94,7 +94,7 @@ async def test_version_commands_reach_the_remote_environment(line):
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        **on(box, "workspace"),
+        **on(box),
     )
     try:
         io = await ws.shell(line)
@@ -179,7 +179,7 @@ async def test_first_line_connects_once():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        **on(box, "workspace"),
+        **on(box),
     )
     try:
         io = await ws.shell("python3 x")
@@ -204,7 +204,7 @@ async def test_failed_connect_retries_on_the_next_line():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        **on(box, "workspace"),
+        **on(box),
     )
     try:
         io = await ws.shell("python3 x")
@@ -224,7 +224,7 @@ async def test_a_handle_another_workspace_takes_connects_again():
         ws = Workspace(
             {"/data": RAMVFS()},
             mode=MountMode.EXEC,
-            **on(box, "workspace"),
+            **on(box),
         )
         try:
             assert (await ws.shell("python3 x")).exit_code == 0
@@ -253,7 +253,7 @@ async def test_stdin_bytes_reach_exec_line():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        **on(box, "workspace"),
+        **on(box),
     )
     try:
         await ws.shell("wc -l", stdin=b"a\nb\n")
@@ -292,7 +292,7 @@ async def test_line_timeout_answers_124():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        **on(box, "workspace"),
+        **on(box),
         command_limits={"@line": Limit(timeout_seconds=0.05)},
     )
     try:
@@ -562,7 +562,7 @@ async def test_line_output_caps_truncate_with_notice():
     ws = Workspace(
         {"/data": (RAMVFS(), MountMode.EXEC, guards)},
         mode=MountMode.EXEC,
-        **on(box, "workspace"),
+        **on(box),
     )
     try:
         io = await ws.shell("python3 train.py")
@@ -579,7 +579,7 @@ async def test_remote_line_invalidates_local_read_caches():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        **on(box, "workspace"),
+        **on(box),
     )
     try:
         mount = next(m for m in ws._registry.mounts() if m.prefix == "/data/")
@@ -636,7 +636,7 @@ async def test_a_program_gets_the_system_time_through_the_sandboxs_libfaketime(
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        **on(box, "workspace"),
+        **on(box),
         system_time=system_time,
     )
     try:
@@ -686,7 +686,7 @@ async def test_a_machine_is_asked_once_and_again_after_a_failed_probe():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        **on(box, "workspace"),
+        **on(box),
         system_time="2026-03-02T09:00:00Z",
     )
     try:
@@ -786,7 +786,7 @@ async def test_the_pid_line_gives_the_programs_pid_once(joined, stdout):
     try:
         io = await ws.shell("train")
         assert await materialize(io.stdout) == stdout
-        [program] = [p for p in await ws.processes() if p.runtime]
+        [program] = [p for p in await ws.processes() if p.program]
         assert program.machine_pid is not None
         assert program.machine_pid.pid == 812
         assert program.machine_instance == "box"

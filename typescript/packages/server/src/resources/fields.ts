@@ -19,7 +19,14 @@ import { knownProviders, machineClass } from '@struktoai/mirage-core/machine/reg
 import type { EntryKind } from '@struktoai/mirage-core/resources/types'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { SECRET_CONFIG_FIELDS } from '@struktoai/mirage-core/runtime/constants'
-import { knownRuntimes, runtimeClass } from '@struktoai/mirage-core/runtime/table'
+import {
+  HOST,
+  IN_PROCESS,
+  inProcessRuntimes,
+  knownRuntimes,
+  runtimeClass,
+  WORKER,
+} from '@struktoai/mirage-core/runtime/table'
 import { normalizedKey } from '@struktoai/mirage-core/utils/normalize'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { FIELD_NORMALIZERS, z } from '@struktoai/mirage-core/vfs/secrets'
@@ -173,19 +180,27 @@ function configTypes(configFields: ConfigFields): Field[] {
   return fields
 }
 
-/** Every registered runtime, with the fields its config takes. */
-function runtimeTypes(): TypeTable {
-  const out: TypeTable = {}
-  for (const name of knownRuntimes()) out[name] = configTypes(runtimeClass(name).configFields)
-  return out
-}
-
-/** Every machine provider, with the fields its config takes. */
+/**
+ * Every machine provider and engine provider, with its fields: a worker
+ * where monty runs on one, a host where this host registers its own
+ * programs.
+ */
 function machineTypes(): TypeTable {
-  const out: TypeTable = {}
+  const captures: Field = { name: 'captures', type: 'list', secret: false, required: false }
+  const inProcess = inProcessRuntimes()
+  const out: TypeTable = {
+    [IN_PROCESS]: [
+      { name: 'runtime', type: 'string', secret: false, required: true, options: inProcess },
+      captures,
+    ],
+  }
+  if (!inProcess.includes('monty'))
+    out[WORKER] = [...configTypes(runtimeClass('monty').configFields), captures]
+  if (knownRuntimes().includes('local'))
+    out[HOST] = [...configTypes(runtimeClass('local').configFields), captures]
   for (const provider of knownProviders())
     out[provider] = configTypes(machineClass(provider).configFields)
-  return out
+  return Object.fromEntries(Object.entries(out).sort(([a], [b]) => compareCodePoints(a, b)))
 }
 
 /**
@@ -199,7 +214,6 @@ export async function typesOf(
 ): Promise<TypeTable> {
   if (kind === 'vfs') return vfsTypes(host.vfsSchemas)
   if (kind === 'cli') return cliTypes()
-  if (kind === 'runtime') return runtimeTypes()
   if (kind === 'machine') return machineTypes()
   throw new Error(`${kind} entries have no types`)
 }

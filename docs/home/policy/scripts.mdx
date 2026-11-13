@@ -13,7 +13,7 @@ Two places take a program:
 | Where | Asked | Answers |
 | --- | --- | --- |
 | a profile's `policy:` | at `pre_execute`, `pre_command`, `pre_vfs` and `pre_network` before the action, and at their `post_` four after it, for the sessions under that profile | deny or ask; a route at `pre_execute`; nothing at `post_network`, which observes |
-| [`route_policy:`](/home/policy/route-runtime) | at `pre_execute`, for every session | a route, or a deny or ask |
+| [`route_policy:`](/home/policy/route-machine) | at `pre_execute`, for every session | a route, or a deny or ask |
 | a server's [policy file](/home/access/http#server-policies) | at the same methods for every session of every workspace it builds, and at `pre_workspace` before it builds one | as a profile's; a deny only at `pre_workspace` |
 
 A server's programs read no workspace files: at `pre_workspace` the
@@ -51,8 +51,7 @@ mirage workspace delete policy-demo
 ```
 
 Each entry names its program and its runtime: a name, or `{name, config}`
-when the runtime needs settings, as in a `runtimes` entry. An entry with no
-`runtime` runs on monty. A method's
+when the runtime needs settings. An entry with no `runtime` runs on monty. A method's
 programs are asked in order, up to the first deny, and each answer counts
 as if a policy of its own gave it
 ([when answers disagree](/home/policy/policies#when-answers-disagree)):
@@ -109,7 +108,7 @@ about, with the reason `defines no pre_command(ctx)`.
 | `None` | no opinion |
 | `{"kind": "deny", "reason": "..."}` | refuses |
 | `{"kind": "ask", "reason": "..."}` | [asks the host](/home/policy/policies#asks) |
-| `{"kind": "route", "runtime": "docker"}` | at `pre_execute`: runs the line on that runtime |
+| `{"kind": "route", "machine": "docker"}` | at `pre_execute` and `pre_command`: runs the line, or the command, on that machine |
 
 A deny or an ask without a `reason` gets the default one. A route may give
 one too, which `explain` shows.

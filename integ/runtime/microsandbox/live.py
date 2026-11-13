@@ -27,7 +27,6 @@ from pathlib import Path
 from mirage import RAMVFS, MountMode, PathSpec, Workspace
 from mirage.commands.config import Context
 from mirage.machine.microsandbox import MicrosandboxMachine
-from mirage.runtime.machine import RemoteRuntime
 
 SANDBOX = os.environ["MIRAGE_E2E_SANDBOX"]
 GUEST = "/e2e-guest"
@@ -131,16 +130,17 @@ async def mode_checks(mode):
     if mode == "both":
         mounts[GUEST] = RAMVFS()
     runtime = MicrosandboxMachine(
-        "msb", {"sandbox": SANDBOX, "mount_type": mode}
+        "msb",
+        {
+            "sandbox": SANDBOX,
+            "mount_type": mode,
+            "captures": ["python3", "dash", "sleep"],
+        },
     )
     ws = Workspace(
         mounts,
         mode=MountMode.EXEC,
         machines={"msb": runtime},
-        runtimes=[
-            RemoteRuntime(["python3", "dash", "sleep"], machine="msb"),
-            "workspace",
-        ],
         profiles={"hidden": {"paths": {"hide": [prefix + "/secret.txt"]}}},
     )
     agent = await ws.session(
@@ -331,10 +331,14 @@ async def cycles():
             mode=MountMode.EXEC,
             machines={
                 "msb": MicrosandboxMachine(
-                    "msb", {"sandbox": SANDBOX, "mount_type": "ssh"}
+                    "msb",
+                    {
+                        "sandbox": SANDBOX,
+                        "mount_type": "ssh",
+                        "captures": ["python3"],
+                    },
                 )
             },
-            runtimes=[RemoteRuntime(["python3"], machine="msb"), "workspace"],
         )
         try:
             result = await ws.shell("python3 -c 'print(\"cycle\")'")
@@ -465,10 +469,14 @@ async def missing_fuse_device():
         mode=MountMode.EXEC,
         machines={
             "msb": MicrosandboxMachine(
-                "msb", {"sandbox": SANDBOX, "mount_type": "ssh"}
+                "msb",
+                {
+                    "sandbox": SANDBOX,
+                    "mount_type": "ssh",
+                    "captures": ["python3"],
+                },
             )
         },
-        runtimes=[RemoteRuntime(["python3"], machine="msb"), "workspace"],
     )
     moved = await raw(
         "test -c /dev/fuse && test ! -e /dev/fuse-mirage-e2e && "

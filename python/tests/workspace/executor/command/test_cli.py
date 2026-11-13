@@ -442,7 +442,7 @@ async def drained(*args, **kwargs):
 
 
 def script_install(
-    runtime: str | None = None,
+    machine: str | None = None,
     config: dict | None = None,
     language: str = "python",
     options: tuple[Argument, ...] = (),
@@ -450,7 +450,7 @@ def script_install(
     spec = CLI(
         spec=CommandSpec(name="pager", arguments=(*options,)),
         script=ScriptSource("print('hi')", language=language),
-        runtime=runtime,
+        machine=machine,
     )
     return CLIInstall(name="pager", cli=spec, config=config)
 
@@ -660,7 +660,7 @@ async def test_script_runtime_pin_is_honored():
     # The pin overrides first-match: the named entry runs the script
     # even when an earlier entry speaks the same language.
     first, pinned = FakePyRuntime(), OtherPyRuntime()
-    install = script_install(runtime="otherpy")
+    install = script_install(machine="otherpy")
     _, io, _ = await drained(
         install,
         ["pager"],
@@ -714,7 +714,7 @@ async def test_script_runs_where_python3_is_bound_with_no_route_policy():
     first, second = TierPyRuntime("first"), TierPyRuntime("second")
     first.captures = ()
     ws = Workspace(
-        {"/ram": RAMVFS()}, mode=MountMode.EXEC, runtimes=[first, second]
+        {"/ram": RAMVFS()}, mode=MountMode.EXEC, machines=[first, second]
     )
     ws.register_cli("pager", script_install().cli)
     result = await ws.shell("pager")
@@ -756,7 +756,7 @@ async def test_script_is_refused_where_the_line_runs_python3_without_python():
         ),
     )
     assert io.exit_code == 127
-    assert io.stderr == b"pager: runtime 'box' does not run python scripts\n"
+    assert io.stderr == b"pager: machine 'box' does not run python scripts\n"
     assert py.seen == []
 
 
@@ -779,14 +779,14 @@ async def test_script_runs_on_the_first_entry_where_the_workspace_serves_python3
 async def test_script_unknown_pin_exits_127():
     py = FakePyRuntime()
     _, io, node = await handle_cli(
-        script_install(runtime="local"),
+        script_install(machine="local"),
         ["pager"],
         SessionState("t"),
         context=CLIContext(entries=[py]),
     )
     assert io.exit_code == 127
     assert io.stderr == (
-        b"pager: unknown runtime: 'local' (workspace runtimes: 'fakepy')\n"
+        b"pager: unknown machine: 'local' (workspace machines: 'fakepy')\n"
     )
     assert node.exit_code == 127
     assert py.seen == []
@@ -796,14 +796,14 @@ async def test_script_unknown_pin_exits_127():
 async def test_script_pin_language_mismatch_exits_127():
     js = FakeJsRuntime()
     _, io, _ = await handle_cli(
-        script_install(runtime="fakejs"),
+        script_install(machine="fakejs"),
         ["pager"],
         SessionState("t"),
         context=CLIContext(entries=[js]),
     )
     assert io.exit_code == 127
     assert io.stderr == (
-        b"pager: runtime 'fakejs' does not run python scripts\n"
+        b"pager: machine 'fakejs' does not run python scripts\n"
     )
     assert js.seen == []
 
@@ -819,8 +819,8 @@ async def test_script_no_language_match_exits_127():
     )
     assert io.exit_code == 127
     assert io.stderr == (
-        b"pager: no workspace runtime runs js scripts "
-        b"(workspace runtimes: 'fakepy')\n"
+        b"pager: no workspace machine runs js scripts "
+        b"(workspace machines: 'fakepy')\n"
     )
 
 
@@ -829,8 +829,8 @@ async def test_script_outside_a_workspace_exits_127():
     _, io, _ = await handle_cli(script_install(), ["pager"], SessionState("t"))
     assert io.exit_code == 127
     assert io.stderr == (
-        b"pager: no workspace runtime runs python scripts "
-        b"(workspace runtimes: none)\n"
+        b"pager: no workspace machine runs python scripts "
+        b"(workspace machines: none)\n"
     )
 
 

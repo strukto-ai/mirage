@@ -51,14 +51,10 @@ class RouteDecision(Generic[_R]):
         fallback (_R | None): where commands no entry captures run:
             the catch-all workspace runtime, or None when the workspace
             runtime declares captures; unbound commands then exit 126.
-        machine (str | None): the machine the remote runtime runs what
-            it serves on, by its ``machines:`` name, when the placement
-            names one; None leaves each native entry on its own.
     """
 
     bindings: Mapping[str, _R | None] = field(default_factory=dict)
     fallback: _R | None = None
-    machine: str | None = None
 
 
 # The languages a runtime can interpret. A Literal, not str, so a typo is

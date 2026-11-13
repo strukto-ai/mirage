@@ -29,7 +29,9 @@ from mirage.core.mcp.config import MCPConfig
 from mirage.machine.registry import known_providers, machine_class
 from mirage.resources.types import EntryKind
 from mirage.runtime.constants import SECRET_CONFIG_FIELDS
-from mirage.runtime.table import known_runtimes, runtime_class
+from mirage.runtime.python.local import LocalRuntime
+from mirage.runtime.python.monty import MontyRuntime
+from mirage.runtime.table import HOST, IN_PROCESS, WORKER, in_process_runtimes
 from mirage.server.resources.types import Field, FieldType, TypeTable
 from mirage.vfs.registry import known_vfs_names, resolve_class, resolve_entry
 from mirage.vfs.secrets import secret_field_names
@@ -156,10 +158,10 @@ def model_fields(model: type[BaseModel]) -> list[Field]:
 
 
 def dataclass_fields(config: type) -> list[Field]:
-    """A runtime config dataclass's fields, its credentials secret.
+    """A config dataclass's fields, its credentials secret.
 
     Args:
-        config (type): the runtime's ``config_cls``.
+        config (type): an engine's or a machine's ``config_cls``.
     """
     hints = typing.get_type_hints(config)
     out: list[Field] = []
@@ -233,22 +235,24 @@ def cli_types() -> TypeTable:
     return dict(sorted(out.items()))
 
 
-def runtime_types() -> TypeTable:
-    """Every registered runtime, with its config's fields."""
-    out: TypeTable = {}
-    for name in known_runtimes():
-        try:
-            cls = runtime_class(name)
-        except ImportError as e:
-            logger.debug("runtime %s is not installed: %s", name, e)
-            continue
-        out[name] = dataclass_fields(cls.config_cls)
-    return out
-
-
 def machine_types() -> TypeTable:
-    """Every machine provider, with its config's fields."""
-    out: TypeTable = {}
+    """Every machine provider and engine provider, with its fields."""
+    captures = described("captures", ("list", None), False, False, None, None)
+    out: TypeTable = {
+        IN_PROCESS: [
+            described(
+                "runtime",
+                ("string", in_process_runtimes()),
+                False,
+                True,
+                None,
+                None,
+            ),
+            captures,
+        ],
+        WORKER: [*dataclass_fields(MontyRuntime.config_cls), captures],
+        HOST: [*dataclass_fields(LocalRuntime.config_cls), captures],
+    }
     for provider in known_providers():
         try:
             cls = machine_class(provider)
@@ -256,13 +260,12 @@ def machine_types() -> TypeTable:
             logger.debug("machine %s is not installed: %s", provider, e)
             continue
         out[provider] = dataclass_fields(cls.config_cls)
-    return out
+    return dict(sorted(out.items()))
 
 
 TYPES = {
     "vfs": vfs_types,
     "cli": cli_types,
-    "runtime": runtime_types,
     "machine": machine_types,
 }
 

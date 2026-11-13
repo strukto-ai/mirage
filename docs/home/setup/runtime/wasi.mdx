@@ -30,7 +30,7 @@ Point `home`, or `MIRAGE_WASI_HOME`, at the unzipped directory.
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[WasiRuntime(config={"home": "/path/to/build"})],
+        machines={"py": WasiRuntime(config={"home": "/path/to/build"})},
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
@@ -38,10 +38,11 @@ Point `home`, or `MIRAGE_WASI_HOME`, at the unzipped directory.
   <Tab title="YAML" icon="file-code">
     ```yaml
     mode: exec
-    runtimes:
-      - name: wasi
-        config:
-          home: /path/to/build
+    machines:
+      py:
+        provider: in_process
+        runtime: wasi
+        home: /path/to/build
     mounts:
       /data:
         vfs: ram
@@ -54,11 +55,12 @@ Point `home`, or `MIRAGE_WASI_HOME`, at the unzipped directory.
 `max_memory` caps the memory one run may grow to:
 
 ```yaml
-runtimes:
-  - name: wasi
-    config:
-      home: /path/to/build
-      max_memory: 256M
+machines:
+  py:
+    provider: in_process
+    runtime: wasi
+    home: /path/to/build
+    max_memory: 256M
 ```
 
 A run that needs more raises `MemoryError`. CPython starts at about 40M, so

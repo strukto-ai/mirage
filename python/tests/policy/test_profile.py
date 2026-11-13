@@ -1597,7 +1597,7 @@ async def test_a_whole_line_runtime_is_gated_like_the_tree():
         {"/repo/": (RAMVFS(), MountMode.WRITE)},
         mode=MountMode.WRITE,
         profiles={"default": COMMANDS_DOC, "reviewer": REVIEWER_COMMANDS},
-        runtimes=[box, "workspace"],
+        machines=[box],
     )
     ws.register_cli("git", cli_spec_for("git"))
     try:
@@ -1667,7 +1667,7 @@ async def test_a_post_command_program_holds_only_its_own_sessions_lines():
         {"/repo/": (RAMVFS(), MountMode.WRITE)},
         mode=MountMode.WRITE,
         profiles={"after": _after_echo()},
-        runtimes=[box, "workspace"],
+        machines=[box],
     )
     try:
         assert await _line(ws, "cat /repo/a") == (0, "box:cat /repo/a", "")
@@ -1724,7 +1724,7 @@ async def test_a_whole_line_runtime_reads_only_literal_words():
         {"/repo/": (RAMVFS(), MountMode.WRITE)},
         mode=MountMode.WRITE,
         profiles={"default": LITERAL_DOC},
-        runtimes=[box, "workspace"],
+        machines=[box],
     )
     ws.register_cli("git", cli_spec_for("git"))
     try:

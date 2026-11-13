@@ -173,7 +173,7 @@ function abortable(command: string): {
 
 /** A published process that ran a program on `machine`. */
 function ran(pid: number, machine = 'docker:t'): Record<string, unknown> {
-  return { pid, session: 's', machine, runtime: 'x' }
+  return { pid, session: 's', machine, program: true }
 }
 
 describe('JobTable.submit', () => {
@@ -1654,7 +1654,7 @@ describe('JobTable process plane', () => {
     await until(async () => a.daemon in (await b.remoteProcesses()))
     const record = (await b.remoteProcesses())[a.daemon]?.[String(job.pid)]
     expect([record?.command, record?.session]).toEqual(['sleep 30', 's'])
-    expect([record?.runtime, record?.machine_pid]).toEqual([null, null])
+    expect([record?.program, record?.machine_pid]).toEqual([false, null])
     expect(Math.abs((record?.seen_at as number) - Date.now() / 1000)).toBeLessThan(5)
     expect(await a.remoteProcesses()).toEqual({})
     expect(await a.kill(job.id, 's')).toBe(true)
@@ -1789,7 +1789,7 @@ describe('JobTable process plane', () => {
         seen_at: 5,
       }
       const box = ran(3)
-      const shell = { pid: 4, session: 's', runtime: null }
+      const shell = { pid: 4, session: 's', program: false }
       await store.publish('dead', { '2': host, '3': box, '4': shell })
       const stopped: [unknown, number][] = []
       const b = new JobTable(store)

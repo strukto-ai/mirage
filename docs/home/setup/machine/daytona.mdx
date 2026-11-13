@@ -5,8 +5,8 @@ description: Run captured programs in a Daytona cloud sandbox you created.
 ---
 
 The `daytona` machine provider reaches a running
-[Daytona](https://www.daytona.io) sandbox, by ID, and the `remote` runtime
-runs captured programs in it. You create and size the
+[Daytona](https://www.daytona.io) sandbox, by ID, and runs the programs it
+captures in it. You create and size the
 sandbox; Mirage only runs programs in it. Python SDK and Node.
 
 ## Installation
@@ -38,27 +38,24 @@ Python in the sandbox too.
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.runtime.machine import RemoteRuntime
 
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        machines={"box": {"provider": "daytona", "sandbox_id": "sandbox-id"}},
-        runtimes=[RemoteRuntime(["@python", "@external"], machine="box")],
+        machines={"box": {"provider": "daytona", "sandbox_id": "sandbox-id", "captures": ["@python", "@external"]}},
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { MountMode, RemoteRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        machines: { box: { provider: 'daytona', sandboxId: 'sandbox-id' } },
-        runtimes: [new RemoteRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+        machines: { box: { provider: 'daytona', sandboxId: 'sandbox-id', captures: ['@python', '@external'] } },
       },
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
@@ -71,10 +68,7 @@ Python in the sandbox too.
       box:
         provider: daytona
         sandbox_id: ${DAYTONA_SANDBOX_ID}
-    runtimes:
-      - name: remote
         captures: ["@python", "@external"]
-        machine: box
     mounts:
       /data:
         vfs: ram

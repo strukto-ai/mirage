@@ -50,20 +50,20 @@ Without it, `WasiRuntime(...)` raises `ImportError`.
 
 ## Managing runtimes in code
 
-`Workspace(runtimes=[...])` takes names and runtime objects, and adds
-`workspace` when the list leaves it out. On a live workspace, `add_runtime`
-appends an entry (one that runs on a machine goes after the last such entry,
-else ahead of Monty and QuickJS),
-`remove_runtime` takes one out, and `runtimes()` lists them:
+`Workspace(machines={...})` takes machine entries, runtime objects and
+machine handles by name. On a live workspace, `add_machine` adds a runtime's
+machine, `remove_machine` takes one out, and
+`engines()` lists them. A machine provider's machine, such as docker, is
+declared when the workspace is built:
 
 ```python
 from mirage.runtime.python import WasiRuntime
 
-await ws.remove_runtime("monty")
-ws.add_runtime(WasiRuntime(config={"home": "/opt/cpython-wasi"}))
+await ws.remove_machine("monty")
+ws.add_machine("py", WasiRuntime(config={"home": "/opt/cpython-wasi"}))
 ```
 
-`python3` moves to the new runtime at once. A running line finishes before
+`python3` moves to the new machine at once. A running line finishes before
 its removed runtime closes, a removed instance cannot be added again, and
 `workspace` cannot be removed. `register_runtime(name, cls)` makes your own
 runtime class available by name in YAML.

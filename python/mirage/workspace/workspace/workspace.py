@@ -93,7 +93,6 @@ from mirage.io.memory import MAX_BODY_BYTES, MAX_MEMORY, MemoryBudget
 from mirage.io.network import NetworkSetting, network_rule, run_with_network
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
-from mirage.machine.handle import MachineHandle
 from mirage.machine.program import (
     host_resources,
     scan_host,
@@ -132,7 +131,12 @@ from mirage.runtime.binding import (
 )
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.routing import RouteRule
-from mirage.runtime.table import whole_line_runtime
+from mirage.runtime.table import (
+    MachineSpec,
+    MachineSpecs,
+    split_machines,
+    whole_line_runtime,
+)
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.secrets.config import EnvVar, SecretSource
 from mirage.secrets.errors import SecretsError
@@ -358,9 +362,7 @@ class Workspace:
         observe: ObserverStore | None = None,
         namespace_store: NamespaceStore | None = None,
         session_store: NamespaceStore | None = None,
-        runtimes: list[Runtime[Any] | str] | None = None,
-        machines: Mapping[str, MachineHandle | Mapping[str, Any]]
-        | None = None,
+        machines: MachineSpecs | None = None,
         route_policy: RouteRule | None = None,
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
         | None = None,
@@ -672,8 +674,9 @@ class Workspace:
             self._sandbox_mounts,
             self.process_table,
         )
+        handles, entries = split_machines(machines)
         self.machine_table = MachineTable(
-            machines, scan_host, signal_host, stop_host_run, host_resources
+            handles, scan_host, signal_host, stop_host_run, host_resources
         )
         self._wire_machines()
         if route_policy is not None:
@@ -683,7 +686,7 @@ class Workspace:
         self._runtimes = Runtimes(
             self._registry, self._runtime_binding, self.machine_table
         )
-        self._runtimes.resolve(runtimes)
+        self._runtimes.resolve(entries)
         self._router = Router(self._registry, self._runtimes)
 
         self._start_installs(clis, specs)
@@ -1031,7 +1034,7 @@ class Workspace:
                         ),
                     )
                     if whole_line
-                    else ("", "")
+                    else ""
                 ),
                 whole_line,
                 aliases,
@@ -1059,7 +1062,7 @@ class Workspace:
         if isinstance(placed, (Deny, Pending)):
             refused = placement_refused(placed, line)
             said = explained_line(
-                line, judged, verdicts, lambda one: ("", ""), aliases=aliases
+                line, judged, verdicts, lambda one: "", aliases=aliases
             )
             return dataclasses.replace(
                 said,
@@ -1665,7 +1668,6 @@ class Workspace:
                     env=None,
                     cancel=None,
                     record=True,
-                    runtime=None,
                     routing_decision=None,
                     argv=argv,
                     sink=output,
@@ -1701,30 +1703,33 @@ class Workspace:
 
         return ChildProcess(process, input_stream, output, cancel)
 
-    def runtimes(self) -> list[Runtime[Any]]:
-        """The ordered runtime world, first capturer first."""
+    def engines(self) -> list[Runtime[Any]]:
+        """The engine each machine runs, first capturer first, each
+        named for its machine."""
         return list(self._runtimes.entries)
 
-    def add_runtime(self, runtime: Runtime[Any] | str) -> Runtime[Any]:
-        """Add a runtime entry to the workspace's ordered set;
+    def add_machine(self, name: str, spec: MachineSpec) -> Runtime[Any]:
+        """Add a machine to the workspace's ordered set;
         ``Runtimes.add`` places it.
 
         Args:
-            runtime (Runtime | str): a Runtime instance or a registry
-                runtime name (built like a config entry).
+            name (str): the machine's name.
+            spec (MachineSpec): an engine, or the entry as YAML spells
+                it (``{provider: worker}``).
 
         Raises:
-            ValueError: unknown name or duplicate entry.
+            ValueError: an entry ``build_entry`` refuses, a machine
+                provider, or a duplicate name.
         """
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
-        return self._runtimes.add(runtime)
+        return self._runtimes.add(name, spec)
 
-    async def remove_runtime(self, name: str) -> None:
-        """Remove a runtime entry, closing it once its runs finish.
+    async def remove_machine(self, name: str) -> None:
+        """Remove a machine, closing its engine once its runs finish.
 
         Args:
-            name (str): the entry's name; ``workspace`` is permanent.
+            name (str): the machine's name; ``workspace`` is permanent.
         """
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
@@ -2114,9 +2119,7 @@ class Workspace:
         clis: CLIOverrides | None = None,
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
         drift_policy: DriftPolicy = DriftPolicy.STRICT,
-        runtimes: list[Runtime[Any] | str] | None = None,
-        machines: Mapping[str, MachineHandle | Mapping[str, Any]]
-        | None = None,
+        machines: MachineSpecs | None = None,
         policies: list[Policy] | None = None,
         policy_functions: Mapping[str, Callable[..., Any]] | None = None,
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
@@ -2168,12 +2171,9 @@ class Workspace:
                 cache entries for fingerprinted paths; a Redis cache is
                 never restored from a snapshot, so it has nothing to
                 drop.
-            runtimes (list[Runtime[Any] | str] | None): the runtimes to
-                build the workspace with; a snapshot carries none, so a
-                profile policy naming one needs it here.
-            machines (Mapping[str, MachineHandle | Mapping[str, Any]] |
-                None): the machines its programs run on, by name; a
-                snapshot carries none.
+            machines (MachineSpecs | None): the machines to build the
+                workspace with; a snapshot carries none, so a profile
+                policy or route naming one needs it here.
             policies (list[Policy] | None): the coded policies to
                 register, as the constructor takes them. A snapshot
                 carries none, and the restored session tables are
@@ -2226,7 +2226,6 @@ class Workspace:
                 clis=clis,
                 secrets=secrets,
                 drift_policy=drift_policy,
-                runtimes=runtimes,
                 machines=machines,
                 policies=policies,
                 policy_functions=policy_functions,
@@ -2248,9 +2247,7 @@ class Workspace:
         clis: CLIOverrides | None = None,
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
         drift_policy: DriftPolicy = DriftPolicy.STRICT,
-        runtimes: list[Runtime[Any] | str] | None = None,
-        machines: Mapping[str, MachineHandle | Mapping[str, Any]]
-        | None = None,
+        machines: MachineSpecs | None = None,
         policies: list[Policy] | None = None,
         policy_functions: Mapping[str, Callable[..., Any]] | None = None,
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
@@ -2283,12 +2280,9 @@ class Workspace:
                 cache entries for fingerprinted paths; a Redis cache is
                 never restored from a snapshot, so it has nothing to
                 drop.
-            runtimes (list[Runtime[Any] | str] | None): the runtimes to
-                build the workspace with; a snapshot carries none, so a
-                profile policy naming one needs it here.
-            machines (Mapping[str, MachineHandle | Mapping[str, Any]] |
-                None): the machines its programs run on, by name; a
-                snapshot carries none.
+            machines (MachineSpecs | None): the machines to build the
+                workspace with; a snapshot carries none, so a profile
+                policy or route naming one needs it here.
             policies (list[Policy] | None): the coded policies to
                 register, as the constructor takes them. A snapshot
                 carries none, and the restored session tables are
@@ -2319,7 +2313,6 @@ class Workspace:
             mounts=mounts,
             clis=clis,
             secrets=secrets,
-            runtimes=runtimes,
             machines=machines,
             policies=policies,
             policy_functions=policy_functions,
@@ -2378,14 +2371,13 @@ class Workspace:
         # first read with "unknown secrets source". Policy instances
         # and the route policy stay behind: a policy is a live host
         # object whose state two workspaces must not share, and the
-        # route names runtime instances the copy does not carry; the
-        # entries named by string are rebuilt. The policy functions
+        # route names machines the copy does not carry; the engines
+        # built from a machines: entry are rebuilt. The policy functions
         # travel, the host's code as a CLI's spec is.
-        named: list[Runtime[Any] | str] = [*self._runtimes.named()]
         return await type(self)._from_state(
             state,
             mounts=mounts,
-            runtimes=named,
+            machines=self._runtimes.specs(),
             clis=reusable_clis(self),
             secrets=self._declared_sources,
             policy_functions=self._policy_functions,
@@ -2403,9 +2395,7 @@ class Workspace:
         mounts: dict[str, Any] | None = None,
         clis: CLIOverrides | None = None,
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
-        runtimes: list[Runtime[Any] | str] | None = None,
-        machines: Mapping[str, MachineHandle | Mapping[str, Any]]
-        | None = None,
+        machines: MachineSpecs | None = None,
         policies: list[Policy] | None = None,
         policy_functions: Mapping[str, Callable[..., Any]] | None = None,
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
@@ -2442,7 +2432,6 @@ class Workspace:
             profile=args.profile if built_for_state else profile,
             processes=args.processes,
             ceilings=ceilings,
-            runtimes=runtimes,
             machines=machines,
             policies=policies,
             policy_functions=policy_functions,
@@ -3473,7 +3462,6 @@ class Workspace:
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
         record: bool = True,
-        runtime: str | None = None,
         routing_decision: RouteDecision[RuntimeIdentity] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
@@ -3496,7 +3484,6 @@ class Workspace:
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
         record: bool = True,
-        runtime: str | None = None,
         routing_decision: RouteDecision[RuntimeIdentity] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
@@ -3519,7 +3506,6 @@ class Workspace:
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
         record: bool = True,
-        runtime: str | None = None,
         routing_decision: RouteDecision[RuntimeIdentity] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
@@ -3541,7 +3527,6 @@ class Workspace:
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
         record: bool = True,
-        runtime: str | None = None,
         routing_decision: RouteDecision[RuntimeIdentity] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
@@ -3585,17 +3570,12 @@ class Workspace:
                 internal evaluations and available to SDK callers that
                 need an unrecorded run. Nested lines inherit the typed
                 line's routing decision and never re-route.
-            runtime: Explicit runtime for this line, naming a workspace
-                runtime entry. Stages the named runtime captures rebind
-                to it for this line only (nested evals inherit it);
-                everything else keeps its normal binding, so the
-                argument overrides policy, never capability. Raises
-                ValueError for a name that is not a workspace entry.
             machine: Explicit machine for this line, by its ``machines:``
-                name: the remote runtime runs what it serves on it, over
-                its entry's own machine, for this line only (nested evals
-                inherit it). Raises ValueError for a name that is not a
-                workspace machine.
+                name. Stages the machine captures rebind to it for this
+                line only (nested evals inherit it); everything else
+                keeps its normal binding, so the argument overrides
+                policy, never capability. Raises ValueError for a name
+                that is not a workspace machine.
             routing_decision: Internal. The typed line's routing decision,
                 forwarded by the executor's nested evals so inner
                 lines never re-route.
@@ -3646,7 +3626,6 @@ class Workspace:
                 env,
                 cancel,
                 record,
-                runtime,
                 routing_decision,
                 handed,
                 sink,
@@ -3654,6 +3633,7 @@ class Workspace:
                 line_handle,
                 job_table,
                 session=session,
+                machine=machine,
             )
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
@@ -3669,7 +3649,6 @@ class Workspace:
                 env,
                 stop,
                 record,
-                runtime,
                 routing_decision,
                 handed,
                 output,
@@ -3716,7 +3695,6 @@ class Workspace:
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
         record: bool = True,
-        runtime: str | None = None,
         routing_decision: RouteDecision[RuntimeIdentity] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
@@ -3764,7 +3742,6 @@ class Workspace:
                     env,
                     cancel,
                     record,
-                    runtime,
                     routing_decision,
                     handed,
                     frame,
@@ -3903,7 +3880,6 @@ class Session:
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
         record: bool = True,
-        runtime: str | None = None,
         *,
         stream: Literal[True],
         machine: str | None = None,
@@ -3918,7 +3894,6 @@ class Session:
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
         record: bool = True,
-        runtime: str | None = None,
         *,
         stream: Literal[False] = False,
         machine: str | None = None,
@@ -3933,7 +3908,6 @@ class Session:
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
         record: bool = True,
-        runtime: str | None = None,
         *,
         stream: bool,
         machine: str | None = None,
@@ -3947,7 +3921,6 @@ class Session:
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
         record: bool = True,
-        runtime: str | None = None,
         *,
         stream: bool = False,
         machine: str | None = None,
@@ -3964,8 +3937,7 @@ class Session:
                 an ephemeral clone of the session.
             cancel (asyncio.Event | None): abort signal.
             record (bool): whether the line enters history.
-            runtime (str | None): the runtime to route the line to.
-            machine (str | None): the machine to run the line on.
+            machine (str | None): the machine to route the line to.
             stream (bool): return bounded live events and a final status handle.
         """
         return await self._ws.shell(
@@ -3976,7 +3948,6 @@ class Session:
             env=env,
             cancel=cancel,
             record=record,
-            runtime=runtime,
             stream=stream,
             machine=machine,
         )

@@ -3,16 +3,15 @@
     {
       "id": "local_runs_a_captured_host_program",
       "world": {
-        "runtimes": [
-          {
-            "name": "local",
+        "machines": {
+          "local": {
+            "provider": "host",
             "captures": [
               "python3",
               "@external"
             ]
-          },
-          "workspace"
-        ],
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",
@@ -76,10 +75,11 @@
     {
       "id": "local_runs_only_python_unless_captured",
       "world": {
-        "runtimes": [
-          "local",
-          "workspace"
-        ]
+        "machines": {
+          "local": {
+            "provider": "host"
+          }
+        }
       },
       "steps": [
         {

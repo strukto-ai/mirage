@@ -3,7 +3,7 @@ import asyncio
 from functools import partial
 from pathlib import Path
 
-from utils import parse_runtime
+from utils import parse_machine
 
 from mirage import Workspace
 from mirage.config import load_config
@@ -16,7 +16,7 @@ async def main(model: str) -> None:
     config = load_config(HERE / "workspace.yaml")
     ws = Workspace(
         **config.to_workspace_kwargs(),
-        policy_functions={"parse_runtime": partial(parse_runtime, model)},
+        policy_functions={"parse_machine": partial(parse_machine, model)},
     )
     try:
         for line in (
@@ -28,7 +28,7 @@ async def main(model: str) -> None:
             print(f"  plan: {plan.outcome.value}")
             for answer in plan.answers:
                 where = (
-                    f" {answer.runtime}" if isinstance(answer, Route) else ""
+                    f" {answer.machine}" if isinstance(answer, Route) else ""
                 )
                 print(f"    {answer.kind}{where}: {answer.reason}")
                 print(f"      by {answer.policy}")

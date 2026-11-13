@@ -5,8 +5,8 @@ description: Run captured programs in a Cloudflare Container, from its Durable O
 ---
 
 The `cloudflare_container` machine provider reaches a
-[Cloudflare Container](https://developers.cloudflare.com/containers/), and
-the `remote` runtime runs captured programs in it. A container belongs to a
+[Cloudflare Container](https://developers.cloudflare.com/containers/),
+and runs the programs it captures in it. A container belongs to a
 Durable Object, which decides when it starts and stops. Mirage reaches it in
 one of two ways:
 
@@ -98,7 +98,6 @@ Point a machine at one:
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.runtime.machine import RemoteRuntime
 
     ws = Workspace(
         {"/data": RAMVFS()},
@@ -109,9 +108,9 @@ Point a machine at one:
                 "url": "https://mirage-relay.example.workers.dev/box",
                 "token": "relay-token",
                 "mount_type": "ssh",
+                "captures": ["@python", "@external"],
             }
         },
-        runtimes=[RemoteRuntime(["@python", "@external"], machine="box")],
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
@@ -119,7 +118,6 @@ Point a machine at one:
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
     import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
-    import { RemoteRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
 
     const ws = new Workspace(
       { '/data': new RAMVFS() },
@@ -131,9 +129,9 @@ Point a machine at one:
             url: 'https://mirage-relay.example.workers.dev/box',
             token: 'relay-token',
             mountType: 'ssh',
+            captures: ['@python', '@external'],
           },
         },
-        runtimes: [new RemoteRuntime({ captures: ['@python', '@external'], machine: 'box' })],
       },
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
@@ -168,7 +166,6 @@ running:
 ```typescript src/worker.ts
 import { DurableObject } from 'cloudflare:workers'
 import { ContainerMachine, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-cloudflare'
-import { RemoteRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
 
 export class WorkspaceObject extends DurableObject {
   private readonly ws = new Workspace(
@@ -176,14 +173,15 @@ export class WorkspaceObject extends DurableObject {
     {
       mode: MountMode.EXEC,
       machines: {
-        box: new ContainerMachine('box', { mountType: 'ssh' }, this.ctx.container, async () => {
-          if (!this.ctx.container?.running) this.ctx.container?.start({ enableInternet: false })
-        }),
+        box: new ContainerMachine(
+          'box',
+          { mountType: 'ssh', captures: ['@external', '@python', '@js'] },
+          this.ctx.container,
+          async () => {
+            if (!this.ctx.container?.running) this.ctx.container?.start({ enableInternet: false })
+          },
+        ),
       },
-      runtimes: [
-        new RemoteRuntime({ captures: ['@external', '@python', '@js'], machine: 'box' }),
-        'workspace',
-      ],
     },
   )
 

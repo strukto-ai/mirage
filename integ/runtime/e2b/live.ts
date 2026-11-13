@@ -17,7 +17,7 @@ import { createHash } from 'node:crypto'
 import { Workspace, SSHVFS, SSHMachine } from '@struktoai/mirage-node'
 import { Limit, MountMode, RAMVFS } from '@struktoai/mirage-core'
 import { E2BMachine } from '@struktoai/mirage-core/machine/e2b/handle'
-import { RemoteRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
+import type { MachineHandle } from '@struktoai/mirage-core/machine/handle'
 import { exerciseCancellation, runLine } from '../../fixtures/runtime/e2b_cancel.ts'
 
 const dec = new TextDecoder()
@@ -58,6 +58,13 @@ async function exercise(machine: E2BMachine | SSHMachine, label: string) {
   console.log(JSON.stringify({ check: label + '_stdin_eof_exit_parallel' }))
 }
 
+/** `machine`, capturing `captures` from here on: the live machine the checks share. */
+function capturing<T extends MachineHandle>(machine: T, ...captures: string[]): T {
+  const held = machine as { config: MachineHandle['config'] }
+  held.config = { ...held.config, captures }
+  return machine
+}
+
 const e2b = new E2BMachine('e2b', { sandboxId: process.env.E2B_SANDBOX_ID! })
 const sshConfig = {
   host: '127.0.0.1',
@@ -72,8 +79,7 @@ try {
     { '/home/user': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      machines: { e2b },
-      runtimes: [new RemoteRuntime({ captures: ['@line'], machine: 'e2b' }), 'workspace'],
+      machines: { e2b: capturing(e2b, '@line') },
       commandLimits: { '@line': new Limit({ timeoutSeconds: 5 }) },
     },
   )
@@ -88,8 +94,7 @@ try {
     { '/home/user/work': new SSHVFS({ ...sshConfig, root: '/home/user/work' }) },
     {
       mode: MountMode.EXEC,
-      machines: { ssh },
-      runtimes: [new RemoteRuntime({ captures: ['python3'], machine: 'ssh' }), 'workspace'],
+      machines: { ssh: capturing(ssh, 'python3') },
     },
   )
   try {

@@ -18,11 +18,8 @@ import logging
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
-from mirage.commands.config import Context
 from mirage.io.types import materialize
-from mirage.machine.registry import build_machine
 from mirage.runtime.base import Runtime
-from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.types import Program, RunResult
@@ -70,7 +67,7 @@ class Gate(Runtime, LineExecutorMixin):
 
 def workspace(*runtimes):
     return Workspace(
-        {"/": RAMVFS()}, mode=MountMode.EXEC, runtimes=[*runtimes, "workspace"]
+        {"/": RAMVFS()}, mode=MountMode.EXEC, machines=[*runtimes]
     )
 
 
@@ -89,11 +86,11 @@ async def test_swap_by_remove_then_add_and_a_removed_instance_stays_out():
     ws = workspace(alpha, beta)
     try:
         assert await python3(ws) == (0, b"alpha\n", b"")
-        await ws.remove_runtime("alpha")
+        await ws.remove_machine("alpha")
         assert await python3(ws) == (0, b"beta\n", b"")
         assert alpha.closed == 1
         with pytest.raises(ValueError, match="construct a new one"):
-            ws.add_runtime(alpha)
+            ws.add_machine(alpha.name, alpha)
     finally:
         await ws.close()
     assert alpha.closed == 1
@@ -107,7 +104,7 @@ async def test_remove_waits_for_a_running_line_before_closing():
     try:
         line = asyncio.create_task(python3(ws))
         await alpha.entered.wait()
-        removing = asyncio.create_task(ws.remove_runtime("alpha"))
+        removing = asyncio.create_task(ws.remove_machine("alpha"))
         await asyncio.sleep(0.01)
         assert not removing.done() and alpha.closed == 0
         alpha.release.set()
@@ -124,12 +121,12 @@ async def test_a_line_keeps_its_runtime_when_a_same_named_one_replaces_it():
     ws = workspace(gate, alpha)
     try:
         line = asyncio.create_task(
-            ws.shell("gate; python3 -c x", runtime="alpha")
+            ws.shell("gate; python3 -c x", machine="alpha")
         )
         await gate.entered.wait()
-        await ws.remove_runtime("alpha")
+        await ws.remove_machine("alpha")
         replacement = Engine("alpha")
-        ws.add_runtime(replacement)
+        ws.add_machine(replacement.name, replacement)
         gate.release.set()
         io = await line
         assert io.exit_code == 1
@@ -149,7 +146,7 @@ async def test_close_settles_a_removal_and_closes_the_runtime_once():
     ws = workspace(alpha)
     line = asyncio.create_task(python3(ws))
     await alpha.entered.wait()
-    removing = asyncio.create_task(ws.remove_runtime("alpha"))
+    removing = asyncio.create_task(ws.remove_machine("alpha"))
     await asyncio.sleep(0)
     await asyncio.wait_for(ws.close(), 5)
     assert line.cancelled()
@@ -164,7 +161,7 @@ async def test_a_cancelled_removal_still_reports_its_close_failure():
     ws = workspace(alpha)
     line = asyncio.create_task(python3(ws))
     await alpha.entered.wait()
-    removing = asyncio.create_task(ws.remove_runtime("alpha"))
+    removing = asyncio.create_task(ws.remove_machine("alpha"))
     await asyncio.sleep(0)
     removing.cancel()
     alpha.release.set()
@@ -221,8 +218,8 @@ async def test_an_added_sandbox_goes_after_the_last_sandbox_or_the_languages(
     ws = workspace(*listed)
     try:
         for entry in added:
-            ws.add_runtime(entry)
-        assert [r.name for r in ws.runtimes()] == order
+            ws.add_machine(entry.name, entry)
+        assert [r.name for r in ws.engines()] == order
     finally:
         await ws.close()
 
@@ -231,7 +228,7 @@ async def test_an_added_sandbox_goes_after_the_last_sandbox_or_the_languages(
 async def test_a_python3_captured_on_an_added_sandbox_wins():
     ws = workspace(Engine("monty"))
     try:
-        ws.add_runtime(Box("box", "python3"))
+        ws.add_machine("box", Box("box", "python3"))
         assert await python3(ws) == (0, b"box\n", b"")
     finally:
         await ws.close()
@@ -242,7 +239,7 @@ async def test_a_capture_that_never_wins_is_logged(caplog):
     caplog.set_level(logging.WARNING, logger="mirage.workspace.workspace")
     ws = workspace(Engine("a"), Engine("b"))
     try:
-        ws.add_runtime(Box("box", "python3"))
+        ws.add_machine("box", Box("box", "python3"))
         said = [r.getMessage() for r in caplog.records]
         shadowed = [
             ("b", "python3", "a"),
@@ -252,7 +249,7 @@ async def test_a_capture_that_never_wins_is_logged(caplog):
             ("b", "python", "a"),
         ]
         assert said == [
-            f"runtime '{entry}' runs '{capture}' only when a route names it: "
+            f"machine '{entry}' runs '{capture}' only when a route names it: "
             f"'{winner}', listed before it, takes it"
             for entry, capture, winner in shadowed
         ]
@@ -268,41 +265,17 @@ async def test_a_capture_is_logged_only_while_no_route_policy_can_reach_it(
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[Engine("a"), Engine("b"), "workspace"],
+        machines=[Engine("a"), Engine("b")],
         route_policy=lambda ctx: "b" if "fast" in ctx.line else None,
     )
     try:
         assert [r.getMessage() for r in caplog.records] == []
         ws.policies.place(None)
-        ws.add_runtime(Box("box", "python"))
+        ws.add_machine("box", Box("box", "python"))
         said = [r.getMessage() for r in caplog.records]
         assert said[0] == (
-            "runtime 'a' runs 'python' only when a route names it: "
+            "machine 'a' runs 'python' only when a route names it: "
             "'box', listed before it, takes it"
         )
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_a_native_entry_another_workspace_holds_keeps_its_machines():
-    runtime = RemoteRuntime(["uname"], machine="box")
-    first = build_machine("box", {"provider": "docker", "container": "a"})
-    ws = Workspace(
-        {"/d": RAMVFS()},
-        mode=MountMode.EXEC,
-        machines={"box": first},
-        runtimes=[runtime],
-    )
-    try:
-        other = build_machine("box", {"provider": "docker", "container": "b"})
-        with pytest.raises(ValueError, match="already bound"):
-            Workspace(
-                {"/d": RAMVFS()},
-                mode=MountMode.EXEC,
-                machines={"box": other},
-                runtimes=[runtime],
-            )
-        assert runtime.handle(Context()) is first
     finally:
         await ws.close()

@@ -119,14 +119,8 @@ export function checkConfig(config: unknown): WorkspaceConfig {
     }
   }
   const cfg = loadWorkspaceConfig(fields, null)
-  for (const entry of cfg.runtimes ?? []) {
-    if (typeof entry === 'string') continue
-    const runtimeConfig = entry.config
-    if (
-      runtimeConfig !== null &&
-      typeof runtimeConfig === 'object' &&
-      Object.hasOwn(runtimeConfig, 'initModule')
-    ) {
+  for (const entry of Object.values(cfg.machines ?? {})) {
+    if (Object.hasOwn(entry, 'initModule')) {
       throw new Error('runtime initModule is only allowed in operator-owned configuration')
     }
   }

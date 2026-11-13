@@ -24,7 +24,7 @@ import { headAllowed } from '../../policy/match/allow.ts'
 import type { ShellNode } from '../../policy/types.ts'
 import { SCANS } from '../../rs/scan.ts'
 import * as stream from '../../rs/stream.ts'
-import { Runtime, type RuntimeEntry } from '../../runtime/base.ts'
+import { Runtime } from '../../runtime/base.ts'
 import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import {
   LINE_EXECUTOR,
@@ -52,6 +52,7 @@ import {
   SHELL_CONSUMERS,
 } from './index.ts'
 import { routedConsumer } from './lookup.ts'
+import { buildRuntime } from '../../runtime/table.ts'
 
 class Sandbox extends Runtime implements ProcessExecutorMixin {
   readonly [PROCESS_EXECUTOR] = true as const
@@ -79,7 +80,7 @@ function fixture(): { session: SessionState; ws: Workspace } {
   const ram = new RAMVFS()
   const ws = new Workspace(
     { '/ram': ram },
-    { mode: MountMode.WRITE, runtimes: ['monty', 'workspace'] },
+    { mode: MountMode.WRITE, machines: [buildRuntime('monty')] },
   )
   return { session: new SessionState({ sessionId: 't' }), ws }
 }
@@ -691,10 +692,7 @@ describe('program', () => {
   // workspace without one answers `python3: command not found`, as a system
   // that never installed it does, so neither `which` nor `ls /usr/bin` finds it.
   it('has no file for an interpreter no language runtime runs', () => {
-    const ws = new Workspace(
-      { '/ram': new RAMVFS() },
-      { mode: MountMode.WRITE, runtimes: ['workspace'] },
-    )
+    const ws = new Workspace({ '/ram': new RAMVFS() }, { mode: MountMode.WRITE, machines: [] })
     const session = new SessionState({ sessionId: 't' })
     for (const name of ['python3', 'python', 'node', 'js']) {
       expect(program(name, session, ws.registry)).toBeNull()
@@ -722,7 +720,7 @@ describe('program', () => {
     const session = new SessionState({ sessionId: 't' })
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { runtimes: [new HostPython({ captures: ['python3', 'gcc'] })] },
+      { machines: [new HostPython({ captures: ['python3', 'gcc'] })] },
     )
     expect(lookup('python3', session, ws.registry)).toBe(Consumer.SESSION)
     expect(lookup('gcc', session, ws.registry)).toBe(Consumer.EXTERNAL)
@@ -730,7 +728,7 @@ describe('program', () => {
 
   it('is no file for a name only the fallback takes', () => {
     const session = new SessionState({ sessionId: 't' })
-    const ws = new Workspace({ '/': new RAMVFS() }, { runtimes: [new Sandbox()] })
+    const ws = new Workspace({ '/': new RAMVFS() }, { machines: [new Sandbox()] })
     expect(lookup('native-tool', session, ws.registry)).toBe(Consumer.EXTERNAL)
     expect(program('native-tool', session, ws.registry)).toBeNull()
     expect(program('gcc', session, ws.registry)).toBe(Consumer.EXTERNAL)
@@ -760,7 +758,7 @@ describe('programNote', () => {
 
   it('names the runtime a capture runs on', () => {
     const session = new SessionState({ sessionId: 't' })
-    const ws = new Workspace({ '/': new RAMVFS() }, { runtimes: [new Sandbox()] })
+    const ws = new Workspace({ '/': new RAMVFS() }, { machines: [new Sandbox()] })
     expect(programNote('gcc', session, ws.registry)).toBe(
       "gcc runs on the workspace's sandbox runtime.",
     )
@@ -957,9 +955,9 @@ class Monty extends PythonRuntime {
   }
 }
 
-function runtimesOf(node: ShellNode): string[] {
+function machinesOf(node: ShellNode): string[] {
   return node.children.flatMap((child) =>
-    'command' in child ? [child.runtime, ...child.children.flatMap(runtimesOf)] : runtimesOf(child),
+    'command' in child ? [child.machine, ...child.children.flatMap(machinesOf)] : machinesOf(child),
   )
 }
 
@@ -979,14 +977,14 @@ describe('a wrapper runs where the program it runs is captured', () => {
     [true, 'nice', 'e2b'],
     [true, 'sudo gcc x.c', 'e2b'],
   ] as [boolean, string, string][])('%s %s runs on %s', async (external, line, runs) => {
-    const entries: RuntimeEntry[] = [new Box('docker', 'gcc'), new Monty(), 'workspace']
+    const entries: Runtime[] = [new Box('docker', 'gcc'), new Monty()]
     if (external) entries.unshift(new Box('e2b', '@external'))
-    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: entries })
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, machines: entries })
     try {
       const io = await ws.shell(line)
       expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, `${runs}\n`])
       const said = await ws.explain(line)
-      expect(runtimesOf(said.node)[0]).toBe(runs)
+      expect(machinesOf(said.node)[0]).toBe(runs)
     } finally {
       await ws.close()
     }
@@ -995,7 +993,7 @@ describe('a wrapper runs where the program it runs is captured', () => {
   it('explains a wrapper around a Mirage command as Mirage runs it', async () => {
     const ws = new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [new Box('e2b', '@external'), 'workspace'] },
+      { mode: MountMode.EXEC, machines: [new Box('e2b', '@external')] },
     )
     try {
       await ws.shell('echo hit > /data/f')
@@ -1003,7 +1001,7 @@ describe('a wrapper runs where the program it runs is captured', () => {
       const io = await ws.shell(line)
       expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, 'hit\n'])
       const said = await ws.explain(line)
-      expect(runtimesOf(said.node)[0]).toBe('')
+      expect(machinesOf(said.node)[0]).toBe('')
     } finally {
       await ws.close()
     }
@@ -1012,14 +1010,14 @@ describe('a wrapper runs where the program it runs is captured', () => {
   it('explains a script path as Mirage runs it', async () => {
     const ws = new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [new Box('e2b', '@external'), 'workspace'] },
+      { mode: MountMode.EXEC, machines: [new Box('e2b', '@external')] },
     )
     try {
       await ws.shell("echo 'echo here' > /data/run.sh; chmod +x /data/run.sh")
       const io = await ws.shell('/data/run.sh')
       expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, 'here\n'])
       const said = await ws.explain('/data/run.sh')
-      expect(runtimesOf(said.node)[0]).toBe('')
+      expect(machinesOf(said.node)[0]).toBe('')
     } finally {
       await ws.close()
     }
@@ -1030,7 +1028,7 @@ describe('a wrapper runs where the program it runs is captured', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [new Box('niced', 'nice'), new Box('docker', 'gcc'), 'workspace'],
+        machines: [new Box('niced', 'nice'), new Box('docker', 'gcc')],
       },
     )
     try {
@@ -1061,11 +1059,11 @@ describe('a wrapped program', () => {
   it.each([false, true])(
     'has its globs expanded as the program does (external: %s)',
     async (external) => {
-      const entries: RuntimeEntry[] = [new Echo('docker', 'gcc'), 'workspace']
+      const entries: Runtime[] = [new Echo('docker', 'gcc')]
       if (external) entries.unshift(new Box('e2b', '@external'))
       const ws = new Workspace(
         { '/data': new RAMVFS() },
-        { mode: MountMode.EXEC, runtimes: entries },
+        { mode: MountMode.EXEC, machines: entries },
       )
       try {
         await ws.vfs.write('/data/a.c', '')
@@ -1081,18 +1079,18 @@ describe('a wrapped program', () => {
   it.each([false, true])(
     'is explained as it runs when a function takes the wrapper (external: %s)',
     async (external) => {
-      const entries: RuntimeEntry[] = [new Box('docker', 'gcc'), 'workspace']
+      const entries: Runtime[] = [new Box('docker', 'gcc')]
       if (external) entries.unshift(new Box('e2b', '@external'))
       const ws = new Workspace(
         { '/data': new RAMVFS() },
-        { mode: MountMode.EXEC, runtimes: entries },
+        { mode: MountMode.EXEC, machines: entries },
       )
       try {
         await ws.shell('nice() { echo local; }')
         const io = await ws.shell('nice gcc x.c')
         expect(new TextDecoder().decode(io.stdout)).toBe('local\n')
         const said = await ws.explain('nice gcc x.c')
-        expect(runtimesOf(said.node)[0]).toBe('')
+        expect(machinesOf(said.node)[0]).toBe('')
       } finally {
         await ws.close()
       }
@@ -1104,26 +1102,26 @@ describe('command past a wrapper function', () => {
   it('is explained as it runs', async () => {
     const ws = new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [new Box('docker', 'gcc'), 'workspace'] },
+      { mode: MountMode.EXEC, machines: [new Box('docker', 'gcc')] },
     )
     try {
       await ws.shell('nice() { echo local; }')
       const io = await ws.shell('command nice gcc x.c')
       expect(new TextDecoder().decode(io.stdout)).toBe('docker\n')
       const said = await ws.explain('command nice gcc x.c')
-      expect(runtimesOf(said.node)).toEqual(['', 'docker', 'docker'])
+      expect(machinesOf(said.node)).toEqual(['', 'docker', 'docker'])
     } finally {
       await ws.close()
     }
   })
 })
 
-function mirageWorkspace(...entries: RuntimeEntry[]): Workspace {
+function mirageWorkspace(...entries: Runtime[]): Workspace {
   return new Workspace(
     { '/data': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      runtimes: [...entries, 'workspace'],
+      machines: [...entries],
       profiles: { tight: { commands: { allow: ['cd', 'grep'] } } },
     },
   )
@@ -1140,7 +1138,7 @@ describe("a wrapper around Mirage's program", () => {
     [true, 'nice python3 -c 1', 'monty\n'],
     [true, 'stdbuf -oL grep python f', 'python here\n'],
   ] as [boolean, string, string][])('%s %s runs it in Mirage', async (external, line, out) => {
-    const entries: RuntimeEntry[] = [new Box('docker', 'gcc'), new Monty()]
+    const entries: Runtime[] = [new Box('docker', 'gcc'), new Monty()]
     if (external) entries.unshift(new Box('e2b', '@external'))
     const ws = mirageWorkspace(...entries)
     try {
@@ -1151,7 +1149,7 @@ describe("a wrapper around Mirage's program", () => {
       const io = await ws.shell(line)
       expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, out])
       const said = await ws.explain(line)
-      expect(runtimesOf(said.node)[0]).toBe('')
+      expect(machinesOf(said.node)[0]).toBe('')
     } finally {
       await ws.close()
     }
@@ -1165,7 +1163,7 @@ describe("a wrapper around Mirage's program", () => {
   ])('runs a function, and keeps its route otherwise: %s', async (line, out) => {
     const ws = new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [new Box('e2b', '@external'), 'workspace'] },
+      { mode: MountMode.EXEC, machines: [new Box('e2b', '@external')] },
     )
     try {
       const io = await ws.shell(line)

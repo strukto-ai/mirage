@@ -116,7 +116,7 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
             if resolved is None:
                 raise FileNotFoundError(
                     f"local python interpreter not found: {chosen!r} "
-                    "(from the runtime entry's config `home` or "
+                    "(from the machine's `home` or "
                     f"{LOCAL_HOME_ENV})"
                 )
             # Absolute: the program's env has no host PATH to resolve a

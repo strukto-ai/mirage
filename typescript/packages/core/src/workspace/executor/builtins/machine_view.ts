@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Context } from '../../../commands/config.ts'
 import { renderHelp } from '../../../commands/spec/help.ts'
 import { parseShellOptions, SHELL_SPECS, type ShellParse } from '../../../commands/spec/shell.ts'
 import { SYNOPSES } from '../../../commands/spec/synopsis.ts'
@@ -63,7 +62,6 @@ function reachOf(runtime: unknown): string {
  */
 function defaultMachine(
   bindings: Record<string, unknown>,
-  machine: string | undefined,
   every: readonly string[],
   host: string,
 ): string {
@@ -71,23 +69,15 @@ function defaultMachine(
     const reach = reachOf(runtime)
     if (reach === 'process') return host
     if (reach !== 'remote') continue
-    try {
-      const found = (
-        runtime as { machineFor: (ctx: Partial<Context>) => MachineName | null }
-      ).machineFor({
-        ...(machine === undefined ? {} : { machine }),
-      })
-      if (found !== null) return found.toString()
-    } catch (err) {
-      console.debug('no default machine:', err)
-    }
+    const found = (runtime as { machine: MachineName | null }).machine
+    if (found !== null) return found.toString()
   }
   return every[0] ?? ''
 }
 
 /**
- * Which machines a command answers for: the one `--machine` or the line's
- * placement names; in a command substitution, whose reader is a script, only
+ * Which machines a command answers for: the one `--machine` names; in a
+ * command substitution, whose reader is a script, only
  * the default one, the workspace when there is no machine; otherwise every
  * one. The host counts only while a runtime
  * runs programs on it. A command that also answers for the workspace passes
@@ -116,15 +106,10 @@ export function machineScope(
       ? null
       : { ids: [named[0]], picked: true, several: false, workspace: false }
   }
-  const placed = routing?.machine ?? null
-  if (placed !== null) {
-    const found = every.find((machine) => namesMachine(machine, placed))
-    if (found !== undefined) return { ids: [found], picked: true, several: false, workspace: false }
-  }
   const substituted = frame?.substitution === true && routing !== undefined
   if (substituted && every.length > 1)
     return {
-      ids: [defaultMachine(routing.bindings, placed ?? undefined, every, host)],
+      ids: [defaultMachine(routing.bindings, every, host)],
       picked: false,
       several: false,
       workspace: false,

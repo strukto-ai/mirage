@@ -80,11 +80,6 @@ export interface Context {
    */
   runtime?: CommandRuntime
   /**
-   * The machine a routed program runs on, by its `machines:` name, when its
-   * route or `execute()` names one; unset leaves it to its runtime's own.
-   */
-  machine?: string
-  /**
    * find's expression, read once by mirage-rs for the whole line; `find`
    * reads it in place of its words.
    */

@@ -83,7 +83,7 @@ async def test_argv_environment_cwd_and_stdin_reach_cli(cli, monkeypatch):
 @pytest.mark.asyncio
 async def test_workspace_routes_named_programs_as_argv(cli):
     runtime = SandlockRuntime(captures=("python3", "node"))
-    ws = Workspace({"/": RAMVFS()}, runtimes=[runtime])
+    ws = Workspace({"/": RAMVFS()}, machines=[runtime])
     try:
         for line in ("python3 --version", "node --version"):
             io = await ws.shell(line)
@@ -194,7 +194,7 @@ async def test_a_session_restriction_refuses_every_line(cli, profile):
         {"/data": DiskVFS(str(cli))},
         mode=MountMode.EXEC,
         profiles={"agent": profile},
-        runtimes=[runtime, "workspace"],
+        machines=[runtime],
     )
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("tool run")
@@ -219,7 +219,7 @@ async def test_the_system_time_reaches_the_child_or_the_host_clock(
     monkeypatch.setattr(sys, "platform", "linux")
     ws = Workspace(
         {"/": RAMVFS()},
-        runtimes=[SandlockRuntime(captures=("node",))],
+        machines=[SandlockRuntime(captures=("node",))],
         system_time="2026-03-02T09:00:00Z",
     )
     try:

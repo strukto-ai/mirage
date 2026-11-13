@@ -3,10 +3,11 @@
     {
       "id": "limit_timeout",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",
@@ -34,10 +35,11 @@
     {
       "id": "many_file_calls_finish",
       "world": {
-        "runtimes": [
-          "monty",
-          "workspace"
-        ],
+        "machines": {
+          "monty": {
+            "provider": "worker"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",

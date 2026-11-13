@@ -26,9 +26,6 @@ tags:
   - name: Saved CLIs
     x-group: CLI
     parent: Configuration
-  - name: Saved runtimes
-    x-group: Runtime
-    parent: Configuration
   - name: Saved machines
     x-group: Machine
     parent: Configuration
@@ -1536,7 +1533,6 @@ paths:
                       type: host
                       name: my-laptop
                       id: my-laptop
-                    runtime: null
                     machine_pid: null
                     state: running
                     started_at: '2026-11-07T00:00:00.000Z'
@@ -1556,7 +1552,6 @@ paths:
                           type: host
                           name: my-laptop
                           id: my-laptop
-                        runtime: process
                         machine_pid:
                           pid: 12345
                           started: 1794009600
@@ -1824,7 +1819,6 @@ paths:
                       type: host
                       name: my-laptop
                       id: my-laptop
-                    runtime: process
                     machine_pid:
                       pid: 12345
                       started: 1794009600
@@ -1884,7 +1878,6 @@ paths:
                   type: host
                   name: my-laptop
                   id: my-laptop
-                runtime: process
                 machine_pid:
                   pid: 12345
                   started: 1794009600
@@ -1984,7 +1977,6 @@ paths:
                       type: host
                       name: my-laptop
                       id: my-laptop
-                    runtime: null
                     machine_pid: null
                     state: exited
                     started_at: '2026-11-07T00:00:04.000Z'
@@ -2017,7 +2009,7 @@ paths:
           in: query
           description: Return the policy decision for the command without running it. Only
             `command` is evaluated; `record` is ignored and `open_stdin` may be `false`. A
-            multipart body, a body that sets `cwd`, `runtime` or `machine` (an empty string
+            multipart body, a body that sets `cwd` or `machine` (an empty string
             counts as set, `null` does not), or `open_stdin` set to `true`, is rejected with
             `400`. Cannot be combined with `stream`.
           required: false
@@ -2061,12 +2053,12 @@ paths:
           description: 'The request is malformed or its options conflict. The body is not JSON
             (`invalid_json`), a field is missing, unknown or of the wrong type (`missing_field`,
             `unknown_field`, `invalid_value`, with `param`; a field of the multipart `request`
-            part is named as in a JSON body), or `runtime` or `machine` names one the workspace
-            does not have (`invalid_value`, `param` `runtime` or `machine`), refused before
-            anything runs. Or the multipart parts are malformed, missing or out of order, or the
-            options conflict, as `stream` with `explain`, `open_stdin` without `stream=true` or
-            with a stdin part, or `explain` with a multipart body, `cwd`, `runtime`, `machine`
-            or `open_stdin` set to `true` (`invalid_request`).'
+            part is named as in a JSON body), or `machine` names one the workspace does not have
+            (`invalid_value`, `param` `machine`), refused before anything runs. Or the multipart
+            parts are malformed, missing or out of order, or the options conflict, as `stream`
+            with `explain`, `open_stdin` without `stream=true` or with a stdin part, or `explain`
+            with a multipart body, `cwd`, `machine` or `open_stdin` set to `true`
+            (`invalid_request`).'
           content:
             application/json:
               schema:
@@ -2078,13 +2070,13 @@ paths:
                     error:
                       code: invalid_request
                       message: open_stdin takes stream=true and no stdin part
-                unknown_runtime:
-                  summary: A runtime the workspace does not have
+                unknown_machine:
+                  summary: A machine the workspace does not have
                   value:
                     error:
                       code: invalid_value
-                      message: runtime must be one of python
-                      param: runtime
+                      message: machine must be one of python
+                      param: machine
         '401':
           $ref: '#/components/responses/401'
         '404':
@@ -5371,269 +5363,6 @@ paths:
       tags:
         - Saved CLIs
       x-hosts: *id002
-  /v1/runtimes:
-    get:
-      operationId: list_entries_v1_runtimes_get
-      parameters:
-        - in: query
-          name: type
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-          description: Filter by a type returned by `GET /v1/runtimes/types`.
-        - in: query
-          name: q
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-          description: Filter names by this text, ignoring case.
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SavedEntryList'
-              example:
-                items:
-                  - id: python
-                    name: python
-                    kind: runtime
-                    type: monty
-                    builtin: false
-                    config:
-                      max_memory: 128MB
-                    captures: []
-                    created_by: null
-                    created_at: null
-                    updated_at: null
-                    used_by: 1
-        '400':
-          $ref: '#/components/responses/400'
-        '401':
-          $ref: '#/components/responses/401'
-        '429':
-          $ref: '#/components/responses/429'
-        '501':
-          $ref: '#/components/responses/501'
-      summary: List runtimes
-      description: List saved runtime configurations for reuse in workspace templates.
-      tags:
-        - Saved runtimes
-      x-hosts: *id002
-    post:
-      operationId: create_entry_v1_runtimes_post
-      responses:
-        '201':
-          description: Created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SavedEntry'
-              example:
-                id: python
-                name: python
-                kind: runtime
-                type: monty
-                builtin: false
-                config:
-                  max_memory: 128MB
-                captures: []
-                created_by: null
-                created_at: null
-                updated_at: null
-        '400':
-          $ref: '#/components/responses/400'
-          description: The request is malformed or a field is not valid for the type (`param`
-            names it), or the fields refer to a secret store that is not saved yet
-            (`invalid_request`; `missing` lists the stores to add first).
-        '401':
-          $ref: '#/components/responses/401'
-        '409':
-          $ref: '#/components/responses/409'
-        '429':
-          $ref: '#/components/responses/429'
-        '501':
-          $ref: '#/components/responses/501'
-      summary: Create runtime
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateSavedEntryRequest'
-            example:
-              name: python
-              type: monty
-              fields:
-                max_memory: 128MB
-      description: Save a named runtime configuration. Fields are validated for the selected type. Secret
-        values are stored securely and omitted from read responses. String fields can reference secrets
-        in a saved store. Returns `409` if the name exists.
-      tags:
-        - Saved runtimes
-      x-hosts: *id002
-  /v1/runtimes/types:
-    get:
-      operationId: list_types_v1_runtimes_types_get
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              example:
-                monty:
-                  - name: max_memory
-                    type: string
-                    secret: false
-                    required: false
-              schema:
-                $ref: '#/components/schemas/TypeTable'
-        '401':
-          $ref: '#/components/responses/401'
-        '429':
-          $ref: '#/components/responses/429'
-        '501':
-          $ref: '#/components/responses/501'
-      summary: List runtime types
-      description: List supported runtime configuration types and their fields. Available types depend
-        on the server.
-      tags:
-        - Saved runtimes
-      x-hosts: *id002
-  /v1/runtimes/{ref}:
-    get:
-      operationId: get_entry_v1_runtimes__ref__get
-      parameters:
-        - in: path
-          name: ref
-          required: true
-          schema:
-            type: string
-          description: Saved configuration name.
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SavedEntryDetail'
-              example:
-                id: python
-                name: python
-                kind: runtime
-                type: monty
-                builtin: false
-                config:
-                  max_memory: 128MB
-                captures: []
-                created_by: null
-                created_at: null
-                updated_at: null
-                sealed: []
-        '400':
-          $ref: '#/components/responses/400'
-        '401':
-          $ref: '#/components/responses/401'
-        '404':
-          $ref: '#/components/responses/404'
-        '429':
-          $ref: '#/components/responses/429'
-        '501':
-          $ref: '#/components/responses/501'
-      summary: Get runtime
-      description: Get a saved runtime configuration without secret values. The `sealed` field lists stored
-        secret names.
-      tags:
-        - Saved runtimes
-      x-hosts: *id002
-    put:
-      operationId: update_entry_v1_runtimes__ref__put
-      parameters:
-        - in: path
-          name: ref
-          required: true
-          schema:
-            type: string
-          description: Saved configuration name.
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SavedEntry'
-              example:
-                id: python
-                name: python
-                kind: runtime
-                type: monty
-                builtin: false
-                config:
-                  max_memory: 256MB
-                captures: []
-                created_by: null
-                created_at: null
-                updated_at: null
-        '400':
-          $ref: '#/components/responses/400'
-          description: The request is malformed or a field is not valid for the type (`param`
-            names it), or the fields refer to a secret store that is not saved yet
-            (`invalid_request`; `missing` lists the stores to add first).
-        '401':
-          $ref: '#/components/responses/401'
-        '404':
-          $ref: '#/components/responses/404'
-        '429':
-          $ref: '#/components/responses/429'
-        '501':
-          $ref: '#/components/responses/501'
-      summary: Update runtime
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateSavedEntryRequest'
-            example:
-              fields:
-                max_memory: 256MB
-      description: Update a saved runtime configuration. The name and type cannot change. Omitted secret
-        fields keep their values; `null` removes a field.
-      tags:
-        - Saved runtimes
-      x-hosts: *id002
-    delete:
-      operationId: delete_entry_v1_runtimes__ref__delete
-      parameters:
-        - in: path
-          name: ref
-          required: true
-          schema:
-            type: string
-          description: Saved configuration name.
-      responses:
-        '204':
-          description: No content
-        '400':
-          $ref: '#/components/responses/400'
-        '401':
-          $ref: '#/components/responses/401'
-        '404':
-          $ref: '#/components/responses/404'
-        '429':
-          $ref: '#/components/responses/429'
-        '501':
-          $ref: '#/components/responses/501'
-      summary: Delete runtime
-      description: Delete a saved runtime configuration.
-      tags:
-        - Saved runtimes
-      x-hosts: *id002
   /v1/machines:
     get:
       operationId: list_entries_v1_machines_get
@@ -6679,11 +6408,6 @@ components:
         pid:
           title: Pid
           type: integer
-        runtime:
-          anyOf:
-            - type: string
-            - type: 'null'
-          title: Runtime
         session_id:
           title: Session Id
           type: string
@@ -6708,7 +6432,6 @@ components:
         - command
         - cwd
         - machine
-        - runtime
         - machine_pid
         - state
         - started_at
@@ -6776,11 +6499,6 @@ components:
         pid:
           title: Pid
           type: integer
-        runtime:
-          anyOf:
-            - type: string
-            - type: 'null'
-          title: Runtime
         session_id:
           title: Session Id
           type: string
@@ -6805,7 +6523,6 @@ components:
         - command
         - cwd
         - machine
-        - runtime
         - machine_pid
         - state
         - started_at
@@ -6828,11 +6545,11 @@ components:
             - type: string
             - type: 'null'
           title: Script
-        runtime:
+        machine:
           anyOf:
             - type: string
             - type: 'null'
-          title: Runtime
+          title: Machine
         config:
           additionalProperties: true
           type: object
@@ -6843,8 +6560,8 @@ components:
       type: object
       title: CLIBlock
       description: Install named commands in the workspace. Set `cli` to a registered CLI type or `script`
-        to a program file. Use `config` for settings and credentials. For scripts, `runtime` selects the
-        execution environment; when omitted, Mirage selects one for the script language.
+        to a program file. Use `config` for settings and credentials. For scripts, `machine` selects the
+        machine that runs it; when omitted, Mirage selects one for the script language.
     CancelLinesResponse:
       properties:
         canceled:
@@ -8231,17 +7948,9 @@ components:
               type: object
             - type: 'null'
           title: Machines
-          description: The machines the workspace runs programs on, by name, each a
-            `provider` and its config.
-        runtimes:
-          anyOf:
-            - items:
-                anyOf:
-                  - type: string
-                  - $ref: '#/components/schemas/RuntimeEntry'
-              type: array
-            - type: 'null'
-          title: Runtimes
+          description: The machines commands run on, by name, in capture order, each a
+            `provider`, what it captures and its config. A command no machine captures runs in
+            the workspace.
         route_policy:
           anyOf:
             - $ref: '#/components/schemas/ProfilePolicy'
@@ -8539,13 +8248,6 @@ components:
             - type: 'null'
           description: Working directory for this command only. `null` is the same as omitting
             it.
-        runtime:
-          anyOf:
-            - type: string
-            - type: 'null'
-          description: Name of an entry under `runtimes` in the workspace config. If omitted or
-            `null`, the runtime is selected automatically. A name the workspace does not have
-            is refused with `400` before anything runs.
         machine:
           anyOf:
             - type: string
@@ -8636,11 +8338,6 @@ components:
           type: string
           description: Name of the policy. Rules written in the profile answer as
             `PermissionsPolicy`.
-        runtime:
-          anyOf:
-            - type: string
-            - type: 'null'
-          description: Runtime the request is routed to. Only for `route`.
         machine:
           anyOf:
             - type: string
@@ -8665,45 +8362,33 @@ components:
             node:
               $ref: '#/components/schemas/ExplainNode'
       title: Explanation (explain=true)
-    RuntimeEntry:
+    MachineEntry:
       type: object
-      description: A runtime by name, with its options. Other keys are the runtime's own
-        options.
+      description: A machine by its provider. Other keys say how to reach it and depend on
+        the provider, such as `container` for docker, or configure the runtime it runs.
       properties:
-        name:
+        provider:
           type: string
-          description: A registered runtime, such as monty, or a `source:Class` reference.
+          description: The provider. `in_process` runs a runtime inside Mirage, `worker` runs
+            Monty in worker processes, `host` runs the host's own programs; docker, ssh and the
+            other providers reach a machine of their own.
         captures:
           type:
             - array
             - 'null'
           items:
             type: string
-          description: The commands the runtime runs. `null` keeps the runtime's default.
-        config:
-          type:
-            - object
-            - 'null'
-          additionalProperties: true
-          description: The runtime's settings. `null` keeps the runtime's default.
-        machine:
-          type:
-            - string
-            - 'null'
-          description: The machine a remote runtime runs on, by its name under `machines`.
-      required:
-        - name
-      additionalProperties: true
-    MachineEntry:
-      type: object
-      description: A machine by its provider. Other keys say how to reach it and depend on
-        the provider, such as `container` for docker.
-      properties:
-        provider:
+          description: The commands the machine runs, `@external` and `@line` among them.
+            `null` keeps the default.
+        runtime:
           type: string
-          description: The provider, such as docker or ssh.
-      required:
-        - provider
+          description: The runtime an `in_process` machine runs, such as quickjs, or a
+            `source:Class` reference.
+        sandbox:
+          type: object
+          additionalProperties: true
+          description: Paths a `host` machine's programs may read and write, which confines
+            them.
       additionalProperties: true
     ExplainNode:
       type: object
@@ -8757,11 +8442,6 @@ components:
         stderr:
           type: string
           description: Command nodes only.
-        runtime:
-          type:
-            - string
-            - 'null'
-          description: The runtime the command is routed to. Command nodes only.
         machine:
           type:
             - string
@@ -9018,11 +8698,10 @@ components:
           enum:
             - vfs
             - cli
-            - runtime
             - machine
         type:
           type: string
-          description: The VFS, CLI, runtime or machine type, such as s3.
+          description: The VFS, CLI or machine type, such as s3.
         builtin:
           type: boolean
         config:
@@ -9030,11 +8709,6 @@ components:
           additionalProperties:
             $ref: '#/components/schemas/FieldValue'
           description: Non-secret configuration values. Secret values are omitted.
-        captures:
-          type: array
-          items:
-            type: string
-          description: The commands the runtime captures. Runtimes only.
         created_by:
           type:
             - string

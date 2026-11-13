@@ -66,17 +66,13 @@ function scripted(
   }
 }
 
-function build(
-  profiles: Record<string, unknown>,
-  runtimes?: string[],
-  profile?: string,
-): Workspace {
+function build(profiles: Record<string, unknown>, machines?: [], profile?: string): Workspace {
   return new Workspace(
     { '/data/': new RAMVFS() },
     {
       mode: MountMode.WRITE,
       profiles: profiles as never,
-      ...(runtimes !== undefined ? { runtimes } : {}),
+      ...(machines !== undefined ? { machines } : {}),
       ...(profile !== undefined ? { profile } : {}),
     },
   )
@@ -220,7 +216,7 @@ describe('profile policies', () => {
     // A profile is operator configuration, so the runtime that judges
     // for it is a property of the profile, built fresh and never
     // resolved out of the runtime world.
-    const ws = build(scripted(), ['workspace'])
+    const ws = build(scripted(), [])
     try {
       ws.createSession('s', { profile: 'release' })
       const denied = await ws.shell('cat /data/sealed/k', { sessionId: 's' })

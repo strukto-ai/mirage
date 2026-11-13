@@ -46,7 +46,6 @@ export type {
   VfsResultContext,
 } from './policy/index.ts'
 export { Runtime } from './runtime/base.ts'
-export type { RuntimeEntry } from './runtime/base.ts'
 export { EXTERNAL_COMMANDS } from './runtime/constants.ts'
 export { LINE_EXECUTOR, PROCESS_EXECUTOR } from './runtime/mixin.ts'
 export type { LineExecutorMixin, ProcessExecutorMixin } from './runtime/mixin.ts'

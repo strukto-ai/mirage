@@ -12,10 +12,12 @@
         "python"
       ],
       "world": {
-        "runtimes": [
-          "wasi",
-          "workspace"
-        ],
+        "machines": {
+          "wasi": {
+            "provider": "in_process",
+            "runtime": "wasi"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",
@@ -59,10 +61,12 @@
         "python"
       ],
       "world": {
-        "runtimes": [
-          "wasi",
-          "workspace"
-        ],
+        "machines": {
+          "wasi": {
+            "provider": "in_process",
+            "runtime": "wasi"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",

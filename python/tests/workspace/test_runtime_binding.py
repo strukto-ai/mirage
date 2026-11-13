@@ -20,7 +20,7 @@ import pytest_asyncio
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import command
 from mirage.commands.spec.types import CommandSpec
-from mirage.config import _build_runtime_entries
+from mirage.config import _build_machines
 from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.policy import (
@@ -68,7 +68,7 @@ async def test_default_world_runs_no_interpreter(ws, command, flag):
 @pytest.mark.asyncio
 async def test_explicit_name_entry_binds():
     ws = Workspace(
-        {"/": RAMVFS()}, mode=MountMode.EXEC, runtimes=["monty", "workspace"]
+        {"/": RAMVFS()}, mode=MountMode.EXEC, machines=[MontyRuntime()]
     )
     try:
         io = await ws.shell("python3 -c 'print(6 * 7)'")
@@ -81,7 +81,7 @@ async def test_explicit_name_entry_binds():
 @pytest.mark.asyncio
 async def test_instance_entry_gets_dispatch_attached():
     ws = Workspace(
-        {"/": RAMVFS()}, mode=MountMode.EXEC, runtimes=[MontyRuntime()]
+        {"/": RAMVFS()}, mode=MountMode.EXEC, machines=[MontyRuntime()]
     )
     try:
         await ws.shell("echo -n hello > /greet.txt")
@@ -95,7 +95,7 @@ async def test_instance_entry_gets_dispatch_attached():
 @pytest.mark.asyncio
 async def test_instance_entry_runs_on_that_runtime():
     ws = Workspace(
-        {"/": RAMVFS()}, mode=MountMode.EXEC, runtimes=[LocalRuntime()]
+        {"/": RAMVFS()}, mode=MountMode.EXEC, machines=[LocalRuntime()]
     )
     try:
         io = await ws.shell("python3 -c 'import sys; print(sys.platform)'")
@@ -107,29 +107,37 @@ async def test_instance_entry_runs_on_that_runtime():
 
 def test_unknown_name_fails_loud():
     with pytest.raises(ValueError, match="unknown runtime"):
-        Workspace({"/": RAMVFS()}, runtimes=["ghost"])
+        Workspace(
+            {"/": RAMVFS()},
+            machines={"x": {"provider": "in_process", "runtime": "ghost"}},
+        )
 
 
 def test_duplicate_entries_fail_loud():
-    with pytest.raises(ValueError, match="duplicate runtime entry"):
-        Workspace({"/": RAMVFS()}, runtimes=[LocalRuntime(), LocalRuntime()])
+    with pytest.raises(ValueError, match="duplicate machine"):
+        Workspace({"/": RAMVFS()}, machines=[LocalRuntime(), LocalRuntime()])
 
 
 def test_config_entries_build_instances():
-    entries = _build_runtime_entries(["local", {"name": "local"}, "workspace"])
-    assert entries[0] == "local"
-    assert isinstance(entries[1], LocalRuntime)
-    assert entries[2] == "workspace"
+    entries = _build_machines(
+        {"box": {"provider": "host"}, "workspace": {"provider": "in_process"}},
+        {},
+    )
+    assert isinstance(entries["box"], LocalRuntime)
+    assert entries["box"].name == "box"
+    assert isinstance(entries["workspace"], WorkspaceRuntime)
 
 
-def test_config_entry_needs_a_name():
-    with pytest.raises(ValueError, match="non-empty 'name'"):
-        _build_runtime_entries([{"home": "/x"}])
+def test_config_entry_needs_a_provider():
+    with pytest.raises(ValueError, match="needs a provider"):
+        _build_machines({"box": {"home": "/x"}}, {})
 
 
 def test_config_workspace_entry_takes_no_options():
     with pytest.raises(TypeError, match="unexpected keyword argument"):
-        _build_runtime_entries([{"name": "workspace", "home": "/x"}])
+        _build_machines(
+            {"workspace": {"provider": "in_process", "home": "/x"}}, {}
+        )
 
 
 class AlphaRuntime(PythonRuntime):
@@ -151,7 +159,7 @@ async def runtime_arg_ws():
     workspace = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[AlphaRuntime(), BetaRuntime(), "workspace"],
+        machines=[AlphaRuntime(), BetaRuntime()],
     )
     yield workspace
     await workspace.close()
@@ -159,7 +167,7 @@ async def runtime_arg_ws():
 
 @pytest.mark.asyncio
 async def test_runtime_arg_rebinds_captured_stage(runtime_arg_ws):
-    io = await runtime_arg_ws.shell("python3 -c 'x'", runtime="beta")
+    io = await runtime_arg_ws.shell("python3 -c 'x'", machine="beta")
     assert await materialize(io.stdout) == b"ran-beta\n"
 
 
@@ -173,39 +181,39 @@ async def test_a_nested_line_leaves_its_callers_route(runtime_arg_ws):
     mount = runtime_arg_ws._registry.mount_for("/")
     for registered in nested._registered_commands:
         mount.register(registered)
-    io = await runtime_arg_ws.shell("nested; python3 -c 'x'", runtime="beta")
+    io = await runtime_arg_ws.shell("nested; python3 -c 'x'", machine="beta")
     assert await materialize(io.stdout) == b"ran-beta\n"
 
 
 @pytest.mark.asyncio
 async def test_runtime_arg_only_lasts_the_line(runtime_arg_ws):
-    await runtime_arg_ws.shell("python3 -c 'x'", runtime="beta")
+    await runtime_arg_ws.shell("python3 -c 'x'", machine="beta")
     io = await runtime_arg_ws.shell("python3 -c 'x'")
     assert await materialize(io.stdout) == b"ran-alpha\n"
 
 
 @pytest.mark.asyncio
 async def test_runtime_arg_inherited_by_nested_eval(runtime_arg_ws):
-    io = await runtime_arg_ws.shell("echo $(python3 -c 'x')", runtime="beta")
+    io = await runtime_arg_ws.shell("echo $(python3 -c 'x')", machine="beta")
     assert await materialize(io.stdout) == b"ran-beta\n"
 
 
 @pytest.mark.asyncio
 async def test_runtime_arg_never_touches_uncaptured_stages(runtime_arg_ws):
-    io = await runtime_arg_ws.shell("echo plain-workspace", runtime="beta")
+    io = await runtime_arg_ws.shell("echo plain-workspace", machine="beta")
     assert await materialize(io.stdout) == b"plain-workspace\n"
 
 
 @pytest.mark.asyncio
 async def test_runtime_arg_unknown_name_fails_loud(runtime_arg_ws):
-    with pytest.raises(ValueError, match="unknown runtime:"):
-        await runtime_arg_ws.shell("python3 -c 'x'", runtime="nope")
+    with pytest.raises(ValueError, match="unknown machine:"):
+        await runtime_arg_ws.shell("python3 -c 'x'", machine="nope")
 
 
 @pytest.mark.asyncio
 async def test_runtime_arg_workspace_fails_loud(runtime_arg_ws):
-    with pytest.raises(ValueError, match="not a runtime you can select"):
-        await runtime_arg_ws.shell("python3 -c 'x'", runtime="workspace")
+    with pytest.raises(ValueError, match="not a machine you can select"):
+        await runtime_arg_ws.shell("python3 -c 'x'", machine="workspace")
 
 
 @pytest_asyncio.fixture
@@ -213,7 +221,7 @@ async def routed_ws():
     workspace = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[AlphaRuntime(), BetaRuntime(), "workspace"],
+        machines=[AlphaRuntime(), BetaRuntime()],
         route_policy=lambda ctx: "beta" if "big" in ctx.line else None,
     )
     yield workspace
@@ -230,7 +238,7 @@ async def test_a_route_moves_a_line_between_capturers(routed_ws):
 
 @pytest.mark.asyncio
 async def test_runtime_arg_beats_the_route(routed_ws):
-    io = await routed_ws.shell("python3 -c 'big job'", runtime="alpha")
+    io = await routed_ws.shell("python3 -c 'big job'", machine="alpha")
     assert await materialize(io.stdout) == b"ran-alpha\n"
 
 
@@ -239,7 +247,7 @@ async def test_workspace_explicit_captures_restrict_the_workspace():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[AlphaRuntime(), WorkspaceRuntime(captures=("echo",))],
+        machines=[AlphaRuntime(), WorkspaceRuntime(captures=("echo",))],
     )
     try:
         io = await ws.shell("echo listed")
@@ -255,11 +263,12 @@ async def test_workspace_explicit_captures_restrict_the_workspace():
 
 
 def test_config_workspace_entry_carries_captures():
-    entries = _build_runtime_entries(
-        [{"name": "workspace", "captures": ["grep", "cat"]}]
+    entries = _build_machines(
+        {"workspace": {"provider": "in_process", "captures": ["grep", "cat"]}},
+        {},
     )
-    assert isinstance(entries[0], WorkspaceRuntime)
-    assert entries[0].captures == ("grep", "cat")
+    assert isinstance(entries["workspace"], WorkspaceRuntime)
+    assert entries["workspace"].captures == ("grep", "cat")
 
 
 @pytest.mark.asyncio
@@ -267,7 +276,7 @@ async def test_empty_captures_serve_nothing():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[AlphaRuntime(), WorkspaceRuntime(captures=())],
+        machines=[AlphaRuntime(), WorkspaceRuntime(captures=())],
     )
     try:
         io = await ws.shell("ls /")
@@ -283,7 +292,7 @@ async def test_workspace_explicit_captures_restrict_under_routing():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[AlphaRuntime(), WorkspaceRuntime(captures=("echo",))],
+        machines=[AlphaRuntime(), WorkspaceRuntime(captures=("echo",))],
         route_policy=lambda ctx: None,
     )
     try:
@@ -300,7 +309,7 @@ async def test_global_route_names_the_runtime():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[AlphaRuntime(), BetaRuntime(), "workspace"],
+        machines=[AlphaRuntime(), BetaRuntime()],
         route_policy=lambda ctx: "beta" if "heavy" in ctx.line else None,
     )
     try:
@@ -323,7 +332,7 @@ async def test_policy_deny_folds_into_the_line_result():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[AlphaRuntime(), "workspace"],
+        machines=[AlphaRuntime()],
         policies=[NoPython()],
     )
     try:
@@ -361,7 +370,7 @@ async def test_syntax_error_gates_before_policy():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[AlphaRuntime(), "workspace"],
+        machines=[AlphaRuntime()],
         route_policy=deny_all,
     )
     try:
@@ -378,7 +387,7 @@ async def test_a_coded_route_policy_places_beside_a_policys_deny():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[AlphaRuntime(), BetaRuntime(), "workspace"],
+        machines=[AlphaRuntime(), BetaRuntime()],
         route_policy=lambda ctx: "beta",
         policies=[NoSecrets()],
     )
@@ -412,7 +421,7 @@ def _runtimes(said: ShellExplanation) -> list[str]:
         said (ShellExplanation): the explained line.
     """
     return [
-        node.runtime
+        node.machine
         for node in said.node.children
         if isinstance(node, CommandExplanation)
     ]
@@ -423,7 +432,7 @@ async def test_a_coded_policy_places_the_line():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[AlphaRuntime(), BetaRuntime(), "workspace"],
+        machines=[AlphaRuntime(), BetaRuntime()],
         policies=[HeavyOnBeta()],
     )
     try:
@@ -432,7 +441,7 @@ async def test_a_coded_policy_places_the_line():
         io = await ws.shell("python3 -c 'light'")
         assert await materialize(io.stdout) == b"ran-alpha\n"
         # The caller's runtime argument is its own placement.
-        io = await ws.shell("python3 -c 'heavy'", runtime="alpha")
+        io = await ws.shell("python3 -c 'heavy'", machine="alpha")
         assert await materialize(io.stdout) == b"ran-alpha\n"
     finally:
         await ws.close()
@@ -443,7 +452,7 @@ async def test_a_placement_deny_outranks_a_route():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[AlphaRuntime(), BetaRuntime(), "workspace"],
+        machines=[AlphaRuntime(), BetaRuntime()],
         route_policy=lambda ctx: "beta",
         policies=[NoSecrets()],
     )
@@ -459,7 +468,7 @@ async def test_a_placement_deny_outranks_a_route():
             "NoSecrets",
         )
         # A deny holds whoever placed the line, the caller included.
-        io = await ws.shell("python3 -c 'secret'", runtime="beta")
+        io = await ws.shell("python3 -c 'secret'", machine="beta")
         assert io.exit_code == 126
         io = await ws.shell("python3 -c 'x'")
         assert await materialize(io.stdout) == b"ran-beta\n"
@@ -472,7 +481,7 @@ async def test_two_placements_that_disagree_refuse_the_line():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[AlphaRuntime(), BetaRuntime(), "workspace"],
+        machines=[AlphaRuntime(), BetaRuntime()],
         route_policy=lambda ctx: "alpha",
         policies=[HeavyOnBeta()],
     )
@@ -481,7 +490,7 @@ async def test_two_placements_that_disagree_refuse_the_line():
         assert io.exit_code == 126
         assert io.decision is not None
         assert io.decision.reason == (
-            "policies place the line on different runtimes: "
+            "policies place the line on different machines: "
             "RoutePolicy on alpha, HeavyOnBeta on beta"
         )
         io = await ws.shell("python3 -c 'light'")
@@ -501,7 +510,7 @@ async def test_admission_comes_before_placement():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[AlphaRuntime(), "workspace"],
+        machines=[AlphaRuntime()],
         route_policy=away,
     )
     try:
@@ -530,7 +539,7 @@ async def test_explain_names_the_policy_that_placed_the_line():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[AlphaRuntime(), BetaRuntime(), "workspace"],
+        machines=[AlphaRuntime(), BetaRuntime()],
         route_policy=lambda ctx: "beta" if "heavy" in ctx.line else None,
         policies=[NoSecrets()],
     )
@@ -560,7 +569,7 @@ async def test_nested_eval_inherits_routing():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[AlphaRuntime(), BetaRuntime(), "workspace"],
+        machines=[AlphaRuntime(), BetaRuntime()],
         route_policy=lambda ctx: "beta" if "big" in ctx.line else None,
     )
     try:
@@ -577,23 +586,25 @@ async def test_add_runtime_appends_and_rebinds():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[AlphaRuntime(), "workspace"],
+        machines=[AlphaRuntime()],
     )
     try:
-        ws.add_runtime(BetaRuntime())
+        ws.add_machine("beta", BetaRuntime())
         io = await ws.shell("python3 -c 'x'")
         assert await materialize(io.stdout) == b"ran-alpha\n"
-        io = await ws.shell("python3 -c 'x'", runtime="beta")
+        io = await ws.shell("python3 -c 'x'", machine="beta")
         assert await materialize(io.stdout) == b"ran-beta\n"
-        with pytest.raises(ValueError, match="duplicate runtime entry"):
-            ws.add_runtime(BetaRuntime())
+        with pytest.raises(ValueError, match="duplicate machine"):
+            ws.add_machine("beta", BetaRuntime())
     finally:
         await ws.close()
 
 
-def test_a_runtime_entry_takes_no_script():
+def test_a_machine_entry_takes_no_script():
     with pytest.raises(TypeError, match="script"):
-        _build_runtime_entries([{"name": "local", "script": "guard.py"}])
+        _build_machines(
+            {"box": {"provider": "host", "script": "guard.py"}}, {}
+        )
 
 
 @pytest.mark.asyncio
@@ -631,9 +642,7 @@ async def test_what_a_runtime_reads_is_in_its_lines_report():
     # and the observer's account of the line, as a command's do.
     box = ReadingBox()
     box.captures = ("@line",)
-    ws = Workspace(
-        {"/ram": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box, "workspace"]
-    )
+    ws = Workspace({"/ram": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
     try:
         await ws.vfs.write("/ram/f.txt", b"hi\n")
         mark = len(ws.vfs.records)
@@ -679,9 +688,7 @@ async def test_what_an_aborted_runtime_read_stays_on_the_books():
     # happened, so it reaches the ledger and the line's record all the same.
     box = StallingBox()
     box.captures = ("@line",)
-    ws = Workspace(
-        {"/ram": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box, "workspace"]
-    )
+    ws = Workspace({"/ram": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
     try:
         await ws.vfs.write("/ram/f.txt", b"hi\n")
         mark = len(ws.vfs.records)
@@ -714,9 +721,7 @@ async def test_what_an_aborted_runtime_read_stays_on_the_books():
 @pytest.mark.asyncio
 async def test_named_capture_keeps_pipeline_and_redirects_in_mirage():
     box = LineBox()
-    ws = Workspace(
-        {"/ram": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box, "workspace"]
-    )
+    ws = Workspace({"/ram": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
     try:
         io = await ws.shell("nvidia-smi -L | grep box > /ram/out.txt")
         assert io.exit_code == 0
@@ -732,9 +737,7 @@ async def test_named_capture_keeps_pipeline_and_redirects_in_mirage():
 async def test_line_capture_takes_any_line_and_stdin_arrives():
     box = LineBox()
     box.captures = ("@line",)
-    ws = Workspace(
-        {"/ram": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box, "workspace"]
-    )
+    ws = Workspace({"/ram": RAMVFS()}, mode=MountMode.EXEC, machines=[box])
     io = await ws.shell("ls /ram && echo done", stdin=b"fed")
     assert (await materialize(io.stdout)).startswith(b"box:")
     assert box.lines[0][1] == b"fed"
@@ -748,7 +751,7 @@ async def test_a_route_to_the_workspace_keeps_a_line_in_mirage():
     ws = Workspace(
         {"/ram": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[box, "workspace"],
+        machines=[box],
         route_policy=lambda ctx: (
             "workspace" if "keep-out" in ctx.line else None
         ),
@@ -768,11 +771,11 @@ async def test_runtime_argument_places_the_whole_line():
     ws = Workspace(
         {"/ram": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[box, "workspace"],
+        machines=[box],
         route_policy=lambda ctx: "workspace",
     )
     refused = await ws.shell("echo hi")
-    forced = await ws.shell("echo hi", runtime="sandbox")
+    forced = await ws.shell("echo hi", machine="sandbox")
     assert await materialize(refused.stdout) == b"hi\n"
     assert (await materialize(forced.stdout)).startswith(b"box:")
     await ws.close()
@@ -814,7 +817,7 @@ async def test_binding_withholds_the_history_view_from_runtimes():
     # The history view is a shell surface, not a place to put files;
     # announcing it would make a WASI guest preopen /.bash_history.
     probe = ResolverProbe()
-    ws = Workspace({"/data": RAMVFS()}, runtimes=[probe])
+    ws = Workspace({"/data": RAMVFS()}, machines=[probe])
     try:
         assert probe.resolver is not None
         prefixes = probe.resolver.prefixes()
@@ -829,7 +832,7 @@ async def test_binding_withholds_the_synthetic_root_anchor():
     # Nobody mounted the anchor; forwarding it would make every
     # runtime claim a VFS the embedder never asked for.
     probe = ResolverProbe()
-    ws = Workspace({"/data": RAMVFS()}, runtimes=[probe])
+    ws = Workspace({"/data": RAMVFS()}, machines=[probe])
     try:
         assert probe.resolver is not None
         assert "/" not in probe.resolver.prefixes()
@@ -842,7 +845,7 @@ async def test_binding_forwards_an_explicit_root_mount():
     # Withheld for being synthetic, never for being `/`: a runtime
     # that cannot serve the root refuses on its own (pyodide does).
     probe = ResolverProbe()
-    ws = Workspace({"/": RAMVFS()}, runtimes=[probe])
+    ws = Workspace({"/": RAMVFS()}, machines=[probe])
     try:
         assert probe.resolver is not None
         assert "/" in probe.resolver.prefixes()

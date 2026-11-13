@@ -244,7 +244,7 @@ const RESTRICTIONS: SessionProfile[] = [
 function restricted(runtime: DockerMachine, profile: SessionProfile): Workspace {
   return new Workspace(
     { '/data': new RAMVFS() },
-    { mode: MountMode.EXEC, profiles: { agent: profile }, ...on(runtime, 'workspace') },
+    { mode: MountMode.EXEC, profiles: { agent: profile }, ...on(runtime) },
   )
 }
 

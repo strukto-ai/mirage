@@ -22,7 +22,7 @@ async def main() -> None:
     ws = Workspace(
         {"/ram": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=["monty", "workspace"],
+        machines={"py": {"provider": "worker"}},
     )
 
     print("=== python3 -c (basic) ===")

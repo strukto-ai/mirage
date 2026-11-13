@@ -13,16 +13,17 @@
     {
       "id": "real_cpython_not_a_subset",
       "world": {
-        "runtimes": [
-          {
-            "name": "sandlock",
+        "machines": {
+          "sandlock": {
+            "provider": "host",
+            "sandbox": {},
             "captures": [
               "python3",
               "node",
               "@external"
             ]
           }
-        ]
+        }
       },
       "steps": [
         {
@@ -37,16 +38,17 @@
     {
       "id": "node_argv",
       "world": {
-        "runtimes": [
-          {
-            "name": "sandlock",
+        "machines": {
+          "sandlock": {
+            "provider": "host",
+            "sandbox": {},
             "captures": [
               "python3",
               "node",
               "@external"
             ]
           }
-        ]
+        }
       },
       "steps": [
         {

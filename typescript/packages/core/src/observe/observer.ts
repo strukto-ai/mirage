@@ -560,7 +560,6 @@ export class Observer {
       attributes['process.parent_pid'] =
         this.shownPids.get(this.spanKey('process', line, record.parent)) ?? record.parent
     }
-    if (record.runtime !== null) attributes['mirage.runtime'] = record.runtime
     return this.startSpan('process', key, line, attributes, under, record.startedAt)
   }
 

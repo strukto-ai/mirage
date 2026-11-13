@@ -1468,7 +1468,7 @@ class JobTable:
                 "started_at": record.started_at,
                 "state": record.state.value,
                 "line": str(record.line) if record.line is not None else None,
-                "runtime": record.runtime,
+                "program": record.program,
                 "machine_pid": (
                     {
                         "pid": record.machine_pid.pid,
@@ -1656,7 +1656,7 @@ class JobTable:
         """
         left: dict[str, RecordFields] = {}
         for pid, record in records.items():
-            if record.get("runtime") is None:
+            if not record.get("program"):
                 continue
             if await self._running(owner):
                 return records

@@ -52,8 +52,8 @@ export interface RuntimeOptions<C extends RuntimeConfig = Record<string, unknown
  * How a runtime's engine is set up: its implementation knobs.
  *
  * Every runtime is constructed the same way (captures, config); what
- * differs between runtimes lives here. In yaml this is
- * the runtime entry's `config` block, mirroring a mount's.
+ * differs between runtimes lives here. In yaml these are a machine
+ * entry's fields beside its `provider`.
  *
  * The base names no field, because no knob is shared by every tier.
  * Python gets its fail-loud check from the dataclass (a field the

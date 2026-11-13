@@ -15,7 +15,6 @@ import { CLI } from '@struktoai/mirage-core/commands/cli/types'
 import { Runtime } from '@struktoai/mirage-core/runtime/base'
 import { PyodideRuntime } from '@struktoai/mirage-core/runtime/python/pyodide/runtime'
 import { E2BMachine } from '@struktoai/mirage-core/machine/e2b/handle'
-import { RemoteRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { MountMode, ReadPolicy, WritePolicy } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
@@ -91,23 +90,21 @@ describe('absolutizeScripts', () => {
     expect(clis.tally?.cli).toBe('/srv/tools/tally.mjs:TALLY')
   })
 
-  it('rebases a runtime entry name that is a code ref, not a registered name', () => {
+  it("rebases a machine's runtime that is a code ref, not a registered name", () => {
     const raw: Record<string, unknown> = {
-      runtimes: [
-        { name: './box.mjs:EchoBox', captures: ['nvidia-smi'] },
-        { name: 'monty' },
-        '../box.mjs:EchoBox',
-        'my-runtimes:EchoBox',
-        'workspace',
-      ],
+      machines: {
+        a: { provider: 'in_process', runtime: './box.mjs:EchoBox', captures: ['nvidia-smi'] },
+        b: { provider: 'in_process', runtime: 'quickjs' },
+        c: { provider: 'in_process', runtime: '../box.mjs:EchoBox' },
+        d: { provider: 'in_process', runtime: 'my-runtimes:EchoBox' },
+      },
     }
     absolutizeScripts(raw, '/srv/deploy')
-    const runtimes = raw.runtimes as ({ name: string } | string)[]
-    expect(runtimes[0]).toEqual({ name: '/srv/deploy/box.mjs:EchoBox', captures: ['nvidia-smi'] })
-    expect(runtimes[1]).toEqual({ name: 'monty' })
-    expect(runtimes[2]).toBe('/srv/box.mjs:EchoBox')
-    expect(runtimes[3]).toBe('my-runtimes:EchoBox')
-    expect(runtimes[4]).toBe('workspace')
+    const machines = raw.machines as Record<string, { runtime: string }>
+    expect(machines.a?.runtime).toBe('/srv/deploy/box.mjs:EchoBox')
+    expect(machines.b?.runtime).toBe('quickjs')
+    expect(machines.c?.runtime).toBe('/srv/box.mjs:EchoBox')
+    expect(machines.d?.runtime).toBe('my-runtimes:EchoBox')
   })
 })
 
@@ -125,12 +122,12 @@ describe('loadWorkspaceConfig', () => {
 })
 
 describe('configToWorkspaceArgs', () => {
-  it('keeps a named runtime through a copy', async () => {
+  it('keeps a machine built from its entry through a copy', async () => {
     const args = await configToWorkspaceArgs(
       loadWorkspaceConfig({
         mounts: { '/': { vfs: 'ram', mode: 'exec' } },
         mode: 'exec',
-        runtimes: ['monty', 'workspace'],
+        machines: { py: { provider: 'worker' } },
       }),
     )
     const ws = new Workspace(args.mounts, args.options)
@@ -209,52 +206,55 @@ describe('configToWorkspaceArgs', () => {
         const filename = join(dir, 'workspace.yaml')
         writeFileSync(
           filename,
-          'mounts:\n  /:\n    vfs: ram\nruntimes:\n  - name: sandlock\n' +
+          'mounts:\n  /:\n    vfs: ram\nmachines:\n  box:\n    provider: host\n    sandbox: {}\n' +
             (captures === undefined ? '' : '    captures: ["@external"]\n'),
         )
         const cfg = loadWorkspaceConfigFile(filename)
         const args = await configToWorkspaceArgs(cfg)
-        expect(args.options.runtimes?.[0]).toBeInstanceOf(SandlockRuntime)
-        expect((args.options.runtimes?.[0] as { captures: readonly string[] }).captures).toEqual([
-          '@external',
-        ])
+        const box = machinesOf(args).box
+        expect(box).toBeInstanceOf(SandlockRuntime)
+        expect((box as { captures: readonly string[] }).captures).toEqual(['@external'])
       } finally {
         rmSync(dir, { recursive: true, force: true })
       }
     },
   )
 
-  it('builds runtime entries from the ordered list', async () => {
+  it('builds the machines in the order they are listed', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },
-      runtimes: [
-        { name: 'pyodide', config: { home: 'https://assets.example.com/pyodide/' } },
-        'quickjs',
-        'workspace',
-      ],
+      machines: {
+        py: { provider: 'in_process', runtime: 'pyodide', home: 'https://assets.example.com/' },
+        js: { provider: 'in_process', runtime: 'quickjs' },
+      },
     })
     const args = await configToWorkspaceArgs(cfg)
-    const entries = args.options.runtimes
-    expect(entries).toBeDefined()
-    expect(entries).toHaveLength(3)
-    expect((entries?.[0] as { name: string }).name).toBe('pyodide')
-    expect((entries?.[1] as { name: string }).name).toBe('quickjs')
-    expect((entries?.[2] as { name: string }).name).toBe('workspace')
+    const machines = machinesOf(args)
+    expect(Object.keys(machines)).toEqual(['py', 'js'])
+    expect(machines.py).toBeInstanceOf(PyodideRuntime)
+    expect((machines.js as Runtime).name).toBe('js')
   })
 
-  it('camelizes the snake_case keys of a runtime entry config block', async () => {
+  it("camelizes the snake_case keys of a machine's runtime config", async () => {
     // Yaml carries Python-shaped keys; the TS runtime config classes
-    // are camelCase, so the loader must translate the block's keys
+    // are camelCase, so the loader must translate the entry's keys
     // (values, like an env map, pass through untouched).
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },
-      runtimes: [
-        { name: 'pyodide', config: { auto_load_from_imports: false, home: '/assets' } },
-        'workspace',
-      ],
+      machines: {
+        py: {
+          provider: 'in_process',
+          runtime: 'pyodide',
+          auto_load_from_imports: false,
+          home: '/assets',
+        },
+      },
     })
     const args = await configToWorkspaceArgs(cfg)
-    expect(args.options.runtimes).toHaveLength(2)
+    expect((machinesOf(args).py as PyodideRuntime).config).toEqual({
+      autoLoadFromImports: false,
+      home: '/assets',
+    })
   })
 
   it.each([1, 2, Number.MAX_SAFE_INTEGER])(
@@ -265,11 +265,11 @@ describe('configToWorkspaceArgs', () => {
         const filename = join(dir, 'workspace.yaml')
         writeFileSync(
           filename,
-          'mounts:\n  /data:\n    vfs: ram\nruntimes:\n  - name: pyodide\n' +
-            `    config:\n      max_concurrency: ${String(limit)}\n  - workspace\n`,
+          'mounts:\n  /data:\n    vfs: ram\nmachines:\n  py:\n    provider: in_process\n' +
+            `    runtime: pyodide\n    max_concurrency: ${String(limit)}\n`,
         )
         const args = await configToWorkspaceArgs(loadWorkspaceConfigFile(filename))
-        const runtime = args.options.runtimes?.[0]
+        const runtime = machinesOf(args).py
         expect(runtime).toBeInstanceOf(PyodideRuntime)
         expect((runtime as PyodideRuntime).config).toEqual({ maxConcurrency: limit })
       } finally {
@@ -281,15 +281,17 @@ describe('configToWorkspaceArgs', () => {
   it('wires the Pyodide lock file and package base from snake_case YAML', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/data': { vfs: 'ram' } },
-      runtimes: [
-        {
-          name: 'pyodide',
-          config: { lock_file_url: '/opt/py/pyodide-lock.json', package_base_url: '/opt/py/' },
+      machines: {
+        py: {
+          provider: 'in_process',
+          runtime: 'pyodide',
+          lock_file_url: '/opt/py/pyodide-lock.json',
+          package_base_url: '/opt/py/',
         },
-      ],
+      },
     })
     const args = await configToWorkspaceArgs(cfg)
-    expect((args.options.runtimes?.[0] as PyodideRuntime).config).toEqual({
+    expect((machinesOf(args).py as PyodideRuntime).config).toEqual({
       lockFileUrl: '/opt/py/pyodide-lock.json',
       packageBaseUrl: '/opt/py/',
     })
@@ -300,7 +302,7 @@ describe('configToWorkspaceArgs', () => {
     async (limit) => {
       const cfg = loadWorkspaceConfig({
         mounts: { '/data': { vfs: 'ram' } },
-        runtimes: [{ name: 'pyodide', config: { max_concurrency: limit } }],
+        machines: { py: { provider: 'in_process', runtime: 'pyodide', max_concurrency: limit } },
       })
       await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(
         'pyodide config: maxConcurrency must be a positive safe integer',
@@ -308,30 +310,18 @@ describe('configToWorkspaceArgs', () => {
     },
   )
 
-  it('rejects a Pyodide concurrency limit outside its config block', async () => {
-    const cfg = loadWorkspaceConfig({
-      mounts: { '/data': { vfs: 'ram' } },
-      runtimes: [{ name: 'pyodide', max_concurrency: 2 }],
-    })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(
-      /unknown pyodide runtime option 'maxConcurrency'/,
-    )
-  })
-
-  it('rejects a flat option on a runtime entry (knobs live in config)', async () => {
+  it('rejects a key the runtime of a machine does not take', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },
-      runtimes: [{ name: 'pyodide', home: '/assets' }],
+      machines: { py: { provider: 'in_process', runtime: 'pyodide', homee: '/assets' } },
     })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(
-      /unknown pyodide runtime option 'home'/,
-    )
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/unknown runtime config key 'homee'/)
   })
 
-  it('rejects an unknown runtime entry name', async () => {
+  it('rejects an unknown runtime on a machine', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },
-      runtimes: ['nosuchruntime'],
+      machines: { py: { provider: 'in_process', runtime: 'nosuchruntime' } },
     })
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/unknown runtime/)
   })
@@ -339,19 +329,17 @@ describe('configToWorkspaceArgs', () => {
   it("hints that 'wasi' is Python-only", async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },
-      runtimes: ['wasi'],
+      machines: { py: { provider: 'in_process', runtime: 'wasi' } },
     })
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/Python-only/)
   })
 
-  it('rejects non-script options on the workspace entry', async () => {
+  it('rejects a config key on the workspace machine', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },
-      runtimes: [{ name: 'workspace', home: '/x' }],
+      machines: { workspace: { provider: 'in_process', home: '/x' } },
     })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(
-      /unknown workspace runtime option 'home'/,
-    )
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/unknown runtime config key 'home'/)
   })
 
   it('resolves script paths against the config file dir', async () => {
@@ -373,24 +361,24 @@ describe('configToWorkspaceArgs', () => {
   it('carries workspace captures through', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },
-      runtimes: [{ name: 'workspace', captures: ['grep', 'cat'] }],
+      machines: { workspace: { provider: 'in_process', captures: ['grep', 'cat'] } },
     })
     const args = await configToWorkspaceArgs(cfg)
-    const entry = args.options.runtimes?.[0] as { captures: readonly string[] }
+    const entry = machinesOf(args).workspace as { captures: readonly string[] }
     expect([...entry.captures]).toEqual(['grep', 'cat'])
   })
 
   it('takes max_memory as a size or a count of bytes', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },
-      runtimes: [{ name: 'monty', config: { max_memory: 1048576 } }],
+      machines: { monty: { provider: 'worker', max_memory: 1048576 } },
     })
     const args = await configToWorkspaceArgs(cfg)
-    const monty = args.options.runtimes?.[0] as { config: { maxMemory?: unknown } }
+    const monty = machinesOf(args).monty as { config: { maxMemory?: unknown } }
     expect(monty.config.maxMemory).toBe(1048576)
     const bad = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },
-      runtimes: [{ name: 'monty', config: { max_memory: 'lots' } }],
+      machines: { monty: { provider: 'worker', max_memory: 'lots' } },
     })
     await expect(configToWorkspaceArgs(bad)).rejects.toThrow(/max_memory must be a size/)
   })
@@ -399,7 +387,6 @@ describe('configToWorkspaceArgs', () => {
     loadWorkspaceConfig({
       mounts: { '/data': { vfs: 'ram' } },
       machines: { box: { provider, sandbox_id: 'sbx-1', api_key: apiKey } },
-      runtimes: [{ name: 'remote', machine: 'box' }, 'workspace'],
       ...extra,
     })
 
@@ -412,16 +399,13 @@ describe('configToWorkspaceArgs', () => {
       const args = await configToWorkspaceArgs(
         e2bConfig({ from: 'env', key: 'E2B_TEST_KEY' }, {}, provider),
       )
-      const box = args.options.machines?.box
+      const box = machinesOf(args).box
       expect(box).toBeInstanceOf(cls)
       expect((box as E2BMachine | DaytonaMachine).config).toMatchObject({
         apiKey: 'key_from_env',
         sandboxId: 'sbx-1',
       })
-      const [native, workspace] = args.options.runtimes ?? []
-      expect(native).toBeInstanceOf(RemoteRuntime)
-      expect((native as RemoteRuntime).defaultMachine).toBe('box')
-      expect((workspace as { name: string }).name).toBe('workspace')
+      expect((box as E2BMachine | DaytonaMachine).config.captures).toBeUndefined()
     } finally {
       vi.unstubAllEnvs()
     }
@@ -438,7 +422,7 @@ describe('configToWorkspaceArgs', () => {
           { secrets: { team: { source: 'dotenv', config: { path: 'unused' } } } },
         ),
       )
-      const e2b = args.options.machines?.box as E2BMachine
+      const e2b = machinesOf(args).box as E2BMachine
       expect(e2b.config.apiKey).toBe('e2b_from_dotenv')
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -460,10 +444,10 @@ describe('configToWorkspaceArgs', () => {
           },
         }),
       )
-      const ssh = args.options.machines?.gpu
+      const ssh = machinesOf(args).gpu as SSHMachine
       expect(ssh).toBeInstanceOf(SSHMachine)
-      expect(String(ssh?.machine)).toBe('ssh:gpu')
-      expect((ssh as SSHMachine).config.privateKey).toBe('key-from-env')
+      expect(String(ssh.machine)).toBe('ssh:gpu')
+      expect(ssh.config.privateKey).toBe('key-from-env')
     } finally {
       vi.unstubAllEnvs()
     }
@@ -562,14 +546,12 @@ describe('configToWorkspaceArgs', () => {
     ).toThrow(/system_time/)
   })
 
-  it('refuses a runtime entry script', async () => {
+  it('refuses a script on a machine', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },
-      runtimes: [{ name: 'quickjs', script: 'entry.py' }],
+      machines: { js: { provider: 'in_process', runtime: 'quickjs', script: 'entry.py' } },
     })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(
-      /unknown quickjs runtime option 'script'/,
-    )
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/unknown runtime config key 'script'/)
   })
 
   it('refuses a route_policy that is not a program block', () => {
@@ -1198,7 +1180,7 @@ describe('clis section', () => {
     writeFileSync(
       join(dir, 'ws.yaml'),
       'mounts:\n  /data:\n    vfs: ram\n' +
-        'clis:\n  pager:\n    script: pager.py\n    runtime: monty\n' +
+        'clis:\n  pager:\n    script: pager.py\n    machine: monty\n' +
         '    config:\n      page_size: 20\n',
     )
     const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
@@ -1207,7 +1189,7 @@ describe('clis section', () => {
     expect(spec).toBeInstanceOf(CLI)
     expect((spec as CLI).spec.name).toBe('pager')
     expect((spec as CLI).script).toEqual(new ScriptSource("print('page')"))
-    expect((spec as CLI).runtime).toBe('monty')
+    expect((spec as CLI).machine).toBe('monty')
     expect(config).toEqual({ page_size: 20 })
     rmSync(dir, { recursive: true, force: true })
   })
@@ -1257,10 +1239,10 @@ describe('clis section', () => {
     await expect(configToWorkspaceArgs(neither)).rejects.toThrow(/exactly one of cli or script/)
   })
 
-  it('runtime takes script', async () => {
+  it('machine takes script', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/data': { vfs: 'ram' } },
-      clis: { sl: { cli: 'slack', runtime: 'monty' } },
+      clis: { sl: { cli: 'slack', machine: 'monty' } },
     })
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/it takes script/)
   })
@@ -1287,11 +1269,11 @@ describe('clis section', () => {
   })
 })
 
-// Mirrors python/tests/config/test_loader.py's runtimes `name:` cases. A
-// runtime entry name carrying a colon names a Runtime subclass the way
+// Mirrors python/tests/config/test_loader.py's machines `runtime:` cases. A
+// machine's runtime carrying a colon names a Runtime subclass the way
 // `vfs:` names a backend, so a deployment ships a runtime as a file
 // with no host program calling registerRuntime.
-describe('runtimes name: reference', () => {
+describe('machines runtime: reference', () => {
   const CORE = pathToFileURL(
     resolve(fileURLToPath(import.meta.url), '../../../core/dist/index.js'),
   ).href
@@ -1305,42 +1287,42 @@ describe('runtimes name: reference', () => {
     '}\n' +
     "export const NOT_A_RUNTIME = { name: 'nope' }\n"
 
-  it('builds a runtime out of a file next to the config, with the entry options', async () => {
+  it('builds a runtime out of a file next to the config, with the entry captures', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-rt-'))
     writeFileSync(join(dir, 'box.mjs'), BOX)
     writeFileSync(
       join(dir, 'ws.yaml'),
       'mounts:\n  /data:\n    vfs: ram\n' +
-        'runtimes:\n  - name: ./box.mjs:EchoBox\n    captures: [nvidia-smi, rocm-smi]\n  - workspace\n',
+        'machines:\n  gpu:\n    provider: in_process\n    runtime: ./box.mjs:EchoBox\n' +
+        '    captures: [nvidia-smi, rocm-smi]\n' +
+        '  bare: {provider: in_process, runtime: ./box.mjs:EchoBox}\n',
     )
     const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
-    expect(cfg.runtimes?.[0]).toEqual({
-      name: `${join(dir, 'box.mjs')}:EchoBox`,
-      captures: ['nvidia-smi', 'rocm-smi'],
-    })
+    expect(cfg.machines?.gpu?.runtime).toBe(`${join(dir, 'box.mjs')}:EchoBox`)
     const args = await configToWorkspaceArgs(cfg)
-    const [box, fallback] = args.options.runtimes ?? []
+    const { gpu: box, bare } = machinesOf(args)
     expect(box).toBeInstanceOf(Runtime)
-    expect((box as Runtime).name).toBe('echobox')
+    expect((box as Runtime).name).toBe('gpu')
     expect((box as Runtime).captures).toEqual(['nvidia-smi', 'rocm-smi'])
-    expect((fallback as Runtime).name).toBe('workspace')
+    expect((bare as Runtime).captures).toEqual(['nvidia-smi'])
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('checks the entry keys of a referenced runtime the way a named one is checked', async () => {
-    // The base constructor ignores a key it does not read, so without
-    // the check `captuers:` would leave EchoBox on its class captures;
-    // Python refuses the same entry through `**options`.
+  it('refuses an unknown entry key on a referenced runtime', async () => {
+    // A referenced class takes the entry's other keys as its config, so a
+    // typo fails the way it does for a builtin runtime instead of leaving
+    // it on its class defaults.
     const dir = mkdtempSync(join(tmpdir(), 'mirage-rt-'))
     writeFileSync(join(dir, 'box.mjs'), BOX)
     writeFileSync(
       join(dir, 'ws.yaml'),
       'mounts:\n  /data:\n    vfs: ram\n' +
-        'runtimes:\n  - name: ./box.mjs:EchoBox\n    captuers: [nvidia-smi, rocm-smi]\n  - workspace\n',
+        'machines:\n  box:\n    provider: in_process\n    runtime: ./box.mjs:EchoBox\n' +
+        '    captuers: [nvidia-smi, rocm-smi]\n',
     )
     await expect(
       configToWorkspaceArgs(loadWorkspaceConfigFile(join(dir, 'ws.yaml'))),
-    ).rejects.toThrow(/unknown .*box\.mjs:EchoBox runtime option 'captuers'/)
+    ).rejects.toThrow(/unknown runtime config key 'captuers'/)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -1349,14 +1331,16 @@ describe('runtimes name: reference', () => {
     writeFileSync(join(dir, 'box.mjs'), BOX)
     writeFileSync(
       join(dir, 'ws.yaml'),
-      'mounts:\n  /data:\n    vfs: ram\nruntimes:\n  - ./box.mjs:NOT_A_RUNTIME\n',
+      'mounts:\n  /data:\n    vfs: ram\n' +
+        'machines:\n  box: {provider: in_process, runtime: ./box.mjs:NOT_A_RUNTIME}\n',
     )
     await expect(
       configToWorkspaceArgs(loadWorkspaceConfigFile(join(dir, 'ws.yaml'))),
     ).rejects.toThrow('is not a Runtime subclass')
     writeFileSync(
       join(dir, 'ws.yaml'),
-      'mounts:\n  /data:\n    vfs: ram\nruntimes:\n  - name: ./missing.mjs:EchoBox\n',
+      'mounts:\n  /data:\n    vfs: ram\n' +
+        'machines:\n  box: {provider: in_process, runtime: ./missing.mjs:EchoBox}\n',
     )
     await expect(
       configToWorkspaceArgs(loadWorkspaceConfigFile(join(dir, 'ws.yaml'))),
@@ -1707,6 +1691,11 @@ describe('CLI to daemon round trip', () => {
 // loaders agree. The accepted half is one file per subject: every config
 // block that is not a permission verb, then a verb each.
 const ACCEPTED_FIXTURES = ['blocks', 'allow', 'ask', 'deny'] as const
+
+/** The machines a config built, by name. */
+function machinesOf(args: { options: { machines?: unknown } }): Record<string, unknown> {
+  return (args.options.machines ?? {}) as Record<string, unknown>
+}
 
 function fixtureCases(
   name: string,

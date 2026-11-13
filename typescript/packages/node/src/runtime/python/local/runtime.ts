@@ -144,7 +144,7 @@ export class LocalRuntime
         accessSync(home, constants.X_OK)
       } catch (cause) {
         throw new Error(
-          `local python interpreter not found: ${home} (from the runtime entry's config home or ${LOCAL_HOME_ENV})`,
+          `local python interpreter not found: ${home} (from the machine's \`home\` or ${LOCAL_HOME_ENV})`,
           { cause },
         )
       }
@@ -229,7 +229,7 @@ export class LocalRuntime
     if (!(await isExecutable(found)))
       throw new Error(
         `local python interpreter not found: '${name}' (set the ` +
-          `runtime entry's config home or ${LOCAL_HOME_ENV})`,
+          `machine's \`home\` or ${LOCAL_HOME_ENV})`,
       )
     return found
   }

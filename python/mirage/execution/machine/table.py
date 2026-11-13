@@ -228,10 +228,10 @@ class MachineTable:
         earlier scan found there still shows, and after a run there ends
         until a scan of it answers, the host likewise. A run's first
         process is the
-        Mirage process the run is, when that process is the program (it
-        has a runtime) and still runs, and its machine pid is recorded.
+        Mirage process the run is, when that process is the program (a
+        runtime started it) and still runs, and its machine pid is recorded.
         Every other process the run started joins the table as a process
-        of its own, with no runtime, under the process whose machine pid
+        of its own, no program of a runtime, under the process whose machine pid
         is its parent's, else under the run's while it runs, else at the
         top, and leaves it once a scan no longer sees it. A machine that
         does not answer keeps what it showed.
@@ -248,7 +248,7 @@ class MachineTable:
             runs = {
                 str(record.id): record
                 for record in processes.records()
-                if record.runtime is not None
+                if record.program
             }
             ended = {tag for tag in runs if tag not in live}
             unscanned = ended - self._scanned_after_end
@@ -333,7 +333,7 @@ class MachineTable:
             ):
                 return None
         elif self.by_id(str(record.machine)) is None or (
-            target is None and record.runtime is None
+            target is None and not record.program
         ):
             return None
         return self._deliver(
@@ -361,13 +361,13 @@ class MachineTable:
             sent = await self._signal_on(machine, target, signum)
         except Exception as exc:
             logger.debug("%s: signal %d not sent: %s", machine, signum, exc)
-            if handle.record.runtime is None:
+            if not handle.record.program:
                 return False
             sent = False
         if sent:
             handle.program_signaled(signum)
             return True
-        if handle.record.runtime is None:
+        if not handle.record.program:
             self._end_found(handle)
             return False
         if signum in CONTINUE_SIGNALS or signum in STOP_SIGNALS:
@@ -464,7 +464,7 @@ class MachineTable:
             placed: dict[int, int] = {}
             if (
                 handle is not None
-                and handle.record.runtime is not None
+                and handle.record.program
                 and handle.record.machine == machine
             ):
                 root = _program_row(run, pids, handle.record.machine_pid)
@@ -537,7 +537,7 @@ class MachineTable:
             1
             for handle in processes.live()
             if handle.record.session_id == session
-            and handle.record.runtime is None
+            and not handle.record.program
             and handle.record.machine_pid is not None
         )
         if placed >= MAX_PROCESSES:

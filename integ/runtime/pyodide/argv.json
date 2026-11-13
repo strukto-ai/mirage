@@ -6,10 +6,12 @@
         "typescript"
       ],
       "world": {
-        "runtimes": [
-          "pyodide",
-          "workspace"
-        ],
+        "machines": {
+          "pyodide": {
+            "provider": "in_process",
+            "runtime": "pyodide"
+          }
+        },
         "mounts": {
           "/disk": {
             "vfs": "ram",

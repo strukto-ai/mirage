@@ -1283,10 +1283,12 @@
     {
       "id": "an_interpreter_loop_stops_at_the_line_deadline",
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ],
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram",

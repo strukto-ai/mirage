@@ -18,6 +18,7 @@ import errno
 import pytest
 
 from mirage.context import reset_caller, set_current_session
+from mirage.runtime.python.monty import MontyRuntime
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Session, Workspace
@@ -32,7 +33,7 @@ def _seeded(mode: MountMode = MountMode.WRITE) -> Workspace:
     ws = Workspace(
         {"/repo": (RAMVFS(), mode)},
         mode=MountMode.WRITE,
-        runtimes=["monty", "workspace"],
+        machines=[MontyRuntime()],
     )
 
     async def seed():

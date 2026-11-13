@@ -89,7 +89,7 @@ Visible installed programs have read-only stubs under `/usr/bin`, so
 `which slack` returns `/usr/bin/slack`. The stub describes the command without
 exposing its config or credentials. Executing that path uses the same command
 and policy checks. Changing `PATH` does not change Mirage's virtual command
-lookup; host and remote runtimes use their own executable paths.
+lookup; a `host` machine and other machines use their own executable paths.
 
 ## Use CLIs with the VFS
 

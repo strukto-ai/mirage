@@ -147,7 +147,7 @@ class SeenRuntime(Runtime, ProcessExecutorMixin):
 
 async def _seen(line: str, reach: str = "remote") -> tuple[Process, str]:
     runtime = SeenRuntime(reach)
-    ws = Workspace({"/data": RAMVFS()}, runtimes=[runtime, "workspace"])
+    ws = Workspace({"/data": RAMVFS()}, machines=[runtime])
     try:
         out = (await ws.shell(line)).stdout.decode()
         [process] = runtime.seen
@@ -166,39 +166,39 @@ async def _seen(line: str, reach: str = "remote") -> tuple[Process, str]:
 async def test_a_program_past_the_workspace_is_a_process_of_its_own():
     alone, line = await _seen("probe; echo $$")
     assert (alone.parent, alone.command) == (int(line), "probe")
-    assert (alone.machine, alone.runtime) == (MachineName("box", "b1"), "seen")
+    assert (alone.machine, alone.program) == (MachineName("box", "b1"), True)
     stage, line = await _seen("echo $$; probe | cat")
-    assert (stage.parent, stage.command, stage.runtime) == (
+    assert (stage.parent, stage.command, stage.program) == (
         int(line),
         "probe",
-        "seen",
+        True,
     )
     job, pid = await _seen("probe & echo $!; wait")
-    assert (job.pid, job.runtime) == (int(pid), "seen")
+    assert (job.pid, job.program) == (int(pid), True)
     replaced, pid = await _seen("exec probe & echo $!; wait")
-    assert (replaced.pid, replaced.runtime) == (int(pid), "seen")
+    assert (replaced.pid, replaced.program) == (int(pid), True)
     forked, pid = await _seen(
         "find /data -maxdepth 0 -exec probe {} \\; & echo $!; wait"
     )
-    assert (forked.parent, forked.runtime) == (int(pid), "seen")
+    assert (forked.parent, forked.program) == (int(pid), True)
     batched, pid = await _seen(
         "/usr/bin/xargs probe </dev/null & echo $!; wait"
     )
-    assert (batched.parent, batched.runtime) == (int(pid), "seen")
+    assert (batched.parent, batched.program) == (int(pid), True)
 
 
 # A runtime the workspace reaches runs its program in its shell's process.
 @pytest.mark.asyncio
 async def test_a_program_the_workspace_reaches_stays_in_its_shell():
     process, line = await _seen("echo $$; probe", "workspace")
-    assert (process.pid, process.runtime) == (int(line), None)
+    assert (process.pid, process.program) == (int(line), False)
 
 
 # A program's process stopped with its shell ends by the shell's signal.
 @pytest.mark.asyncio
 async def test_a_programs_process_ends_by_its_shells_signal():
     runtime = SeenRuntime()
-    ws = Workspace({"/data": RAMVFS()}, runtimes=[runtime, "workspace"])
+    ws = Workspace({"/data": RAMVFS()}, machines=[runtime])
     try:
         line = asyncio.ensure_future(ws.shell("true; hold"))
         async with asyncio.timeout(5):
@@ -228,7 +228,7 @@ async def test_a_programs_process_ends_by_its_shells_signal():
 @pytest.mark.asyncio
 async def test_a_programs_process_stopped_alone_leaves_its_shell_running():
     runtime = SeenRuntime()
-    ws = Workspace({"/data": RAMVFS()}, runtimes=[runtime, "workspace"])
+    ws = Workspace({"/data": RAMVFS()}, machines=[runtime])
     try:
         line = asyncio.ensure_future(ws.shell("true; hold; echo after $?"))
         async with asyncio.timeout(5):

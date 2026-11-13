@@ -8,21 +8,23 @@ A runtime decides where a program runs. Write one when the agent's programs
 should run somewhere Mirage does not ship: your team's job runner, a GPU
 machine or a build farm. A runtime is a class that extends `Runtime`, names
 the programs it captures and implements one entry point. You ship it as a file
-next to your workspace YAML and name it by file and class:
+next to your workspace YAML and name it by file and class as an `in_process`
+machine's `runtime`:
 
 ```yaml
-runtimes:
-  - name: ./remote_runtime.py:RemoteRuntime     # TypeScript: ./remote_runtime.mjs:RemoteRuntime
-    config:
-      url: ${EXEC_URL}
-      token: ${EXEC_TOKEN}
-  - workspace
+machines:
+  exec:
+    provider: in_process
+    runtime: ./remote_runtime.py:RemoteRuntime     # TypeScript: ./remote_runtime.mjs:RemoteRuntime
+    url: ${EXEC_URL}
+    token: ${EXEC_TOKEN}
 ```
 
 The part before the colon is a file path, relative to the YAML file, or an
 importable module (`mypkg.runtimes:RemoteRuntime`). The part after it is the
 class. Mirage loads the file, checks that the class is a `Runtime` subclass and
-builds it with the entry's `captures` and `config`, like a runtime it ships.
+builds it with the machine's `captures` and its other keys as config, like a
+runtime it ships.
 Loading runs the file's top-level code in the Mirage process, so name only
 code you trust.
 
@@ -282,6 +284,6 @@ declare its reach claims no promise. Embedders read it to decide whether
 
 ## Next
 
-[Routing](/home/setup/runtime/overview#routing) orders your runtime among the
-others, and [Route Runtime](/home/policy/route-runtime) picks one per command
-line.
+[Routing](/home/setup/runtime/overview#routing) orders your runtime's machine
+among the others, and [Route Machine](/home/policy/route-machine) picks one per
+command line.

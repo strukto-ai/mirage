@@ -14,10 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import type { Context } from '../../commands/config.ts'
-import { MachineHandle } from '../../machine/handle.ts'
 import { Runtime } from '../../runtime/base.ts'
 import { LINE_EXECUTOR, type LineExecutorMixin } from '../../runtime/mixin.ts'
-import { RemoteRuntime } from '../../runtime/machine/runtime.ts'
 import { PythonRuntime } from '../../runtime/python/base.ts'
 import type { Program, RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
@@ -89,26 +87,14 @@ function workspace(...runtimes: Runtime[]): Workspace {
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      runtimes: [...runtimes, 'workspace'],
+      machines: [...runtimes],
     },
   )
 }
 
-async function python3(ws: Workspace, runtime?: string): Promise<[number, string, string]> {
-  const io = await ws.shell('python3 -c x', runtime !== undefined ? { runtime } : {})
+async function python3(ws: Workspace, machine?: string): Promise<[number, string, string]> {
+  const io = await ws.shell('python3 -c x', machine !== undefined ? { machine } : {})
   return [io.exitCode, DEC.decode(io.stdout), DEC.decode(io.stderr)]
-}
-
-class Idle extends MachineHandle {
-  static override readonly provider = 'idle'
-
-  connect(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  protected execArgv(): Promise<RunResult> {
-    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
-  }
 }
 
 describe('the default world', () => {
@@ -132,16 +118,16 @@ describe('the default world', () => {
   })
 })
 
-describe('removeRuntime', () => {
+describe('removeMachine', () => {
   it('swaps engines as remove then add and keeps a removed instance out', async () => {
     const alpha = new Engine('alpha')
     const ws = workspace(alpha, new Engine('beta'))
     try {
       expect(await python3(ws)).toEqual([0, 'alpha\n', ''])
-      await ws.removeRuntime('alpha')
+      await ws.removeMachine('alpha')
       expect(await python3(ws)).toEqual([0, 'beta\n', ''])
       expect(alpha.closed).toBe(1)
-      expect(() => ws.addRuntime(alpha)).toThrow(/construct a new one/)
+      expect(() => ws.addMachine(alpha.name, alpha)).toThrow(/construct a new one/)
     } finally {
       await ws.close()
     }
@@ -157,7 +143,7 @@ describe('removeRuntime', () => {
       const line = python3(ws)
       await alpha.entered.promise
       let removed = false
-      const removing = ws.removeRuntime('alpha').then(() => {
+      const removing = ws.removeMachine('alpha').then(() => {
         removed = true
       })
       await new Promise((resolve) => setTimeout(resolve, 10))
@@ -176,9 +162,9 @@ describe('removeRuntime', () => {
     const gate = new Gate()
     const ws = workspace(gate, alpha)
     try {
-      const line = ws.shell('gate; python3 -c x', { runtime: 'alpha' })
+      const line = ws.shell('gate; python3 -c x', { machine: 'alpha' })
       await gate.entered.promise
-      await ws.removeRuntime('alpha')
+      await ws.removeMachine('alpha')
       gate.release.open()
       const io = await line
       expect(io.exitCode).toBe(1)
@@ -197,7 +183,7 @@ describe('removeRuntime', () => {
       (err: unknown) => (err instanceof Error ? err.name : String(err)),
     )
     await alpha.entered.promise
-    const removing = ws.removeRuntime('alpha')
+    const removing = ws.removeMachine('alpha')
     await Promise.resolve()
     await ws.close()
     await removing
@@ -228,7 +214,7 @@ class Box extends Runtime implements LineExecutorMixin {
   }
 }
 
-describe('addRuntime', () => {
+describe('addMachine', () => {
   it.each([
     [() => [new Engine('a')], () => [new Box('b1'), new Box('b2')], ['b1', 'b2', 'a', 'workspace']],
     [() => [new Engine('a'), new Box('b1')], () => [new Box('b2')], ['a', 'b1', 'b2', 'workspace']],
@@ -244,8 +230,8 @@ describe('addRuntime', () => {
     async (listed, added, order) => {
       const ws = workspace(...listed())
       try {
-        for (const entry of added()) ws.addRuntime(entry)
-        expect(ws.runtimes().map((r) => r.name)).toEqual(order)
+        for (const entry of added()) ws.addMachine(entry.name, entry)
+        expect(ws.engines().map((r) => r.name)).toEqual(order)
       } finally {
         await ws.close()
       }
@@ -255,7 +241,7 @@ describe('addRuntime', () => {
   it('runs a python3 captured on an added sandbox there', async () => {
     const ws = workspace(new Engine('monty'))
     try {
-      ws.addRuntime(new Box('box', 'python3'))
+      ws.addMachine('box', new Box('box', 'python3'))
       expect(await python3(ws)).toEqual([0, 'box\n', ''])
     } finally {
       await ws.close()
@@ -269,13 +255,13 @@ describe('shadowed captures', () => {
     logger.warn = (message) => said.push(message)
     const ws = workspace(new Engine('a'), new Engine('b'))
     try {
-      ws.addRuntime(new Box('box', 'python3'))
+      ws.addMachine('box', new Box('box', 'python3'))
       expect(said).toEqual([
-        "runtime 'b' runs 'python3' only when a route names it: 'a', listed before it, takes it",
-        "runtime 'b' runs 'python' only when a route names it: 'a', listed before it, takes it",
-        "runtime 'a' runs 'python3' only when a route names it: 'box', listed before it, takes it",
-        "runtime 'b' runs 'python3' only when a route names it: 'box', listed before it, takes it",
-        "runtime 'b' runs 'python' only when a route names it: 'a', listed before it, takes it",
+        "machine 'b' runs 'python3' only when a route names it: 'a', listed before it, takes it",
+        "machine 'b' runs 'python' only when a route names it: 'a', listed before it, takes it",
+        "machine 'a' runs 'python3' only when a route names it: 'box', listed before it, takes it",
+        "machine 'b' runs 'python3' only when a route names it: 'box', listed before it, takes it",
+        "machine 'b' runs 'python' only when a route names it: 'a', listed before it, takes it",
       ])
     } finally {
       delete logger.warn
@@ -290,40 +276,19 @@ describe('shadowed captures', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [new Engine('a'), new Engine('b'), 'workspace'],
+        machines: [new Engine('a'), new Engine('b')],
         routePolicy: (ctx) => (ctx.line.includes('fast') ? 'b' : null),
       },
     )
     try {
       expect(said).toEqual([])
       ws.policies.place(null)
-      ws.addRuntime(new Box('box', 'python'))
+      ws.addMachine('box', new Box('box', 'python'))
       expect(said[0]).toBe(
-        "runtime 'a' runs 'python' only when a route names it: 'box', listed before it, takes it",
+        "machine 'a' runs 'python' only when a route names it: 'box', listed before it, takes it",
       )
     } finally {
       delete logger.warn
-      await ws.close()
-    }
-  })
-
-  it('leaves a native entry another workspace holds on its own machines', async () => {
-    const runtime = new RemoteRuntime({ captures: ['uname'], machine: 'box' })
-    const first = new Idle('box')
-    const ws = new Workspace(
-      { '/d': new RAMVFS() },
-      { mode: MountMode.EXEC, machines: { box: first }, runtimes: [runtime] },
-    )
-    try {
-      expect(
-        () =>
-          new Workspace(
-            { '/d': new RAMVFS() },
-            { mode: MountMode.EXEC, machines: { box: new Idle('box') }, runtimes: [runtime] },
-          ),
-      ).toThrow('already bound')
-      expect(runtime.handle({} as Context)).toBe(first)
-    } finally {
       await ws.close()
     }
   })

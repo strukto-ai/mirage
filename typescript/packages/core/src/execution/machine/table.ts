@@ -199,7 +199,7 @@ export class MachineTable {
     const runs = new Map(
       processes
         .records()
-        .filter((record) => record.runtime !== null)
+        .filter((record) => record.program)
         .map((record) => [record.id.toString(), record]),
     )
     const ended = new Set([...runs.keys()].filter((tag) => !live.has(tag)))
@@ -270,7 +270,7 @@ export class MachineTable {
       if (this.signalHost === null || target === null || target.exited != null) return null
     } else if (
       this.byId(record.machine.toString()) === null ||
-      (target === null && record.runtime === null)
+      (target === null && !record.program)
     )
       return null
     return this.deliverSignal(handle, record.machine, target ?? record.id.toString(), signum)
@@ -292,14 +292,14 @@ export class MachineTable {
       sent = await this.signalOn(machine, target, signum)
     } catch (error) {
       console.debug(`${machine.toString()}: signal ${String(signum)} not sent:`, error)
-      if (handle.record.runtime === null) return false
+      if (!handle.record.program) return false
       sent = false
     }
     if (sent) {
       handle.programSignaled(signum)
       return true
     }
-    if (handle.record.runtime === null) {
+    if (!handle.record.program) {
       this.endFound(handle)
       return false
     }
@@ -380,7 +380,7 @@ export class MachineTable {
       const placed = new Map<number, number>()
       if (
         handle !== null &&
-        handle.record.runtime !== null &&
+        handle.record.program &&
         handle.record.machine.toString() === machine.toString()
       ) {
         const known = handle.record.machinePid
@@ -445,7 +445,7 @@ export class MachineTable {
       .filter(
         (p) =>
           p.record.sessionId === session &&
-          p.record.runtime === null &&
+          !p.record.program &&
           p.record.machinePid !== null,
       ).length
     if (placed >= MAX_PROCESSES) {

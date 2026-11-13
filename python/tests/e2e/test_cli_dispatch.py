@@ -30,6 +30,7 @@ from mirage.io.types import Rows, materialize
 from mirage.policy import Deny, Policy, RouteContext
 from mirage.policy.match import Outcome
 from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
+from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.types import ScriptSource
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.call import vfs_call
@@ -77,7 +78,7 @@ def ws():
     workspace = Workspace(
         {"/data": (RAMVFS(), MountMode.WRITE)},
         mode=MountMode.WRITE,
-        runtimes=["monty", "workspace"],
+        machines=[MontyRuntime()],
     )
     yield workspace
 
@@ -551,11 +552,11 @@ async def test_shell_function_shadows_a_script_cli(ws):
 async def test_script_cli_pinned_to_local_runs_on_the_host(ws):
     # sys.argv only exists on a host interpreter (monty has no sys
     # bridge), so output proves the runtime: pin escalated to local.
-    ws.add_runtime("local")
+    ws.add_machine("local", {"provider": "host"})
     spec = CLI(
         spec=CommandSpec(name="pager"),
         script=ScriptSource("import sys\nprint('local', sys.argv[1])"),
-        runtime="local",
+        machine="local",
     )
     ws.register_cli("pager", spec)
     code, out, _ = await run(ws, "pager report.txt")
@@ -566,7 +567,7 @@ async def test_script_cli_pinned_to_local_runs_on_the_host(ws):
 @live_quickjs
 async def test_script_cli_js_runs_on_quickjs(ws):
     # scriptArgs[0] is the installed name, like a qjs script's path.
-    ws.add_runtime("quickjs")
+    ws.add_machine("quickjs", {"provider": "in_process", "runtime": "quickjs"})
     ws.register_cli(
         "pager",
         pager_spec(
@@ -616,7 +617,7 @@ async def test_yaml_script_entry_executes_end_to_end(tmp_path):
             "clis": {
                 "pager": {"script": str(script), "config": {"width": 80}}
             },
-            "runtimes": ["monty", "workspace"],
+            "machines": {"monty": {"provider": "worker"}},
         }
     )
     ws = Workspace(**cfg.to_workspace_kwargs())

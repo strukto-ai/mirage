@@ -9,10 +9,12 @@
     {
       "id": "stdin_operand",
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ],
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        },
         "mounts": {
           "/ram": {
             "vfs": "ram"
@@ -75,10 +77,12 @@
     {
       "id": "node_argv_is_typed_and_names_no_mount",
       "world": {
-        "runtimes": [
-          "quickjs",
-          "workspace"
-        ],
+        "machines": {
+          "quickjs": {
+            "provider": "in_process",
+            "runtime": "quickjs"
+          }
+        },
         "mounts": {
           "/w": {
             "vfs": "ram",

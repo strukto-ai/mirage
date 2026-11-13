@@ -707,8 +707,6 @@ class Observer:
             attributes["process.parent_pid"] = self._shown.get(
                 ("process", line, record.parent), record.parent
             )
-        if record.runtime is not None:
-            attributes["mirage.runtime"] = record.runtime
         return self._start(
             ("process", line, record.pid), attributes, under, record.started_at
         )

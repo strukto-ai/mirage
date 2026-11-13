@@ -22,9 +22,9 @@ from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.table import (
-    DEFAULT_ENTRIES,
+    MachineSpec,
     bind_commands,
-    build_runtime,
+    build_entry,
     built_from,
     is_sandbox,
     shadowed_captures,
@@ -36,12 +36,11 @@ logger = logging.getLogger(__name__)
 
 
 class Runtimes:
-    """The workspace's ordered runtime entries.
+    """The engine each of the workspace's machines runs, in capture order.
 
     Owns the entry list and everything that reads or changes it:
-    building it from config, adding and removing entries and closing
-    them. Adding a runtime kind
-    touches this module rather than the workspace.
+    wiring it, adding and removing machines and closing them. Adding an
+    engine kind touches this module rather than the workspace.
 
     Args:
         registry (MountRegistry): carries the resolved bindings and the
@@ -72,33 +71,29 @@ class Runtimes:
     def entries(self) -> list[Runtime[Any]]:
         return self._entries
 
-    def named(self) -> list[str]:
-        """The registry names of the entries built from one, in list order.
-
-        A copy rebuilds these; an entry built with options or by the host
-        stays behind.
+    def specs(self) -> dict[str, dict[str, Any]]:
+        """The ``machines:`` entries of the engines built from one, by
+        name, in list order. A copy rebuilds these; a machine provider's
+        runtime and an engine the host built stay behind.
         """
-        return [n for n in map(built_from, self._entries) if n is not None]
+        return {
+            entry.name: spec
+            for entry in self._entries
+            if (spec := built_from(entry)) is not None
+        }
 
-    def resolve(
-        self, runtimes: list[Runtime[Any] | str] | None
-    ) -> list[Runtime[Any]]:
-        """Build and wire the ordered entries.
+    def resolve(self, entries: list[Runtime[Any]]) -> list[Runtime[Any]]:
+        """Wire the ordered entries.
 
-        Name strings become no-option instances and every instance gets
-        the workspace dispatch attached. The workspace runtime is required:
-        when the list omits it, an unconditional one is appended, so
-        there is always an executor for unclaimed commands. An explicit
-        list fails loud per entry; no list is DEFAULT_ENTRIES.
+        Every entry gets the workspace dispatch attached. The shell is
+        required: when the list omits it, an unconditional one is
+        appended, so there is always an executor for unclaimed commands.
 
         Args:
-            runtimes (list[Runtime | str] | None): user entries, or
-                None for the default set.
+            entries (list[Runtime]): the engine of each machine, in
+                capture order.
         """
-        entries: list[Runtime[Any]] = [
-            build_runtime(entry) if isinstance(entry, str) else entry
-            for entry in (DEFAULT_ENTRIES if runtimes is None else runtimes)
-        ]
+        entries = list(entries)
         if not any(entry.name == WorkspaceRuntime.name for entry in entries):
             entries.append(WorkspaceRuntime())
         bindings = bind_commands(entries)
@@ -107,22 +102,30 @@ class Runtimes:
         self._install(entries, bindings)
         return entries
 
-    def add(self, runtime: Runtime[Any] | str) -> Runtime[Any]:
-        """Add an entry to the ordered list.
+    def add(self, name: str, spec: MachineSpec) -> Runtime[Any]:
+        """Add a machine's engine to the ordered list.
 
         A sandbox (``is_sandbox``) lands after the last sandbox listed,
         else before the first language runtime, else last; any other
-        entry lands last. A name builds like a config entry and fails
-        loud; a duplicate name is rejected before any state changes.
+        entry lands last. A duplicate name is rejected before any state
+        changes.
 
         Args:
-            runtime (Runtime | str): a Runtime instance or a registry
-                runtime name (built like a config entry).
+            name (str): the machine's name.
+            spec (MachineSpec): an engine, or the entry as YAML spells
+                it; a machine provider's handle is the workspace's to
+                hold from the start.
 
         Raises:
-            ValueError: unknown name or duplicate entry.
+            ValueError: what ``build_entry`` refuses, a machine provider,
+                or a duplicate name.
         """
-        entry = build_runtime(runtime) if isinstance(runtime, str) else runtime
+        handle, entry = build_entry(name, spec)
+        if handle is not None:
+            raise ValueError(
+                f"machine {name!r}: a {handle.provider} machine is declared"
+                " when the workspace is built"
+            )
         at = len(self._entries)
         if is_sandbox(entry):
             sandboxes = [
@@ -147,19 +150,19 @@ class Runtimes:
         """Unbind an entry's commands now and close it once it is idle.
 
         Args:
-            name (str): the entry's name.
+            name (str): the machine's name.
 
         Raises:
-            ValueError: the name is the workspace runtime or no entry.
+            ValueError: the name is the shell's or no machine's.
         """
         if name == WorkspaceRuntime.name:
             raise ValueError(
-                "cannot remove the workspace runtime: it serves every "
-                "command no other runtime captures"
+                "cannot remove the workspace machine: it serves every "
+                "command no other machine captures"
             )
         entry = next((e for e in self._entries if e.name == name), None)
         if entry is None:
-            raise ValueError(f"no runtime entry: {name!r}")
+            raise ValueError(f"no machine: {name!r}")
         remaining = [e for e in self._entries if e is not entry]
         self._install(remaining, bind_commands(remaining))
         identity = id(entry)
@@ -198,10 +201,7 @@ class Runtimes:
             ValueError: a machine entry's machine is not the workspace's,
                 or another workspace holds the entry.
         """
-        if (
-            isinstance(entry, RemoteRuntime)
-            and entry.default_machine is not None
-        ):
+        if isinstance(entry, RemoteRuntime):
             self._machines.get(entry.default_machine)
         entry.bind(self._binding)
         if isinstance(entry, RemoteRuntime):
@@ -215,7 +215,7 @@ class Runtimes:
             [] if routed else shadowed_captures(entries)
         ):
             logger.warning(
-                "runtime %r runs %r only when a route names it: %r, "
+                "machine %r runs %r only when a route names it: %r, "
                 "listed before it, takes it",
                 shadowed,
                 capture,

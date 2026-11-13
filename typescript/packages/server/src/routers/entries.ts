@@ -29,7 +29,6 @@ import { requireOneAccount, storeRefusal } from './templates.ts'
 export const ROUTES = {
   vfs: '/v1/vfs',
   cli: '/v1/clis',
-  runtime: '/v1/runtimes',
   machine: '/v1/machines',
 } as const satisfies Partial<Record<EntryKind, string>>
 
@@ -60,7 +59,6 @@ function present(kind: EntryKind, entry: Entry, usedBy?: number): Record<string,
     type: entry.type,
     builtin: false,
     config: entry.fields,
-    ...(kind === 'runtime' ? { captures: [] } : {}),
     created_by: null,
     created_at: null,
     updated_at: null,

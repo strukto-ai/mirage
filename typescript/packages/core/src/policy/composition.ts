@@ -119,14 +119,12 @@ export interface CompositionResult {
 
 /** Whether an answer is a route, told by its fields: an agreement leaves its kind unread. */
 function isRoute(answer: Answer): answer is Route {
-  return 'runtime' in answer || 'machine' in answer
+  return 'machine' in answer
 }
 
-/** Where a route places a line, as a conflict names it: its runtime, its machine, or the runtime on the machine. */
+/** Where a route places a line, as a conflict names it: its machine. */
 function placed(route: Route): string {
-  if (route.machine === undefined) return route.runtime ?? ''
-  if (route.runtime === undefined) return `machine ${route.machine}`
-  return `${route.runtime} on machine ${route.machine}`
+  return route.machine ?? ''
 }
 
 export class Composition {
@@ -254,7 +252,6 @@ export class Composition {
           if (!isRoute(action)) throw new Error('invalid policy route reference')
           return {
             action: index,
-            runtime: units(action.runtime ?? ''),
             machine: units(action.machine ?? ''),
           }
         })
@@ -306,7 +303,7 @@ export class Composition {
       })
       return {
         kind: 'deny',
-        reason: `policies place the line on different runtimes: ${routes.map((r) => `${r.policy ?? ''} on ${placed(r)}`).join(', ')}`,
+        reason: `policies place the line on different machines: ${routes.map((r) => `${r.policy ?? ''} on ${placed(r)}`).join(', ')}`,
         policy: [...new Set(routes.map((r) => r.policy ?? ''))].join(', '),
       }
     }
@@ -344,7 +341,7 @@ export class Composition {
       })
       action = {
         kind: 'deny',
-        reason: `policies place the line on different runtimes: ${routes.map((r) => `${r.policy ?? ''} on ${placed(r)}`).join(', ')}`,
+        reason: `policies place the line on different machines: ${routes.map((r) => `${r.policy ?? ''} on ${placed(r)}`).join(', ')}`,
         policy: [...new Set(routes.map((r) => r.policy ?? ''))].join(', '),
       }
     }

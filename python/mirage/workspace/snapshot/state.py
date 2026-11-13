@@ -256,7 +256,7 @@ def cli_snapshot(name: str, install: CLIInstall) -> dict[str, Any]:
             ScriptKey.LANGUAGE: script.language,
             ScriptKey.MODULE: script.module,
         }
-        entry[CLIKey.RUNTIME] = install.cli.runtime
+        entry[CLIKey.MACHINE] = install.cli.machine
     source = install.cli.mcp
     if source is not None:
         entry[CLIKey.MCP] = {
@@ -318,7 +318,7 @@ def cli_spec_from_entry(entry: dict[str, Any]) -> str | CLI:
             language=cast(Language, language),
             module=bool(script.get(ScriptKey.MODULE)),
         ),
-        runtime=entry.get(CLIKey.RUNTIME),
+        machine=entry.get(CLIKey.MACHINE),
     )
 
 

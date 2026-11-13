@@ -268,11 +268,4 @@ describe('entries router', () => {
     expect(r.status).toBe(201)
     expect(r.body.config).toEqual({ sandbox_id: 's1' })
   })
-
-  it('answers a runtime with its captures', async () => {
-    const { app } = setup()
-    const r = await call(app, 'POST', '/v1/runtimes', { name: 'py', type: 'monty', fields: {} })
-    expect(r.status).toBe(201)
-    expect(r.body.captures).toEqual([])
-  })
 })

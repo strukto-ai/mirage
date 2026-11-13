@@ -218,7 +218,7 @@ function command(text: string, outcome: string, reason = '', exitCode = 0) {
     exit_code: exitCode,
     reason,
     source: reason === '' ? '' : 'top',
-    runtime: '',
+    machine: '',
     children: [],
   }
 }
@@ -268,7 +268,7 @@ describe('mirage workspace explain', () => {
   })
 
   it('prints why a route places the line', () => {
-    const python3 = { ...command("python3 -c 'import sqlite3'", 'allow'), runtime: 'local' }
+    const python3 = { ...command("python3 -c 'import sqlite3'", 'allow'), machine: 'local' }
     const said = {
       line: "python3 -c 'import sqlite3'",
       outcome: 'allow',
@@ -276,7 +276,7 @@ describe('mirage workspace explain', () => {
       answers: [
         {
           kind: 'route',
-          runtime: 'local',
+          machine: 'local',
           reason: 'monty has no sqlite3',
           policy: 'RoutePolicy',
         },

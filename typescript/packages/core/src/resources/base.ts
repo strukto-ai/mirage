@@ -23,7 +23,7 @@ import type {
 } from './types.ts'
 
 /**
- * One scope's saved configs: vfs, cli, runtime and store entries, policies
+ * One scope's saved configs: vfs, cli, machine and store entries, policies
  * and templates. Every backend answers the same way: lists sort by name, an
  * entry's sealed values leave only through `revealEntry` and deleting an
  * entry wipes them. A missing name raises `ResourceError('not_found')`.

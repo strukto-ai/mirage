@@ -95,17 +95,17 @@ def test_script_excludes_config_model():
         )
 
 
-def test_runtime_requires_a_script():
+def test_machine_requires_a_script():
     with pytest.raises(ValueError, match="it takes script"):
         CLI(
             CommandSpec(name="pager"),
             handlers={"": CLIHandler(_verb)},
-            runtime="monty",
+            machine="monty",
         )
     cli = CLI(
-        CommandSpec(name="pager"), script=ScriptSource("1"), runtime="monty"
+        CommandSpec(name="pager"), script=ScriptSource("1"), machine="monty"
     )
-    assert cli.runtime == "monty"
+    assert cli.machine == "monty"
 
 
 @pytest.mark.parametrize(

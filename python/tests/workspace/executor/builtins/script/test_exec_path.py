@@ -18,6 +18,7 @@ import pytest
 
 from mirage.policy import CommandRule
 from mirage.policy.profile import CommandsBlock, SessionProfile
+from mirage.runtime.python.monty import MontyRuntime
 from mirage.types import MountMode, PathSpec
 from mirage.vfs import RAMVFS
 from mirage.workspace import Workspace
@@ -31,7 +32,7 @@ def ws() -> Workspace:
             "/": (RAMVFS(), MountMode.WRITE),
             "/work/": (RAMVFS(), MountMode.WRITE),
         },
-        runtimes=["monty", "workspace"],
+        machines=[MontyRuntime()],
     )
 
 
