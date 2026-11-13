@@ -975,6 +975,15 @@ describe('sleep', () => {
     expect(box.log).toEqual(['close', 'pause'])
   })
 
+  it('refuses a later sleep for a machine the first left unpaused', async () => {
+    const box = new Napper('box')
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC, machines: { box } })
+    await ws.sleep({ pause: [] })
+    await expect(ws.sleep({ pause: ['box'] })).rejects.toThrow("slept without pausing 'box'")
+    await ws.sleep({ pause: [] })
+    expect(box.log).toEqual(['close'])
+  })
+
   it('leaves machines awake on a plain close', async () => {
     const box = new Napper('box')
     const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC, machines: { box } })

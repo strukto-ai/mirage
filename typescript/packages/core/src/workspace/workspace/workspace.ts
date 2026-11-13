@@ -2812,7 +2812,8 @@ export class Workspace {
    * says; without it, those whose config asks pause (E2B's
    * `onSleep: 'pause'`). Throws, closing nothing, when `pause` names a
    * machine the workspace lacks; throws after closing when the workspace
-   * was closed first: its machines were let go awake.
+   * was closed first, which let its machines go awake, or when an earlier
+   * sleep closed it without pausing a machine this one names.
    */
   async sleep(options: { pause?: readonly string[] } = {}): Promise<void> {
     const table = this.machineTable
@@ -2822,8 +2823,14 @@ export class Workspace {
     for (const name of names) table.get(name)
     this.closing ??= this.runClose(false, names)
     await this.closing
-    if (this.machinesPaused === null)
+    const paused = this.machinesPaused
+    if (paused === null)
       throw new Error('workspace was closed before sleep; its machines are awake')
+    const missed = [...names].filter((name) => !paused.has(name)).sort(compareCodePoints)
+    if (missed.length > 0) {
+      const listed = missed.map((name) => `'${name}'`).join(', ')
+      throw new Error(`workspace already slept without pausing ${listed}`)
+    }
   }
 
   private async runClose(

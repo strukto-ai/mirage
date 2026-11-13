@@ -1776,6 +1776,17 @@ async def test_sleep_refuses_an_unknown_machine_before_closing_anything():
 
 
 @pytest.mark.asyncio
+async def test_a_later_sleep_refuses_a_machine_the_first_left_unpaused():
+    box = _Napper("box")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box})
+    await ws.sleep(pause=[])
+    with pytest.raises(RuntimeError, match="slept without pausing 'box'"):
+        await ws.sleep(pause=["box"])
+    await ws.sleep(pause=[])
+    assert box.log == ["close"]
+
+
+@pytest.mark.asyncio
 async def test_a_plain_close_leaves_machines_awake():
     box = _Napper("box")
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box})

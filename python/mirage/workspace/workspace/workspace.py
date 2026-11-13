@@ -442,7 +442,7 @@ class Workspace:
         self._closing = False
         self._async_closed = False
         self._state_dropped = False
-        self._machines_slept = False
+        self._machines_paused: frozenset[str] | None = None
         self._close_error: BaseException | None = None
         self._close_lock = asyncio.Lock()
         self._meta_lock = asyncio.Lock()
@@ -1970,7 +1970,8 @@ class Workspace:
             ValueError: ``pause`` names a machine the workspace lacks;
                 nothing is closed.
             RuntimeError: the workspace was closed first, which let its
-                machines go awake.
+                machines go awake, or an earlier sleep closed it without
+                pausing a machine this one names.
         """
         table = self.machine_table
         if pause is None:
@@ -1989,9 +1990,14 @@ class Workspace:
             )
         finally:
             await self._sync_bridge.ashutdown()
-        if not self._machines_slept:
+        if self._machines_paused is None:
             raise RuntimeError(
                 "workspace was closed before sleep; its machines are awake"
+            )
+        if missed := names - self._machines_paused:
+            listed = ", ".join(repr(name) for name in sorted(missed))
+            raise RuntimeError(
+                f"workspace already slept without pausing {listed}"
             )
 
     async def _close(
@@ -2043,7 +2049,7 @@ class Workspace:
                     raise self._close_error
                 return
             self._state_dropped = drop_state
-            self._machines_slept = pause is not None
+            self._machines_paused = pause
             failures = [
                 result
                 for result in execution_results
