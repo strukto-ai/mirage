@@ -37,7 +37,6 @@ from mirage.observe.constants import (
     TRACE_CONTENT_ENV,
     TRACE_CONTENT_MAX_BYTES,
     TRACE_CONTENT_MAX_BYTES_ENV,
-    TRACE_MAX_SPANS_ENV,
 )
 from mirage.observe.disk_store import DiskObserverStore
 from mirage.observe.log_entry import EVENT_COMMAND, LogEntry
@@ -470,7 +469,7 @@ def _exported(monkeypatch) -> InMemorySpanExporter:
     return exporter
 
 
-def test_a_finished_line_is_a_span_over_its_vfs_calls(monkeypatch):
+def test_a_finished_line_is_one_span_its_vfs_calls_stay_out_of(monkeypatch):
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
@@ -497,7 +496,7 @@ def test_a_finished_line_is_a_span_over_its_vfs_calls(monkeypatch):
     )
     # The line ends in another cwd; the span keeps the one it started in.
     asyncio.run(obs.log_result(io, [rec], "s1", cwd="/", line="L"))
-    call, line = exporter.get_finished_spans()
+    [line] = exporter.get_finished_spans()
     assert (line.name, dict(line.attributes or {})) == (
         "command",
         {
@@ -517,24 +516,10 @@ def test_a_finished_line_is_a_span_over_its_vfs_calls(monkeypatch):
         start * 1_000_000,
         (start + 1000) * 1_000_000,
     )
-    assert call.parent is not None
-    assert call.parent.span_id == line.context.span_id
-    assert (call.name, dict(call.attributes or {})) == (
-        "vfs.read",
-        {
-            "mirage.vfs.path": "/d/a",
-            "mirage.vfs.source": "s3",
-            "mirage.vfs.bytes": 6,
-            "mirage.vfs.timestamp": start + 5,
-            "mirage.vfs.duration_ms": 12,
-        },
-    )
-    assert (call.start_time, call.end_time) == (
-        (start - 7) * 1_000_000,
-        (start + 5) * 1_000_000,
-    )
-    # The history keeps its own, shorter cut.
-    results = [e for e in asyncio.run(obs.events()) if e["type"] == "result"]
+    # The history keeps the call, and its own, shorter cut.
+    events = asyncio.run(obs.events())
+    assert [e["path"] for e in events if e["type"] == "vfs"] == ["/d/a"]
+    results = [e for e in events if e["type"] == "result"]
     assert [len(e["stdout"]) for e in results] == [4096]
 
 
@@ -554,32 +539,6 @@ def test_span_output_is_cut_at_the_bytes_it_is_told_to(monkeypatch):
     asyncio.run(obs.log_result(io, [], "s1", cwd="/", line="L"))
     [line] = exporter.get_finished_spans()
     assert (line.attributes or {})["mirage.stdout"] == "éé"
-
-
-def test_a_line_sends_at_most_its_span_cap_and_counts_the_rest(monkeypatch):
-    monkeypatch.setenv(TRACE_MAX_SPANS_ENV, "2")
-    exporter = _exported(monkeypatch)
-    obs = Observer(store=RAMObserverStore(), clock=ManualClock(start=NEW_YEAR))
-    start = int(NEW_YEAR * 1000)
-    recs = [
-        OpRecord(
-            op="stat",
-            path=f"/d/{i}",
-            source="ram",
-            bytes=0,
-            timestamp=start,
-            duration_ms=0,
-        )
-        for i in range(5)
-    ]
-    asyncio.run(obs.log_command("find /d", "s1", cwd="/", line="L"))
-    asyncio.run(obs.log_result(IOResult(), recs, "s1", cwd="/", line="L"))
-    *calls, line = exporter.get_finished_spans()
-    assert [c.attributes["mirage.vfs.path"] for c in calls] == ["/d/0", "/d/1"]
-    assert (line.attributes or {})["mirage.vfs.dropped"] == 3
-    # The history still records every call.
-    vfs = [e for e in asyncio.run(obs.events()) if e["type"] == "vfs"]
-    assert len(vfs) == 5
 
 
 def test_span_output_that_is_not_utf8_stays_within_its_bytes(monkeypatch):
@@ -632,7 +591,7 @@ async def test_a_span_takes_output_past_the_terminal_chunk(monkeypatch):
     assert [len(e["stdout"]) for e in results] == [4096]
 
 
-def test_spans_leave_out_output_and_vfs_calls_when_told_to(monkeypatch):
+def test_spans_leave_out_output_when_told_to(monkeypatch):
     monkeypatch.setenv(TRACE_CONTENT_ENV, "false")
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
@@ -994,25 +953,4 @@ async def test_a_process_links_to_each_it_read_from(monkeypatch):
         "process train 1",
         "process train 4",
         "process train 6",
-    ]
-
-
-# A call to a mount goes under the process that made it.
-@pytest.mark.asyncio
-async def test_a_vfs_call_goes_under_the_process_that_made_it(monkeypatch):
-    exporter = _exported(monkeypatch)
-    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
-    try:
-        await ws.shell("echo a > /a.txt; (cat /a.txt)")
-    finally:
-        await ws.close()
-    spans = exporter.get_finished_spans()
-    by_id = {s.context.span_id: s for s in spans if s.context is not None}
-    assert sorted(
-        (s.name, _span_name(by_id[s.parent.span_id]))
-        for s in spans
-        if s.name.startswith("vfs.") and s.parent is not None
-    ) == [
-        ("vfs.read", "process (cat /a.txt)"),
-        ("vfs.write", "process echo a > /a.txt; (cat /a.txt)"),
     ]

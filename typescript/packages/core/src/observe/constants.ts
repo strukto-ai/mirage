@@ -17,9 +17,9 @@ export const NAME_LIMIT = 200
 export const TRACER_NAME = 'mirage.observe'
 
 /**
- * Set to `false` or `0` to keep what lines touched out of their spans:
- * no output on `command`, no `vfs.<call>` spans. Named after
- * OpenTelemetry's `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`.
+ * Set to `false` or `0` to keep lines' output out of their `command` spans.
+ * Named after OpenTelemetry's
+ * `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`.
  */
 export const TRACE_CONTENT_ENV = 'MIRAGE_TRACE_CAPTURE_CONTENT'
 
@@ -35,19 +35,6 @@ export const TRACE_CONTENT_MAX_BYTES_ENV = 'MIRAGE_TRACE_CONTENT_MAX_BYTES'
  * Workers span holds for all its attributes, and any backend's field.
  */
 export const TRACE_CONTENT_MAX_BYTES = 16 * 1024
-
-/**
- * How many `vfs.<call>` spans one line sends at most: TRACE_MAX_SPANS unless
- * this sets a positive whole number. The calls past it are counted on the
- * line's `command` span as `mirage.vfs.dropped`.
- */
-export const TRACE_MAX_SPANS_ENV = 'MIRAGE_TRACE_MAX_SPANS'
-
-/**
- * 1000 a line: a walk over a large tree makes a call per entry, and an
- * exporter's queue (2048 spans by default) drops what overflows it anyway.
- */
-export const TRACE_MAX_SPANS = 1000
 
 // The most a workspace's RAM recorder holds. Past it the oldest lines go
 // first, down to three quarters of it, so trimming stays rare however fast

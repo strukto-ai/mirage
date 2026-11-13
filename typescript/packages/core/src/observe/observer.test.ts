@@ -38,7 +38,6 @@ import {
   TRACE_CONTENT_ENV,
   TRACE_CONTENT_MAX_BYTES,
   TRACE_CONTENT_MAX_BYTES_ENV,
-  TRACE_MAX_SPANS_ENV,
 } from './constants.ts'
 import { Observer, logger } from './observer.ts'
 import { OpRecord } from './record.ts'
@@ -533,7 +532,7 @@ describe('a damaged history file', () => {
     expect((await o.sessionCommandEvents(long)).map((e) => e.command)).toEqual(['echo 50'])
   })
 
-  it('sends a finished line as a span over its vfs calls', async () => {
+  it('sends a finished line as one span its vfs calls stay out of', async () => {
     const spans = exported()
     const clock = new ManualClock(NEW_YEAR)
     const o = new Observer(new RAMObserverStore(), clock, 'w')
@@ -555,7 +554,8 @@ describe('a damaged history file', () => {
     })
     // The line ends in another cwd; the span keeps the one it started in.
     await o.logResult(io, [rec], 's1', '/', 'L')
-    const [line, call] = spans
+    expect(spans).toHaveLength(1)
+    const [line] = spans
     expect([line?.name, line?.attributes, line?.startTime, line?.end]).toEqual([
       'command',
       {
@@ -573,21 +573,10 @@ describe('a damaged history file', () => {
       start,
       start + 1000,
     ])
-    expect([call?.name, call?.attributes, call?.startTime, call?.end]).toEqual([
-      'vfs.read',
-      {
-        'mirage.vfs.path': '/d/a',
-        'mirage.vfs.source': 's3',
-        'mirage.vfs.bytes': 6,
-        'mirage.vfs.timestamp': start + 5,
-        'mirage.vfs.duration_ms': 12,
-      },
-      start - 7,
-      start + 5,
-    ])
-    expect(call?.parent).toBeDefined()
-    // The history keeps its own, shorter cut.
-    const results = (await o.events()).filter((e) => e.type === 'result')
+    // The history keeps the call, and its own, shorter cut.
+    const events = await o.events()
+    expect(events.filter((e) => e.type === 'vfs').map((e) => e.path)).toEqual(['/d/a'])
+    const results = events.filter((e) => e.type === 'result')
     expect(results.map((e) => String(e.stdout).length)).toEqual([4096])
   })
 
@@ -601,31 +590,6 @@ describe('a damaged history file', () => {
     const io = new IOResult({ stdout: new TextEncoder().encode('ééé') })
     await o.logResult(io, [], 's1', '/', 'L')
     expect(spans[0]?.attributes['mirage.stdout']).toBe('éé')
-  })
-
-  it('sends at most its span cap a line and counts the rest', async () => {
-    vi.stubEnv(TRACE_MAX_SPANS_ENV, '2')
-    const spans = exported()
-    const o = new Observer(new RAMObserverStore(), new ManualClock(NEW_YEAR))
-    const recs = Array.from(
-      { length: 5 },
-      (_, i) =>
-        new OpRecord({
-          op: 'stat',
-          path: `/d/${String(i)}`,
-          source: 'ram',
-          bytes: 0,
-          timestamp: NEW_YEAR * 1000,
-          durationMs: 0,
-        }),
-    )
-    await o.logCommand('find /d', 's1', '/', 'L')
-    await o.logResult(new IOResult(), recs, 's1', '/', 'L')
-    const [line, ...calls] = spans
-    expect(calls.map((c) => c.attributes['mirage.vfs.path'])).toEqual(['/d/0', '/d/1'])
-    expect(line?.attributes['mirage.vfs.dropped']).toBe(3)
-    // The history still records every call.
-    expect((await o.events()).filter((e) => e.type === 'vfs')).toHaveLength(5)
   })
 
   it('keeps span output that is not UTF-8 within its bytes', async () => {
@@ -675,7 +639,7 @@ describe('a damaged history file', () => {
     expect(results.map((e) => String(e.stdout).length)).toEqual([4096])
   })
 
-  it('keeps output and vfs calls out of spans when told to', async () => {
+  it('keeps output out of spans when told to', async () => {
     vi.stubEnv(TRACE_CONTENT_ENV, 'false')
     const spans = exported()
     const o = new Observer(new RAMObserverStore(), new ManualClock(NEW_YEAR), 'w')
@@ -1013,26 +977,5 @@ it('links a process to each it read from', async () => {
     ['process train 2', 'stdin', 'process train 1'],
     ['process train 3 /dev/fd/63', '/dev/fd/63', 'process train 4'],
     [`process train 5 ${CHECK_MARK}`, 'argv', 'process train 6'],
-  ])
-})
-
-// A call to a mount goes under the process that made it.
-it('puts a vfs call under the process that made it', async () => {
-  const spans = exported()
-  const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
-  try {
-    await ws.shell('echo a > /a.txt; (cat /a.txt)')
-  } finally {
-    await ws.close()
-    trace.disable()
-  }
-  const byId = new Map(spans.map((s) => [s.context.spanId, s]))
-  const calls = spans
-    .filter((s) => s.name.startsWith('vfs.') && s.parent !== undefined)
-    .map((s) => [s.name, spanName(byId.get(s.parent?.spanId ?? '') ?? s)])
-    .sort()
-  expect(calls).toEqual([
-    ['vfs.read', 'process (cat /a.txt)'],
-    ['vfs.write', 'process echo a > /a.txt; (cat /a.txt)'],
   ])
 })

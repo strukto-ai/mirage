@@ -27,7 +27,7 @@ from opentelemetry import trace
 from mirage.execution.constants import HISTORY_MAX_RECORDS
 from mirage.execution.job.types import Job
 from mirage.execution.process.types import Process, ProcessState
-from mirage.execution.types import MachineName, ProcessId
+from mirage.execution.types import MachineName
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.types import IOResult
 from mirage.io.yield_budget import YieldBudget
@@ -36,8 +36,6 @@ from mirage.observe.constants import (
     TRACE_CONTENT_ENV,
     TRACE_CONTENT_MAX_BYTES,
     TRACE_CONTENT_MAX_BYTES_ENV,
-    TRACE_MAX_SPANS,
-    TRACE_MAX_SPANS_ENV,
     TRACER_NAME,
 )
 from mirage.observe.log_entry import (
@@ -183,18 +181,13 @@ def _end_line(
     span: tuple[int, int],
     exit_code: int,
     output: tuple[bytes, bytes],
-    records: list[OpRecord],
-    under: Callable[[OpRecord], context_api.Context | None],
 ) -> None:
-    """Close a typed line's ``command`` span: how it ended, the start of
-    its stdout and stderr, and a ``vfs.<call>`` span for each call it
-    made to a mount, under the span of the process that made it, else
-    under the line's. Each span
-    also carries its start or end and its length in milliseconds, as the
-    history's entries have them, for a tracer that can't be given a
-    span's times. ``TRACE_CONTENT_ENV`` leaves out the output and the
-    calls, and past ``TRACE_MAX_SPANS_ENV`` calls the rest are only
-    counted.
+    """Close a typed line's ``command`` span: how it ended and the start
+    of its stdout and stderr. It also carries its length in
+    milliseconds, as the history's entries have it, for a tracer that
+    can't be given a span's times. ``TRACE_CONTENT_ENV`` leaves out the
+    output. The calls the line made to mounts are its commands' own
+    work, so they stay in the history and send no spans.
 
     Args:
         line (trace.Span): the line's span.
@@ -202,38 +195,13 @@ def _end_line(
         exit_code (int): how it ended.
         output (tuple[bytes, bytes]): its stdout and stderr as it wrote
             them.
-        records (list[OpRecord]): the calls it made.
-        under (Callable[[OpRecord], context_api.Context | None]): the
-            context of the span of the process that made a call, None
-            when there is none.
     """
-    content = _trace_content()
     line.set_attribute("mirage.exit_code", exit_code)
     line.set_attribute("mirage.duration_ms", span[1] - span[0])
-    calls = records[: _positive_env(TRACE_MAX_SPANS_ENV, TRACE_MAX_SPANS)]
-    if content:
+    if _trace_content():
         limit = _trace_content_max_bytes()
         line.set_attribute("mirage.stdout", _traced_output(output[0], limit))
         line.set_attribute("mirage.stderr", _traced_output(output[1], limit))
-        if len(calls) < len(records):
-            line.set_attribute("mirage.vfs.dropped", len(records) - len(calls))
-    if content and line.is_recording():
-        tracer = _tracer()
-        parent = trace.set_span_in_context(line)
-        for rec in calls:
-            call = tracer.start_span(
-                f"vfs.{rec.op}",
-                context=under(rec) or parent,
-                start_time=(rec.timestamp - rec.duration_ms) * _NS_PER_MS,
-                attributes={
-                    "mirage.vfs.path": rec.path,
-                    "mirage.vfs.source": rec.source,
-                    "mirage.vfs.bytes": rec.bytes,
-                    "mirage.vfs.timestamp": rec.timestamp,
-                    "mirage.vfs.duration_ms": rec.duration_ms,
-                },
-            )
-            call.end(end_time=rec.timestamp * _NS_PER_MS)
     line.end(end_time=span[1] * _NS_PER_MS)
 
 
@@ -303,12 +271,11 @@ class Observer:
     each job and process once it ends: a process under the one that
     started it, a job's process under its job, and the line's own under
     the line's span while the newest ``HISTORY_MAX_RECORDS`` lines' spans
-    are known, each vfs call under the process that made it. A process
-    links to each it reads from, ``mirage.input`` naming where: its
-    ``stdin``, a ``/dev/fd`` path or its ``argv``. Nothing leaves the
-    process until an SDK is set up. Tracing stops at the workspace's own
-    machine and runtimes: a program a runtime runs elsewhere starts no
-    trace of its own there.
+    are known. A process links to each it reads from, ``mirage.input``
+    naming where: its ``stdin``, a ``/dev/fd`` path or its ``argv``.
+    Nothing leaves the process until an SDK is set up. Tracing stops at
+    the workspace's own machine and runtimes: a program a runtime runs
+    elsewhere starts no trace of its own there.
 
     Args:
         store (ObserverStore | None): Storage backend for log files;
@@ -496,14 +463,6 @@ class Observer:
                 (started[0], started[0] + took),
                 io.exit_code,
                 (stdout, stderr),
-                op_records,
-                lambda rec: (
-                    None
-                    if rec.process is None
-                    else self._context(
-                        ("process", line, ProcessId.parse(rec.process).pid)
-                    )
-                ),
             )
         await self._log(
             LogEntry(

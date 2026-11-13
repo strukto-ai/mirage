@@ -25,7 +25,7 @@ import {
 import { HISTORY_MAX_RECORDS } from '../execution/constants.ts'
 import type { Job } from '../execution/job/types.ts'
 import type { Process } from '../execution/process/types.ts'
-import { ProcessId, type MachineName } from '../execution/types.ts'
+import type { MachineName } from '../execution/types.ts'
 import { CHUNK_SIZE } from '../io/cooperative.ts'
 import type { IOResult } from '../io/types.ts'
 import { YieldBudget } from '../io/yield_budget.ts'
@@ -49,8 +49,6 @@ import {
   TRACE_CONTENT_ENV,
   TRACE_CONTENT_MAX_BYTES,
   TRACE_CONTENT_MAX_BYTES_ENV,
-  TRACE_MAX_SPANS,
-  TRACE_MAX_SPANS_ENV,
   TRACER_NAME,
 } from './constants.ts'
 import type { OpRecord } from './record.ts'
@@ -155,53 +153,25 @@ function startLine(
 
 /**
  * Close a typed line's `command` span (`span`, its start and end in epoch
- * milliseconds): how it ended, the start of its stdout and stderr
- * (`output`, as it wrote them), and a `vfs.<call>` span for each call it
- * made to a mount, under the span of the process that made it (`under`),
- * else under the line's. Each span also carries its start or end and its
- * length in milliseconds, as the history's entries have them, for a tracer
- * that can't be given a span's times. TRACE_CONTENT_ENV leaves out the
- * output and the calls, and past TRACE_MAX_SPANS_ENV calls the rest are
- * only counted. Mirrors Python's `_end_line`.
+ * milliseconds): how it ended and the start of its stdout and stderr
+ * (`output`, as it wrote them). It also carries its length in milliseconds,
+ * as the history's entries have it, for a tracer that can't be given a
+ * span's times. TRACE_CONTENT_ENV leaves out the output. The calls the line
+ * made to mounts are its commands' own work, so they stay in the history and
+ * send no spans. Mirrors Python's `_end_line`.
  */
 function endLine(
   line: Span,
   span: [number, number],
   exitCode: number,
   output: [Uint8Array, Uint8Array],
-  records: readonly OpRecord[],
-  under: (rec: OpRecord) => Context | undefined,
 ): void {
-  const content = traceContent()
   line.setAttribute('mirage.exit_code', exitCode)
   line.setAttribute('mirage.duration_ms', span[1] - span[0])
-  const calls = records.slice(0, positiveEnv(TRACE_MAX_SPANS_ENV, TRACE_MAX_SPANS))
-  if (content) {
+  if (traceContent()) {
     const limit = traceContentMaxBytes()
     line.setAttribute('mirage.stdout', tracedOutput(output[0], limit))
     line.setAttribute('mirage.stderr', tracedOutput(output[1], limit))
-    if (calls.length < records.length)
-      line.setAttribute('mirage.vfs.dropped', records.length - calls.length)
-  }
-  if (content && line.isRecording()) {
-    const parent = trace.setSpan(context.active(), line)
-    for (const rec of calls) {
-      const call = tracer().startSpan(
-        `vfs.${rec.op}`,
-        {
-          startTime: rec.timestamp - rec.durationMs,
-          attributes: {
-            'mirage.vfs.path': rec.path,
-            'mirage.vfs.source': rec.source,
-            'mirage.vfs.bytes': rec.bytes,
-            'mirage.vfs.timestamp': rec.timestamp,
-            'mirage.vfs.duration_ms': rec.durationMs,
-          },
-        },
-        under(rec) ?? parent,
-      )
-      call.end(rec.timestamp)
-    }
   }
   line.end(span[1])
 }
@@ -280,8 +250,8 @@ function later(a: number | null, b: number | null): number | null {
  * Each typed line also goes to OpenTelemetry as a span, and so does each job
  * and process once it ends: a process under the one that started it, a job's
  * process under its job, and the line's own under the line's span while the
- * newest `HISTORY_MAX_RECORDS` lines' spans are known, each vfs call under
- * the process that made it. A process links to each it reads from,
+ * newest `HISTORY_MAX_RECORDS` lines' spans are known. A process links to
+ * each it reads from,
  * `mirage.input` naming where: its `stdin`, a `/dev/fd` path or its `argv`.
  * Nothing leaves the process until an SDK is set up. Tracing stops at the workspace's own machine and runtimes: a program
  * a runtime runs elsewhere starts no trace of its own there. `machine` is
@@ -671,19 +641,7 @@ export class Observer {
     const took =
       started === undefined ? undefined : Math.round((this.clock.monotonic() - started[1]) * 1000)
     if (started !== undefined && took !== undefined) {
-      endLine(
-        started[2],
-        [started[0], started[0] + took],
-        io.exitCode,
-        [out, err],
-        opRecords,
-        (rec) =>
-          rec.process === null
-            ? undefined
-            : this.contextOf(
-                this.spanKey('process', line ?? null, ProcessId.parse(rec.process).pid),
-              ),
-      )
+      endLine(started[2], [started[0], started[0] + took], io.exitCode, [out, err])
     }
     const init: LogEntryInit = {
       type: EVENT_RESULT,
