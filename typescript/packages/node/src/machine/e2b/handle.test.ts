@@ -1021,14 +1021,14 @@ it('passes on a streamed tail without a newline', async () => {
   ])
 })
 
-describe('E2BMachine sleep', () => {
-  async function reached(config: Partial<E2BConfig> = {}): Promise<FakedE2BMachine> {
-    const machine = new FakedE2BMachine('box', { sandboxId: 'sb-live', apiKey: 'k-123', ...config })
-    await machine.connect()
-    await machine.close()
-    return machine
-  }
+async function reached(config: Partial<E2BConfig> = {}): Promise<FakedE2BMachine> {
+  const machine = new FakedE2BMachine('box', { sandboxId: 'sb-live', apiKey: 'k-123', ...config })
+  await machine.connect()
+  await machine.close()
+  return machine
+}
 
+describe('E2BMachine sleep', () => {
   it('is sleepable', () => {
     expect(isSleepable(makeRuntime())).toBe(true)
   })
