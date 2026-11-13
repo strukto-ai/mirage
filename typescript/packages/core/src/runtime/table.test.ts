@@ -307,6 +307,9 @@ describe('runtimeBindingsFor', () => {
     const b = new RemoteRuntime({ captures: ['node'], machine: 'b' })
     expect(runtimeBindingsFor([a, new WorkspaceRuntime()], 'remote')['@external']).toBe(a)
     expect(runtimeBindingsFor([a, b], 'remote:b').node).toBe(b)
+    expect(() =>
+      runtimeBindingsFor([new RemoteRuntime({ machine: 'gpu:prod' })], 'remote:gpu'),
+    ).toThrow(/unknown runtime: 'remote:gpu'/)
     expect(() => runtimeBindingsFor([a, b], 'remote')).toThrow(
       /ambiguous runtime: 'remote' \(workspace runtimes: 'remote:a', 'remote:b'\)/,
     )

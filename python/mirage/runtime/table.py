@@ -197,7 +197,7 @@ def runtime_bindings_for(
             "'workspace' is the default executor, not a runtime you can select"
         )
     found = [e for e in entries if e.name == name] or [
-        e for e in entries if e.name.startswith(f"{name}:")
+        e for e in entries if e.name.partition(":")[0] == name
     ]
     if len(found) == 1:
         return {command: found[0] for command in found[0].captures}

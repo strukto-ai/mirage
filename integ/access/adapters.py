@@ -872,9 +872,13 @@ class HttpSteps:
             "GET", f"/v1/workspaces/{wid}/{kind}", params=params
         )
         key = "pid" if kind == "processes" else "id"
-        return [
-            await self._ok("GET", f"/v1/workspaces/{wid}/{kind}/{r[key]}")
+        refs = [
+            f"{r['type']}:{r['name']}" if kind == "machines" else r[key]
             for r in listed["items"]
+        ]
+        return [
+            await self._ok("GET", f"/v1/workspaces/{wid}/{kind}/{ref}")
+            for ref in refs
         ]
 
     async def explain(

@@ -219,7 +219,7 @@ export function runtimeBindingsFor(
     throw new Error(`'workspace' is the default executor, not a runtime you can select`)
   }
   const exact = entries.filter((e) => e.name === name)
-  const found = exact.length > 0 ? exact : entries.filter((e) => e.name.startsWith(`${name}:`))
+  const found = exact.length > 0 ? exact : entries.filter((e) => e.name.split(':', 1)[0] === name)
   const [entry] = found
   if (found.length === 1 && entry !== undefined) {
     // Null prototype: captures are arbitrary command names.

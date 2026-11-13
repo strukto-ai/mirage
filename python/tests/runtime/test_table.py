@@ -228,6 +228,9 @@ def test_runtime_bindings_for_takes_a_runtimes_name_while_it_has_one_entry():
         "@external": a
     }
     assert runtime_bindings_for([a, b], "remote:b") == {"node": b}
+    prod = RemoteRuntime(machine="gpu:prod")
+    with pytest.raises(ValueError, match="unknown runtime: 'remote:gpu'"):
+        runtime_bindings_for([prod], "remote:gpu")
     with pytest.raises(
         ValueError,
         match=r"ambiguous runtime: 'remote' \(workspace runtimes: 'remote:a',"
