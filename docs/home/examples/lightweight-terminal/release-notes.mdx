@@ -1,25 +1,51 @@
 ---
 title: Release Notes
 icon: scroll
-description: An agent turns a week of merged pull requests and closed Linear issues into release notes and publishes them to Notion.
+description: An agent turns a week of merged pull requests and closed Linear issues into release notes and publishes them to Notion, with no sandbox.
 ---
 
-Every Monday someone on the team writes up what shipped the week before:
-the changes a customer would notice, in plain words, each with a link. An
-agent with a [lightweight terminal](/home/examples/lightweight-terminal) can
-write the first draft. It lists the pull requests merged that week with
-[`gh`](/python/cli/gh), lists the issues closed in Linear with
-[`linear`](/python/cli/linear), sorts them into groups, and publishes the
-notes as a Notion page with [`ntn`](/python/cli/ntn) for a person to review.
+import { UseCaseTerminal } from "/snippets/use-case-terminal.jsx"
 
-Nothing here needs a sandbox. `gh`, `linear` and `ntn` are Mirage CLIs: each
-one calls its service's API from your server with a token the server holds,
-so no program is installed and no token is typed into the terminal. The JSON
-they return lands in the terminal's files, and `jq` and Python read it there.
+<UseCaseTerminal
+  services={[
+    { cli: "gh", name: "GitHub", detail: "the pull requests merged in the week" },
+    { cli: "linear", name: "Linear", detail: "the issues closed in the week" },
+    { cli: "ntn", name: "Notion", detail: "the release notes page", dir: "out" },
+  ]}
+  steps={[
+    { cmd: "gh search prs --merged-at 2025-12-29..2026-01-04 …", cli: "gh", out: "10 pull requests" },
+    { cmd: "linear issue list --team BILL | jq …", cli: "linear", out: "3 issues" },
+    { cmd: "python3 /work/group.py", cli: "python3", out: "Breaking 1, New 3, Improved 1, Fixed 2" },
+    { cmd: "python3 /work/notes.py", cli: "python3", out: "/work/release-notes.md" },
+    { cmd: "ntn pages create --parent \"page:$parent\" …", cli: "ntn", out: "Week of December 29, 2025" },
+  ]}
+  extras={[
+    { text: "/work in memory" },
+    { text: "python3 on Monty", cli: "python3" },
+  ]}
+/>
 
-The lines on this page are what an agent would send. They write the notes
-for the week of December 29, 2025 in `example/billing`, a sample repository
-whose team tracks its work in a Linear team with the key `BILL`.
+An agent drafts a team's weekly release notes. It lists the pull requests
+merged in the week and the Linear issues closed, sorts them into groups, and
+publishes the draft to Notion for a person to review. A cron job can start it
+every Monday.
+
+A job this small needs no VM or sandbox. It runs in a
+[lightweight terminal](/home/examples/lightweight-terminal) inside one
+FastAPI or Express server:
+
+- **Files:** `/work`, mounted in [memory](/home/setup/ram) for the agent's
+  scratch files. To keep them, mount a [disk folder](/home/setup/disk), an
+  [S3 bucket](/home/setup/s3) or another [VFS](/home/setup/vfs) there
+  instead.
+- **Python:** `python3`, in-process on [Monty](/home/setup/runtime/monty).
+- **CLIs:** [`gh`](/python/cli/gh), [`linear`](/python/cli/linear) and
+  [`ntn`](/python/cli/ntn) call GitHub, Linear and Notion with tokens the
+  server holds, so the agent never sees one.
+
+The commands below are what the agent runs in its terminal. They write the
+notes for the week of December 29, 2025 in `example/billing`, a sample
+repository whose team tracks its work in the Linear team `BILL`.
 
 ## Server
 
@@ -147,8 +173,8 @@ APIs, or set them for GitHub Enterprise or a proxy.
 
 ## Usage
 
-Create a terminal, and define `run`, which sends lines to it and prints what
-they print. It needs [`jq`](https://jqlang.org):
+Create a terminal, and define `run`, which sends commands to it and prints
+what they print. It needs [`jq`](https://jqlang.org):
 
 ```bash
 curl -X POST localhost:3000/sessions/a
@@ -160,17 +186,16 @@ run() {
 }
 ```
 
-The lines between `SH` and `SH` in the blocks below run in the terminal on
-the server, not in the shell that calls `run`. The output shown comes from
+The commands between `SH` and `SH` in the blocks below run in the terminal
+on the server, not in the shell that calls `run`. The output shown comes from
 the sample repository; yours will list your own work.
 
-## Collect the Week
+## List merged pull requests
 
-The agent asks GitHub for the pull requests merged between Monday, December
-29, and Sunday, January 4. The agent names the week in the command, so the
-notes cover that week even if it runs on Tuesday; the next Monday it moves
-both dates forward. It saves the list as JSON in a file and prints only the
-count and the titles:
+The agent asks GitHub for the pull requests merged from Monday, December 29,
+to Sunday, January 4. The dates are in the command, so a run on Tuesday
+still covers that week. It saves the list as JSON in a file and prints only
+the count and the titles:
 
 ```bash
 run <<'SH'
@@ -195,12 +220,15 @@ SH
 #150 test: cover partial refunds
 ```
 
-Ten pull requests were merged. The team starts each title with its kind of
-change: `feat`, `fix` and `perf` are changes a customer sees, `chore`,
-`build`, `ci` and `test` are not, and a `!` marks a breaking change.
+Ten pull requests were merged. `--limit 100` caps the list, so raise it for a
+busier repository. The team starts each title with its kind of change:
+`feat`, `fix` and `perf` are changes a customer sees; `chore`, `build`, `ci`
+and `test` are not; a `!` marks a breaking change.
 
-Next the agent lists the team's Linear issues and keeps the ones in the
-`Done` state that were last updated during the same week:
+## List closed issues
+
+The agent lists the team's Linear issues and keeps the ones in the `Done`
+state that were last updated during the same week:
 
 ```bash
 run <<'SH'
@@ -223,7 +251,7 @@ the filtering. The JSON has no completion date, so the last update stands in
 for it. An issue that was finished earlier, or is still in progress, is left
 out.
 
-## Group the Changes
+## Group the changes
 
 Some of these describe the same change: pull request #142 says `Closes
 BILL-31` in its description, and #143 says `Fixes BILL-34`. A short Python
@@ -291,7 +319,7 @@ Dropped 4
 Thirteen items became seven entries: four pull requests were chores, and two
 issues joined the pull requests that closed them.
 
-## Write the Notes
+## Write the release notes
 
 The next file turns the groups into Markdown, one heading per group that has
 entries, and the agent prints the result:
