@@ -24,6 +24,7 @@ from collections.abc import (
     AsyncIterator,
     Awaitable,
     Callable,
+    Iterable,
     Mapping,
     Sequence,
 )
@@ -1956,18 +1957,35 @@ class Workspace:
                 "workspace was closed before delete; its state is kept"
             )
 
-    async def sleep(self) -> None:
-        """Close the workspace as ``close`` does, then pause each machine:
-        an E2B sandbox whose config says ``on_sleep: pause`` is paused,
-        and other machines are only disconnected. The state is kept.
+    async def sleep(self, pause: Iterable[str] | None = None) -> None:
+        """Close the workspace as ``close`` does, then pause its machines;
+        the others are only disconnected, and the state is kept.
+
+        Args:
+            pause (Iterable[str] | None): the machines to pause, by their
+                ``machines:`` names, whatever their config says; None
+                pauses those whose config asks (E2B's ``on_sleep: pause``).
 
         Raises:
+            ValueError: ``pause`` names a machine the workspace lacks;
+                nothing is closed.
             RuntimeError: the workspace was closed first, which let its
                 machines go awake.
         """
+        table = self.machine_table
+        if pause is None:
+            names = frozenset(
+                name
+                for name in table.names()
+                if table.get(name).pauses_on_sleep()
+            )
+        else:
+            names = frozenset(pause)
+            for name in names:
+                table.get(name)
         try:
             await self._sync_bridge.close(
-                partial(self._close, drop_state=False, sleep=True)
+                partial(self._close, drop_state=False, pause=names)
             )
         finally:
             await self._sync_bridge.ashutdown()
@@ -1980,7 +1998,7 @@ class Workspace:
         self,
         drop_state: bool,
         blocked_loop: asyncio.AbstractEventLoop | None = None,
-        sleep: bool = False,
+        pause: frozenset[str] | None = None,
     ) -> None:
         """Release everything the workspace owns, exactly once
         (``close_workspace``); a later call answers as the first did.
@@ -1993,7 +2011,8 @@ class Workspace:
                 sync ``with`` block is exiting inside; its runners are
                 cancelled but not joined, and a metadata write there is
                 not waited for, since neither can run until this returns.
-            sleep (bool): pause each machine once it is closed.
+            pause (frozenset[str] | None): the machines to pause once
+                closed, by name; None closes only.
         """
         # Stop lifecycle mutations before teardown yields or captures its
         # close lists. Keep _closed separate so runtime journals can still
@@ -2024,7 +2043,7 @@ class Workspace:
                     raise self._close_error
                 return
             self._state_dropped = drop_state
-            self._machines_slept = sleep
+            self._machines_slept = pause is not None
             failures = [
                 result
                 for result in execution_results
@@ -2033,7 +2052,7 @@ class Workspace:
             try:
                 failures.extend(
                     await close_workspace(
-                        self._close_deps(drop_state, blocked_loop, sleep)
+                        self._close_deps(drop_state, blocked_loop, pause)
                     )
                 )
             finally:
@@ -2054,7 +2073,7 @@ class Workspace:
         self,
         drop_state: bool,
         blocked_loop: asyncio.AbstractEventLoop | None = None,
-        sleep: bool = False,
+        pause: frozenset[str] | None = None,
     ) -> CloseDeps:
         """What closing releases (``close_workspace``).
 
@@ -2062,7 +2081,8 @@ class Workspace:
             drop_state (bool): delete the workspace's state too.
             blocked_loop (asyncio.AbstractEventLoop | None): the loop a
                 sync ``with`` block is exiting inside.
-            sleep (bool): pause each machine once it is closed.
+            pause (frozenset[str] | None): the machines to pause once
+                closed, by name; None closes only.
         """
         return CloseDeps(
             sessions=self._session_mgr,
@@ -2074,7 +2094,7 @@ class Workspace:
                 self._diff_pool.close,
                 self._script_policy.close,
                 self._runtimes.close,
-                partial(self.machine_table.close, pause=sleep),
+                partial(self.machine_table.close, pause=pause),
                 self._registry.clis.close,
             ],
             job_table=self.job_table,

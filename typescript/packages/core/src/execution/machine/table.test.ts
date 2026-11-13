@@ -893,12 +893,22 @@ class Napper extends Box {
 }
 
 describe('MachineTable pause', () => {
+  const BOTH: ReadonlySet<string> = new Set(['a', 'b'])
+
   it('closes every handle, then pauses each one it held', async () => {
     const log: string[] = []
     const table = new MachineTable({ a: new Napper('a', log), b: new Box('b', 0) })
     table.holdHandles()
-    await table.close(true)
+    await table.close(BOTH)
     expect(log).toEqual(['close a', 'pause a'])
+  })
+
+  it('pauses only the held handles it names', async () => {
+    const log: string[] = []
+    const table = new MachineTable({ a: new Napper('a', log), b: new Napper('b', log) })
+    table.holdHandles()
+    await table.close(new Set(['b']))
+    expect(log).toEqual(['close a', 'close b', 'pause b'])
   })
 
   it('pauses nothing on a plain close', async () => {
@@ -913,7 +923,7 @@ describe('MachineTable pause', () => {
     const log: string[] = []
     const table = new MachineTable({ a: new Napper('a', log, true) })
     table.holdHandles()
-    await expect(table.close(true)).rejects.toThrow('close a failed')
+    await expect(table.close(BOTH)).rejects.toThrow('close a failed')
     expect(log).toEqual(['close a', 'pause a'])
   })
 
@@ -924,7 +934,7 @@ describe('MachineTable pause', () => {
       b: new Napper('b', log, false, true),
     })
     table.holdHandles()
-    const failure = await table.close(true).catch((e: unknown) => e)
+    const failure = await table.close(BOTH).catch((e: unknown) => e)
     expect(failure).toBeInstanceOf(AggregateError)
     expect((failure as AggregateError).errors.map((e: Error) => e.message).sort()).toEqual([
       'close a failed',
@@ -939,7 +949,7 @@ describe('MachineTable pause', () => {
     first.holdHandles()
     await first.close()
     new MachineTable({ a }).holdHandles()
-    await first.close(true)
+    await first.close(BOTH)
     expect(log).toEqual(['close a', 'close a'])
   })
 
@@ -950,7 +960,7 @@ describe('MachineTable pause', () => {
     }
     const table = new MachineTable({ a })
     table.holdHandles()
-    await expect(table.close(true)).rejects.toThrow('pause threw')
+    await expect(table.close(BOTH)).rejects.toThrow('pause threw')
     expect(() => new MachineTable({ a })).not.toThrow()
   })
 
@@ -963,7 +973,7 @@ describe('MachineTable pause', () => {
       release = resolve
     })
     ;(table as unknown as { signaling: Map<string, Promise<void>> }).signaling.set('box:a', queued)
-    const closing = table.close(true)
+    const closing = table.close(BOTH)
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(log).toEqual([])
     release()
@@ -975,7 +985,7 @@ describe('MachineTable pause', () => {
     const a = new Napper('a', [])
     const table = new MachineTable({ a })
     table.holdHandles()
-    await table.close(true)
+    await table.close(BOTH)
     expect(a.refused).toBe("machine 'a' is already in another workspace")
     expect(() => {
       new MachineTable({ a }).holdHandles()

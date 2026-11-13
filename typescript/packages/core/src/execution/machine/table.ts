@@ -505,18 +505,19 @@ export class MachineTable {
 
   /**
    * Close every handle: unmount what each was served, and let go of it for
-   * another workspace. With `pause`, each handle this table held is then
-   * paused, held until it has paused so no other workspace takes it first;
-   * a handle whose close failed is still paused.
+   * another workspace. With `pause`, each handle it names that this table
+   * held is then paused, every held handle staying held until then so no
+   * other workspace takes it first; a handle whose close failed is still
+   * paused.
    *
-   * @param pause pause each handle after closing it.
+   * @param pause the machines to pause after closing, by name; null closes only.
    */
-  async close(pause = false): Promise<void> {
-    const held = this.handles().filter((handle) => HOLDERS.get(handle) === this)
+  async close(pause: ReadonlySet<string> | null = null): Promise<void> {
+    const held = [...this.byName].filter(([, handle]) => HOLDERS.get(handle) === this)
     let results: PromiseSettledResult<void>[]
-    if (pause) results = await this.closeThenPause(held)
+    if (pause !== null) results = await this.closeThenPause(held, pause)
     else {
-      for (const handle of held) HOLDERS.delete(handle)
+      for (const [, handle] of held) HOLDERS.delete(handle)
       results = await Promise.allSettled(this.handles().map(async (h) => h.close()))
     }
     const failures = results.flatMap((r) => (r.status === 'rejected' ? [r.reason as unknown] : []))
@@ -524,18 +525,22 @@ export class MachineTable {
     if (failures.length > 1) throw new AggregateError(failures, 'machine close failed')
   }
   /**
-   * Close every handle and pause the ones this table held, once the
+   * Close every handle and pause the held ones `pause` names, once the
    * signals still queued for its machines have run, so none reaches a
    * machine after it pauses; the handles stay held until then.
    */
-  private async closeThenPause(held: MachineHandle[]): Promise<PromiseSettledResult<void>[]> {
+  private async closeThenPause(
+    held: [string, MachineHandle][],
+    pause: ReadonlySet<string>,
+  ): Promise<PromiseSettledResult<void>[]> {
     await Promise.allSettled(this.signaling.values())
     try {
       const results = await Promise.allSettled(this.handles().map(async (h) => h.close()))
-      results.push(...(await Promise.allSettled(held.map(async (h) => h.pause()))))
+      const paused = held.filter(([name]) => pause.has(name))
+      results.push(...(await Promise.allSettled(paused.map(async ([, h]) => h.pause()))))
       return results
     } finally {
-      for (const handle of held) HOLDERS.delete(handle)
+      for (const [, handle] of held) HOLDERS.delete(handle)
     }
   }
 }

@@ -304,8 +304,8 @@ export class Workspace {
   private closing: Promise<void> | null = null
   private metaWrite: Promise<void> | null = null
   private stateDropped = false
-  // Whether the close that ran paused the machines (`sleep`).
-  private machinesSlept = false
+  // The machines the close that ran paused, by name (`sleep`); null when it didn't sleep.
+  private machinesPaused: ReadonlySet<string> | null = null
   // The stores this workspace's state lives in, whether the state store
   // built them or the caller passed one in directly: delete clears these,
   // not only what the state store would hand out.
@@ -654,7 +654,7 @@ export class Workspace {
       machines: this.machineTable,
     })
     this.closers.push(() => this.runtimeWorld.close())
-    this.closers.push(() => this.machineTable.close(this.machinesSlept))
+    this.closers.push(() => this.machineTable.close(this.machinesPaused))
     this.closers.push(() => this.registry.clis.close())
     this.router = new Router(this.registry, this.runtimeWorld)
     this.registry.bindClocks()
@@ -2806,19 +2806,30 @@ export class Workspace {
   }
 
   /**
-   * Close the workspace as `close` does, then pause each machine: an E2B
-   * sandbox whose config says `onSleep: 'pause'` is paused, and other
-   * machines are only disconnected. The state is kept. Throws when the
-   * workspace was closed first: its machines were let go awake.
+   * Close the workspace as `close` does, then pause its machines; the
+   * others are only disconnected, and the state is kept. `pause` names the
+   * machines to pause by their `machines` names, whatever their config
+   * says; without it, those whose config asks pause (E2B's
+   * `onSleep: 'pause'`). Throws, closing nothing, when `pause` names a
+   * machine the workspace lacks; throws after closing when the workspace
+   * was closed first: its machines were let go awake.
    */
-  async sleep(): Promise<void> {
-    this.closing ??= this.runClose(false, true)
+  async sleep(options: { pause?: readonly string[] } = {}): Promise<void> {
+    const table = this.machineTable
+    const names = new Set(
+      options.pause ?? table.names().filter((name) => table.get(name).pausesOnSleep()),
+    )
+    for (const name of names) table.get(name)
+    this.closing ??= this.runClose(false, names)
     await this.closing
-    if (!this.machinesSlept)
+    if (this.machinesPaused === null)
       throw new Error('workspace was closed before sleep; its machines are awake')
   }
 
-  private async runClose(dropState: boolean, sleep = false): Promise<void> {
+  private async runClose(
+    dropState: boolean,
+    pause: ReadonlySet<string> | null = null,
+  ): Promise<void> {
     this.diffPool.stop()
     const executions = [...this.shellExecutions]
     for (const execution of executions) execution.cancel()
@@ -2835,7 +2846,7 @@ export class Workspace {
     // state or closes the store.
     await Promise.allSettled([this.metaWrite])
     this.stateDropped = dropState
-    this.machinesSlept = sleep
+    this.machinesPaused = pause
     try {
       await closeWorkspace({
         sessions: this.sessionManager,

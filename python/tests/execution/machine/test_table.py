@@ -867,13 +867,25 @@ class _Napper(_Box):
             raise RuntimeError(f"pause {self.name} failed")
 
 
+_BOTH = frozenset({"a", "b"})
+
+
 @pytest.mark.asyncio
 async def test_a_pausing_close_closes_every_handle_then_pauses_each_it_held():
     log: list[str] = []
     table = MachineTable({"a": _Napper("a", log), "b": _Box("b", 0)})
     table.hold_handles()
-    await table.close(pause=True)
+    await table.close(pause=_BOTH)
     assert log == ["close a", "pause a"]
+
+
+@pytest.mark.asyncio
+async def test_a_pausing_close_pauses_only_the_held_handles_it_names():
+    log: list[str] = []
+    table = MachineTable({"a": _Napper("a", log), "b": _Napper("b", log)})
+    table.hold_handles()
+    await table.close(pause=frozenset({"b"}))
+    assert log == ["close a", "close b", "pause b"]
 
 
 @pytest.mark.asyncio
@@ -891,7 +903,7 @@ async def test_a_handle_whose_close_failed_is_still_paused():
     table = MachineTable({"a": _Napper("a", log, fail_close=True)})
     table.hold_handles()
     with pytest.raises(RuntimeError, match="close a failed"):
-        await table.close(pause=True)
+        await table.close(pause=_BOTH)
     assert log == ["close a", "pause a"]
 
 
@@ -906,7 +918,7 @@ async def test_a_failed_close_and_a_failed_pause_are_both_raised():
     )
     table.hold_handles()
     with pytest.raises(BaseExceptionGroup) as raised:
-        await table.close(pause=True)
+        await table.close(pause=_BOTH)
     assert sorted(str(e) for e in raised.value.exceptions) == [
         "close a failed",
         "pause b failed",
@@ -922,16 +934,16 @@ async def test_a_pausing_close_pauses_no_handle_another_table_took():
     await first.close()
     again = MachineTable({"a": a})
     again.hold_handles()
-    await first.close(pause=True)
+    await first.close(pause=_BOTH)
     assert log == ["close a", "close a"]
 
 
 @pytest.mark.asyncio
-async def test_a_handle_is_held_until_it_has_slept():
+async def test_a_handle_is_held_until_it_has_paused():
     a = _Napper("a", [])
     table = MachineTable({"a": a})
     table.hold_handles()
-    await table.close(pause=True)
+    await table.close(pause=_BOTH)
     assert a.refused == "machine 'a' is already in another workspace"
     MachineTable({"a": a})
 
@@ -942,7 +954,7 @@ async def test_a_cancelled_pausing_close_still_pauses_its_machines():
     gate = asyncio.Event()
     table = MachineTable({"a": _Napper("a", log, gate=gate)})
     table.hold_handles()
-    closing = asyncio.ensure_future(table.close(pause=True))
+    closing = asyncio.ensure_future(table.close(pause=_BOTH))
     while "pause a" not in log:
         await asyncio.sleep(0)
     closing.cancel()
@@ -959,7 +971,7 @@ async def test_a_pausing_close_waits_for_the_signals_queued_for_its_machines():
     table.hold_handles()
     signal = table._signaling["box:a"]
     await signal.acquire()
-    closing = asyncio.ensure_future(table.close(pause=True))
+    closing = asyncio.ensure_future(table.close(pause=_BOTH))
     for _ in range(5):
         await asyncio.sleep(0)
     assert log == []

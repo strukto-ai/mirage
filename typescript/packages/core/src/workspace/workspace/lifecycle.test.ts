@@ -903,9 +903,20 @@ class Napper extends MachineHandle {
     this.log.push('close')
   }
 
+  override pausesOnSleep(): boolean {
+    return true
+  }
+
   override pause(): Promise<void> {
     this.log.push('pause')
     return Promise.resolve()
+  }
+}
+
+/** A machine whose config doesn't ask to pause it at sleep. */
+class Unasked extends Napper {
+  override pausesOnSleep(): boolean {
+    return false
   }
 }
 
@@ -929,6 +940,38 @@ describe('sleep', () => {
     const box = new Napper('box')
     const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC, machines: { box } })
     await ws.sleep()
+    expect(box.log).toEqual(['close', 'pause'])
+  })
+
+  it('pauses the machines whose config asks when no list is given', async () => {
+    const a = new Napper('a')
+    const b = new Unasked('b')
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC, machines: { a, b } })
+    await ws.sleep()
+    expect([a.log, b.log]).toEqual([['close', 'pause'], ['close']])
+  })
+
+  it('pauses exactly the machines it names', async () => {
+    const a = new Napper('a')
+    const b = new Unasked('b')
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC, machines: { a, b } })
+    await ws.sleep({ pause: ['b'] })
+    expect([a.log, b.log]).toEqual([['close'], ['close', 'pause']])
+  })
+
+  it('pauses nothing with an empty list', async () => {
+    const box = new Napper('box')
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC, machines: { box } })
+    await ws.sleep({ pause: [] })
+    expect(box.log).toEqual(['close'])
+  })
+
+  it('refuses an unknown machine before closing anything', async () => {
+    const box = new Napper('box')
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC, machines: { box } })
+    await expect(ws.sleep({ pause: ['bxo'] })).rejects.toThrow("unknown machine: 'bxo'")
+    expect(box.log).toEqual([])
+    await ws.sleep({ pause: ['box'] })
     expect(box.log).toEqual(['close', 'pause'])
   })
 

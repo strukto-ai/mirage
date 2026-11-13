@@ -139,8 +139,9 @@ class PtyWriter implements PipeWriter {
  * command runs until mirage's limits stop it. A `mountType` serves the
  * workspace over a PTY, since E2B's exec decodes output as text.
  *
- * The sandbox is yours: Mirage never kills it, and pauses it only when its
- * config says `onSleep: 'pause'` and the workspace sleeps. Once the SDK
+ * The sandbox is yours: Mirage never kills it, and pauses it only when the
+ * workspace sleeps and its config says `onSleep: 'pause'` or the sleep names
+ * it. Once the SDK
  * says it is gone, connecting fails with how to replace it, and a line it
  * cut short loses its connection (129) with the same advice; the next line
  * connects again.
@@ -205,15 +206,20 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
     await super.close()
   }
 
+  /** Whether the config says `onSleep: 'pause'`. */
+  override pausesOnSleep(): boolean {
+    return this.config.onSleep === 'pause'
+  }
+
   /**
-   * Pause the sandbox when the config says `onSleep: 'pause'` and the
-   * workspace that just closed reached it, keeping its disk and memory; the
-   * next connect resumes it. A sandbox already gone has nothing to pause.
+   * Pause the sandbox when the workspace that just closed reached it,
+   * keeping its disk and memory; the next connect resumes it. A sandbox
+   * already gone has nothing to pause.
    */
   override async pause(): Promise<void> {
     const pausable = this.pausable
     this.pausable = false
-    if (this.config.onSleep !== 'pause' || !pausable) return
+    if (!pausable) return
     const sdk = await this.ensureSdk()
     try {
       await sdk.Sandbox.pause(this.config.sandboxId, this.apiParams())

@@ -754,6 +754,14 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   }
 
   /**
+   * Whether the machine's config asks to pause it when its workspace sleeps
+   * without naming the machines to pause.
+   */
+  pausesOnSleep(): boolean {
+    return false
+  }
+
+  /**
    * Pause the machine after its workspace closed for sleep. A provider that
    * can pause overrides this, and its next connect resumes the machine; by
    * default the machine is only disconnected.

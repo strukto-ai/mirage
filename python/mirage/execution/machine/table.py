@@ -612,25 +612,26 @@ class MachineTable:
                 del self._found[key]
                 gone.set()
 
-    async def close(self, pause: bool = False) -> None:
+    async def close(self, pause: frozenset[str] | None = None) -> None:
         """Close every handle: unmount what each was served, and let go
-        of it for another workspace. With ``pause``, each handle this
-        table held is then paused, held until it has paused so no other
-        workspace takes it first; a handle whose close failed is still
-        paused.
+        of it for another workspace. With ``pause``, each handle it names
+        that this table held is then paused, every held handle staying
+        held until then so no other workspace takes it first; a handle
+        whose close failed is still paused.
 
         Args:
-            pause (bool): pause each handle after closing it.
+            pause (frozenset[str] | None): the machines to pause after
+                closing, by name; None closes only.
         """
-        held = [
-            handle
-            for handle in self._handles.values()
+        held = {
+            name: handle
+            for name, handle in self._handles.items()
             if (ref := _HOLDERS.get(handle)) is not None and ref() is self
-        ]
-        if pause:
-            results = await asyncio.shield(self._close_then_pause(held))
+        }
+        if pause is not None:
+            results = await asyncio.shield(self._close_then_pause(held, pause))
         else:
-            for handle in held:
+            for handle in held.values():
                 _HOLDERS.pop(handle, None)
             results = await asyncio.gather(
                 *(handle.close() for handle in self._handles.values()),
@@ -645,17 +646,18 @@ class MachineTable:
             )
 
     async def _close_then_pause(
-        self, held: list[MachineHandle]
+        self, held: dict[str, MachineHandle], pause: frozenset[str]
     ) -> list[BaseException | None]:
-        """Close every handle and pause the ones this table held, once the
-        signals still queued for its machines have run, so none reaches a
-        machine after it pauses; the handles stay held
-        until then. Shielded by ``close``, so a caller's cancel never
-        leaves its machines awake.
+        """Close every handle and pause the held ones ``pause`` names,
+        once the signals still queued for its machines have run, so none
+        reaches a machine after it pauses; the handles stay held until
+        then. Shielded by ``close``, so a caller's cancel never leaves its
+        machines awake.
 
         Args:
-            held (list[MachineHandle]): the handles this table held when
-                its close began.
+            held (dict[str, MachineHandle]): the handles this table held
+                when its close began, by name.
+            pause (frozenset[str]): the machines to pause, by name.
         """
         for lock in list(self._signaling.values()):
             async with lock:
@@ -666,12 +668,16 @@ class MachineTable:
                 return_exceptions=True,
             )
             results += await asyncio.gather(
-                *(handle.pause() for handle in held),
+                *(
+                    handle.pause()
+                    for name, handle in held.items()
+                    if name in pause
+                ),
                 return_exceptions=True,
             )
             return results
         finally:
-            for handle in held:
+            for handle in held.values():
                 _HOLDERS.pop(handle, None)
 
 

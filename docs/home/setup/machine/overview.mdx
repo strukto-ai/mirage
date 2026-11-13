@@ -249,13 +249,26 @@ state.
 ## Sleep
 
 `workspace.sleep()` closes the workspace as `close()` does, then pauses each
-machine. What a pause does is the provider's:
+machine whose config asks. What a pause does is the provider's:
 
 | Machine | `sleep()` does |
 | --- | --- |
 | E2B with `on_sleep: pause` | Pauses the sandbox, keeping its disk and memory; the next line resumes it |
 | E2B without `on_sleep` | Nothing: the sandbox keeps running, as after `close()` |
 | Every other machine | Nothing: it is only disconnected |
+
+To choose at sleep time instead, name the machines to pause, whatever their
+config says; every other machine is only disconnected:
+
+```python
+await workspace.sleep(pause=["box"])
+```
+
+```typescript
+await workspace.sleep({ pause: ['box'] })
+```
+
+A name the workspace has no machine for is refused before anything closes.
 
 A machine is paused after it is closed, so its mounts are unmounted while it
 still runs, and it is paused even when its close failed. A workspace closed

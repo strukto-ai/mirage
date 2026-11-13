@@ -155,7 +155,9 @@ connect resumes it, with at least 5 more minutes. Mirage pauses only a
 sandbox the workspace reached, and a sandbox that is already gone counts as
 asleep. A pause interrupts anything else running in the sandbox, so leave
 `on_sleep` unset when the sandbox is shared. Without it, `sleep()` leaves the
-sandbox running, as `close()` does. `pause` is the only value.
+sandbox running, as `close()` does, unless the call names the machine
+(`sleep(pause=["box"])`), which pauses it whatever its config says. `pause` is
+the only value.
 
 Once the sandbox has ended, a line exits 1, and its error names the fix:
 

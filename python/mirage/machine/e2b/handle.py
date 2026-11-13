@@ -143,7 +143,8 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
     exec decodes output as text.
 
     The sandbox is yours: Mirage never kills it, and pauses it only when
-    its config says ``on_sleep: pause`` and the workspace sleeps. Once
+    the workspace sleeps and its config says ``on_sleep: pause`` or the
+    sleep names it. Once
     the SDK says it is gone, connecting fails with how to replace it, and a line
     it cut short loses its connection (129) with the same advice; the
     next line connects again.
@@ -195,14 +196,17 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
         self._reached = False
         await super().close()
 
+    def pauses_on_sleep(self) -> bool:
+        """Whether the config says ``on_sleep: pause``."""
+        return self.config.on_sleep == "pause"
+
     async def pause(self) -> None:
-        """Pause the sandbox when the config says ``on_sleep: pause`` and
-        the workspace that just closed reached it, keeping its disk and
-        memory; the next connect resumes it. A sandbox already gone has
-        nothing to pause."""
+        """Pause the sandbox when the workspace that just closed reached
+        it, keeping its disk and memory; the next connect resumes it. A
+        sandbox already gone has nothing to pause."""
         pausable = self._pausable
         self._pausable = False
-        if self.config.on_sleep != "pause" or not pausable:
+        if not pausable:
             return
         try:
             await sdk.AsyncSandbox.pause(
