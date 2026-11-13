@@ -101,7 +101,7 @@ from the terminal.
     )
     ws = Workspace(
         {"/work": (RAMVFS(), MountMode.EXEC), "/repo": (repo, MountMode.READ)},
-        runtimes=[MontyRuntime(captures=["python", "python3"])],
+        machines=[MontyRuntime(captures=["python", "python3"])],
     )
     ws.register_cli("git", GIT)
     ws.register_cli("gh", GH, GhConfig(token=token, repo="strukto-ai/mirage"))
@@ -156,7 +156,7 @@ from the terminal.
     })
     const ws = new Workspace(
       { '/work': [new RAMVFS(), MountMode.EXEC], '/repo': [repo, MountMode.READ] },
-      { runtimes: [new MontyRuntime({ captures: ['python', 'python3'] })] },
+      { machines: [new MontyRuntime({ captures: ['python', 'python3'] })] },
     )
     ws.registerCli('git', GIT)
     ws.registerCli('gh', GH, { token, repo: 'strukto-ai/mirage' })

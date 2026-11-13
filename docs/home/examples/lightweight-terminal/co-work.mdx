@@ -120,7 +120,7 @@ credentials.
     env = os.environ
     ws = Workspace(
         {"/work": (RAMVFS(), MountMode.EXEC)},
-        runtimes=[MontyRuntime(captures=["python", "python3"])],
+        machines=[MontyRuntime(captures=["python", "python3"])],
     )
     ws.register_cli("himalaya", HIMALAYA, {
         "imap_host": env["IMAP_HOST"],
@@ -180,7 +180,7 @@ credentials.
     const env = process.env
     const ws = new Workspace(
       { '/work': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [new MontyRuntime({ captures: ['python', 'python3'] })] },
+      { mode: MountMode.EXEC, machines: [new MontyRuntime({ captures: ['python', 'python3'] })] },
     )
     ws.registerCli('himalaya', HIMALAYA, {
       imapHost: env.IMAP_HOST,

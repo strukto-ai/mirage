@@ -84,7 +84,7 @@ One endpoint creates a terminal, another runs a command in it.
 
     ws = Workspace(
         {"/work": (RAMVFS(), MountMode.EXEC)},
-        runtimes=[MontyRuntime(captures=["python", "python3"])],
+        machines=[MontyRuntime(captures=["python", "python3"])],
     )
 
 
@@ -123,7 +123,7 @@ One endpoint creates a terminal, another runs a command in it.
 
     const ws = new Workspace(
       { '/work': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [new MontyRuntime({ captures: ['python', 'python3'] })] },
+      { mode: MountMode.EXEC, machines: [new MontyRuntime({ captures: ['python', 'python3'] })] },
     )
     const app = express()
     app.use(express.json())

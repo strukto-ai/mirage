@@ -83,7 +83,7 @@ APIs, or set them for GitHub Enterprise or a proxy.
 
     ws = Workspace(
         {"/work": (RAMVFS(), MountMode.EXEC)},
-        runtimes=[MontyRuntime(captures=["python", "python3"])],
+        machines=[MontyRuntime(captures=["python", "python3"])],
     )
     ws.register_cli("gh", GH, GhConfig(
         token=os.environ["GITHUB_TOKEN"],
@@ -134,7 +134,7 @@ APIs, or set them for GitHub Enterprise or a proxy.
 
     const ws = new Workspace(
       { '/work': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [new MontyRuntime({ captures: ['python', 'python3'] })] },
+      { mode: MountMode.EXEC, machines: [new MontyRuntime({ captures: ['python', 'python3'] })] },
     )
     ws.registerCli('gh', GH, {
       token: process.env.GITHUB_TOKEN,
