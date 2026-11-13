@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from mirage.execution.process.types import ProcessUsage
-from mirage.execution.types import MachineId
+from mirage.execution.types import MachineName
 
 
 class MachineState(str, Enum):
@@ -41,7 +41,7 @@ class Machine:
     it: ``checked_at`` is when that check ran.
     """
 
-    id: MachineId
+    name: MachineName
     state: MachineState
     checked_at: float
 

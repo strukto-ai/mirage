@@ -842,6 +842,11 @@ class Policies:
         self._placement = placement
         self._rescan()
 
+    def has_placement(self) -> bool:
+        """Whether a route policy is placed, which can name a runtime a
+        capture listed earlier would otherwise take."""
+        return self._placement is not None
+
     def add(self, policy: Policy) -> None:
         """Register a policy after the existing ones.
 

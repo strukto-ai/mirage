@@ -26,7 +26,7 @@ from mirage.context.session_context import (
     current_caller,
     reset_caller,
 )
-from mirage.execution.types import MachineId
+from mirage.execution.types import MachineName
 from mirage.io.gateway import live_egress
 from mirage.runtime.binding import WorkspaceBinding, refused_run
 from mirage.runtime.config import RuntimeConfig
@@ -128,7 +128,7 @@ class Runtime(ABC, Generic[E]):
         self.config = self.config_cls.coerce(config)
 
     @property
-    def machine(self) -> MachineId | None:
+    def machine(self) -> MachineName | None:
         """The machine this runtime runs its programs on, which their
         process records name; None for the workspace's own."""
         return None
@@ -141,7 +141,7 @@ class Runtime(ABC, Generic[E]):
         """
         return self.name
 
-    def machine_for(self, ctx: Context) -> MachineId | None:
+    def machine_for(self, ctx: Context) -> MachineName | None:
         """The machine one run of this runtime goes to: its own
         (``machine``), whatever the run's route names.
 

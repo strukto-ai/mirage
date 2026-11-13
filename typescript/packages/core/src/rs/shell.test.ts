@@ -92,6 +92,32 @@ describe('parseShell', () => {
     expect(command.fieldNameForChild(2)).toBe('argument')
   })
 
+  it('rejects raw node reads after disposing its tree', () => {
+    const tree = parseShell('echo hello')
+    const root = tree.rootNode
+    const child = root.children[0]
+    if (child === undefined) throw new Error('no command')
+    tree.dispose()
+    tree.dispose()
+    for (const node of [root, child]) {
+      for (const read of [
+        () => node.parent,
+        () => node.text,
+        () => node.children,
+        () => node.id,
+        () => node.offsets,
+        () => node.inlined,
+        () => node.error,
+        () => node.rereadLines(),
+        () => node.warnings('', 1),
+        () => node.child(-1),
+        () => node.childForFieldName('missing'),
+      ])
+        expect(read).toThrow('released')
+    }
+    expect(() => tree.rootNode).toThrow('released')
+  })
+
   it('counts offsets and columns in UTF-16 units', () => {
     const line = 'echo é💡 x'
     const word = parseShell(line).rootNode.child(0)?.child(2)
@@ -161,7 +187,8 @@ describe('the text a tree reads', () => {
     const root = parseShell(command).rootNode
     const errors = root.children.filter((node) => node.type === 'ERROR')
     expect(errors).toHaveLength(1)
-    expect(root.offsets[errors[0]?.startIndex ?? -1]).toBe(command.lastIndexOf('fi'))
+    const at = errors[0]?.startIndex ?? -1
+    expect(root.offsets?.[at] ?? at).toBe(command.lastIndexOf('fi'))
   })
 })
 
@@ -290,4 +317,18 @@ describe('Shell', () => {
     expect(result).toEqual(['host', 'the host failed'])
     expect(shell.get('x')).toBeNull()
   })
+})
+
+it.each([
+  ['echo \ud800', 'echo �'],
+  ['echo \udc00', 'echo �'],
+  ['echo \udd00', 'echo �'],
+  ['echo \udcff', 'echo \udcff'],
+  ['echo 😀', 'echo 😀'],
+])('preserves encoded source semantics for %j', (input, expected) => {
+  const tree = parseShell(input)
+  expect(tree.source).toBe(expected)
+  expect(tree.rootNode.children[0]?.text).toBe(expected)
+  expect(tree.rootNode.sourceText).toBe(input)
+  tree.dispose()
 })

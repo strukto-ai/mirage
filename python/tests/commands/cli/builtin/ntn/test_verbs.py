@@ -350,9 +350,15 @@ def test_notion_transport_applies_the_line_version():
 
 
 @pytest.mark.asyncio
-async def test_auth_token_prints_the_configured_key():
-    out, _io = await token(NOTION, [], [], Context())
-    assert await _text(out) == "secret\n"
+async def test_auth_token_refuses_and_never_prints_the_key():
+    out, io = await token(NOTION, [], [], Context())
+    assert out is None
+    assert io.exit_code == 1
+    assert io.stderr == (
+        b"error: The authentication token stays in Mirage configuration "
+        b"and is never printed.\n"
+        b"  hint: ntn commands use it directly.\n"
+    )
 
 
 @pytest.mark.asyncio

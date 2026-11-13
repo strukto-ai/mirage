@@ -38,8 +38,8 @@ import {
   type Target,
 } from '../runners/typescript/harness.ts'
 
-// The integ corpus on the edge host: the same cases and goldens the node
-// battery runs, each line sent to an edge worker (workerd, through
+// The integ corpus on the Cloudflare host: the same cases and goldens the node
+// battery runs, each line sent to a Cloudflare worker (workerd, through
 // `wrangler dev`) over the server API, its mounts and CLIs built from a
 // config the way the node adapters build their instances. A case that needs
 // more of a workspace than its shell (sessions, policy checks, faults, stat
@@ -47,8 +47,8 @@ import {
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '..')
-const edge = resolve(root, '../typescript/packages/cloudflare')
-const TOKEN = 'edge-test-token'
+const cloudflare = resolve(root, '../typescript/packages/cloudflare')
+const TOKEN = 'cloudflare-test-token'
 
 // The fakes the targets below run against, on the ports ci/fakes.json pins:
 // the hf goldens carry the hub's URL verbatim.
@@ -72,7 +72,7 @@ const MCP_PORT = 5110
 
 type Config = Record<string, unknown>
 
-// How long the edge worker may take over one request: past the corpus's
+// How long the Cloudflare worker may take over one request: past the corpus's
 // slowest line, a 300,000-pass shell loop that takes over two minutes on a
 // CI runner, and short of the five minutes Node's fetch waits for headers,
 // as the shell route answers once its line ends. A line that hangs the
@@ -80,7 +80,7 @@ type Config = Record<string, unknown>
 // one does), then fails the run rather than holding it to the job's limit.
 const ANSWER_MS = 280_000
 
-/** The edge worker left a request unanswered past its limit. */
+/** The Cloudflare worker left a request unanswered past its limit. */
 class NoAnswer extends Error {}
 
 /** A fetch our limit ended, or Node's own wait for headers or a body. */
@@ -90,13 +90,17 @@ function timedOut(e: unknown): boolean {
   return code === 'UND_ERR_HEADERS_TIMEOUT' || code === 'UND_ERR_BODY_TIMEOUT'
 }
 
-/** A request of the edge worker's, failing once it has not answered in `ms`. */
-async function edgeFetch(url: string, init: RequestInit = {}, ms = ANSWER_MS): Promise<Response> {
+/** A request of the Cloudflare worker's, failing once it has not answered in `ms`. */
+async function cloudflareFetch(
+  url: string,
+  init: RequestInit = {},
+  ms = ANSWER_MS,
+): Promise<Response> {
   try {
     return await fetch(url, { ...init, signal: AbortSignal.timeout(ms) })
   } catch (e) {
     if (timedOut(e)) {
-      throw new NoAnswer(`${url}: the edge worker did not answer in ${String(ms / 1000)} s`, {
+      throw new NoAnswer(`${url}: the Cloudflare worker did not answer in ${String(ms / 1000)} s`, {
         cause: e,
       })
     }
@@ -111,7 +115,7 @@ function runId(): string {
 
 function env(name: string): string {
   const value = process.env[name] ?? ''
-  if (value === '') throw new Error(`the edge battery needs ${name}`)
+  if (value === '') throw new Error(`the Cloudflare battery needs ${name}`)
   return value.replace(/\/+$/, '')
 }
 
@@ -315,7 +319,7 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
     }
   },
   notion: async (target) => {
-    // One fixed token, as on node: `ntn auth token` prints it.
+    // One fixed token, as on node.
     const token = 'integ-test'
     const base = `${await scopedRun('NOTION_URL', { tenants: [token] })}/v1`
     const auth = { api_key: token, base_url: base }
@@ -411,7 +415,7 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
 }
 
 // What a case may ask of a workspace beyond its shell and its documents,
-// which an edge workspace reached over the API does not offer here. A
+// which a Cloudflare workspace reached over the API does not offer here. A
 // `clear_cache` case still runs, against warm caches: skipping it would skip
 // the write it may make, and every later golden counts on that write.
 // Cases whose object outgrows a Worker's 128 MB, where jq refuses it as it
@@ -456,18 +460,20 @@ async function applyProfiles(
   const auth = { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` }
   const sessions = `${base}/v1/workspaces/${id}/sessions`
   for (const [sid, profile] of Object.entries(profiles)) {
-    const { items: listed } = (await (await edgeFetch(sessions, { headers: auth })).json()) as {
+    const { items: listed } = (await (
+      await cloudflareFetch(sessions, { headers: auth })
+    ).json()) as {
       items: { session_id: string }[]
     }
     if (!listed.some((s) => s.session_id === sid)) {
-      const created = await edgeFetch(sessions, {
+      const created = await cloudflareFetch(sessions, {
         method: 'POST',
         headers: auth,
         body: JSON.stringify({ session_id: sid }),
       })
       if (created.status !== 201) throw new Error(`session ${sid}: ${await created.text()}`)
     }
-    const set = await edgeFetch(`${sessions}/${encodeURIComponent(sid)}`, {
+    const set = await cloudflareFetch(`${sessions}/${encodeURIComponent(sid)}`, {
       method: 'PATCH',
       headers: auth,
       body: JSON.stringify({ profile }),
@@ -477,11 +483,11 @@ async function applyProfiles(
 }
 
 function unsupported(name: string): never {
-  throw new Error(`an edge workspace over the API has no ${name} here`)
+  throw new Error(`a Cloudflare workspace over the API has no ${name} here`)
 }
 
-/** A workspace on the edge worker, its lines sent over the server API. */
-function edgeWorkspace(base: string, id: string): ExecWorkspace {
+/** A workspace on the Cloudflare worker, its lines sent over the server API. */
+function cloudflareWorkspace(base: string, id: string): ExecWorkspace {
   const enc = new TextEncoder()
   const shell: ExecWorkspace['shell'] = async (command, opts) => {
     const request = JSON.stringify({ command })
@@ -496,7 +502,7 @@ function edgeWorkspace(base: string, id: string): ExecWorkspace {
           })()
     const query =
       opts?.sessionId === undefined ? '' : `?session_id=${encodeURIComponent(opts.sessionId)}`
-    const response = await edgeFetch(`${base}/v1/workspaces/${id}/shell${query}`, {
+    const response = await cloudflareFetch(`${base}/v1/workspaces/${id}/shell${query}`, {
       ...init,
       method: 'POST',
       headers: {
@@ -532,7 +538,7 @@ function edgeWorkspace(base: string, id: string): ExecWorkspace {
     sessionId: string | undefined,
   ): Promise<string> => {
     const scope = sessionId === undefined ? '' : `/sessions/${encodeURIComponent(sessionId)}`
-    const response = await edgeFetch(`${base}/v1/workspaces/${id}${scope}/${kind}-md`, {
+    const response = await cloudflareFetch(`${base}/v1/workspaces/${id}${scope}/${kind}-md`, {
       method: path === undefined ? 'GET' : 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
       ...(path === undefined ? {} : { body: JSON.stringify({ path }) }),
@@ -559,7 +565,7 @@ function edgeWorkspace(base: string, id: string): ExecWorkspace {
     decisions: { pending: () => [], answer: () => unsupported('decisions') },
     explain: () => unsupported('explain'),
     close: async () => {
-      await edgeFetch(`${base}/v1/workspaces/${id}`, {
+      await cloudflareFetch(`${base}/v1/workspaces/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${TOKEN}` },
       })
@@ -653,8 +659,8 @@ function layersSessions(t: Target): boolean {
 
 /**
  * Whether the battery runs a target here: a service it opens, or RAM mounts
- * alone, with no secrets channel and no policy program on Pyodide, which an
- * edge isolate cannot load.
+ * alone, with no secrets channel and no policy program on Pyodide, which a
+ * Workers isolate cannot load.
  */
 function runsHere(t: Target): boolean {
   if (layersSessions(t)) return false
@@ -694,14 +700,15 @@ function selectTargets(runnable: Target[], args: string[]): Target[] {
         targets = runnable.filter((target) => groupOf(target) === group)
         break
       default:
-        throw new Error(`unknown edge group: ${String(group)}`)
+        throw new Error(`unknown Cloudflare group: ${String(group)}`)
     }
   } else {
     const unknown = args.filter((id) => !runnable.some((target) => target.id === id))
-    if (unknown.length > 0) throw new Error(`the edge host runs no target ${unknown.join(', ')}`)
+    if (unknown.length > 0)
+      throw new Error(`the Cloudflare host runs no target ${unknown.join(', ')}`)
     targets = runnable.filter((target) => args.length === 0 || args.includes(target.id))
   }
-  if (targets.length === 0) throw new Error('the edge selection contains no targets')
+  if (targets.length === 0) throw new Error('the Cloudflare selection contains no targets')
   return targets
 }
 
@@ -755,7 +762,7 @@ function checkGroups(runnable: Target[], cases: Case[]): void {
       executable += targetCases.filter((c) => !needsMore(c)).length
       skipped += targetCases.filter(needsMore).length
     }
-    assert(executable > 0, `edge group ${group} has no executable cases`)
+    assert(executable > 0, `Cloudflare group ${group} has no executable cases`)
     console.log(
       `${group}: ${String(selected.length)} targets, ${String(executable)} executable, ${String(skipped)} skipped`,
     )
@@ -765,18 +772,18 @@ function checkGroups(runnable: Target[], cases: Case[]): void {
     assert.deepEqual(
       inventory.get(target.id),
       cases.filter((c) => c.targets.includes(target.id)).map((c) => c.id),
-      `edge group changes the ordered case inventory for ${target.id}`,
+      `Cloudflare group changes the ordered case inventory for ${target.id}`,
     )
   }
   console.log(
-    'edge groups: disjoint and exhaustive targets and ordered cases; default selection unchanged',
+    'Cloudflare groups: disjoint and exhaustive targets and ordered cases; default selection unchanged',
   )
 }
 
-/** The edge test worker under `wrangler dev`, answering on `port`. */
-async function startEdge(port: number): Promise<ChildProcess> {
+/** The Cloudflare test worker under `wrangler dev`, answering on `port`. */
+async function startCloudflare(port: number): Promise<ChildProcess> {
   const child = spawn(
-    join(edge, 'node_modules/.bin/wrangler'),
+    join(cloudflare, 'node_modules/.bin/wrangler'),
     [
       'dev',
       'tests/worker.ts',
@@ -788,7 +795,7 @@ async function startEdge(port: number): Promise<ChildProcess> {
       '127.0.0.1',
     ],
     {
-      cwd: edge,
+      cwd: cloudflare,
       stdio: ['ignore', 'ignore', 'inherit'],
       env: { ...process.env, WRANGLER_SEND_METRICS: 'false' },
     },
@@ -798,10 +805,10 @@ async function startEdge(port: number): Promise<ChildProcess> {
   const deadline = Date.now() + 120_000
   while (Date.now() < deadline) {
     if (child.exitCode !== null || child.signalCode !== null) {
-      throw new Error('the edge worker exited before it answered')
+      throw new Error('the Cloudflare worker exited before it answered')
     }
     try {
-      if ((await edgeFetch(`http://127.0.0.1:${String(port)}/v1/health`, {}, 5_000)).ok) {
+      if ((await cloudflareFetch(`http://127.0.0.1:${String(port)}/v1/health`, {}, 5_000)).ok) {
         return child
       }
     } catch {
@@ -810,7 +817,9 @@ async function startEdge(port: number): Promise<ChildProcess> {
     await delay(500)
   }
   child.kill()
-  throw new Error('the edge worker did not start in two minutes; its build is in the log above')
+  throw new Error(
+    'the Cloudflare worker did not start in two minutes; its build is in the log above',
+  )
 }
 
 async function main(): Promise<void> {
@@ -822,7 +831,7 @@ async function main(): Promise<void> {
     return
   }
   const selected = plan(runnable, loadCases(root), args)
-  const dir = mkdtempSync(join(tmpdir(), 'mirage-integ-edge-'))
+  const dir = mkdtempSync(join(tmpdir(), 'mirage-integ-cloudflare-'))
   const port = await freePort()
   const base = `http://127.0.0.1:${String(port)}`
   let fakes: ChildProcess | null = null
@@ -837,7 +846,7 @@ async function main(): Promise<void> {
   try {
     fakes = await startFakes(dir)
     mcp = await startMcp()
-    worker = await startEdge(port)
+    worker = await startCloudflare(port)
     for (const { target, cases } of selected) {
       const config = await OPENERS[target.service ?? '']!(target)
       // A session's inline permissions document rides in as a profile of its
@@ -855,12 +864,12 @@ async function main(): Promise<void> {
       // The corpus's python3 cases run on Monty, named since no runtime is a default.
       config.runtimes = ['monty', 'workspace']
       const id = `integ-${target.id}-${runId()}`
-      const ws = edgeWorkspace(base, id)
+      const ws = cloudflareWorkspace(base, id)
       const auth = { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` }
       // The workspace, its sessions and its seeds; again after workerd ends
       // an isolate, which takes every workspace it held with it.
       const open = async (): Promise<void> => {
-        const created = await edgeFetch(`${base}/v1/workspaces`, {
+        const created = await cloudflareFetch(`${base}/v1/workspaces`, {
           method: 'POST',
           headers: auth,
           body: JSON.stringify({ id, config }),
@@ -869,7 +878,7 @@ async function main(): Promise<void> {
           throw new Error(`create answered ${String(created.status)} ${await created.text()}`)
         }
         for (const [sid, profile] of sessions) {
-          const opened = await edgeFetch(`${base}/v1/workspaces/${id}/sessions`, {
+          const opened = await cloudflareFetch(`${base}/v1/workspaces/${id}/sessions`, {
             method: 'POST',
             headers: auth,
             body: JSON.stringify({ session_id: sid, ...(profile !== null ? { profile } : {}) }),
@@ -887,7 +896,7 @@ async function main(): Promise<void> {
         }
       }
       const alive = async (): Promise<boolean> =>
-        (await edgeFetch(`${base}/v1/workspaces/${id}`, { headers: auth })).status !== 404
+        (await cloudflareFetch(`${base}/v1/workspaces/${id}`, { headers: auth })).status !== 404
       try {
         await open()
       } catch (e) {
@@ -954,7 +963,7 @@ async function main(): Promise<void> {
     rmSync(dir, { recursive: true, force: true })
   }
   console.log(
-    `\nedge: ${String(passed)} passed, ${String(failed)} failed, ${String(skipped)} skipped, ` +
+    `\ncloudflare: ${String(passed)} passed, ${String(failed)} failed, ${String(skipped)} skipped, ` +
       `${String(warm)} cold-cache checks unmet on a warm cache, ` +
       `${String(heavy)} refused past the isolate's memory, ${String(lost)} isolates lost`,
   )

@@ -32,7 +32,7 @@ ENV_JWT_ALG = "MIRAGE_JWT_ALG"
 ENV_JWT_ISSUER = "MIRAGE_JWT_ISSUER"
 ENV_JWT_AUDIENCE = "MIRAGE_JWT_AUDIENCE"
 ENV_JWT_AUTHORIZED_PARTIES = "MIRAGE_JWT_AUTHORIZED_PARTIES"
-ENV_JWT_CLOCK_SKEW = "MIRAGE_JWT_CLOCK_SKEW_SECONDS"
+ENV_JWT_CLOCK_SKEW_SECONDS = "MIRAGE_JWT_CLOCK_SKEW_SECONDS"
 ENV_LOGIN_CLIENT_ID = "MIRAGE_LOGIN_CLIENT_ID"
 
 DEFAULT_CLOCK_SKEW_SECONDS = 5
@@ -128,12 +128,14 @@ CONFIG_ENV_KEYS = {
     "jwt_alg": ENV_JWT_ALG,
     "jwt_issuer": ENV_JWT_ISSUER,
     "jwt_audience": ENV_JWT_AUDIENCE,
+    "jwt_pubkey": ENV_JWT_PUBKEY,
     "jwt_pubkey_file": ENV_JWT_PUBKEY_FILE,
     "jwt_jwks_url": ENV_JWT_JWKS_URL,
-    "jwt_clock_skew": ENV_JWT_CLOCK_SKEW,
+    "jwt_clock_skew_seconds": ENV_JWT_CLOCK_SKEW_SECONDS,
     "jwt_authorized_parties": ENV_JWT_AUTHORIZED_PARTIES,
     "login_client_id": ENV_LOGIN_CLIENT_ID,
 }
+JWT_KEY_ENVS = (ENV_JWT_PUBKEY, ENV_JWT_PUBKEY_FILE)
 
 
 def _merge_config_table(
@@ -142,8 +144,10 @@ def _merge_config_table(
     """Fold config.toml auth keys under their env names, env winning.
 
     Only non-secret keys have config counterparts: the raw
-    ``MIRAGE_AUTH_TOKEN`` and inline ``MIRAGE_JWT_PUBKEY`` stay
-    env-only (use the token file / ``jwt_pubkey_file`` instead).
+    ``MIRAGE_AUTH_TOKEN`` stays env-only (use the token file instead).
+    The fixed JWT key is one setting: when env gives it, inline or as
+    a file, config.toml's ``jwt_pubkey`` and ``jwt_pubkey_file`` are
+    both ignored.
 
     Args:
         env (Mapping[str, str]): the process environment view.
@@ -153,8 +157,11 @@ def _merge_config_table(
         dict[str, str]: env copy with config fallbacks applied.
     """
     merged = dict(env)
+    env_key = any(env.get(name, "").strip() for name in JWT_KEY_ENVS)
     for cfg_key, env_name in CONFIG_ENV_KEYS.items():
         if merged.get(env_name, "").strip():
+            continue
+        if env_key and env_name in JWT_KEY_ENVS:
             continue
         value = table.get(cfg_key)
         if value is not None and str(value).strip():
@@ -233,7 +240,7 @@ def resolve_auth_config(
     issuer = (e.get(ENV_JWT_ISSUER) or "").strip() or None
     audiences = _parse_csv(e.get(ENV_JWT_AUDIENCE, ""))
     azp = _parse_csv(e.get(ENV_JWT_AUTHORIZED_PARTIES, ""))
-    skew_raw = (e.get(ENV_JWT_CLOCK_SKEW) or "").strip()
+    skew_raw = (e.get(ENV_JWT_CLOCK_SKEW_SECONDS) or "").strip()
     skew = int(skew_raw) if skew_raw else DEFAULT_CLOCK_SKEW_SECONDS
     if login_client_id is not None and (
         issuer is None or login_client_id not in audiences

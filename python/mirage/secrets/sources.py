@@ -65,6 +65,12 @@ async def config_value(
     seen = fetched.get((ref.provider, ref.ref))
     if seen is not None:
         return _select_field(label, ref, seen, sources)
+    # Resolving an undeclared source quotes no secret, so an unknown
+    # name or a missing optional dependency reaches the caller in its
+    # own words, with the extra to install, instead of as the redacted
+    # fetch failure.
+    if not (sources and ref.provider in sources):
+        source_for(ref.provider)
     try:
         secret = await fetch_secret(ref.provider, ref.ref, sources)
     except Exception as exc:

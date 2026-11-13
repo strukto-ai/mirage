@@ -43,10 +43,11 @@ import type {
 } from '@struktoai/mirage-core/workspace/workspace/types'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import '@struktoai/mirage-core/machine/cloudflare_container/handle'
 import '@struktoai/mirage-core/mount/sftp'
 import type { ServerHost } from '@struktoai/mirage-server/routes'
 import './monty.ts'
-import { EDGE_RUNTIMES } from './constants.ts'
+import { CLOUDFLARE_RUNTIMES } from './constants.ts'
 import { buildVfs, knownVfsNames } from './vfs/registry.ts'
 
 /**
@@ -64,7 +65,7 @@ function refuseQuickJs(entry: RuntimeEntry): void {
 }
 
 export class Workspace extends CoreWorkspace {
-  /** A saved mount rebuilds through the edge's VFS registry. */
+  /** A saved mount rebuilds through this package's VFS registry. */
   protected static override async buildSavedVfs(entry: MountSnapshot): Promise<BaseVFS | null> {
     const build = savedVfsBuild(entry, (name) => knownVfsNames().includes(name))
     return build === null ? null : buildVfs(build.name, build.config)
@@ -75,7 +76,7 @@ export class Workspace extends CoreWorkspace {
     options: WorkspaceOptions = {},
   ) {
     refuseUnseenAddresses(options.network)
-    const runtimes = options.runtimes ?? [...EDGE_RUNTIMES]
+    const runtimes = options.runtimes ?? [...CLOUDFLARE_RUNTIMES]
     runtimes.forEach(refuseQuickJs)
     super(mounts, { ...options, runtimes })
     this.registry.setNetworkWatch(watchNetwork)
@@ -122,31 +123,33 @@ function buildStateStore(block: StoreBlock | null | undefined): WorkspaceStateSt
   if (block === null || block === undefined) return undefined
   const groups = [block.namespace, block.logs, block.sessions, block.execution]
   if ((block.type ?? 'ram') !== 'ram' || groups.some((g) => g != null && g.type !== 'ram')) {
-    throw new VFSConfigError('an edge host keeps workspace state in memory; store.type must be ram')
+    throw new VFSConfigError(
+      'a Cloudflare host keeps workspace state in memory; store.type must be ram',
+    )
   }
   return new RAMWorkspaceStateStore()
 }
 
 function refuse(what: string): never {
-  throw new Error(`an edge host cannot ${what}`)
+  throw new Error(`a Cloudflare host cannot ${what}`)
 }
 
 const CONFIG: ConfigHost = {
   buildVfs,
   buildStateStore,
   readScript: (path) => refuse(`read the script file ${path}; inline its source`),
-  loadRef: (ref) => Promise.reject(new Error(`an edge host cannot import ${ref}`)),
+  loadRef: (ref) => Promise.reject(new Error(`a Cloudflare host cannot import ${ref}`)),
   watchNetwork,
   releaseNetwork: () => Promise.resolve(),
 }
 
 /**
- * The server's host on an edge runtime: the edge's VFS registry, core's config
- * loader, no disk, no kernel mounts, no module loading by reference. Its
- * workspaces keep their state in one store held in memory, so a closed
- * workspace reopens with it while the isolate lives.
+ * The server's host on Cloudflare Workers: this package's VFS registry,
+ * core's config loader, no disk, no kernel mounts, no module loading by
+ * reference. Its workspaces keep their state in one store held in memory,
+ * so a closed workspace reopens with it while the isolate lives.
  */
-export function edgeHost(): ServerHost {
+export function cloudflareHost(): ServerHost {
   const state = new RAMWorkspaceStateStore()
   const daemon = crypto.randomUUID().replaceAll('-', '')
   return {
@@ -164,7 +167,7 @@ export function edgeHost(): ServerHost {
       ),
     reservedIds: new Set(['', '.', '..']),
     watchNetwork,
-    mountKernel: () => Promise.reject(new Error('an edge host has no kernel mounts')),
+    mountKernel: () => Promise.reject(new Error('a Cloudflare host has no kernel mounts')),
   }
 }
 

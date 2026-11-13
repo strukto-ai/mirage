@@ -20,7 +20,7 @@ import { type CommandSpec, UsageStyle } from '../../../commands/spec/types.ts'
 import { getCurrentEvaluation, type RedirectResult } from '../../../context/session_context.ts'
 import { WORKSPACE_MACHINE } from '../../../execution/process/constants.ts'
 import type { ProcessTable } from '../../../execution/process/table.ts'
-import type { MachineId, MachineResources } from '../../../execution/types.ts'
+import type { MachineName, MachineResources } from '../../../execution/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
 import { decodeText, encodeText } from '../../../shell/bytes.ts'
@@ -73,7 +73,7 @@ function defaultMachine(
     if (reach !== 'remote') continue
     try {
       const found = (
-        runtime as { machineFor: (ctx: Partial<Context>) => MachineId | null }
+        runtime as { machineFor: (ctx: Partial<Context>) => MachineName | null }
       ).machineFor({
         ...(machine === undefined ? {} : { machine }),
       })
@@ -101,7 +101,7 @@ export function machineScope(
 ): MachineScope | null {
   const frame = getCurrentEvaluation()?.frame
   const routing = frame?.routing
-  const every = [...(processes.machineIds?.() ?? [])]
+  const every = [...(processes.machineNames?.() ?? [])]
   const host = processes.machine.toString()
   if (
     routing !== undefined &&

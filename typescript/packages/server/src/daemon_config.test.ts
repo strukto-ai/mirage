@@ -36,11 +36,25 @@ describe('parseDaemonTable', () => {
   })
 
   it('unescapes backslashes in quoted values', () => {
-    expect(parseDaemonTable('[daemon]\nsocket = "C:\\\\pipes"\n').socket).toBe('C:\\pipes')
+    expect(parseDaemonTable('[daemon]\njwt_pubkey_file = "C:\\\\keys"\n').jwt_pubkey_file).toBe(
+      'C:\\keys',
+    )
   })
 
   it('unescapes escaped quotes in quoted values', () => {
     expect(parseDaemonTable('[daemon]\nfoo = "a\\"b"\n').foo).toBe('a"b')
+  })
+
+  it('refuses an escape that is not a Unicode scalar value', () => {
+    for (const bad of ['\\U00110000', '\\uD800']) {
+      expect(() => parseDaemonTable(`[daemon]\nk = "${bad}"\n`)).toThrow(DaemonConfigError)
+    }
+  })
+
+  it('reads the escapes of a TOML basic string as tomllib does', () => {
+    expect(parseDaemonTable('[daemon]\nk = "a\\nb\\tc\\r\\u00e9\\U0001F600\\\\n"\n').k).toBe(
+      'a\nb\tc\r\u00e9\u{1F600}\\n',
+    )
   })
 })
 
@@ -52,8 +66,8 @@ describe('readDaemonTable', () => {
 
   it('reads [daemon] keys, stripping quotes', () => {
     const home = mkdtempSync(join(tmpdir(), 'mir-'))
-    writeFileSync(join(home, 'config.toml'), '[daemon]\nsocket = "/tmp/s.sock"\n')
-    expect(readDaemonTable(home).socket).toBe('/tmp/s.sock')
+    writeFileSync(join(home, 'config.toml'), '[daemon]\nlogin_client_id = "mirage-cli"\n')
+    expect(readDaemonTable(home).login_client_id).toBe('mirage-cli')
   })
 })
 
@@ -82,6 +96,23 @@ describe('validateDaemonTable', () => {
     expect(() => {
       validateDaemonTable({ typo_key: 'x', url: 'http://h:1' })
     }).toThrow(/typo_key/)
+  })
+
+  it('names the new key for a renamed one', () => {
+    expect(() => {
+      validateDaemonTable({ jwt_clock_skew: '9', typo_key: 'x' })
+    }).toThrow(
+      new DaemonConfigError(
+        'config.toml: `daemon.jwt_clock_skew` is now `daemon.jwt_clock_skew_seconds`; rename the key',
+      ),
+    )
+  })
+
+  it('accepts the jwt keys', () => {
+    validateDaemonTable({ jwt_clock_skew_seconds: '9', jwt_pubkey: '-----BEGIN' })
+    expect(() => {
+      validateDaemonTable({ jwt_clock_skew_seconds: 'soon' })
+    }).toThrow(/jwt_clock_skew_seconds/)
   })
 
   it('throws DaemonConfigError instances', () => {

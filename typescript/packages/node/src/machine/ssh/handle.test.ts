@@ -263,7 +263,7 @@ describe('SSHMachine', () => {
   it("registers under the config name 'ssh'", () => {
     const machine = buildMachine('box', { provider: 'ssh', host: 'box' })
     expect(machine).toBeInstanceOf(SSHMachine)
-    expect(String(machine.id)).toBe('ssh:box')
+    expect(String(machine.machine)).toBe('ssh:box')
   })
 })
 

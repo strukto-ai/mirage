@@ -392,8 +392,8 @@ impl Tree {
         if end <= start {
             return std::borrow::Cow::Borrowed(&[]);
         }
-        let to = (self.offsets[end - 1] + 1).min(self.original.len());
-        let from = self.offsets[start].min(to);
+        let to = (self.offsets.at(end - 1) + 1).min(self.original.len());
+        let from = self.offsets.at(start).min(to);
         std::borrow::Cow::Owned(self.typed(start, end, from, to, Vec::new()))
     }
 
@@ -415,7 +415,8 @@ impl Tree {
                 kept[at - from] = true;
             }
         };
-        for &at in &self.offsets[start..end] {
+        for index in start..end {
+            let at = self.offsets.at(index);
             keep(at, at + 1);
         }
         for heredoc in &self.heredocs {
@@ -460,7 +461,7 @@ impl Tree {
         if !matches!(kind, "command_substitution" | "process_substitution") || end <= start {
             return Vec::new();
         }
-        let (first, last) = (self.offsets[start], self.offsets[end - 1]);
+        let (first, last) = (self.offsets.at(start), self.offsets.at(end - 1));
         let closes: Vec<&(usize, Vec<usize>)> = self
             .closes
             .iter()

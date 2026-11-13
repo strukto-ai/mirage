@@ -152,7 +152,7 @@ their ids differ from the entry above.
   "mirage.command": "cd /data; wc -l notes.txt",
   "mirage.timestamp": 1794457025511,
   "mirage.workspace.id": "demo",
-  "host.id": "host:my-laptop",
+  "host.name": "my-laptop",
   "mirage.cwd": "/",
   "mirage.exit_code": 0,
   "mirage.duration_ms": 3,
@@ -443,10 +443,10 @@ backend's queries, dashboards and alerts.
 
 | Span | Sent | Attributes |
 | --- | --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>command</code> | When the line ends | `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.id`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.timestamp`, `mirage.duration_ms`, `mirage.stdout`, `mirage.stderr`, `mirage.vfs.dropped` |
+| <code style={{ whiteSpace: 'nowrap' }}>command</code> | When the line ends | `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.name`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.timestamp`, `mirage.duration_ms`, `mirage.stdout`, `mirage.stderr`, `mirage.vfs.dropped` |
 | <code style={{ whiteSpace: 'nowrap' }}>vfs.&lt;call&gt;</code> | For each recorded call the line makes to a mount, such as `vfs.read` | `mirage.vfs.path`, `mirage.vfs.source`, `mirage.vfs.bytes`, `mirage.vfs.timestamp`, `mirage.vfs.duration_ms` |
-| <code style={{ whiteSpace: 'nowrap' }}>job</code> | When an `&` job ends | `mirage.job.id`, `mirage.job.number`, `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.id`, `mirage.machine.type`, `mirage.machine.name`, `mirage.machine.id`, `process.pid`, `mirage.process.pid`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.signal` |
-| <code style={{ whiteSpace: 'nowrap' }}>process</code> | When a process the line started ends | `process.pid`, `mirage.process.pid`, `process.parent_pid`, `process.group_leader.pid`, `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.id`, `mirage.machine.type`, `mirage.machine.name`, `mirage.machine.id`, `process.command_line`, `mirage.cwd`, `mirage.runtime`, `process.exit.code`, `mirage.signal`, `mirage.error` |
+| <code style={{ whiteSpace: 'nowrap' }}>job</code> | When an `&` job ends | `mirage.job.id`, `mirage.job.number`, `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.name`, `mirage.machine.type`, `mirage.machine.name`, `mirage.machine.id`, `process.pid`, `mirage.process.pid`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.signal` |
+| <code style={{ whiteSpace: 'nowrap' }}>process</code> | When a process the line started ends | `process.pid`, `mirage.process.pid`, `process.parent_pid`, `process.group_leader.pid`, `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.name`, `mirage.machine.type`, `mirage.machine.name`, `mirage.machine.id`, `process.command_line`, `mirage.cwd`, `mirage.runtime`, `process.exit.code`, `mirage.signal`, `mirage.error` |
 
 </Accordion>
 
@@ -454,9 +454,9 @@ backend's queries, dashboards and alerts.
 
 | Attribute | Meaning |
 | --- | --- |
-| <code style={{ whiteSpace: 'nowrap' }}>host.id</code> | The host that runs Mirage, such as `host:my-laptop`. |
+| <code style={{ whiteSpace: 'nowrap' }}>host.name</code> | The hostname of the host that runs Mirage, such as `my-laptop`. |
 | <code style={{ whiteSpace: 'nowrap' }}>mirage.machine.type</code> | The provider of the [machine](/home/setup/machine/overview) a job or process ran on, such as `e2b` or `docker`, and `host` for the host that runs Mirage. |
-| <code style={{ whiteSpace: 'nowrap' }}>mirage.machine.name</code> | The machine's name under `machines:`, such as `gpu`, or the hostname for the host that runs Mirage. With the type it makes the machine's id elsewhere in Mirage, such as `e2b:gpu`. |
+| <code style={{ whiteSpace: 'nowrap' }}>mirage.machine.name</code> | The machine's name under `machines:`, such as `gpu`, or the hostname for the host that runs Mirage. With the type it makes the machine's full name elsewhere in Mirage, such as `e2b:gpu`. |
 | <code style={{ whiteSpace: 'nowrap' }}>mirage.machine.id</code> | What the provider calls the machine: the sandbox id for E2B and Daytona, the container for Docker, the pod for Kubernetes, the host for SSH. |
 | <code style={{ whiteSpace: 'nowrap' }}>process.pid</code> | The pid the agent sees in `ps` and `$!`: a program's own pid on its machine, else Mirage's number for the process. |
 | <code style={{ whiteSpace: 'nowrap' }}>mirage.process.pid</code> | Mirage's own number for the process, the same as `process.pid` for a command Mirage runs itself. |
@@ -478,6 +478,6 @@ own.
 
 ## Next steps
 
-- See every `store` setting, `logs` included, in the [configuration reference](/home/configuration).
+- See every `store` setting, `logs` included, in the [configuration reference](/home/configuration/workspace).
 - Check lines before or after they run with [policies](/home/policy/policies), which read `/.bash_history`.
 - See every `mirage workspace logs` flag in the [CLI reference](/home/access/cli).

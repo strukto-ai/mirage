@@ -29,7 +29,7 @@ from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.process.types import Process, ProcessState
 from mirage.execution.types import (
-    MachineId,
+    MachineName,
     MachinePid,
     MachineResources,
     ProcessId,
@@ -166,18 +166,19 @@ class MachineTable:
         """The handle whose id is ``machine``, written ``docker:tools``.
 
         Args:
-            machine (str): a machine id as a process record names it.
+            machine (str): a machine name as a process record names it.
         """
         return next(
-            (h for h in self._handles.values() if str(h.id) == machine), None
+            (h for h in self._handles.values() if str(h.machine) == machine),
+            None,
         )
 
-    def instance(self, machine: MachineId) -> str:
+    def instance(self, machine: MachineName) -> str:
         """What ``machine``'s provider calls it (``MachineHandle.instance``),
         its name for one the table holds no handle of, such as the host.
 
         Args:
-            machine (MachineId): the machine.
+            machine (MachineName): the machine.
         """
         handle = self.by_id(str(machine))
         return machine.name if handle is None else handle.instance
@@ -216,7 +217,7 @@ class MachineTable:
         handles = [
             h
             for h in self._handles.values()
-            if machine is None or str(h.id) == machine
+            if machine is None or str(h.machine) == machine
         ]
         return list(await asyncio.gather(*(_check(h, now) for h in handles)))
 
@@ -259,10 +260,12 @@ class MachineTable:
                 for tag in unscanned
                 if runs[tag].machine != processes.machine
             }
-            scans: list[tuple[MachineId, Awaitable[list[MachineProcess]]]] = [
-                (handle.id, handle.status(workspace))
+            scans: list[
+                tuple[MachineName, Awaitable[list[MachineProcess]]]
+            ] = [
+                (handle.machine, handle.status(workspace))
                 for handle in self._handles.values()
-                if handle.executing or str(handle.id) in machines_to_scan
+                if handle.executing or str(handle.machine) in machines_to_scan
             ]
             if self._scan_host is not None:
                 groups = {
@@ -340,7 +343,7 @@ class MachineTable:
     async def _deliver(
         self,
         handle: ProcessHandle,
-        machine: MachineId,
+        machine: MachineName,
         target: str | MachinePid,
         signum: int,
     ) -> bool:
@@ -350,7 +353,7 @@ class MachineTable:
 
         Args:
             handle (ProcessHandle): the process.
-            machine (MachineId): where it runs.
+            machine (MachineName): where it runs.
             target (str | MachinePid): its run's tag, or its machine pid.
             signum (int): the signal.
         """
@@ -410,12 +413,12 @@ class MachineTable:
         )
 
     async def _signal_on(
-        self, machine: MachineId, target: str | MachinePid, signum: int
+        self, machine: MachineName, target: str | MachinePid, signum: int
     ) -> bool:
         """Send ``signum`` to one process on ``machine``.
 
         Args:
-            machine (MachineId): where it runs.
+            machine (MachineName): where it runs.
             target (str | MachinePid): its run's tag, or its machine pid.
             signum (int): the signal.
         """
@@ -430,7 +433,7 @@ class MachineTable:
     def _apply_scan(
         self,
         processes: ProcessTable,
-        machine: MachineId,
+        machine: MachineName,
         rows: list[MachineProcess],
         live: dict[str, ProcessHandle],
         runs: dict[str, Process],
@@ -442,7 +445,7 @@ class MachineTable:
 
         Args:
             processes (ProcessTable): the workspace's processes.
-            machine (MachineId): the machine scanned.
+            machine (MachineName): the machine scanned.
             rows (list[MachineProcess]): what the scan found.
             live (dict[str, ProcessHandle]): the live processes, by tag.
             runs (dict[str, Process]): the programs' processes the
@@ -504,7 +507,7 @@ class MachineTable:
     def _place_found(
         self,
         processes: ProcessTable,
-        machine: MachineId,
+        machine: MachineName,
         row: MachineProcess,
         parent: int | None,
         owner: Process | None,
@@ -515,7 +518,7 @@ class MachineTable:
 
         Args:
             processes (ProcessTable): the workspace's processes.
-            machine (MachineId): where it runs.
+            machine (MachineName): where it runs.
             row (MachineProcess): what the scan found.
             parent (int | None): the pid of the process it is under.
             owner (Process | None): the process its run is, ended or
@@ -582,12 +585,12 @@ class MachineTable:
         return handle
 
     async def _stop_found(
-        self, machine: MachineId, target: MachinePid, signum: int
+        self, machine: MachineName, target: MachinePid, signum: int
     ) -> None:
         """Stop a process a scan found, as Mirage stops what it runs.
 
         Args:
-            machine (MachineId): where it runs.
+            machine (MachineName): where it runs.
             target (MachinePid): the process.
             signum (int): the signal Mirage stops it with.
         """
@@ -661,8 +664,8 @@ async def _check(handle: MachineHandle, now: Callable[[], float]) -> Machine:
     try:
         managed = await handle.check()
     except Exception as exc:
-        logger.debug("%s: check failed: %s", handle.id, exc)
+        logger.debug("%s: check failed: %s", handle.machine, exc)
         state = MachineState.UNREACHABLE
     else:
         state = MachineState.MANAGED if managed else MachineState.REACHABLE
-    return Machine(handle.id, state, now())
+    return Machine(handle.machine, state, now())

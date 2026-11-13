@@ -125,7 +125,7 @@ export interface RouteApp {
  * a config names, the config schema of each VFS it builds, its CLIs, a
  * profile's policy files, the store the server
  * keeps workspaces' state in, and the network watch a rule needs. Node
- * builds these from `@struktoai/mirage-node`; an edge runtime from core.
+ * builds these from `@struktoai/mirage-node`; Cloudflare from core.
  */
 export interface ServerHost {
   readonly Workspace: typeof Workspace

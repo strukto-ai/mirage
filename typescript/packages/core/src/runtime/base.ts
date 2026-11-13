@@ -16,7 +16,7 @@ import type { Context } from '../commands/config.ts'
 import { currentCaller, runWithCaller } from '../context/session_context.ts'
 import { isAborting } from '../errors/fs.ts'
 import type { ProcessHandle } from '../execution/process/handle.ts'
-import type { MachineId } from '../execution/types.ts'
+import type { MachineName } from '../execution/types.ts'
 import { liveEgress } from '../io/gateway.ts'
 import { FORK_FAILED, FORK_FAILED_STATUS } from '../shell/constants.ts'
 import { shellJoin } from '../shell/join.ts'
@@ -109,7 +109,7 @@ export abstract class Runtime<E = unknown> {
    * records name; null for the workspace's own.
    */
   // eslint-disable-next-line @typescript-eslint/class-literal-property-style
-  get machine(): MachineId | null {
+  get machine(): MachineName | null {
     return null
   }
 
@@ -129,7 +129,7 @@ export abstract class Runtime<E = unknown> {
    *
    * @param _ctx the run's context.
    */
-  machineFor(_ctx: Context): MachineId | null {
+  machineFor(_ctx: Context): MachineName | null {
     return this.machine
   }
 

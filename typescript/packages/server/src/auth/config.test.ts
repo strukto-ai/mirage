@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { AuthMode, resolveAuthConfig, resolveLocalToken } from './config.ts'
+import { AuthMode, CONFIG_ENV_KEYS, resolveAuthConfig, resolveLocalToken } from './config.ts'
 import { ALLOWED_KEYS } from '../daemon_config.ts'
 
 describe('resolveLocalToken', () => {
@@ -251,7 +251,7 @@ describe('resolveAuthConfig config table', () => {
         jwt_issuer: 'https://issuer',
         jwt_audience: 'aud',
         jwt_authorized_parties: 'a,b',
-        jwt_clock_skew: '9',
+        jwt_clock_skew_seconds: '9',
       },
     })
     expect(cfg.mode).toBe(AuthMode.Jwt)
@@ -278,9 +278,59 @@ describe('resolveAuthConfig config table', () => {
     expect(cfg.jwt?.algorithm).toBe('ES256')
   })
 
-  it('secret keys have no config counterpart', () => {
-    expect(ALLOWED_KEYS.has('jwt_pubkey')).toBe(false)
-    expect(ALLOWED_KEYS.has('auth_mode')).toBe(true)
-    expect(ALLOWED_KEYS.has('jwt_alg')).toBe(true)
+  it('only the raw token has no config counterpart', () => {
+    expect(ALLOWED_KEYS.has('auth_token')).toBe(true)
+    expect(CONFIG_ENV_KEYS.auth_token).toBeUndefined()
+    expect(CONFIG_ENV_KEYS.jwt_pubkey).toBe('MIRAGE_JWT_PUBKEY')
+    expect(CONFIG_ENV_KEYS.jwt_clock_skew_seconds).toBe('MIRAGE_JWT_CLOCK_SKEW_SECONDS')
+    expect(ALLOWED_KEYS.has('jwt_clock_skew')).toBe(false)
+  })
+})
+
+describe('resolveAuthConfig fixed key sources', () => {
+  const jwtTable = { auth_mode: 'jwt', jwt_alg: 'RS256' }
+  let keyDir: string
+  let keyFile: string
+
+  beforeEach(() => {
+    keyDir = mkdtempSync(join(tmpdir(), 'mir-auth-'))
+    keyFile = join(keyDir, 'pub.pem')
+    writeFileSync(keyFile, 'FILEKEY')
+  })
+
+  afterEach(() => {
+    rmSync(keyDir, { recursive: true, force: true })
+  })
+
+  it('reads the inline key from the table', () => {
+    const cfg = resolveAuthConfig({
+      env: {},
+      table: { ...jwtTable, jwt_pubkey: '-----BEGIN\nTABLE' },
+    })
+    expect(cfg.jwt?.key).toBe('-----BEGIN\nTABLE')
+  })
+
+  it('takes the inline table key before the table key file', () => {
+    const cfg = resolveAuthConfig({
+      env: {},
+      table: { ...jwtTable, jwt_pubkey: 'TABLE', jwt_pubkey_file: keyFile },
+    })
+    expect(cfg.jwt?.key).toBe('TABLE')
+  })
+
+  it('takes an env key file before the inline table key', () => {
+    const cfg = resolveAuthConfig({
+      env: { MIRAGE_JWT_PUBKEY_FILE: keyFile },
+      table: { ...jwtTable, jwt_pubkey: 'TABLE' },
+    })
+    expect(cfg.jwt?.key).toBe('FILEKEY')
+  })
+
+  it('takes an env inline key before the table key file', () => {
+    const cfg = resolveAuthConfig({
+      env: { MIRAGE_JWT_PUBKEY: 'ENV' },
+      table: { ...jwtTable, jwt_pubkey_file: keyFile },
+    })
+    expect(cfg.jwt?.key).toBe('ENV')
   })
 })

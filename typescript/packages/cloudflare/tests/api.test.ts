@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { unstable_dev, type Unstable_DevWorker } from 'wrangler'
 
-const TOKEN = 'edge-test-token'
+const TOKEN = 'cloudflare-test-token'
 let worker: Unstable_DevWorker
 
 async function call(
@@ -27,7 +27,7 @@ async function call(
   body?: unknown,
   token: string | null = TOKEN,
 ): Promise<{ status: number; json: unknown; text: string; type: string | null }> {
-  const response = await worker.fetch(`http://edge.test${path}`, {
+  const response = await worker.fetch(`http://cloudflare.test${path}`, {
     method,
     headers: {
       ...(token !== null ? { authorization: `Bearer ${token}` } : {}),
@@ -67,11 +67,14 @@ async function openLine(
   id: string,
   command: string,
 ): Promise<{ route: string; next: () => Promise<LineRecord> }> {
-  const response = await worker.fetch(`http://edge.test/v1/workspaces/${id}/shell?stream=true`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ command, open_stdin: true }),
-  })
+  const response = await worker.fetch(
+    `http://cloudflare.test/v1/workspaces/${id}/shell?stream=true`,
+    {
+      method: 'POST',
+      headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ command, open_stdin: true }),
+    },
+  )
   const reader = (response.body as ReadableStream<Uint8Array>).getReader()
   const decoder = new TextDecoder()
   let held = ''
@@ -93,7 +96,7 @@ async function openLine(
 }
 
 async function writeLine(route: string, body: string | Uint8Array): Promise<number> {
-  const written = await worker.fetch(`http://edge.test${route}`, {
+  const written = await worker.fetch(`http://cloudflare.test${route}`, {
     method: 'POST',
     headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/octet-stream' },
     body,
@@ -120,7 +123,7 @@ afterAll(async () => {
 
 /** A shell body sent as text/plain, answered as its status and JSON. */
 async function shellAsText(body: string): Promise<unknown> {
-  const response = await worker.fetch('http://edge.test/v1/workspaces/api/shell', {
+  const response = await worker.fetch('http://cloudflare.test/v1/workspaces/api/shell', {
     method: 'POST',
     headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'text/plain' },
     body,
@@ -154,7 +157,7 @@ describe('the server API in workerd', () => {
     expect(stat.status).toBe(200)
   })
 
-  it('exports logs as JSONL through the edge route adapter', async () => {
+  it('exports logs as JSONL through the Cloudflare route adapter', async () => {
     const id = '日志'
     const base = `/v1/workspaces/${encodeURIComponent(id)}`
     expect(
@@ -179,7 +182,7 @@ describe('the server API in workerd', () => {
       expect(items).toHaveLength(1)
       expect(items[0]?.started_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
       const response = await worker.fetch(
-        `http://edge.test${base}/logs?format=jsonl&session=${encodeURIComponent(session_id)}`,
+        `http://cloudflare.test${base}/logs?format=jsonl&session=${encodeURIComponent(session_id)}`,
         { headers: { authorization: `Bearer ${TOKEN}` } },
       )
       expect(response.status).toBe(200)
@@ -295,7 +298,7 @@ describe('the server API in workerd', () => {
     ])
   })
 
-  it("names the edge's own backends when a mount names none of them", async () => {
+  it('names the Cloudflare backends when a mount names none of them', async () => {
     const unknown = await call('POST', '/v1/workspaces', {
       config: { mounts: { '/': { vfs: 'disk' } } },
     })
@@ -306,7 +309,7 @@ describe('the server API in workerd', () => {
 
   it('serves MCP and JSON-RPC over the same workspace', async () => {
     await call('POST', '/v1/workspaces', { id: 'mcp', config: { mounts: { '/': { vfs: 'ram' } } } })
-    const response = await worker.fetch('http://edge.test/v1/workspaces/mcp/mcp', {
+    const response = await worker.fetch('http://cloudflare.test/v1/workspaces/mcp/mcp', {
       method: 'POST',
       headers: {
         authorization: `Bearer ${TOKEN}`,
@@ -325,7 +328,7 @@ describe('the server API in workerd', () => {
     })
     expect(rpc.status).toBe(200)
     expect(rpc.text).toContain('rpc')
-    const bad = await worker.fetch('http://edge.test/v1/workspaces/mcp/rpc', {
+    const bad = await worker.fetch('http://cloudflare.test/v1/workspaces/mcp/rpc', {
       method: 'POST',
       headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
       body: 'not json',
@@ -548,7 +551,7 @@ describe('the server API in workerd', () => {
         config: {
           mounts: {
             '/': { vfs: 'ram' },
-            '/slack': { vfs: 'slack', config: { token: 'xoxb-edge', base_url: base } },
+            '/slack': { vfs: 'slack', config: { token: 'xoxb-cloudflare', base_url: base } },
           },
         },
       })
@@ -556,7 +559,9 @@ describe('the server API in workerd', () => {
       const listed = await shell('slack', 'ls /slack/channels')
       expect(listed.stdout).toContain('general__C1')
       expect(
-        seen.some((s) => s.startsWith('/conversations.list') && s.endsWith('Bearer xoxb-edge')),
+        seen.some(
+          (s) => s.startsWith('/conversations.list') && s.endsWith('Bearer xoxb-cloudflare'),
+        ),
       ).toBe(true)
     } finally {
       server.close()
@@ -603,8 +608,8 @@ describe('the server API in workerd', () => {
                 bucket: 'b',
                 endpoint: base,
                 force_path_style: true,
-                access_key_id: 'AKEDGE',
-                secret_access_key: 'edge-secret',
+                access_key_id: 'AKCLOUDFLARE',
+                secret_access_key: 'cloudflare-secret',
               },
             },
           },
@@ -616,7 +621,8 @@ describe('the server API in workerd', () => {
       expect((await shell('bucket', 'cat /r2/hello.txt')).stdout).toBe('hello')
       expect(
         seen.some(
-          (s) => s.startsWith('GET /b/?') && s.includes('AWS4-HMAC-SHA256 Credential=AKEDGE/'),
+          (s) =>
+            s.startsWith('GET /b/?') && s.includes('AWS4-HMAC-SHA256 Credential=AKCLOUDFLARE/'),
         ),
       ).toBe(true)
       const proxied = await call('POST', '/v1/workspaces', {
@@ -638,7 +644,7 @@ describe('the server API in workerd', () => {
   })
 
   // A live Postgres the worker reaches over a TCP socket, as pg does in workerd.
-  it.skipIf(process.env.MIRAGE_EDGE_POSTGRES_DSN === undefined)(
+  it.skipIf(process.env.MIRAGE_CLOUDFLARE_POSTGRES_DSN === undefined)(
     'mounts Postgres through pg over a socket',
     async () => {
       const created = await call('POST', '/v1/workspaces', {
@@ -646,7 +652,7 @@ describe('the server API in workerd', () => {
         config: {
           mounts: {
             '/': { vfs: 'ram' },
-            '/pg': { vfs: 'postgres', config: { dsn: process.env.MIRAGE_EDGE_POSTGRES_DSN } },
+            '/pg': { vfs: 'postgres', config: { dsn: process.env.MIRAGE_CLOUDFLARE_POSTGRES_DSN } },
           },
         },
       })
@@ -757,7 +763,7 @@ describe('the server API in workerd', () => {
           clis: {
             wiki: {
               cli: 'mcp',
-              config: { url: base, auth: { type: 'bearer', token: 'mcp-edge' } },
+              config: { url: base, auth: { type: 'bearer', token: 'mcp-cloudflare' } },
             },
           },
         },
@@ -767,7 +773,7 @@ describe('the server API in workerd', () => {
       expect(first.stdout).toContain('echo: one')
       const second = await shell('mcp-cli', `wiki echo-text '{"text": "two"}'`)
       expect(second.stdout).toContain('echo: two')
-      expect(seen.every((s) => s.endsWith('Bearer mcp-edge'))).toBe(true)
+      expect(seen.every((s) => s.endsWith('Bearer mcp-cloudflare'))).toBe(true)
     } finally {
       server.close()
     }

@@ -27,10 +27,30 @@ A line or a command can also name its machine: `execute(machine=)`, a
 `machine` on the shell request, or a policy's `Route(machine=)`: see
 [Route Machine](/home/policy/route-machine).
 
+A `remote` entry with a `machine` is named for it, such as `remote:box`, so
+a workspace takes one entry per machine:
+
+```yaml
+runtimes:
+  - name: remote
+    captures: [python3]
+    machine: py
+  - name: remote
+    captures: [node]
+    machine: js
+```
+
+A program goes to the first entry that captures it, so with two `@external`
+entries the first one listed runs every program. Two entries on one machine
+are refused. `execute(runtime=)` and `Route(runtime=)` take an entry's name,
+such as `remote:js`, or plain `remote` while the workspace has one `remote`
+entry.
+
 | Provider | Runs programs in |
 | --- | --- |
 | [Docker](/home/setup/machine/docker) | A Docker container |
 | [E2B](/home/setup/machine/e2b) | An E2B cloud sandbox |
+| [Cloudflare Container](/home/setup/machine/cloudflare_container) | A Cloudflare Container, from its Durable Object or through a relay |
 | [Daytona](/home/setup/machine/daytona) | A Daytona cloud sandbox |
 | [Kubernetes](/home/setup/machine/kubernetes) | A pod, including an AWS Nitro Sandbox on EKS |
 | [smolvm](/home/setup/machine/smolvm) | A microVM with its own kernel |
@@ -219,16 +239,18 @@ process of another user.
 
 `GET /v1/workspaces/{id}/machines` checks every machine, and
 `GET /v1/workspaces/{id}/machines/{machine}` checks one and lists its
-processes. `{machine}` is the id `ps` shows, `provider:name` such as
-`docker:box`; a bare name answers 400. `mirage workspace list-machines -w ID`
-prints each machine and its state.
+processes. `{machine}` is the name `ps` shows, `provider:name` such as
+`docker:box`; a bare name answers 400. Each machine answers its `type`, its
+`name` and its `id`, what its provider calls it, such as the sandbox id.
+`mirage workspace list-machines -w ID` prints each machine, its id and its
+state.
 
 ## The machine image
 
 Every machine needs a POSIX shell at `/bin/sh` and `grep`. E2B and Daytona
 also need `dd` and `base64`, which carry a program's output back. With
 [libfaketime](https://github.com/wolfcw/libfaketime) in the image, programs
-see the workspace's [`system_time`](/home/configuration#system-time). With
+see the workspace's [`system_time`](/home/configuration/workspace#system-time). With
 `mount_type: ssh` the machine also needs `sshfs`, and a machine that runs its
 own Mirage needs `fuse3` and Mirage.
 

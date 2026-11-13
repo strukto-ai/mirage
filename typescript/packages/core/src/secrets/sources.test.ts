@@ -314,6 +314,23 @@ describe('resolveConfigSecrets', () => {
     expect(out).toEqual({ token: 'xoxb-fetched', baseUrl: 'https://slack.com/api' })
   })
 
+  it('keeps an undeclared source’s install hint', async () => {
+    // No `secrets:` block, so the source resolves on the first read.
+    registerSecrets(
+      'peerless',
+      EnvConfig,
+      (_c: unknown, _r: string) => Promise.resolve({ fields: {} }),
+      () => {
+        throw new SecretsError(
+          "the 'peerless' source needs its optional dependency (peer-sdk): npm install peer-sdk",
+        )
+      },
+    )
+    await expect(
+      resolveConfigSecrets({ token: { from: 'peerless', ref: 'r', key: 'k' } }),
+    ).rejects.toThrow('npm install peer-sdk')
+  })
+
   it('leaves a config with no pointer alone', async () => {
     expect(await resolveConfigSecrets({ token: 'xoxb-literal' })).toEqual({
       token: 'xoxb-literal',

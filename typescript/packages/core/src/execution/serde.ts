@@ -16,7 +16,7 @@ import { PathSpec } from '../types.ts'
 import type { RecordFields } from '../workspace/record/types.ts'
 import type { Line, LineState } from './line/types.ts'
 import type { Process, ProcessState } from './process/types.ts'
-import { LineId, MachineId, ProcessId } from './types.ts'
+import { LineId, MachineName, ProcessId } from './types.ts'
 
 /** A line's record as a store or a snapshot keeps it. Mirrors Python's `line_to_fields`. */
 export function lineToFields(record: Line): RecordFields {
@@ -95,7 +95,7 @@ export function processFromFields(fields: RecordFields): Process {
     group: fields.group as number,
     command: fields.command as string,
     cwd: PathSpec.fromStrPath(fields.cwd as string),
-    machine: MachineId.parse(fields.machine as string),
+    machine: MachineName.parse(fields.machine as string),
     machineInstance: (fields.machine_instance as string | null | undefined) ?? null,
     startedAt: fields.started_at as number,
     runtime: (fields.runtime as string | null | undefined) ?? null,

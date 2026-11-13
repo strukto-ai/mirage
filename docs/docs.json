@@ -129,7 +129,18 @@
             "group": "Configuration",
             "pages": [
               "home/configuration",
-              "home/credentials",
+              "home/configuration/server",
+              "home/configuration/workspace",
+              "home/configuration/session",
+              {
+                "group": "Service Credentials",
+                "icon": "key",
+                "pages": [
+                  "home/service-credentials",
+                  "home/service-credentials/aws-secrets-manager",
+                  "home/service-credentials/1password"
+                ]
+              },
               "home/limits"
             ]
           },
@@ -274,12 +285,6 @@
             ]
           },
           {
-            "group": "Agent Profiles",
-            "pages": [
-              "home/profiles"
-            ]
-          },
-          {
             "group": "Policy",
             "pages": [
               "home/policy/overview",
@@ -327,6 +332,7 @@
               "home/setup/machine/microsandbox",
               "home/setup/machine/daytona",
               "home/setup/machine/e2b",
+              "home/setup/machine/cloudflare_container",
               "home/setup/machine/ssh"
             ]
           },
@@ -844,7 +850,7 @@
                 "group": "Machines",
                 "pages": [
                   "GET /v1/workspaces/{workspace_id}/machines",
-                  "GET /v1/workspaces/{workspace_id}/machines/{machine_id}"
+                  "GET /v1/workspaces/{workspace_id}/machines/{machine}"
                 ]
               }
             ]

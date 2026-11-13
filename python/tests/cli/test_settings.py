@@ -41,7 +41,12 @@ from mirage.cli.settings import (
     set_config,
     unset_config,
 )
-from mirage.server.daemon_config import DaemonConfigError
+from mirage.server.auth.config import resolve_auth_config
+from mirage.server.daemon_config import (
+    DaemonConfigError,
+    read_daemon_table,
+    validate_daemon_table,
+)
 from mirage.server.env import ENV_HOME
 
 
@@ -139,8 +144,8 @@ def test_load_daemon_settings_reads_config_under_mirage_home(
 
 def test_set_config_creates_file(tmp_path):
     p = tmp_path / "config.toml"
-    set_config("socket", "/tmp/s.sock", path=p)
-    assert get_config("socket", path=p) == "/tmp/s.sock"
+    set_config("login_client_id", "mirage-cli", path=p)
+    assert get_config("login_client_id", path=p) == "mirage-cli"
     assert "[daemon]" in p.read_text()
 
 
@@ -155,27 +160,27 @@ def test_set_config_updates_existing_key(tmp_path):
 def test_set_config_preserves_comments_and_other_keys(tmp_path):
     p = tmp_path / "config.toml"
     p.write_text('[daemon]\n# keep me\nurl = "http://a:1"\n')
-    set_config("socket", "/tmp/s.sock", path=p)
+    set_config("login_client_id", "mirage-cli", path=p)
     text = p.read_text()
     assert "# keep me" in text
     assert 'url = "http://a:1"' in text
-    assert get_config("socket", path=p) == "/tmp/s.sock"
+    assert get_config("login_client_id", path=p) == "mirage-cli"
 
 
 def test_unset_config_removes_key(tmp_path):
     p = tmp_path / "config.toml"
-    set_config("socket", "/tmp/s.sock", path=p)
-    unset_config("socket", path=p)
-    assert get_config("socket", path=p) is None
+    set_config("login_client_id", "mirage-cli", path=p)
+    unset_config("login_client_id", path=p)
+    assert get_config("login_client_id", path=p) is None
 
 
 def test_list_config_returns_written_keys(tmp_path):
     p = tmp_path / "config.toml"
     set_config("url", "http://a:1", path=p)
-    set_config("socket", "/tmp/s.sock", path=p)
+    set_config("login_client_id", "mirage-cli", path=p)
     assert list_config(path=p) == {
         "url": "http://a:1",
-        "socket": "/tmp/s.sock",
+        "login_client_id": "mirage-cli",
     }
 
 
@@ -188,6 +193,39 @@ def test_numeric_key_written_bare(tmp_path):
     p = tmp_path / "config.toml"
     set_config("idle_grace_seconds", "45", path=p)
     assert "idle_grace_seconds = 45" in p.read_text()
+
+
+def test_a_multi_line_key_round_trips_through_the_file(tmp_path):
+    p = tmp_path / "config.toml"
+    pem = "-----BEGIN PUBLIC KEY-----\nMIIB\n-----END PUBLIC KEY-----\n"
+    set_config("jwt_pubkey", pem, path=p)
+    assert len(p.read_text().splitlines()) == 2
+    assert get_config("jwt_pubkey", path=p) == pem
+    cfg = resolve_auth_config(
+        env={},
+        table={
+            **read_daemon_table(tmp_path),
+            "auth_mode": "jwt",
+            "jwt_alg": "RS256",
+        },
+    )
+    assert cfg.jwt is not None
+    assert cfg.jwt.key == pem.strip()
+
+
+def test_the_old_clock_skew_key_names_the_new_one(tmp_path):
+    p = tmp_path / "config.toml"
+    p.write_text("[daemon]\njwt_clock_skew = 9\n")
+    for call in (
+        lambda: set_config("jwt_clock_skew", "9", path=p),
+        lambda: get_config("jwt_clock_skew", path=p),
+    ):
+        with pytest.raises(DaemonConfigError, match="jwt_clock_skew_seconds"):
+            call()
+    unset_config("jwt_clock_skew", path=p)
+    validate_daemon_table(read_daemon_table(tmp_path))
+    set_config("jwt_clock_skew_seconds", "9", path=p)
+    assert get_config("jwt_clock_skew_seconds", path=p) == "9"
 
 
 def test_unset_config_accepts_unknown_key(tmp_path):
@@ -206,8 +244,10 @@ def test_set_config_chmods_0600(tmp_path):
 
 def test_unset_config_chmods_0600(tmp_path):
     p = tmp_path / "config.toml"
-    p.write_text('[daemon]\nurl = "http://a:1"\nsocket = "/tmp/s"\n')
-    unset_config("socket", path=p)
+    p.write_text(
+        '[daemon]\nurl = "http://a:1"\nlogin_client_id = "mirage-cli"\n'
+    )
+    unset_config("login_client_id", path=p)
     assert (p.stat().st_mode & 0o777) == 0o600
 
 
@@ -231,6 +271,24 @@ def test_resolved_config_reports_origins(monkeypatch, tmp_path):
     resolved = resolved_config()
     assert resolved["port"] == ("9314", "env MIRAGE_DAEMON_PORT")
     assert resolved["url"] == ("http://f:1", "file")
+
+
+def test_resolved_config_drops_file_keys_when_env_gives_the_jwt_key(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv(ENV_HOME, str(tmp_path))
+    monkeypatch.delenv("MIRAGE_JWT_PUBKEY", raising=False)
+    monkeypatch.setenv("MIRAGE_JWT_PUBKEY_FILE", "/env.pem")
+    (tmp_path / "config.toml").write_text(
+        '[daemon]\njwt_pubkey = "TABLE"\njwt_alg = "RS256"\n'
+    )
+    resolved = resolved_config()
+    assert resolved["jwt_pubkey_file"] == (
+        "/env.pem",
+        "env MIRAGE_JWT_PUBKEY_FILE",
+    )
+    assert resolved["jwt_pubkey"] == ("", "default")
+    assert resolved["jwt_alg"] == ("RS256", "file")
 
 
 def test_resolved_config_defaults_when_nothing_set(monkeypatch, tmp_path):

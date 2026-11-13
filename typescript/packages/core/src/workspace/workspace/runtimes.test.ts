@@ -271,12 +271,36 @@ describe('shadowed captures', () => {
     try {
       ws.addRuntime(new Box('box', 'python3'))
       expect(said).toEqual([
-        "runtime 'b' never runs 'python3': 'a', listed before it, takes it",
-        "runtime 'b' never runs 'python': 'a', listed before it, takes it",
-        "runtime 'a' never runs 'python3': 'box', listed before it, takes it",
-        "runtime 'b' never runs 'python3': 'box', listed before it, takes it",
-        "runtime 'b' never runs 'python': 'a', listed before it, takes it",
+        "runtime 'b' runs 'python3' only when a route names it: 'a', listed before it, takes it",
+        "runtime 'b' runs 'python' only when a route names it: 'a', listed before it, takes it",
+        "runtime 'a' runs 'python3' only when a route names it: 'box', listed before it, takes it",
+        "runtime 'b' runs 'python3' only when a route names it: 'box', listed before it, takes it",
+        "runtime 'b' runs 'python' only when a route names it: 'a', listed before it, takes it",
       ])
+    } finally {
+      delete logger.warn
+      await ws.close()
+    }
+  })
+
+  it('logs a capture only while no route policy can reach it', async () => {
+    const said: string[] = []
+    logger.warn = (message) => said.push(message)
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        runtimes: [new Engine('a'), new Engine('b'), 'workspace'],
+        routePolicy: (ctx) => (ctx.line.includes('fast') ? 'b' : null),
+      },
+    )
+    try {
+      expect(said).toEqual([])
+      ws.policies.place(null)
+      ws.addRuntime(new Box('box', 'python'))
+      expect(said[0]).toBe(
+        "runtime 'a' runs 'python' only when a route names it: 'box', listed before it, takes it",
+      )
     } finally {
       delete logger.warn
       await ws.close()

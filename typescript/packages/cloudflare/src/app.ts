@@ -28,8 +28,8 @@ import {
 } from '@struktoai/mirage-server/registry'
 import type { RouteReply, RouteRequest } from '@struktoai/mirage-server/routes'
 import { serveCodexSocket } from '@struktoai/mirage-server/ssh/codex'
-import { EDGE_MAX_SESSIONS } from './constants.ts'
-import { edgeHost, RAMRecordClient } from './host.ts'
+import { CLOUDFLARE_MAX_SESSIONS } from './constants.ts'
+import { cloudflareHost, RAMRecordClient } from './host.ts'
 import { WebRoutes } from './router.ts'
 
 interface Served {
@@ -39,7 +39,7 @@ interface Served {
   mcp: ReturnType<typeof registerApi>
 }
 
-export interface EdgeAppOptions {
+export interface CloudflareAppOptions {
   /**
    * How each request is checked: a shared bearer token, or JWTs from an
    * issuer. Undefined reads the `MIRAGE_AUTH_*` and `MIRAGE_JWT_*` env vars
@@ -83,7 +83,7 @@ export interface EdgeAppOptions {
   snapshotStore?: S3Config
 }
 
-export interface EdgeApp {
+export interface CloudflareApp {
   /** Answer one request, as the Node daemon answers it. */
   fetch(request: Request): Promise<Response>
   /** Close every workspace and the jobs still running. */
@@ -148,12 +148,12 @@ function codexSocket(
 }
 
 /**
- * The server API on an edge runtime's web `Request`/`Response`: the same
+ * The server API on a Worker's web `Request`/`Response`: the same
  * routes the Node daemon serves, over workspaces held in this isolate's
  * memory. SSH, kernel mounts and policy files on disk are the Node
  * daemon's alone. `export default createApp()` serves it.
  */
-export function createApp(options: EdgeAppOptions = {}): EdgeApp {
+export function createApp(options: CloudflareAppOptions = {}): CloudflareApp {
   // Built on the first request: an isolate's env and clock are not set at
   // global scope, where an app is built, and the server's uptime counts
   // from here.
@@ -164,7 +164,7 @@ export function createApp(options: EdgeAppOptions = {}): EdgeApp {
     const check = authenticator(auth)
     if (check === null) {
       throw new Error(
-        'an edge app needs MIRAGE_AUTH_MODE=token with MIRAGE_AUTH_TOKEN, or MIRAGE_AUTH_MODE=jwt',
+        'a Cloudflare app needs MIRAGE_AUTH_MODE=token with MIRAGE_AUTH_TOKEN, or MIRAGE_AUTH_MODE=jwt',
       )
     }
     const registry = new WorkspaceRegistry({
@@ -173,11 +173,11 @@ export function createApp(options: EdgeAppOptions = {}): EdgeApp {
       configs: new RAMRecordClient(),
       watchNetwork,
       maxWorkspaces: resolveMaxWorkspaces(options.maxWorkspaces),
-      maxSessions: resolveMaxSessions(options.maxSessions, process.env, EDGE_MAX_SESSIONS),
+      maxSessions: resolveMaxSessions(options.maxSessions, process.env, CLOUDFLARE_MAX_SESSIONS),
       ceilings: resolveCeilings(options),
       policies: options.policies ?? [],
     })
-    const host = edgeHost()
+    const host = cloudflareHost()
     const routes = new WebRoutes((id, account) => isStopped({ registry, host }, id, account))
     const mcp = registerApi(routes, {
       registry,

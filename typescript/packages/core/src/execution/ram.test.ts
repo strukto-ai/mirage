@@ -20,7 +20,7 @@ import { HISTORY_MAX_RECORDS, HISTORY_SECONDS } from './constants.ts'
 import type { Line } from './line/types.ts'
 import type { Process } from './process/types.ts'
 import { RAMExecutionStore } from './ram.ts'
-import { LineId, MachineId, ProcessId } from './types.ts'
+import { LineId, MachineName, ProcessId } from './types.ts'
 
 const enc = (text: string): Uint8Array => new TextEncoder().encode(text)
 const dec = (b: Uint8Array): string => new TextDecoder().decode(b)
@@ -149,7 +149,7 @@ function processOf(pid: number, sessionId = 's'): Process {
     group: pid,
     command: 'sleep 30',
     cwd: PathSpec.fromStrPath('/'),
-    machine: new MachineId('host', 'box'),
+    machine: new MachineName('host', 'box'),
     startedAt: 1,
     runtime: null,
     machinePid: null,

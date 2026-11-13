@@ -27,7 +27,7 @@ from mirage.execution.job.types import JobState
 from mirage.execution.line.types import Line, LineState
 from mirage.execution.process.types import Process, ProcessState
 from mirage.execution.redis import RedisExecutionStore
-from mirage.execution.types import LineId, MachineId, MachinePid, ProcessId
+from mirage.execution.types import LineId, MachineName, MachinePid, ProcessId
 from mirage.io import IOResult
 from mirage.shell.console import Channel
 from mirage.types import PathSpec
@@ -221,7 +221,7 @@ async def test_a_noted_record_reaches_every_store(stores):
         group=3,
         command="sleep 30",
         cwd=PathSpec.from_str_path("/m"),
-        machine=MachineId("docker", "tools"),
+        machine=MachineName("docker", "tools"),
         started_at=1.5,
         runtime="docker",
         machine_pid=MachinePid(4242, 1.25),

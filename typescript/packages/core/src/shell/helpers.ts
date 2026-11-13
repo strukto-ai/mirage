@@ -59,7 +59,7 @@ export function sourceRow(node: TSNodeLike, end = false): number {
   const row = (end ? node.endPosition?.row : node.startPosition?.row) ?? 0
   if (!(node instanceof ProgramNode)) return row
   const index = end ? Math.max(node.endIndex - 1, node.startIndex) : node.startIndex
-  return node.program.row(node.program.offsets[index] ?? index)
+  return node.program.row(node.program.offsets?.[index] ?? index)
 }
 
 /**

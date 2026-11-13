@@ -33,11 +33,11 @@ def test_read_daemon_table_no_daemon_section(tmp_path):
 
 def test_read_daemon_table_reads_keys(tmp_path):
     (tmp_path / "config.toml").write_text(
-        '[daemon]\nurl = "http://h:1"\nsocket = "/tmp/s.sock"\n'
+        '[daemon]\nurl = "http://h:1"\nlogin_client_id = "mirage-cli"\n'
     )
     table = read_daemon_table(tmp_path)
     assert table["url"] == "http://h:1"
-    assert table["socket"] == "/tmp/s.sock"
+    assert table["login_client_id"] == "mirage-cli"
 
 
 def test_read_daemon_table_malformed_toml(tmp_path):
@@ -58,6 +58,23 @@ def test_validate_accepts_known_keys():
 def test_validate_rejects_unknown_keys():
     with pytest.raises(DaemonConfigError, match="typo_key"):
         validate_daemon_table({"typo_key": "x", "url": "http://h:1"})
+
+
+def test_validate_names_the_new_key_for_a_renamed_one():
+    with pytest.raises(DaemonConfigError) as err:
+        validate_daemon_table({"jwt_clock_skew": 9, "typo_key": "x"})
+    assert str(err.value) == (
+        "config.toml: `daemon.jwt_clock_skew` is now "
+        "`daemon.jwt_clock_skew_seconds`; rename the key"
+    )
+
+
+def test_validate_accepts_the_jwt_keys():
+    validate_daemon_table(
+        {"jwt_clock_skew_seconds": 9, "jwt_pubkey": "-----BEGIN"}
+    )
+    with pytest.raises(DaemonConfigError, match="jwt_clock_skew_seconds"):
+        validate_daemon_table({"jwt_clock_skew_seconds": "soon"})
 
 
 def test_validate_rejects_wrong_type():

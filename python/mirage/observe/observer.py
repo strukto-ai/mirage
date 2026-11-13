@@ -27,7 +27,7 @@ from opentelemetry import trace
 from mirage.execution.constants import HISTORY_MAX_RECORDS
 from mirage.execution.job.types import Job
 from mirage.execution.process.types import Process, ProcessState
-from mirage.execution.types import MachineId
+from mirage.execution.types import MachineName
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.types import IOResult
 from mirage.io.yield_budget import YieldBudget
@@ -154,7 +154,7 @@ def _start_line(
 
     Args:
         workspace_id (str | None): the workspace the line runs in.
-        machine (str | None): the workspace's machine, ``host.id``.
+        machine (str | None): the host running Mirage, ``host.name``.
         line (str): the line's id.
         session (str): the session it runs in.
         command (str): the typed line.
@@ -170,7 +170,7 @@ def _start_line(
     if workspace_id is not None:
         attributes["mirage.workspace.id"] = workspace_id
     if machine is not None:
-        attributes["host.id"] = machine
+        attributes["host.name"] = machine
     if cwd is not None:
         attributes["mirage.cwd"] = cwd
     return _tracer().start_span(
@@ -309,11 +309,11 @@ class Observer:
         clock (Clock | None): the workspace clock; None is the system
             clock.
         workspace_id (str | None): the workspace, named on its spans.
-        machine (str | None): the workspace's machine, ``host.id`` on
+        machine (str | None): the host running Mirage, ``host.name`` on
             its command, job and process spans.
         processes (Callable[[], list[Process]] | None): the process
             records the workspace keeps, which a span goes under.
-        instance (Callable[[MachineId], str] | None): what each
+        instance (Callable[[MachineName], str] | None): what each
             machine's provider calls it, ``mirage.machine.id`` for a
             record that does not say.
     """
@@ -325,7 +325,7 @@ class Observer:
         workspace_id: str | None = None,
         machine: str | None = None,
         processes: Callable[[], list[Process]] | None = None,
-        instance: Callable[[MachineId], str] | None = None,
+        instance: Callable[[MachineName], str] | None = None,
     ) -> None:
         self._store = store if store is not None else RAMObserverStore()
         self._clock: Clock = clock if clock is not None else SystemClock()
@@ -575,13 +575,13 @@ class Observer:
         return known is None or known.is_valid
 
     def _machine_attributes(
-        self, machine: MachineId, instance: str | None = None
+        self, machine: MachineName, instance: str | None = None
     ) -> dict[str, str | int]:
         """The attributes naming where a span's work ran: the machine's
         provider, its name and what its provider calls it.
 
         Args:
-            machine (MachineId): the machine.
+            machine (MachineName): the machine.
             instance (str | None): what its provider called it when the
                 work started, when the record kept it.
         """
@@ -744,7 +744,7 @@ class Observer:
             started_at (float): when it started, epoch seconds.
         """
         if self._machine is not None:
-            attributes["host.id"] = self._machine
+            attributes["host.name"] = self._machine
         if key[1] is not None:
             attributes["mirage.line.id"] = key[1]
         span = _tracer().start_span(

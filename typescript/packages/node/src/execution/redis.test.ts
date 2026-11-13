@@ -21,7 +21,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HISTORY_MAX_RECORDS } from '@struktoai/mirage-core/execution/constants'
 import type { Line } from '@struktoai/mirage-core/execution/line/types'
 import type { Process } from '@struktoai/mirage-core/execution/process/types'
-import { LineId, MachineId, ProcessId } from '@struktoai/mirage-core/execution/types'
+import { LineId, MachineName, ProcessId } from '@struktoai/mirage-core/execution/types'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { RedisExecutionStore } from './redis.ts'
 
@@ -261,7 +261,7 @@ describe.skipIf(REDIS_URL === '')('RedisExecutionStore', () => {
       group: 3,
       command: 'sleep 30',
       cwd: PathSpec.fromStrPath('/m'),
-      machine: new MachineId('docker', 'tools'),
+      machine: new MachineName('docker', 'tools'),
       startedAt: 1.5,
       runtime: 'docker',
       machinePid: { pid: 4242, started: 1.25, exited: null },

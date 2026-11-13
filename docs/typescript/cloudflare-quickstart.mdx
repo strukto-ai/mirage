@@ -63,7 +63,7 @@ For anything else from core, import its subpaths (`@struktoai/mirage-core/vfs/re
 
 ## Read secrets from AWS and 1Password
 
-A [pointer](/home/credentials) reads `aws-sm` in a Worker as it does on the server, and `1password` once the Worker imports it.
+A [pointer](/home/service-credentials) reads `aws-sm` in a Worker as it does on the server, and `1password` once the Worker imports it.
 
 `aws-sm` is registered when the package loads. The Worker signs each `GetSecretValue` itself, and has no AWS credentials file or default chain to fall back on, so the source's config gives `region`, `aws_access_key_id` and `aws_secret_access_key`, with `aws_session_token` for temporary keys. `aws_profile` is refused.
 
@@ -122,10 +122,10 @@ curl -s localhost:8787/v1/workspaces/demo/shell -H "Authorization: Bearer $MIRAG
 | `auth` | An `AuthConfig` in place of the env variables: `{ mode: 'token', bearerToken }`, or `{ mode: 'jwt', jwt }`. |
 | `maxWorkspaces` | The most workspaces the isolate holds at once. A create past it answers 503. |
 | `maxSessions` | The most sessions each workspace holds, `4` unless set, since every workspace shares the isolate's memory. A new session past it answers 429. |
-| `maxMemory` | The most any workspace's `max_memory` reaches, as a [size](/home/configuration#sizes). |
+| `maxMemory` | The most any workspace's `max_memory` reaches, as a [size](/home/configuration/workspace#sizes). |
 | `maxProcesses` | The most any session's `processes.max` reaches. |
 | `maxLineSeconds` | The most seconds any line runs, whatever `@line` a config or profile sets. |
-| `maxEnv` | The most any workspace's `max_env` reaches, as a [size](/home/configuration#sizes). |
+| `maxEnv` | The most any workspace's `max_env` reaches, as a [size](/home/configuration/workspace#sizes). |
 | `policies` | The server's own [policies](/home/access/http#server-policies). |
 | `snapshotStore` | An `S3Config`: the store a snapshot request may name a key in. |
 

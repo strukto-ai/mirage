@@ -195,6 +195,18 @@ describe('dirAwareStat and dirAwareStream', () => {
   })
 })
 
+// Mirrors test_a_file_written_while_the_listing_probes_reads_as_a_file.
+it('reads a file written while the listing probes as a file, not a directory', async () => {
+  const stored: Record<string, string> = {}
+  const landing = (): Promise<string[]> => {
+    stored['/a'] = 'hi'
+    return Promise.resolve(['/a'])
+  }
+  const ctx = contextFor(keyed({ stored, listing: landing }))
+  const files = await guarded(ctx)
+  expect((await dirAwareStat(files, ctx)(at('/a'))).type).toBe(FileType.FILE)
+})
+
 describe('the abort guard', () => {
   it('forwards every call while the signal is quiet and starts none once it fired', async () => {
     const calls: string[] = []

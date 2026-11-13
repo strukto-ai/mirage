@@ -182,7 +182,7 @@ def test_a_config_defaults_to_empty():
     assert SecretSource(source="env").config == {}
 
 
-@pytest.mark.parametrize("source", ["1password", "aws-sm", "auth0"])
+@pytest.mark.parametrize("source", ["1password", "aws-sm"])
 def test_only_a_bootstrap_source_can_back_a_config_value(source):
     with pytest.raises(ValidationError, match="needs no config of its own"):
         SecretSource.model_validate(

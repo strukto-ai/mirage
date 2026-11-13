@@ -27,7 +27,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 
 from mirage import MountMode, Workspace
 from mirage.execution.process.types import Process, ProcessState
-from mirage.execution.types import LineId, MachineId, ProcessId
+from mirage.execution.types import LineId, MachineName, ProcessId
 from mirage.io import IOResult
 from mirage.machine.constants import CHECK_MARK, RUN_PID_MARK, is_run
 from mirage.machine.handle import MachineHandle
@@ -738,17 +738,16 @@ async def test_an_ended_job_and_process_are_spans(monkeypatch):
     assert attributes["mirage.session.id"] == line.session_id
     assert attributes["mirage.cwd"] == "/"
     machine = ws.process_table.machine
-    host = str(machine)
     where = {
         "mirage.machine.type": "host",
         "mirage.machine.name": machine.name,
         "mirage.machine.id": machine.name,
     }
-    assert attributes["host.id"] == host
+    assert attributes["host.name"] == machine.name
     assert {k: attributes[k] for k in where} == where
     [command] = [s for s in spans if s.name == "command"]
     assert (command.attributes or {})["mirage.line.id"] == str(line.id)
-    assert (command.attributes or {})["host.id"] == host
+    assert (command.attributes or {})["host.name"] == machine.name
     assert "mirage.machine.ids" not in (command.attributes or {})
     [shell] = [
         s
@@ -765,7 +764,7 @@ async def test_an_ended_job_and_process_are_spans(monkeypatch):
             context.span_id,
         )
     assert (job.attributes or {})["process.pid"] == attributes["process.pid"]
-    assert (job.attributes or {})["host.id"] == host
+    assert (job.attributes or {})["host.name"] == machine.name
     assert {k: (job.attributes or {})[k] for k in where} == where
     assert (job.attributes or {})["mirage.cwd"] == "/"
 
@@ -802,7 +801,7 @@ async def test_a_span_names_the_machine_its_work_ran_on(monkeypatch):
         await ws.shell("echo hi")
         await ws.shell("echo a\ntrain 2")
         first, second, third = await ws.lines()
-        host = str(ws.process_table.machine)
+        name = ws.process_table.machine.name
     finally:
         await ws.close()
     spans = exporter.get_finished_spans()
@@ -821,12 +820,11 @@ async def test_a_span_names_the_machine_its_work_ran_on(monkeypatch):
             (s.attributes or {})["mirage.machine.type"],
             (s.attributes or {})["mirage.machine.name"],
             (s.attributes or {})["mirage.machine.id"],
-            (s.attributes or {})["host.id"],
+            (s.attributes or {})["host.name"],
         )
         for s in spans
         if s.name in ("job", "process")
     )
-    name = host.split(":", 1)[1]
     pids = {
         (s.attributes or {})["process.command_line"]: (
             (s.attributes or {})["process.pid"],
@@ -839,12 +837,12 @@ async def test_a_span_names_the_machine_its_work_ran_on(monkeypatch):
     assert pids["train 2"][1] != 812
     assert pids["echo hi"][0] == pids["echo hi"][1]
     assert ran == [
-        ("job", "train 1", "box", "a", "box-a", host),
-        ("process", "echo a\ntrain 2", "host", name, name, host),
-        ("process", "echo hi", "host", name, name, host),
-        ("process", "train 1", "box", "a", "box-a", host),
-        ("process", "train 1 & wait", "host", name, name, host),
-        ("process", "train 2", "box", "a", "box-a", host),
+        ("job", "train 1", "box", "a", "box-a", name),
+        ("process", "echo a\ntrain 2", "host", name, name, name),
+        ("process", "echo hi", "host", name, name, name),
+        ("process", "train 1", "box", "a", "box-a", name),
+        ("process", "train 1 & wait", "host", name, name, name),
+        ("process", "train 2", "box", "a", "box-a", name),
     ]
 
 
@@ -877,7 +875,7 @@ async def test_a_child_of_a_stopping_parent_goes_under_it(monkeypatch):
         10,
         "(train) &",
         cwd,
-        MachineId("host", "h"),
+        MachineName("host", "h"),
         1.0,
         state=ProcessState.STOPPING,
     )
@@ -889,7 +887,7 @@ async def test_a_child_of_a_stopping_parent_goes_under_it(monkeypatch):
         10,
         "train",
         cwd,
-        MachineId("box", "a"),
+        MachineName("box", "a"),
         2.0,
         runtime="remote",
         state=ProcessState.EXITED,

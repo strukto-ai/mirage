@@ -15,7 +15,7 @@
 import { DOMParser, Node } from '@xmldom/xmldom'
 
 // The AWS SDK reads S3's XML replies through the web's DOMParser, which a
-// browser has and an edge runtime does not: an S3-family mount lists and
+// browser has and a Worker does not: an S3-family mount lists and
 // reads through this one there.
 const web = globalThis as { DOMParser?: unknown; Node?: unknown }
 web.DOMParser ??= DOMParser

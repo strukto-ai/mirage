@@ -153,9 +153,10 @@ export class Runtimes {
   }
 
   private install(entries: readonly Runtime[], bindings: Record<string, Runtime>): void {
-    for (const [capture, winner, shadowed] of shadowedCaptures(entries)) {
+    const routed = this.registry.policies.hasPlacement()
+    for (const [capture, winner, shadowed] of routed ? [] : shadowedCaptures(entries)) {
       logger.warn?.(
-        `runtime '${shadowed}' never runs '${capture}': '${winner}', listed before it, takes it`,
+        `runtime '${shadowed}' runs '${capture}' only when a route names it: '${winner}', listed before it, takes it`,
       )
     }
     this.entries = entries

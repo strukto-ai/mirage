@@ -17,7 +17,7 @@ from typing import Any
 
 from mirage.execution.line.types import Line, LineState
 from mirage.execution.process.types import Process, ProcessState
-from mirage.execution.types import LineId, MachineId, MachinePid, ProcessId
+from mirage.execution.types import LineId, MachineName, MachinePid, ProcessId
 from mirage.types import PathSpec
 from mirage.workspace.record.types import RecordFields
 
@@ -114,7 +114,7 @@ def process_from_fields(fields: RecordFields) -> Process:
         group=fields["group"],
         command=fields["command"],
         cwd=PathSpec.from_str_path(fields["cwd"]),
-        machine=MachineId.parse(fields["machine"]),
+        machine=MachineName.parse(fields["machine"]),
         machine_instance=fields.get("machine_instance"),
         started_at=fields["started_at"],
         runtime=fields.get("runtime"),

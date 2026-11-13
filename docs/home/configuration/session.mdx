@@ -1,0 +1,217 @@
+---
+title: Session Profiles
+sidebarTitle: Session
+description: Choose what each session can run and which files it can see, with profiles.
+icon: robot
+---
+
+A session gets its permissions from a profile. Agents can share a
+workspace while seeing different files and using different commands.
+
+## What a profile controls
+
+| Setting | Purpose |
+| --- | --- |
+| `commands.allow` | Limit the session to the listed tools. |
+| `commands.ask` | Require approval for matching commands. |
+| `commands.deny` | Refuse matching commands. |
+| `paths.hide` | Make matching files and folders invisible to the session. |
+| `paths.show` | Make a specific path visible within a hidden folder. |
+| `mounts` | Restrict a data source to `read`, `write` or `exec` access. |
+| `cwd` and `env` | Set the session's starting directory and environment; `env` takes the same literals and [credential pointers](/home/service-credentials#set-environment-variables) as the workspace's. |
+| `vars.hide` | Make matching variable names, or globs over names, read as unset. |
+| `processes` | Set whose processes `ps` lists and `kill` stops, and cap the live processes. |
+| `command_limits` | Override [output and execution limits](/home/core/output-limits) for the session. |
+| `network` | Narrow where the session's lines may connect, besides the workspace's [`network`](/home/configuration/workspace#network). |
+| `policy` | Run [policy scripts](/home/policy/scripts) at the `pre_` and `post_` methods. |
+
+Each of the last five keys takes this shape:
+
+```yaml
+profiles:
+  worker:
+    vars:
+      hide: [AWS_*, GITHUB_TOKEN]
+    processes:
+      list: workspace
+      kill: session
+      max: 8
+    command_limits:
+      grep: {max_lines: 200}
+    network:
+      allowed_domains: ["*.github.com"]
+    policy:
+      pre_command:
+        - {script: ./guard.py, runtime: monty}
+```
+
+`processes.list` and `processes.kill` take `session`, the default, for the
+session's own processes, or `workspace`, for every session's.
+`kill` cannot reach past `list`, and a bare scope such as
+`processes: workspace` sets both. `max` counts every pipeline stage,
+subshell and background job the session has running; it is 128 unless a
+block sets it, and `null` lifts it. Starting a process past `max` fails with
+`Resource temporarily unavailable`.
+
+The workspace takes the same `processes` block beside `profiles`, for every
+session. A profile's block overrides it field by field: here a `batch`
+session holds 512 processes, and every other session 64, with the
+workspace's scopes.
+
+```yaml
+processes: {list: workspace, max: 64}
+profiles:
+  batch:
+    processes: {max: 512}
+```
+
+`network` takes the workspace's grammar, and a session's lines are held to
+both: the profile can narrow where they connect, never widen it. A mount
+still connects under the workspace's `network`, since it serves every
+session. A profile's `routes` replace the workspace's for the same address:
+see [Route Network](/home/policy/route-network#per-session).
+
+## Example: a research agent
+
+This profile lets an agent browse and search `/data`, keeps it read-only,
+and hides `/data/private`.
+
+```yaml workspace.yaml
+mounts:
+  /data:
+    vfs: ram
+
+profiles:
+  researcher:
+    cwd: /data
+    mounts:
+      /data:
+        mode: read
+    paths:
+      hide: [/data/private]
+    commands:
+      allow: [ls, cat, grep, find, stat, pwd]
+
+profile: researcher
+```
+
+Replace RAM with your [VFS](/home/setup/vfs). `profile: researcher` selects
+the default for new sessions; another session can use a different named
+profile.
+
+The allow list covers shell builtins too. This profile omits `cd` and `echo`,
+so a session under it is refused both with `Permission denied`. The session's
+own shell functions are exempt, because each line in a function body passes
+the same check.
+
+## Use a profile
+
+Name the profile when you create a session:
+
+| | Create a session under `researcher` |
+| --- | --- |
+| Python | `ws.create_session("s1", profile="researcher")` or `await ws.session("s1", profile="researcher")` |
+| TypeScript | `ws.createSession('s1', { profile: 'researcher' })` |
+| [CLI](/home/access/cli#workspaces) | `mirage workspace session create -w ID -p researcher` |
+
+A session that names no profile gets the one `profile:` selects. Without
+`profile:`, it gets the profile named `default` if the workspace defines one,
+and no restrictions otherwise.
+
+To change a profile while the workspace runs, add a profile or replace what
+a name means, then move sessions onto it. Use the
+[CLI](/home/access/cli#workspaces) or the [Python](/python/access/in-app) or
+[TypeScript](/typescript/access/in-app) API. Over HTTP,
+[Set profile](/api/operations/workspaces/set-profile) adds or replaces a
+profile.
+
+- A session keeps its old rules until you move it onto the new profile.
+- A moved session keeps its working directory, variables and history.
+- `workspace.yaml` is never rewritten.
+- An agent cannot do this from inside a session: no builtin, MCP tool or RPC
+  method changes a profile.
+
+## Rule matching
+
+### Commands
+
+- A pattern matches token prefixes: `git push` matches `git push origin main`.
+- Spelling and order matter: `rm -rf` does not match `rm -r -f` or
+  `rm --recursive --force`.
+- A `*` token matches any token. A trailing `*` adds nothing.
+- Without `commands.allow`, there is no allow list. `allow: []` allows no
+  installed tool.
+- `commands.allow` does not cover shell functions, executed paths or direct
+  VFS calls.
+- The shell's tests count as commands under their own names. An allow list
+  admits `[ ]` only if it names `[`, and `[[ ]]` only if it names `[[`.
+- A path rule judges the file operand of `-e`, `-f` or `-nt` the same way in
+  `test`, `[` and `[[`, however the operand is spelled.
+
+### Ask and deny
+
+Ask and deny rules can name commands, paths, or map a command to its paths:
+
+```yaml
+commands:
+  allow: [rm]
+  ask:
+    - {commands: {rm: ["/data/review/*"]}, reason: deletes need review}
+  deny:
+    - {commands: {rm: ["/data/*"]}, reason: data is retained}
+```
+
+- For each path, the rule with the deeper literal path wins. At equal depth,
+  deny wins.
+- Here `rm /data/review/note.txt` asks for approval despite the broader deny,
+  and `rm /data/other.txt` is denied.
+- A command with several paths must pass the check for each one.
+- Ask and deny control what a command may do. The paths stay visible.
+
+A rule written under a mount section applies to:
+
+- a line whose working directory or paths are in that mount;
+- a walk or a move of a directory that holds the mount (`grep -r`, `ls -R`,
+  `mv`);
+- each entry inside the mount that a line reaches on its own (`cp -r`,
+  `chmod -R`).
+
+### Hide and show paths
+
+- `paths.hide` makes a path look absent. `paths.show` reopens a more specific
+  path inside it.
+- `paths.hide` and ask and deny path entries take absolute paths or
+  slashless name patterns such as `*.pem`, in mount sections too.
+- `paths.show` takes absolute paths only.
+- A literal path covers everything under it. Globs use `*`, `?` and `[`, and
+  `*` can cross `/`.
+- A rule that names only `paths` also applies to direct VFS calls.
+- Moving a directory that holds a hidden path, or one the session reaches
+  only through a `paths.show` below it, is refused with `Permission denied`.
+  The hidden content would come into view.
+
+### What a hidden path hides
+
+- **Command output:** commands and CLIs leave it out of what they print from
+  their own data, and out of their counts and totals. `git status`,
+  `git ls-files`, `git diff --stat` and `git log --name-only` neither name nor
+  count a file another session staged under it.
+- **Links:** a link that leads into it is hidden too. `readlink -f`,
+  `test -L`, `ln`, `touch -h`, `chown -R` and `find -newer` meet it as a name
+  that is not there.
+- **Git history:** no revision ever held it.
+  - `git show HEAD:secret.txt` answers as for a path never committed.
+  - `git log -S` finds nothing in it.
+  - An object id stored only there names nothing.
+- **Checkouts and branch switches:** they leave a hidden file as it is.
+  - An edit to it does not block the switch, and git's refusal does not name
+    it.
+  - A switch that would remove it, by writing a file where its directory
+    stands, is refused. The refusal names only the visible path.
+
+Under a deny rule instead of a hide, git refuses to print the path's content
+from any revision (`git log -p`, `git show HEAD:secret.txt`), as it refuses
+the file, and still lists the name.
+
+Use [Explain](/home/policy/explain) to check a rule before running a line.
+For conditions beyond these patterns, attach a [policy script](/home/policy/scripts).

@@ -15,7 +15,8 @@ cpu_ms = 60000
 
 [vars]
 MIRAGE_AUTH_MODE = "token"
-MIRAGE_AUTH_TOKEN = "edge-test-token"
+MIRAGE_AUTH_TOKEN = "cloudflare-test-token"
+MIRAGE_RELAY_TOKEN = "relay-test-token"
 
 # The sql mount's two Cloudflare drivers: a local D1 database, and a
 # SQLite-backed Durable Object's own storage.
@@ -28,6 +29,15 @@ database_id = "00000000-0000-0000-0000-000000000000"
 name = "SQL_OBJECTS"
 class_name = "SqlObject"
 
+# A container relay over a container that echoes, standing in for a real one.
+[[durable_objects.bindings]]
+name = "RELAY"
+class_name = "EchoRelay"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["SqlObject"]
+
+[[migrations]]
+tag = "v2"
+new_classes = ["EchoRelay"]

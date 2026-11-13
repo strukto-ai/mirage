@@ -1,5 +1,5 @@
 import { isAborting } from '../../errors/fs.ts'
-import type { MachineId, MachinePid } from '../types.ts'
+import type { MachineName, MachinePid } from '../types.ts'
 import { settledWithin, SignalStop } from '../../utils/abort.ts'
 import { SIGTERM } from '../../shell/constants.ts'
 import { NEVER_TAKEN } from './constants.ts'
@@ -170,7 +170,7 @@ export class ProcessHandle {
    * @param runtime what runs it.
    * @param instance what `machine`'s provider calls it.
    */
-  take(machine: MachineId | null, runtime: string, instance: string | null = null): boolean {
+  take(machine: MachineName | null, runtime: string, instance: string | null = null): boolean {
     if (!this.oneCommand) return false
     this.oneCommand = false
     this.ignores = this.programIgnores

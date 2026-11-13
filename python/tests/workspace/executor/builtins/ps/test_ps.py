@@ -17,7 +17,7 @@ import pytest
 
 from mirage.execution.job import JobTable
 from mirage.execution.process.constants import FIRST_PID
-from mirage.execution.types import MachineId, MachinePid
+from mirage.execution.types import MachineName, MachinePid
 from mirage.policy.profile import SessionProfile
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -261,7 +261,7 @@ async def test_ps_shows_where_a_program_runs(host):
             assert job.process.take(None, "local")
             job.process.set_machine_pid(MachinePid(4242, 1.0))
         else:
-            assert job.process.take(MachineId("docker", "tools"), "docker")
+            assert job.process.take(MachineName("docker", "tools"), "docker")
         machine = str(ws.process_table.machine) if host else "docker:tools"
         own = (await ws.shell("ps", session_id="s")).stdout.decode()
         lines = own.splitlines()

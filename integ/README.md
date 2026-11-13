@@ -378,12 +378,12 @@ predicted finish time. Targets keep their complete ordered case sequence;
 only their shard placement and launch order change. Timing replay is a
 scheduling estimate, not a measured end-to-end improvement.
 
-The edge corpus runs in four isolated jobs: RAM, Google Drive, Google Drive
-folder, and every other supported target. Each job owns its worker and fake
-services, so targets keep their serial fixture lifecycle. The partition gate
-checks that the groups are disjoint and cover the original target/case
-inventory. These jobs keep the full edge corpus; the local default still
-runs every supported target.
+The Cloudflare corpus runs in four isolated jobs: RAM, Google Drive, Google
+Drive folder, and every other supported target. Each job owns its worker and
+fake services, so targets keep their serial fixture lifecycle. The partition
+gate checks that the groups are disjoint and cover the original target/case
+inventory. These jobs keep the full Cloudflare corpus; the local default
+still runs every supported target.
 
 `runtime/parallel.sh` overlaps the Python and TypeScript JSON drivers inside
 each existing runtime job. It waits for both even after a failure, then runs
@@ -427,7 +427,7 @@ flowchart LR
     ts --> J2["integ-ts"]
     core & ts --> J3["integ-shared-py · integ-shared-ts<br/>integ-shared-parity · integ-selftests<br/>integ-facets · integ-wandb"]
     core & ts --> HOST["integ-hosting<br/>interrupts: CPU · streams · disconnect · cancellation<br/>hosting: FastAPI · Fastify · Monty<br/>RAM · S3 · Redis · Slack"]
-    core & ts --> EDGE["integ-edge<br/>four isolated workerd jobs:<br/>RAM · Drive · Drive folder · other targets"]
+    core & ts --> CLOUDFLARE["integ-cloudflare<br/>four isolated workerd jobs:<br/>RAM · Drive · Drive folder · other targets"]
     NC["Nextcloud tuning and full workflow"] --> ts & data
     SF["shared execution · backend source · storage cases<br/>runners · manifests · fakes · setup"] --> FULL["Shared backends full<br/>six targets × two hosts · goldens · parity"]
     data --> J4["integ-data · integ-events<br/>integ-tidb-filesystem"]
@@ -568,16 +568,17 @@ duration or throughput estimate is not the assertion. The normal `python/**`,
 suite. Run it locally with `cd integ && pnpm exec tsx hosting/run.ts` after
 building TypeScript; append `python` or `typescript` to select one host.
 
-`integ-edge` runs the corpus's targets for every built-in CLI on the edge
-host: git on RAM, gh and github, gws and the Google mounts, hf, himalaya and
-email, slack, discord, ntn, linear, trello, airtable, mcp, and search over
-dify and mem0. `cloudflare/run.ts` starts their fakes through the launcher (the mcp
-fake as a process of its own), starts the edge test worker under
-`wrangler dev`, builds each target's mounts and CLIs as a config the way the
-node adapters build instances, and sends every line over the server API, checked
-against the same goldens. A case's `session_profiles` are put on its sessions
-over the API. What needs more than the shell stays on the node battery: stat
-checks, faults, decisions, fresh reads and capacity are skipped and
+`integ-cloudflare` runs the corpus's targets for every built-in CLI on the
+Cloudflare host: git on RAM, gh and github, gws and the Google mounts, hf,
+himalaya and email, slack, discord, ntn, linear, trello, airtable, mcp, and
+search over dify and mem0. `cloudflare/run.ts` starts their fakes through the
+launcher (the mcp fake as a process of its own), starts the Cloudflare test
+worker under `wrangler dev`, builds each target's mounts and CLIs as a config
+the way the node adapters build instances, and sends every line over the
+server API, checked against the same goldens. A case's `session_profiles` are
+put on its sessions over the API. What needs more than the shell stays on the
+node battery: stat checks, faults, decisions, fresh reads and capacity are
+skipped and
 counted, and so is a target whose sessions layer inline permissions onto a
 default profile (`ram-commands`), since the API takes a session's profile by
 name. A `clear_cache` case runs warm, so the write it makes still lands; the

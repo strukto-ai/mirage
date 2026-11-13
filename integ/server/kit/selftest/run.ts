@@ -630,9 +630,8 @@ async function main(): Promise<void> {
       JSON.stringify(seedU.json),
     )
     await call(fake, '/reset', { method: 'POST', runInPath: 'u2', body: { tenants: ['shared'] } })
-    // The same tenant name in both, which is the point: notion's bearer token
-    // is echoed by `ntn auth token` and pinned by a golden, so it CANNOT be
-    // minted per run. The run has to be the axis that separates two hosts.
+    // The same tenant name in both, which is the point: notion's battery
+    // shares one fixed token, so the run is the axis that separates two hosts.
     const wroteU1 = await call(fake, '/boards/brd_1/cards', {
       method: 'POST',
       runInPath: 'u1',

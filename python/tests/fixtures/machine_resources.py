@@ -56,6 +56,6 @@ def table_of(
             raise OSError("down")
         return by_id[machine]
 
-    table.processes.machine_ids = lambda: ids or list(by_id)
+    table.processes.machine_names = lambda: ids or list(by_id)
     table.processes.machine_resources = read
     return table

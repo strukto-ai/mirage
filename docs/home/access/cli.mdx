@@ -53,7 +53,7 @@ mirage shell -w demo -c 'echo "hello mirage" > /data/hello.txt && grep -n hello 
 
 This prints `1:hello mirage`. Keep `demo` for the [MCP](/home/access/mcp) or
 [RPC](/home/access/rpc) examples, then remove it with `mirage workspace delete demo`.
-See [Workspace configuration](/home/configuration) for YAML settings and defaults.
+See [Workspace configuration](/home/configuration/workspace) for YAML settings and defaults.
 
 ## Write a config
 
@@ -98,7 +98,7 @@ mirage shell -w work -c 'ls /repo && echo draft > /scratch/notes.txt'
 ```
 
 `clis`, `runtimes`, `profiles` and the other top-level keys are in
-[Workspace configuration](/home/configuration).
+[Workspace configuration](/home/configuration/workspace).
 
 ## Exit codes
 
@@ -505,33 +505,4 @@ goes nowhere but its own server.
 
 `mirage daemon config set|get|unset|list` edits `~/.mirage/config.toml`. An
 environment variable wins over the file. Changes apply on the next start.
-
-| Key | Env var | Default |
-| --- | --- | --- |
-| `port` | `MIRAGE_DAEMON_PORT` | `8765`; the `local` context follows it |
-| `url` | `MIRAGE_DAEMON_URL` | `http://127.0.0.1:PORT`: the `local` context's URL; `mirage login URL` adds another server |
-| `auth_token` | `MIRAGE_TOKEN` | your [login](#log-in) for the `local` context, else `~/.mirage/auth_token` |
-| `auth_mode` | `MIRAGE_AUTH_MODE` | `local` |
-| `allowed_hosts` | `MIRAGE_ALLOWED_HOSTS` | `127.0.0.1,localhost,::1` |
-| `idle_grace_seconds` | `MIRAGE_IDLE_GRACE_SECONDS` | `30` |
-| `max_workspaces` | `MIRAGE_MAX_WORKSPACES` | no cap; past it a new workspace answers 503 |
-| `max_sessions` | `MIRAGE_MAX_SESSIONS` | `16`; past it a new session answers 429 |
-| `max_memory` | `MIRAGE_MAX_MEMORY` | none; the most any workspace's `max_memory` reaches, as a [size](/home/configuration#sizes) |
-| `max_processes` | `MIRAGE_MAX_PROCESSES` | none; the most any session's `processes.max` reaches |
-| `max_line_seconds` | `MIRAGE_MAX_LINE_SECONDS` | none; the most seconds any line runs |
-| `max_env` | `MIRAGE_MAX_ENV` | none; the most any workspace's `max_env` reaches, as a [size](/home/configuration#sizes) |
-| `workers` | `MIRAGE_WORKERS` | `1`; see [Workers](/typescript/access/server#workers) |
-| `worker_type` | `MIRAGE_WORKER_TYPE` | `thread` in TypeScript; in Python, `thread` without the GIL, else `process` |
-| `rate_limits` | `MIRAGE_RATE_LIMITS` | `ip=1000/minute`; see [Rate limits](/home/access/http#rate-limits) |
-| `forwarded_allow_ips` | `MIRAGE_FORWARDED_ALLOW_IPS` | none; the proxies whose `X-Forwarded-For` names the client |
-| `graceful_timeout` | `MIRAGE_GRACEFUL_TIMEOUT` | `0`; seconds running lines get to finish on shutdown |
-| `policy_file` | `MIRAGE_POLICY_FILE` | none; see [Server policies](/home/access/http#server-policies) |
-| `resource_store` | `MIRAGE_RESOURCE_STORE` | `files`, under `~/.mirage/resources`; `memory` keeps saved templates and connections only until the daemon stops, and does not combine with `workers` |
-| `ssh_*` | `MIRAGE_SSH_*` | see [SSH](/home/access/ssh#set-up) |
-| `jwt_*` | `MIRAGE_JWT_*` | see [Configure authentication](/home/access/http#configure-authentication) |
-| `login_client_id` | `MIRAGE_LOGIN_CLIENT_ID` | see [Log in](#log-in) |
-
-`jwt_clock_skew` is `MIRAGE_JWT_CLOCK_SKEW_SECONDS`, and `MIRAGE_JWT_PUBKEY`
-has no key: use `jwt_pubkey_file`.
-
-`MIRAGE_HOME` moves everything under `~/.mirage`.
+See [Server](/home/configuration/server) for every key.

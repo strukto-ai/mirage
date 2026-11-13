@@ -87,7 +87,7 @@ export const NTN = new CLI({
         name: 'auth',
         description: 'Inspect authentication credentials',
         subcommands: [
-          new CommandSpec({ name: 'token', description: 'Print the current authentication token' }),
+          new CommandSpec({ name: 'token', description: 'Token display is unavailable in Mirage' }),
         ],
       }),
       new CommandSpec({

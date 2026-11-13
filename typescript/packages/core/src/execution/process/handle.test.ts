@@ -18,7 +18,7 @@ import { stopSignal } from '../../utils/abort.ts'
 import { newPauseGate, ProcessHandle } from './handle.ts'
 import type { Process } from './types.ts'
 import { LOCAL_MACHINE } from '../constants.ts'
-import { MachineId, ProcessId } from '../types.ts'
+import { MachineName, ProcessId } from '../types.ts'
 
 describe('a program that stops or takes signals itself', () => {
   const ignored = () => undefined
@@ -305,7 +305,7 @@ describe('ProcessHandle', () => {
     const handle = new ProcessHandle(info(), () => Promise.resolve(3), ignore, ignore)
     expect(handle.take(null, 'docker')).toBe(false)
     handle.oneCommand = true
-    expect(handle.take(new MachineId('docker', 'tools'), 'docker')).toBe(true)
+    expect(handle.take(new MachineName('docker', 'tools'), 'docker')).toBe(true)
     expect(handle.take(null, 'local')).toBe(false)
     expect([handle.record.machine.toString(), handle.record.runtime]).toEqual([
       'docker:tools',

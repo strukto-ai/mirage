@@ -259,9 +259,9 @@ fn a_heredoc_body_folds_into_its_line() {
          (command name: (command_name (word=echo))))"
     );
     let tree = parse(b"cat <<E \\\nx\nbody\nE\n");
-    assert_eq!(tree.source, b"cat <\"body\n\" x\n");
-    assert_eq!(tree.offsets[5], 12);
-    assert_eq!(tree.offsets[tree.source.len()], 19);
+    assert_eq!(tree.source.as_slice(), b"cat <\"body\n\" x\n");
+    assert_eq!(tree.offsets.at(5), 12);
+    assert_eq!(tree.offsets.at(tree.source.len()), 19);
 }
 
 #[test]
@@ -354,15 +354,18 @@ fn a_continuation_joins_the_halves_of_a_word() {
         read("ec\\\nho a"),
         "(program (command name: (command_name (word=echo)) argument: (word=a)))"
     );
-    assert_eq!(parse(b"ec\\\nho a").offsets, [0, 1, 4, 5, 6, 7, 8]);
+    assert_eq!(
+        parse(b"ec\\\nho a").offsets.iter().collect::<Vec<_>>(),
+        [0, 1, 4, 5, 6, 7, 8]
+    );
     assert_eq!(
         read("echo 'a\\\nb' # c\\\n"),
         "(program (command name: (command_name (word=echo)) argument: (raw_string='a\\\nb')) (comment=# c\\))"
     );
     // bash -c keeps a backslash ending the input; one before a last
     // newline continues onto nothing.
-    assert_eq!(parse(b"echo a\\").source, b"echo a\\");
-    assert_eq!(parse(b"echo a\\\n").source, b"echo a");
+    assert_eq!(parse(b"echo a\\").source.as_slice(), b"echo a\\");
+    assert_eq!(parse(b"echo a\\\n").source.as_slice(), b"echo a");
 }
 
 #[test]
@@ -753,7 +756,7 @@ fn a_heredoc_pending_across_an_array_is_read_again() {
     // second read, which ends only at the end of the input; the redirect
     // gets that one...
     let tree = parse(b"cat <<EOF; x=(1\nbody\nEOF\n2)\nfi");
-    assert_eq!(tree.source, b"cat <\"fi\n\"; x=(1\n2)\n");
+    assert_eq!(tree.source.as_slice(), b"cat <\"fi\n\"; x=(1\n2)\n");
     assert_eq!(
         warned(&tree),
         "bash: line 5: warning: here-document at line 4 delimited by end-of-file (wanted `body\n')\n"
@@ -1081,4 +1084,35 @@ fn a_subscript_holds_its_blanks() {
          (concatenation (word=[) (word=k) (word=]) (word==v)))))"
     );
     assert_eq!(parse(b"a=([$k x]=v)").error, None);
+}
+
+#[test]
+fn unchanged_source_shares_storage_without_a_byte_map() {
+    for source in [
+        b"echo hello".as_slice(),
+        "echo 'é😀'".as_bytes(),
+        b"echo '\xff'",
+    ] {
+        let tree = parse(source);
+        assert!(tree.offsets.is_identity());
+        assert_eq!(tree.offsets.len(), source.len() + 1);
+        assert_eq!(
+            tree.offsets.iter().collect::<Vec<_>>(),
+            (0..=source.len()).collect::<Vec<_>>()
+        );
+        assert!(std::sync::Arc::ptr_eq(&tree.source, &tree.original));
+    }
+}
+
+#[test]
+fn transformed_offsets_keep_checked_width() {
+    use super::SourceMap;
+    let map: SourceMap = [0, 2, u32::MAX as usize].into_iter().collect();
+    assert!(matches!(map, SourceMap::Packed(_)));
+    assert_eq!(map.at(2), u32::MAX as usize);
+    if let Some(large) = (u32::MAX as usize).checked_add(1) {
+        let map: SourceMap = [0, large, 2].into_iter().collect();
+        assert!(matches!(map, SourceMap::Wide(_)));
+        assert_eq!(map.iter().collect::<Vec<_>>(), [0, large, 2]);
+    }
 }

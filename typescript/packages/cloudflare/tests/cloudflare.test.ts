@@ -17,6 +17,7 @@ import type { AddressInfo } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { unstable_dev, type Unstable_DevWorker } from 'wrangler'
+import { RelayContainer } from '@struktoai/mirage-core/machine/cloudflare_container/relay'
 
 interface Result {
   readonly exit: number
@@ -25,6 +26,12 @@ interface Result {
 }
 
 let worker: Unstable_DevWorker
+// NUL and CR LF, which line framing trips on, and bytes that are not UTF-8.
+const ODD = new Uint8Array([0, 13, 10, 255, 128, 254, 0])
+
+async function read(stream: ReadableStream<Uint8Array> | null): Promise<Uint8Array> {
+  return new Uint8Array(await new Response(stream).arrayBuffer())
+}
 const REDIS_URL = process.env.REDIS_URL
 
 async function run(
@@ -33,7 +40,7 @@ async function run(
   lineSeconds?: number,
   redis?: { url: string; keyPrefix: string; clear?: boolean },
 ): Promise<Result[]> {
-  const response = await worker.fetch('http://edge.test/run', {
+  const response = await worker.fetch('http://cloudflare.test/run', {
     method: 'POST',
     body: JSON.stringify({
       lines,
@@ -63,6 +70,30 @@ describe('mirage in workerd', () => {
     const response = await worker.fetch('http://localhost/sftp')
     // VERSION, HANDLE, then DATA with the file's bytes.
     expect(await response.json()).toEqual({ kinds: [2, 102, 103], data: 'served from the edge' })
+  })
+
+  it('relays a container to a client outside Cloudflare', async () => {
+    const url = `http://${worker.address}:${String(worker.port)}/relay/box`
+    await expect(new RelayContainer(url, 'wrong').start()).rejects.toThrow(
+      'the relay answered 401 to start: the relay refused the token',
+    )
+    const relay = new RelayContainer(url, 'relay-test-token')
+    await relay.start()
+    const proc = await relay.exec(['cat', '-'], {})
+    const input = proc.stdin?.getWriter()
+    await input?.write(ODD)
+    await input?.close()
+    const [out, err, code] = await Promise.all([
+      read(proc.stdout),
+      read(proc.stderr),
+      proc.exitCode,
+    ])
+    expect([out, new TextDecoder().decode(err), code]).toEqual([ODD, 'cat -', 7])
+  })
+
+  it('registers the container machine with the host', async () => {
+    const response = await worker.fetch('http://localhost/machines')
+    expect(await response.json()).toContain('cloudflare_container')
   })
 
   it('runs pipes, awk and jq', async () => {
@@ -139,7 +170,7 @@ describe('mirage in workerd', () => {
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
     const base = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`
     const fetched = async (path: string): Promise<unknown> => {
-      const response = await worker.fetch('http://edge.test/follow', {
+      const response = await worker.fetch('http://cloudflare.test/follow', {
         method: 'POST',
         body: JSON.stringify({ url: `${base}${path}`, allowed: ['127.0.0.1'] }),
       })
@@ -206,7 +237,7 @@ describe('mirage in workerd', () => {
   )
   for (const on of ['d1', 'object'] as const) {
     const sql = async (id: string, lines: readonly string[]): Promise<Result[]> => {
-      const response = await worker.fetch('http://edge.test/sql', {
+      const response = await worker.fetch('http://cloudflare.test/sql', {
         method: 'POST',
         body: JSON.stringify({ lines, on, id }),
       })

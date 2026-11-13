@@ -1,8 +1,8 @@
-from mirage.execution.types import MachineId
+from mirage.execution.types import MachineName
 
 # Where a process runs when nothing names its machine: the machine the
 # workspace itself runs on, before the host gives its name.
-LOCAL_MACHINE = MachineId("host", "localhost")
+LOCAL_MACHINE = MachineName("host", "localhost")
 
 # The ended records a table keeps: the newest of them, for at most an hour.
 HISTORY_MAX_RECORDS = 1024

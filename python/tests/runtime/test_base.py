@@ -20,7 +20,7 @@ from mirage import RAMVFS, Workspace
 from mirage.commands.config import Context
 from mirage.context.session_context import current_caller
 from mirage.execution.process.types import Process
-from mirage.execution.types import MachineId
+from mirage.execution.types import MachineName
 from mirage.runtime.base import Runtime
 from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.errors import UnsupportedExecutionError
@@ -131,8 +131,8 @@ class SeenRuntime(Runtime, ProcessExecutorMixin):
         self.release = asyncio.Event()
 
     @property
-    def machine(self) -> MachineId:
-        return MachineId("box", "b1")
+    def machine(self) -> MachineName:
+        return MachineName("box", "b1")
 
     async def run_process(
         self, engine, paths, texts, ctx, output=None, errors=None
@@ -166,7 +166,7 @@ async def _seen(line: str, reach: str = "remote") -> tuple[Process, str]:
 async def test_a_program_past_the_workspace_is_a_process_of_its_own():
     alone, line = await _seen("probe; echo $$")
     assert (alone.parent, alone.command) == (int(line), "probe")
-    assert (alone.machine, alone.runtime) == (MachineId("box", "b1"), "seen")
+    assert (alone.machine, alone.runtime) == (MachineName("box", "b1"), "seen")
     stage, line = await _seen("echo $$; probe | cat")
     assert (stage.parent, stage.command, stage.runtime) == (
         int(line),

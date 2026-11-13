@@ -267,8 +267,8 @@ describe('routing on machines', () => {
     try {
       const said = await ws.explain('hostname; hostname -s; ls')
       expect([...commands(said.node)].map((c) => [c.command, c.runtime, c.machine])).toEqual([
-        ['hostname', 'remote', 'box:a'],
-        ['hostname', 'remote', 'box:b'],
+        ['hostname', 'remote:a', 'box:a'],
+        ['hostname', 'remote:a', 'box:b'],
         ['ls', '', ''],
       ])
     } finally {
@@ -432,6 +432,62 @@ describe('routing on machines', () => {
     const ws = withMonty(new HostnameOnMontyOnB())
     try {
       await expect(ws.explain('hostname')).rejects.toThrow(RouteError)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Each remote entry is named for its machine, so a workspace holds one per
+  // machine and each program goes to the entry that captures it.
+  it('gives each machine a remote entry of its own', async () => {
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { a: new Box('a'), b: new Box('b') },
+        runtimes: [
+          new RemoteRuntime({ captures: ['python3'], machine: 'a' }),
+          new RemoteRuntime({ captures: ['node'], machine: 'b' }),
+        ],
+      },
+    )
+    try {
+      expect(ws.runtimes().map((r) => r.name)).toEqual(['remote:a', 'remote:b', 'workspace'])
+      const said = await ws.shell('python3 x.py; node x.js; python3 x.py | node')
+      expect(DEC.decode(said.stdout)).toBe('a\nb\nb\n')
+      const named = await ws.shell('node x.js', { runtime: 'remote:b' })
+      expect(DEC.decode(named.stdout)).toBe('b\n')
+      await expect(ws.shell('node x.js', { runtime: 'remote' })).rejects.toThrow(
+        /ambiguous runtime: 'remote'/,
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // A program two remote entries both capture goes to the first listed, on
+  // every line, after an entry is added, and to the next once it is removed.
+  it('keeps what two remote entries capture on the first', async () => {
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { a: new Box('a'), b: new Box('b'), c: new Box('c') },
+        runtimes: [new RemoteRuntime({ machine: 'a' }), new RemoteRuntime({ machine: 'b' })],
+      },
+    )
+    try {
+      expect(DEC.decode((await ws.shell('train; train')).stdout)).toBe('a\na\n')
+      ws.addRuntime(new RemoteRuntime({ machine: 'c' }))
+      expect(ws.runtimes().map((r) => r.name)).toEqual([
+        'remote:a',
+        'remote:b',
+        'remote:c',
+        'workspace',
+      ])
+      expect(DEC.decode((await ws.shell('train')).stdout)).toBe('a\n')
+      await ws.removeRuntime('remote:a')
+      expect(DEC.decode((await ws.shell('train')).stdout)).toBe('b\n')
     } finally {
       await ws.close()
     }

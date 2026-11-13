@@ -16,6 +16,8 @@ import { expect, it } from 'vitest'
 import { buildApp } from '../app.ts'
 
 interface Machine {
+  type: string
+  name: string
   id: string
   state: string
   processes?: { command: string }[]
@@ -39,11 +41,10 @@ it('lists the host and reads it with its processes', async () => {
     const listed = await app.inject({ method: 'GET', url: '/v1/workspaces/w/machines' })
     expect(listed.statusCode).toBe(200)
     const [host] = listed.json<{ items: Machine[] }>().items
-    expect(host?.id.startsWith('host:')).toBe(true)
-    expect(host?.state).toBe('managed')
+    expect([host?.type, host?.id, host?.state]).toEqual(['host', host?.name, 'managed'])
     const one = await app.inject({
       method: 'GET',
-      url: `/v1/workspaces/w/machines/${encodeURIComponent(host?.id ?? '')}`,
+      url: `/v1/workspaces/w/machines/${encodeURIComponent(`host:${host?.name ?? ''}`)}`,
     })
     expect(one.statusCode).toBe(200)
     expect(one.json<Machine>().processes?.map((p) => p.command)).toContain('sleep 30')

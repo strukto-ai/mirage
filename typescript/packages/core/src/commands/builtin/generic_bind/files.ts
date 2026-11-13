@@ -523,12 +523,25 @@ async function statRefusingDirs(files: CommandFiles, ctx: Context, p: PathSpec):
     st = await files.stat(p)
   } catch (e) {
     if ((e as { code?: string }).code !== 'ENOENT' || isDotWalkError(e)) throw e
-    if (await isImplicitDir(files.readdir, p)) throw eisdir(p)
-    if (isNamespaceDir(ctx, p)) throw eisdir(p)
-    throw e
+    if (await isImplicitDir(files.readdir, p)) st = await landedOrDir(files, p)
+    else if (isNamespaceDir(ctx, p)) throw eisdir(p)
+    else throw e
   }
   if (st.type === FileType.DIRECTORY) throw eisdir(p)
   return st
+}
+
+// A file written between the stat that missed it and the listing that named
+// it looks like a prefix of deeper keys, so `echo hi > f &` then `cat f` read
+// the new file as a directory. A second stat tells the two apart: only a
+// prefix misses again. Mirrors Python's `_landed_or_dir`.
+async function landedOrDir(files: CommandFiles, p: PathSpec): Promise<FileStat> {
+  try {
+    return await files.stat(p)
+  } catch (e) {
+    if ((e as { code?: string }).code !== 'ENOENT') throw e
+    throw eisdir(p)
+  }
 }
 
 // Stat for the read-family chokepoint (`splitReadable`): a directory operand

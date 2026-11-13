@@ -197,8 +197,8 @@ async def test_explain_names_the_machine_a_command_runs_on():
         said = await ws.explain("hostname; hostname -s; ls")
         commands = [node for node in _commands(said.node) if node.command]
         assert [(c.command, c.runtime, c.machine) for c in commands] == [
-            ("hostname", "remote", "box:a"),
-            ("hostname", "remote", "box:b"),
+            ("hostname", "remote:a", "box:a"),
+            ("hostname", "remote:a", "box:b"),
             ("ls", "", ""),
         ]
     finally:
@@ -417,5 +417,60 @@ async def test_explain_refuses_a_command_route_to_a_machine_as_a_route_error():
     try:
         with pytest.raises(RouteError, match="runs on the workspace's"):
             await ws.explain("hostname")
+    finally:
+        await ws.close()
+
+
+# Each remote entry is named for its machine, so a workspace holds one per
+# machine and each program goes to the entry that captures it.
+@pytest.mark.asyncio
+async def test_each_machine_takes_a_remote_entry_of_its_own():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"a": _Box("a"), "b": _Box("b")},
+        runtimes=[
+            RemoteRuntime(["python3"], machine="a"),
+            RemoteRuntime(["node"], machine="b"),
+        ],
+    )
+    try:
+        assert [r.name for r in ws.runtimes()] == [
+            "remote:a",
+            "remote:b",
+            "workspace",
+        ]
+        said = await ws.shell("python3 x.py; node x.js; python3 x.py | node")
+        assert said.stdout == b"a\nb\nb\n"
+        said = await ws.shell("node x.js", runtime="remote:b")
+        assert said.stdout == b"b\n"
+        with pytest.raises(ValueError, match="ambiguous runtime: 'remote'"):
+            await ws.shell("node x.js", runtime="remote")
+    finally:
+        await ws.close()
+
+
+# A program two remote entries both capture goes to the first listed, on
+# every line, after an entry is added, and to the next once it is removed.
+@pytest.mark.asyncio
+async def test_the_first_remote_entry_keeps_what_both_capture():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"a": _Box("a"), "b": _Box("b"), "c": _Box("c")},
+        runtimes=[RemoteRuntime(machine="a"), RemoteRuntime(machine="b")],
+    )
+    try:
+        assert (await ws.shell("train; train")).stdout == b"a\na\n"
+        ws.add_runtime(RemoteRuntime(machine="c"))
+        assert [r.name for r in ws.runtimes()] == [
+            "remote:a",
+            "remote:b",
+            "remote:c",
+            "workspace",
+        ]
+        assert (await ws.shell("train")).stdout == b"a\n"
+        await ws.remove_runtime("remote:a")
+        assert (await ws.shell("train")).stdout == b"b\n"
     finally:
         await ws.close()

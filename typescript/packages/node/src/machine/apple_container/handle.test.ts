@@ -153,7 +153,7 @@ describe('AppleContainerMachine', () => {
   it("registers under the config name 'apple_container'", () => {
     const machine = buildMachine('box', { provider: 'apple_container', container: 'box' })
     expect(machine).toBeInstanceOf(AppleContainerMachine)
-    expect(String(machine.id)).toBe('apple_container:box')
+    expect(String(machine.machine)).toBe('apple_container:box')
   })
 
   it('runs the line under the prelude with stdin and real stderr', async () => {

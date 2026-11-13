@@ -622,7 +622,7 @@ async def test_a_machine_credential_reads_a_pointer(monkeypatch, provider):
     assert box.config.api_key == "key_from_env"
     assert box.config.sandbox_id == "sbx-1"
     native, workspace = kwargs["runtimes"]
-    assert (native.name, native.default_machine) == ("remote", "box")
+    assert (native.name, native.default_machine) == ("remote:box", "box")
     assert workspace == "workspace"
 
 
@@ -675,7 +675,7 @@ async def test_the_ssh_machine_private_key_reads_a_pointer(monkeypatch):
         )
     )
     ssh = cfg.to_workspace_kwargs()["machines"]["gpu"]
-    assert str(ssh.id) == "ssh:gpu"
+    assert str(ssh.machine) == "ssh:gpu"
     assert ssh.config.private_key == "key-from-env"
 
 

@@ -29,7 +29,7 @@ import { buildVfs, knownVfsNames } from './vfs/registry.ts'
 import { hostResources, scanHost, stopHostRun, signalHost } from './machine/program.ts'
 import type { MachineProcess } from '@struktoai/mirage-core/execution/machine/types'
 import {
-  MachineId,
+  MachineName,
   type MachinePid,
   type MachineResources,
 } from '@struktoai/mirage-core/execution/types'
@@ -83,8 +83,8 @@ export class Workspace extends CoreWorkspace {
   }
 
   /** This host, by its name. */
-  protected override hostMachine(): MachineId {
-    return new MachineId('host', hostname())
+  protected override hostMachine(): MachineName {
+    return new MachineName('host', hostname())
   }
 
   private fuseSetupPromise: Promise<void> | null = null

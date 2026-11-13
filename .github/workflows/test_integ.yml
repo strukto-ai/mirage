@@ -399,10 +399,10 @@ jobs:
         working-directory: integ
         run: pnpm exec tsx hosting/run.ts --mounts
 
-  integ-edge:
+  integ-cloudflare:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
-    name: integ-edge (${{ matrix.group }})
+    name: integ-cloudflare (${{ matrix.group }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -430,17 +430,17 @@ jobs:
       - name: Bundle the Cloudflare package's Monty runtime
         working-directory: typescript/packages/cloudflare
         run: node scripts/bundle-monty.mjs
-      # The corpus's targets for every built-in CLI on an edge worker
+      # The corpus's targets for every built-in CLI on a Cloudflare worker
       # (workerd under wrangler dev), each line over the server API.
-      - name: Assert the edge groups preserve full coverage
+      - name: Assert the Cloudflare groups preserve full coverage
         if: matrix.group == 'ram'
         working-directory: integ
         run: pnpm exec tsx cloudflare/run.ts --check-groups
-      - name: Run the corpus on the edge host
+      - name: Run the corpus on the Cloudflare host
         working-directory: integ
         env:
-          EDGE_GROUP: ${{ matrix.group }}
-        run: pnpm exec tsx cloudflare/run.ts --group "$EDGE_GROUP"
+          CLOUDFLARE_GROUP: ${{ matrix.group }}
+        run: pnpm exec tsx cloudflare/run.ts --group "$CLOUDFLARE_GROUP"
 
   integ:
     needs: changes
@@ -2987,7 +2987,7 @@ jobs:
     name: integ-gate
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [changes, typescript-build, integ-edge, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-selftests, integ-shared-parity, integ-database, integ-data, integ-tidb-filesystem, integ-events, integ-fuse, integ-observability, integ-facets, integ-microsandbox, integ-kubernetes, integ-runtime, integ-e2b, integ-wandb, integ-shell-coverage]
+    needs: [changes, typescript-build, integ-cloudflare, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-selftests, integ-shared-parity, integ-database, integ-data, integ-tidb-filesystem, integ-events, integ-fuse, integ-observability, integ-facets, integ-microsandbox, integ-kubernetes, integ-runtime, integ-e2b, integ-wandb, integ-shell-coverage]
     if: always()
     steps:
       - name: Check required jobs

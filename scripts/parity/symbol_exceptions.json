@@ -611,7 +611,7 @@
     "_admit": "Python records the caller's account on the ASGI scope in one helper its three admit paths share; the Fastify hook sets req.account inline."
    },
    "typescript_only": {
-    "authenticator": "The bearer and JWT check as a function of the Authorization header, so the Fastify hook and the edge host's fetch handler share it. Python's AuthMiddleware is its one ASGI host."
+    "authenticator": "The bearer and JWT check as a function of the Authorization header, so the Fastify hook and the Cloudflare host's fetch handler share it. Python's AuthMiddleware is its one ASGI host."
    }
   },
   "server/routers/sessions": {
@@ -1337,7 +1337,7 @@
    "typescript_only": {
     "RAM_OPTIONS": "The TypeScript registry refuses unknown config keys against a per-backend key list, as DISK_OPTIONS does; Python's build_vfs reads the constructor's keywords.",
     "buildVfsFrom": "TypeScript splits its backends across core, node and browser, so each runtime's buildVfs is this one build over its own table; Python keeps every backend in one REGISTRY and needs no table parameter.",
-    "DIRECT_REGISTRY": "The token-holding backends (vfs/direct) node and edge add to core's table and the browser does not, since it reaches the same services through a proxy; Python has one host and one REGISTRY.",
+    "DIRECT_REGISTRY": "The token-holding backends (vfs/direct) node and cloudflare add to core's table and the browser does not, since it reaches the same services through a proxy; Python has one host and one REGISTRY.",
     "CONFIG_SCHEMAS": "A TypeScript registry entry is a factory that imports its config schema inside, so the schemas sit beside it to be read without building a VFS; a Python entry names its config class, which resolve_entry reads.",
     "ConfigSchemaLoader": "A TypeScript registry entry is a factory that imports its config schema inside, so the schemas sit beside it to be read without building a VFS; a Python entry names its config class, which resolve_entry reads."
    }
@@ -1422,6 +1422,10 @@
   "server/daemon_config": {
    "python_only": {
     "SIZE_KEYS": "Python's tomllib hands each [daemon] value back typed, so a size key takes an int or a string; TypeScript's reader returns every value as text and checks only the numeric keys."
+   },
+   "typescript_only": {
+    "BASIC_ESCAPES": "TypeScript reads config.toml with its own line reader, which decodes a basic string's escapes (a PEM's \\n) itself; Python's tomllib decodes them.",
+    "unescapeBasicString": "TypeScript reads config.toml with its own line reader, which decodes a basic string's escapes (a PEM's \\n) itself; Python's tomllib decodes them."
    }
   },
   "rs/session": {
@@ -1755,6 +1759,41 @@
   "execution/process/constants": {
    "typescript_only": {
     "NEVER_TAKEN": "Only Pyodide programs take signals through their runner (onSignal), and Pyodide runs on the TypeScript host alone."
+   }
+  },
+  "machine/cloudflare_container/config": {
+   "typescript_only": {
+    "CONTAINER_CONFIG_FIELDS": "A TypeScript runtime lists the keys its config takes, each with its type, so an unknown key fails loud at construction and a saved runtime's form is typed; Python reads both off the config dataclass."
+   }
+  },
+  "machine/cloudflare_container/constants": {
+   "typescript_only": {
+    "NO_WEBSOCKET": "TypeScript reaches a relay through the runtime's own WebSocket, which core alone on Node 20 lacks; Python's client always has aiohttp."
+   }
+  },
+  "machine/cloudflare_container/handle": {
+   "python_only": {
+    "PipeInput": "Python's pipe writer is a sync write and close over an async stdin, so a task sends the queued writes in order; TypeScript chains each write onto the last inside openPipe.",
+    "READ_BYTES": "Python reads a stream reader a bounded chunk at a time; a TypeScript reader hands over each chunk as it came."
+   },
+   "typescript_only": {
+    "PIPES": "workerd's exec takes its pipes as options and may answer a process without them; Python's container always pipes all three.",
+    "piped": "workerd's exec takes its pipes as options and may answer a process without them; Python's container always pipes all three."
+   }
+  },
+  "machine/cloudflare_container/relay": {
+   "python_only": {
+    "CLOSED": "Python raises the one lost-connection message from several places in its relay process; TypeScript builds it where the socket closes.",
+    "RelayInput": "A Python process's stdin is an object with async write and close; TypeScript's is a WritableStream built in place."
+   }
+  },
+  "machine/cloudflare_container/types": {
+   "python_only": {
+    "ProcessInput": "A Python process's stdin is an object with async write and close; TypeScript's is a WritableStream."
+   },
+   "typescript_only": {
+    "ExecOptions": "workerd's exec takes env and its pipes as options; Python's container takes env alone and always pipes all three.",
+    "RelaySocket": "TypeScript's client and the relay share one socket shape across a browser, Node and workerd; Python's client speaks aiohttp's WebSocket only."
    }
   }
  }

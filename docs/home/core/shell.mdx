@@ -94,7 +94,7 @@ Mirage's pids start at 4194305, past any Linux pid, so `$!`, `kill`, `wait` and
 
 ### Per-session mount modes
 
-Session mount modes can narrow access to `read`, `write`, or `exec` (`r`, `rw`, `rwx`). Unlisted mounts keep their configured modes. Interpreters such as `python3` and `js` require `exec`; shell scripts run with the permissions of each command they contain. Use an [agent profile](/home/profiles) to hide paths or restrict commands.
+Session mount modes can narrow access to `read`, `write`, or `exec` (`r`, `rw`, `rwx`). Unlisted mounts keep their configured modes. Interpreters such as `python3` and `js` require `exec`; shell scripts run with the permissions of each command they contain. Use an [session profile](/home/configuration/session) to hide paths or restrict commands.
 
 ## Limits
 
