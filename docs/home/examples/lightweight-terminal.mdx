@@ -260,13 +260,13 @@ terminal, so three `sleep 1` commands on session `a` take three seconds.
 
 ## Sharing and security
 
-- Terminals share the workspace's mounts, so a file one writes under `/work`
-  is visible to the others, and each can read the others' directories. To
-  keep an agent's files apart, give it its own workspace.
+- By default, terminals share the workspace's mounts, so a file one writes
+  under `/work` is visible to the others.
 - A [session profile](/home/configuration/session) and a
   [policy](/home/policy/overview) decide which commands a terminal may run
-  and which files it sees. [Policy & Security](/home/examples/policy-security)
-  walks through one.
+  and which files it sees, so each agent can have a folder the others cannot
+  see. [Policy & Security](/home/examples/policy-security) walks through one.
+  To keep everything apart, give an agent its own workspace.
 
 ## Use cases
 
