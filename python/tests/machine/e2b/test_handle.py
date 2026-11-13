@@ -993,6 +993,19 @@ async def test_sleep_leaves_alone_a_sandbox_only_an_earlier_workspace_reached():
     assert FakeMachine.paused == []
 
 
+@pytest.mark.asyncio
+async def test_sleep_pauses_a_sandbox_a_connect_under_way_at_close_reached():
+    machine = E2BMachine(
+        "box", config={"sandbox_id": "sb-live", "on_sleep": "pause"}
+    )
+    connecting = asyncio.ensure_future(machine._ensure_connected())
+    await asyncio.sleep(0)
+    await machine.close()
+    await connecting
+    await machine.sleep()
+    assert FakeMachine.paused == [("sb-live", {})]
+
+
 def test_on_sleep_takes_only_pause():
     with pytest.raises(ValueError, match="e2b on_sleep must be one of pause"):
         E2BMachine("box", config={"sandbox_id": "sb", "on_sleep": "stop"})

@@ -187,7 +187,10 @@ class E2BMachine(MachineHandle, PipeTransportMixin, SleepableMixin):
 
     async def close(self) -> None:
         """Close as any machine does, letting the sleep after it pause only
-        what this workspace reached."""
+        what this workspace reached; a connect still under way settles
+        first."""
+        async with self._connect_lock:
+            pass
         self._pausable = self._reached
         self._reached = False
         await super().close()

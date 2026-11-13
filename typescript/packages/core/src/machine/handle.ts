@@ -176,7 +176,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   // Connect-once latch: the first run connects; later runs just execute.
   // Single-flight so concurrent first runs share one connect, and a failed
   // connect clears the slot so the next run retries.
-  private connecting: Promise<void> | null = null
+  protected connecting: Promise<void> | null = null
   private mounts: MachineMounts | null = null
   // The libfaketime the machine holds, asked once the first program runs
   // there under a system_time: null for none. Concurrent first runs share

@@ -196,8 +196,12 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
    * workspace that just closed reached it, keeping its disk and memory; the
    * next connect resumes it. A sandbox already gone has nothing to pause.
    */
-  /** Close as any machine does, letting the sleep after it pause only what this workspace reached. */
+  /**
+   * Close as any machine does, letting the sleep after it pause only what
+   * this workspace reached; a connect still under way settles first.
+   */
   override async close(): Promise<void> {
+    await Promise.allSettled([this.connecting])
     this.pausable = this.reached
     this.reached = false
     await super.close()

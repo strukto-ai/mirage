@@ -1058,6 +1058,16 @@ describe('E2BMachine sleep', () => {
     await machine.sleep()
     expect(FakeMachine.paused).toEqual([])
   })
+  it('pauses a sandbox a connect still under way at close reached', async () => {
+    const machine = new FakedE2BMachine('box', { sandboxId: 'sb-live', onSleep: 'pause' })
+    const connecting = (
+      machine as unknown as { ensureConnected(): Promise<void> }
+    ).ensureConnected()
+    await machine.close()
+    await connecting
+    await machine.sleep()
+    expect(FakeMachine.paused).toEqual([['sb-live', {}]])
+  })
   it('takes no onSleep other than pause', () => {
     expect(() => new FakedE2BMachine('box', { sandboxId: 'sb', onSleep: 'stop' as never })).toThrow(
       'e2b onSleep must be one of pause, not "stop"',
