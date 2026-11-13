@@ -372,7 +372,7 @@ agent creates nothing, so it can ask which page to use:
 ```bash
 run <<'SH'
 parent=$(ntn api v1/search -d '{"query": "Release Notes"}' |
-  jq -r '[.results[] | select((.properties.title.title | map(.plain_text) | join("")) == "Release Notes") | .id] |
+  jq -r '[.results[] | select((.properties.title.title // [] | map(.plain_text) | join("")) == "Release Notes") | .id] |
     if length == 1 then .[0] else error("\(length) pages are titled Release Notes") end') &&
 page=$(ntn pages create --parent "page:$parent" < /work/release-notes.md) &&
 ntn api "v1/pages/$page" | jq -r .url

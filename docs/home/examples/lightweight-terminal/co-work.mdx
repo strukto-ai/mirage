@@ -399,18 +399,18 @@ SH
 
 ## Confirm and tell the team
 
-The agent replies to each booked candidate in their own thread and flags
-their message as answered, then checks the sent folder for the five replies.
-`mailbox list` gives that folder the role `sent`. It writes the schedule to a
-file, posts it to the hiring channel, `#hiring-backend`, by its Slack channel
-ID, and reads the post back:
+The agent replies to each booked candidate in their own thread and, once
+the reply is sent, flags their message as answered. It then checks the sent
+folder for the five replies. `mailbox list` gives that folder the role
+`sent`. It writes the schedule to a file, posts it to the hiring channel,
+`#hiring-backend`, by its Slack channel ID, and reads the post back:
 
 ```bash
 run <<'SH'
 jq -r '.[] | select(.start) | "\(.id) \(.start[0:16] | sub("T"; " at "))"' /work/plan.json |
 while read -r id when; do
-  himalaya message reply $id --send --body "Thank you. Your interview is booked for $when UTC and lasts one hour. You will meet Dana Lee and Omar Haddad from the backend team." > /dev/null
-  himalaya flag add $id --flag answered > /dev/null
+  himalaya message reply $id --send --body "Thank you. Your interview is booked for $when UTC and lasts one hour. You will meet Dana Lee and Omar Haddad from the backend team." > /dev/null &&
+    himalaya flag add $id --flag answered > /dev/null
 done
 sent=$(himalaya --json mailbox list | jq -r '.mailboxes[] | select(.role == "sent") | .id')
 himalaya --json envelope list -m "$sent" | jq -r '.envelopes[].to[0].name'
@@ -443,7 +443,9 @@ newest first. The rest is the post in `#hiring-backend`.
 safe way for an agent to show a draft before it sends.
 
 The `answered` flag is kept in the mailbox, so the next morning's run skips
-the five booked candidates and plans only new replies and Priya's.
+the five booked candidates and plans only new replies and Priya's. A reply
+that fails to send prints its error and leaves the message unflagged, so the
+next run tries that candidate again.
 
 The round ends with what the agent can report:
 
