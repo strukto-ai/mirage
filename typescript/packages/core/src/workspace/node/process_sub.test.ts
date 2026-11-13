@@ -3,6 +3,7 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
 import { Workspace } from '../workspace/workspace.ts'
+import { inRequest } from '../../io/web/request.ts'
 
 function barrier(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void
@@ -138,4 +139,16 @@ it.each([
   } finally {
     await ws.close()
   }
+})
+
+it('joins an unread producer before the command ends on an edge runtime', async () => {
+  const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+  const io = await inRequest(() =>
+    ws.shell(
+      ': <(sleep .1; echo late > /done); (: <(sleep .05; echo late); wait "$!"; echo closed:$?)',
+    ),
+  )
+  expect(new TextDecoder().decode(io.stdout)).toBe('closed:141\n')
+  const done = await ws.shell('cat /done')
+  expect(new TextDecoder().decode(done.stdout)).toBe('late\n')
 })
