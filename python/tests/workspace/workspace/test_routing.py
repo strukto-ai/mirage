@@ -474,3 +474,82 @@ async def test_the_first_remote_entry_keeps_what_both_capture():
         assert (await ws.shell("train")).stdout == b"b\n"
     finally:
         await ws.close()
+
+
+# A stage's one program records its own words, expanded, as bash's exec
+# does, so each pass of a loop names what it ran.
+@pytest.mark.asyncio
+async def test_a_loop_records_each_programs_expanded_words():
+    ws = _workspace()
+    try:
+        said = await ws.shell("for i in 1 2; do hostname -s$i | cat; done")
+        assert said.stdout == b"a\na\n"
+        commands = [p.command for p in await ws.processes()]
+        assert [c for c in commands if c.startswith("hostname")] == [
+            "hostname -s1",
+            "hostname -s2",
+        ]
+    finally:
+        await ws.close()
+
+
+# What a program reads from another names the process writing it: the
+# stage before it as its stdin, a `<( )` by the descriptor it got, a
+# `$( )` as its arguments.
+@pytest.mark.asyncio
+async def test_a_program_names_the_processes_it_reads_from():
+    ws = _workspace()
+    try:
+        read = {}
+        for line, reader in (
+            ("hostname | hostname", "hostname"),
+            ("hostname <(hostname); true", "hostname /dev/fd/63"),
+            ('hostname "$(hostname)"; true', "hostname a"),
+        ):
+            assert (await ws.shell(line)).stdout == b"a\n"
+            ran = {p.pid: p for p in await ws.processes()}
+            [program] = [
+                p
+                for p in ran.values()
+                if p.command == reader and p.runtime is not None
+            ][-1:]
+            read[line] = (
+                ran[program.stdin].command if program.stdin else None,
+                {fd: ran[pid].command for fd, pid in program.fd.items()},
+                [ran[pid].command for pid in program.argv],
+            )
+        assert read == {
+            "hostname | hostname": ("hostname", {}, []),
+            "hostname <(hostname); true": (None, {63: "hostname"}, []),
+            'hostname "$(hostname)"; true': (None, {}, ["hostname"]),
+        }
+    finally:
+        await ws.close()
+
+
+# A forked shell's last program runs in the shell's place, as bash execs
+# it there: a subshell's and a substitution's leave no shell between it
+# and the line, a line's own stays its session's `$$`.
+@pytest.mark.asyncio
+async def test_a_forked_shells_last_program_runs_as_the_shell():
+    ws = _workspace()
+    try:
+        for line in ("(true; hostname); true", "x=$(hostname); echo $x"):
+            assert (await ws.shell(line)).stdout == b"a\n"
+        shell = int((await ws.shell("echo $$")).stdout)
+        programs = [
+            p
+            for p in await ws.processes()
+            if p.runtime is not None and p.line is not None
+        ]
+        assert [(p.command, p.parent) for p in programs] == [
+            ("hostname", shell),
+            ("hostname", shell),
+        ]
+        await ws.shell("hostname")
+        [line] = [p for p in await ws.processes() if p.command == "hostname"][
+            -1:
+        ]
+        assert line.parent == shell
+    finally:
+        await ws.close()

@@ -74,7 +74,7 @@ export class ProcessSubScope {
     private readonly signal?: AbortSignal,
   ) {}
 
-  open = (node: TSNodeLike, executeLine: ProcessSubLine): Promise<string> => {
+  open = async (node: TSNodeLike, executeLine: ProcessSubLine): Promise<string> => {
     const [root] = this.registry.resolve('/dev/null')
     if (!(root instanceof DevVFS)) throw new Error('missing device filesystem')
     const dev = root.forSession(this.context.session.sessionId)
@@ -94,6 +94,11 @@ export class ProcessSubScope {
       task: Promise.resolve(),
     }
     const output = new SubstitutionConsole(endpoint, this.sink ?? this.capture, abort)
+    const writers = this.context.frame.writers
+    let begin = (): void => undefined
+    const begun = new Promise<void>((resolve) => {
+      begin = resolve
+    })
     // The line starts once the command naming it has, as bash's forked child
     // does and Python's task does: a consumer that reads nothing must not
     // close its pipe before the command's first write lands.
@@ -103,6 +108,10 @@ export class ProcessSubScope {
           sink: output,
           signal,
           ...(endpoint.readable ? {} : { stdin: endpoint.pipe.stream() }),
+          started: (process) => {
+            if (endpoint.readable) writers.push([path, process.record.id.pid])
+            begin()
+          },
         }),
       )
       .then(async (io) => {
@@ -118,11 +127,15 @@ export class ProcessSubScope {
           console.error('process substitution failed after cancellation', child.failure)
       })
       .finally(() => {
+        begin()
         if (endpoint.readable) endpoint.pipe.end(child.failure)
         else endpoint.pipe.closeReader()
       })
     this.held.push(child)
-    return Promise.resolve(path)
+    // A `<( )` the command reads has started before the command does, as bash
+    // forks it, so the command's program knows the process writing the path.
+    if (endpoint.readable) await begun
+    return path
   }
 
   close(failed = false): Promise<void> {

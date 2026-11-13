@@ -907,6 +907,8 @@ async def execute_node(
     process_subs = ProcessSubScope(context, registry, sink)
     previous = context.frame.process_sub
     context.frame.process_sub = process_subs.open
+    writers = context.frame.writers
+    context.frame.writers = []
     try:
         # What expanding the node printed (a substitution's stderr) goes
         # out with the node's own stderr, unless its caller collects it: a
@@ -952,6 +954,7 @@ async def execute_node(
         raise
     finally:
         context.frame.process_sub = previous
+        context.frame.writers = writers
 
 
 def _names_process_sub(word: TSNodeLike) -> bool:

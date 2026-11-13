@@ -16,6 +16,7 @@ import {
   trace,
   type Attributes,
   type Context,
+  type Link,
   type Span,
   type SpanContext,
   type SpanOptions,
@@ -56,6 +57,7 @@ interface Seen {
   end?: unknown
   parent: SpanContext | undefined
   context: SpanContext
+  links: Link[]
 }
 
 /**
@@ -77,6 +79,7 @@ function exported(): Seen[] {
           spanId: String(spans.length + 1).padStart(16, '0'),
           traceFlags: 1,
         },
+        links: [],
       }
       spans.push(seen)
       const span = {
@@ -87,6 +90,10 @@ function exported(): Seen[] {
         },
         end: (time?: unknown) => {
           seen.end = time
+        },
+        addLink: (link: Link) => {
+          seen.links.push(link)
+          return span
         },
         spanContext: () => seen.context,
       }
@@ -969,5 +976,63 @@ it("puts a nested job's process under its job", async () => {
     'job (train 1 & wait)',
     'process (train 1 & wait) & wait',
     'command (train 1 & wait) & wait',
+  ])
+})
+
+// A process links to each it read from, `mirage.input` naming where: its
+// stdin, the `/dev/fd` path a `<( )` gave it, or its arguments.
+it('links a process to each it read from', async () => {
+  const spans = exported()
+  const ws = new Workspace(
+    { '/': new RAMVFS() },
+    {
+      mode: MountMode.EXEC,
+      machines: { a: new Box('a') },
+      runtimes: [new RemoteRuntime({ captures: ['train'], machine: 'a' })],
+    },
+  )
+  try {
+    await ws.shell('train 1 | train 2')
+    await ws.shell('train 3 <(train 4); true')
+    await ws.shell('train 5 "$(train 6)"; true')
+  } finally {
+    await ws.close()
+    trace.disable()
+  }
+  const byId = new Map(spans.map((s) => [s.context.spanId, s]))
+  const links = spans
+    .flatMap((s) =>
+      s.links.map((link) => [
+        spanName(s),
+        link.attributes?.['mirage.input'],
+        spanName(byId.get(link.context.spanId) ?? s),
+      ]),
+    )
+    .sort()
+  expect(links).toEqual([
+    ['process train 2', 'stdin', 'process train 1'],
+    ['process train 3 /dev/fd/63', '/dev/fd/63', 'process train 4'],
+    [`process train 5 ${CHECK_MARK}`, 'argv', 'process train 6'],
+  ])
+})
+
+// A call to a mount goes under the process that made it.
+it('puts a vfs call under the process that made it', async () => {
+  const spans = exported()
+  const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+  try {
+    await ws.shell('echo a > /a.txt; (cat /a.txt)')
+  } finally {
+    await ws.close()
+    trace.disable()
+  }
+  const byId = new Map(spans.map((s) => [s.context.spanId, s]))
+  const calls = spans
+    .filter((s) => s.name.startsWith('vfs.') && s.parent !== undefined)
+    .map((s) => [s.name, spanName(byId.get(s.parent?.spanId ?? '') ?? s)])
+    .sort()
+  expect(calls).toEqual([
+    ['vfs.read', 'process (cat /a.txt)'],
+    ['vfs.write', 'process echo a > /a.txt; (cat /a.txt)'],
   ])
 })

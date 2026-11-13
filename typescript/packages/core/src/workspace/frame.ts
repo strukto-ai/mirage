@@ -9,6 +9,7 @@ export type ProcessSubLine = (
     stdin?: ByteSource | null
     sink?: JobConsole
     signal?: AbortSignal
+    started?: (process: ProcessHandle) => void
   },
 ) => Promise<IOResult>
 
@@ -36,6 +37,10 @@ export class ExecutionFrame {
   // (`substitution`).
   reports: Uint8Array[] = []
   substitution = false
+  // The processes the running command's substitutions started, each with the
+  // `/dev/fd` path a `<( )` gave it, null for a `$( )`, which its program
+  // reads.
+  writers: (readonly [string | null, number])[] = []
 
   fork(): ExecutionFrame {
     const child = new ExecutionFrame()

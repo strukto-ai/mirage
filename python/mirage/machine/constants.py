@@ -221,6 +221,10 @@ RUN_START_WAIT_SECONDS = 10.0
 # Where a run reports on its machine, then the workspace and the process.
 RUN_STATUS_PREFIX = "/tmp/.mirage-run-"
 
+# Where a process substitution a program names by path becomes a named
+# pipe on its machine, which Mirage feeds.
+FIFO_PREFIX = "/tmp/.mirage-fd-"
+
 # Every program runs as a child of this wrapper, which outlives it to say
 # how it ended, since an exec holds on while anything the program started
 # keeps its output open (E2B, msb). ``$1`` is the file it reports in, which

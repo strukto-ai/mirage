@@ -15,8 +15,11 @@
 import type { Context } from '../../commands/config.ts'
 import type { MachineTable } from '../../execution/machine/table.ts'
 import type { MachineName } from '../../execution/types.ts'
+import { FIFO_PREFIX, RUN_DRAIN_SECONDS } from '../../machine/constants.ts'
 import type { MachineHandle } from '../../machine/handle.ts'
-import type { PathSpec } from '../../types.ts'
+import { FileType, type PathSpec } from '../../types.ts'
+import { shellQuote } from '../../utils/quote.ts'
+import type { Files } from '../../workspace/files.ts'
 import { Runtime } from '../base.ts'
 import type { RuntimeOptions } from '../config.ts'
 import { EXTERNAL_COMMANDS } from '../constants.ts'
@@ -27,6 +30,41 @@ import {
   type ProcessExecutorMixin,
 } from '../mixin.ts'
 import type { OutputFn, RunResult } from '../types.ts'
+
+/**
+ * Whether a program's word names a live process substitution, the `/dev/fd/N`
+ * the shell handed it. Mirrors Python's `_substitution`.
+ */
+async function substitution(files: Files, text: string): Promise<boolean> {
+  if (!text.startsWith('/dev/fd/')) return false
+  try {
+    return (await files.stat(text)).type === FileType.FIFO
+  } catch (err) {
+    if ((err as { code?: string } | null)?.code !== 'ENOENT') throw err
+    console.debug(`${text}: not found`, err)
+    return false
+  }
+}
+
+/**
+ * Stream a process substitution into the named pipe on the machine that
+ * stands for it, while the pipe is still there. Mirrors Python's `_feed`.
+ */
+async function feed(
+  handle: MachineHandle,
+  files: Files,
+  text: string,
+  fifo: string,
+  env: Record<string, string>,
+): Promise<RunResult> {
+  const quoted = shellQuote(fifo)
+  return handle.execLine(
+    `[ -p ${quoted} ] && exec cat > ${quoted}`,
+    await files.read(text, { stream: true }),
+    env,
+    '/',
+  )
+}
 
 /** A machine entry's options: a runtime's, and the machine a run goes to by default. */
 export interface MachineOptions extends RuntimeOptions {
@@ -155,7 +193,13 @@ export class RemoteRuntime
     )
   }
 
-  runProcess(
+  /**
+   * Run one program on the machine. A process substitution it names by path
+   * (`node read.js <(python3 gen.py)`) becomes a named pipe on that machine,
+   * which Mirage feeds while the program runs, as bash hands a program a pipe
+   * it shares. Mirrors Python's `run_process`.
+   */
+  async runProcess(
     _engine: undefined,
     _paths: PathSpec[],
     texts: string[],
@@ -163,7 +207,43 @@ export class RemoteRuntime
     output: OutputFn | undefined,
     errors?: OutputFn,
   ): Promise<RunResult> {
-    return this.handle(ctx).run(texts, ctx, this.binding, output ?? null, errors ?? null)
+    const handle = this.handle(ctx)
+    const env = { ...handle.config.env }
+    const argv = [...texts]
+    const feeds: [string, Promise<void>][] = []
+    try {
+      for (const [at, text] of texts.entries()) {
+        if (ctx.vfs == null || !(await substitution(ctx.vfs, text))) continue
+        const fifo = `${FIFO_PREFIX}${crypto.randomUUID().replaceAll('-', '')}`
+        const made = await handle.execLine(`mkfifo ${shellQuote(fifo)}`, null, env, '/')
+        if (made.exitCode !== 0) {
+          console.debug(`${fifo}: mkfifo exited ${String(made.exitCode)}`)
+          continue
+        }
+        argv[at] = fifo
+        feeds.push([
+          fifo,
+          feed(handle, ctx.vfs, text, fifo, env).then(
+            () => undefined,
+            (err: unknown) => {
+              console.debug(`${fifo}: feed failed`, err)
+            },
+          ),
+        ])
+      }
+      return await handle.run(argv, ctx, this.binding, output ?? null, errors ?? null)
+    } finally {
+      for (const [fifo, fed] of feeds) {
+        const quoted = shellQuote(fifo)
+        await handle.execLine(`exec 3<>${quoted}; exec 3>&-; rm -f ${quoted}`, null, env, '/')
+        let timer: ReturnType<typeof setTimeout> | undefined
+        await Promise.race([
+          fed,
+          new Promise<void>((resolve) => (timer = setTimeout(resolve, RUN_DRAIN_SECONDS * 1000))),
+        ])
+        clearTimeout(timer)
+      }
+    }
   }
 
   /** Land what a line's programs left on every machine. */

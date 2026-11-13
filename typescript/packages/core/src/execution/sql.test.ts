@@ -199,6 +199,9 @@ describe('SqlExecutionStore', () => {
       error: null,
       ancestors: [1, 3],
       machineInstance: 'tools-1',
+      stdin: 2,
+      fd: { 63: 4 },
+      argv: [5],
     }
     a.note(process)
     a.note(lineOf(0))

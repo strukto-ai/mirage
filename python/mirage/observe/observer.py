@@ -27,7 +27,7 @@ from opentelemetry import trace
 from mirage.execution.constants import HISTORY_MAX_RECORDS
 from mirage.execution.job.types import Job
 from mirage.execution.process.types import Process, ProcessState
-from mirage.execution.types import MachineName
+from mirage.execution.types import MachineName, ProcessId
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.types import IOResult
 from mirage.io.yield_budget import YieldBudget
@@ -184,10 +184,12 @@ def _end_line(
     exit_code: int,
     output: tuple[bytes, bytes],
     records: list[OpRecord],
+    under: Callable[[OpRecord], context_api.Context | None],
 ) -> None:
     """Close a typed line's ``command`` span: how it ended, the start of
-    its stdout and stderr, and under it a ``vfs.<call>`` span for each
-    call it made to a mount. Each span
+    its stdout and stderr, and a ``vfs.<call>`` span for each call it
+    made to a mount, under the span of the process that made it, else
+    under the line's. Each span
     also carries its start or end and its length in milliseconds, as the
     history's entries have them, for a tracer that can't be given a
     span's times. ``TRACE_CONTENT_ENV`` leaves out the output and the
@@ -201,6 +203,9 @@ def _end_line(
         output (tuple[bytes, bytes]): its stdout and stderr as it wrote
             them.
         records (list[OpRecord]): the calls it made.
+        under (Callable[[OpRecord], context_api.Context | None]): the
+            context of the span of the process that made a call, None
+            when there is none.
     """
     content = _trace_content()
     line.set_attribute("mirage.exit_code", exit_code)
@@ -218,7 +223,7 @@ def _end_line(
         for rec in calls:
             call = tracer.start_span(
                 f"vfs.{rec.op}",
-                context=parent,
+                context=under(rec) or parent,
                 start_time=(rec.timestamp - rec.duration_ms) * _NS_PER_MS,
                 attributes={
                     "mirage.vfs.path": rec.path,
@@ -294,11 +299,13 @@ class Observer:
     ahead of the commands it acts on. A session with no history sets no
     floor.
 
-    Each typed line also goes to OpenTelemetry as a span, its vfs calls
-    as spans under it, and so does each job and process once it ends: a
-    process under the one that started it, a job's process under its
-    job, and the line's own under the line's span while the newest
-    ``HISTORY_MAX_RECORDS`` lines' spans are known; nothing leaves the
+    Each typed line also goes to OpenTelemetry as a span, and so does
+    each job and process once it ends: a process under the one that
+    started it, a job's process under its job, and the line's own under
+    the line's span while the newest ``HISTORY_MAX_RECORDS`` lines' spans
+    are known, each vfs call under the process that made it. A process
+    links to each it reads from, ``mirage.input`` naming where: its
+    ``stdin``, a ``/dev/fd`` path or its ``argv``. Nothing leaves the
     process until an SDK is set up. Tracing stops at the workspace's own
     machine and runtimes: a program a runtime runs elsewhere starts no
     trace of its own there.
@@ -490,6 +497,13 @@ class Observer:
                 io.exit_code,
                 (stdout, stderr),
                 op_records,
+                lambda rec: (
+                    None
+                    if rec.process is None
+                    else self._context(
+                        ("process", line, ProcessId.parse(rec.process).pid)
+                    )
+                ),
             )
         await self._log(
             LogEntry(
@@ -507,7 +521,8 @@ class Observer:
 
     def trace_process(self, record: Process) -> None:
         """Send an ended process to OpenTelemetry as a ``process`` span:
-        what it ran, where and as whom, and how it ended.
+        what it ran, where and as whom, how it ended, and a link to each
+        process it read from, whose span is known by then.
 
         Args:
             record (Process): the process's record.
@@ -522,6 +537,13 @@ class Observer:
             span.set_attribute("mirage.signal", record.signal)
         if record.error is not None:
             span.set_attribute("mirage.error", record.error)
+        inputs = [] if record.stdin is None else [("stdin", record.stdin)]
+        inputs += [(f"/dev/fd/{fd}", pid) for fd, pid in record.fd.items()]
+        inputs += [("argv", pid) for pid in record.argv]
+        for value, pid in inputs:
+            known = self._known(record, pid)
+            if known is not None:
+                span.add_link(known, {"mirage.input": value})
         span.set_attributes(
             {
                 "process.pid": record.shown_pid,
@@ -684,6 +706,33 @@ class Observer:
         return self._start(
             ("process", line, record.pid), attributes, under, record.started_at
         )
+
+    def _known(self, record: Process, pid: int) -> trace.SpanContext | None:
+        """The span of the process ``pid`` of ``record``'s line, opened now
+        when it still runs, None when it is not known.
+
+        Args:
+            record (Process): a process of the line.
+            pid (int): the other process.
+        """
+        line = record.line.value if record.line is not None else None
+        span = self._open.get(("process", line, pid))
+        if span is not None:
+            return span.get_span_context()
+        known = self._closed.get(("process", line, pid))
+        if known is not None:
+            return known
+        other = next(
+            (
+                p
+                for p in (self._processes() if self._processes else [])
+                if p.pid == pid and p.line == record.line
+            ),
+            None,
+        )
+        if other is None:
+            return None
+        return self._process_span(other).get_span_context()
 
     def _job_span(self, record: Job, process: Process | None) -> trace.Span:
         """``record``'s span, opened the first time it is needed from its

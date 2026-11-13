@@ -31,6 +31,11 @@ export interface ProcessUsage {
  * process stays under an ancestor whose own record has gone. `stages` are the
  * pids of the pipeline a background job runs; bash starts those from its
  * shell, so the job's own process has no row in `ps`.
+ *
+ * What it reads from other processes names their pids: `stdin` the one whose
+ * stdout is its stdin (the stage before it in a pipeline), `fd` the one
+ * writing each descriptor a `<( )` gave it, by number, and `argv` each whose
+ * output a `$( )` made its arguments of.
  */
 export interface Process {
   readonly id: ProcessId
@@ -55,6 +60,9 @@ export interface Process {
   readonly usage?: ProcessUsage | null
   /** What its machine's provider called the machine when it ran there. */
   readonly machineInstance?: string | null
+  readonly stdin?: number | null
+  readonly fd?: Readonly<Record<number, number>>
+  readonly argv?: readonly number[]
 }
 
 /** Whether a process is a program on a machine, not Mirage's own. */

@@ -272,6 +272,7 @@ async def recurse(
     """
     records = opts.pop("records", None)
     read = opts.pop("read", None)
+    began = opts.pop("started", None)
     if handed is None:
         inner = None
     elif node is None:
@@ -453,6 +454,8 @@ async def recurse(
             def started(process: ProcessHandle) -> None:
                 session.process_id = process.record.pid
                 context.frame.shell = process
+                if began is not None:
+                    began(process)
 
             process = start_shell(
                 opts["job_table"].processes,

@@ -1,5 +1,5 @@
 from collections.abc import Callable, Coroutine
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
@@ -46,6 +46,11 @@ class Process:
     whose own record has gone. ``stages`` are the pids of the pipeline a
     background job runs; bash starts those from its shell, so the job's
     own process has no row in ``ps``.
+
+    What it reads from other processes names their pids: ``stdin`` the
+    one whose stdout is its stdin (the stage before it in a pipeline),
+    ``fd`` the one writing each descriptor a ``<( )`` gave it, by number,
+    and ``argv`` each whose output a ``$( )`` made its arguments of.
     """
 
     id: ProcessId
@@ -69,6 +74,9 @@ class Process:
     stages: tuple[int, ...] = ()
     usage: ProcessUsage | None = None
     machine_instance: str | None = None
+    stdin: int | None = None
+    fd: dict[int, int] = field(default_factory=dict)
+    argv: tuple[int, ...] = ()
 
     @property
     def pid(self) -> int:

@@ -20,6 +20,7 @@ class ProcessSubLine(Protocol):
         *,
         stdin: ByteSource | None = None,
         sink: JobConsole | None = None,
+        started: Callable[[ProcessHandle], None] | None = None,
     ) -> IOResult: ...
 
 
@@ -35,7 +36,9 @@ class ExecutionFrame:
     jobs a signal ended that the running command reaped, which go out
     after its stderr, around a redirect of its own; a command
     substitution's shell, and the shells it forks, make none
-    (``substitution``).
+    (``substitution``). ``writers`` are the processes the running
+    command's substitutions started, each with the ``/dev/fd`` path a
+    ``<( )`` gave it, None for a ``$( )``, which its program reads.
     """
 
     diagnostics: list[str | bytes] = field(default_factory=list)
@@ -50,6 +53,7 @@ class ExecutionFrame:
     line_timeout: float | None = None
     shell: ProcessHandle | None = None
     substitution: bool = False
+    writers: list[tuple[str | None, int]] = field(default_factory=list)
 
     def fork(self) -> ExecutionFrame:
         """A child evaluation's frame, which starts empty but for the

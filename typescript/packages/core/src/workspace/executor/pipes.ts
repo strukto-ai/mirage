@@ -229,6 +229,7 @@ export async function handlePipe(
       },
       undefined,
       oneProgram(cmd, session),
+      i === 0 ? null : (stages[i - 1]?.record.id.pid ?? null),
     )
     child.processId = process.record.id.pid
     stages[i] = process

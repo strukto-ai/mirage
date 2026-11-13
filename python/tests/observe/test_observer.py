@@ -955,3 +955,64 @@ async def test_a_nested_jobs_process_goes_under_its_job(monkeypatch):
         "process (train 1 & wait) & wait",
         "command (train 1 & wait) & wait",
     ]
+
+
+# A process links to each it read from, `mirage.input` naming where: its
+# stdin, the `/dev/fd` path a `<( )` gave it, or its arguments.
+@pytest.mark.asyncio
+async def test_a_process_links_to_each_it_read_from(monkeypatch):
+    exporter = _exported(monkeypatch)
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"a": _Box("a")},
+        runtimes=[RemoteRuntime(["train"], machine="a")],
+    )
+    try:
+        await ws.shell("train 1 | train 2")
+        await ws.shell("train 3 <(train 4); true")
+        await ws.shell('train 5 "$(train 6)"; true')
+    finally:
+        await ws.close()
+    spans = exporter.get_finished_spans()
+    by_id = {s.context.span_id: s for s in spans if s.context is not None}
+    links = sorted(
+        (
+            _span_name(s),
+            (link.attributes or {})["mirage.input"],
+            _span_name(by_id[link.context.span_id]),
+        )
+        for s in spans
+        for link in s.links
+    )
+    assert [(reader, how) for reader, how, _ in links] == [
+        ("process train 2", "stdin"),
+        ("process train 3 /dev/fd/63", "/dev/fd/63"),
+        (f"process train 5 {CHECK_MARK}", "argv"),
+    ]
+    assert [writer for _, _, writer in links] == [
+        "process train 1",
+        "process train 4",
+        "process train 6",
+    ]
+
+
+# A call to a mount goes under the process that made it.
+@pytest.mark.asyncio
+async def test_a_vfs_call_goes_under_the_process_that_made_it(monkeypatch):
+    exporter = _exported(monkeypatch)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("echo a > /a.txt; (cat /a.txt)")
+    finally:
+        await ws.close()
+    spans = exporter.get_finished_spans()
+    by_id = {s.context.span_id: s for s in spans if s.context is not None}
+    assert sorted(
+        (s.name, _span_name(by_id[s.parent.span_id]))
+        for s in spans
+        if s.name.startswith("vfs.") and s.parent is not None
+    ) == [
+        ("vfs.read", "process (cat /a.txt)"),
+        ("vfs.write", "process echo a > /a.txt; (cat /a.txt)"),
+    ]

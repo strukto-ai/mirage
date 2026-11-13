@@ -25,7 +25,7 @@ import {
 import { HISTORY_MAX_RECORDS } from '../execution/constants.ts'
 import type { Job } from '../execution/job/types.ts'
 import type { Process } from '../execution/process/types.ts'
-import type { MachineName } from '../execution/types.ts'
+import { ProcessId, type MachineName } from '../execution/types.ts'
 import { CHUNK_SIZE } from '../io/cooperative.ts'
 import type { IOResult } from '../io/types.ts'
 import { YieldBudget } from '../io/yield_budget.ts'
@@ -156,8 +156,9 @@ function startLine(
 /**
  * Close a typed line's `command` span (`span`, its start and end in epoch
  * milliseconds): how it ended, the start of its stdout and stderr
- * (`output`, as it wrote them), and under it a `vfs.<call>` span for each
- * call it made to a mount. Each span also carries its start or end and its
+ * (`output`, as it wrote them), and a `vfs.<call>` span for each call it
+ * made to a mount, under the span of the process that made it (`under`),
+ * else under the line's. Each span also carries its start or end and its
  * length in milliseconds, as the history's entries have them, for a tracer
  * that can't be given a span's times. TRACE_CONTENT_ENV leaves out the
  * output and the calls, and past TRACE_MAX_SPANS_ENV calls the rest are
@@ -169,6 +170,7 @@ function endLine(
   exitCode: number,
   output: [Uint8Array, Uint8Array],
   records: readonly OpRecord[],
+  under: (rec: OpRecord) => Context | undefined,
 ): void {
   const content = traceContent()
   line.setAttribute('mirage.exit_code', exitCode)
@@ -196,7 +198,7 @@ function endLine(
             'mirage.vfs.duration_ms': rec.durationMs,
           },
         },
-        parent,
+        under(rec) ?? parent,
       )
       call.end(rec.timestamp)
     }
@@ -275,12 +277,13 @@ function later(a: number | null, b: number | null): number | null {
  * persisted log) would otherwise file a clear or delete ahead of the
  * commands it acts on. A session with no history sets no floor.
  *
- * Each typed line also goes to OpenTelemetry as a span, its vfs calls as
- * spans under it, and so does each job and process once it ends: a process
- * under the one that started it, a job's process under its job, and the
- * line's own under the line's span while the newest `HISTORY_MAX_RECORDS`
- * lines' spans are known; nothing leaves the process until an SDK is set
- * up. Tracing stops at the workspace's own machine and runtimes: a program
+ * Each typed line also goes to OpenTelemetry as a span, and so does each job
+ * and process once it ends: a process under the one that started it, a job's
+ * process under its job, and the line's own under the line's span while the
+ * newest `HISTORY_MAX_RECORDS` lines' spans are known, each vfs call under
+ * the process that made it. A process links to each it reads from,
+ * `mirage.input` naming where: its `stdin`, a `/dev/fd` path or its `argv`.
+ * Nothing leaves the process until an SDK is set up. Tracing stops at the workspace's own machine and runtimes: a program
  * a runtime runs elsewhere starts no trace of its own there. `machine` is
  * the host running Mirage, `host.name` on its command, job and process spans;
  * `processes` gives the process records the workspace keeps, which a span
@@ -391,7 +394,8 @@ export class Observer {
 
   /**
    * Send an ended process to OpenTelemetry as a `process` span: what it ran,
-   * where and as whom, and how it ended. Mirrors Python's `trace_process`.
+   * where and as whom, how it ended, and a link to each process it read
+   * from, whose span is known by then. Mirrors Python's `trace_process`.
    */
   traceProcess(record: Process): void {
     const line = record.line?.value ?? null
@@ -400,6 +404,14 @@ export class Observer {
     if (record.exit !== null) span.setAttribute('process.exit.code', record.exit)
     if (record.signal !== null) span.setAttribute('mirage.signal', record.signal)
     if (record.error !== null) span.setAttribute('mirage.error', record.error)
+    const inputs: [string, number][] = record.stdin == null ? [] : [['stdin', record.stdin]]
+    for (const [fd, pid] of Object.entries(record.fd ?? {})) inputs.push([`/dev/fd/${fd}`, pid])
+    for (const pid of record.argv ?? []) inputs.push(['argv', pid])
+    for (const [value, pid] of inputs) {
+      const known = this.known(record, pid)
+      if (known !== undefined)
+        span.addLink({ context: known, attributes: { 'mirage.input': value } })
+    }
     const shown = record.machinePid?.pid ?? record.id.pid
     span.setAttribute('process.pid', shown)
     for (const [key, value] of Object.entries(
@@ -491,6 +503,23 @@ export class Observer {
     }
     const known = line === null ? undefined : this.lineSpans.get(line)
     return known === undefined ? undefined : trace.setSpanContext(context.active(), known)
+  }
+
+  /**
+   * The span of the process `pid` of `record`'s line, opened now when it
+   * still runs, undefined when it is not known. Mirrors Python's `_known`.
+   */
+  private known(record: Process, pid: number): SpanContext | undefined {
+    const line = record.line?.value ?? null
+    const key = this.spanKey('process', line, pid)
+    const open = this.openSpans.get(key)
+    if (open !== undefined) return open.spanContext()
+    const closed = this.closedSpans.get(key)
+    if (closed !== undefined) return closed
+    const other = (this.processes?.() ?? []).find(
+      (p) => p.id.pid === pid && (p.line?.value ?? null) === line,
+    )
+    return other === undefined ? undefined : this.processSpan(other).spanContext()
   }
 
   /**
@@ -642,7 +671,19 @@ export class Observer {
     const took =
       started === undefined ? undefined : Math.round((this.clock.monotonic() - started[1]) * 1000)
     if (started !== undefined && took !== undefined) {
-      endLine(started[2], [started[0], started[0] + took], io.exitCode, [out, err], opRecords)
+      endLine(
+        started[2],
+        [started[0], started[0] + took],
+        io.exitCode,
+        [out, err],
+        opRecords,
+        (rec) =>
+          rec.process === null
+            ? undefined
+            : this.contextOf(
+                this.spanKey('process', line ?? null, ProcessId.parse(rec.process).pid),
+              ),
+      )
     }
     const init: LogEntryInit = {
       type: EVENT_RESULT,

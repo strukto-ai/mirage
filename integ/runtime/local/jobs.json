@@ -145,6 +145,71 @@
           }
         }
       ]
+    },
+    {
+      "id": "local_a_shells_last_program_runs_in_its_place",
+      "world": {
+        "runtimes": [
+          {
+            "name": "local",
+            "captures": [
+              "python3",
+              "@external"
+            ]
+          },
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "( true; python3 -c \"import time; time.sleep(2)\" ) & sleep 0.5; ps -o ppid=,comm= | awk -v j=$! -v s=$$ '$2 == \"python3\" { print ($1 == s ? \"shell\" : $1 == j ? \"job\" : \"other\") }'; wait",
+          "expect": {
+            "exit": 0,
+            "stdout": "shell\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "( python3 -c \"import time; time.sleep(2)\"; true ) & sleep 0.5; ps -o ppid=,comm= | awk -v j=$! -v s=$$ '$2 == \"python3\" { print ($1 == s ? \"shell\" : $1 == j ? \"job\" : \"other\") }'; wait",
+          "expect": {
+            "exit": 0,
+            "stdout": "job\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "( true; python3 -c \"import time; time.sleep(2)\" 2>/dev/null ) & sleep 0.5; ps -o ppid=,comm= | awk -v j=$! -v s=$$ '$2 == \"python3\" { print ($1 == s ? \"shell\" : $1 == j ? \"job\" : \"other\") }'; wait",
+          "expect": {
+            "exit": 0,
+            "stdout": "job\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "( eval 'python3 -c \"import time; time.sleep(2)\"' ) & sleep 0.5; ps -o ppid=,comm= | awk -v j=$! -v s=$$ '$2 == \"python3\" { print ($1 == s ? \"shell\" : $1 == j ? \"job\" : \"other\") }'; wait",
+          "expect": {
+            "exit": 0,
+            "stdout": "job\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "bash -c 'echo \"$(python3 -c \"import time; time.sleep(2)\")\"' & sleep 0.5; ps -o ppid=,comm= | awk -v j=$! -v s=$$ '$2 == \"python3\" { print ($1 == s ? \"shell\" : $1 == j ? \"job\" : \"other\") }'; wait",
+          "expect": {
+            "exit": 0,
+            "stdout": "job\n\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "bash -c 'echo \"$(:; python3 -c \"import time; time.sleep(2)\"; :)\"' & sleep 0.5; ps -o ppid=,comm= | awk -v j=$! -v s=$$ '$2 == \"python3\" { print ($1 == s ? \"shell\" : $1 == j ? \"job\" : \"other\") }'; wait",
+          "expect": {
+            "exit": 0,
+            "stdout": "other\n\n",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }

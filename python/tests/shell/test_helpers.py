@@ -18,6 +18,7 @@ from mirage.rs.shell import parse_shell
 from mirage.shell.helpers import (
     brace_expands,
     byte_offset,
+    ends_line,
     get_case_items,
     get_case_word,
     get_cfor_parts,
@@ -1072,3 +1073,36 @@ def test_function_source_copies_only_its_own_source(line, expected):
         assert get_function_source(node) == expected
     finally:
         program.release()
+
+
+def _commands(node):
+    if node.type == NT.COMMAND:
+        yield node
+    for child in node.children:
+        yield from _commands(child)
+
+
+# bash runs a shell's last command in the shell's place, as bash 5.2's
+# `ps -o pid,ppid,args --forest` shows: not one under a redirect, a `!`,
+# a group or a function, nor one after a `&` job.
+@pytest.mark.parametrize(
+    ("line", "last"),
+    [
+        ("true; ps", ["ps"]),
+        ("ps; true", ["true"]),
+        ("true && ps", ["ps"]),
+        ("false || ps", ["ps"]),
+        ("x=1 ps", ["x=1 ps"]),
+        ("(true; ps); true", ["ps", "true"]),
+        ("ps 2>/dev/null", []),
+        ("! ps", []),
+        ("sleep 1 & ps", []),
+        ("{ ps; }", []),
+        ("if true; then ps; fi", []),
+        ("a | ps", []),
+        ("ps &", []),
+    ],
+)
+def test_a_shells_last_command_runs_in_its_place(line, last):
+    commands = _commands(_parse(line))
+    assert [get_text(c) for c in commands if ends_line(c)] == last

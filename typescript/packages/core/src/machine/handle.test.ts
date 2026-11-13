@@ -90,6 +90,18 @@ class RecordingMachine extends MachineHandle {
   }
 }
 
+// A box that keeps what each line it runs was fed, streamed or not.
+class FifoBox extends RecordingMachine {
+  override async execLine(
+    line: string,
+    stdin: ByteSource | null,
+    env: Record<string, string>,
+    cwd: string,
+  ): Promise<RunResult> {
+    return super.execLine(line, stdin === null ? null : await materialize(stdin), env, cwd)
+  }
+}
+
 // A box whose connection drops while it runs `train`.
 class DroppedBox extends RecordingMachine {
   error: Error = new ConnectionLostError(
@@ -849,4 +861,28 @@ it.each([
   } finally {
     await ws.close()
   }
+})
+
+// A process substitution a program names by path becomes a named pipe on the
+// program's machine, fed what the substitution writes, then removed.
+it('turns a substitution a program names into a pipe on its machine', async () => {
+  const box = new FifoBox({ captures: ['node'] })
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, ...on(box) })
+  try {
+    const io = await ws.shell('node read.js <(echo hi) /dev/fd/9')
+    expect(io.exitCode).toBe(0)
+  } finally {
+    await ws.close()
+  }
+  const lines = box.execs.map(([line]) => line)
+  const made = lines.find((line) => line.startsWith('mkfifo ')) ?? ''
+  const fifo = made.slice('mkfifo '.length)
+  expect(fifo.startsWith('/tmp/.mirage-fd-')).toBe(true)
+  const ran = lines.indexOf(`node read.js ${fifo} /dev/fd/9`)
+  expect(lines.indexOf(made)).toBeLessThan(ran)
+  const fed = box.execs
+    .filter(([line]) => line.includes('exec cat'))
+    .map(([line, data]) => [line, DEC.decode(data ?? new Uint8Array())])
+  expect(fed).toEqual([[`[ -p ${fifo} ] && exec cat > ${fifo}`, 'hi\n']])
+  expect(lines.indexOf(`exec 3<>${fifo}; exec 3>&-; rm -f ${fifo}`)).toBeGreaterThan(ran)
 })
