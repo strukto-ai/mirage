@@ -1,24 +1,57 @@
 ---
 title: Co-Work
 icon: users
-description: An agent schedules candidate interviews from a recruiting inbox, two calendars and a Slack channel.
+description: An agent schedules candidate interviews from a recruiting inbox, two calendars and a Slack channel, with no sandbox.
 ---
 
-A recruiting team gets the same chore with every role: candidates reply with
-the times they can interview, and someone matches those times against the
-interviewers' calendars, books the interviews, writes back to each candidate
-and tells the hiring channel. An agent with a
-[lightweight terminal](/home/examples/lightweight-terminal) can do that
-round. Each service is a command: [`himalaya`](/python/cli/himalaya) reads and
-sends mail, [`gws`](/python/cli/gws) calls Google Calendar, and
-[`slack`](/python/cli/slack) posts to Slack. These are Mirage CLIs, so they
-call the services' APIs from your server process, and Python runs in-process
-on [Monty](/home/setup/runtime/monty). Nothing here needs a sandbox.
+import { UseCaseTerminal } from "/snippets/use-case-terminal.jsx"
 
-The lines on this page are what an agent would send. A company is hiring a
-senior backend engineer. Six candidates have replied to the recruiting inbox
-with two times each for the week of 16 November 2026, and two engineers,
-Dana Lee and Omar Haddad, run every interview. All times are in UTC.
+<UseCaseTerminal
+  services={[
+    { cli: "himalaya", name: "Recruiting inbox", text: "reads the replies, sends the confirmations" },
+    { cli: "gws", name: "Google Calendar", text: "reads busy times, books the interviews" },
+    { cli: "slack", name: "Slack", text: "posts the schedule to #hiring-backend", dir: "out" },
+  ]}
+  steps={[
+    { cmd: "himalaya --json envelope search subject '\"interview times\"' …", cli: "himalaya", out: "6 replies" },
+    { cmd: "python3 /work/candidates.py", cli: "python3", out: "6 candidates, 2 times each" },
+    { cmd: "gws calendar freebusy query --json '{…}'", cli: "gws", out: "Dana: 7 busy blocks, Omar: 4" },
+    { cmd: "python3 /work/plan.py", cli: "python3", out: "5 booked, 1 with no common time" },
+    { cmd: "gws calendar events insert …", cli: "gws", dir: "out", out: "5 interviews on the calendar" },
+    { cmd: "himalaya message reply $id --send …", cli: "himalaya", dir: "out", out: "5 confirmations sent" },
+    { cmd: "slack send-message --channel C07HB2Q9KX …", cli: "slack", out: "the schedule in #hiring-backend" },
+  ]}
+  extras={[
+    { text: "/work in memory" },
+    { text: "python3 on Monty", cli: "python3" },
+  ]}
+/>
+
+An agent schedules interviews for a recruiting team. It reads the times
+candidates offer in their replies, matches them against the interviewers'
+calendars, books the interviews, confirms each one in the candidate's thread
+and posts the schedule to the hiring channel. A cron job can start it each
+morning while a role is open.
+
+A job this small needs no VM or sandbox. It runs in a
+[lightweight terminal](/home/examples/lightweight-terminal) inside one
+FastAPI or Express server:
+
+- **Files:** `/work`, mounted in [memory](/home/setup/ram) for the agent's
+  scratch files. To keep them, mount a [disk folder](/home/setup/disk), an
+  [S3 bucket](/home/setup/s3) or another [VFS](/home/setup/vfs) there
+  instead.
+- **Python:** `python3`, in-process on [Monty](/home/setup/runtime/monty).
+- **CLIs:** [`himalaya`](/python/cli/himalaya) reads and sends mail,
+  [`gws`](/python/cli/gws) calls Google Calendar and
+  [`slack`](/python/cli/slack) posts to Slack, with credentials the server
+  holds, so the agent never sees one.
+
+The commands below are what the agent runs in its terminal. A company is
+hiring a senior backend engineer. Six candidates have replied to the
+recruiting inbox with two times each for the week of 16 November 2026, and
+two engineers, Dana Lee and Omar Haddad, run every interview. All times are
+in UTC.
 
 ## Installation
 
@@ -193,8 +226,8 @@ The output below comes from sample data, so yours will differ.
 
 ## Usage
 
-Create a terminal, and define `run`, which sends lines to it and prints what
-they print. It needs [`jq`](https://jqlang.org):
+Create a terminal, and define `run`, which sends commands to it and prints
+what they print. It needs [`jq`](https://jqlang.org):
 
 ```bash
 curl -X POST localhost:3000/sessions/a
@@ -206,10 +239,10 @@ run() {
 }
 ```
 
-The lines between `SH` and `SH` in the blocks below run in the terminal on
-the server, not in the shell that calls `run`.
+The commands between `SH` and `SH` in the blocks below run in the terminal
+on the server, not in the shell that calls `run`.
 
-## Read the Inbox
+## Read the inbox
 
 The agent counts the messages in the inbox, then searches for the candidates'
 replies by subject. It saves each reply to a file under `/work/replies`,
@@ -238,7 +271,7 @@ Dana and a notice from a job board. `--page-size 0` returns every match
 instead of a page of 25, up to the newest 200 messages, the account's
 `max_messages`.
 
-## Find the Offered Times
+## Find the offered times
 
 The recruiting team asked each candidate for two times, one per line, written
 as `2026-11-16 10:00`. A short Python script takes each candidate's name and
@@ -278,7 +311,7 @@ SH
 The first column is the message ID, which the agent uses later to reply in
 the same thread. The candidates are in the order they replied.
 
-## Check the Calendars
+## Check the calendars
 
 Google Calendar's free/busy query returns the times each person is busy,
 without the details of their meetings. The agent asks for both interviewers
@@ -335,7 +368,7 @@ Maya and Lucas both offered Monday at 10:00. Maya replied first and gets it,
 so Lucas gets his second time. Each of Priya's times clashes with at least
 one interviewer, so the agent leaves her for a person.
 
-## Book the Interviews
+## Book the interviews
 
 `jq` turns each booked row of the plan into a Calendar event, one per line,
 with the candidate and both interviewers as guests. The agent creates the
@@ -364,7 +397,7 @@ SH
 2026-11-20 14:00 Interview: Jonas Weber, Senior Backend Engineer (3 guests)
 ```
 
-## Confirm and Tell the Team
+## Confirm and tell the team
 
 The agent replies to each booked candidate in their own thread, then checks
 the sent folder for the five replies. `mailbox list` gives that folder the
