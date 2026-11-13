@@ -256,7 +256,6 @@ function defaultForKey(key: string, home: string): string {
     jwt_clock_skew_seconds: '5',
     jwt_authorized_parties: '',
     login_client_id: '',
-    socket: '',
     auth_token: '',
     idle_grace_seconds: '30',
     graceful_timeout: '0',
