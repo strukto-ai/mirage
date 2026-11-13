@@ -195,9 +195,9 @@ server's memory: a working directory, variables and a history.
 Each square is 128 MB, the least that the sandbox services linked above
 reserve for one agent. The server is drawn at the same scale, four squares
 for 512 MB, and then enlarged to show its terminals and its memory. Mirage
-and its runtime take about 100 MB of it. An idle terminal adds about 20 KB.
-A busy terminal adds what its command holds: files in a memory mount, a
-cache, the data in its pipes. Move the slider to add agents, and choose how
+and its runtime take about 100 MB of it. An idle terminal adds about 20 KB,
+plus any files it keeps in a memory mount. A busy terminal adds what its
+command holds: files, a cache, the data in its pipes. Move the slider to add agents, and choose how
 many are busy and how much each holds.
 
 What a terminal costs depends on what it is doing:

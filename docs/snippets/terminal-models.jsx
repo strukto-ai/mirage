@@ -256,7 +256,7 @@ export const SandboxesVsTerminals = () => {
 
       <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-zinc-600 dark:text-zinc-400">
         {mark("128 MB of memory, reserved")}
-        {mark("idle terminal, about 20 KB", "var(--tm-a)", "ring")}
+        {mark("idle terminal with no files kept, about 20 KB", "var(--tm-a)", "ring")}
         {mark("busy terminal: its files, cache and buffers", "var(--tm-b)")}
         {mark("the server, enlarged", null, "outline")}
       </div>
