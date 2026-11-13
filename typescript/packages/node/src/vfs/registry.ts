@@ -171,6 +171,23 @@ function vfsDefect(value: unknown): string | null {
   return null
 }
 
+async function buildFromRef(ref: string, config: Record<string, unknown>): Promise<BaseVFS> {
+  const exported = await loadAttr(ref)
+  if (typeof exported !== 'function') {
+    throw new Error(`VFS ref ${JSON.stringify(ref)} must name a class, got ${typeof exported}`)
+  }
+  const cls = exported as {
+    create?: (config: Record<string, unknown>) => unknown
+    new (config: Record<string, unknown>): unknown
+  }
+  const built = await (typeof cls.create === 'function' ? cls.create(config) : new cls(config))
+  const defect = vfsDefect(built)
+  if (defect !== null) {
+    throw new Error(`VFS ref ${JSON.stringify(ref)} ${defect}`)
+  }
+  return built as BaseVFS
+}
+
 /**
  * Build a VFS instance by registry name, or from a colon reference
  * naming a class directly (`./wiki.mjs:WikiVFS`, or the package
@@ -187,23 +204,7 @@ export async function buildVfs(
   config: Record<string, unknown> = {},
   sources?: Readonly<Record<string, ResolvedSource>>,
 ): Promise<BaseVFS> {
-  return buildVfsFrom(REGISTRY, CUSTOM, name, config, sources, async (ref, resolved) => {
-    if (!ref.includes(':')) return null
-    const exported = await loadAttr(ref)
-    if (typeof exported !== 'function') {
-      throw new Error(`VFS ref ${JSON.stringify(ref)} must name a class, got ${typeof exported}`)
-    }
-    const cls = exported as {
-      create?: (config: Record<string, unknown>) => unknown
-      new (config: Record<string, unknown>): unknown
-    }
-    const built = await (typeof cls.create === 'function'
-      ? cls.create(resolved)
-      : new cls(resolved))
-    const defect = vfsDefect(built)
-    if (defect !== null) {
-      throw new Error(`VFS ref ${JSON.stringify(ref)} ${defect}`)
-    }
-    return built as BaseVFS
-  })
+  return buildVfsFrom(REGISTRY, CUSTOM, name, config, sources, (unknown, resolved) =>
+    unknown.includes(':') ? buildFromRef(unknown, resolved) : Promise.resolve(null),
+  )
 }

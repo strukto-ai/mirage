@@ -1,5 +1,5 @@
 {
- "baseline": 981,
+ "baseline": 983,
  "modules": {
   "secrets/aws": {
    "typescript_only": {
