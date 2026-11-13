@@ -18,6 +18,7 @@ from typing import Any
 from mirage.context.session_context import current_caller
 from mirage.io.stream import feed
 from mirage.io.types import ByteSource
+from mirage.io.yield_budget import YieldBudget
 from mirage.machine.boxd import sdk
 from mirage.machine.boxd.config import BoxdConfig
 from mirage.machine.boxd.constants import MACHINE_GONE
@@ -103,13 +104,17 @@ class BoxdMachine(MachineHandle):
             "machine", self.config.machine_id, "deleted", MACHINE_GONE
         )
 
-    def _lost(self, exc: BaseException) -> ConnectionLostError | None:
+    def _lost(
+        self, exc: BaseException, stdout: bytes, stderr: bytes
+    ) -> ConnectionLostError | None:
         """The lost connection ``exc`` is when the machine went or boxd
         could not be reached, which also lets the next line connect again;
         None otherwise.
 
         Args:
             exc (BaseException): what an SDK call raised.
+            stdout (bytes): the output the line kept before the drop.
+            stderr (bytes): the errors the line kept before the drop.
         """
         hint = self._gone(exc)
         if hint is None and isinstance(
@@ -119,7 +124,9 @@ class BoxdMachine(MachineHandle):
         if hint is None:
             return None
         self._connected = False
-        return ConnectionLostError(hint, b"", f"boxd: {hint}\n".encode())
+        return ConnectionLostError(
+            hint, stdout, stderr + f"boxd: {hint}\n".encode()
+        )
 
     async def _exec_argv(
         self,
@@ -155,12 +162,20 @@ class BoxdMachine(MachineHandle):
             code: int | None = stream.exit_code
             return -1 if code is None else code
 
+        budget = YieldBudget()
+
+        async def write(chunk: bytes) -> None:
+            # The SDK queues input without waiting, so an input that is
+            # always ready would never let the output or a cancel in.
+            await stream.write(chunk)
+            await budget.run()
+
         async def end() -> None:
             await stream.write_eof()
 
         reading = asyncio.create_task(read())
         feeding = (
-            asyncio.create_task(feed(stdin, stream.write, end, exited.is_set))
+            asyncio.create_task(feed(stdin, write, end, exited.is_set))
             if stdin is not None
             else None
         )
@@ -179,23 +194,22 @@ class BoxdMachine(MachineHandle):
                     feeding.result()
             exit_code = reading.result()
         except BaseException as exc:
-            for task in (reading, feeding):
-                if task is not None:
-                    task.cancel()
-            await asyncio.gather(
-                *(t for t in (reading, feeding) if t is not None),
-                return_exceptions=True,
-            )
-            if (lost := self._lost(exc)) is not None:
-                await stream.close()
-                raise lost from exc
-            # Ending the stream ends the command with TERM; a run a kill
-            # stopped with a gentler signal gets that signal first.
+            if feeding is not None:
+                feeding.cancel()
+                await asyncio.gather(feeding, return_exceptions=True)
+            lost = self._lost(exc, bytes(out), bytes(err))
+            # Ending the stream, or the read of it, ends the command with
+            # TERM; a run a kill stopped with a gentler signal gets that
+            # signal first.
             tag = run_tag(argv) if is_run(argv) else env.get(PROCESS)
             signum = stop_signal(current_caller().process)
-            if tag is not None and signum is not None:
+            if lost is None and tag is not None and signum is not None:
                 await asyncio.shield(self.stop(tag, signum))
+            reading.cancel()
+            await asyncio.gather(reading, return_exceptions=True)
             await stream.close()
+            if lost is not None:
+                raise lost from exc
             if tag is not None and not isinstance(exc, asyncio.CancelledError):
                 await self.stop(tag, 15)
             raise

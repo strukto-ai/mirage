@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { feed } from '@struktoai/mirage-core/io/stream'
+import { closeQuietly, feed } from '@struktoai/mirage-core/io/stream'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
+import { YieldBudget } from '@struktoai/mirage-core/io/yield_budget'
 import { currentCaller } from '@struktoai/mirage-core/context/session_context'
 import { requireId } from '@struktoai/mirage-core/machine/config'
 import {
@@ -112,8 +113,14 @@ export class BoxdMachine extends MachineHandle<BoxdConfig> {
   /**
    * The lost connection `error` is when the machine went or boxd could not
    * be reached, which also lets the next line connect again; null otherwise.
+   * `stdout` and `stderr` are what the line kept before the drop.
    */
-  private lost(sdk: BoxdSdk, error: unknown): ConnectionLostError | null {
+  private lost(
+    sdk: BoxdSdk,
+    error: unknown,
+    stdout: Uint8Array,
+    stderr: Uint8Array,
+  ): ConnectionLostError | null {
     let hint = this.gone(sdk, error)
     if (
       hint === null &&
@@ -122,7 +129,7 @@ export class BoxdMachine extends MachineHandle<BoxdConfig> {
       hint = error.message
     if (hint === null) return null
     this.disconnected()
-    return new ConnectionLostError(hint, new Uint8Array(), ENC.encode(`boxd: ${hint}\n`))
+    return new ConnectionLostError(hint, stdout, concat([stderr, ENC.encode(`boxd: ${hint}\n`)]))
   }
 
   private stream(command: string, closeStdin: boolean): ExecStream {
@@ -147,16 +154,20 @@ export class BoxdMachine extends MachineHandle<BoxdConfig> {
     const out: Uint8Array[] = []
     const err: Uint8Array[] = []
     const state = { exited: false }
+    const budget = new YieldBudget()
     // The command may end without reading all its input (head), so its
-    // exit, not the end of the input, ends the line.
+    // exit, not the end of the input, ends the line. The SDK queues input
+    // without waiting, so an input that is always ready would never let
+    // the output or an abort in: the budget gives them their turn.
     const feeding =
       stdin === null
         ? Promise.resolve()
         : feed(
             stdin,
-            (chunk) => {
-              if (!state.exited) stream.write(chunk)
-              return Promise.resolve()
+            async (chunk) => {
+              if (state.exited) return
+              stream.write(chunk)
+              await budget.run()
             },
             () => {
               stream.end()
@@ -181,14 +192,17 @@ export class BoxdMachine extends MachineHandle<BoxdConfig> {
       )
       exitCode = code
       state.exited = true
-      // The input may still wait on a source that stays open; let it go.
       feeding.catch((error: unknown) => {
         console.debug(`boxd input after the command ended: ${String(error)}`)
       })
+      // The input may still wait on a source that stays open: closing it
+      // lets its writer go, and is not waited for behind that read.
+      void closeQuietly(stdin)
       stream.close()
     } catch (error) {
       state.exited = true
-      const lost = signal?.aborted === true ? null : this.lost(sdk, error)
+      void closeQuietly(stdin)
+      const lost = signal?.aborted === true ? null : this.lost(sdk, error, concat(out), concat(err))
       if (lost !== null) {
         stream.close()
         throw lost
