@@ -1,0 +1,319 @@
+---
+title: Code Review
+icon: code-pull-request
+description: An agent reviews a release and one fix in a lightweight terminal, with git, pipes, Python and MCP servers as commands.
+---
+
+An agent with a [lightweight terminal](/home/examples/lightweight-terminal)
+can review a change the way a developer does: clone the repository, read the
+diff, search the tree and look things up. Nothing here needs a sandbox.
+`git` is a Mirage CLI, so the clone lands in the terminal's files and no
+`git` program runs on the host, and two MCP servers, DeepWiki and Context7,
+are installed as commands.
+
+The lines on this page are what an agent would send. They review release
+9.2.0 of [tenacity](https://github.com/jd/tenacity), a Python retry library,
+and then one fix in it.
+
+## Server
+
+This is the server from the
+[Overview](/home/examples/lightweight-terminal#server) with three additions:
+it registers [`git`](/python/cli/git), and at start it installs the two MCP
+servers as CLIs.
+
+<Tabs>
+  <Tab title="FastAPI" icon="/images/python-logo.svg">
+    ```python app.py
+    from contextlib import asynccontextmanager
+
+    from fastapi import FastAPI
+    from pydantic import BaseModel
+
+    from mirage import RAMVFS, MountMode, Workspace, mcp_cli
+    from mirage.commands.cli.builtin.git import GIT
+    from mirage.runtime.python.monty import MontyRuntime
+
+    ws = Workspace(
+        {"/work": (RAMVFS(), MountMode.EXEC)},
+        runtimes=[MontyRuntime(captures=["python", "python3"])],
+    )
+    ws.register_cli("git", GIT)
+
+    MCP_SERVERS = {
+        "deepwiki": "https://mcp.deepwiki.com/mcp",
+        "context7": "https://mcp.context7.com/mcp",
+    }
+
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        for name, url in MCP_SERVERS.items():
+            config = {"url": url}
+            ws.register_cli(name, await mcp_cli(config), config)
+        yield
+        await ws.close()
+
+
+    app = FastAPI(lifespan=lifespan)
+
+
+    class Run(BaseModel):
+        command: str
+
+
+    @app.post("/sessions/{session_id}")
+    async def create(session_id: str) -> None:
+        ws.create_session(session_id)
+
+
+    @app.post("/sessions/{session_id}/run")
+    async def run(session_id: str, body: Run) -> dict:
+        r = await ws.shell(body.command, session_id=session_id)
+        return {"stdout": await r.stdout_str(), "stderr": await r.stderr_str(), "exit_code": r.exit_code}
+    ```
+
+    ```bash
+    uvicorn app:app --port 3000
+    ```
+  </Tab>
+  <Tab title="Express" icon="/images/typescript-logo.svg">
+    ```typescript app.mjs
+    import express from 'express'
+    import { GIT, MontyRuntime, MountMode, RAMVFS, Workspace, mcpCli } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      { '/work': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: [new MontyRuntime({ captures: ['python', 'python3'] })] },
+    )
+    ws.registerCli('git', GIT)
+
+    const mcpServers = {
+      deepwiki: 'https://mcp.deepwiki.com/mcp',
+      context7: 'https://mcp.context7.com/mcp',
+    }
+    for (const [name, url] of Object.entries(mcpServers)) {
+      const config = { url }
+      ws.registerCli(name, await mcpCli(config), config)
+    }
+
+    const app = express()
+    app.use(express.json())
+
+    app.post('/sessions/:id', (req, res) => {
+      ws.createSession(req.params.id)
+      res.sendStatus(201)
+    })
+
+    app.post('/sessions/:id/run', async (req, res) => {
+      const r = await ws.shell(req.body.command, { sessionId: req.params.id })
+      res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
+    })
+
+    app.listen(3000, '127.0.0.1')
+    ```
+
+    ```bash
+    node app.mjs
+    ```
+  </Tab>
+</Tabs>
+
+## Usage
+
+Create a terminal, and define `run`, which sends lines to it and prints what
+they print. It needs [`jq`](https://jqlang.org):
+
+```bash
+curl -X POST localhost:3000/sessions/a
+
+run() {
+  jq -Rs '{command: .}' |
+    curl -s localhost:3000/sessions/a/run -H 'content-type: application/json' -d @- |
+    jq -j '.stdout, .stderr'
+}
+```
+
+The lines between `SH` and `SH` in the blocks below run in the terminal on
+the server, not in the shell that calls `run`.
+
+## MCP Servers as Commands
+
+The server installed DeepWiki and Context7 at start, so every terminal has a
+`deepwiki` and a `context7` command. Each tool of an
+[MCP server](/python/cli/mcp) is a subcommand that takes its arguments as one
+JSON object, and `--help` prints the tool's schema. For example:
+
+```bash
+run <<'SH'
+deepwiki --help
+deepwiki read-wiki-structure '{"repoName": "facebook/react"}' | head -15
+context7 resolve-library-id '{"libraryName": "fastapi", "query": "dependency injection"}' | grep -i "library id" | head -5
+context7 query-docs '{"libraryId": "/websites/fastapi_tiangolo", "query": "dependency injection with Depends"}' | grep -n Depends | head -5
+SH
+```
+
+A large answer goes to a file, and the caller reads only what it asks for:
+
+```bash
+run <<'SH'
+deepwiki read-wiki-contents '{"repoName": "facebook/react"}' > /work/react-wiki.md
+wc -c /work/react-wiki.md
+grep -n -i "usestate" /work/react-wiki.md | head -5
+SH
+```
+
+The whole React wiki is about 670 KB, roughly 170,000 tokens; the caller
+sees a byte count and a few lines.
+
+- The tool list is read once, at registration, and no schema reaches the
+  model until it runs `--help`.
+- The server needs both MCP servers to start; `mcp_cli` raises when one
+  cannot be reached. Remove an entry from `MCP_SERVERS` to run without it.
+- A profile can deny a tool, and a `network:` rule can limit the hosts a
+  terminal reaches. See [From MCP](/python/cli/mcp).
+- DeepWiki and Context7 are third-party services with rate limits. Context7
+  takes an API key for higher limits, sent with
+  `auth: {"type": "header", ...}`.
+
+## Review a Release
+
+The first block clones the repository, checks out the release tag and
+measures the change since 9.1.4:
+
+```bash
+run <<'SH'
+git clone -q https://github.com/jd/tenacity.git /work/tenacity
+cd /work/tenacity
+git checkout -q 9.2.0
+git log --oneline 9.1.4..9.2.0 | wc -l
+git diff 9.1.4 9.2.0 > /work/release.patch
+grep -c '^diff --git' /work/release.patch
+git log --oneline --grep '^fix' 9.1.4..9.2.0 | head -3
+SH
+```
+
+```text
+64
+39
+b3c5a9f fix: stop hanging on cyclic exception __cause__ chains (#660)
+868c60b fix: respect enabled=False in iterator protocols (__iter__ / __aiter__) (#643)
+e5179bd fix: reraise underlying exception when TryAgain wraps a cause (#640)
+```
+
+The release is 64 commits over 39 files. Its patch is about 200 KB, roughly
+50,000 tokens, and it stays in a file. Python on Monty reads that file and
+counts the test functions the release adds and removes:
+
+```bash
+run <<'SH'
+cat > /work/tests.py <<'PY'
+import re
+tests = {}
+for line in open("/work/release.patch"):
+    if line.startswith("+++ b/"):
+        path = line[6:].strip()
+    elif m := re.match(r"([+-])\s*(async )?def test_", line):
+        key = (path, m.group(1))
+        tests[key] = tests.get(key, 0) + 1
+for path in sorted({p for p, _ in tests}):
+    print(path, "+%d" % tests.get((path, "+"), 0), "-%d" % tests.get((path, "-"), 0))
+PY
+python3 /work/tests.py
+SH
+```
+
+```text
+tests/test_after.py +3 -2
+tests/test_asyncio.py +28 -22
+tests/test_tenacity.py +135 -95
+tests/test_tornado.py +4 -4
+tests/test_utils.py +1 -0
+```
+
+The next block reads the first fix:
+
+```bash
+run <<'SH'
+git show --stat --format='%h %s' b3c5a9f
+git show --format= b3c5a9f -- tenacity/retry.py | tail -12
+SH
+```
+
+```text
+b3c5a9f fix: stop hanging on cyclic exception __cause__ chains (#660)
+
+ tenacity/retry.py      |  9 +++++++--
+ tests/test_tenacity.py | 25 +++++++++++++++++++++++++
+ 2 files changed, 32 insertions(+), 2 deletions(-)
+         if retry_state.outcome.failed:
+             exc = retry_state.outcome.exception()
+-            while exc is not None:
++            # Guard against cyclic __cause__ chains (e.g. ``raise e from e``),
++            # which would otherwise spin forever inside the predicate and
++            # prevent stop conditions from ever running (see #658).
++            seen: set[int] = set()
++            while exc is not None and id(exc) not in seen:
++                seen.add(id(exc))
+                 if isinstance(exc.__cause__, self.exception_cause_types):
+                     return True
+                 exc = exc.__cause__
+```
+
+A reviewer then asks who uses the changed class, whether other code walks
+`__cause__` the same way, and whether the fix came with a test:
+
+```bash
+run <<'SH'
+git grep -n retry_if_exception_cause_type -- tenacity tests
+git grep -n '__cause__' -- tenacity
+git show --format= b3c5a9f -- tests | grep '^+.*def test'
+SH
+```
+
+```text
+tenacity/__init__.py:49:    retry_if_exception_cause_type,
+tenacity/__init__.py:819:    "retry_if_exception_cause_type",
+tenacity/retry.py:160:class retry_if_exception_cause_type(retry_base):
+tests/test_tenacity.py:1169:@retry(retry=tenacity.retry_if_exception_cause_type(NameError))
+tests/test_tenacity.py:1432:    def test_retry_if_exception_cause_type(self) -> None:
+tests/test_tenacity.py:1443:    def test_retry_if_exception_cause_type_handles_cause_cycles(self) -> None:
+tests/test_tenacity.py:1461:                retry=tenacity.retry_if_exception_cause_type(KeyError),
+tenacity/__init__.py:193:                cause = exc.__cause__ or exc.__context__
+tenacity/retry.py:164:    an exception in the chain that has no ``__cause__``, or a cycle is detected).
+tenacity/retry.py:180:            # Guard against cyclic __cause__ chains (e.g. ``raise e from e``),
+tenacity/retry.py:186:                if isinstance(exc.__cause__, self.exception_cause_types):
+tenacity/retry.py:188:                exc = exc.__cause__
++    def test_retry_if_exception_cause_type_handles_cause_cycles(self) -> None:
+```
+
+The class is public and has its own tests. The only other reader of
+`__cause__`, at `tenacity/__init__.py:193`, takes one step and has no loop,
+so the fix covers the one walk. The fix adds a test for the cycle.
+
+The commit message says a predicate that never returns keeps the stop
+conditions from running. DeepWiki answers that from the repository's wiki,
+into a file:
+
+```bash
+run <<'SH'
+deepwiki ask-wiki-question '{"repoName": "jd/tenacity", "question": "Where is a retry predicate such as retry_if_exception_cause_type called in the retry loop, and do stop conditions still run if the predicate never returns?"}' > /work/context.md
+wc -l /work/context.md
+grep -n -i "stop" /work/context.md | head -3
+SH
+```
+
+The review ends with three findings the agent can report:
+
+- The fix is one loop in `tenacity/retry.py`, and it comes with a test for
+  the cycle.
+- No other code in `tenacity/` walks `__cause__` in a loop, so nothing else
+  has the same bug.
+- DeepWiki's answer agrees with the commit message: a predicate that never
+  returns blocks the stop check.
+
+To get there the agent read about 3 KB of output. The 1.2 MB repository and
+the 200 KB patch stayed in the terminal.
+
+For the supported commands and the differences from native Git, see
+[git](/python/cli/git).

@@ -297,7 +297,7 @@ interface, and Mirage embeds one in an application server. Each terminal is a
 Mirage session with its own working directory, environment and history, and Python
 runs in-process on Monty, so a terminal starts with no container or VM. Here
 it is in Express; the FastAPI version is in the
-[docs](https://docs.mirage.strukto.ai/home/examples/embedded-terminal).
+[docs](https://docs.mirage.strukto.ai/home/examples/lightweight-terminal).
 
 ```bash
 npm install @struktoai/mirage-node @pydantic/monty express

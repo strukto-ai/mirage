@@ -1,0 +1,253 @@
+---
+title: Lightweight Terminal
+sidebarTitle: Overview
+icon: terminal
+description: A terminal for agents inside your FastAPI or Express server, with no sandbox per agent.
+---
+
+An agent needs somewhere to run commands: Bash, Python, and CLIs such as
+`git`. The usual answer is a sandbox, a container or microVM for each agent.
+A sandbox reserves memory for every agent, takes time to start and needs a
+service to manage it.
+
+Most of what an agent runs does not need a machine. It reads files, calls
+services and pipes text from one command to the next. A lightweight terminal
+runs that work inside the server you already have. Each terminal is a Mirage
+session with its own working directory, environment and history, and
+[Monty](/home/setup/runtime/monty) runs Python in-process. One server process
+holds many terminals on its event loop.
+
+| | Sandbox per agent | Lightweight terminal |
+| --- | --- | --- |
+| Commands run in | a container or microVM | your server process |
+| Memory per agent | 128 MB to 1 GB reserved ([1](https://modal.com/docs/guide/sandbox-resources), [2](https://developers.cloudflare.com/containers/platform/pricing/), [3](https://docs.e2b.dev/pricing), [4](https://www.daytona.io/docs/en/sandboxes/)) | DRAFT: number pending the benchmark |
+| Start | DRAFT: number pending the benchmark | DRAFT: number pending the benchmark |
+| You operate | a sandbox service | nothing new |
+| Runs | any program | Bash, Python on Monty, CLIs, MCP servers |
+
+A line that needs more, such as `numpy` or a GPU, can still go to a machine:
+[Runtime Routing](/home/examples/runtime-routing) sends only those lines
+there.
+
+## What an Agent Can Run
+
+| | Example | Where it runs |
+| --- | --- | --- |
+| Bash | `grep -c ERROR app.log`, pipes, redirects, variables, `curl`, `jq` | [Mirage's shell](/home/core/shell) |
+| Python | `python3 report.py` | [Monty](/home/setup/runtime/monty), a subset of Python with no network or host access |
+| CLIs | `git log --oneline -5` | a [CLI](/home/setup/clis) the server registers, such as `git`, `gh` or `slack` |
+| MCP servers | `deepwiki ask-wiki-question '{...}'` | any [MCP server](/python/cli/mcp), installed as a command |
+| Files | `cat /work/report.csv` | a [mount](/home/setup/vfs): memory here; S3, Drive or a database in production |
+
+## Installation
+
+<Tabs>
+  <Tab title="FastAPI" icon="/images/python-logo.svg">
+    ```bash
+    pip install 'mirage-ai[monty]' fastapi uvicorn
+    ```
+  </Tab>
+  <Tab title="Express" icon="/images/typescript-logo.svg">
+    ```bash
+    npm install @struktoai/mirage-node @pydantic/monty express
+    ```
+  </Tab>
+</Tabs>
+
+## Server
+
+One endpoint creates a terminal, another runs a command line in it.
+
+<Tabs>
+  <Tab title="FastAPI" icon="/images/python-logo.svg">
+    ```python app.py
+    from contextlib import asynccontextmanager
+
+    from fastapi import FastAPI
+    from pydantic import BaseModel
+
+    from mirage import RAMVFS, MountMode, Workspace
+    from mirage.runtime.python.monty import MontyRuntime
+
+    ws = Workspace(
+        {"/work": (RAMVFS(), MountMode.EXEC)},
+        runtimes=[MontyRuntime(captures=["python", "python3"])],
+    )
+
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        await ws.close()
+
+
+    app = FastAPI(lifespan=lifespan)
+
+
+    class Run(BaseModel):
+        command: str
+
+
+    @app.post("/sessions/{session_id}")
+    async def create(session_id: str) -> None:
+        ws.create_session(session_id)
+
+
+    @app.post("/sessions/{session_id}/run")
+    async def run(session_id: str, body: Run) -> dict:
+        r = await ws.shell(body.command, session_id=session_id)
+        return {"stdout": await r.stdout_str(), "stderr": await r.stderr_str(), "exit_code": r.exit_code}
+    ```
+
+    ```bash
+    uvicorn app:app --port 3000
+    ```
+  </Tab>
+  <Tab title="Express" icon="/images/typescript-logo.svg">
+    ```typescript app.mjs
+    import express from 'express'
+    import { MontyRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      { '/work': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: [new MontyRuntime({ captures: ['python', 'python3'] })] },
+    )
+    const app = express()
+    app.use(express.json())
+
+    app.post('/sessions/:id', (req, res) => {
+      ws.createSession(req.params.id)
+      res.sendStatus(201)
+    })
+
+    app.post('/sessions/:id/run', async (req, res) => {
+      const r = await ws.shell(req.body.command, { sessionId: req.params.id })
+      res.json({ stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode })
+    })
+
+    app.listen(3000, '127.0.0.1')
+    ```
+
+    ```bash
+    node app.mjs
+    ```
+  </Tab>
+</Tabs>
+
+## Usage
+
+```bash
+curl -X POST localhost:3000/sessions/a
+curl -X POST localhost:3000/sessions/a/run -H 'content-type: application/json' \
+  -d '{"command": "cd /work && echo \"print(sum(range(10)))\" > s.py && python3 s.py"}'
+```
+
+The run prints `45`. A later call to session `a` starts in `/work`, where the
+`cd` left it.
+
+The examples below send several lines in one request. This shell function
+reads the lines from standard input, sends them to session `a` as the
+`command`, and prints what they print, errors included. It needs
+[`jq`](https://jqlang.org):
+
+```bash
+run() {
+  jq -Rs '{command: .}' |
+    curl -s localhost:3000/sessions/a/run -H 'content-type: application/json' -d @- |
+    jq -j '.stdout, .stderr'
+}
+
+run <<'SH'
+pwd
+python3 s.py
+SH
+```
+
+```text
+/work
+45
+```
+
+The lines between `SH` and `SH` run in the terminal on the server, not in
+the shell that calls `run`.
+
+## Terminals per Server
+
+<Note>
+  DRAFT. This section is waiting for the benchmark: how many idle terminals,
+  and how many busy ones, a server holds under a 256 MB and a 512 MB memory
+  limit, on FastAPI and on Express.
+</Note>
+
+## Limits
+
+<Note>
+  DRAFT. This section is waiting for the benchmark: the caps a server sets on
+  a terminal's memory and files, and the error a terminal sees when it hits
+  one. See [Limits](/home/limits) for the full list.
+</Note>
+
+## Async
+
+`ws.shell` is a coroutine in Python and a promise in TypeScript, and it never
+blocks the event loop. The handlers above are `async`, so while one terminal
+waits on a file read, a runtime or a slow command, the server keeps serving
+every other terminal, with no thread or process per terminal.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import asyncio
+
+    for sid in ["a", "b", "c"]:
+        ws.create_session(sid)
+    await asyncio.gather(*(ws.shell("sleep 1", session_id=sid) for sid in ["a", "b", "c"]))
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    for (const sid of ['a', 'b', 'c']) ws.createSession(sid)
+    await Promise.all(['a', 'b', 'c'].map((sid) => ws.shell('sleep 1', { sessionId: sid })))
+    ```
+  </Tab>
+</Tabs>
+
+The three lines finish together in about a second; 20 sessions take the
+same. Within one session, lines run one after another in order, as in a real
+terminal, so three `sleep 1` lines on session `a` take three seconds.
+
+## Sharing and Security
+
+- Terminals share the workspace's mounts, so a file one writes under `/work`
+  is visible to the others. Give each terminal its own directory, or its own
+  workspace, to keep files apart.
+- The server runs any line for any caller that names a session. Put
+  authentication and a check that the caller owns the session in front of it
+  before it listens beyond localhost.
+- A [session profile](/home/configuration/session) and a
+  [policy](/home/policy/overview) decide which commands a terminal may run
+  and which files it sees. [Policy & Security](/home/examples/policy-security)
+  walks through one.
+
+## Use Cases
+
+Each page adds a few lines to this server and shows what an agent does with
+the terminal.
+
+<CardGroup cols={2}>
+  <Card title="Code Review" icon="code-pull-request" href="/home/examples/lightweight-terminal/code-review">
+    Review a release and one fix with `git`, pipes, Python and MCP servers.
+  </Card>
+  <Card title="Co-Work" icon="users" href="/home/examples/lightweight-terminal/co-work">
+    Schedule candidate interviews from an inbox, a calendar and Slack.
+  </Card>
+  <Card title="Alert Triage" icon="bell" href="/home/examples/lightweight-terminal/alert-triage">
+    One short terminal per alert: enrich it, decide, escalate.
+  </Card>
+  <Card title="Release Notes" icon="scroll" href="/home/examples/lightweight-terminal/release-notes">
+    Turn a week of merged work into release notes.
+  </Card>
+  <Card title="Log Triage" icon="magnifying-glass-chart" href="/home/examples/lightweight-terminal/log-triage">
+    Find where the errors are in service logs, without reading the logs.
+  </Card>
+</CardGroup>
