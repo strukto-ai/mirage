@@ -167,7 +167,7 @@ impl Stream for Strftime {
         }
         self.rendered
             .write(out, OUTPUT, &self.format, &self.config.zone);
-        if self.layout.done(&self.format) && self.rendered.pieces.is_empty() {
+        if self.layout.done(&self.format) && self.rendered.format_spans == 0 {
             self.format = Vec::new();
             self.layout = Layout::default();
         }
@@ -219,6 +219,7 @@ struct Rendered {
     pieces: VecDeque<Piece>,
     len: usize,
     written: usize,
+    format_spans: usize,
 }
 
 impl Rendered {
@@ -240,6 +241,7 @@ impl Rendered {
     fn span(&mut self, source: Source, range: std::ops::Range<usize>) {
         if !range.is_empty() {
             self.len = self.len.saturating_add(range.len());
+            self.format_spans += usize::from(matches!(&source, Source::Format));
             self.pieces.push_back(Piece::Span(source, range, None));
         }
     }
@@ -253,6 +255,7 @@ impl Rendered {
 
     fn append(&mut self, other: Rendered) {
         self.len = self.len.saturating_add(other.len);
+        self.format_spans += other.format_spans;
         self.pieces.extend(other.pieces);
     }
 
@@ -305,6 +308,7 @@ impl Rendered {
             room -= taken;
             self.written += taken;
             if self.written == len {
+                self.format_spans -= usize::from(matches!(piece, Piece::Span(Source::Format, ..)));
                 self.pieces.pop_front();
                 self.written = 0;
             }
@@ -997,7 +1001,7 @@ mod tests {
                 let at = stream.layout.at;
                 let mut chunk = Vec::new();
                 stream.drain(&mut chunk).unwrap();
-                if stream.busy() {
+                if !stream.format.is_empty() {
                     assert!(stream.layout.at - at <= super::WORK);
                 }
                 assert!(chunk.len() <= super::OUTPUT);
@@ -1029,6 +1033,55 @@ mod tests {
             crate::drain_steps(stream.as_mut(), &mut out).unwrap();
         }
         assert_eq!(out, b"2026");
+    }
+
+    #[test]
+    fn completed_formats_are_released_while_padding_or_zone_output_remains() {
+        let n = super::WORK * 5;
+        let mut config = moment();
+        config["zone"] = json!("mIx".repeat(n));
+        for suffix in [b"2147483647Y".as_slice(), b"Z"] {
+            let mut stream =
+                super::Strftime::new(serde_json::from_value(config.clone()).unwrap()).unwrap();
+            let format = [b"%".as_slice(), &vec![b'^'; n], suffix].concat();
+            let mut out = Vec::new();
+            stream.feed(&format, &mut out).unwrap();
+            stream.finish(&mut out).unwrap();
+            while out.is_empty() {
+                stream.drain(&mut out).unwrap();
+            }
+            assert!(stream.busy());
+            assert_eq!(stream.format.capacity(), 0);
+            if suffix == b"Z" {
+                while stream.busy() {
+                    stream.drain(&mut out).unwrap();
+                }
+                assert_eq!(out, b"MIX".repeat(n));
+            } else {
+                assert!(out.iter().all(|&byte| byte == b'0'));
+            }
+        }
+    }
+
+    #[test]
+    fn pending_literal_spans_keep_the_format_until_their_output_is_written() {
+        let mut stream = super::Strftime::new(serde_json::from_value(moment()).unwrap()).unwrap();
+        let format = [b"%".as_slice(), &vec![b'^'; super::WORK * 5], b"70000Ytail"].concat();
+        let mut out = Vec::new();
+        stream.feed(&format, &mut out).unwrap();
+        stream.finish(&mut out).unwrap();
+        while out.is_empty() {
+            stream.drain(&mut out).unwrap();
+        }
+        assert!(stream.layout.done(&stream.format));
+        assert!(stream.busy());
+        assert!(!stream.format.is_empty());
+        while stream.busy() {
+            stream.drain(&mut out).unwrap();
+        }
+        assert_eq!(stream.format.capacity(), 0);
+        let expected = [vec![b'0'; 69996], b"2026tail".to_vec()].concat();
+        assert_eq!(out, expected);
     }
 
     #[test]
