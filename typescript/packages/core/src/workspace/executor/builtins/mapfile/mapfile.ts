@@ -38,7 +38,8 @@ import {
   recordDelimiter,
   requireView,
 } from '../shared.ts'
-import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
+import type { BuiltinCall } from '../types.ts'
+import type { ExecuteFn } from '../../../expand/types.ts'
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
 const DEFAULT_QUANTUM = 5000
@@ -58,7 +59,7 @@ export async function handleMapfile(
   args: string[],
   session: SessionState,
   stdin: ByteSource | null,
-  executeFn: ExecuteStringFn,
+  executeFn: ExecuteFn,
   state: SessionView | null = null,
   cmd = 'mapfile',
   signal?: AbortSignal,

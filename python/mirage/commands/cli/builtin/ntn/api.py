@@ -13,8 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import Awaitable, Callable
-from typing import Any
 
 from mirage.accessor.notion import NotionAccessor
 from mirage.commands.cli.builtin.ntn.serde import serde_message
@@ -27,13 +25,7 @@ from mirage.commands.cli.builtin.ntn.util import (
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.notion.client import (
-    notion_delete,
-    notion_get,
-    notion_patch,
-    notion_post,
-    notion_put,
-)
+from mirage.core.notion.client import notion_request
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import JsonValue, PathSpec
 
@@ -67,24 +59,11 @@ EMPTY_METHOD = (
     "GET, POST, PATCH, PUT, or DELETE.\n"
 )
 
-# The write verbs share one shape and `notion_get` does not (a query
-# where they take a body), so the table is typed by what every entry
-# returns rather than by a signature that would fit neither. Only the
-# write verbs are ever called through it: the GET branch calls
-# `notion_get` by name, and this mapping also answers "is that a method
-# at all".
-#
 # DELETE is here because `DELETE /v1/blocks/{id}` is the only delete verb the
 # public API has, so without it the one way to remove anything is unreachable
 # from this CLI. It takes no body, which is why it is reached through `-X`
 # rather than by a body source inferring it.
-METHODS: dict[str, Callable[..., Awaitable[dict[str, Any]]]] = {
-    "GET": notion_get,
-    "POST": notion_post,
-    "PATCH": notion_patch,
-    "PUT": notion_put,
-    "DELETE": notion_delete,
-}
+METHODS = frozenset({"GET", "POST", "PATCH", "PUT", "DELETE"})
 
 
 class InlineRefusal(Exception):
@@ -291,25 +270,20 @@ async def api(
     method = fl.as_str("method", "POST" if named else "GET").upper()
     if not method:
         return refusal(EMPTY_METHOD, REFUSAL_EXIT)
-    call = METHODS.get(method)
-    if call is None:
+    if method not in METHODS:
         raise UsageError(f"unsupported method: {method}")
     route = path if path.startswith("/") else f"/{path}"
     route = route[3:] if route.startswith("/v1/") else route
     line = notion_transport(accessor, ctx)
-    if method == "GET":
-        result = await notion_get(
-            line, route, params=params or None, extra_headers=headers or None
-        )
-    else:
-        # `name==value` is a query parameter whatever the method is, so
-        # it rides alongside the body rather than being dropped the
-        # moment the call stops being a GET.
-        result = await call(
-            line,
-            route,
-            body,
-            extra_headers=headers or None,
-            params=params or None,
-        )
+    # `name==value` is a query parameter whatever the method is, so it
+    # rides alongside the body rather than being dropped the moment the
+    # call stops being a GET, which sends no body.
+    result = await notion_request(
+        line,
+        method,
+        route,
+        body,
+        extra_headers=headers or None,
+        params=params or None,
+    )
     return compact_json(result), IOResult()

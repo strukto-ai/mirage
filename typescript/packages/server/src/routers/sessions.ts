@@ -21,10 +21,6 @@ import { refused } from '../metrics.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
 import { HttpError, loaderError, validationError, WorkspaceMissing } from '../errors.ts'
 
-interface WsIdParams {
-  wsId: string
-}
-
 interface WsSessionParams {
   wsId: string
   sessionId: string
@@ -72,7 +68,7 @@ export function registerSessionsRoutes(
     loadProfile: (profile: SessionProfile) => SessionProfile
   },
 ): void {
-  app.post<{ Params: WsIdParams; Body: JsonValue }>(
+  app.post<{ Params: { wsId: string }; Body: JsonValue }>(
     '/v1/workspaces/:wsId/sessions',
     async (req, reply) => {
       const { wsId } = req.params
@@ -113,7 +109,7 @@ export function registerSessionsRoutes(
     },
   )
 
-  app.get<{ Params: WsIdParams }>(
+  app.get<{ Params: { wsId: string } }>(
     '/v1/workspaces/:wsId/sessions',
     async (req): Promise<SessionList> => {
       const { wsId } = req.params

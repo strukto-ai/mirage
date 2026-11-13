@@ -45,17 +45,6 @@ function isoDay(year: number, month: number, date: number): string {
   return `${String(year)}-${mm}-${dd}`
 }
 
-function isValidDate(year: number, month: number, date: number): boolean {
-  if (month < 1 || month > 12 || date < 1) return false
-  const d = new Date(Date.UTC(year, month - 1, date))
-  return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === date
-}
-
-function parseFixedInt(s: string | undefined, expectedLength: number): number | null {
-  if (s?.length !== expectedLength || !/^\d+$/.test(s)) return null
-  return Number.parseInt(s, 10)
-}
-
 /**
  * Whether a glob names a date range a windowed lister can move to.
  *
@@ -143,34 +132,32 @@ export function globSpan(pattern: string | null | undefined): [string, string] |
  * that cuts the prefix first; separators trailing the literal are ignored.
  */
 export function literalSpan(literal: string): [string, string] | null {
-  if (literal === '') return null
-  const parts = literal.replace(/[_-]+$/, '').split('-')
-  if (parts.length === 1) {
-    const year = parseFixedInt(parts[0], 4)
-    if (year === null) return null
-    return [isoDay(year, 1, 1), isoDay(year + 1, 1, 1)]
+  const fields = /^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$/.exec(literal.replace(/[_-]+$/, ''))
+  if (fields === null) return null
+  const [, y, m, d] = fields
+  const year = Number(y)
+  if (m === undefined) return [isoDay(year, 1, 1), isoDay(year + 1, 1, 1)]
+  const month = Number(m)
+  const date = Number(d ?? 1)
+  const start = new Date(Date.UTC(year, month - 1, date))
+  if (
+    start.getUTCFullYear() !== year ||
+    start.getUTCMonth() !== month - 1 ||
+    start.getUTCDate() !== date
+  ) {
+    return null
   }
-  if (parts.length === 2) {
-    const year = parseFixedInt(parts[0], 4)
-    const month = parseFixedInt(parts[1], 2)
-    if (year === null || month === null) return null
-    if (!isValidDate(year, month, 1)) return null
-    if (month === 12) return [isoDay(year, month, 1), isoDay(year + 1, 1, 1)]
-    return [isoDay(year, month, 1), isoDay(year, month + 1, 1)]
-  }
-  if (parts.length === 3) {
-    const year = parseFixedInt(parts[0], 4)
-    const month = parseFixedInt(parts[1], 2)
-    const date = parseFixedInt(parts[2], 2)
-    if (year === null || month === null || date === null) return null
-    if (!isValidDate(year, month, date)) return null
-    const next = new Date(Date.UTC(year, month - 1, date) + 86400000)
+  if (d === undefined) {
     return [
-      isoDay(year, month, date),
-      isoDay(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate()),
+      isoDay(year, month, 1),
+      month === 12 ? isoDay(year + 1, 1, 1) : isoDay(year, month + 1, 1),
     ]
   }
-  return null
+  const next = new Date(start.getTime() + 86400000)
+  return [
+    isoDay(year, month, date),
+    isoDay(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate()),
+  ]
 }
 
 // A quoted glob character keeps travelling as a character, under a

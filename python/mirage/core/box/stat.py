@@ -17,7 +17,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.cache.index.ram import ListingCheckStore
 from mirage.core.box.api import absent_on_404, get_folder_info
 from mirage.core.box.readdir import resource_type_for, stat_from_item
-from mirage.core.box.resolve import item_of, live_item, root_id
+from mirage.core.box.resolve import item_of, live_item
 from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
@@ -46,7 +46,7 @@ async def stat(
     virtual = path.virtual
     key = path.vfs_path
     if not key.strip("/"):
-        folder_id = root_id(accessor)
+        folder_id = accessor.root_folder_id
         info = await absent_on_404(
             virtual, lambda: get_folder_info(accessor.token_manager, folder_id)
         )

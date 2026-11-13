@@ -17,7 +17,7 @@ import logging
 from mirage.accessor.box import BoxAccessor
 from mirage.core.box.api import search_content
 from mirage.core.box.client import BoxApiError
-from mirage.core.box.resolve import mount_relative_key, path_parts, root_id
+from mirage.core.box.resolve import mount_relative_key, path_parts
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mounted_path
 
@@ -49,7 +49,7 @@ async def files_containing(
         under (PathSpec): the directory walked.
         entry (FileStat | None): what is at ``under``.
     """
-    root = root_id(accessor)
+    root = accessor.root_folder_id
     if not path_parts(under):
         folder_id = root
     elif entry is None or entry.type is not FileType.DIRECTORY:

@@ -362,7 +362,11 @@ class HttpTransport:
             )
         if method == "GET":
             moved = resp.url.split("/info/refs", 1)[0]
-            if _origin(moved) != _origin(self._url):
+            before, after = urlsplit(self._url), urlsplit(moved)
+            if (after.scheme, after.netloc.lower()) != (
+                before.scheme,
+                before.netloc.lower(),
+            ):
                 self._credentials = {}
             self._url = moved
         return await materialize(resp.body)
@@ -427,16 +431,6 @@ class HttpTransport:
                     + payload.decode("utf-8", "replace").strip()
                 )
         return bytes(pack)
-
-
-def _origin(url: str) -> tuple[str, str]:
-    """A URL's scheme and host, the part credentials are scoped to.
-
-    Args:
-        url (str): an absolute URL.
-    """
-    parts = urlsplit(url)
-    return parts.scheme.lower(), parts.netloc.lower()
 
 
 def _credentials(url: str) -> tuple[str, dict[str, str]]:

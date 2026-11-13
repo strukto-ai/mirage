@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from email import policy
-from email.message import Message
 from email.parser import BytesParser
 from email.utils import getaddresses
 from typing import Any, cast
@@ -28,9 +27,41 @@ def parse_rfc822(raw: bytes, headers_only: bool = False) -> dict[str, Any]:
 
     body_text, body_html = "", ""
     attachments: list[dict[str, Any]] = []
+    if not headers_only and msg.is_multipart():
+        for part in msg.walk():
+            content_type = part.get_content_type()
+            disposition = str(part.get("Content-Disposition", ""))
 
-    if not headers_only:
-        body_text, body_html, attachments = _extract_parts(msg)
+            if "attachment" in disposition:
+                payload = cast(bytes, part.get_payload(decode=True) or b"")
+                attachments.append(
+                    {
+                        "filename": part.get_filename() or "unnamed",
+                        "content_type": content_type,
+                        "size": len(payload),
+                    }
+                )
+            elif content_type == "text/plain" and not body_text:
+                body_text = cast(
+                    bytes, part.get_payload(decode=True) or b""
+                ).decode(
+                    part.get_content_charset() or "utf-8", errors="replace"
+                )
+            elif content_type == "text/html" and not body_html:
+                body_html = cast(
+                    bytes, part.get_payload(decode=True) or b""
+                ).decode(
+                    part.get_content_charset() or "utf-8", errors="replace"
+                )
+    elif not headers_only:
+        payload = cast(bytes, msg.get_payload(decode=True) or b"")
+        decoded = payload.decode(
+            msg.get_content_charset() or "utf-8", errors="replace"
+        )
+        if msg.get_content_type() == "text/html":
+            body_html = decoded
+        else:
+            body_text = decoded
 
     return {
         "from": _parse_address(msg.get("From", "")),
@@ -48,50 +79,6 @@ def parse_rfc822(raw: bytes, headers_only: bool = False) -> dict[str, Any]:
         "has_attachments": bool(attachments),
         "attachments": attachments,
     }
-
-
-def _extract_parts(msg: Message) -> tuple[str, str, list[dict[str, Any]]]:
-    text, html = "", ""
-    attachments: list[dict[str, Any]] = []
-
-    if msg.is_multipart():
-        for part in msg.walk():
-            content_type = part.get_content_type()
-            disposition = str(part.get("Content-Disposition", ""))
-
-            if "attachment" in disposition:
-                payload = cast(bytes, part.get_payload(decode=True) or b"")
-                attachments.append(
-                    {
-                        "filename": part.get_filename() or "unnamed",
-                        "content_type": content_type,
-                        "size": len(payload),
-                    }
-                )
-            elif content_type == "text/plain" and not text:
-                text = cast(
-                    bytes, part.get_payload(decode=True) or b""
-                ).decode(
-                    part.get_content_charset() or "utf-8", errors="replace"
-                )
-            elif content_type == "text/html" and not html:
-                html = cast(
-                    bytes, part.get_payload(decode=True) or b""
-                ).decode(
-                    part.get_content_charset() or "utf-8", errors="replace"
-                )
-    else:
-        content_type = msg.get_content_type()
-        payload = cast(bytes, msg.get_payload(decode=True) or b"")
-        decoded = payload.decode(
-            msg.get_content_charset() or "utf-8", errors="replace"
-        )
-        if content_type == "text/html":
-            html = decoded
-        else:
-            text = decoded
-
-    return text, html, attachments
 
 
 def _parse_address(raw: str) -> dict[str, str]:

@@ -16,7 +16,6 @@ import type { RedirectResult } from '../../context/session_context.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import { EvaluationContext } from '../evaluation.ts'
 import { helpPage, versionLine } from '../../commands/spec/standard.ts'
-import type { ExecuteStringFn } from './builtins/types.ts'
 import { specOf } from '../../commands/spec/index.ts'
 import { makeVar } from '../../shell/variable.ts'
 import { envGet, envSnapshot, seedVar, sessionView, setAttr } from '../session/state.ts'
@@ -1204,7 +1203,7 @@ describe('handleCd', () => {
 
 describe('handleEval', () => {
   it('runs the joined words in the frames of its caller', async () => {
-    const exec = vi.fn<ExecuteStringFn>(() => Promise.resolve(new IOResult({ exitCode: 7 })))
+    const exec = vi.fn<ExecuteFn>(() => Promise.resolve(new IOResult({ exitCode: 7 })))
     const s = new SessionState({ sessionId: 'sess' })
     const cs = new CallStack()
     const [, io] = await handleEval(exec, ['echo', 'hi'], s, null, undefined, cs)

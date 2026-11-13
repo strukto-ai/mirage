@@ -16,10 +16,33 @@ import { IOResult } from '../../../../io/types.ts'
 import { editsInPlace, facts, sedGeneric, positionalAsPaths } from '../../generic/sed.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
+import type { CommandFn } from '../../../config.ts'
 import { type GenericCommand } from '../adapter.ts'
 import { commandFiles } from '../files.ts'
 
 const ENC = new TextEncoder()
+
+const sed: CommandFn = async (_accessor, paths, texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  // The default stream-to-stdout path is read-only and works on every
+  // backend; only in-place editing needs a write op (#382).
+  const fl = new FlagView(ctx.flags, specOf('sed'))
+  if (editsInPlace(fl) && !files.answers('write')) {
+    return [
+      null,
+      new IOResult({
+        exitCode: 1,
+        stderr: ENC.encode('sed: -i not supported on this backend: Permission denied\n'),
+      }),
+    ]
+  }
+  // With -e/-f the positional operand is a file, not the script.
+  const usingE = fl.asList('expression').length > 0
+  const usingF = fl.asPaths('file').length > 0
+  const operands = usingE || usingF ? [...positionalAsPaths(texts, ctx), ...paths] : paths
+  const resolved = operands.length > 0 ? await files.resolveGlob(operands) : operands
+  return sedGeneric(resolved, texts, ctx, files.read)
+}
 
 export const BUILDER: GenericCommand = {
   name: 'sed',
@@ -27,25 +50,5 @@ export const BUILDER: GenericCommand = {
   write: true,
   read: true,
   givesBack: true,
-  fn: async (_accessor, paths, texts, ctx) => {
-    const files = commandFiles(ctx, paths)
-    // The default stream-to-stdout path is read-only and works on every
-    // backend; only in-place editing needs a write op (#382).
-    const fl = new FlagView(ctx.flags, specOf('sed'))
-    if (editsInPlace(fl) && !files.answers('write')) {
-      return [
-        null,
-        new IOResult({
-          exitCode: 1,
-          stderr: ENC.encode('sed: -i not supported on this backend: Permission denied\n'),
-        }),
-      ]
-    }
-    // With -e/-f the positional operand is a file, not the script.
-    const usingE = fl.asList('expression').length > 0
-    const usingF = fl.asPaths('file').length > 0
-    const operands = usingE || usingF ? [...positionalAsPaths(texts, ctx), ...paths] : paths
-    const resolved = operands.length > 0 ? await files.resolveGlob(operands) : operands
-    return sedGeneric(resolved, texts, ctx, files.read)
-  },
+  fn: sed,
 }

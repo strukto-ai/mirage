@@ -24,31 +24,11 @@ import type { Files } from '../../../../workspace/files.ts'
 
 const MERGE_HEAD = 'MERGE_HEAD'
 
-/** The raw shape isomorphic-git keeps one index row in. */
-interface RawEntry {
-  path: string
-  oid: string
-  mode: number
-  size: number
-  stage?: number
-  flags?: { stage?: number }
-}
-
 /** What a mutation hands back to the index, before the stat cache is filled. */
 export interface StagedEntry {
   readonly oid: string
   readonly mode: number
   readonly size: number
-}
-
-function toEntry(entry: RawEntry): IndexEntry {
-  return {
-    path: entry.path,
-    oid: entry.oid,
-    mode: entry.mode,
-    size: entry.size,
-    stage: entry.stage ?? entry.flags?.stage ?? 0,
-  }
 }
 
 /**
@@ -65,7 +45,15 @@ function toEntry(entry: RawEntry): IndexEntry {
 async function withIndex<T>(
   repo: Repo,
   closure: (index: {
-    entriesFlat: RawEntry[]
+    /** Each row in the raw shape isomorphic-git keeps it in. */
+    entriesFlat: {
+      path: string
+      oid: string
+      mode: number
+      size: number
+      stage?: number
+      flags?: { stage?: number }
+    }[]
     insert(args: { filepath: string; stats: object; oid: string; stage?: number }): void
     delete(args: { filepath: string }): void
   }) => T,
@@ -95,7 +83,15 @@ export async function readIndex(repo: Repo, vfs: Files): Promise<IndexState> {
   const merging = await exists(vfs, repo.location.gitdir.join(MERGE_HEAD))
   const entries = new Map<string, IndexEntry>()
   const conflicts = new Map<string, ConflictedEntry>()
-  const rows = await withIndex(repo, (index) => index.entriesFlat.map(toEntry))
+  const rows = await withIndex(repo, (index) =>
+    index.entriesFlat.map((entry): IndexEntry => ({
+      path: entry.path,
+      oid: entry.oid,
+      mode: entry.mode,
+      size: entry.size,
+      stage: entry.stage ?? entry.flags?.stage ?? 0,
+    })),
+  )
   for (const row of rows) {
     if (row.stage === 0) {
       entries.set(row.path, row)

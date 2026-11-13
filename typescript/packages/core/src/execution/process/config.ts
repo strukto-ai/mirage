@@ -86,11 +86,6 @@ export function layerProcesses(
   return Object.freeze({ ...out, kill: nearer(out.kill, out.list) })
 }
 
-/** A `processes` block on its own, its unstated fields at their defaults. */
-export function parseProcessPermissions(value: unknown): ProcessPermissions {
-  return layerProcesses([statedProcesses(value)])
-}
-
 /**
  * `own` narrowed by the fields an inline document's block states: the
  * nearer scope of each, `kill` never past `list`, the lower cap. Mirrors

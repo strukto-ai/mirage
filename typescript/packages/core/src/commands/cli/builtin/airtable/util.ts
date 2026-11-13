@@ -14,9 +14,9 @@
 
 import type { AirtableAccessor } from '../../../../accessor/airtable.ts'
 import type { AirtableConfig } from '../../../../core/airtable/config.ts'
-import type { Row } from '../../../../core/airtable/normalize.ts'
 import { materialize, type ByteSource } from '../../../../io/types.ts'
 import { eacces } from '../../../../errors/fs.ts'
+import type { JsonObject } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { UsageError } from '../../../errors.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
@@ -70,7 +70,7 @@ export function scopedBase(config: AirtableConfig, baseId: string): string {
  * takes either spelling in a path, and an id can never be another table's
  * name, so the id match wins.
  */
-export function findTable(tables: readonly Row[], ref: string): Row | undefined {
+export function findTable(tables: readonly JsonObject[], ref: string): JsonObject | undefined {
   return tables.find((t) => t.id === ref) ?? tables.find((t) => t.name === ref)
 }
 

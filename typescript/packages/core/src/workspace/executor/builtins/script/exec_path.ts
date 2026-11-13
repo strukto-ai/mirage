@@ -32,7 +32,7 @@ import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { handleCommandBuiltin } from '../command/command.ts'
-import type { ExecuteStringFn } from '../types.ts'
+import type { ExecuteFn } from '../../../expand/types.ts'
 import { handleBash } from './bash.ts'
 import { isBinary, readScriptBytes, scriptError } from './script.ts'
 
@@ -102,7 +102,7 @@ function shebangWords(script: string): string[] {
  */
 export async function handleExecPath(
   dispatch: DispatchFn,
-  executeFn: ExecuteStringFn,
+  executeFn: ExecuteFn,
   path: string,
   args: string[],
   context: EvaluationContext,

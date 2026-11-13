@@ -15,7 +15,8 @@
 import type { OneDriveAccessor } from '@struktoai/mirage-core/accessor/onedrive'
 import { read } from '@struktoai/mirage-core/core/onedrive/read'
 import { readStream } from '@struktoai/mirage-core/core/onedrive/stream'
-import { runWithRecording, runWithRevisions } from '@struktoai/mirage-core/observe/context'
+import { currentCaller, runWithCaller } from '@struktoai/mirage-core/context/session_context'
+import { runWithRecording } from '@struktoai/mirage-core/observe/context'
 import {
   DEFAULT_READ_TTL,
   type FileStat,
@@ -150,7 +151,7 @@ describe('onedrive under read: fresh', () => {
     graph.write(ME, 'a.txt', NEW)
     const vfs = await vfsOf(graph)
     const pinned = (): Promise<Uint8Array> =>
-      runWithRevisions(new Map([['/a.txt', pin]]), () =>
+      runWithCaller({ ...currentCaller(), revisions: { map: new Map([['/a.txt', pin]]) } }, () =>
         read(vfs.accessor as OneDriveAccessor, SPEC),
       )
     try {

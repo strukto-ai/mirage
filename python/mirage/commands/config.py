@@ -15,7 +15,7 @@
 import functools
 from collections.abc import Awaitable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol, TypeAlias, overload
+from typing import Any, Callable, Protocol, overload
 
 from mirage.accessor.base import Accessor
 from mirage.commands.constants import ROOT_CWD
@@ -243,17 +243,14 @@ def command(
     return decorator
 
 
-CommandSource: TypeAlias = Command | Callable[..., Any]
-
-
 def registered_commands(
-    items: Iterable[CommandSource],
+    items: Iterable[Command | Callable[..., Any]],
 ) -> list[Command]:
     """The registrations of *items*, in order.
 
     Args:
-        items (Iterable[CommandSource]): ``Command`` values
-            and ``@command``-decorated functions.
+        items (Iterable[Command | Callable[..., Any]]): ``Command``
+            values and ``@command``-decorated functions.
 
     Raises:
         TypeError: An item is neither.
@@ -279,14 +276,14 @@ class CommandCatalog(Sequence[Command]):
     """A fixed list of commands, looked up by name and file extension.
 
     Args:
-        items (Iterable[CommandSource]): ``Command`` values
-            and ``@command``-decorated functions; a later one wins a
-            lookup.
+        items (Iterable[Command | Callable[..., Any]]): ``Command``
+            values and ``@command``-decorated functions; a later one
+            wins a lookup.
     """
 
     __slots__ = ("_items", "_by_key")
 
-    def __init__(self, items: Iterable[CommandSource]) -> None:
+    def __init__(self, items: Iterable[Command | Callable[..., Any]]) -> None:
         self._items = tuple(registered_commands(items))
         self._by_key = {(c.name, c.filetype): c for c in self._items}
 

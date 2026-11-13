@@ -20,8 +20,6 @@ const DECODER = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 const SURROGATE_BASE = 0xdc00
 const SURROGATE_LOW = 0xdc80
 const SURROGATE_HIGH = 0xdcff
-const HIGH_SURROGATE_LOW = 0xd800
-const HIGH_SURROGATE_HIGH = 0xdbff
 const ASCII_MAX = 0x80
 const BYTE_MASK = 0xff
 const VIEW_CHUNK = 8192
@@ -58,7 +56,7 @@ function isByteSentinel(text: string, i: number): boolean {
   if (code < SURROGATE_LOW || code > SURROGATE_HIGH) return false
   if (i === 0) return true
   const before = text.charCodeAt(i - 1)
-  return before < HIGH_SURROGATE_LOW || before > HIGH_SURROGATE_HIGH
+  return before < 0xd800 || before > 0xdbff
 }
 
 /**

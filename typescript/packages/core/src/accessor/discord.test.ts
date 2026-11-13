@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { DiscordAccessor } from './discord.ts'
-import type { DiscordMethod, DiscordResponse, DiscordTransport } from '../core/discord/client.ts'
+import type { DiscordMethod, DiscordTransport } from '../core/discord/client.ts'
 
 class FakeDiscordTransport implements DiscordTransport {
   public readonly calls: {
@@ -28,7 +28,7 @@ class FakeDiscordTransport implements DiscordTransport {
     endpoint: string,
     params?: Record<string, string | number>,
     body?: Record<string, unknown>,
-  ): Promise<DiscordResponse> {
+  ): Promise<unknown> {
     this.calls.push({
       method,
       endpoint,

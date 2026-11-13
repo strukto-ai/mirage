@@ -22,7 +22,6 @@ from mirage.accessor.notion import NotionAccessor
 from mirage.core.api.client import RetryPolicy, api_request
 from mirage.core.api.errors import ApiError
 from mirage.core.api.paginate import cursor_items
-from mirage.core.notion.config import NotionConfig
 from mirage.core.notion.constants import API_VERSION, MAX_PAGE_SIZE
 from mirage.types import JsonValue
 from mirage.vfs.secrets import reveal_secret
@@ -46,28 +45,6 @@ class NotionAPIError(ApiError):
         self.code = code
 
 
-def notion_headers(
-    config: NotionConfig, extra: Mapping[str, str] | None = None
-) -> dict[str, str]:
-    """The headers every request carries, plus a caller's own.
-
-    Args:
-        config (NotionConfig): notion API config.
-        extra (Mapping[str, str] | None): per-request headers, which
-            `ntn api` collects from its `Header:Value` inputs. Applied
-            last so a caller can override a default, which is what the
-            real CLI does.
-    """
-    headers = {
-        "Authorization": f"Bearer {reveal_secret(config.api_key)}",
-        "Notion-Version": config.api_version or API_VERSION,
-        "Content-Type": "application/json",
-    }
-    if extra:
-        headers.update(extra)
-    return headers
-
-
 def _error_of(resp: aiohttp.ClientResponse, body: str) -> Exception:
     try:
         data = json.loads(body)
@@ -80,44 +57,50 @@ def _error_of(resp: aiohttp.ClientResponse, body: str) -> Exception:
     )
 
 
-async def notion_get(
+async def notion_request(
     accessor: NotionAccessor,
-    path: str,
-    params: dict[str, Any] | None = None,
-    extra_headers: Mapping[str, str] | None = None,
-) -> dict[str, Any]:
-    data: dict[str, Any] = await api_request(
-        "GET",
-        f"{accessor.config.base_url}{path}",
-        error_of=_error_of,
-        retry=_RATE_LIMIT_RETRY,
-        headers=notion_headers(accessor.config, extra_headers),
-        params=params,
-        session=accessor.pool,
-    )
-    return data
-
-
-async def notion_post(
-    accessor: NotionAccessor,
+    method: str,
     path: str,
     body: JsonValue = None,
     extra_headers: Mapping[str, str] | None = None,
     params: dict[str, Any] | None = None,
     form: aiohttp.FormData | None = None,
 ) -> dict[str, Any]:
-    # `body or {}` would rewrite an empty list or a zero into an object.
-    # `ntn api` can be handed any JSON value and sends it verbatim, so only
-    # a genuinely absent body becomes `{}`. A multipart body replaces the
-    # JSON one, and its boundary sets its own content type.
-    headers = notion_headers(accessor.config, extra_headers)
+    """One Notion call: every verb and ``ntn api`` send through it.
+
+    GET and DELETE carry no body; the only route DELETE exists on is
+    /v1/blocks/{id}, whose whole payload is the id in the path. `body or
+    {}` would rewrite an empty list or a zero into an object, and `ntn
+    api` can be handed any JSON value and sends it verbatim, so only a
+    genuinely absent body becomes `{}`. A multipart body replaces the JSON
+    one, and its boundary sets its own content type.
+
+    Args:
+        accessor (NotionAccessor): the account's config and pool.
+        method (str): the HTTP method.
+        path (str): the API path under the base URL.
+        body (JsonValue): the JSON body; GET and DELETE send none.
+        extra_headers (Mapping[str, str] | None): per-request headers,
+            which `ntn api` collects from its `Header:Value` inputs,
+            applied last so a caller can override a default, as the real
+            CLI does.
+        params (dict[str, Any] | None): query parameters.
+        form (aiohttp.FormData | None): a multipart body sent in place of
+            the JSON one.
+    """
+    headers = {
+        "Authorization": f"Bearer {reveal_secret(accessor.config.api_key)}",
+        "Notion-Version": accessor.config.api_version or API_VERSION,
+        "Content-Type": "application/json",
+        **(extra_headers or {}),
+    }
     json_body: JsonValue = None
     if form is not None:
         del headers["Content-Type"]
-    else:
+    elif method not in ("GET", "DELETE"):
         json_body = body if body is not None else {}
     data: dict[str, Any] = await api_request(
-        "POST",
+        method,
         f"{accessor.config.base_url}{path}",
         error_of=_error_of,
         retry=_RATE_LIMIT_RETRY,
@@ -125,68 +108,6 @@ async def notion_post(
         params=params,
         json_body=json_body,
         data=form,
-        session=accessor.pool,
-    )
-    return data
-
-
-async def notion_patch(
-    accessor: NotionAccessor,
-    path: str,
-    body: JsonValue = None,
-    extra_headers: Mapping[str, str] | None = None,
-    params: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    data: dict[str, Any] = await api_request(
-        "PATCH",
-        f"{accessor.config.base_url}{path}",
-        error_of=_error_of,
-        retry=_RATE_LIMIT_RETRY,
-        headers=notion_headers(accessor.config, extra_headers),
-        params=params,
-        json_body=body if body is not None else {},
-        session=accessor.pool,
-    )
-    return data
-
-
-async def notion_put(
-    accessor: NotionAccessor,
-    path: str,
-    body: JsonValue = None,
-    extra_headers: Mapping[str, str] | None = None,
-    params: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    data: dict[str, Any] = await api_request(
-        "PUT",
-        f"{accessor.config.base_url}{path}",
-        error_of=_error_of,
-        retry=_RATE_LIMIT_RETRY,
-        headers=notion_headers(accessor.config, extra_headers),
-        params=params,
-        json_body=body if body is not None else {},
-        session=accessor.pool,
-    )
-    return data
-
-
-# DELETE carries no body at all, which is why it does not send one: the only
-# route the public API exposes it on is /v1/blocks/{id}, whose whole payload is
-# the id in the path.
-async def notion_delete(
-    accessor: NotionAccessor,
-    path: str,
-    body: JsonValue = None,
-    extra_headers: Mapping[str, str] | None = None,
-    params: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    data: dict[str, Any] = await api_request(
-        "DELETE",
-        f"{accessor.config.base_url}{path}",
-        error_of=_error_of,
-        retry=_RATE_LIMIT_RETRY,
-        headers=notion_headers(accessor.config, extra_headers),
-        params=params,
         session=accessor.pool,
     )
     return data
@@ -204,7 +125,7 @@ async def paginate_list(
         args = dict(merged)
         if cursor is not None:
             args["start_cursor"] = cursor
-        return await notion_get(accessor, path, params=args)
+        return await notion_request(accessor, "GET", path, params=args)
 
     return await cursor_items(page)
 
@@ -241,6 +162,8 @@ async def paginate_post(
         args = dict(merged)
         if cursor is not None:
             args["start_cursor"] = cursor
-        return complete_page(await notion_post(accessor, path, args))
+        return complete_page(
+            await notion_request(accessor, "POST", path, args)
+        )
 
     return await cursor_items(page, max_results)

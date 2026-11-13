@@ -118,13 +118,10 @@ export interface ObjectMeta {
  * One open connection a kit op holds for its whole body.
  *
  * Python's driver exposes `connect` as an async context manager; the
- * TS equivalent is this open/close handle consumed with try/finally.
- * The existing `withClient(config, fn)` callback style was not reused
- * because a callback cannot live in a record field without fixing the
- * callback's return type, and the handle lets every kit op scope one
- * connection over listings, probes and mutations alike. A store that
- * keeps a live client on its accessor returns the accessor itself with
- * a no-op close.
+ * TS equivalent is this open/close handle consumed with try/finally,
+ * which lets every kit op scope one connection over listings, probes
+ * and mutations alike. A store that keeps a live client on its accessor
+ * returns the accessor itself with a no-op close.
  */
 export interface ObjectStoreConnection<C> {
   conn: C

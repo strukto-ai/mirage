@@ -29,7 +29,6 @@ import { classify } from '../../../../errors/index.ts'
 import { isMissingPath } from '../../../../errors/fs.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 import { S_IFCHR, S_IFMT } from '../../../../utils/stat_view.ts'
-import { isUnclassified } from '../../../files.ts'
 import { openMode } from '../../../handles/mode.ts'
 import { posixStat } from '../../../stat.ts'
 import type { VFSEntry, VFSStat } from '../../../types.ts'
@@ -531,9 +530,10 @@ export class PyodideFs {
     takeOwner(node, stat)
     if (target !== undefined) node.link = target
     // Emscripten's getdents looks up every name it lists, so a row the
-    // file adapter could not classify still needs a node; it goes in as a
-    // regular file and is asked about before its first stat.
-    if (isUnclassified(stat)) node.unclassified = true
+    // file adapter could not classify (no mode, and neither a slash-marked
+    // directory nor a link) still needs a node; it goes in as a regular
+    // file and is asked about before its first stat.
+    if (stat.mode === undefined && !stat.isDir && stat.isLink !== true) node.unclassified = true
     return node
   }
 

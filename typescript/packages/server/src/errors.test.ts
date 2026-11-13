@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FS_CONDITIONS } from '@struktoai/mirage-core/errors/types'
+import { POSIX } from '@struktoai/mirage-core/errors/posix'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { describe, expect, it } from 'vitest'
@@ -43,7 +43,7 @@ function first(body: unknown, under: readonly string[] = []): Record<string, unk
 describe('errors', () => {
   it('answers one status for every code and a code for every errno', () => {
     expect(Object.keys(STATUS).sort()).toEqual(Object.values(ErrorCode).sort())
-    expect(Object.keys(ERRNO_CODE).sort()).toEqual([...FS_CONDITIONS].sort())
+    expect(Object.keys(ERRNO_CODE).sort()).toEqual(Object.keys(POSIX).sort())
   })
 
   it('reports the first declared field and unknown keys last', () => {

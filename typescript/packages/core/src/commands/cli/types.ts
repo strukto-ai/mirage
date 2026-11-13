@@ -31,13 +31,8 @@ export type CLIVerbFn<A extends Accessor = Accessor> = (
   ctx: Context,
 ) => Promise<CommandFnResult> | CommandFnResult
 
-/** Builds an install's accessor from its validated config. */
-export type CLIAccessorFn = (config: unknown) => Accessor
-
 /** The accessor a CLI that reaches no service keeps, one `NOOPAccessor` per install. */
 export const noopAccessor = (config: unknown): Accessor => new NOOPAccessor(config)
-
-export type CLIConfigModel = ZodObject<ZodRawShape> | ((input: Record<string, unknown>) => unknown)
 
 /** Execution and policy for one canonical command path. */
 export class CLIHandler {
@@ -74,8 +69,12 @@ export class CLI {
   readonly spec: CommandSpec
   readonly handlers: Readonly<Record<string, CLIHandler>>
 
-  readonly configModel: CLIConfigModel | null
-  readonly accessor: CLIAccessorFn
+  readonly configModel:
+    | ZodObject<ZodRawShape>
+    | ((input: Record<string, unknown>) => unknown)
+    | null
+  /** Builds an install's accessor from its validated config. */
+  readonly accessor: (config: unknown) => Accessor
   readonly script: ScriptSource | null
   readonly runtime: string | null
   /** The MCP tool list the tree was built from, so a snapshot rebuilds it without the server. */
@@ -84,9 +83,9 @@ export class CLI {
   constructor(init: {
     spec: CommandSpec
     handlers?: Readonly<Record<string, CLIHandler>>
-    configModel?: CLIConfigModel | null
+    configModel?: CLI['configModel']
     /** Builds the install's accessor once per install; a `NOOPAccessor` by default. */
-    accessor?: CLIAccessorFn
+    accessor?: CLI['accessor']
     script?: ScriptSource | null
     runtime?: string | null
     mcp?: MCPSource | null

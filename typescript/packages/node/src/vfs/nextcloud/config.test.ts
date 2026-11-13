@@ -1,4 +1,4 @@
-import { parseConfigWithSchema, redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { parseConfigWithSchema, redactedConfigDump } from '@struktoai/mirage-core/vfs/secrets'
 import { describe, expect, it } from 'vitest'
 import { NextcloudConfig } from './config.ts'
 
@@ -27,7 +27,7 @@ describe('NextcloudConfig', () => {
 
   it('redacts the password', () => {
     expect(
-      redactConfigWithSchema(NextcloudConfig, {
+      redactedConfigDump(NextcloudConfig, {
         url: 'https://cloud.example/remote.php/dav/files/alice/',
         username: 'alice',
         password: 'secret',

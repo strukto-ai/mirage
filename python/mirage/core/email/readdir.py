@@ -17,11 +17,7 @@ from functools import partial
 from typing import Any
 
 from mirage.accessor.email import EmailAccessor
-from mirage.core.email.client import (
-    INTERNAL_DATE_KEY,
-    fetch_headers,
-    list_message_uids,
-)
+from mirage.core.email.client import fetch_headers, list_message_uids
 from mirage.core.email.folders import list_folders
 from mirage.core.email.render import message_json_bytes
 from mirage.core.email.scope import detect_scope
@@ -85,7 +81,7 @@ def _date_bucket(message: dict[str, Any]) -> str:
     header = _parse_date(str(message.get("date", "")))
     if header is not None:
         return header
-    internal = _parse_date(str(message.get(INTERNAL_DATE_KEY, "")))
+    internal = _parse_date(str(message.get("internal_date", "")))
     return internal if internal is not None else EPOCH_DATE
 
 

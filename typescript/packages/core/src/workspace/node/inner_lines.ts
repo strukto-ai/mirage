@@ -118,10 +118,6 @@ export interface InnerLine {
 
 const UNREADABLE: InnerLine = { line: null, argv: [], open: false }
 
-function asLine(line: string, open = false): InnerLine {
-  return { line, argv: [], open }
-}
-
 function asArgv(argv: readonly Word[], open = false): InnerLine[] {
   return argv.length > 0 ? [{ line: null, argv, open }] : []
 }
@@ -241,7 +237,7 @@ function xargsInner(args: readonly Word[]): InnerLine[] {
 function mapfileInner(args: readonly Word[]): InnerLine[] {
   const parsed = parseShellOptions(SHELL_SPECS.mapfile, args.map(wordValue))
   const callback = parsed.flags.C
-  return typeof callback === 'string' ? [asLine(callback, true)] : []
+  return typeof callback === 'string' ? [{ line: callback, argv: [], open: true }] : []
 }
 
 // `find ... -exec COMMAND [ARG]... ;` (and `-execdir`, `-ok`, `-okdir`,
@@ -303,7 +299,7 @@ function shellInner(args: readonly Word[]): InnerLine[] {
   }
   const parsed = parseBashArgs(literal)
   if (parsed.help || parsed.version) return []
-  if (parsed.script !== null) return [asLine(parsed.script)]
+  if (parsed.script !== null) return [{ line: parsed.script, argv: [], open: false }]
   return [UNREADABLE]
 }
 
@@ -325,7 +321,7 @@ export function innerLines(head: string, args: readonly Word[]): InnerLine[] {
   if (head.includes('/')) return [UNREADABLE]
   switch (head) {
     case 'eval':
-      return args.length > 0 ? [asLine(args.map(wordValue).join(' '))] : []
+      return args.length > 0 ? [{ line: args.map(wordValue).join(' '), argv: [], open: false }] : []
     case 'source':
     case '.':
       return args.length > 0 ? [UNREADABLE] : []

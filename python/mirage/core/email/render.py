@@ -16,10 +16,9 @@ from datetime import timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
 
-from mirage.core.email.client import INTERNAL_DATE_KEY
 from mirage.core.render.json import compact_json_text
 
-_TRANSPORT_KEYS = frozenset({INTERNAL_DATE_KEY, "raw_size"})
+_TRANSPORT_KEYS = frozenset({"internal_date", "raw_size"})
 _IANA_FLAGS = (
     "seen",
     "answered",

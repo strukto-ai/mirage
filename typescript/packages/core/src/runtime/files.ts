@@ -64,19 +64,6 @@ function listed(raw: string, links: ReadonlySet<string>): VFSEntry {
 }
 
 /**
- * Whether a listing row is one the file adapter did not classify.
- *
- * Its size-0 non-directory shape is a placeholder, not an answer: a
- * guest that needs the entry's kind, size or stamp must ask the mount
- * with a stat of its own, which also reports whatever failed. A
- * slash-marked directory and a link carry no mode either, but their
- * kind is known.
- */
-export function isUnclassified(entry: VFSEntry | VFSStat): boolean {
-  return entry.mode === undefined && !entry.isDir && entry.isLink !== true
-}
-
-/**
  * Translate one mirage stat row into the guest-facing struct.
  *
  * The projection lives in the file adapter rather than in each surface so both

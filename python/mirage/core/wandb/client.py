@@ -2,7 +2,7 @@ import base64
 import json
 from collections.abc import AsyncIterator, Mapping
 from typing import Any, cast
-from urllib.parse import SplitResult, urljoin, urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import aiohttp
 
@@ -26,13 +26,6 @@ def response_error(response: aiohttp.ClientResponse, text: str) -> Exception:
     if response.status in (401, 403):
         return PermissionError("W&B authentication or authorization failed")
     return WandbAPIError(f"W&B HTTP {response.status}", response.status)
-
-
-def origin_key(url: SplitResult) -> tuple[str, str | None, int | None]:
-    port = url.port
-    if port is None:
-        port = {"http": 80, "https": 443}.get(url.scheme)
-    return url.scheme, url.hostname, port
 
 
 class WandbClient:
@@ -172,7 +165,6 @@ class WandbClient:
 
     async def download(self, url: str) -> AsyncIterator[bytes]:
         url = urljoin(self.config.base_url + "/", url)
-        origin = urlsplit(self.config.base_url)
         target = urlsplit(url)
         if (
             target.scheme not in ("http", "https")
@@ -180,9 +172,17 @@ class WandbClient:
             or target.password
         ):
             raise WandbAPIError("W&B invalid download URL")
-        headers = (
-            self.headers() if origin_key(origin) == origin_key(target) else {}
-        )
+        origins = [
+            (
+                part.scheme,
+                part.hostname,
+                {"http": 80, "https": 443}.get(part.scheme)
+                if part.port is None
+                else part.port,
+            )
+            for part in (urlsplit(self.config.base_url), target)
+        ]
+        headers = self.headers() if origins[0] == origins[1] else {}
         async with self.pool.get().get(url, headers=headers) as response:
             if response.status >= 400:
                 raise response_error(response, "")

@@ -14,11 +14,7 @@
 
 import { DiscordAccessor } from '../../../src/accessor/discord.ts'
 import type { IndexCacheStore } from '../../../src/cache/index/store.ts'
-import type {
-  DiscordMethod,
-  DiscordResponse,
-  DiscordTransport,
-} from '../../../src/core/discord/client.ts'
+import type { DiscordMethod, DiscordTransport } from '../../../src/core/discord/client.ts'
 import { FileStat, FileType } from '../../../src/types.ts'
 import { DiscordVFS } from '../../../src/vfs/discord/discord.ts'
 
@@ -33,7 +29,7 @@ export type Responder = (
   method: DiscordMethod,
   endpoint: string,
   params?: Record<string, string | number>,
-) => DiscordResponse
+) => unknown
 
 export class FakeDiscordTransport implements DiscordTransport {
   public readonly calls: FakeCall[] = []
@@ -43,7 +39,7 @@ export class FakeDiscordTransport implements DiscordTransport {
     endpoint: string,
     params?: Record<string, string | number>,
     body?: Record<string, unknown>,
-  ): Promise<DiscordResponse> {
+  ): Promise<unknown> {
     this.calls.push({
       method,
       endpoint,

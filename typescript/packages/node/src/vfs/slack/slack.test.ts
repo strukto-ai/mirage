@@ -14,7 +14,7 @@
 
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
-import { parseConfigWithSchema, redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { parseConfigWithSchema, redactedConfigDump } from '@struktoai/mirage-core/vfs/secrets'
 import { SlackConfig } from '@struktoai/mirage-core/vfs/slack/config'
 import { backendCommands } from '@struktoai/mirage-core/workspace/mount/backends'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -112,10 +112,10 @@ describe('SlackVFS (node)', () => {
 
 describe('SlackConfig redaction (node)', () => {
   it('redacts only declared fields, drops nothing else', () => {
-    expect(redactConfigWithSchema(SlackConfig, { token: 'a' })).toEqual({
+    expect(redactedConfigDump(SlackConfig, { token: 'a' })).toEqual({
       token: '<REDACTED>',
     })
-    expect(redactConfigWithSchema(SlackConfig, { token: 'a', searchToken: 'b' })).toEqual({
+    expect(redactedConfigDump(SlackConfig, { token: 'a', searchToken: 'b' })).toEqual({
       token: '<REDACTED>',
       searchToken: '<REDACTED>',
     })

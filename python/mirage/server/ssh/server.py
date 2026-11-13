@@ -77,27 +77,12 @@ class MirageSSHServer(asyncssh.SSHServer):
         return False
 
 
-async def serve_channel(
-    registry: WorkspaceRegistry,
-    process: asyncssh.SSHServerProcess[str],
-) -> None:
-    """Route a session channel: the codex-exec subsystem to Codex's
-    server, anything else to the shell.
-
-    Args:
-        registry (WorkspaceRegistry): the daemon's workspaces.
-        process (asyncssh.SSHServerProcess[str]): the channel's process.
-    """
-    if process.subsystem == CODEX_SUBSYSTEM:
-        await serve_codex(registry, process)
-        return
-    await handle_channel(registry, process)
-
-
 async def _server_options(
     registry: WorkspaceRegistry, config: SSHConfig
 ) -> dict[str, Any]:
-    """What every SSH connection the daemon serves runs with.
+    """What every SSH connection the daemon serves runs with: a session
+    channel's codex-exec subsystem goes to Codex's server, anything else
+    to the shell.
 
     asyncssh runs its line editor only on a text channel, and
     surrogateescape is the one error policy under which every byte
@@ -108,9 +93,16 @@ async def _server_options(
         registry (WorkspaceRegistry): the daemon's workspaces.
         config (SSHConfig): where the host key is kept.
     """
+
+    async def serve_channel(process: asyncssh.SSHServerProcess[str]) -> None:
+        if process.subsystem == CODEX_SUBSYSTEM:
+            await serve_codex(registry, process)
+        else:
+            await handle_channel(registry, process)
+
     return {
         "server_host_keys": [await load_host_key(config.host_key_file)],
-        "process_factory": functools.partial(serve_channel, registry),
+        "process_factory": serve_channel,
         "sftp_factory": functools.partial(serve_sftp, registry),
         "allow_scp": True,
         "keepalive_interval": KEEPALIVE_INTERVAL_SECONDS,

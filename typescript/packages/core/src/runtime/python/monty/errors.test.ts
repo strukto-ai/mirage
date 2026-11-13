@@ -15,7 +15,8 @@
 import { describe, expect, it } from 'vitest'
 
 import { exdev } from '../../../errors/fs.ts'
-import { FS_CONDITIONS } from '../../../errors/index.ts'
+import { POSIX } from '../../../errors/posix.ts'
+import type { FsCondition } from '../../../errors/types.ts'
 import { asGuestError, cpythonError, guestError } from './errors.ts'
 
 describe('the CPython table', () => {
@@ -30,7 +31,7 @@ describe('the CPython table', () => {
       'FileExistsError',
       'PermissionError',
     ]
-    for (const cond of FS_CONDITIONS) {
+    for (const cond of Object.keys(POSIX) as FsCondition[]) {
       const row = cpythonError(cond)
       expect(builtins).toContain(row.exception)
       expect(row.errno).toBeGreaterThan(0)

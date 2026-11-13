@@ -14,7 +14,8 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import { runWithRecording, runWithRevisions } from '../../observe/context.ts'
+import { currentCaller, runWithCaller } from '../../context/session_context.ts'
+import { runWithRecording } from '../../observe/context.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import {
   type StubDrive,
@@ -78,8 +79,9 @@ describe('Drive checksum', () => {
 
   // Mirrors python's test_a_pinned_revision_reads.
   it('reads a pinned revision', async () => {
-    const found = await runWithRevisions(new Map([[SCOPE.virtual, 'r7']]), () =>
-      checksum(accessor, SCOPE, 'md5', row('gdrive/file')),
+    const found = await runWithCaller(
+      { ...currentCaller(), revisions: { map: new Map([[SCOPE.virtual, 'r7']]) } },
+      () => checksum(accessor, SCOPE, 'md5', row('gdrive/file')),
     )
     expect(found).toBeNull()
     expect(drive.getFile).not.toHaveBeenCalled()

@@ -15,6 +15,7 @@
 import base64
 import json
 from collections.abc import AsyncGenerator
+from enum import Enum
 from typing import Any, cast
 from urllib.parse import urlencode
 
@@ -39,11 +40,8 @@ from mirage.types import JsonValue
 from mirage.vfs.secrets import reveal_secret
 
 
-class _NoBody:
-    pass
-
-
-_NO_BODY = _NoBody()
+class _NoBody(Enum):
+    TOKEN = 0
 
 
 def github_headers(token: SecretStr) -> dict[str, str]:
@@ -52,10 +50,6 @@ def github_headers(token: SecretStr) -> dict[str, str]:
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": API_VERSION,
     }
-
-
-def github_url(path: str, base_url: str | None = None, **kwargs: str) -> str:
-    return (base_url or API_BASE) + path.format(**kwargs)
 
 
 def graphql_url(base_url: str | None = None) -> str:
@@ -136,7 +130,7 @@ async def github_get(
 ) -> dict[str, Any]:
     data: dict[str, Any] = await api_request(
         "GET",
-        github_url(path, account.config.base_url, **kwargs),
+        (account.config.base_url or API_BASE) + path.format(**kwargs),
         error_of=_error_of,
         headers=github_headers(account.config.token),
         params=params,
@@ -149,7 +143,7 @@ async def github_request(
     account: GitHubAccount,
     method: str,
     path: str,
-    body: "JsonValue | _NoBody" = _NO_BODY,
+    body: "JsonValue | _NoBody" = _NoBody.TOKEN,
     params: dict[str, str] | None = None,
     *,
     headers: dict[str, str] | None = None,
@@ -187,7 +181,7 @@ async def github_raw_response(
     account: GitHubAccount,
     method: str,
     path: str,
-    body: "JsonValue | bytes | _NoBody" = _NO_BODY,
+    body: "JsonValue | bytes | _NoBody" = _NoBody.TOKEN,
     params: dict[str, str] | None = None,
     *,
     headers: dict[str, str] | None = None,
@@ -219,7 +213,7 @@ async def github_raw_response(
             merged.pop(prior)
         merged[key] = value
     data = body if isinstance(body, bytes) else None
-    present = body is not _NO_BODY and data is None
+    present = body is not _NoBody.TOKEN and data is None
     try:
         raw: ApiResponse = await api_request(
             method.upper(),
@@ -260,7 +254,7 @@ async def github_request_response(
     account: GitHubAccount,
     method: str,
     path: str,
-    body: "JsonValue | _NoBody" = _NO_BODY,
+    body: "JsonValue | _NoBody" = _NoBody.TOKEN,
     params: dict[str, str] | None = None,
     *,
     headers: dict[str, str] | None = None,
@@ -374,7 +368,7 @@ def stream_blob(
     """
     config = account.config
     return api_stream(
-        github_url(blob_path(owner, repo, sha), config.base_url),
+        (config.base_url or API_BASE) + blob_path(owner, repo, sha),
         error_of=_error_of,
         headers={**github_headers(config.token), "Accept": RAW_MEDIA_TYPE},
         session=account.pool,

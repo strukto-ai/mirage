@@ -4,15 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import { GraphError } from './client.ts'
 import { resolveMsGraphConfig } from './config.ts'
-import {
-  DriveLoc,
-  batchTree,
-  copyTree,
-  deltaTree,
-  renameReplace,
-  type DriveRef,
-  type DriveUrl,
-} from './drive.ts'
+import { DriveLoc, batchTree, copyTree, deltaTree, renameReplace } from './drive.ts'
 
 // drive.ts is one module implementing copy-with-monitor-polling and
 // replace-on-409 for OneDrive and SharePoint in both languages, and it had
@@ -23,12 +15,12 @@ import {
 const BASE = 'https://graph.microsoft.com/v1.0/me/drive'
 const CONFLICT = { error: { code: 'nameAlreadyExists', message: 'x' } }
 
-const itemUrl: DriveUrl = (path, action = '') => {
+const itemUrl = (path: string, action = ''): string => {
   if (path === '') return `${BASE}/root${action}`
   const stem = `${BASE}/root:/${path}`
   return action !== '' ? `${stem}:${action}` : stem
 }
-const refPath: DriveRef = (folder = '') =>
+const refPath = (folder = ''): string =>
   folder !== '' ? `/me/drive/root:/${folder}` : '/me/drive/root:'
 
 function loc(path: string, drive = ''): DriveLoc {

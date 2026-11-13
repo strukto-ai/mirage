@@ -15,7 +15,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Protocol, TypeAlias
+from typing import Any, Protocol
 
 
 class TSNodeLike(Protocol):
@@ -77,9 +77,6 @@ class AliasExpansion:
     root: int
     owners: tuple[frozenset[str], ...]
     names: frozenset[str]
-
-
-FunctionBody: TypeAlias = list[TSNodeLike]
 
 
 class NodeType(StrEnum):

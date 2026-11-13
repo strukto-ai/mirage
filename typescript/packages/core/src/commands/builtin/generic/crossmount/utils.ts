@@ -192,14 +192,6 @@ export function fileStreamOp(dispatch: DispatchFn): (p: PathSpec) => AsyncIterab
   return stream
 }
 
-export function streamOp(dispatch: DispatchFn): (p: PathSpec) => AsyncIterable<Uint8Array> {
-  async function* gen(p: PathSpec): AsyncIterable<Uint8Array> {
-    const [data] = await dispatch('read', p)
-    yield (data as Uint8Array | null) ?? new Uint8Array()
-  }
-  return gen
-}
-
 /** Write one whole file on the mount that owns it. Mirrors Python's `_relay_write`. */
 export async function relayWrite(
   dispatch: DispatchFn,

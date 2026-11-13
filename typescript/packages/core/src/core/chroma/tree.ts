@@ -25,13 +25,11 @@ import { fetchPathTree } from './client.ts'
 
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
-export type ChromaPathTree = Record<string, Record<string, unknown>>
-
 async function loadTree(accessor: ChromaAccessor): Promise<DirRows> {
   return buildDirEntries(await parsePathTree(await fetchPathTree(accessor)))
 }
 
-export async function parsePathTree(raw: string): Promise<ChromaPathTree> {
+export async function parsePathTree(raw: string): Promise<Record<string, Record<string, unknown>>> {
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
@@ -45,7 +43,7 @@ export async function parsePathTree(raw: string): Promise<ChromaPathTree> {
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('Chroma path tree must be a JSON object')
   }
-  const result: ChromaPathTree = {}
+  const result: Record<string, Record<string, unknown>> = {}
   for (const [key, value] of Object.entries(parsed)) {
     result[key] =
       value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -55,7 +53,7 @@ export async function parsePathTree(raw: string): Promise<ChromaPathTree> {
   return result
 }
 
-export function buildDirEntries(pathTree: ChromaPathTree): DirRows {
+export function buildDirEntries(pathTree: Record<string, Record<string, unknown>>): DirRows {
   const files = new Map<string, Record<string, unknown>>()
   for (const [rawSlug, metadata] of Object.entries(pathTree)) {
     const path = normalizeSlug(rawSlug, 'Chroma path')

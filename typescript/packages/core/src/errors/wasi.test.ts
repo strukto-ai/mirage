@@ -14,16 +14,9 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { FS_CONDITIONS } from './types.ts'
 import { WASI } from './wasi.ts'
 
 describe('the preview1 wire table', () => {
-  it('covers the whole vocabulary', () => {
-    // A condition cannot be half-added: the dialect table stays total
-    // over the vocabulary, keyed on exactly the union.
-    expect(Object.keys(WASI).sort()).toEqual([...FS_CONDITIONS].sort())
-  })
-
   it('is the wasi-libc numbering, pinned literally', () => {
     // NOT the host's POSIX values: ENOENT is 44 on the wire, and 18
     // here would be EDOM where a POSIX host means EXDEV. Mirrors the

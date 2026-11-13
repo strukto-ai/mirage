@@ -19,18 +19,13 @@ import { GitError } from './errors.ts'
 import { resolveObject, unwrapped } from './revparse.ts'
 import { repoArgs, storedItems, type Repo } from './repo.ts'
 import { decoded, rooted } from './seen.ts'
-import type { GitObject, TreeItem } from './types.ts'
+import type { GitObject } from './types.ts'
 
 /** One tree entry, flattened to a repository-relative path. */
 export interface TreeEntry {
   readonly oid: string
   /** git's own octal spelling, e.g. `100644`. */
   readonly mode: string
-}
-
-/** The entries of one tree object, refusing an empty name as git does. */
-export async function treeItems(repo: Repo, treeOid: string): Promise<TreeItem[]> {
-  return decoded(await storedItems(repo, treeOid))
 }
 
 /**
@@ -127,7 +122,7 @@ export async function listedTree(
   prefix = '',
 ): Promise<[string, string, string][]> {
   const out: [string, string, string][] = []
-  for (const entry of await treeItems(repo, tree)) {
+  for (const entry of decoded(await storedItems(repo, tree))) {
     const path = prefix ? `${prefix}/${entry.path}` : entry.path
     const selected =
       patterns.length === 0 ||

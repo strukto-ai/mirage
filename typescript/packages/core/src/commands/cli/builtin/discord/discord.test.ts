@@ -15,11 +15,7 @@
 import { compileSpec } from '../../../spec/compile.ts'
 import { describe, expect, it } from 'vitest'
 import { DiscordAccessor, discordAccessor } from '../../../../accessor/discord.ts'
-import type {
-  DiscordMethod,
-  DiscordResponse,
-  DiscordTransport,
-} from '../../../../core/discord/client.ts'
+import type { DiscordMethod, DiscordTransport } from '../../../../core/discord/client.ts'
 import { cliSpecFor } from '../../specs.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { ByteSource, IOResult } from '../../../../io/types.ts'
@@ -53,7 +49,7 @@ interface Recorded {
 }
 
 const CALLS: Recorded[] = []
-let RESPONSE: DiscordResponse = { id: 'M1' }
+let RESPONSE: unknown = { id: 'M1' }
 
 class FakeTransport implements DiscordTransport {
   call(
@@ -61,7 +57,7 @@ class FakeTransport implements DiscordTransport {
     endpoint: string,
     params?: Record<string, string | number>,
     body?: Record<string, unknown>,
-  ): Promise<DiscordResponse> {
+  ): Promise<unknown> {
     CALLS.push({
       method,
       endpoint,

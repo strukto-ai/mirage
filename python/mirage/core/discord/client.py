@@ -16,14 +16,19 @@ import json
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
+from functools import partial
 from typing import Any
 
 import aiohttp
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.core.api.client import RetryPolicy, api_request, status_error
+from mirage.core.api.client import (
+    NO_RETRY,
+    RetryPolicy,
+    api_request,
+    status_error,
+)
 from mirage.core.api.errors import ApiError
-from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.constants import (
     DISCORD_API,
     GONE_STATUS,
@@ -70,62 +75,60 @@ def refusals_denied(path_spec: PathSpec) -> Iterator[None]:
         raise
 
 
-def discord_headers(config: DiscordConfig) -> dict[str, str]:
-    return {"Authorization": f"Bot {reveal_secret(config.token)}"}
+def _discord_error(
+    resp: aiohttp.ClientResponse, body: str, *, retried: bool
+) -> Exception:
+    if resp.status != 429:
+        return status_error(resp, body)
+    if retried:
+        return ApiError(f"Rate limited after {MAX_RETRIES} retries", 429)
+    try:
+        data = json.loads(body)
+    except ValueError:
+        data = None
+    retry = data.get("retry_after", 1) if isinstance(data, dict) else 1
+    return ApiError(f"Rate limited, retry after {retry}s", 429)
 
 
-def discord_base(config: DiscordConfig) -> str:
-    # base_url exists so the integ fake can stand in for discord.com; every
-    # request must go through it, not the module constant.
-    return (config.base_url or DISCORD_API).rstrip("/")
-
-
-def _mutation_error(resp: aiohttp.ClientResponse, body: str) -> Exception:
-    if resp.status == 429:
-        try:
-            data = json.loads(body)
-        except ValueError:
-            data = None
-        retry = data.get("retry_after", 1) if isinstance(data, dict) else 1
-        return ApiError(f"Rate limited, retry after {retry}s", 429)
-    return status_error(resp, body)
-
-
-async def discord_get(
+async def discord_request(
     accessor: DiscordAccessor,
+    method: str,
     endpoint: str,
     params: dict[str, Any] | None = None,
-) -> dict[str, Any] | list[Any]:
-    data: dict[str, Any] | list[Any] = await api_request(
-        "GET",
-        f"{discord_base(accessor.config)}{endpoint}",
-        error_of=lambda resp, body: (
-            ApiError(f"Rate limited after {MAX_RETRIES} retries", 429)
-            if resp.status == 429
-            else status_error(resp, body)
-        ),
-        headers=discord_headers(accessor.config),
-        params=params,
-        retry=_RATE_LIMIT_RETRY,
-        session=accessor.pool,
-    )
-    return data
-
-
-async def discord_post(
-    accessor: DiscordAccessor,
-    endpoint: str,
     body: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    data: dict[str, Any] = await api_request(
-        "POST",
-        f"{discord_base(accessor.config)}{endpoint}",
-        error_of=_mutation_error,
-        headers=discord_headers(accessor.config),
-        json_body=body or {},
+    form: aiohttp.FormData | None = None,
+) -> Any:
+    """One Discord call, sent to the config's ``base_url`` when it names
+    one (the integ fake stands in for discord.com that way).
+
+    POST and PATCH send a JSON body, ``{}`` when none is given, or a
+    multipart ``form`` in its place; PUT and DELETE send none and read no
+    answer.
+
+    Args:
+        accessor (DiscordAccessor): Discord accessor.
+        method (str): the HTTP method.
+        endpoint (str): API path, e.g. ``/channels/{id}/messages``.
+        params (dict[str, Any] | None): query parameters.
+        body (dict[str, Any] | None): the JSON body of a POST or PATCH.
+        form (aiohttp.FormData | None): a multipart body sent in place of
+            the JSON one.
+    """
+    sends_json = method in ("POST", "PATCH") and form is None
+    return await api_request(
+        method,
+        f"{(accessor.config.base_url or DISCORD_API).rstrip('/')}{endpoint}",
+        error_of=partial(_discord_error, retried=method == "GET"),
+        headers={
+            "Authorization": f"Bot {reveal_secret(accessor.config.token)}"
+        },
+        params=params,
+        json_body=(body or {}) if sends_json else None,
+        data=form,
+        retry=_RATE_LIMIT_RETRY if method == "GET" else NO_RETRY,
+        read="none" if method in ("PUT", "DELETE") else "json",
         session=accessor.pool,
     )
-    return data
 
 
 async def discord_post_files(
@@ -162,50 +165,7 @@ async def discord_post_files(
             filename=name,
             content_type=mime_type_for(name),
         )
-    data: dict[str, Any] = await api_request(
-        "POST",
-        f"{discord_base(accessor.config)}{endpoint}",
-        error_of=_mutation_error,
-        headers=discord_headers(accessor.config),
-        data=form,
-        session=accessor.pool,
+    data: dict[str, Any] = await discord_request(
+        accessor, "POST", endpoint, form=form
     )
     return data
-
-
-async def discord_put(accessor: DiscordAccessor, endpoint: str) -> None:
-    await api_request(
-        "PUT",
-        f"{discord_base(accessor.config)}{endpoint}",
-        error_of=_mutation_error,
-        headers=discord_headers(accessor.config),
-        read="none",
-        session=accessor.pool,
-    )
-
-
-async def discord_patch(
-    accessor: DiscordAccessor,
-    endpoint: str,
-    body: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    data: dict[str, Any] = await api_request(
-        "PATCH",
-        f"{discord_base(accessor.config)}{endpoint}",
-        error_of=_mutation_error,
-        headers=discord_headers(accessor.config),
-        json_body=body or {},
-        session=accessor.pool,
-    )
-    return data
-
-
-async def discord_delete(accessor: DiscordAccessor, endpoint: str) -> None:
-    await api_request(
-        "DELETE",
-        f"{discord_base(accessor.config)}{endpoint}",
-        error_of=_mutation_error,
-        headers=discord_headers(accessor.config),
-        read="none",
-        session=accessor.pool,
-    )

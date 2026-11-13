@@ -12,10 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../../../../types.ts'
 import git, { Errors } from 'isomorphic-git'
 
-import { abbrevLength, type CommitFacts } from './format.ts'
+import { abbrevLength, FULL_SHA, type CommitFacts } from './format.ts'
 import { decodeText } from '../../../../shell/bytes.ts'
 import { configValues, gitFs } from './fs.ts'
 import { exists, readNames, readRange, writeFile } from './io.ts'
@@ -24,13 +23,11 @@ import { entryName } from '../../../../utils/remnants.ts'
 import { toHex } from '../../../../utils/hex.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { gitBool } from './util.ts'
-import { GITLINK_MODE, TREE_MODE } from './constants.ts'
+import { GITLINK_MODE, IDX_SUFFIX, OBJECTS_DIR, PACK_DIR, TREE_MODE } from './constants.ts'
 import { GitError } from './errors.ts'
 import type { RefObject, RepoLocation, TreeItem } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
 
-const PACK_DIR = 'objects/pack'
-const IDX_SUFFIX = '.idx'
 // A v2 pack index is a 8-byte header then 256 fanout entries; the last one is
 // the object count, so the total is four bytes at a fixed offset.
 const FANOUT_END = 8 + 256 * 4
@@ -39,13 +36,8 @@ const FANOUT_SIZE = 256 * 4
 // fanout, its entries an offset and a name each rather than names alone.
 const IDX_MAGIC = [0xff, 0x74, 0x4f, 0x63]
 const SHA_BYTES = 20
-const SPACE = 0x20
-const NUL = 0x00
-const SHORT_TREE_MODE = '40000'
 const DEC = new TextDecoder()
 const V1_OFFSET_BYTES = 4
-const OBJECTS_DIR = 'objects'
-const LOOSE_NAME_LENGTH = 38
 
 /**
  * A repository living in a mount, opened for reading.
@@ -116,59 +108,10 @@ export function repoArgs(repo: Repo): {
 }
 
 /**
- * How many objects the repository's packs hold, for the id abbreviation.
- *
- * Read off each pack index, which states its own count in its fanout table, so
- * this costs one small ranged read per pack. Loose objects are deliberately not
- * counted: git's own estimate ignores them, and matching that is what makes an
- * abbreviated id agree with real git.
- */
-async function packedCount(vfs: Files, commondir: PathSpec): Promise<number> {
-  const root = commondir.join(PACK_DIR)
-  let total = 0
-  for (const entry of await readNames(vfs, root)) {
-    const name = entryName(entry)
-    if (!name.endsWith(IDX_SUFFIX)) continue
-    const head = await readRange(vfs, root.join(name), FANOUT_END - 4, 4)
-    if (head.byteLength < 4) continue
-    total += new DataView(head.buffer, head.byteOffset, 4).getUint32(0, false)
-  }
-  return total
-}
-
-/**
- * The ids one pack index holds whose first byte is `byte`: its fanout table
- * says where that bucket of the sorted names starts and ends, so only the
- * bucket is read rather than every name.
- */
-async function packedUnder(vfs: Files, path: PathSpec, byte: number): Promise<string[]> {
-  const head = await readRange(vfs, path, 0, IDX_MAGIC.length)
-  const v2 = IDX_MAGIC.every((value, i) => head[i] === value)
-  const fanoutAt = v2 ? FANOUT_END - FANOUT_SIZE : 0
-  const fanout = await readRange(vfs, path, fanoutAt, FANOUT_SIZE)
-  if (fanout.byteLength < FANOUT_SIZE) return []
-  const table = new DataView(fanout.buffer, fanout.byteOffset, FANOUT_SIZE)
-  const start = byte === 0 ? 0 : table.getUint32((byte - 1) * 4, false)
-  const end = table.getUint32(byte * 4, false)
-  if (end <= start) return []
-  const stride = v2 ? SHA_BYTES : SHA_BYTES + V1_OFFSET_BYTES
-  const skip = v2 ? 0 : V1_OFFSET_BYTES
-  const names = await readRange(
-    vfs,
-    path,
-    fanoutAt + FANOUT_SIZE + start * stride,
-    (end - start) * stride,
-  )
-  const ids: string[] = []
-  for (let at = skip; at + SHA_BYTES <= names.byteLength; at += stride)
-    ids.push(toHex(names.subarray(at, at + SHA_BYTES)))
-  return ids
-}
-
-/**
  * Every id, loose or packed, starting with a two-digit fanout prefix, sorted.
  * Nothing is read but each pack index's bucket for that byte and the one loose
- * directory, which is what widening abbreviated ids needs.
+ * directory, which is what widening abbreviated ids needs: an index's fanout
+ * table says where that bucket of its sorted names starts and ends.
  *
  * @param fanout two lowercase hex digits
  */
@@ -179,12 +122,30 @@ export async function idsUnder(repo: Repo, fanout: string): Promise<string[]> {
   for (const entry of await readNames(repo.vfs, root)) {
     const name = entryName(entry)
     if (!name.endsWith(IDX_SUFFIX)) continue
-    for (const oid of await packedUnder(repo.vfs, root.join(name), byte)) found.add(oid)
+    const path = root.join(name)
+    const head = await readRange(repo.vfs, path, 0, IDX_MAGIC.length)
+    const v2 = IDX_MAGIC.every((value, i) => head[i] === value)
+    const fanoutAt = v2 ? FANOUT_END - FANOUT_SIZE : 0
+    const bytes = await readRange(repo.vfs, path, fanoutAt, FANOUT_SIZE)
+    if (bytes.byteLength < FANOUT_SIZE) continue
+    const table = new DataView(bytes.buffer, bytes.byteOffset, FANOUT_SIZE)
+    const start = byte === 0 ? 0 : table.getUint32((byte - 1) * 4, false)
+    const end = table.getUint32(byte * 4, false)
+    if (end <= start) continue
+    const stride = v2 ? SHA_BYTES : SHA_BYTES + V1_OFFSET_BYTES
+    const names = await readRange(
+      repo.vfs,
+      path,
+      fanoutAt + FANOUT_SIZE + start * stride,
+      (end - start) * stride,
+    )
+    for (let at = v2 ? 0 : V1_OFFSET_BYTES; at + SHA_BYTES <= names.byteLength; at += stride)
+      found.add(toHex(names.subarray(at, at + SHA_BYTES)))
   }
   const loose = repo.location.commondir.join(`${OBJECTS_DIR}/${fanout}`)
   for (const entry of await readNames(repo.vfs, loose)) {
     const name = entryName(entry)
-    if (name.length === LOOSE_NAME_LENGTH) found.add(`${fanout}${name}`)
+    if (fanout.length + name.length === FULL_SHA) found.add(`${fanout}${name}`)
   }
   return [...found].sort(compareCodePoints)
 }
@@ -200,7 +161,8 @@ export async function rawObject(repo: Repo, oid: string): Promise<RefObject> {
 }
 
 /**
- * The entries of one tree object, read from its stored bytes.
+ * The entries of one tree object, read from its stored bytes: each one its
+ * mode, a space, its name, a NUL and its 20-byte id.
  *
  * Parsed here rather than through isomorphic-git's readTree, which refuses a
  * whole tree over one entry named `..` or `.git`, a tree git stores and reads
@@ -215,12 +177,12 @@ export async function storedItems(repo: Repo, treeOid: string): Promise<TreeItem
   if (type !== 'tree') throw new GitError(`unable to read tree (${treeOid})`)
   const items: TreeItem[] = []
   for (let at = 0; at < raw.length;) {
-    const space = raw.indexOf(SPACE, at)
-    const nul = space < 0 ? -1 : raw.indexOf(NUL, space)
+    const space = raw.indexOf(0x20, at)
+    const nul = space < 0 ? -1 : raw.indexOf(0x00, space)
     if (nul < 0 || nul + 1 + SHA_BYTES > raw.length)
       throw new GitError(`unable to read tree (${treeOid})`)
     const stored = DEC.decode(raw.subarray(at, space))
-    const mode = stored === SHORT_TREE_MODE ? TREE_MODE : stored
+    const mode = stored === '40000' ? TREE_MODE : stored
     items.push({
       path: decodeText(raw.subarray(space + 1, nul)),
       oid: toHex(raw.subarray(nul + 1, nul + 1 + SHA_BYTES)),
@@ -278,6 +240,12 @@ export async function storePack(repo: Repo, data: Uint8Array): Promise<void> {
 /**
  * Open a repository living in a mount.
  *
+ * The id abbreviation counts the objects the repository's packs hold, read
+ * off each pack index, which states its own count in its fanout table, so
+ * this costs one small ranged read per pack. Loose objects are deliberately
+ * not counted: git's own estimate ignores them, and matching that is what
+ * makes an abbreviated id agree with real git.
+ *
  * @param vfs the session's files
  * @param location the discovered repository
  */
@@ -286,12 +254,21 @@ export async function openRepo(
   location: RepoLocation,
   ambiguous: string[] | null = null,
 ): Promise<Repo> {
+  const root = location.commondir.join(PACK_DIR)
+  let packed = 0
+  for (const entry of await readNames(vfs, root)) {
+    const name = entryName(entry)
+    if (!name.endsWith(IDX_SUFFIX)) continue
+    const head = await readRange(vfs, root.join(name), FANOUT_END - 4, 4)
+    if (head.byteLength < 4) continue
+    packed += new DataView(head.buffer, head.byteOffset, 4).getUint32(0, false)
+  }
   return {
     fs: gitFs(vfs, location),
     vfs,
     location,
     cache: {},
-    abbrev: abbrevLength(await packedCount(vfs, location.commondir)),
+    abbrev: abbrevLength(packed),
     held: new Map(),
     ambiguous,
     places: new Map(),

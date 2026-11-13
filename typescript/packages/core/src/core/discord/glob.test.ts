@@ -16,7 +16,7 @@ import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
 import { PathSpec } from '../../types.ts'
-import type { DiscordMethod, DiscordResponse, DiscordTransport } from './client.ts'
+import type { DiscordMethod, DiscordTransport } from './client.ts'
 import { makeResolveGlob } from '../../utils/glob_walk.ts'
 import { mountDiscord } from '../../../tests/workspace/fixtures/chat_fixture.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
@@ -33,10 +33,9 @@ const resolveDiscordGlob = (accessor: DiscordAccessor, paths: PathSpec[]): Promi
 class FakeDiscordTransport implements DiscordTransport {
   public readonly calls: { method: DiscordMethod; endpoint: string }[] = []
   constructor(
-    private readonly responder: (method: DiscordMethod, endpoint: string) => DiscordResponse = () =>
-      null,
+    private readonly responder: (method: DiscordMethod, endpoint: string) => unknown = () => null,
   ) {}
-  call(method: DiscordMethod, endpoint: string): Promise<DiscordResponse> {
+  call(method: DiscordMethod, endpoint: string): Promise<unknown> {
     this.calls.push({ method, endpoint })
     return Promise.resolve(this.responder(method, endpoint))
   }

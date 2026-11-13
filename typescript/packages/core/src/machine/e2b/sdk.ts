@@ -12,15 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { loadOptionalPeer } from '../../utils/optional_peer.ts'
 import type * as e2bSdk from 'e2b'
 
 export type E2bSdk = typeof e2bSdk
-
-/** Load the optional host SDK at the runtime boundary. */
-export function loadSdk(): Promise<E2bSdk> {
-  return loadOptionalPeer(() => import('e2b'), {
-    feature: "the 'e2b' runtime",
-    packageName: 'e2b',
-  })
-}

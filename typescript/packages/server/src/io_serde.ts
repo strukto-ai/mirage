@@ -38,20 +38,8 @@ import { RESERVED_KWARGS, STAT_TIMES } from './constants.ts'
 import { HttpError, paramOf, type ErrorCode } from './errors.ts'
 import { BYTES, schemaOf, type Args, type VfsCall } from './vfs_calls.ts'
 
-export interface ResultDict {
-  exit_code: number
-  stdout: string
-  stderr: string
-  decision: {
-    kind: PolicyDecision['kind']
-    reason: string
-    policy: string
-    ask_id: string | null
-  } | null
-}
-
 /** A decision record as the server's entry points carry it. Mirrors Python's `decision_to_dict`. */
-export function decisionToDict(decision: PolicyDecision | null): ResultDict['decision'] {
+export function decisionToDict(decision: PolicyDecision | null): Record<string, JsonValue> | null {
   return decision === null
     ? null
     : {
@@ -62,7 +50,7 @@ export function decisionToDict(decision: PolicyDecision | null): ResultDict['dec
       }
 }
 
-export function ioResultToDict(result: ExecuteResult): ResultDict & JsonValue {
+export function ioResultToDict(result: ExecuteResult): Record<string, JsonValue> {
   return {
     exit_code: result.exitCode,
     stdout: result.stdoutText,

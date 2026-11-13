@@ -39,14 +39,12 @@ import { parseConfigWithSchema, refuseUnknownKeys, z } from './secrets.ts'
  */
 export type VFSFactory = (config: Record<string, unknown>) => Promise<BaseVFS>
 
-// The option names RAM takes without a schema. Python builds it from
-// constructor keywords, so a key outside these is refused on both sides
+// RAM takes its options without a schema: Python builds it from constructor
+// keywords, so a key outside the ones it names is refused on both sides
 // rather than ignored here.
-const RAM_OPTIONS: readonly (keyof RAMVFSOptions)[] = ['capacity']
-
 export const REGISTRY: Readonly<Record<string, VFSFactory>> = {
   ram: async (config) => {
-    refuseUnknownKeys(config, RAM_OPTIONS)
+    refuseUnknownKeys(config, ['capacity'] satisfies (keyof RAMVFSOptions)[])
     const { RAMVFS } = await import('./ram/ram.ts')
     return new RAMVFS(normalizeFields(config) as RAMVFSOptions)
   },

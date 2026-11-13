@@ -27,7 +27,7 @@ import { type FlagValue } from '../../spec/types.ts'
 import { usageHint, wordRefusalError } from '../../spec/usage.ts'
 import { matchWord } from '../../spec/word_choice.ts'
 import { listedNames } from '../utils/files0.ts'
-import { guardInput } from '../utils/limit.ts'
+import { chunks } from '../../../io/cooperative.ts'
 import { atOffsets } from '../utils/operands.ts'
 import { formatRecords } from '../utils/output.ts'
 import { isStdin, resolveSource, stdinStream } from '../utils/stream.ts'
@@ -100,7 +100,7 @@ async function wc(source: ByteSource, ctx: Context, flags: WcFlags): Promise<WcC
     max_line_length: flags.maxLineLength,
   }
   let report = ''
-  for await (const part of runStream('wc', config, guardInput(source, ctx))) {
+  for await (const part of runStream('wc', config, chunks(source, ctx.signal))) {
     report += decoder.decode(part)
   }
   const [lines = 0, words = 0, bytes = 0, chars = 0, maxLineLength = 0] = report

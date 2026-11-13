@@ -15,11 +15,13 @@ async def test_after_id_pages_advances_with_newest_id_on_newest_first(
         "200": [{"id": "300"}],
     }
 
-    async def fake_get(accessor, endpoint, params=None):
+    async def fake_get(accessor, method, endpoint, params=None):
         calls.append(str(params["after"]))
         return pages.get(str(params["after"]), [])
 
-    monkeypatch.setattr("mirage.core.discord.paginate.discord_get", fake_get)
+    monkeypatch.setattr(
+        "mirage.core.discord.paginate.discord_request", fake_get
+    )
     out = []
     async for page in after_id_pages(
         None,
@@ -40,11 +42,13 @@ async def test_after_id_pages_advances_with_last_id_by_default(monkeypatch):
     calls: list[str] = []
     pages = {"0": [{"id": "1"}, {"id": "2"}], "2": [{"id": "3"}]}
 
-    async def fake_get(accessor, endpoint, params=None):
+    async def fake_get(accessor, method, endpoint, params=None):
         calls.append(str(params["after"]))
         return pages.get(str(params["after"]), [])
 
-    monkeypatch.setattr("mirage.core.discord.paginate.discord_get", fake_get)
+    monkeypatch.setattr(
+        "mirage.core.discord.paginate.discord_request", fake_get
+    )
     out = []
     async for page in after_id_pages(
         None,

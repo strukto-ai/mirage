@@ -27,11 +27,6 @@ import { isDirRow, isRegularRow, statResult } from './stat.ts'
 import { boundSystemClock, type Clock } from '../../../utils/clock.ts'
 import { zoneFromEnv } from '../../../utils/timezone.ts'
 
-/** Character count the way python's `len` counts: code points, not UTF-16 units. */
-function textLength(data: unknown): number {
-  return Array.from(String(data)).length
-}
-
 function payloadBytes(data: unknown): Uint8Array {
   if (data instanceof Uint8Array) return data
   return new TextEncoder().encode(typeof data === 'string' ? data : '')
@@ -70,12 +65,6 @@ const CONTENT = new Set([
   'Path.unlink',
   'Path.rename',
 ])
-
-/** The predicates, which answer false where there is no filesystem. */
-const PROBES = new Set(['Path.exists', 'Path.is_file', 'Path.is_dir', 'Path.is_symlink'])
-
-/** The other calls this adapter serves, which refuse where there is none. */
-const STRUCTURE = new Set(['Path.mkdir', 'Path.iterdir', 'Path.scan', 'Path.stat'])
 
 /**
  * Monty's OS callbacks: every path a guest names is the workspace's.
@@ -239,10 +228,15 @@ export class MontyFs {
     })
   }
 
-  /** Outside a workspace there is no filesystem: probes answer false, the rest refuse. */
+  /**
+   * Outside a workspace there is no filesystem: the predicates answer false,
+   * and the other calls this adapter serves refuse.
+   */
   private unbound(name: string, path: string): unknown {
-    if (PROBES.has(name)) return false
-    if (CONTENT.has(name) || STRUCTURE.has(name)) throw guestError('ENOENT', path)
+    if (/^Path\.(exists|is_file|is_dir|is_symlink)$/.test(name)) return false
+    if (CONTENT.has(name) || /^Path\.(mkdir|iterdir|scan|stat)$/.test(name)) {
+      throw guestError('ENOENT', path)
+    }
     return this.notHandled
   }
 
@@ -443,11 +437,14 @@ export class MontyFs {
     return parsed.append ? new this.fileHandle(path, mode, { position: size }) : handle
   }
 
-  /** Replace a file; the return is python's: characters for text, bytes for bytes. */
+  /**
+   * Replace a file; the return is python's: characters for text, counted as
+   * its `len` counts them (code points, not UTF-16 units), bytes for bytes.
+   */
   private async write(path: string, data: unknown, files: RuntimeFiles): Promise<number> {
     const bytes = payloadBytes(data)
     await files.write(path, bytes)
-    return typeof data === 'string' ? textLength(data) : bytes.length
+    return typeof data === 'string' ? Array.from(data).length : bytes.length
   }
 
   /**
@@ -455,12 +452,12 @@ export class MontyFs {
    * Re-sending everything written so far turns a write loop quadratic,
    * so a mount with its own append op carries just these bytes, and the
    * adapter falls back to a whole-file write only for the mount without
-   * one. The return is python's: characters for text, bytes for bytes.
+   * one. The return is python's, as `write`'s.
    */
   private async append(path: string, data: unknown, files: RuntimeFiles): Promise<number> {
     const tail = payloadBytes(data)
     await files.append(path, tail)
-    return typeof data === 'string' ? textLength(data) : tail.length
+    return typeof data === 'string' ? Array.from(data).length : tail.length
   }
 
   /**

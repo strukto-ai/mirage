@@ -4,7 +4,7 @@ from mirage.core.nextcloud.read import read
 from mirage.core.nextcloud.readdir import readdir
 from mirage.core.nextcloud.search import SearchEntry
 from mirage.core.nextcloud.stat import stat, tree
-from mirage.types import ContentType, FileStat, FileType, FindType, PathSpec
+from mirage.types import ContentType, FileStat, FileType, PathSpec
 
 
 @pytest.mark.asyncio
@@ -137,10 +137,10 @@ async def test_tree_renders_each_row_as_a_listed_stat(make_acc, monkeypatch):
         tree.__globals__,
         "search_files",
         _rows(
-            SearchEntry("/docs/a.txt", FindType.FILE, 3, when),
-            SearchEntry("/docs/sub", FindType.DIRECTORY, None, when),
-            SearchEntry("/docs/sub/b.txt", FindType.FILE, 0, None),
-            SearchEntry("/other.txt", FindType.FILE, 1, when),
+            SearchEntry("/docs/a.txt", "f", 3, when),
+            SearchEntry("/docs/sub", "d", None, when),
+            SearchEntry("/docs/sub/b.txt", "f", 0, None),
+            SearchEntry("/other.txt", "f", 1, when),
         ),
     )
     found = await tree(make_acc({}), PathSpec.from_str_path("/docs"))
@@ -162,7 +162,7 @@ async def test_tree_renders_each_row_as_a_listed_stat(make_acc, monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "rows",
-    [None, [SearchEntry("/docs/a.txt", FindType.FILE, None, None)]],
+    [None, [SearchEntry("/docs/a.txt", "f", None, None)]],
 )
 async def test_tree_leaves_no_search_or_a_sizeless_file_to_the_walk(
     make_acc, monkeypatch, rows

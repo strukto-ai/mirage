@@ -44,14 +44,11 @@ const PRUNE_SORT: Record<string, -1> = { filename: -1, uploadDate: -1, _id: -1 }
 
 const BATCH = 1000
 
-let cachedModule: Promise<GridFSModule> | null = null
-
 export async function loadGridFSModule(): Promise<GridFSModule> {
-  cachedModule ??= loadOptionalPeer(() => import('mongodb') as unknown as Promise<GridFSModule>, {
+  return loadOptionalPeer(() => import('mongodb') as unknown as Promise<GridFSModule>, {
     feature: 'GridFSVFS',
     packageName: 'mongodb',
   })
-  return cachedModule
 }
 
 export function gridfsKey(path: string, config: GridFSConfig): string {

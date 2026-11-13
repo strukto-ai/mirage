@@ -18,7 +18,6 @@ from typing import Any
 
 from gridfs import AsyncGridFSBucket
 from pymongo.asynchronous.collection import AsyncCollection
-from pymongo.asynchronous.database import AsyncDatabase
 
 from mirage.accessor.gridfs import GridFSAccessor
 from mirage.core.gridfs.constants import TRASH_PREFIX
@@ -40,27 +39,23 @@ def gridfs_key(path: str, config: GridFSConfig) -> str:
     return kp.apply(config.key_prefix or "", path)
 
 
-def database(accessor: GridFSAccessor) -> AsyncDatabase[dict[str, Any]]:
-    return accessor.client[accessor.config.database]
-
-
 def files_coll(accessor: GridFSAccessor) -> AsyncCollection[dict[str, Any]]:
-    return database(accessor)[f"{accessor.config.bucket}.files"]
+    return accessor.db()[f"{accessor.config.bucket}.files"]
 
 
 def chunks_coll(accessor: GridFSAccessor) -> AsyncCollection[dict[str, Any]]:
-    return database(accessor)[f"{accessor.config.bucket}.chunks"]
+    return accessor.db()[f"{accessor.config.bucket}.chunks"]
 
 
 def bucket(accessor: GridFSAccessor) -> AsyncGridFSBucket:
     config = accessor.config
     if config.chunk_size_bytes is not None:
         return AsyncGridFSBucket(
-            database(accessor),
+            accessor.db(),
             bucket_name=config.bucket,
             chunk_size_bytes=config.chunk_size_bytes,
         )
-    return AsyncGridFSBucket(database(accessor), bucket_name=config.bucket)
+    return AsyncGridFSBucket(accessor.db(), bucket_name=config.bucket)
 
 
 def prefix_query(pfx: str) -> dict[str, Any]:

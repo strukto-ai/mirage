@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
-import type { DiscordMethod, DiscordResponse, DiscordTransport } from './client.ts'
+import type { DiscordMethod, DiscordTransport } from './client.ts'
 import { listGuilds } from './guilds.ts'
 
 interface RecordedCall {
@@ -26,13 +26,13 @@ interface RecordedCall {
 
 class FakeDiscordTransport implements DiscordTransport {
   public readonly calls: RecordedCall[] = []
-  constructor(private readonly responder: () => DiscordResponse = () => null) {}
+  constructor(private readonly responder: () => unknown = () => null) {}
   call(
     method: DiscordMethod,
     endpoint: string,
     params?: Record<string, string | number>,
     body?: Record<string, unknown>,
-  ): Promise<DiscordResponse> {
+  ): Promise<unknown> {
     this.calls.push({
       method,
       endpoint,

@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
+from typing import Any, cast
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.core.discord.client import discord_post
+from mirage.core.discord.client import discord_request
 
 
 async def create_thread(
@@ -36,13 +36,15 @@ async def create_thread(
         dict: the created thread channel.
     """
     if message_id:
-        return await discord_post(
-            accessor,
-            f"/channels/{channel_id}/messages/{message_id}/threads",
-            {"name": name},
-        )
-    # Standalone threads must state a type: the API otherwise defaults
-    # to PRIVATE_THREAD, which needs extra permissions. 11 = PUBLIC_THREAD.
-    return await discord_post(
-        accessor, f"/channels/{channel_id}/threads", {"name": name, "type": 11}
+        endpoint = f"/channels/{channel_id}/messages/{message_id}/threads"
+        body: dict[str, Any] = {"name": name}
+    else:
+        # Standalone threads must state a type: the API otherwise defaults
+        # to PRIVATE_THREAD, which needs extra permissions. 11 =
+        # PUBLIC_THREAD.
+        endpoint = f"/channels/{channel_id}/threads"
+        body = {"name": name, "type": 11}
+    return cast(
+        dict[str, Any],
+        await discord_request(accessor, "POST", endpoint, body=body),
     )

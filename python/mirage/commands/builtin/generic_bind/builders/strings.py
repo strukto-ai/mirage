@@ -21,10 +21,7 @@ from mirage.commands.builtin.generic_bind.files import (
     dir_aware_stat,
     resolve_or_empty,
 )
-from mirage.commands.builtin.utils.operands import (
-    merge_split_errors,
-    per_operand,
-)
+from mirage.commands.builtin.utils.operands import operands_io, per_operand
 from mirage.commands.builtin.utils.stream import stdin_stat, stdin_stream
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
@@ -131,7 +128,7 @@ async def strings(
     readable, err = await _readable(resolved, stat)
     if err and not readable:
         return None, IOResult(exit_code=1, stderr=err)
-    io = IOResult()
+    io = operands_io(err)
     read = stdin_stream(files.read, ctx.stdin, dash=False)
     names = iter(
         [p.raw_path or p.virtual for p in readable] or ["{standard input}"]
@@ -143,8 +140,7 @@ async def strings(
         prefix = byte_view(encode_text(f"{name}: ")) if named else None
         return run_stream("strings", {**config, "prefix": prefix}, source)
 
-    output = per_operand(readable, read, ctx.stdin, io, "strings", each)
-    return await merge_split_errors((output, io), err)
+    return per_operand(readable, read, ctx.stdin, io, "strings", each), io
 
 
 BUILDER = GenericCommand("strings", strings, read=True)

@@ -73,11 +73,6 @@ export interface AuthorizedKey {
   account: readonly string[]
 }
 
-interface KeyOption {
-  name: string
-  value: string | null
-}
-
 /**
  * The public keys allowed to log in, read fresh for every attempt so a key
  * added or revoked takes effect on the next login. A line that cannot be
@@ -115,59 +110,45 @@ export async function readAuthorizedKeys(
 /**
  * One authorized_keys line as its key and its `mirage-profile` and
  * `mirage-account` values. A line ssh2 reads as it stands carries no
- * options; otherwise its leading options field is split off the way
- * OpenSSH reads it.
+ * options; otherwise its leading options field (comma-separated `name` or
+ * `name="value"`, `\"` escaping a quote) is split off the way OpenSSH reads
+ * it, and a line that does not start with one keeps ssh2's error.
  */
 function authorizedKey(line: string, utils: typeof Ssh2Mod.utils): AuthorizedKey | Error {
   const plain = utils.parseKey(line)
   if (!(plain instanceof Error)) return { key: plain, profile: [], account: [] }
-  const split = splitOptions(line)
-  if (split === null) return plain
   const profile: string[] = []
   const account: string[] = []
-  for (const option of split.options) {
-    const name = option.name.toLowerCase()
-    if (name === PROFILE_OPTION) profile.push(option.value ?? '')
-    else if (name === ACCOUNT_OPTION) account.push(option.value ?? '')
-    else return new Error(`unsupported key option ${option.name}`)
-  }
-  const key = utils.parseKey(split.rest)
-  return key instanceof Error ? key : { key, profile, account }
-}
-
-/**
- * The comma-separated options field that leads an authorized_keys line
- * (`name` or `name="value"`, `\"` escaping a quote) and the key after it,
- * or null when the line does not start with one.
- */
-function splitOptions(line: string): { options: KeyOption[]; rest: string } | null {
-  const options: KeyOption[] = []
+  let unsupported: string | null = null
   let at = 0
   for (;;) {
     const name = /^[A-Za-z0-9-]+/.exec(line.slice(at))?.[0]
-    if (name === undefined) return null
+    if (name === undefined) return plain
     at += name.length
-    let value: string | null = null
+    let value = ''
     if (line[at] === '=') {
-      if (line[at + 1] !== '"') return null
+      if (line[at + 1] !== '"') return plain
       at += 2
-      value = ''
       while (at < line.length && line[at] !== '"') {
         if (line[at] === '\\' && line[at + 1] === '"') at += 1
         value += line.charAt(at)
         at += 1
       }
-      if (at >= line.length) return null
+      if (at >= line.length) return plain
       at += 1
     }
-    options.push({ name, value })
-    const next = line[at]
-    if (next === ',') {
+    const option = name.toLowerCase()
+    if (option === PROFILE_OPTION) profile.push(value)
+    else if (option === ACCOUNT_OPTION) account.push(value)
+    else unsupported ??= name
+    if (line[at] === ',') {
       at += 1
       continue
     }
-    if (next === ' ' || next === '\t') return { options, rest: line.slice(at).trim() }
-    return null
+    if (line[at] !== ' ' && line[at] !== '\t') return plain
+    if (unsupported !== null) return new Error(`unsupported key option ${unsupported}`)
+    const key = utils.parseKey(line.slice(at).trim())
+    return key instanceof Error ? key : { key, profile, account }
   }
 }
 

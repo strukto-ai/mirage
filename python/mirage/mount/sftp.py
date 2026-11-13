@@ -221,23 +221,6 @@ async def vfs_attrs(core: MountCore) -> asyncssh.SFTPVFSAttrs:
     )
 
 
-def as_os_error(err: Exception) -> OSError:
-    """The errno asyncssh turns into an SFTP status, from the shared table.
-
-    Args:
-        err (Exception): what the core raised.
-
-    Returns:
-        OSError: carrying the classified errno.
-    """
-    code = classify_error(err)
-    if code in (errno.EROFS, errno.EPERM):
-        # SFTP v3 says permission denied for every refused write; asyncssh
-        # would send EROFS as write-protect, which a v3 client cannot read.
-        return OSError(errno.EACCES, os.strerror(code))
-    return OSError(code, os.strerror(code))
-
-
 def workspace_path(path: bytes) -> str:
     """A client path as a workspace path: absolute, normalized, never
     above ``/``.
@@ -310,7 +293,14 @@ class MirageSFTPServer(asyncssh.SFTPServer):
                     return await op(self._core)
                 return cast(T, await self._run(op(self._core)))
             except Exception as err:
-                raise as_os_error(err) from err
+                # The errno asyncssh turns into an SFTP status. SFTP v3
+                # says permission denied for every refused write; asyncssh
+                # would send EROFS as write-protect, which a v3 client
+                # cannot read.
+                code = classify_error(err)
+                denied = code in (errno.EROFS, errno.EPERM)
+                sent = errno.EACCES if denied else code
+                raise OSError(sent, os.strerror(code)) from err
 
     def _encode(self, path: str) -> bytes:
         return path.encode(ENCODING, ERRORS)

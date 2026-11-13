@@ -34,7 +34,8 @@ import { NameKind } from '../lookup/types.ts'
 import { builtinUsage, result, written } from '../shared.ts'
 import { BASH_BUILTINS, KEYWORDS, SHELL_NAMES } from '../../../lookup/constants.ts'
 import { withoutCapture } from '../../../lookup/lookup.ts'
-import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
+import type { BuiltinCall } from '../types.ts'
+import type { ExecuteFn } from '../../../expand/types.ts'
 
 /**
  * Run the `-v`/`-V` introspection modes.
@@ -94,7 +95,7 @@ function probe(
  * `-v`/`-V` wins.
  */
 export async function handleCommandBuiltin(
-  executeFn: ExecuteStringFn,
+  executeFn: ExecuteFn,
   args: readonly string[],
   session: SessionState,
   registry: MountRegistry,
@@ -137,7 +138,7 @@ export async function handleCommandBuiltin(
  */
 async function pastFunctions(
   cmd: string,
-  executeFn: ExecuteStringFn,
+  executeFn: ExecuteFn,
   words: readonly string[],
   session: SessionState,
   stdin: ByteSource | null,
@@ -185,7 +186,7 @@ async function pastFunctions(
  * debian:stable-slim. Mirrors Python's handle_builtin.
  */
 export async function handleBuiltin(
-  executeFn: ExecuteStringFn,
+  executeFn: ExecuteFn,
   args: readonly string[],
   session: SessionState,
   stdin: ByteSource | null = null,

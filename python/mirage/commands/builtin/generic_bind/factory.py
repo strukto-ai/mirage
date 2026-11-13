@@ -74,11 +74,11 @@ def _bind(
             # A RAM or cache read arrives as one whole chunk, over which a
             # scan that splits its buffer per line is quadratic and cannot
             # be cancelled until it ends; stdin is cut into pieces with a
-            # yield between them, as each operand read is and as
-            # TypeScript's guardInput. A pass-through builder (cat, head)
-            # keeps the producer's chunks: it writes a pipe in the writes
-            # the producer made, so a write the reader's close cuts short
-            # is its SIGPIPE, and a scan inside it splits its own input.
+            # yield between them, as each operand read is. A pass-through
+            # builder (cat, head) keeps the producer's chunks: it writes a
+            # pipe in the writes the producer made, so a write the reader's
+            # close cuts short is its SIGPIPE, and a scan inside it splits
+            # its own input.
             ctx = replace(ctx, stdin=chunks(ctx.stdin))
         with with_reading(ctx, reading) as run:
             return await builder.fn(accessor, paths, texts, run)

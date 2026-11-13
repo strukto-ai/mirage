@@ -18,7 +18,7 @@ import { DiscordAccessor } from '../../accessor/discord.ts'
 import { LISTING_TRUST_WINDOW } from '../../cache/index/constants.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
 import { FileStat, FileType, PathSpec, ReadPolicy } from '../../types.ts'
-import type { DiscordMethod, DiscordResponse, DiscordTransport } from './client.ts'
+import type { DiscordMethod, DiscordTransport } from './client.ts'
 import { snowflakeAt } from './history.ts'
 import { follow, read, readMany, readStream } from './read.ts'
 import { readdir } from './readdir.ts'
@@ -33,15 +33,14 @@ interface RecordedCall {
 class FakeDiscordTransport implements DiscordTransport {
   public readonly calls: RecordedCall[] = []
   constructor(
-    private readonly responder: (method: DiscordMethod, endpoint: string) => DiscordResponse = () =>
-      null,
+    private readonly responder: (method: DiscordMethod, endpoint: string) => unknown = () => null,
   ) {}
   call(
     method: DiscordMethod,
     endpoint: string,
     params?: Record<string, string | number>,
     body?: Record<string, unknown>,
-  ): Promise<DiscordResponse> {
+  ): Promise<unknown> {
     this.calls.push({
       method,
       endpoint,
@@ -299,7 +298,7 @@ describe('follow', () => {
       // `later` lands once the day has been read, so only a poll sees it.
       const after = BigInt(t.calls[t.calls.length - 1]?.params?.after ?? 0)
       const posted = after >= BigInt(day[0]?.id ?? 0) ? [later] : day
-      return posted.filter((m) => BigInt(m.id) > after) as DiscordResponse
+      return posted.filter((m) => BigInt(m.id) > after)
     })
     const stream = await follow(
       new DiscordAccessor(t),

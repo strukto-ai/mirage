@@ -30,7 +30,7 @@ from mirage.core.generic.types import (
     TrueNode,
     Type,
 )
-from mirage.types import FileStat, FileType, FindType
+from mirage.types import FileStat, FileType
 from mirage.utils.stat_view import DIR_SIZE
 
 
@@ -172,12 +172,6 @@ def test_build_tree_from_params_matches_args_to_tree():
     tree = build_tree(name="*.txt", type="f")
     assert evaluate(tree, _entry(kind="f"), Effects()) is True
     assert evaluate(tree, _entry(kind="d"), Effects()) is False
-
-
-def test_build_tree_findtype_enum():
-    tree = build_tree(type=FindType.DIRECTORY)
-    assert evaluate(tree, _entry(kind="d"), Effects()) is True
-    assert evaluate(tree, _entry(kind="f"), Effects()) is False
 
 
 def test_build_tree_file_directory_string_aliases():

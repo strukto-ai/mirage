@@ -25,6 +25,7 @@ from mirage.utils.timezone import (
     numeric_abbreviation,
     posix_zone,
     resolve_tz,
+    transition_at,
     zone_abbreviations,
     zone_from_env,
 )
@@ -472,18 +473,29 @@ def test_posix_zone_skipped_hour_reads_under_standard_time() -> None:
 
 def test_transition_rule_shapes() -> None:
     last_sunday_march = TransitionRule("M", month=3, week=5, weekday=0)
-    assert last_sunday_march.at(2025) == datetime(2025, 3, 30, 2)
+    assert transition_at(last_sunday_march, 2025) == datetime(2025, 3, 30, 2)
     first_sunday_november = TransitionRule("M", month=11, week=1, weekday=0)
-    assert first_sunday_november.at(2025) == datetime(2025, 11, 2, 2)
+    assert transition_at(first_sunday_november, 2025) == datetime(
+        2025, 11, 2, 2
+    )
     # J60 is March 1 whatever the year: February 29 is never counted.
-    assert TransitionRule("J", day=60).at(2024) == datetime(2024, 3, 1, 2)
-    assert TransitionRule("J", day=60).at(2025) == datetime(2025, 3, 1, 2)
+    assert transition_at(TransitionRule("J", day=60), 2024) == datetime(
+        2024, 3, 1, 2
+    )
+    assert transition_at(TransitionRule("J", day=60), 2025) == datetime(
+        2025, 3, 1, 2
+    )
     # A bare day is zero-based and counts February 29.
-    assert TransitionRule("D", day=59).at(2024) == datetime(2024, 2, 29, 2)
-    assert TransitionRule("D", day=59).at(2025) == datetime(2025, 3, 1, 2)
-    assert TransitionRule(
-        "M", month=10, week=5, weekday=0, seconds=3 * 3600
-    ).at(2025) == datetime(2025, 10, 26, 3)
+    assert transition_at(TransitionRule("D", day=59), 2024) == datetime(
+        2024, 2, 29, 2
+    )
+    assert transition_at(TransitionRule("D", day=59), 2025) == datetime(
+        2025, 3, 1, 2
+    )
+    assert transition_at(
+        TransitionRule("M", month=10, week=5, weekday=0, seconds=3 * 3600),
+        2025,
+    ) == datetime(2025, 10, 26, 3)
 
 
 def test_transition_rule_counts_refused_fields_as_gnu_does() -> None:
@@ -492,21 +504,21 @@ def test_transition_rule_counts_refused_fields_as_gnu_does() -> None:
     # Sunday of a month that starts on one (September 2024) and the
     # first of any other; Julian day 0 is the day before January 1. GNU
     # date 9.7 places refused rules this way.
-    assert TransitionRule("M", month=3, week=0, weekday=0, seconds=0).at(
-        2024
+    assert transition_at(
+        TransitionRule("M", month=3, week=0, weekday=0, seconds=0), 2024
     ) == datetime(2024, 3, 3)
-    assert TransitionRule("M", month=3, week=5, weekday=7, seconds=0).at(
-        2024
+    assert transition_at(
+        TransitionRule("M", month=3, week=5, weekday=7, seconds=0), 2024
     ) == datetime(2024, 3, 31)
-    assert TransitionRule("M", month=9, week=1, weekday=7, seconds=0).at(
-        2024
+    assert transition_at(
+        TransitionRule("M", month=9, week=1, weekday=7, seconds=0), 2024
     ) == datetime(2024, 9, 8)
-    assert TransitionRule("M", month=3, week=1, weekday=7, seconds=0).at(
-        2024
+    assert transition_at(
+        TransitionRule("M", month=3, week=1, weekday=7, seconds=0), 2024
     ) == datetime(2024, 3, 3)
-    assert TransitionRule("J", day=0, seconds=0).at(2024) == datetime(
-        2023, 12, 31
-    )
+    assert transition_at(
+        TransitionRule("J", day=0, seconds=0), 2024
+    ) == datetime(2023, 12, 31)
 
 
 def test_posix_zone_default_rule_is_the_us_one() -> None:

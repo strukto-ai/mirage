@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { JsonObject } from '@struktoai/mirage-core/types'
+import { isRecord } from '@struktoai/mirage-core/utils/records'
 import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
 import {
@@ -20,8 +22,6 @@ import {
   etagValue,
   hubPost,
 } from '@struktoai/mirage-core/core/hf_hub/client'
-
-type Row = Record<string, unknown>
 
 function base(accessor: HfBucketsAccessor): string {
   return rstripSlash(accessor.endpoint)
@@ -56,16 +56,17 @@ export function resolveUrl(accessor: HfBucketsAccessor, rel: string): string {
  * evidence about this one, and must not read as its absence: reconcile deletes
  * what it believes is gone. The mount root is never a file and is never asked.
  */
-export async function fetchRow(accessor: HfBucketsAccessor, key: string): Promise<Row | null> {
+export async function fetchRow(
+  accessor: HfBucketsAccessor,
+  key: string,
+): Promise<JsonObject | null> {
   if (stripSlash(key) === '') return null
   const asked = accessor.bucketPath(key)
   const rows = await hubPost(accessor.account, pathsInfoUrl(accessor), { paths: [asked] })
   if (!Array.isArray(rows)) {
     throw new HfHubError(`paths-info answered no list for ${asked}`, 0, 'InvalidResponse')
   }
-  const matching = rows.filter(
-    (row): row is Row => typeof row === 'object' && row !== null && (row as Row).path === asked,
-  )
+  const matching = rows.filter(isRecord).filter((row) => row.path === asked)
   if (rows.length > 0 && matching.length === 0) {
     throw new HfHubError(`paths-info answered no row for ${asked}`, 0, 'PathMismatch')
   }

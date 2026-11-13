@@ -18,23 +18,11 @@ import type { S3Client } from '@aws-sdk/client-s3'
 import { missingPeer } from '../../utils/optional_peer.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
-import type { S3Module, S3SendClient } from './types.ts'
+import type { S3Module } from './types.ts'
 import { CONDITION_LOST_CODES, DENIED_CODES } from './constants.ts'
 
 export function s3Key(path: string, config: S3Config): string {
   return kp.apply(config.keyPrefix ?? '', path)
-}
-
-export async function withClient<T>(
-  config: S3Config,
-  fn: (client: S3SendClient) => Promise<T>,
-): Promise<T> {
-  const client = (await createS3Client(config)) as unknown as S3SendClient
-  try {
-    return await fn(client)
-  } finally {
-    client.destroy?.()
-  }
 }
 
 let cachedModule: Promise<S3Module> | null = null

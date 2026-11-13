@@ -11,11 +11,11 @@ import { deltas, shownSides, type Delta, type Side } from './rows.ts'
 import { configValues } from './fs.ts'
 import { abbrevWidth } from './format.ts'
 import { maybeBool } from './util.ts'
-import { commitFacts, type Repo } from './repo.ts'
-import { readable, shownEntries } from './seen.ts'
+import { commitFacts, storedItems, type Repo } from './repo.ts'
+import { decoded, readable, shownEntries } from './seen.ts'
 import { BINARY_SNIFF, diffstat, statTable, type FileStat } from './summary.ts'
 import { matches, type Pickaxe } from './pickaxe.ts'
-import { treeEntries, treeItems, type TreeEntry } from './tree.ts'
+import { treeEntries, type TreeEntry } from './tree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const RENAME_SCORE = 50
@@ -461,7 +461,9 @@ export async function entries(
   if (tree === null) return new Map()
   const found = recursive
     ? await treeEntries(repo, tree)
-    : new Map((await treeItems(repo, tree)).map((e) => [e.path, { mode: e.mode, oid: e.oid }]))
+    : new Map(
+        decoded(await storedItems(repo, tree)).map((e) => [e.path, { mode: e.mode, oid: e.oid }]),
+      )
   // A commit's tree stands at the root; what the session cannot see there is
   // no side of any change, so no patch, count or match.
   return limited(shownEntries(repo, found), pathspecs)

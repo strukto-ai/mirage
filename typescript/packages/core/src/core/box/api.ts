@@ -68,10 +68,8 @@ export async function absentOn404<T>(virtual: string, call: () => Promise<T>): P
   }
 }
 
-type BoxItemType = 'file' | 'folder' | 'web_link'
-
 export interface BoxItem {
-  type: BoxItemType
+  type: 'file' | 'folder' | 'web_link'
   id: string
   name: string
   size?: number
@@ -90,17 +88,11 @@ const SEARCH_PAGE = 200
 const MAX_SEARCH_MATCHES = 10_000
 const EVENTS_PAGE = 500
 
-interface BoxPathCollectionEntry {
-  type: 'folder'
-  id: string
-  name: string
-}
-
-export interface BoxSearchItem {
-  type: BoxItemType
-  id: string
-  name: string
-  path_collection?: { total_count: number; entries: BoxPathCollectionEntry[] }
+export interface BoxSearchItem extends Pick<BoxItem, 'type' | 'id' | 'name'> {
+  path_collection?: {
+    total_count: number
+    entries: { type: 'folder'; id: string; name: string }[]
+  }
 }
 
 /**
@@ -236,8 +228,7 @@ export async function getFolderInfo(tm: BoxTokenManager, folderId: string): Prom
 }
 
 /** `GET /files/{id}`: a file's live metadata, with its ancestry and status. */
-export interface BoxFileInfo extends BoxItem {
-  path_collection?: { total_count: number; entries: BoxPathCollectionEntry[] }
+export interface BoxFileInfo extends BoxItem, Pick<BoxSearchItem, 'path_collection'> {
   item_status?: string
 }
 

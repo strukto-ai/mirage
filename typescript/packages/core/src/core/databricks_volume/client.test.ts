@@ -6,7 +6,7 @@ import { materialize } from '../../io/types.ts'
 import { MountMode } from '../../types.ts'
 import { DatabricksVolumeConfig } from '../../vfs/databricks_volume/config.ts'
 import { DatabricksVolumeVFS } from '../../vfs/databricks_volume/databricks_volume.ts'
-import { parseConfigWithSchema, redactConfigWithSchema } from '../../vfs/secrets.ts'
+import { parseConfigWithSchema, redactedConfigDump } from '../../vfs/secrets.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import {
   deleteFile,
@@ -66,7 +66,7 @@ describe('Files client', () => {
     let current = 'old'
     const token = vi.fn(() => current)
     const a = accessor({ token })
-    expect(redactConfigWithSchema(DatabricksVolumeConfig, a.config).token).toBe('<REDACTED>')
+    expect(redactedConfigDump(DatabricksVolumeConfig, a.config).token).toBe('<REDACTED>')
     const stream = downloadStream(a, '/Volumes/x/a')
     await read(a, spec('/volume/a'), { size: 0 })
     expect(token).not.toHaveBeenCalled()

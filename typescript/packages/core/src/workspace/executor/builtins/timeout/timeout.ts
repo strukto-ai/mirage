@@ -66,7 +66,8 @@ import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { programText } from '../../background.ts'
 import { redirectedBody, reportedCommand } from '../../statement.ts'
-import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
+import type { BuiltinCall } from '../types.ts'
+import type { ExecuteFn } from '../../../expand/types.ts'
 import { FORK_FAILED, SELF_KILLING_SIGNALS, SIGNAL_ALIASES, TIMEOUT_NAMES } from './constants.ts'
 
 const UNIT_SECONDS: Readonly<Record<string, number>> = Object.freeze({
@@ -206,7 +207,7 @@ export function signalName(number: number): string {
 // printed, as GNU's leaves it on the terminal. A lazy stdout it still
 // returns drains inside the deadline too.
 async function executeDrained(
-  executeFn: ExecuteStringFn,
+  executeFn: ExecuteFn,
   inner: string,
   context: EvaluationContext,
   stdin: ByteSource | null,
@@ -307,7 +308,7 @@ interface Supervision {
  */
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function handleTimeout(
-  executeFn: ExecuteStringFn,
+  executeFn: ExecuteFn,
   args: readonly string[],
   context: EvaluationContext,
   stdin: ByteSource | null = null,

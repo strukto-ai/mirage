@@ -38,10 +38,6 @@ def path_parts(path: PathSpec) -> list[str]:
     return [p for p in path.vfs_path.strip("/").split("/") if p]
 
 
-def root_id(accessor: BoxAccessor) -> str:
-    return accessor.config.root_folder_id or ALL_FILES_FOLDER_ID
-
-
 async def resolve_chain(
     accessor: BoxAccessor, parts: list[str]
 ) -> list[dict[str, Any]]:
@@ -57,7 +53,7 @@ async def resolve_chain(
         parts (list[str]): mount-relative path components.
     """
     tm = accessor.token_manager
-    cur_id = root_id(accessor)
+    cur_id = accessor.root_folder_id
     chain: list[dict[str, Any]] = []
     for name in parts:
         if chain and chain[-1].get("type") != "folder":
@@ -121,7 +117,7 @@ def parent_folder(
         parent (FileStat | None): what is at its parent path.
     """
     if len(path_parts(path)) <= 1:
-        return root_id(accessor)
+        return accessor.root_folder_id
     if parent is None:
         raise enoent(path.virtual)
     if parent.type is not FileType.DIRECTORY:
@@ -188,7 +184,7 @@ def names_this_path(
         return False
     if any(anc.get("id") == TRASH_FOLDER_ID for anc in chain):
         return False
-    key = mount_relative_key(item, root_id(accessor))
+    key = mount_relative_key(item, accessor.root_folder_id)
     return key == "/".join(path_parts(path))
 
 

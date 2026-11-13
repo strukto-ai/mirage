@@ -21,7 +21,6 @@ from collections.abc import (
     Sequence,
 )
 from dataclasses import replace
-from functools import partial
 
 from mirage.commands.builtin.constants import OPERAND_CONCURRENCY
 from mirage.concurrency.limiter import bounded_map
@@ -31,14 +30,13 @@ from mirage.errors.render import fs_error_line
 from mirage.errors.types import DotWalkError
 from mirage.io.cooperative import chunks
 from mirage.io.stream import close_quietly, ensure_stream
-from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
 from mirage.types import (
     FileStat,
     FileType,
     PathSpec,
     PolymorphicReadFn,
-    ReadBytesFn,
     StatFn,
 )
 from mirage.view.types import LinkView, MountView, StatPath
@@ -369,26 +367,6 @@ def operands_io(err: bytes) -> IOResult:
     return IOResult(exit_code=1 if err else 0, stderr=err or None)
 
 
-async def merge_split_errors(
-    result: tuple[ByteSource | None, IOResult],
-    err: bytes,
-) -> tuple[ByteSource | None, IOResult]:
-    """Attach ``split_readable`` stderr lines to a generic's result.
-
-    Args:
-        result (tuple[ByteSource | None, IOResult]): The body's return.
-        err (bytes): Stderr lines for the operands dropped by the split;
-            when non-empty the command exits 1.
-    """
-    if not err:
-        return result
-    out, io = result
-    existing = await materialize(io.stderr) if io.stderr else b""
-    io.stderr = existing + err
-    io.exit_code = 1
-    return out, io
-
-
 async def reported_stream(
     source: AsyncIterator[bytes], io: IOResult, path: PathSpec, cmd_name: str
 ) -> AsyncIterator[bytes]:
@@ -469,9 +447,9 @@ def per_operand(
 async def errors_first(
     result: tuple[ByteSource | None, IOResult], err: bytes
 ) -> tuple[ByteSource | None, IOResult]:
-    """``merge_split_errors`` for a command whose lines come before its
-    output, as GNU's do when it holds its output until it ends (``rev``,
-    ``tac``).
+    """Attach ``split_readable`` stderr lines to a generic's result, for
+    a command whose lines come before its output, as GNU's do when it
+    holds its output until it ends (``rev``, ``tac``).
 
     Args:
         result (tuple[ByteSource | None, IOResult]): The body's return.
@@ -497,20 +475,6 @@ async def _awaited_stream(
             yield chunk
     finally:
         await close_quietly(stream)
-
-
-def _call_normalized(
-    read: PolymorphicReadFn, path: PathSpec
-) -> AsyncIterator[bytes]:
-    # The reader is invoked NOW, not when the returned stream is first
-    # drained: a cache-aware factory reader captures the active cache
-    # manager at call time, inside the command's cache-manager scope,
-    # which is gone by drain time. Only the rare awaitable-of-bytes
-    # reader keeps a deferred step, and it carries no such scope.
-    source = read(path)
-    if inspect.isawaitable(source):
-        return _awaited_stream(source)
-    return ensure_stream(source)
 
 
 def normalized_read(
@@ -539,23 +503,16 @@ def normalized_read(
                 await close_quietly(source)
 
         return stream
-    return partial(_call_normalized, read)
 
+    def call(path: PathSpec) -> AsyncIterator[bytes]:
+        # The reader is invoked NOW, not when the returned stream is first
+        # drained: a cache-aware factory reader captures the active cache
+        # manager at call time, inside the command's cache-manager scope,
+        # which is gone by drain time. Only the rare awaitable-of-bytes
+        # reader keeps a deferred step, and it carries no such scope.
+        source = read(path)
+        if inspect.isawaitable(source):
+            return _awaited_stream(source)
+        return ensure_stream(source)
 
-async def _read_materialized(read: PolymorphicReadFn, path: PathSpec) -> bytes:
-    source = read(path)
-    if inspect.isawaitable(source):
-        source = await source
-    return await materialize(source)
-
-
-def materialized_read(read: PolymorphicReadFn) -> ReadBytesFn:
-    """Normalize a polymorphic bound reader to always return bytes.
-
-    The buffering twin of ``normalized_read``, for generic bodies that
-    take a whole-file ``read_bytes`` reader.
-
-    Args:
-        read (PolymorphicReadFn): Bound reader called as ``read(path)``.
-    """
-    return partial(_read_materialized, read)
+    return call

@@ -12,18 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
-import { BASE_CONFIG_FIELDS, type MachineConfig } from '@struktoai/mirage-core/machine/config'
+import type { MachineConfig } from '@struktoai/mirage-core/machine/config'
 
 export interface SandlockConfig extends MachineConfig {
   fsReadable?: readonly string[]
   fsWritable?: readonly string[]
   maxMemory?: string
-}
-
-export const SANDLOCK_CONFIG_FIELDS: ConfigFields = {
-  ...BASE_CONFIG_FIELDS,
-  fsReadable: { type: 'list' },
-  fsWritable: { type: 'list' },
-  maxMemory: { type: 'string' },
 }

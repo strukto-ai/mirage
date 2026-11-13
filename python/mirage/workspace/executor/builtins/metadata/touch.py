@@ -30,11 +30,11 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text
 from mirage.types import PathSpec
 from mirage.workspace.executor.builtins.metadata.metadata import (
-    apply_link_attrs,
     follow_operand,
     now_iso,
     parse_touch_stamp,
     permission_error,
+    setattr_link,
     setattr_via,
 )
 from mirage.workspace.executor.builtins.shared import (
@@ -130,9 +130,14 @@ async def handle_touch(
     links = namespace.session_links(session)
     for target in await expand_operands(namespace, dispatch, operands):
         if fl.as_bool("no_dereference") and links.is_link(target.virtual):
-            await apply_link_attrs(
-                dispatch, "touch", target, target.raw_path, errors, mtime=stamp
-            )
+            try:
+                await setattr_link(dispatch, target, mtime=stamp)
+            except PermissionError as exc:
+                errors.append(
+                    permission_error(
+                        "touch", "setting times of", target.raw_path, exc
+                    )
+                )
             continue
         if target.walk_error is not None:
             # Past -h, which acts on a looping link itself: the empty

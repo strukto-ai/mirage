@@ -26,12 +26,12 @@ import {
   asRow,
   asRows,
   deletionsJsonl,
-  isRow,
   normalizeComment,
   recordsJsonl,
-  type Row,
 } from '../../../../core/airtable/normalize.ts'
 import { IOResult } from '../../../../io/types.ts'
+import type { JsonObject } from '../../../../types.ts'
+import { isRecord } from '../../../../utils/records.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { UsageError } from '../../../errors.ts'
@@ -56,8 +56,8 @@ const ENC = new TextEncoder()
  * must not leave ten records already written. A blank line is skipped but
  * still counted, so a refusal names the line an editor shows.
  */
-function recordLines(text: string, need: { id: boolean; fields: boolean }): Row[] {
-  const rows: Row[] = []
+function recordLines(text: string, need: { id: boolean; fields: boolean }): JsonObject[] {
+  const rows: JsonObject[] = []
   text.split('\n').forEach((line, index) => {
     if (/^[ \t\r]*$/.test(line)) return
     const where = `stdin line ${String(index + 1)}`
@@ -67,14 +67,14 @@ function recordLines(text: string, need: { id: boolean; fields: boolean }): Row[
     } catch {
       throw new UsageError(`${where}: not valid JSON`)
     }
-    if (!isRow(row)) throw new UsageError(`${where}: not a JSON object`)
+    if (!isRecord(row)) throw new UsageError(`${where}: not a JSON object`)
     const unknown = Object.keys(row)
       .filter((key) => !LINE_KEYS.has(key))
       .sort(compareCodePoints)[0]
     if (unknown !== undefined) {
       throw new UsageError(`${where}: unknown key ${JSON.stringify(unknown)}`)
     }
-    if ('fields' in row && !isRow(row.fields)) {
+    if ('fields' in row && !isRecord(row.fields)) {
       throw new UsageError(`${where}: "fields" must be an object`)
     }
     if (need.id && !('record_id' in row)) {
@@ -96,8 +96,8 @@ async function writable(
   accessor: AirtableAccessor,
   baseId: string,
   table: string,
-  cells: Row[],
-): Promise<Row[]> {
+  cells: JsonObject[],
+): Promise<JsonObject[]> {
   const found = findTable(await listTables(accessor, baseId), table)
   const fields = asRows(asRow(found).fields)
   const computed = new Set(
@@ -116,10 +116,10 @@ async function writable(
  * installed under, and the error names its call.
  */
 async function landed(
-  batches: AsyncIterable<Row[]>,
-  render: (rows: Row[]) => Uint8Array,
+  batches: AsyncIterable<JsonObject[]>,
+  render: (rows: JsonObject[]) => Uint8Array,
 ): Promise<CommandFnResult> {
-  const done: Row[] = []
+  const done: JsonObject[] = []
   try {
     for await (const batch of batches) done.push(...batch)
   } catch (err) {
@@ -139,13 +139,13 @@ async function recordCreateBody(
   noOperands(texts)
   const fields = fl.asStr('fields')
   const table = fl.asStr('table') ?? ''
-  let cells: Row[]
+  let cells: JsonObject[]
   let piped = false
   if (fields !== undefined) {
     cells = [jsonObject('--fields', fields)]
   } else if (ctx.stdin !== null) {
     const rows = recordLines(await stdinText(ctx.stdin), { id: false, fields: true })
-    cells = rows.map((row) => row.fields as Row)
+    cells = rows.map((row) => row.fields as JsonObject)
     piped = rows.length > 0
   } else {
     throw new UsageError('--fields or records on stdin are required')
@@ -174,7 +174,7 @@ async function recordUpdateBody(
     throw new UsageError('RECORD is required with --fields')
   }
   let ids: string[]
-  let cells: Row[]
+  let cells: JsonObject[]
   let piped = false
   if (recordId !== null && fields !== undefined) {
     ids = [recordId]
@@ -182,14 +182,14 @@ async function recordUpdateBody(
   } else if (ctx.stdin !== null) {
     const rows = recordLines(await stdinText(ctx.stdin), { id: true, fields: true })
     ids = rows.map((row) => String(row.record_id))
-    cells = rows.map((row) => row.fields as Row)
+    cells = rows.map((row) => row.fields as JsonObject)
     piped = rows.length > 0
   } else {
     throw new UsageError('RECORD --fields or records on stdin are required')
   }
   const baseId = scopedBase(accessor.config, fl.asStr('base') ?? '')
   if (piped) cells = await writable(accessor, baseId, table, cells)
-  const updates = ids.map((id, i): [string, Row] => [id, cells[i] ?? {}])
+  const updates = ids.map((id, i): [string, JsonObject] => [id, cells[i] ?? {}])
   const batches = updateRecords(accessor, baseId, table, updates, {
     typecast: fl.asBool('typecast'),
   })

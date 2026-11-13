@@ -107,19 +107,6 @@ export class MountCommandUnsupported extends Error {
   }
 }
 
-/** The placements of the mounts a registry is constructed with, keyed by raw prefix. */
-export interface RegistryPlacements {
-  index?: IndexConfig
-  indexes?: Record<string, IndexConfig>
-  refs?: Record<string, string>
-  /** The write policy a mount takes when it names none. */
-  defaultWrite?: WritePolicy
-  /** Each mount's own write policy, keyed by raw prefix. */
-  writes?: Record<string, WritePolicy>
-  /** Scopes the redis index stores this registry builds. */
-  workspaceId?: string
-}
-
 export class MountRegistry {
   diff?: DiffComputer
   private readonly indexConfig: IndexConfig | undefined
@@ -372,7 +359,18 @@ export class MountRegistry {
     modeOverrides: Record<string, MountMode> = {},
     defaultRead: ReadSpec = DEFAULT_READ_SPEC,
     readOverrides: Record<string, ReadSpec> = {},
-    placements: RegistryPlacements = {},
+    /** The placements of the mounts it is constructed with, keyed by raw prefix. */
+    placements: {
+      index?: IndexConfig
+      indexes?: Record<string, IndexConfig>
+      refs?: Record<string, string>
+      /** The write policy a mount takes when it names none. */
+      defaultWrite?: WritePolicy
+      /** Each mount's own write policy, keyed by raw prefix. */
+      writes?: Record<string, WritePolicy>
+      /** Scopes the redis index stores this registry builds. */
+      workspaceId?: string
+    } = {},
     readonly io: IOConfig = new IOConfig(),
     readonly clock: Clock = new SystemClock(),
     readonly ids: IdSource = new SystemIdSource(clock),

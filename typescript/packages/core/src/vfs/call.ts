@@ -31,13 +31,13 @@ const DISPATCH_NAMES: ReadonlyMap<string, string> = new Map([
   ['linesContaining', 'lines_containing'],
   ['beforeFullWalk', 'before_full_walk'],
 ])
-const METHOD_NAMES: ReadonlyMap<string, string> = new Map(
-  [...DISPATCH_NAMES].map(([method, name]) => [name, method]),
-)
 
 /** The method that answers the dispatcher's `name`. */
 export function methodName(name: string): string {
-  return METHOD_NAMES.get(name) ?? name
+  for (const [method, dispatched] of DISPATCH_NAMES) {
+    if (dispatched === name) return method
+  }
+  return name
 }
 
 // Removing, moving or copying a name is what these calls do, and the
@@ -47,10 +47,6 @@ const NAMED: Partial<Record<Effect, readonly string[]>> = {
   [Effect.REMOVE]: ['unlink', 'rmdir', 'rm_r'],
   [Effect.RENAME]: ['rename'],
   [Effect.COPY]: ['copy', 'dir_copy'],
-}
-
-interface Marked {
-  [MARK]?: VfsCall
 }
 
 /**
@@ -99,7 +95,7 @@ export function vfsCall(options: {
         `${name}: only ${names.join(', ')} may declare ${mark.effect.toUpperCase()}`,
       )
     }
-    ;(method as Marked)[MARK] = { name, ...mark }
+    ;(method as { [MARK]?: VfsCall })[MARK] = { name, ...mark }
   }
 }
 
@@ -113,7 +109,7 @@ export function declared(cls: { readonly prototype: unknown }, name: string): Vf
   let proto: unknown = cls.prototype
   while (typeof proto === 'object' && proto !== null) {
     const fn: unknown = Object.getOwnPropertyDescriptor(proto, method)?.value
-    const mark = typeof fn === 'function' ? (fn as Marked)[MARK] : undefined
+    const mark = typeof fn === 'function' ? (fn as { [MARK]?: VfsCall })[MARK] : undefined
     if (mark !== undefined) return mark
     proto = Object.getPrototypeOf(proto)
   }
