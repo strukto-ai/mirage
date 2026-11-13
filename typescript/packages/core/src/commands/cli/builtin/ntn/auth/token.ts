@@ -15,15 +15,18 @@
 import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
-import { notionConfig, type NtnAccessor } from '../util.ts'
+import type { NtnAccessor } from '../util.ts'
 
 const ENC = new TextEncoder()
+const REFUSED =
+  'error: The authentication token stays in Mirage configuration and is never printed.\n' +
+  '  hint: ntn commands use it directly.\n'
 
 export function token(
-  accessor: NtnAccessor,
+  _accessor: NtnAccessor,
   _paths: PathSpec[],
   _texts: string[],
-  ctx: Context,
+  _ctx: Context,
 ): CommandFnResult {
-  return [ENC.encode(`${notionConfig(accessor, ctx.flags).apiKey}\n`), new IOResult()]
+  return [null, new IOResult({ stderr: ENC.encode(REFUSED), exitCode: 1 })]
 }

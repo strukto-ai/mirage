@@ -104,7 +104,7 @@ NTN = CLI(
                 subcommands=(
                     CommandSpec(
                         name="token",
-                        description="Print the current authentication token",
+                        description="Token display is unavailable in Mirage",
                     ),
                 ),
             ),

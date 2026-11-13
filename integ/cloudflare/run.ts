@@ -319,7 +319,7 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
     }
   },
   notion: async (target) => {
-    // One fixed token, as on node: `ntn auth token` prints it.
+    // One fixed token, as on node.
     const token = 'integ-test'
     const base = `${await scopedRun('NOTION_URL', { tenants: [token] })}/v1`
     const auth = { api_key: token, base_url: base }
