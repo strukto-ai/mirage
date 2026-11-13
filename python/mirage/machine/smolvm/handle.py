@@ -51,6 +51,7 @@ class SmolvmMachine(ProgramMachine):
     """
 
     provider = "smolvm"
+    pauses = True
     config_cls = SmolvmConfig
     config: SmolvmConfig
     program = "smolvm"

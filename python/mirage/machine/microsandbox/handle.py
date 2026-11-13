@@ -50,6 +50,7 @@ class MicrosandboxMachine(ProgramMachine):
     """
 
     provider = "microsandbox"
+    pauses = True
     config_cls = MicrosandboxConfig
     config: MicrosandboxConfig
     program = "msb"
@@ -63,12 +64,23 @@ class MicrosandboxMachine(ProgramMachine):
     def exec_words(self) -> tuple[tuple[str, ...], tuple[str, ...]]:
         return ("exec", self.config.sandbox, "--quiet"), ("--",)
 
+    _closing = False
+
+    async def close(self) -> None:
+        """Close as any machine does; the cleanup's probes never resume a
+        sandbox paused meanwhile."""
+        self._closing = True
+        try:
+            await super().close()
+        finally:
+            self._closing = False
+
     async def ensure_connected(self) -> None:
         """Skip the connect-once latch: every exec probes the guest."""
 
     async def connect(self) -> None:
         """Require a running sandbox before executing any commands,
-        resuming a paused one."""
+        resuming a paused one unless the workspace is closing."""
         sandbox = self.config.sandbox
         try:
             async with asyncio.timeout(INSPECT_TIMEOUT_SECONDS):
@@ -80,7 +92,7 @@ class MicrosandboxMachine(ProgramMachine):
                 f"msb status timed out after {INSPECT_TIMEOUT_SECONDS} seconds"
             ) from error
         state = reported_state(status, "msb status", ("status",))
-        if state == PAUSED_STATE:
+        if state == PAUSED_STATE and not self._closing:
             await self._change_state(["resume", sandbox, "--quiet"])
         elif state != RUNNING_STATE:
             raise RuntimeError(

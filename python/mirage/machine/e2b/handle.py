@@ -155,6 +155,7 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
     """
 
     provider = "e2b"
+    pauses = True
     config_cls = E2BConfig
     config: E2BConfig
 

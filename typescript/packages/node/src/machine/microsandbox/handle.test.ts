@@ -33,16 +33,25 @@ async function* piped(): AsyncIterable<Uint8Array> {
 
 /** `msb` answering status with `state` and failing the verbs in `refusals`. */
 function fakeMsb(state = 'Running'): {
+  state: string
   calls: string[][]
+  signals: (AbortSignal | undefined)[]
   refusals: Map<string, string>
 } {
-  const msb = { calls: [] as string[][], refusals: new Map<string, string>() }
-  vi.spyOn(program, 'runProgram').mockImplementation((_exe, _hint, args) => {
+  const msb = {
+    state,
+    calls: [] as string[][],
+    signals: [] as (AbortSignal | undefined)[],
+    refusals: new Map<string, string>(),
+  }
+  vi.spyOn(program, 'runProgram').mockImplementation((_exe, _hint, args, _stdin, options) => {
     msb.calls.push(args.slice())
+    msb.signals.push(options?.signal)
     const verb = args[0] ?? ''
     const refusal = msb.refusals.get(verb)
     return Promise.resolve({
-      stdout: verb === 'status' ? ENC.encode(JSON.stringify({ status: state })) : new Uint8Array(),
+      stdout:
+        verb === 'status' ? ENC.encode(JSON.stringify({ status: msb.state })) : new Uint8Array(),
       stderr: ENC.encode(refusal ?? ''),
       exitCode: refusal === undefined ? 0 : 1,
     })
@@ -97,6 +106,31 @@ describe('MicrosandboxMachine pause', () => {
     const machine = await reached()
     msb.refusals.set('pause', 'error: sandbox "sb" has no live runtime')
     await expect(machine.pause()).rejects.toThrow('no live runtime')
+  })
+  it('leaves the sandbox alone for a later workspace that never ran', async () => {
+    const msb = fakeMsb()
+    const machine = new MicrosandboxMachine('box', { sandbox: 'sb' })
+    await machine.connect()
+    ;(machine as unknown as { spent: string[] }).spent = ['/tmp/report']
+    await machine.close()
+    await machine.close()
+    await machine.pause()
+    expect(msb.calls).not.toContainEqual(['pause', 'sb', '--quiet'])
+  })
+  it('never resumes on close a sandbox paused meanwhile', async () => {
+    const msb = fakeMsb()
+    const machine = new MicrosandboxMachine('box', { sandbox: 'sb' })
+    await machine.connect()
+    msb.state = 'Paused'
+    ;(machine as unknown as { spent: string[] }).spent = ['/tmp/report']
+    await machine.close()
+    expect(msb.calls.map((call) => call[0])).toEqual(['status', 'status'])
+  })
+  it('stops a resume on the caller signal', async () => {
+    const msb = fakeMsb('Paused')
+    const stop = new AbortController()
+    await new MicrosandboxMachine('box', { sandbox: 'sb' }).connect(stop.signal)
+    expect(msb.signals.at(-1)).toBe(stop.signal)
   })
   it('asks the workspace to pause it only with onPause: pause', () => {
     const asks = (onPause?: 'pause'): boolean =>

@@ -57,6 +57,7 @@ class DaytonaMachine(MachineHandle):
     """
 
     provider = "daytona"
+    pauses = True
     config_cls = DaytonaConfig
     config: DaytonaConfig
 

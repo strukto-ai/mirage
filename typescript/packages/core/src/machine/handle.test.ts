@@ -929,3 +929,22 @@ it('keeps the output of a program whose pipe is left behind', async () => {
     await ws.close()
   }
 })
+
+class HungBox extends RecordingMachine {
+  override connect(): Promise<void> {
+    return new Promise(() => undefined)
+  }
+}
+
+describe('MachineHandle close', () => {
+  it('never waits for a hung connect on a machine that cannot pause', async () => {
+    const box = new HungBox()
+    void box.ensureConnected().catch(() => undefined)
+    await expect(
+      Promise.race([
+        box.close().then(() => 'closed'),
+        new Promise((resolve) => setTimeout(resolve, 1000, 'stuck')),
+      ]),
+    ).resolves.toBe('closed')
+  })
+})

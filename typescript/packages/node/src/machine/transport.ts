@@ -59,9 +59,14 @@ export abstract class ProgramMachine<C extends MachineConfig = MachineConfig>
    * @param args the arguments after the program.
    * @param gone what the program's stderr says of a machine already gone,
    *   which then counts as done; null fails on it too.
+   * @param signal stops the program.
    */
-  protected async changeState(args: string[], gone: string | null = null): Promise<void> {
-    const result = await this.execProgram(args)
+  protected async changeState(
+    args: string[],
+    gone: string | null = null,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const result = await this.execProgram(args, null, null, signal)
     if (result.exitCode === 0) return
     const said = new TextDecoder().decode(result.stderr ?? new Uint8Array()).trim()
     if (gone !== null && said.includes(gone)) {

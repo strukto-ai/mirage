@@ -50,6 +50,7 @@ import { ProgramMachine } from '../transport.ts'
 export class SmolvmMachine extends ProgramMachine<SmolvmConfig> {
   static override readonly configFields: ConfigFields = SMOLVM_CONFIG_FIELDS
   static override readonly provider = 'smolvm'
+  protected override readonly pauses = true
   protected readonly program = 'smolvm'
   protected readonly installHint = SMOLVM_HINT
 

@@ -150,6 +150,7 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
   static override readonly configFields: ConfigFields = E2B_CONFIG_FIELDS
   readonly [PIPE_TRANSPORT] = true as const
   static override readonly provider = 'e2b'
+  protected override readonly pauses = true
   private sdk: E2bSdk | null = null
   private sandbox: Sandbox | null = null
 

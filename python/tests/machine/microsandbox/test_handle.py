@@ -406,6 +406,31 @@ async def test_any_other_pause_failure_is_raised(monkeypatch):
         await machine.pause()
 
 
+@pytest.mark.asyncio
+async def test_a_later_workspace_that_never_ran_leaves_the_sandbox_alone(
+    monkeypatch,
+):
+    msb = _msb(monkeypatch)
+    machine = MicrosandboxMachine("box", config={"sandbox": "sb"})
+    await machine.connect()
+    machine._spent = ["/tmp/report"]
+    await machine.close()
+    await machine.close()
+    await machine.pause()
+    assert ["pause", "sb", "--quiet"] not in msb.calls
+
+
+@pytest.mark.asyncio
+async def test_close_never_resumes_a_sandbox_paused_meanwhile(monkeypatch):
+    msb = _msb(monkeypatch)
+    machine = MicrosandboxMachine("box", config={"sandbox": "sb"})
+    await machine.connect()
+    msb.state = "Paused"
+    machine._spent = ["/tmp/report"]
+    await machine.close()
+    assert [call[0] for call in msb.calls] == ["status", "status"]
+
+
 def _asks(**config) -> bool:
     return MicrosandboxMachine(
         "box", config={"sandbox": "sb", **config}

@@ -43,6 +43,7 @@ import type { Daytona, Sandbox } from '@daytonaio/sdk'
 export class DaytonaMachine extends MachineHandle<DaytonaConfig> {
   static override readonly configFields: ConfigFields = DAYTONA_CONFIG_FIELDS
   static override readonly provider = 'daytona'
+  protected override readonly pauses = true
   private sdk: DaytonaSdk | null = null
   private client: Daytona | null = null
   private sandbox: Sandbox | null = null

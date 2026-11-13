@@ -191,6 +191,9 @@ class MachineHandle:
 
     provider: ClassVar[str]
     config_cls: ClassVar[type[MachineConfig]] = MachineConfig
+    # Whether ``_pause_machine`` pauses; only then does close wait for a
+    # connect under way, which an unbounded connect would otherwise hold.
+    pauses: ClassVar[bool] = False
     config: MachineConfig
 
     def __init__(
@@ -822,19 +825,20 @@ class MachineHandle:
     async def close(self) -> None:
         """Unmount what the machine was served; the machine is the user's.
         The next run connects again, so a workspace that takes the handle
-        after this one reaches the machine anew. A connect still under way
-        settles first, so the pause after touches only a machine this
-        workspace reached."""
-        async with self._connect_lock:
-            pass
-        self._pausable = self._reached
-        self._reached = False
+        after this one reaches the machine anew. On a machine that pauses, a
+        connect still under way settles first, and what this workspace
+        reached, cleanup included, is handed to the pause after."""
+        if self.pauses:
+            async with self._connect_lock:
+                pass
         try:
             if self._spent:
                 await self._remove_spent()
             if self._mounts is not None:
                 await self._mounts.close()
         finally:
+            self._pausable = self._reached
+            self._reached = False
             self._disconnected()
 
     def config_asks_to_pause(self) -> bool:

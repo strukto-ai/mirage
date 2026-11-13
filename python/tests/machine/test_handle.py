@@ -792,3 +792,20 @@ async def test_the_pid_line_gives_the_programs_pid_once(joined, stdout):
         assert program.machine_instance == "box"
     finally:
         await ws.close()
+
+
+class HungBox(RecordingMachine):
+    async def connect(self) -> None:
+        await asyncio.Event().wait()
+
+
+@pytest.mark.asyncio
+async def test_close_never_waits_for_a_hung_connect_on_a_machine_that_cannot_pause():
+    box = HungBox()
+    connecting = asyncio.ensure_future(box.ensure_connected())
+    await asyncio.sleep(0)
+    try:
+        async with asyncio.timeout(1):
+            await box.close()
+    finally:
+        connecting.cancel()

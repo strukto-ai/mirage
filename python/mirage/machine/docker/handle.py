@@ -45,6 +45,7 @@ class DockerMachine(ProgramMachine):
     """
 
     provider = "docker"
+    pauses = True
     config_cls = DockerConfig
     config: DockerConfig
     program = "docker"

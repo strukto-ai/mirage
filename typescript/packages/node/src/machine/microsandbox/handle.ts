@@ -42,6 +42,7 @@ import { ProgramMachine } from '../transport.ts'
 export class MicrosandboxMachine extends ProgramMachine<MicrosandboxConfig> {
   static override readonly configFields: ConfigFields = MICROSANDBOX_CONFIG_FIELDS
   static override readonly provider = 'microsandbox'
+  protected override readonly pauses = true
   protected readonly program = 'msb'
   protected readonly installHint = MICROSANDBOX_HINT
 
@@ -56,6 +57,18 @@ export class MicrosandboxMachine extends ProgramMachine<MicrosandboxConfig> {
     return this.config.sandbox
   }
 
+  private closing = false
+
+  /** Close as any machine does; the cleanup's probes never resume a sandbox paused meanwhile. */
+  override async close(): Promise<void> {
+    this.closing = true
+    try {
+      await super.close()
+    } finally {
+      this.closing = false
+    }
+  }
+
   /** Skip the connect-once latch: every exec probes the guest. */
   override ensureConnected(signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted()
@@ -66,7 +79,7 @@ export class MicrosandboxMachine extends ProgramMachine<MicrosandboxConfig> {
     return [['exec', this.config.sandbox, '--quiet'], ['--']]
   }
 
-  /** Require a running sandbox before executing any commands, resuming a paused one. */
+  /** Require a running sandbox before executing any commands, resuming a paused one unless the workspace is closing. */
   async connect(signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted()
     const sandbox = this.config.sandbox
@@ -89,7 +102,8 @@ export class MicrosandboxMachine extends ProgramMachine<MicrosandboxConfig> {
       throw error
     }
     const state = reportedState(status, 'msb status', ['status'])
-    if (state === PAUSED_STATE) await this.changeState(['resume', sandbox, '--quiet'])
+    if (state === PAUSED_STATE && !this.closing)
+      await this.changeState(['resume', sandbox, '--quiet'], null, signal)
     else if (state !== RUNNING_STATE)
       throw new Error(notRunningHint('sandbox', sandbox, state, {}, 'start it with msb start'))
     this.reached = true

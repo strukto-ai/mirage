@@ -38,6 +38,7 @@ import { ProgramMachine } from '../transport.ts'
 export class DockerMachine extends ProgramMachine<DockerConfig> {
   static override readonly configFields: ConfigFields = DOCKER_CONFIG_FIELDS
   static override readonly provider = 'docker'
+  protected override readonly pauses = true
   protected readonly program = 'docker'
   protected readonly installHint = DOCKER_HINT
 
