@@ -66,6 +66,7 @@ fn short_records_bound_allocation_volume_and_live_input() {
     comparison_rows_stay_bounded();
     checksum_lists_stay_bounded();
     giant_record_capacity_is_released();
+    grep_context_capacity_is_released();
     for (kind, config) in [
         ("wc", br#"{"lines":false,"words":true,"bytes":false,"chars":false,"max_line_length":false}"#.as_slice()),
         ("cut", br#"{"options":[["fields","2"],["delimiter",","]]}"#),
@@ -510,6 +511,37 @@ fn giant_record_capacity_is_released() {
         retained < 512 * 1024,
         "uniq kept {retained} bytes after replacing its giant record"
     );
+}
+
+fn grep_context_capacity_is_released() {
+    let mut stream = mirage_rs::open(
+        "grep",
+        br#"{"patterns":["hit"],"syntax":"basic","before":1}"#,
+    )
+    .unwrap();
+    stream.begin(br#"{"label":"in"}"#).unwrap();
+    let chunk = vec![b'x'; 16 * 1024];
+    let mut out = Vec::new();
+    let baseline = LIVE.load(Ordering::Relaxed);
+    for _ in 0..256 {
+        stream.feed(&chunk, &mut out).unwrap();
+    }
+    for text in
+        std::iter::once(b"\n".as_slice()).chain(std::iter::repeat_n(b"small\n".as_slice(), 100))
+    {
+        stream.feed(text, &mut out).unwrap();
+        while stream.busy() {
+            stream.drain(&mut out).unwrap();
+        }
+    }
+    let retained = LIVE.load(Ordering::Relaxed).saturating_sub(baseline);
+    assert!(
+        retained < 512 * 1024,
+        "grep kept {retained} bytes after displacing its giant context line"
+    );
+    stream.finish(&mut out).unwrap();
+    assert!(out.is_empty());
+    assert_eq!(stream.status(), 1);
 }
 
 fn diff_releases_finished_inputs() {
