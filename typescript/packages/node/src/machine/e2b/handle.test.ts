@@ -1027,15 +1027,18 @@ async function reached(config: Partial<E2BConfig> = {}): Promise<FakedE2BMachine
   return machine
 }
 
+/** Whether an E2B machine built with `config` asks to pause at sleep. */
+function asksToPause(config: Partial<E2BConfig>): boolean {
+  return new E2BMachine('box', { sandboxId: 'sb', ...config }).pausesOnSleep()
+}
+
 describe('E2BMachine pause', () => {
   it('pauses the sandbox it reached whatever onSleep says', async () => {
     await (await reached()).pause()
     expect(FakeMachine.paused).toEqual([['sb-live', { apiKey: 'k-123' }]])
   })
   it('asks to pause at sleep only with onSleep: pause', () => {
-    const asks = (config: Partial<E2BConfig>): boolean =>
-      new E2BMachine('box', { sandboxId: 'sb', ...config }).pausesOnSleep()
-    expect([asks({ onSleep: 'pause' }), asks({})]).toEqual([true, false])
+    expect([asksToPause({ onSleep: 'pause' }), asksToPause({})]).toEqual([true, false])
   })
   it('leaves alone a sandbox it never reached', async () => {
     const machine = new FakedE2BMachine('box', { sandboxId: 'sb-live', onSleep: 'pause' })

@@ -951,13 +951,14 @@ async def test_pause_pauses_the_sandbox_it_reached_whatever_on_sleep_says():
     assert FakeMachine.paused == [("sb-live", {"api_key": "k-123"})]
 
 
-def test_only_on_sleep_pause_asks_to_pause_at_sleep():
-    def asks(**config) -> bool:
-        return E2BMachine(
-            "box", config={"sandbox_id": "sb", **config}
-        ).pauses_on_sleep()
+def _asks(**config) -> bool:
+    return E2BMachine(
+        "box", config={"sandbox_id": "sb", **config}
+    ).pauses_on_sleep()
 
-    assert (asks(on_sleep="pause"), asks()) == (True, False)
+
+def test_only_on_sleep_pause_asks_to_pause_at_sleep():
+    assert (_asks(on_sleep="pause"), _asks()) == (True, False)
 
 
 @pytest.mark.asyncio
