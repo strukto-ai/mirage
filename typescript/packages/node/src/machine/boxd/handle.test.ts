@@ -13,13 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { mkdtempSync, readFileSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { debuglog } from 'node:util'
+import { runAsProcess } from '@struktoai/mirage-core/context/session_context'
+import { ProcessTable } from '@struktoai/mirage-core/execution/process/table'
 import { buildMachine } from '@struktoai/mirage-core/machine/registry'
 import { wrapLine } from '@struktoai/mirage-core/machine/constants'
+import { ConnectionLostError } from '@struktoai/mirage-core/machine/errors'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import type { RunResult } from '@struktoai/mirage-core/runtime/types'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../../workspace.ts'
 import { machineRuntime, on } from '../../../tests/fixtures/machine.ts'
 import type { BoxdConfig } from './config.ts'
@@ -34,14 +41,75 @@ class FakeNotFoundError extends FakeBoxdError {}
 class FakeConflictError extends FakeBoxdError {}
 class FakeAPIConnectionError extends FakeBoxdError {}
 
-/** One of a local process's outputs, failing with `fail` once it has data. */
+/** How a fake stream fails: with `error`, once `after` chunks have come. */
+interface StreamFailure {
+  error: Error
+  after: number
+}
+
+/** One of a local process's outputs, failing as `fail` says. */
 async function* chunks(
   source: AsyncIterable<Buffer>,
-  fail: Error | null,
+  fail: StreamFailure | null,
 ): AsyncGenerator<Uint8Array> {
   for await (const chunk of source) {
-    if (fail !== null) throw fail
+    if (fail !== null) {
+      if (fail.after === 0) throw fail.error
+      fail.after -= 1
+    }
     yield new Uint8Array(chunk)
+  }
+}
+
+/** An input that is always ready: reading it never waits a turn of the loop. */
+async function* endless(): AsyncGenerator<Uint8Array> {
+  for (;;) {
+    await Promise.resolve()
+    yield ENC.encode('abcdef'.repeat(1000))
+  }
+}
+
+async function* idle(): AsyncGenerator<Uint8Array> {
+  yield ENC.encode('one\ntwo\n')
+  await new Promise(() => undefined)
+}
+
+async function* failing(): AsyncGenerator<Uint8Array> {
+  yield ENC.encode('first\n')
+  await Promise.resolve()
+  throw new Error('source went away')
+}
+
+/** An input that gives one chunk and then stays open until it is closed. */
+class OpenInput implements AsyncIterableIterator<Uint8Array> {
+  closed = false
+  private sent = false
+  private release: () => void = () => undefined
+  private readonly released: Promise<void>
+
+  constructor() {
+    this.released = new Promise<void>((resolve) => {
+      this.release = resolve
+    })
+  }
+
+  [Symbol.asyncIterator](): this {
+    return this
+  }
+
+  async next(): Promise<IteratorResult<Uint8Array>> {
+    if (this.sent) {
+      await this.released
+      return { done: true, value: undefined }
+    }
+    this.sent = true
+    return { done: false, value: ENC.encode('one\ntwo\n') }
+  }
+
+  return(): Promise<IteratorResult<Uint8Array>> {
+    this.closed = true
+    this.release()
+    return Promise.resolve({ done: true, value: undefined })
   }
 }
 
@@ -60,7 +128,7 @@ class LocalStream {
   constructor(
     readonly command: string,
     readonly closeStdin: boolean,
-    fail: Error | null,
+    fail: StreamFailure | null,
   ) {
     this.child = spawn('/bin/sh', ['-c', command], { detached: true })
     this.child.stdin.on('error', () => undefined)
@@ -91,21 +159,25 @@ class LocalStream {
     if (this.child.exitCode === null && this.child.signalCode === null) {
       try {
         process.kill(-(this.child.pid ?? 0), 'SIGTERM')
-      } catch {
-        // already gone
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+        debuglog('mirage')('the fake command had already ended: %s', error)
       }
     }
   }
 }
 
+type BoxdClientOptions = Pick<BoxdConfig, 'apiKey' | 'region'>
+
 class FakeClient {
-  static configs: object[] = []
+  static configs: BoxdClientOptions[] = []
   static fetched: string[] = []
   static streams: { machineId: string; stream: LocalStream }[] = []
   static closed = 0
   static status = 'running'
   static getError: Error | null = null
   static streamError: Error | null = null
+  static streamErrorAfter = 0
 
   readonly machines = {
     get: (machineId: string): Promise<{ id: string; status: string }> => {
@@ -120,14 +192,16 @@ class FakeClient {
       const stream = new LocalStream(
         params.command,
         params.closeStdin === true,
-        FakeClient.streamError,
+        FakeClient.streamError === null
+          ? null
+          : { error: FakeClient.streamError, after: FakeClient.streamErrorAfter },
       )
       FakeClient.streams.push({ machineId, stream })
       return stream
     },
   }
 
-  constructor(config: object) {
+  constructor(config: BoxdClientOptions) {
     FakeClient.configs.push(config)
   }
 
@@ -180,6 +254,7 @@ beforeEach(() => {
   FakeClient.status = 'running'
   FakeClient.getError = null
   FakeClient.streamError = null
+  FakeClient.streamErrorAfter = 0
 })
 
 describe('BoxdMachine', () => {
@@ -270,12 +345,6 @@ describe('BoxdMachine', () => {
   it('the exit ends a line whose input never ends', async () => {
     const machine = makeMachine()
     await machine.connect()
-    async function* endless(): AsyncGenerator<Uint8Array> {
-      for (;;) {
-        yield ENC.encode('abcdef'.repeat(1000))
-        await new Promise((r) => setTimeout(r, 0))
-      }
-    }
     const result = await machine.execLine('head -c 3', endless(), {}, '/')
     expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'abc'])
   })
@@ -283,10 +352,6 @@ describe('BoxdMachine', () => {
   it('the exit ends a line whose input stays open', async () => {
     const machine = makeMachine()
     await machine.connect()
-    async function* idle(): AsyncGenerator<Uint8Array> {
-      yield ENC.encode('one\ntwo\n')
-      await new Promise(() => undefined)
-    }
     const result = await machine.execLine('head -n 1', idle(), {}, '/')
     expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'one\n'])
   })
@@ -294,17 +359,38 @@ describe('BoxdMachine', () => {
   it('an input that fails as it is read ends the line', async () => {
     const machine = makeMachine()
     await machine.connect()
-    async function* failing(): AsyncGenerator<Uint8Array> {
-      yield ENC.encode('first\n')
-      await Promise.resolve()
-      throw new Error('source went away')
-    }
     await expect(machine.execLine('cat; sleep 30', failing(), {}, '/')).rejects.toThrow(
       'source went away',
     )
     const stream = lastStream()
     expect(stream.closed).toBe(true)
     await stream.wait()
+  })
+
+  it('a finished line closes an input that stays open', async () => {
+    const machine = makeMachine()
+    await machine.connect()
+    const source = new OpenInput()
+    const result = await machine.execLine('head -n 1', source, {}, '/')
+    expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'one\n'])
+    await vi.waitFor(() => {
+      expect(source.closed).toBe(true)
+    })
+  })
+
+  it('an aborted line closes an input that stays open', async () => {
+    const machine = makeMachine()
+    await machine.connect()
+    const source = new OpenInput()
+    const abort = new AbortController()
+    const line = machine.execLine('cat; sleep 30', source, {}, '/', abort.signal)
+    while (FakeClient.streams.length === 0) await new Promise((r) => setTimeout(r, 10))
+    abort.abort()
+    await expect(line).rejects.toThrow('aborted')
+    await vi.waitFor(() => {
+      expect(source.closed).toBe(true)
+    })
+    await lastStream().wait()
   })
 
   it('streams output to the caller as it arrives', async () => {
@@ -343,6 +429,62 @@ describe('BoxdMachine', () => {
     const stream = lastStream()
     expect(stream.closed).toBe(true)
     await stream.wait()
+  })
+
+  // A kill with a gentler signal reaches the program before the stream ends,
+  // which would end it with TERM.
+  it('a kill sends its signal before the stream ends', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-boxd-'))
+    const [ready, seen] = [join(dir, 'ready'), join(dir, 'seen')]
+    const machine = makeMachine()
+    const abort = new AbortController()
+    const ctx = {
+      stdin: null,
+      flags: {
+        c:
+          `trap 'echo INT >> ${seen}; exit 0' INT; ` +
+          `trap 'echo TERM >> ${seen}; exit 0' TERM; ` +
+          `echo up > ${ready}; while :; do sleep 1; done`,
+      },
+      env: {},
+      cwd: PathSpec.fromStrPath('/'),
+      signal: abort.signal,
+    }
+    const runner = new ProcessTable(undefined, undefined, runAsProcess).start({
+      sessionId: 's',
+      command: 'sh',
+      cwd: ctx.cwd,
+      cancel: () => {
+        abort.abort()
+      },
+      run: async () => (await machineRuntime(machine).runLine(undefined, [], [], ctx)).exitCode,
+    })
+    await vi.waitFor(
+      () => {
+        expect(existsSync(ready)).toBe(true)
+      },
+      { timeout: 10000 },
+    )
+    expect(runner.terminate(2)).toBe(true)
+    expect((await runner.join()).exit).toBe(130)
+    expect(readFileSync(seen, 'utf8')).toBe('INT\n')
+  })
+
+  // What a line with no sinks read before the drop comes back with the error.
+  it('a dropped connection keeps what the line read', async () => {
+    const machine = makeMachine()
+    await machine.connect()
+    FakeClient.streamError = new FakeAPIConnectionError('connection reset')
+    FakeClient.streamErrorAfter = 2
+    const lost = await machine
+      .execLine('echo out; echo err >&2; sleep 0.3; echo more', null, {}, '/')
+      .catch((error: unknown) => error)
+    expect(lost).toBeInstanceOf(ConnectionLostError)
+    const { stdout, stderr } = lost as ConnectionLostError
+    expect([DEC.decode(stdout), DEC.decode(stderr ?? new Uint8Array())]).toEqual([
+      'out\n',
+      'err\nboxd: connection reset\n',
+    ])
   })
 
   it('a dropped connection loses the line, and the next line connects again', async () => {

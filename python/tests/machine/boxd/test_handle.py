@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 import os
 import signal
 from collections.abc import AsyncIterator
@@ -23,6 +24,8 @@ from boxd.errors import APIConnectionError, ConflictError, NotFoundError
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
+from mirage.context.session_context import run_as_process
+from mirage.execution.process.table import ProcessTable
 from mirage.machine.boxd import BoxdMachine, sdk
 from mirage.machine.constants import wrap_line
 from mirage.machine.errors import ConnectionLostError
@@ -30,16 +33,21 @@ from mirage.machine.registry import build_machine
 from mirage.types import PathSpec
 from tests.fixtures.machine import machine_runtime, on
 
+logger = logging.getLogger(__name__)
+
 
 class LocalStream:
     """boxd's exec stream over a local ``/bin/sh``: stdin as written,
     stdout and stderr separately, byte for byte, and ``close`` ends the
     command's process group."""
 
-    def __init__(self, command: str, close_stdin: bool, fail=None) -> None:
+    def __init__(
+        self, command: str, close_stdin: bool, fail=None, fail_after=0
+    ) -> None:
         self.command = command
         self.close_stdin = close_stdin
         self.fail = fail
+        self.fail_after = fail_after
         self.exit_code = None
         self.closed = False
         self.proc = None
@@ -84,7 +92,8 @@ class LocalStream:
             while (data := await self._input.get()) is not None:
                 stdin.write(data)
                 await stdin.drain()
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError) as exc:
+            logger.debug("the fake command closed its input: %s", exc)
             return
         if not stdin.is_closing():
             stdin.close()
@@ -112,7 +121,9 @@ class LocalStream:
                     ended += 1
                     continue
                 if self.fail is not None:
-                    raise self.fail
+                    if self.fail_after == 0:
+                        raise self.fail
+                    self.fail_after -= 1
                 yield chunk
             self.exit_code = await proc.wait()
         finally:
@@ -144,7 +155,12 @@ class FakeMachines:
         return SimpleNamespace(id=machine_id, status=FakeClient.status)
 
     def stream_exec(self, machine_id, *, command, close_stdin=False):
-        stream = LocalStream(command, close_stdin, FakeClient.stream_error)
+        stream = LocalStream(
+            command,
+            close_stdin,
+            FakeClient.stream_error,
+            FakeClient.stream_error_after,
+        )
         FakeClient.streams.append((machine_id, command, close_stdin, stream))
         return stream
 
@@ -157,6 +173,7 @@ class FakeClient:
     status = "running"
     get_error = None
     stream_error = None
+    stream_error_after = 0
 
     def __init__(self, api_key=None, region=None) -> None:
         FakeClient.configs.append({"api_key": api_key, "region": region})
@@ -175,11 +192,51 @@ def fake_client(monkeypatch):
     FakeClient.status = "running"
     FakeClient.get_error = None
     FakeClient.stream_error = None
+    FakeClient.stream_error_after = 0
     monkeypatch.setattr(sdk, "AsyncBoxd", FakeClient)
 
 
 def _machine(**config) -> BoxdMachine:
     return BoxdMachine("box", config={"machine_id": "m-live", **config})
+
+
+async def _endless() -> AsyncIterator[bytes]:
+    while True:
+        yield b"abcdef" * 1000
+
+
+async def _idle() -> AsyncIterator[bytes]:
+    yield b"one\ntwo\n"
+    await asyncio.Event().wait()
+
+
+async def _failing() -> AsyncIterator[bytes]:
+    yield b"first\n"
+    raise OSError("source went away")
+
+
+class OpenInput:
+    """An input that gives one chunk and then stays open until it is
+    closed."""
+
+    def __init__(self) -> None:
+        self.closed = False
+        self._sent = False
+        self._released = asyncio.Event()
+
+    def __aiter__(self) -> "OpenInput":
+        return self
+
+    async def __anext__(self) -> bytes:
+        if self._sent:
+            await self._released.wait()
+            raise StopAsyncIteration
+        self._sent = True
+        return b"one\ntwo\n"
+
+    async def aclose(self) -> None:
+        self.closed = True
+        self._released.set()
 
 
 @pytest.mark.asyncio
@@ -289,13 +346,8 @@ async def test_the_exit_ends_a_line_whose_input_never_ends():
     machine = _machine()
     await machine.connect()
 
-    async def endless():
-        while True:
-            yield b"abcdef" * 1000
-            await asyncio.sleep(0)
-
     result = await asyncio.wait_for(
-        machine.exec_line("head -c 3", endless(), {}, "/"), 10
+        machine.exec_line("head -c 3", _endless(), {}, "/"), 10
     )
     assert (result.exit_code, result.stdout) == (0, b"abc")
 
@@ -305,12 +357,8 @@ async def test_the_exit_ends_a_line_whose_input_stays_open():
     machine = _machine()
     await machine.connect()
 
-    async def idle():
-        yield b"one\ntwo\n"
-        await asyncio.Event().wait()
-
     result = await asyncio.wait_for(
-        machine.exec_line("head -n 1", idle(), {}, "/"), 10
+        machine.exec_line("head -n 1", _idle(), {}, "/"), 10
     )
     assert (result.exit_code, result.stdout) == (0, b"one\n")
 
@@ -320,16 +368,40 @@ async def test_an_input_that_fails_as_it_is_read_ends_the_line():
     machine = _machine()
     await machine.connect()
 
-    async def failing():
-        yield b"first\n"
-        raise OSError("source went away")
-
     with pytest.raises(OSError, match="source went away"):
         await asyncio.wait_for(
-            machine.exec_line("cat; sleep 30", failing(), {}, "/"), 10
+            machine.exec_line("cat; sleep 30", _failing(), {}, "/"), 10
         )
     stream = FakeClient.streams[0][3]
     assert stream.closed and stream.proc.returncode is not None
+
+
+@pytest.mark.asyncio
+async def test_a_finished_line_closes_an_input_that_stays_open():
+    machine = _machine()
+    await machine.connect()
+    source = OpenInput()
+    result = await asyncio.wait_for(
+        machine.exec_line("head -n 1", source, {}, "/"), 10
+    )
+    assert (result.exit_code, result.stdout) == (0, b"one\n")
+    assert source.closed
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_line_closes_an_input_that_stays_open():
+    machine = _machine()
+    await machine.connect()
+    source = OpenInput()
+    line = asyncio.create_task(
+        machine.exec_line("cat; sleep 30", source, {}, "/")
+    )
+    while not FakeClient.streams or FakeClient.streams[0][3].proc is None:
+        await asyncio.sleep(0.01)
+    line.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await line
+    assert source.closed
 
 
 @pytest.mark.asyncio
@@ -372,6 +444,55 @@ async def test_a_cancelled_line_ends_its_stream():
         await line
     stream = FakeClient.streams[0][3]
     assert stream.closed and stream.proc.returncode is not None
+
+
+# A kill with a gentler signal reaches the program before the stream ends,
+# which would end it with TERM.
+@pytest.mark.asyncio
+async def test_a_kill_sends_its_signal_before_the_stream_ends(tmp_path):
+    ready, seen = tmp_path / "ready", tmp_path / "seen"
+    box = _machine()
+    ctx = Context(
+        flags={
+            "c": f"trap 'echo INT >> {seen}; exit 0' INT; "
+            f"trap 'echo TERM >> {seen}; exit 0' TERM; "
+            f"echo up > {ready}; while :; do sleep 1; done"
+        },
+        env=None,
+        cwd=PathSpec.from_str_path("/"),
+    )
+
+    async def run() -> int:
+        return (
+            await machine_runtime(box).run_line(None, [], [], ctx)
+        ).exit_code
+
+    runner = ProcessTable(bind=run_as_process).start(
+        session_id="s", command="sh", cwd=ctx.cwd, run=run
+    )
+    async with asyncio.timeout(10):
+        while not ready.exists():
+            await asyncio.sleep(0.01)
+        assert runner.terminate(signal.SIGINT)
+        assert (await runner.join()).exit == 130
+    assert seen.read_text() == "INT\n"
+
+
+# What a line with no sinks read before the drop comes back with the error.
+@pytest.mark.asyncio
+async def test_a_dropped_connection_keeps_what_the_line_read():
+    machine = _machine()
+    await machine.connect()
+    FakeClient.stream_error = APIConnectionError("connection reset")
+    FakeClient.stream_error_after = 2
+    with pytest.raises(ConnectionLostError) as lost:
+        await machine.exec_line(
+            "echo out; echo err >&2; sleep 0.3; echo more", None, {}, "/"
+        )
+    assert (lost.value.stdout, lost.value.stderr) == (
+        b"out\n",
+        b"err\nboxd: connection reset\n",
+    )
 
 
 @pytest.mark.asyncio
