@@ -104,12 +104,12 @@ async function readRaw(
   if (count !== null) return readCounted(buffer, count, stop, signal)
   let [data, complete] = await buffer.readUntil(delim, signal)
   let held = data.byteLength
-  let text = decodeText(data)
+  let text = decodeText(data).replaceAll('\0', '')
   while (!raw && complete && endsEscaped(text)) {
     ;[data, complete] = await buffer.readUntil(delim, signal)
     held += data.byteLength + 1
     checkMemory(held)
-    text += decodeText(new Uint8Array([delim])) + decodeText(data)
+    text += decodeText(new Uint8Array([delim])) + decodeText(data).replaceAll('\0', '')
   }
   return [text, complete]
 }

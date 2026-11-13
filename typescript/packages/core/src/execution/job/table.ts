@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ProcessPermissions } from '../process/config.ts'
+import { WORKSPACE_MACHINE } from '../process/constants.ts'
 import type { ProcessHandle } from '../process/handle.ts'
 import { ProcessTable } from '../process/table.ts'
 import { PathSpec } from '../../types.ts'
@@ -130,6 +131,7 @@ function heldConsoles(fields: RecordFields | null): Set<string> {
  * caller with no session (a bare table in a test) shares.
  */
 export class JobTable {
+  private readonly substitutions = new Map<number, ProcessHandle>()
   store: ExecutionStore
   // The id of the daemon this table runs on, which its lease names.
   readonly daemon: string
@@ -686,6 +688,9 @@ export class JobTable {
         this.jobs.delete(sessionId)
         this.marks.delete(sessionId)
         this.statuses.delete(sessionId)
+        for (const [pid, child] of this.substitutions) {
+          if (child.record.sessionId === sessionId) this.substitutions.delete(pid)
+        }
         this.processes.revokeSession(sessionId)
         return [...stopped.values()]
       }
@@ -847,28 +852,48 @@ export class JobTable {
     jobs: readonly JobHandle[],
     runningStatus: number | null = null,
   ): void {
-    let kept = this.statuses.get(sessionId)
-    if (kept === undefined) {
-      kept = new Map()
-      this.statuses.set(sessionId, kept)
-    }
     for (const job of jobs) {
       const code = job.state === 'running' ? runningStatus : job.exitCode
       if (code === null) continue
       for (const [pid, machine] of job.namedPids) {
-        const held = kept.get(pid) ?? new Map<string, number>()
-        kept.set(pid, held.set(machine, code))
+        this.saveStatus(sessionId, pid, machine, code)
       }
     }
+  }
+
+  private saveStatus(sessionId: string, pid: number, machine: string, code: number): void {
+    const kept = this.statuses.get(sessionId) ?? new Map<number, Map<string, number>>()
+    this.statuses.set(sessionId, kept)
+    const codes = kept.get(pid) ?? new Map<string, number>()
+    kept.set(pid, codes.set(machine, code))
     for (const pid of [...kept.keys()].slice(0, Math.max(0, kept.size - SAVED_STATUSES)))
       kept.delete(pid)
   }
 
-  /**
-   * Drop how the jobs that left the list ended, as a bare `wait` does, which
-   * leaves bash nothing to answer for their pids. Mirrors Python's
-   * `forget_statuses`.
-   */
+  /** Make the substitution's process waitable only from the shell that started it. */
+  trackSubstitution(process: ProcessHandle): void {
+    const pid = process.record.id.pid
+    this.substitutions.set(pid, process)
+    queueMicrotask(() => {
+      void process.join().then((record) => {
+        if (!this.substitutions.delete(pid)) return
+        if (record.exit !== null)
+          this.saveStatus(record.sessionId, pid, WORKSPACE_MACHINE, record.exit)
+      })
+    })
+  }
+
+  async waitSubstitution(sessionId: string, pid?: number): Promise<void> {
+    if (pid !== undefined) {
+      const process = this.substitutions.get(pid)
+      if (process?.record.sessionId === sessionId) await process.join()
+      return
+    }
+    for (const process of [...this.substitutions.values()]) {
+      if (process.record.sessionId === sessionId) await process.join()
+    }
+  }
+
   forgetStatuses(sessionId = ''): void {
     this.statuses.delete(sessionId)
   }

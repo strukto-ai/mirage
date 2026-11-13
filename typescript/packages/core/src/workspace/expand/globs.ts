@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { fnmatch } from '../../utils/fnmatch.ts'
+import { visibleEnv } from '../session/state.ts'
 import { shellVoice } from '../../shell/voice.ts'
 import { childMountNames, namespaceNames } from '../../view/namespace_view.ts'
 import {
@@ -63,11 +65,27 @@ export interface GlobOptions {
   failglob: boolean
   globstar: boolean
   extglob: boolean
+  ignore?: readonly string[]
+}
+
+function ignored(spelling: string, options: GlobOptions): boolean {
+  const parts = spelling.split('/')
+  return (
+    options.ignore?.some((pattern) => {
+      const pats = globParts(pattern, options.access)
+      return (
+        pats.length === parts.length &&
+        pats.every((pat, i) => fnmatch(parts[i]!, pat, options.extglob))
+      )
+    }) ?? false
+  )
 }
 
 export function globOptions(session: SessionState): GlobOptions {
+  session.syncShopts()
   return {
     access: sessionAccess(session),
+    ignore: (visibleEnv(session).GLOBIGNORE ?? '').split(':').filter(Boolean),
     nullglob: session.shopts.nullglob ?? SHOPT_DEFAULTS.get('nullglob') ?? false,
     failglob: session.shopts.failglob ?? SHOPT_DEFAULTS.get('failglob') ?? false,
     globstar: session.shopts.globstar ?? SHOPT_DEFAULTS.get('globstar') ?? false,
@@ -608,6 +626,9 @@ export async function resolveGlobs(
           if (limit >= 0 && count > limit) {
             throw new TooManyMatches(new GlobLimitError(unmarkGlobs(typed.rawPath), limit).message)
           }
+        }
+        if (opts.ignore?.length) {
+          resolved = resolved.filter((p) => !ignored(matchRaw(withPrefix, p).rawPath, opts))
         }
         if (resolved.length === 0) {
           // bash's three answers to a zero-match glob: the literal word

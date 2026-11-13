@@ -231,11 +231,12 @@ async def _install(
     for redirect in redirects:
         if expand is not None:
             redirect = await expand(redirect)
-        error = await _install_descriptor(
-            owned, dispatch, session, redirect, stdin
-        )
-        if error is not None:
-            return error
+        for operation in redirect.operations():
+            error = await _install_descriptor(
+                owned, dispatch, session, operation, stdin
+            )
+            if error is not None:
+                return error
     return None
 
 
@@ -248,6 +249,10 @@ async def _install_descriptor(
 ) -> bytes | None:
     fd = redirect.fd
     target = redirect.target
+    if redirect.kind == RedirectKind.UNEXPANDED and isinstance(
+        target, ExitSignal
+    ):
+        return target.stderr
     if redirect.kind == RedirectKind.AMBIGUOUS:
         word = target.raw_path if isinstance(target, PathSpec) else str(target)
         return encode_text(f"{word}: ambiguous redirect\n")

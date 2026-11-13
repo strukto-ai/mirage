@@ -150,16 +150,27 @@ async def handle_pipe(
     # Each segment is a child shell: bash forks one per stage, which a
     # signal stops on its own, its status 128 plus it, and which hands a
     # QUIT to the program it runs right now (``run_program``).
-    children = [child_context(context) for _ in commands]
+    owner = current_caller().process
+    lastpipe = session.shopts.get("lastpipe", False) and not (
+        session.shell_options.get("monitor") or (owner and owner.pipeline)
+    )
+    children = [
+        context
+        if lastpipe and i == len(commands) - 1
+        else child_context(context)
+        for i in range(len(commands))
+    ]
     stages: list[ProcessHandle | None] = [None for _ in commands]
 
     async def run_segment(i: int, cmd: TSNodeLike) -> int:
         child_evaluation = children[i]
         child = child_evaluation.session
-        inherit_traps(child)
-        child.terminal_output = (
-            session.terminal_output and i == len(commands) - 1
-        )
+        in_parent = child_evaluation is context
+        if not in_parent:
+            inherit_traps(child)
+            child.terminal_output = (
+                session.terminal_output and i == len(commands) - 1
+            )
         token = set_current_evaluation(child_evaluation)
         output = pipes[i]
         input_stream = stdin if i == 0 else pipes[i - 1].stream()
@@ -167,8 +178,12 @@ async def handle_pipe(
             child_evaluation.frame.stdin = input_stream
         io = IOResult()
         child_exec = ExecutionNode()
-        stage_stack = (call_stack or CallStack()).fork(
-            paren=None if simple_command(cmd) else True
+        stage_stack = (
+            call_stack
+            if in_parent
+            else (call_stack or CallStack()).fork(
+                paren=None if simple_command(cmd) else True
+            )
         )
         # A job a stage before the last starts writes into the pipe, and
         # the reader sees end of input only once the job has closed it.
@@ -195,13 +210,16 @@ async def handle_pipe(
             return None, io, ran
 
         try:
-            stdout, io, child_exec = await end_shell(
-                execute_fn,
-                child,
-                input_stream,
-                stage_stack,
-                run_program(cmd, child_evaluation, statement),
-            )
+            if in_parent:
+                stdout, io, child_exec = await statement()
+            else:
+                stdout, io, child_exec = await end_shell(
+                    execute_fn,
+                    child,
+                    input_stream,
+                    stage_stack,
+                    run_program(cmd, child_evaluation, statement),
+                )
             await pump(output, Channel.STDOUT, stdout, io)
             await pump(output, Channel.STDERR, io.stderr)
             if waits is not None:
@@ -209,6 +227,8 @@ async def handle_pipe(
         except PipeClosed:
             io.exit_code = SIGPIPE_STATUS
         except Unwinding as sig:
+            if in_parent:
+                raise
             # A stage is a subshell: whatever unwinds ends it there, a
             # simple command the top shell forked as that shell would.
             unwound = ended(sig, simple_command(cmd) and not forked)
@@ -240,7 +260,8 @@ async def handle_pipe(
             ios[i] = io
             child_nodes[i] = child_exec
             reset_caller(token)
-            await child.close_inputs()
+            if not in_parent:
+                await child.close_inputs()
         return io.exit_code
 
     async def reaped(i: int, process: ProcessHandle) -> int:
@@ -252,7 +273,7 @@ async def handle_pipe(
     failed = False
     try:
         for i, cmd in enumerate(commands):
-            if processes is None:
+            if processes is None or children[i] is context:
                 tasks.append(asyncio.create_task(run_segment(i, cmd)))
                 continue
             writer = stages[i - 1] if i > 0 else None

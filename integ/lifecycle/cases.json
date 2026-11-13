@@ -4105,6 +4105,73 @@
       ]
     },
     {
+      "id": "sourced_function_keeps_its_file_after_checkout_and_load",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "config": {}
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "echo 'f() { echo \"${BASH_SOURCE[0]}\"; }' >/data/defs; source /data/defs",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "snapshot"
+        },
+        {
+          "op": "exec",
+          "command": "unset -f f",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "checkout"
+        },
+        {
+          "op": "exec",
+          "command": "f",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "/data/defs\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "load"
+        },
+        {
+          "op": "exec",
+          "command": "f",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "/data/defs\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
       "id": "shell_settings_and_function_aliases_survive_checkout_and_load",
       "settings": {
         "mode": "write",

@@ -77,6 +77,8 @@ async def handle_set(
     while i < len(args):
         tok = args[i]
         if tok == "--":
+            if call_stack is not None:
+                call_stack.current.replaced_args = True
             set_positional_params(session, call_stack, args[i + 1 :])
             return None, IOResult(), ExecutionNode(command="set", exit_code=0)
         # `-o` and `+o` with nothing after them print the option table
@@ -91,6 +93,8 @@ async def handle_set(
             tok, args[i + 1] if i + 1 < len(args) else None
         )
         if word is None:
+            if call_stack is not None:
+                call_stack.current.replaced_args = True
             set_positional_params(session, call_stack, args[i:])
             break
         for option, enable in word.settings:

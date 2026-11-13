@@ -904,7 +904,7 @@ async def execute_node(
     )
     # The node's own `<(...)` files go when it ends, so a command still
     # reading one is read out first.
-    process_subs = ProcessSubScope(context, registry, sink)
+    process_subs = ProcessSubScope(context, registry, job_table, sink)
     previous = context.frame.process_sub
     context.frame.process_sub = process_subs.open
     writers = context.frame.writers

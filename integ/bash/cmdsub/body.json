@@ -909,6 +909,21 @@
         "stdout": "$hi a$bc $q\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "cmdsub_and_read_nul_bytes",
+      "seq": 1380023,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "(v=$(printf 'a\\0b\\0c\\n\\n'); printf '<%s> %s\\n' \"$v\" \"${#v}\"; printf 'a\\0b\\nc\\0d\\n' | { IFS= read -r -n2 a; read b; mapfile -t lines; printf '<%s> <%s> <%s>\\n' \"$a\" \"$b\" \"${lines[0]}\"; })",
+      "expect": {
+        "exit": 0,
+        "stdout": "<abc> 3\n<ab> <> <c>\n",
+        "stderr": "bash: line 1: warning: command substitution: ignored null byte in input\n"
+      }
     }
   ]
 }

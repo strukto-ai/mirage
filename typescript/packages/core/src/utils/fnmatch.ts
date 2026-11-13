@@ -45,8 +45,14 @@ export function patternParts(pattern: string): string[] {
 }
 
 /** Match a case-sensitive shell pattern, preserving quoting sentinels. */
-export function fnmatch(name: string, pattern: string, extglob = false, period = false): boolean {
-  return globMatcher(pattern, extglob, period).matches(name)
+export function fnmatch(
+  name: string,
+  pattern: string,
+  extglob = false,
+  period = false,
+  nocase = false,
+): boolean {
+  return globMatcher(pattern, extglob, period, 'shell', nocase).matches(name)
 }
 
 /** Match Python's fnmatchcase dialect, including literal class carets. */

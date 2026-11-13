@@ -1177,12 +1177,14 @@ async function runRedirects(
     guard === undefined ? stdin : await redirectStdin(dispatch, redirects, context, stdin)
   for (const raw of redirects) {
     const r = expand === undefined ? raw : await expand(raw)
-    expanded.push(r)
+    expanded.push(...r.operations())
     const refused = unusable(r)
     if (refused !== null) return opened.failed(refused)
     if (typeof r.target === 'number') {
-      const bad = duplicate(opened, r, r.target)
-      if (bad !== null) return opened.failed(shellFailure(badDescriptorLine(bad)))
+      for (const operation of r.operations()) {
+        const bad = duplicate(opened, operation, operation.target as number)
+        if (bad !== null) return opened.failed(shellFailure(badDescriptorLine(bad)))
+      }
       continue
     }
     if (r.kind === RedirectKind.HEREDOC || r.kind === RedirectKind.HERESTRING) {

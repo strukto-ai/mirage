@@ -132,13 +132,20 @@ export async function handlePipe(
     // Each segment is a child shell: bash forks one per stage, which a signal
     // stops on its own, its status 128 plus it, and which hands a QUIT to the
     // program it runs right now (`runProgram`).
-    const childEvaluation = childContext(context)
+    const inParent =
+      i === commands.length - 1 &&
+      session.shopts.lastpipe === true &&
+      session.shellOptions.monitor !== true &&
+      currentCaller().process?.pipeline !== true
+    const childEvaluation = inParent ? context : childContext(context)
     const stopped = new AbortController()
     const stops = mergeSignals(abort.signal, stopped.signal) ?? abort.signal
     const child = childEvaluation.session
-    inheritTraps(child)
-    child.terminalOutput = session.terminalOutput && i === commands.length - 1
-    childEvaluation.frame.abortSignal = mergeSignals(context.frame.abortSignal, stops) ?? stops
+    if (!inParent) {
+      inheritTraps(child)
+      child.terminalOutput = session.terminalOutput && i === commands.length - 1
+      childEvaluation.frame.abortSignal = mergeSignals(context.frame.abortSignal, stops) ?? stops
+    }
     const output = pipes[i]
     if (output === undefined) throw new Error('Missing pipeline segment')
     const upstream = pipes[i - 1]
@@ -147,7 +154,9 @@ export async function handlePipe(
     const run = async (): Promise<void> => {
       let io = new IOResult()
       let childExec = new ExecutionNode({ command: cmd.text })
-      const stageStack = (callStack ?? new CallStack()).fork(true, simpleCommand(cmd) ? null : true)
+      const stageStack = inParent
+        ? callStack
+        : (callStack ?? new CallStack()).fork(true, simpleCommand(cmd) ? null : true)
       // A job a stage before the last starts writes into the pipe, and
       // the reader sees end of input only once the job has closed it.
       const waits =
@@ -165,20 +174,23 @@ export async function handlePipe(
       }
       const rest = session.jobOutput ?? session.tty.jobs
       try {
-        const [stdout, result, execution] = await endShell(
-          executeFn,
-          child,
-          input,
-          stageStack,
-          runProgram(cmd, childEvaluation, async () => {
-            const [out, ran, node] = await executeNode(cmd, childEvaluation, input, stageStack, {
-              sink: output,
-              signal: stops,
-            })
-            await pump(output, Channel.STDOUT, out, ran)
-            return [null, ran, node]
-          }),
-        )
+        const statement = async (): Promise<RedirectResult> => {
+          const [out, ran, node] = await executeNode(cmd, childEvaluation, input, stageStack, {
+            sink: output,
+            signal: stops,
+          })
+          await pump(output, Channel.STDOUT, out, ran)
+          return [null, ran, node]
+        }
+        const [stdout, result, execution] = inParent
+          ? await statement()
+          : await endShell(
+              executeFn,
+              child,
+              input,
+              stageStack,
+              runProgram(cmd, childEvaluation, statement),
+            )
         io = result
         childExec = execution
         await pump(output, Channel.STDOUT, stdout, io)
@@ -188,6 +200,7 @@ export async function handlePipe(
         if (error instanceof PipeClosed) {
           io.exitCode = SIGPIPE_STATUS
         } else if (isUnwinding(error)) {
+          if (inParent) throw error
           // A stage is a subshell: whatever unwinds ends it there, a simple
           // command the top shell forked as that shell would.
           const unwound = ended(error, simpleCommand(cmd) && !forked)
@@ -209,12 +222,12 @@ export async function handlePipe(
         ios[i] = io
         childNodes[i] = childExec
         if (failed) await discardIo(io)
-        await child.closeInputs()
+        if (!inParent) await child.closeInputs()
       }
     }
     const isolated = () =>
       asyncContextIsolatesTasks ? runWithEvaluation(childEvaluation, run) : run()
-    if (processes === undefined) return isolated()
+    if (inParent || processes === undefined) return isolated()
     const process = startShell(
       processes,
       session,

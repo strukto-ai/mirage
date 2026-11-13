@@ -113,6 +113,8 @@ export const RedirectKind = Object.freeze({
   STDERR_TO_STDOUT: 'stderr_to_stdout',
   HEREDOC: 'heredoc',
   HERESTRING: 'herestring',
+  DUP_INPUT: 'dup_input',
+  DUP_OUTPUT: 'dup_output',
   // `N>&word` with a word that is neither a number nor `-` on a
   // descriptor other than 1: bash refuses it as `word: ambiguous redirect`
   // before the command runs, so the target is kept for the message and
@@ -133,6 +135,7 @@ export class Redirect {
   readonly kind: RedirectKind
   readonly append: boolean
   readonly clobber: boolean
+  readonly move: boolean
   readonly expandVars: boolean
   /**
    * For a heredoc, where expanding its body fails (an index into the body and
@@ -144,7 +147,10 @@ export class Redirect {
   constructor(
     init: Pick<Redirect, 'fd' | 'target'> &
       Partial<
-        Pick<Redirect, 'targetNode' | 'kind' | 'append' | 'clobber' | 'expandVars' | 'deferred'>
+        Pick<
+          Redirect,
+          'targetNode' | 'kind' | 'append' | 'clobber' | 'expandVars' | 'deferred' | 'move'
+        >
       >,
   ) {
     this.fd = init.fd
@@ -153,8 +159,15 @@ export class Redirect {
     this.kind = init.kind ?? RedirectKind.STDOUT
     this.append = init.append ?? false
     this.clobber = init.clobber ?? false
+    this.move = init.move ?? false
     this.expandVars = init.expandVars ?? true
     this.deferred = init.deferred ?? null
+  }
+
+  operations(): readonly Redirect[] {
+    return this.move
+      ? [this, new Redirect({ fd: this.target as number, target: -1, kind: this.kind })]
+      : [this]
   }
 }
 

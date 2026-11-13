@@ -32,6 +32,21 @@
         "stdout": "sourced-ok\nsourced-ok\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "source_path_and_definition_stack",
+      "seq": 1380022,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "(mkdir -p {mount}/source_path_and_definition_stack; cd {mount}/source_path_and_definition_stack; mkdir lib; printf '%s\\n' 'echo wrong' > helper; printf '%s\\n' 'f() { printf \"<%s>\\n\" \"${BASH_SOURCE[@]}\"; }; f' > lib/helper; PATH=lib; set -u; source helper; f; shopt -u sourcepath; source helper)",
+      "expect": {
+        "exit": 0,
+        "stdout": "<lib/helper>\n<lib/helper>\n<lib/helper>\nwrong\n",
+        "stderr": ""
+      }
     }
   ]
 }

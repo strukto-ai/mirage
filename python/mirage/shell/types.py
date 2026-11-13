@@ -187,6 +187,8 @@ class RedirectKind(StrEnum):
     STDERR_TO_STDOUT = "stderr_to_stdout"
     HEREDOC = "heredoc"
     HERESTRING = "herestring"
+    DUP_INPUT = "dup_input"
+    DUP_OUTPUT = "dup_output"
     # `N>&word` with a word that is neither a number nor `-` on a
     # descriptor other than 1: bash refuses it as `word: ambiguous
     # redirect` before the command runs, so the target is kept for the
@@ -224,6 +226,13 @@ class Redirect:
     clobber: bool = False
     expand_vars: bool = True
     deferred: tuple[int, int] | None = None
+    move: bool = False
+
+    def operations(self) -> tuple["Redirect", ...]:
+        """A descriptor move duplicates its source, then closes it."""
+        if self.move:
+            return (self, Redirect(fd=self.target, target=-1, kind=self.kind))
+        return (self,)
 
 
 @dataclass(frozen=True, slots=True)

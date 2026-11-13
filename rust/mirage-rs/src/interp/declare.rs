@@ -1260,7 +1260,7 @@ impl<H: Host> Run<'_, H> {
             marks,
             plus: plus.clone(),
             nameref: declaration.flags.contains(&b'n') && !plus.contains(&b'n'),
-            inherit: declaration.flags.contains(&b'I'),
+            inherit: declaration.flags.contains(&b'I') || self.shell.shopt("localvar_inherit"),
             scoped: !global && self.store().in_function(),
             subscripts: declaration.subscripts,
         };

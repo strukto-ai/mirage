@@ -217,6 +217,8 @@ async def handle_wait(
             continue
         if spec.isdigit() and not refusal.endswith(AMBIGUOUS_SPEC):
             answered_pid = int(spec)
+            if not next_job:
+                await job_table.wait_substitution(sid, answered_pid)
             answered, ambiguous = saved_on_machine(
                 job_table.saved_statuses(sid, answered_pid), machine
             )
@@ -253,6 +255,9 @@ async def handle_wait(
         told = _wait_reports(session, job_table)
         await job_table.pop_completed(sid, keep)
         job_table.forget_statuses(sid)
+        await job_table.wait_substitution(sid)
+        if visible:
+            job_table.forget_statuses(sid)
         return (
             None,
             IOResult(stderr=told or None),

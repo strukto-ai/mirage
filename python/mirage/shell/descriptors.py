@@ -60,11 +60,11 @@ def unsupported_descriptor(redirects: Iterable[Redirect]) -> int | None:
     return None
 
 
-def bad_descriptor_line(fd: int) -> bytes:
+def bad_descriptor_line(fd: int | str) -> bytes:
     """Bash's error for a closed descriptor, in the running shell's voice.
 
     Args:
-        fd (int): the descriptor that was named.
+        fd (int | str): the descriptor or operand Bash names in the error.
     """
     return encode_text(f"{shell_voice()}{fd}: Bad file descriptor\n")
 

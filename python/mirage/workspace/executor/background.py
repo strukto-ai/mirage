@@ -62,7 +62,6 @@ from mirage.shell.console import (
     OwnedStream,
     Tee,
 )
-from mirage.shell.console.pipe import PipeConsole
 from mirage.shell.constants import (
     FD_BOTH,
     FD_CLOSE,
@@ -166,14 +165,12 @@ async def pump(
             async for part_channel, chunk in parts:
                 if chunk:
                     await console.emit(part_channel, chunk)
-                if part_channel != channel or not isinstance(
-                    console, PipeConsole
-                ):
-                    continue
-                if not eager:
-                    await console.drain()
-                if console.closed_reader:
-                    return
+                pipe = console.pipe_for(part_channel)
+                if pipe is not None:
+                    if not eager:
+                        await pipe.drain()
+                    if pipe.closed_reader:
+                        return
     finally:
         await close_quietly(stream)
 

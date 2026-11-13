@@ -333,6 +333,10 @@ impl Shell {
     /// The stamp the records and the names hidden from them carry, a
     /// fresh one on every change, which a host keys what it derives from
     /// them by.
+    fn take_dotglob(&mut self) -> PyResult<Option<bool>> {
+        Ok(self.store_mut()?.take_dotglob())
+    }
+
     fn stamp(&self) -> PyResult<u64> {
         Ok(self.store()?.stamp())
     }
@@ -551,7 +555,7 @@ impl Shell {
     /// `${BASH_LINENO[@]}` and whether the shell is a `( )` subshell or a forked stage, the bytes
     /// left under `max_memory` (None for no cap), `$LINENO`, `$BASHPID`,
     /// and the voice the shell's own diagnostics lead with.
-    #[pyo3(signature = (*, positional, calls, status, pid, last_job, argv0, options, shopts, env_limit, outside, pipe_status, function_names, call_lines, paren, memory_room, line, bash_pid, voice, err_trap))]
+    #[pyo3(signature = (*, positional, calls, status, pid, last_job, argv0, options, shopts, env_limit, outside, pipe_status, function_names, call_lines, paren, memory_room, line, bash_pid, voice, err_trap, source_files=None))]
     #[allow(clippy::too_many_arguments)]
     fn frame(
         &mut self,
@@ -574,6 +578,7 @@ impl Shell {
         bash_pid: u32,
         voice: Bound<'_, PyAny>,
         err_trap: bool,
+        source_files: Option<Vec<Bound<'_, PyAny>>>,
     ) -> PyResult<()> {
         let texts =
             |list: &[Bound<'_, PyAny>]| list.iter().map(bytes_of).collect::<PyResult<Vec<_>>>();
@@ -622,6 +627,7 @@ impl Shell {
             outside,
             pipe_status,
             function_names: function_names.as_deref().map(texts).transpose()?,
+            source_files: texts(source_files.as_deref().unwrap_or_default())?,
             call_lines,
             paren,
             memory_room,
@@ -1242,9 +1248,15 @@ impl ShellTask {
         )
     }
 
-    fn answer_path(&mut self, py: Python<'_>, path: Bound<'_, PyAny>) -> PyResult<()> {
+    #[pyo3(signature = (path, pid=None))]
+    fn answer_path(
+        &mut self,
+        py: Python<'_>,
+        path: Bound<'_, PyAny>,
+        pid: Option<u32>,
+    ) -> PyResult<()> {
         let path = bytes_of(&path)?;
-        self.answer(py, Answer::Path(path))
+        self.answer(py, Answer::Path(path, pid))
     }
 
     /// The host has let others run; the operation goes on.

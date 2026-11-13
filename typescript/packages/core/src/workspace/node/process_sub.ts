@@ -12,14 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { JobTable } from '../../execution/job/table.ts'
 import { DevicePipe } from '../../core/dev/pipe.ts'
 import type { AsyncLineIterator } from '../../io/async_line_iterator.ts'
+import type { BytePipe } from '../../io/pipe.ts'
 import { PipeClosed } from '../../io/errors.ts'
 import { materialize, type ByteSource, type IOResult } from '../../io/types.ts'
 import { Channel, JobConsole, Terminal } from '../../shell/console/index.ts'
+import { retainPrograms } from '../../shell/parse/program.ts'
 import { getProcessSubBody, getProcessSubDirection } from '../../shell/helpers.ts'
 import { ProcessSubDirection, type TSNodeLike } from '../../shell/types.ts'
-import { runCancellable, makeAbortError, mergeSignals } from '../../utils/abort.ts'
+import { runCancellable, mergeSignals } from '../../utils/abort.ts'
 import { concat } from '../../utils/bytes.ts'
 import { DevVFS } from '../../vfs/dev/dev.ts'
 import type { EvaluationContext } from '../evaluation.ts'
@@ -36,16 +39,16 @@ class SubstitutionConsole extends JobConsole {
   ) {
     super()
   }
+  override pipeFor(channel: Channel): BytePipe | null {
+    return channel === Channel.STDOUT && this.endpoint.readable
+      ? this.endpoint.pipe
+      : this.target.pipeFor(channel)
+  }
+
   override async emit(channel: Channel, data: Uint8Array): Promise<void> {
     if (this.abort.signal.aborted) return
     if (channel === Channel.STDOUT && this.endpoint.readable) {
-      try {
-        await this.endpoint.pipe.write(data)
-      } catch (error) {
-        if (!(error instanceof PipeClosed)) throw error
-        this.abort.abort()
-        throw makeAbortError(this.abort.signal)
-      }
+      await this.endpoint.pipe.write(data)
     } else await this.target.emit(channel, data)
   }
 }
@@ -70,6 +73,7 @@ export class ProcessSubScope {
   constructor(
     private readonly context: EvaluationContext,
     private readonly registry: MountRegistry,
+    private readonly jobs: JobTable,
     private readonly sink?: JobConsole,
     private readonly signal?: AbortSignal,
   ) {}
@@ -99,6 +103,7 @@ export class ProcessSubScope {
     const begun = new Promise<void>((resolve) => {
       begin = resolve
     })
+    const release = retainPrograms([node])
     // The line starts once the command naming it has, as bash's forked child
     // does and Python's task does: a consumer that reads nothing must not
     // close its pipe before the command's first write lands.
@@ -109,7 +114,10 @@ export class ProcessSubScope {
           signal,
           ...(endpoint.readable ? {} : { stdin: endpoint.pipe.stream() }),
           started: (process) => {
-            if (endpoint.readable) writers.push([path, process.record.id.pid])
+            const pid = process.record.id.pid
+            if (endpoint.readable) writers.push([path, pid])
+            this.context.session.lastBgJobId = pid
+            this.jobs.trackSubstitution(process)
             begin()
           },
         }),
@@ -123,11 +131,11 @@ export class ProcessSubScope {
         if (signal.aborted && error instanceof Error && error.name === 'AbortError') return
         if (error instanceof PipeClosed && endpoint.pipe.closedReader) return
         child.failure = error instanceof Error ? error : new Error(String(error), { cause: error })
-        if (signal.aborted)
-          console.error('process substitution failed after cancellation', child.failure)
+        console.debug('process substitution failed', child.failure)
       })
       .finally(() => {
         begin()
+        release()
         if (endpoint.readable) endpoint.pipe.end(child.failure)
         else endpoint.pipe.closeReader()
       })
@@ -135,6 +143,7 @@ export class ProcessSubScope {
     // A `<( )` the command reads has started before the command does, as bash
     // forks it, so the command's program knows the process writing the path.
     if (endpoint.readable) await begun
+    if (child.failure !== undefined) throw child.failure
     return path
   }
 
@@ -150,23 +159,25 @@ export class ProcessSubScope {
       if (kept.has(child.path)) continue
       if (failed || child.endpoint.readable) {
         child.endpoint.pipe.closeReader()
-        child.abort.abort()
+        if (failed) child.abort.abort()
       } else child.endpoint.pipe.end()
     }
     try {
       await Promise.all([
         ...[...kept.values()].flat().map((lines) => lines.loadRest()),
-        ...this.held.map(async (child) => {
-          try {
-            await runCancellable(child.task, child.signal)
-          } catch (error) {
-            // A join the caller cut short leaves the child to settle on its
-            // own; its late output must not reach a console the caller left.
-            child.abort.abort()
-            if (!child.signal.aborted) throw error
-          }
-          if (child.failure !== undefined) throw child.failure
-        }),
+        ...this.held
+          .filter((child) => failed || kept.has(child.path) || !child.endpoint.readable)
+          .map(async (child) => {
+            try {
+              await runCancellable(child.task, child.signal)
+            } catch (error) {
+              // A join the caller cut short leaves the child to settle on its
+              // own; its late output must not reach a console the caller left.
+              child.abort.abort()
+              if (!child.signal.aborted) throw error
+            }
+            if (child.failure !== undefined) throw child.failure
+          }),
       ])
     } finally {
       for (const child of this.held) {

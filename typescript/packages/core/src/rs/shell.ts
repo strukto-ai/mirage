@@ -745,6 +745,7 @@ export interface ShellFrame {
   readonly outside: number
   readonly pipeStatus: readonly number[]
   readonly functionNames: readonly string[] | null
+  readonly sourceFiles?: readonly string[]
   readonly callLines: readonly number[]
   readonly paren: boolean
   readonly memoryRoom: number | null
@@ -865,6 +866,7 @@ export class Shell {
       frame.pipeStatus,
       frame.functionNames,
       frame.callLines,
+      frame.sourceFiles ?? [],
       frame.paren,
       frame.memoryRoom,
       frame.line,
@@ -972,6 +974,10 @@ export class Shell {
   }
 
   /** The stamp the records and the names hidden from them carry, fresh on every change. */
+  takeDotglob(): boolean | null {
+    return this.call('take_dotglob') as boolean | null
+  }
+
   stamp(): number {
     return Number(this.call('stamp'))
   }
@@ -1495,8 +1501,8 @@ export class ShellTask {
     this.land(this.call('answer_substituted', stdout, stderr, status))
   }
 
-  answerPath(path: string): void {
-    this.land(this.call('answer_path', path))
+  answerPath(path: string, pid: number | null = null): void {
+    this.land(this.call('answer_path', path, pid))
   }
 
   /**

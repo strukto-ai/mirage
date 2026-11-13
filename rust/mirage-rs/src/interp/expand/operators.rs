@@ -52,6 +52,7 @@ impl<H: Host> Expander<'_, H> {
                 .collect();
             let expanded = if index == 0 {
                 let mut pattern = Pattern::default();
+                pattern.nocase = op.starts_with('/') && self.shell.shopt("nocasematch");
                 self.pattern_group(group, &mut pattern).await.map(|()| {
                     operands.pattern = pattern;
                 })

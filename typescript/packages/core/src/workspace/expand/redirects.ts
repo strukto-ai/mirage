@@ -19,6 +19,9 @@ import type { CallStack } from '../../shell/call_stack.ts'
 import { encodeText, utf8Locale } from '../../shell/bytes.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import { parse, syntaxRefusal } from '../../shell/parse/index.ts'
+import { FD_BOTH, FD_CLOSE, FD_STDIN, FD_STDOUT } from '../../shell/constants.ts'
+import { badDescriptorLine } from '../../shell/descriptors.ts'
+import { wordText } from '../../types.ts'
 import { Redirect, RedirectKind } from '../../shell/types.ts'
 import { shellVoice } from '../../shell/voice.ts'
 import type { SessionState } from '../session/session.ts'
@@ -108,7 +111,31 @@ async function expandTarget(
         kind: RedirectKind.AMBIGUOUS,
       })
     }
-    targetScope = targets[0]
+    const target = targets[0]!
+    targetScope = target
+    if (r.kind === RedirectKind.DUP_INPUT || r.kind === RedirectKind.DUP_OUTPUT) {
+      const word = wordText(target)
+      if (word === '') {
+        const defaultFd = r.kind === RedirectKind.DUP_INPUT ? FD_STDIN : FD_STDOUT
+        const label = r.fd === defaultFd ? String(r.target) : r.fd
+        return new Redirect({
+          fd: r.fd,
+          target: new ExitSignal(1, badDescriptorLine(label)),
+          kind: RedirectKind.UNEXPANDED,
+        })
+      }
+      if (word === '-' || /^[0-9]+$/.test(word)) {
+        return new Redirect({
+          fd: r.fd,
+          target: word === '-' ? FD_CLOSE : Number(word),
+          kind: r.kind === RedirectKind.DUP_INPUT ? RedirectKind.STDIN : RedirectKind.STDOUT,
+        })
+      }
+      if (r.kind === RedirectKind.DUP_OUTPUT && r.fd === FD_STDOUT) {
+        return new Redirect({ fd: FD_BOTH, target })
+      }
+      return new Redirect({ fd: r.fd, target: word, kind: RedirectKind.AMBIGUOUS })
+    }
   }
   return new Redirect({
     fd: r.fd,

@@ -144,6 +144,8 @@ export async function runShellFunction(
   }
   session.lineRow = site?.row ?? 0
   session.lineRows = site === undefined ? null : calledLines(site.lines, body)
+  const outerSources = session.sourceFiles
+  session.sourceFiles = [site?.name ?? 'environment', ...outerSources]
   session.parseName = site?.name ?? 'environment'
   session.aliasView = site?.aliases ?? null
   // Its commands stand under the definition's place, on a hand-off of
@@ -217,6 +219,7 @@ export async function runShellFunction(
     scope.release()
     cs.pop()
     if (session.functionNames !== null) session.functionNames = outerNames
+    session.sourceFiles = outerSources
     session.callLines = outerLines
     restoreFunctionTraps(session, lifted)
     shell.leave(outerScope)

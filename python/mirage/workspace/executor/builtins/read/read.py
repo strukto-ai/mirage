@@ -208,12 +208,12 @@ async def _read_raw(
         return await _read_counted(buffer, count, stop)
     data, complete = await buffer.read_until(delim)
     held = len(data)
-    text = decode_text(data)
+    text = decode_text(data.replace(b"\0", b""))
     while not raw and complete and ends_escaped(text):
         more, complete = await buffer.read_until(delim)
         held += len(more) + 1
         check_memory(held)
-        text += decode_text(delim) + decode_text(more)
+        text += decode_text(delim) + decode_text(more.replace(b"\0", b""))
     return text, complete
 
 

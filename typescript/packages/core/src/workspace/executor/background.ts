@@ -32,7 +32,6 @@ import { encodeText } from '../../shell/bytes.ts'
 import { concat } from '../../utils/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { Channel, JobConsole, JobOutput, type OwnedStream, Tee } from '../../shell/console/index.ts'
-import { PipeConsole } from '../../shell/console/pipe.ts'
 import {
   FD_BOTH,
   FD_CLOSE,
@@ -114,9 +113,10 @@ export async function pump(
     io !== null ? interleaved(stream, io) : tagged(channel, stream)
   for await (const [partChannel, chunk] of parts) {
     if (chunk.byteLength > 0) await console_.emit(partChannel, chunk)
-    if (partChannel !== channel || !(console_ instanceof PipeConsole)) continue
-    if (!eager) await console_.drain()
-    if (console_.closedReader) return
+    const pipe = console_.pipeFor(partChannel)
+    if (pipe === null) continue
+    if (!eager) await pipe.drain()
+    if (pipe.closedReader) return
   }
 }
 

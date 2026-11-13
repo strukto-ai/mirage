@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.io.pipe import BytePipe
 from mirage.shell.bytes import encode_text
 from mirage.shell.console.constants import END_OF_CONSOLE
 from mirage.shell.console.ram import RAMConsoleStore
@@ -53,6 +54,10 @@ class JobConsole:
     def process(self) -> str | None:
         """The id of the process whose output this is, as text."""
         return self._process
+
+    def pipe_for(self, channel: Channel) -> BytePipe | None:
+        """Return the pipe consuming this channel, if any, for stream backpressure."""
+        return None
 
     def bind_process(self, process: str) -> None:
         """Associate this job's output with its one managed process.

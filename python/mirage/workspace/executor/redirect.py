@@ -1498,16 +1498,17 @@ async def _handle_redirect(
     )
     for raw in redirects:
         r = await expand(raw) if expand is not None else raw
-        expanded.append(r)
+        expanded.extend(r.operations())
         unusable = _unusable(r)
         if unusable is not None:
             return await opened.failed(unusable)
         if isinstance(r.target, int):
-            bad = _duplicate(opened, r, r.target)
-            if bad is not None:
-                return await opened.failed(
-                    _shell_failure(bad_descriptor_line(bad))
-                )
+            for operation in r.operations():
+                bad = _duplicate(opened, operation, operation.target)
+                if bad is not None:
+                    return await opened.failed(
+                        _shell_failure(bad_descriptor_line(bad))
+                    )
             continue
         if r.kind in (RedirectKind.HEREDOC, RedirectKind.HERESTRING):
             _here_input(opened, r)

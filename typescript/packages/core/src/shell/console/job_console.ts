@@ -15,6 +15,7 @@
 import { concat } from '../../utils/bytes.ts'
 import { Channel, type ConsoleChunk, type OwnedStream, type ReadResult } from './types.ts'
 import { END_OF_CONSOLE } from './constants.ts'
+import type { BytePipe } from '../../io/pipe.ts'
 import { RAMConsoleStore } from './ram.ts'
 import type { ConsoleStore } from './store.ts'
 import { decodeText, encodeText } from '../bytes.ts'
@@ -31,6 +32,10 @@ export class JobConsole {
   private readonly backing: ConsoleStore
   private finishedFlag: boolean
   private boundProcess: string | null = null
+
+  pipeFor(_channel: Channel): BytePipe | null {
+    return null
+  }
 
   /** The id of the process whose output this is, as text. */
   get process(): string | null {

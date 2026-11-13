@@ -18,15 +18,18 @@ from collections.abc import AsyncIterator
 from functools import partial
 
 from mirage.core.dev.pipe import DevicePipe
+from mirage.execution.job import JobTable
 from mirage.execution.process.handle import ProcessHandle
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.errors import PipeClosed
+from mirage.io.pipe import BytePipe
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.console import Channel, JobConsole, Terminal
 from mirage.shell.helpers import (
     get_process_sub_body,
     get_process_sub_direction,
 )
+from mirage.shell.parse.program import retain_programs
 from mirage.shell.types import ProcessSubDirection, TSNodeLike
 from mirage.vfs.dev.dev import DevVFS
 from mirage.workspace.evaluation import EvaluationContext
@@ -44,12 +47,14 @@ class SubstitutionConsole(JobConsole):
         self.endpoint = endpoint
         self.target = target
 
+    def pipe_for(self, channel: Channel) -> BytePipe | None:
+        if channel == Channel.STDOUT and self.endpoint.readable:
+            return self.endpoint.pipe
+        return self.target.pipe_for(channel)
+
     async def emit(self, channel: Channel, data: bytes) -> None:
         if channel == Channel.STDOUT and self.endpoint.readable:
-            try:
-                await self.endpoint.pipe.write(data)
-            except PipeClosed as exc:
-                raise asyncio.CancelledError() from exc
+            await self.endpoint.pipe.write(data)
         else:
             await self.target.emit(channel, data)
 
@@ -80,8 +85,10 @@ class ProcessSubScope:
         self,
         context: EvaluationContext,
         registry: MountRegistry,
+        jobs: JobTable,
         sink: JobConsole | None = None,
     ) -> None:
+        self.jobs = jobs
         self.context = context
         self.registry = registry
         self.sink = sink
@@ -106,16 +113,30 @@ class ProcessSubScope:
         )
 
         def started(process: ProcessHandle) -> None:
+            pid = process.record.pid
             if endpoint.readable:
-                writers.append((path, process.record.pid))
+                writers.append((path, pid))
+            self.context.session.last_bg_job_id = pid
+            self.jobs.track_substitution(process)
             if not begun.done():
                 begun.set_result(None)
 
+        release = retain_programs([node])
         task = asyncio.create_task(
             self._run(
                 node, partial(execute_line, started=started), endpoint, output
             )
         )
+
+        def finished(task: asyncio.Task[None]) -> None:
+            release()
+            if (
+                not task.cancelled()
+                and (error := task.exception()) is not None
+            ):
+                logger.debug("process substitution failed", exc_info=error)
+
+        task.add_done_callback(finished)
         self.held.append(Substitution(dev, path, allocation, endpoint, task))
         # A `<( )` the command reads starts first, as bash forks it, so
         # the command's program knows the process writing the path; a
@@ -125,6 +146,8 @@ class ProcessSubScope:
             await asyncio.wait(
                 (begun, task), return_when=asyncio.FIRST_COMPLETED
             )
+            if task.done():
+                await task
         return path
 
     async def _run(
@@ -163,7 +186,8 @@ class ProcessSubScope:
                 continue
             if failed or child.endpoint.readable:
                 child.endpoint.pipe.close_reader()
-                child.task.cancel()
+                if failed:
+                    child.task.cancel()
             else:
                 child.endpoint.pipe.end()
         try:
@@ -173,7 +197,14 @@ class ProcessSubScope:
                     for readers in kept.values()
                     for lines in readers
                 ),
-                *(child.task for child in self.held),
+                *(
+                    child.task
+                    for child in self.held
+                    if failed
+                    or child.path in kept
+                    or not child.endpoint.readable
+                    or child.task.done()
+                ),
                 return_exceptions=True,
             )
             for result in results:

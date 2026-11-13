@@ -374,8 +374,10 @@ async function install(
 ): Promise<Uint8Array | null> {
   for (const raw of redirects) {
     const redirect = expand === undefined ? raw : await expand(raw)
-    const error = await installDescriptor(owned, dispatch, session, redirect, stdin)
-    if (error !== null) return error
+    for (const operation of redirect.operations()) {
+      const error = await installDescriptor(owned, dispatch, session, operation, stdin)
+      if (error !== null) return error
+    }
   }
   return null
 }
@@ -388,6 +390,8 @@ async function installDescriptor(
   stdin: ByteSource | null,
 ): Promise<Uint8Array | null> {
   const { fd, target } = redirect
+  if (redirect.kind === RedirectKind.UNEXPANDED && target instanceof ExitSignal)
+    return target.stderr
   if (redirect.kind === RedirectKind.AMBIGUOUS) {
     const word = target instanceof PathSpec ? target.rawPath : String(target)
     return encodeText(`${word}: ambiguous redirect\n`)

@@ -811,7 +811,13 @@ export async function executeNode(
   await lineHandle.checkpoint(deps.signal ?? context.frame.abortSignal ?? undefined)
   // The node's own `<(...)` files go when it ends, so a command still
   // reading one is read out first.
-  const processSubs = new ProcessSubScope(context, deps.registry, deps.sink, deps.signal)
+  const processSubs = new ProcessSubScope(
+    context,
+    deps.registry,
+    deps.jobTable,
+    deps.sink,
+    deps.signal,
+  )
   const previous = context.frame.processSub
   context.frame.processSub = processSubs.open
   const writers = context.frame.writers

@@ -50,7 +50,7 @@ export function unsupportedDescriptor(redirects: readonly Redirect[]): number | 
 }
 
 /** Bash's error for a closed descriptor, in the running shell's voice. */
-export function badDescriptorLine(fd: number): Uint8Array {
+export function badDescriptorLine(fd: number | string): Uint8Array {
   return encodeText(`${shellVoice()}${String(fd)}: Bad file descriptor\n`)
 }
 

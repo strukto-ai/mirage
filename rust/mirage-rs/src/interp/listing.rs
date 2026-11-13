@@ -7,9 +7,10 @@ use crate::vars::{BASH_LINENO, BASHPID, INTEGER, LINENO, RANDOM, Store, UNASSIGN
 const SET_QUOTED: &[u8] = b" \t\n'\"\\|&;()<>!{}*[?]^$`";
 
 /// The names the shell computes, which a listing shows with no record.
-const COMPUTED: [&str; 6] = [
+const COMPUTED: [&str; 7] = [
     BASHPID,
     BASH_LINENO,
+    "BASH_SOURCE",
     "FUNCNAME",
     LINENO,
     "PIPESTATUS",
@@ -103,6 +104,7 @@ pub fn computed(vars: &Store, name: &str) -> Option<Var> {
                 managed: None,
             });
         }
+        "BASH_SOURCE" if !vars.source_files.is_empty() => (Value::Indexed(vars.special(name)?), 0),
         BASH_LINENO => (Value::Indexed(vars.special(name)?), 0),
         "PIPESTATUS" | "FUNCNAME" => {
             let array = vars.special(name)?;

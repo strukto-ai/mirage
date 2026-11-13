@@ -452,6 +452,7 @@ export class SessionState {
   // from, innermost first (`CallStack.callLines`), written beside
   // `functionNames`; `unset` cannot end it.
   callLines: readonly number[] = []
+  sourceFiles: readonly string[] = []
   // A pipeline's per-segment statuses, parked by `handlePipe` for the
   // statement boundary that closes it to claim. Null between them.
   pipeStatusPending: readonly number[] | null = null
@@ -795,6 +796,7 @@ export class SessionState {
     forked.pipeStatus = [...this.pipeStatus]
     forked.functionNames = this.functionNames
     forked.callLines = this.callLines
+    forked.sourceFiles = this.sourceFiles
     forked.exitTrap = this.exitTrap
     forked.exitTrapInherited = this.exitTrapInherited
     forked.errTrap = this.errTrap
@@ -908,6 +910,7 @@ export class SessionState {
     child.lastBgJobId = null
     child.functionNames = []
     child.callLines = []
+    child.sourceFiles = []
     child.getoptsPos = 0
     child.getoptsOptind = null
     child.errexitIgnored = false
@@ -1119,6 +1122,11 @@ export class SessionState {
    * fill, for a flush that compares their store's version instead of reading
    * them.
    */
+  syncShopts(): void {
+    const dotglob = this.vars.shell.takeDotglob()
+    if (dotglob !== null) this.shopts.dotglob = dotglob
+  }
+
   toDict(variables = true): Record<string, unknown> {
     const data: Record<string, unknown> = {
       session_id: this.sessionId,
@@ -1139,11 +1147,15 @@ export class SessionState {
     // Each function's body runs the aliases its definition saw, not the
     // ones defined since, so the view goes with it.
     const views = ownRecord<Record<string, string>>()
+    const files = ownRecord<string>()
     for (const [name, source] of Object.entries(this.functions)) {
       const site = this.functionSites.get(name)
-      if (site?.aliases != null && site.source === source) views[name] = { ...site.aliases }
+      if (site === undefined || site.source !== source) continue
+      if (site.aliases != null) views[name] = { ...site.aliases }
+      if (site.name !== undefined && site.name !== 'environment') files[name] = site.name
     }
     if (Object.keys(views).length > 0) data.function_aliases = views
+    if (Object.keys(files).length > 0) data.function_files = files
     if (Object.keys(this.shellOptions).length > 0) data.shell_options = { ...this.shellOptions }
     if (Object.keys(this.shopts).length > 0) data.shopts = { ...this.shopts }
     if (this.umask !== FRESH_UMASK) data.umask = this.umask
@@ -1220,6 +1232,7 @@ export class SessionState {
     exported_functions?: string[]
     aliases?: Record<string, string>
     function_aliases?: Record<string, Record<string, string>>
+    function_files?: Record<string, string>
     shell_options?: Record<string, boolean>
     shopts?: Record<string, boolean>
     umask?: number
@@ -1303,12 +1316,17 @@ export class SessionState {
       }
     }
     if (data.aliases != null) session.aliases = { ...data.aliases }
-    // A function's alias view comes back as its site; where on its line the
-    // definition stood went with the line.
-    for (const [name, view] of Object.entries(data.function_aliases ?? {})) {
-      const source = Object.hasOwn(session.functions, name) ? session.functions[name] : undefined
-      if (source === undefined) continue
-      session.functionSites.set(name, { source, mark: [0, 0], origin: null, aliases: { ...view } })
+    const views = data.function_aliases ?? {}
+    const files = functionSources(data.function_files ?? {})
+    for (const [name, source] of Object.entries(session.functions)) {
+      if (!Object.hasOwn(views, name) && !Object.hasOwn(files, name)) continue
+      session.functionSites.set(name, {
+        source,
+        mark: [0, 0],
+        origin: null,
+        aliases: Object.hasOwn(views, name) ? { ...views[name] } : null,
+        name: files[name] ?? 'environment',
+      })
     }
     if (data.shopts != null) session.shopts = { ...data.shopts }
     if (data.umask != null) session.umask = data.umask

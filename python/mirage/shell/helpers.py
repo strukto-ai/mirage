@@ -676,15 +676,34 @@ def _parse_file_redirect(child: TSNodeLike) -> Redirect:
             fd = int(get_text(c))
         elif c.type in _REDIRECT_OPERATORS:
             op = c.type
-        elif c.type == NT.NUMBER:
+        elif (
+            c.type == NT.NUMBER
+            and op in _DUP_OPERATORS
+            and get_text(c).isascii()
+            and get_text(c).isdecimal()
+        ):
             dup_fd = int(get_text(c))
 
     for c in child.named_children:
-        if c.type in _TARGET_TYPES:
+        if c.type in _TARGET_TYPES or (c.type == NT.NUMBER and dup_fd is None):
             target = get_text(c)
             target_node = c
             break
 
+    if (
+        op in _DUP_OPERATORS
+        and isinstance(target, str)
+        and target.endswith("-")
+        and target[:-1].isascii()
+        and target[:-1].isdecimal()
+    ):
+        reading = op == NT.REDIRECT_DUP_IN
+        return Redirect(
+            fd=(FD_STDIN if reading else FD_STDOUT) if fd is None else fd,
+            target=int(target[:-1]),
+            kind=RedirectKind.STDIN if reading else RedirectKind.STDOUT,
+            move=True,
+        )
     document = getattr(child, "heredoc", None)
     if document is not None:
         fails = document.deferred
@@ -699,23 +718,17 @@ def _parse_file_redirect(child: TSNodeLike) -> Redirect:
             else (len(decode_text(document.body[: fails[0]])), fails[1]),
         )
 
-    # `>&word` with a word rather than a number is bash's other spelling
-    # of `&>word`, bare or on descriptor 1 (`1>&word` sends both streams
-    # too, pinned on bash 5.2). On any other explicit descriptor bash
-    # refuses it as `word: ambiguous redirect`, before the command runs
-    # and before any file opens, so the parse keeps the word for the
-    # message rather than turning `3>&foo` into a both-streams file.
-    word_dup = (
-        op == NT.REDIRECT_STDERR and dup_fd is None and target_node is not None
-    )
-    if word_dup and fd is not None and fd != FD_STDOUT:
+    if op in _DUP_OPERATORS and dup_fd is None and target_node is not None:
+        reading = op == NT.REDIRECT_DUP_IN
         return Redirect(
-            fd=fd,
+            fd=(FD_STDIN if reading else FD_STDOUT) if fd is None else fd,
             target=target,
             target_node=target_node,
-            kind=RedirectKind.AMBIGUOUS,
+            kind=RedirectKind.DUP_INPUT
+            if reading
+            else RedirectKind.DUP_OUTPUT,
         )
-    if op in _BOTH_OPERATORS or word_dup:
+    if op in _BOTH_OPERATORS:
         return Redirect(
             fd=FD_BOTH,
             target=target,

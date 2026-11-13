@@ -65,6 +65,7 @@ pub struct Frame {
     pub outside: usize,
     pub pipe_status: Vec<i32>,
     pub function_names: Option<Vec<Vec<u8>>>,
+    pub source_files: Vec<Vec<u8>>,
     pub call_lines: Vec<usize>,
     pub paren: bool,
     pub memory_room: Option<usize>,
@@ -93,6 +94,7 @@ impl Shell {
         self.shopts = frame.shopts;
         self.env_limit = frame.env_limit;
         self.outside = frame.outside;
+        self.vars.source_files = frame.source_files;
         self.vars.set_specials(
             frame.pipe_status,
             frame.function_names,

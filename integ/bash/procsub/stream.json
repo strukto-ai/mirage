@@ -164,6 +164,21 @@
         "stdout": "saved",
         "stderr": ""
       }
+    },
+    {
+      "id": "procsub_wait_for_producer_status",
+      "seq": 1380024,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "((read -r v < <(printf 'row\\n'; exit 7); p=$!; wait \"$p\"; echo \"$v:$?\"; wait \"$p\"; echo again:$?); (cat <(exit 3) <(exit 9); wait \"$!\"; echo last:$?); (: <(sleep .05; echo late); wait \"$!\"; echo closed:$?); (: <(sleep .05; echo waited > {mount}/procsub-wait-marker; exit 5); wait; cat {mount}/procsub-wait-marker; rm {mount}/procsub-wait-marker))",
+      "expect": {
+        "exit": 0,
+        "stdout": "row:7\nagain:7\nlast:9\nclosed:141\nwaited\n",
+        "stderr": ""
+      }
     }
   ]
 }

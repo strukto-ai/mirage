@@ -34,6 +34,21 @@
         "stdout": "1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "lastpipe_current_shell",
+      "seq": 1380025,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "(shopt -s lastpipe; x=old; printf 'new\\n' | read -r x; echo \"$x:${PIPESTATUS[*]}\"; printf x | { q=kept; cd /; }; echo \"$q:$PWD\"; (printf x | { exit 8; }; echo unexpected); echo status:$?; set -m; printf 'lost\\n' | read x; echo \"$x\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "new:0 0\nkept:/\nstatus:8\nnew\n",
+        "stderr": ""
+      }
     }
   ]
 }
