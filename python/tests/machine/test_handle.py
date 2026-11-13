@@ -143,6 +143,21 @@ async def test_a_substitution_a_program_names_is_a_pipe_on_its_machine():
     assert lines.index(f"exec 3<>{fifo}; exec 3>&-; rm -f {fifo}") > ran
 
 
+# A function's program reads the substitution its call was given.
+@pytest.mark.asyncio
+async def test_a_functions_program_reads_its_calls_substitution():
+    box = FifoBox(captures=("node",))
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
+    try:
+        io = await ws.shell('f() { node read.js "$1"; }; f <(echo hi)')
+        assert io.exit_code == 0
+    finally:
+        await ws.close()
+    [made] = [line for line, _, _ in box.execs if line.startswith("mkfifo ")]
+    fifo = made.removeprefix("mkfifo -m 600 ")
+    assert f"node read.js {fifo}" in [line for line, _, _ in box.execs]
+
+
 # A pipe that cannot be removed, the machine gone, leaves the program's
 # output as it ran.
 @pytest.mark.asyncio

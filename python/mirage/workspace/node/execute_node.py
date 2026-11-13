@@ -908,7 +908,7 @@ async def execute_node(
     previous = context.frame.process_sub
     context.frame.process_sub = process_subs.open
     writers = context.frame.writers
-    context.frame.writers = []
+    context.frame.writers = [w for w in writers if w[0] is not None]
     try:
         # What expanding the node printed (a substitution's stderr) goes
         # out with the node's own stderr, unless its caller collects it: a

@@ -39,7 +39,8 @@ export class ExecutionFrame {
   substitution = false
   // The processes the running command's substitutions started, each with the
   // `/dev/fd` path a `<( )` gave it, null for a `$( )`, which its program
-  // reads.
+  // reads; the commands a command runs (a function's body) keep its `<( )`,
+  // as bash's inherit the descriptor.
   writers: (readonly [string | null, number])[] = []
   // The pipe a pipeline stage reads, which a program the stage starts reads
   // too while its standard input is still that pipe.

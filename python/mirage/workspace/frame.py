@@ -38,7 +38,9 @@ class ExecutionFrame:
     substitution's shell, and the shells it forks, make none
     (``substitution``). ``writers`` are the processes the running
     command's substitutions started, each with the ``/dev/fd`` path a
-    ``<( )`` gave it, None for a ``$( )``, which its program reads.
+    ``<( )`` gave it, None for a ``$( )``, which its program reads; the
+    commands a command runs (a function's body) keep its ``<( )``, as
+    bash's inherit the descriptor.
     ``stdin`` is the pipe a pipeline stage reads, which a program the
     stage starts reads too while its standard input is still that pipe.
     """

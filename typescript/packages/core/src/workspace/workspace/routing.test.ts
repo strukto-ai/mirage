@@ -521,6 +521,7 @@ describe('routing on machines', () => {
         ['hostname | hostname', 'hostname'],
         ['hostname <(hostname); true', 'hostname /dev/fd/63'],
         ['hostname "$(hostname)"; true', 'hostname a'],
+        ['f() { hostname "$1"; }; f <(hostname); true', 'hostname /dev/fd/63'],
         ['hostname | { hostname; true; }', 'hostname'],
         ['hostname | { hostname < /dev/null; true; }', 'hostname'],
       ] as const) {
@@ -542,6 +543,7 @@ describe('routing on machines', () => {
         'hostname | hostname': ['hostname', {}, []],
         'hostname <(hostname); true': [null, { 63: 'hostname' }, []],
         'hostname "$(hostname)"; true': [null, {}, ['hostname']],
+        'f() { hostname "$1"; }; f <(hostname); true': [null, { 63: 'hostname' }, []],
         'hostname | { hostname; true; }': ['hostname', {}, []],
         'hostname | { hostname < /dev/null; true; }': [null, {}, []],
       })

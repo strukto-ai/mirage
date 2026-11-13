@@ -815,7 +815,7 @@ export async function executeNode(
   const previous = context.frame.processSub
   context.frame.processSub = processSubs.open
   const writers = context.frame.writers
-  context.frame.writers = []
+  context.frame.writers = writers.filter(([path]) => path !== null)
   try {
     if (!ownDiagnostics) {
       const [stdout, io, execNode] = await executeNodeBody(

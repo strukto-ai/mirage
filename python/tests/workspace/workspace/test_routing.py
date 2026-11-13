@@ -505,6 +505,10 @@ async def test_a_program_names_the_processes_it_reads_from():
             ("hostname | hostname", "hostname"),
             ("hostname <(hostname); true", "hostname /dev/fd/63"),
             ('hostname "$(hostname)"; true', "hostname a"),
+            (
+                'f() { hostname "$1"; }; f <(hostname); true',
+                "hostname /dev/fd/63",
+            ),
             ("hostname | { hostname; true; }", "hostname"),
             ("hostname | { hostname < /dev/null; true; }", "hostname"),
         ):
@@ -524,6 +528,11 @@ async def test_a_program_names_the_processes_it_reads_from():
             "hostname | hostname": ("hostname", {}, []),
             "hostname <(hostname); true": (None, {63: "hostname"}, []),
             'hostname "$(hostname)"; true': (None, {}, ["hostname"]),
+            'f() { hostname "$1"; }; f <(hostname); true': (
+                None,
+                {63: "hostname"},
+                [],
+            ),
             "hostname | { hostname; true; }": ("hostname", {}, []),
             "hostname | { hostname < /dev/null; true; }": (None, {}, []),
         }

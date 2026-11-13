@@ -898,6 +898,23 @@ it('turns a substitution a program names into a pipe on its machine', async () =
   expect(lines.indexOf(`exec 3<>${fifo}; exec 3>&-; rm -f ${fifo}`)).toBeGreaterThan(ran)
 })
 
+// A function's program reads the substitution its call was given.
+it("pipes a call's substitution to its function's program", async () => {
+  const box = new FifoBox({ captures: ['node'] })
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, ...on(box) })
+  try {
+    const io = await ws.shell('f() { node read.js "$1"; }; f <(echo hi)')
+    expect(io.exitCode).toBe(0)
+  } finally {
+    await ws.close()
+  }
+  const lines = box.execs.map(([line]) => line)
+  const fifo = (lines.find((line) => line.startsWith('mkfifo ')) ?? '').slice(
+    'mkfifo -m 600 '.length,
+  )
+  expect(lines).toContain(`node read.js ${fifo}`)
+})
+
 // A pipe that cannot be removed, the machine gone, leaves the program's output
 // as it ran.
 it('keeps the output of a program whose pipe is left behind', async () => {
