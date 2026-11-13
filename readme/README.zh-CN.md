@@ -261,7 +261,7 @@ python3: Permission denied
 
 ## 嵌入式终端
 
-大多数时候，Agent 需要的不是沙箱，而只是一个类似终端的接口，Mirage 可以把它嵌入应用服务器。每个终端都是一个 Mirage 会话，拥有自己的工作目录、环境和历史记录，Python 在进程内通过 Monty 运行，因此启动终端无需容器或虚拟机。下面是 Express 版本；FastAPI 版本见[文档](https://docs.mirage.strukto.ai/home/examples/embedded-terminal)。
+大多数时候，Agent 需要的不是沙箱，而只是一个类似终端的接口，Mirage 可以把它嵌入应用服务器。每个终端都是一个 Mirage 会话，拥有自己的工作目录、环境和历史记录，Python 在进程内通过 Monty 运行，因此启动终端无需容器或虚拟机。下面是 Express 版本；FastAPI 版本见[文档](https://docs.mirage.strukto.ai/home/examples/lightweight-terminal)。
 
 ```bash
 npm install @struktoai/mirage-node @pydantic/monty express

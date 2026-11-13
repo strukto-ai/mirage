@@ -261,7 +261,7 @@ Die übrigen Stufen, an denen ein Skript antworten kann, beschreiben die [Policy
 
 ## Eingebettetes Terminal
 
-Meist braucht ein Agent keine Sandbox, sondern nur eine terminalartige Schnittstelle, und Mirage bettet eine in einen Anwendungsserver ein. Jedes Terminal ist eine Mirage-Session mit eigenem Arbeitsverzeichnis, eigener Umgebung und History, und Python läuft im Prozess auf Monty, sodass ein Terminal ohne Container oder VM startet. Hier mit Express; die FastAPI-Version steht in der [Dokumentation](https://docs.mirage.strukto.ai/home/examples/embedded-terminal).
+Meist braucht ein Agent keine Sandbox, sondern nur eine terminalartige Schnittstelle, und Mirage bettet eine in einen Anwendungsserver ein. Jedes Terminal ist eine Mirage-Session mit eigenem Arbeitsverzeichnis, eigener Umgebung und History, und Python läuft im Prozess auf Monty, sodass ein Terminal ohne Container oder VM startet. Hier mit Express; die FastAPI-Version steht in der [Dokumentation](https://docs.mirage.strukto.ai/home/examples/lightweight-terminal).
 
 ```bash
 npm install @struktoai/mirage-node @pydantic/monty express

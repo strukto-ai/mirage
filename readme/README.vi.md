@@ -261,7 +261,7 @@ Xem [script chính sách](https://docs.mirage.strukto.ai/home/policy/scripts) đ
 
 ## Terminal nhúng
 
-Phần lớn thời gian agent không cần sandbox, chỉ cần một giao diện giống terminal, và Mirage nhúng một giao diện như vậy vào máy chủ ứng dụng. Mỗi terminal là một session Mirage với thư mục làm việc, môi trường và lịch sử riêng, còn Python chạy trong tiến trình trên Monty, nên terminal khởi động mà không cần container hay VM. Dưới đây là bản Express; bản FastAPI có trong [tài liệu](https://docs.mirage.strukto.ai/home/examples/embedded-terminal).
+Phần lớn thời gian agent không cần sandbox, chỉ cần một giao diện giống terminal, và Mirage nhúng một giao diện như vậy vào máy chủ ứng dụng. Mỗi terminal là một session Mirage với thư mục làm việc, môi trường và lịch sử riêng, còn Python chạy trong tiến trình trên Monty, nên terminal khởi động mà không cần container hay VM. Dưới đây là bản Express; bản FastAPI có trong [tài liệu](https://docs.mirage.strukto.ai/home/examples/lightweight-terminal).
 
 ```bash
 npm install @struktoai/mirage-node @pydantic/monty express

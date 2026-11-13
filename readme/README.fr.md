@@ -261,7 +261,7 @@ Voir les [scripts de politique](https://docs.mirage.strukto.ai/home/policy/scrip
 
 ## Terminal embarqué
 
-La plupart du temps, un agent n'a pas besoin d'un bac à sable, seulement d'une interface de type terminal, et Mirage en embarque une dans un serveur d'application. Chaque terminal est une session Mirage avec son propre répertoire de travail, son environnement et son historique, et Python s'exécute en processus sur Monty, si bien qu'un terminal démarre sans conteneur ni VM. Le voici avec Express ; la version FastAPI se trouve dans la [documentation](https://docs.mirage.strukto.ai/home/examples/embedded-terminal).
+La plupart du temps, un agent n'a pas besoin d'un bac à sable, seulement d'une interface de type terminal, et Mirage en embarque une dans un serveur d'application. Chaque terminal est une session Mirage avec son propre répertoire de travail, son environnement et son historique, et Python s'exécute en processus sur Monty, si bien qu'un terminal démarre sans conteneur ni VM. Le voici avec Express ; la version FastAPI se trouve dans la [documentation](https://docs.mirage.strukto.ai/home/examples/lightweight-terminal).
 
 ```bash
 npm install @struktoai/mirage-node @pydantic/monty express

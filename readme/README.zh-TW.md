@@ -261,7 +261,7 @@ python3: Permission denied
 
 ## 嵌入式終端機
 
-大多數時候，Agent 需要的不是沙箱，而只是一個類似終端機的介面，Mirage 可以把它嵌入應用程式伺服器。每個終端機都是一個 Mirage 工作階段，擁有自己的工作目錄、環境和歷史記錄，Python 在行程內透過 Monty 執行，因此啟動終端機無需容器或虛擬機。下面是 Express 版本；FastAPI 版本見[文件](https://docs.mirage.strukto.ai/home/examples/embedded-terminal)。
+大多數時候，Agent 需要的不是沙箱，而只是一個類似終端機的介面，Mirage 可以把它嵌入應用程式伺服器。每個終端機都是一個 Mirage 工作階段，擁有自己的工作目錄、環境和歷史記錄，Python 在行程內透過 Monty 執行，因此啟動終端機無需容器或虛擬機。下面是 Express 版本；FastAPI 版本見[文件](https://docs.mirage.strukto.ai/home/examples/lightweight-terminal)。
 
 ```bash
 npm install @struktoai/mirage-node @pydantic/monty express
