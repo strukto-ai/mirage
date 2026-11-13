@@ -22,6 +22,7 @@ import type { HandOff } from '../../policy/types.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import type { JobTable } from '../../execution/job/index.ts'
+import type { ProcessHandle } from '../../execution/process/handle.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/types.ts'
 /**
@@ -55,6 +56,7 @@ export type ExecuteFn = (
     callStack?: CallStack
     jobTable?: JobTable
     routingDecision?: RouteDecision<Runtime>
+    started?: (process: ProcessHandle) => void
   },
 ) => Promise<IOResult>
 

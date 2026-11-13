@@ -90,6 +90,27 @@ class RecordingMachine extends MachineHandle {
   }
 }
 
+// A box that keeps what each line it runs was fed, streamed or not.
+class FifoBox extends RecordingMachine {
+  lost = false
+
+  override async connect(): Promise<void> {
+    await super.connect()
+    this.execs.push(['connect', null, {}, '/'])
+  }
+
+  override async execLine(
+    line: string,
+    stdin: ByteSource | null,
+    env: Record<string, string>,
+    cwd: string,
+  ): Promise<RunResult> {
+    const data = stdin === null ? null : await materialize(stdin)
+    if (line.includes('rm -f') && this.lost) throw new Error('gone')
+    return super.execLine(line, data, env, cwd)
+  }
+}
+
 // A box whose connection drops while it runs `train`.
 class DroppedBox extends RecordingMachine {
   error: Error = new ConnectionLostError(
@@ -846,6 +867,64 @@ it.each([
     expect(DEC.decode(await materialize(io.stdout))).toBe(stdout)
     const [program] = (await ws.processes()).filter((p) => p.runtime !== null)
     expect([program?.machinePid?.pid, program?.machineInstance]).toEqual([812, 'box'])
+  } finally {
+    await ws.close()
+  }
+})
+
+// A process substitution a program reads by path becomes a named pipe on the
+// program's machine, only its owner's, made once the machine is reached, fed
+// what the substitution writes, then removed; one it writes to stays its word.
+it('turns a substitution a program names into a pipe on its machine', async () => {
+  const box = new FifoBox({ captures: ['node'] })
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, ...on(box) })
+  try {
+    const io = await ws.shell('node read.js <(echo hi) /dev/fd/9 >(cat)')
+    expect(io.exitCode).toBe(0)
+  } finally {
+    await ws.close()
+  }
+  const lines = box.execs.map(([line]) => line)
+  const made = lines.find((line) => line.startsWith('mkfifo ')) ?? ''
+  const fifo = made.slice('mkfifo -m 600 '.length)
+  expect(fifo.startsWith('/tmp/.mirage-fd-')).toBe(true)
+  const ran = lines.indexOf(`node read.js ${fifo} /dev/fd/9 /dev/fd/62`)
+  expect(lines.indexOf('connect')).toBeLessThan(lines.indexOf(made))
+  expect(lines.indexOf(made)).toBeLessThan(ran)
+  const fed = box.execs
+    .filter(([line]) => line.includes('exec cat'))
+    .map(([line, data]) => [line, DEC.decode(data ?? new Uint8Array())])
+  expect(fed).toEqual([[`[ -p ${fifo} ] && exec cat > ${fifo}`, 'hi\n']])
+  expect(lines.indexOf(`exec 3<>${fifo}; exec 3>&-; rm -f ${fifo}`)).toBeGreaterThan(ran)
+})
+
+// A function's program reads the substitution its call was given.
+it("pipes a call's substitution to its function's program", async () => {
+  const box = new FifoBox({ captures: ['node'] })
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, ...on(box) })
+  try {
+    const io = await ws.shell('f() { node read.js "$1"; }; f <(echo hi)')
+    expect(io.exitCode).toBe(0)
+  } finally {
+    await ws.close()
+  }
+  const lines = box.execs.map(([line]) => line)
+  const fifo = (lines.find((line) => line.startsWith('mkfifo ')) ?? '').slice(
+    'mkfifo -m 600 '.length,
+  )
+  expect(lines).toContain(`node read.js ${fifo}`)
+})
+
+// A pipe that cannot be removed, the machine gone, leaves the program's output
+// as it ran.
+it('keeps the output of a program whose pipe is left behind', async () => {
+  const box = new FifoBox({ captures: ['node'] })
+  box.lost = true
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, ...on(box) })
+  try {
+    const io = await ws.shell('node read.js <(echo hi)')
+    expect(io.exitCode).toBe(0)
+    expect(DEC.decode(await materialize(io.stdout))).toMatch(/^ran:node read\.js /)
   } finally {
     await ws.close()
   }

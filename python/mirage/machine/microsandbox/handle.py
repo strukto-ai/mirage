@@ -59,7 +59,7 @@ class MicrosandboxMachine(ProgramMachine):
     def exec_words(self) -> tuple[tuple[str, ...], tuple[str, ...]]:
         return ("exec", self.config.sandbox, "--quiet"), ("--",)
 
-    async def _ensure_connected(self) -> None:
+    async def ensure_connected(self) -> None:
         """Skip the connect-once latch: every exec probes the guest."""
 
     async def connect(self) -> None:

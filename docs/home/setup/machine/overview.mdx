@@ -131,6 +131,7 @@ mounts:
 | --- | --- |
 | Command | The captured program and its words, as typed |
 | Piped input | stdin |
+| A `<(...)` it opens by name | A named pipe on the machine, which Mirage feeds, so `node read.js <(python3 gen.py)` works with each program on a different machine. Mirage sends the pipe all it can, read or not, so a later command reading the same `<(...)`, such as the next one in a function, may get nothing. |
 | Environment | The session's, over the config `env`, plus `MIRAGE_PROCESS`, the id of its Mirage process. Docker, Apple Container, Kubernetes, smolvm and Microsandbox pass it on the exec command line, where other users of the host can see it in `ps`. |
 | Working directory | The shell's, unchanged; one the machine lacks exits 126 |
 | Disk, network, language modules | The machine's own |

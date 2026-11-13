@@ -37,7 +37,6 @@ from mirage.observe.constants import (
     TRACE_CONTENT_ENV,
     TRACE_CONTENT_MAX_BYTES,
     TRACE_CONTENT_MAX_BYTES_ENV,
-    TRACE_MAX_SPANS_ENV,
 )
 from mirage.observe.disk_store import DiskObserverStore
 from mirage.observe.log_entry import EVENT_COMMAND, LogEntry
@@ -470,7 +469,7 @@ def _exported(monkeypatch) -> InMemorySpanExporter:
     return exporter
 
 
-def test_a_finished_line_is_a_span_over_its_vfs_calls(monkeypatch):
+def test_a_finished_line_is_one_span_its_vfs_calls_stay_out_of(monkeypatch):
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
@@ -497,9 +496,9 @@ def test_a_finished_line_is_a_span_over_its_vfs_calls(monkeypatch):
     )
     # The line ends in another cwd; the span keeps the one it started in.
     asyncio.run(obs.log_result(io, [rec], "s1", cwd="/", line="L"))
-    call, line = exporter.get_finished_spans()
+    [line] = exporter.get_finished_spans()
     assert (line.name, dict(line.attributes or {})) == (
-        "command",
+        "shell",
         {
             "mirage.line.id": "L",
             "mirage.workspace.id": "w",
@@ -517,24 +516,10 @@ def test_a_finished_line_is_a_span_over_its_vfs_calls(monkeypatch):
         start * 1_000_000,
         (start + 1000) * 1_000_000,
     )
-    assert call.parent is not None
-    assert call.parent.span_id == line.context.span_id
-    assert (call.name, dict(call.attributes or {})) == (
-        "vfs.read",
-        {
-            "mirage.vfs.path": "/d/a",
-            "mirage.vfs.source": "s3",
-            "mirage.vfs.bytes": 6,
-            "mirage.vfs.timestamp": start + 5,
-            "mirage.vfs.duration_ms": 12,
-        },
-    )
-    assert (call.start_time, call.end_time) == (
-        (start - 7) * 1_000_000,
-        (start + 5) * 1_000_000,
-    )
-    # The history keeps its own, shorter cut.
-    results = [e for e in asyncio.run(obs.events()) if e["type"] == "result"]
+    # The history keeps the call, and its own, shorter cut.
+    events = asyncio.run(obs.events())
+    assert [e["path"] for e in events if e["type"] == "vfs"] == ["/d/a"]
+    results = [e for e in events if e["type"] == "result"]
     assert [len(e["stdout"]) for e in results] == [4096]
 
 
@@ -554,32 +539,6 @@ def test_span_output_is_cut_at_the_bytes_it_is_told_to(monkeypatch):
     asyncio.run(obs.log_result(io, [], "s1", cwd="/", line="L"))
     [line] = exporter.get_finished_spans()
     assert (line.attributes or {})["mirage.stdout"] == "éé"
-
-
-def test_a_line_sends_at_most_its_span_cap_and_counts_the_rest(monkeypatch):
-    monkeypatch.setenv(TRACE_MAX_SPANS_ENV, "2")
-    exporter = _exported(monkeypatch)
-    obs = Observer(store=RAMObserverStore(), clock=ManualClock(start=NEW_YEAR))
-    start = int(NEW_YEAR * 1000)
-    recs = [
-        OpRecord(
-            op="stat",
-            path=f"/d/{i}",
-            source="ram",
-            bytes=0,
-            timestamp=start,
-            duration_ms=0,
-        )
-        for i in range(5)
-    ]
-    asyncio.run(obs.log_command("find /d", "s1", cwd="/", line="L"))
-    asyncio.run(obs.log_result(IOResult(), recs, "s1", cwd="/", line="L"))
-    *calls, line = exporter.get_finished_spans()
-    assert [c.attributes["mirage.vfs.path"] for c in calls] == ["/d/0", "/d/1"]
-    assert (line.attributes or {})["mirage.vfs.dropped"] == 3
-    # The history still records every call.
-    vfs = [e for e in asyncio.run(obs.events()) if e["type"] == "vfs"]
-    assert len(vfs) == 5
 
 
 def test_span_output_that_is_not_utf8_stays_within_its_bytes(monkeypatch):
@@ -610,7 +569,7 @@ async def test_a_span_keeps_the_cwd_a_line_was_given(monkeypatch):
         history = await ws.history()
     finally:
         await ws.close()
-    [line] = [s for s in exporter.get_finished_spans() if s.name == "command"]
+    [line] = [s for s in exporter.get_finished_spans() if s.name == "shell"]
     assert (line.attributes or {})["mirage.cwd"] == "/data"
     assert [e["cwd"] for e in history] == ["/data", "/data"]
 
@@ -625,14 +584,14 @@ async def test_a_span_takes_output_past_the_terminal_chunk(monkeypatch):
         history = await ws.history()
     finally:
         await ws.close()
-    [line] = [s for s in exporter.get_finished_spans() if s.name == "command"]
+    [line] = [s for s in exporter.get_finished_spans() if s.name == "shell"]
     assert len(str((line.attributes or {})["mirage.stdout"])) == 20000
     # The history keeps its own cut.
     results = [e for e in history if e["type"] == "result"]
     assert [len(e["stdout"]) for e in results] == [4096]
 
 
-def test_spans_leave_out_output_and_vfs_calls_when_told_to(monkeypatch):
+def test_spans_leave_out_output_when_told_to(monkeypatch):
     monkeypatch.setenv(TRACE_CONTENT_ENV, "false")
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
@@ -661,7 +620,7 @@ def test_spans_leave_out_output_and_vfs_calls_when_told_to(monkeypatch):
         for s in exporter.get_finished_spans()
     ] == [
         (
-            "command",
+            "shell",
             {
                 "mirage.line.id": "L",
                 "mirage.workspace.id": "w",
@@ -745,7 +704,7 @@ async def test_an_ended_job_and_process_are_spans(monkeypatch):
     }
     assert attributes["host.name"] == machine.name
     assert {k: attributes[k] for k in where} == where
-    [command] = [s for s in spans if s.name == "command"]
+    [command] = [s for s in spans if s.name == "shell"]
     assert (command.attributes or {})["mirage.line.id"] == str(line.id)
     assert (command.attributes or {})["host.name"] == machine.name
     assert "mirage.machine.ids" not in (command.attributes or {})
@@ -808,7 +767,7 @@ async def test_a_span_names_the_machine_its_work_ran_on(monkeypatch):
     assert all(
         "mirage.machine.ids" not in (s.attributes or {})
         for s in spans
-        if s.name == "command"
+        if s.name == "shell"
     )
     ran = sorted(
         (
@@ -905,7 +864,7 @@ async def test_a_child_of_a_stopping_parent_goes_under_it(monkeypatch):
         (s.attributes or {}).get("process.command_line", s.name): s
         for s in exporter.get_finished_spans()
     }
-    for name, above in (("train", "(train) &"), ("(train) &", "command")):
+    for name, above in (("train", "(train) &"), ("(train) &", "shell")):
         context = spans[above].get_span_context()
         assert context is not None
         assert spans[name].parent is not None
@@ -953,5 +912,80 @@ async def test_a_nested_jobs_process_goes_under_its_job(monkeypatch):
         "process (train 1 & wait)",
         "job (train 1 & wait)",
         "process (train 1 & wait) & wait",
-        "command (train 1 & wait) & wait",
+        "shell (train 1 & wait) & wait",
     ]
+
+
+# A process links to each it read from, `mirage.input` naming where: its
+# stdin, the `/dev/fd` path a `<( )` gave it, or its arguments.
+@pytest.mark.asyncio
+async def test_a_process_links_to_each_it_read_from(monkeypatch):
+    exporter = _exported(monkeypatch)
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"a": _Box("a")},
+        runtimes=[RemoteRuntime(["train"], machine="a")],
+    )
+    try:
+        await ws.shell("train 1 | train 2")
+        await ws.shell("train 3 <(train 4); true")
+        await ws.shell('train 5 "$(train 6)"; true')
+    finally:
+        await ws.close()
+    spans = exporter.get_finished_spans()
+    by_id = {s.context.span_id: s for s in spans if s.context is not None}
+    links = sorted(
+        (
+            _span_name(s),
+            (link.attributes or {})["mirage.input"],
+            _span_name(by_id[link.context.span_id]),
+        )
+        for s in spans
+        for link in s.links
+    )
+    assert [(reader, how) for reader, how, _ in links] == [
+        ("process train 2", "stdin"),
+        ("process train 3 /dev/fd/63", "/dev/fd/63"),
+        (f"process train 5 {CHECK_MARK}", "argv"),
+    ]
+    assert [writer for _, _, writer in links] == [
+        "process train 1",
+        "process train 4",
+        "process train 6",
+    ]
+
+
+# A call the caller makes to a mount itself is a `vfs.<call>` span of its
+# own; a typed line is a `shell` span whose calls to mounts send none.
+@pytest.mark.asyncio
+async def test_a_call_made_through_vfs_is_a_span_a_lines_calls_are_not(
+    monkeypatch,
+):
+    exporter = _exported(monkeypatch)
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.vfs.write("/data/a.txt", b"hello")
+        await ws.vfs.read("/data/a.txt")
+        await ws.shell("wc -l /data/a.txt")
+        await asyncio.sleep(0.05)
+    finally:
+        await ws.close()
+    spans = exporter.get_finished_spans()
+    assert sorted(s.name for s in spans) == [
+        "process",
+        "shell",
+        "vfs.read",
+        "vfs.write",
+    ]
+    read = next(s for s in spans if s.name == "vfs.read")
+    assert read.parent is None
+    assert {
+        k: v
+        for k, v in (read.attributes or {}).items()
+        if k in ("mirage.vfs.path", "mirage.vfs.source", "mirage.vfs.bytes")
+    } == {
+        "mirage.vfs.path": "/data/a.txt",
+        "mirage.vfs.source": "ram",
+        "mirage.vfs.bytes": 5,
+    }

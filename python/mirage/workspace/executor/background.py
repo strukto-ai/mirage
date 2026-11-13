@@ -515,6 +515,7 @@ def start_shell(
     parent_pid: int | None,
     started: Callable[[ProcessHandle], None] | None = None,
     one_command: bool = False,
+    stdin: int | None = None,
 ) -> ProcessHandle:
     """Start a shell the running one forks (a subshell, a pipeline stage,
     a command substitution, a nested shell): a process in its session's
@@ -531,6 +532,7 @@ def start_shell(
             process before it runs.
         one_command (bool): the shell runs one program, which runs as it
             (``one_program``).
+        stdin (int | None): the pid whose stdout is its stdin.
     """
     try:
         return processes.start(
@@ -543,6 +545,7 @@ def start_shell(
             started=started,
             ignores=SHELL_IGNORED_SIGNALS,
             one_command=one_command,
+            stdin=stdin,
         )
     except BlockingIOError as exc:
         raise ExitSignal(FORK_FAILED_STATUS, stderr=FORK_FAILED) from exc

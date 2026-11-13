@@ -65,7 +65,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   holders = 0
   private released = false
 
-  constructor(private readonly input: ByteSource | AsyncIterator<Uint8Array>) {
+  constructor(readonly input: ByteSource | AsyncIterator<Uint8Array>) {
     const s = this.input as AsyncIterable<Uint8Array>
     if (this.input instanceof Uint8Array) {
       this.source = chunks(this.input)

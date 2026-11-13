@@ -95,6 +95,9 @@ def process_to_fields(record: Process) -> RecordFields:
         "signal": record.signal,
         "error": record.error,
         "ancestors": list(record.ancestors),
+        "stdin": record.stdin,
+        "fd": {str(fd): pid for fd, pid in record.fd.items()},
+        "argv": list(record.argv),
     }
 
 
@@ -129,4 +132,7 @@ def process_from_fields(fields: RecordFields) -> Process:
         signal=fields.get("signal"),
         error=fields.get("error"),
         ancestors=tuple(fields.get("ancestors") or ()),
+        stdin=fields.get("stdin"),
+        fd={int(fd): pid for fd, pid in (fields.get("fd") or {}).items()},
+        argv=tuple(fields.get("argv") or ()),
     )

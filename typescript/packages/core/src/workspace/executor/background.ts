@@ -455,8 +455,8 @@ export function reportReaped(
  * command substitution, a nested shell): a process in its session's
  * directory that ignores the signals every shell does. A fork past the
  * session's process limit fails as bash's does. `oneCommand` marks a shell
- * that runs one program, which runs as it (`oneProgram`). Mirrors Python's
- * start_shell.
+ * that runs one program, which runs as it (`oneProgram`), and `stdin` is the
+ * pid whose stdout is its stdin. Mirrors Python's start_shell.
  */
 export function startShell(
   processes: ProcessTable,
@@ -467,6 +467,7 @@ export function startShell(
   cancel: () => void,
   started?: (process: ProcessHandle) => void,
   oneCommand = false,
+  stdin: number | null = null,
 ): ProcessHandle {
   try {
     return processes.start({
@@ -480,6 +481,7 @@ export function startShell(
       ...(started === undefined ? {} : { started }),
       ignores: SHELL_IGNORED_SIGNALS,
       oneCommand,
+      stdin,
     })
   } catch (error) {
     if ((error as { code?: unknown }).code === 'EAGAIN')

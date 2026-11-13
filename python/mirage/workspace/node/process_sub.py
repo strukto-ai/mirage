@@ -15,8 +15,10 @@
 import asyncio
 import logging
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.core.dev.pipe import DevicePipe
+from mirage.execution.process.handle import ProcessHandle
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.errors import PipeClosed
 from mirage.io.types import ByteSource, IOResult, materialize
@@ -98,10 +100,31 @@ class ProcessSubScope:
         )
         path, allocation = dev.allocate_input(endpoint)
         output = SubstitutionConsole(endpoint, self.sink or self.capture)
+        writers = self.context.frame.writers
+        begun: asyncio.Future[None] = (
+            asyncio.get_running_loop().create_future()
+        )
+
+        def started(process: ProcessHandle) -> None:
+            if endpoint.readable:
+                writers.append((path, process.record.pid))
+            if not begun.done():
+                begun.set_result(None)
+
         task = asyncio.create_task(
-            self._run(node, execute_line, endpoint, output)
+            self._run(
+                node, partial(execute_line, started=started), endpoint, output
+            )
         )
         self.held.append(Substitution(dev, path, allocation, endpoint, task))
+        # A `<( )` the command reads starts first, as bash forks it, so
+        # the command's program knows the process writing the path; a
+        # `>( )` starts after the command, so it cannot close its pipe
+        # before the command's first write.
+        if endpoint.readable:
+            await asyncio.wait(
+                (begun, task), return_when=asyncio.FIRST_COMPLETED
+            )
         return path
 
     async def _run(

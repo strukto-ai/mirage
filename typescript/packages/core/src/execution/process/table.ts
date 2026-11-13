@@ -119,7 +119,9 @@ export class ProcessTable {
    * for Mirage itself. `oneCommand` marks a runner that runs exactly one
    * command, whose program it is (`ProcessHandle.take`), and
    * `programIgnores` what that program ignores as well, where `ignores` is
-   * more than a shell's.
+   * more than a shell's. `stdin` is the pid whose stdout is its stdin, `fd`
+   * the pid writing each descriptor a `<( )` gave it, by number, and `argv`
+   * the pids whose output became its arguments.
    */
   start(init: {
     sessionId: string
@@ -139,6 +141,9 @@ export class ProcessTable {
     oneCommand?: boolean
     background?: boolean
     programIgnores?: ReadonlySet<number>
+    stdin?: number | null
+    fd?: Readonly<Record<number, number>>
+    argv?: readonly number[]
   }): ProcessHandle {
     if (this.stopped) throw new Error('process table is stopped')
     const limit = underCeiling(init.limit ?? null, this.ceiling)
@@ -178,6 +183,9 @@ export class ProcessTable {
         error: null,
         ancestors: ancestry,
         machineInstance: this.machineInstance?.(init.machine ?? this.machine) ?? null,
+        stdin: init.stdin ?? null,
+        fd: init.fd ?? {},
+        argv: init.argv ?? [],
       },
       init.run,
       () => {

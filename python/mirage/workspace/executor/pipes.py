@@ -163,6 +163,8 @@ async def handle_pipe(
         token = set_current_evaluation(child_evaluation)
         output = pipes[i]
         input_stream = stdin if i == 0 else pipes[i - 1].stream()
+        if i > 0:
+            child_evaluation.frame.stdin = input_stream
         io = IOResult()
         child_exec = ExecutionNode()
         stage_stack = (call_stack or CallStack()).fork(
@@ -253,6 +255,7 @@ async def handle_pipe(
             if processes is None:
                 tasks.append(asyncio.create_task(run_segment(i, cmd)))
                 continue
+            writer = stages[i - 1] if i > 0 else None
             process = start_shell(
                 processes,
                 session,
@@ -260,6 +263,7 @@ async def handle_pipe(
                 partial(run_segment, i, cmd),
                 session.process_id,
                 one_command=one_program(cmd, session),
+                stdin=None if writer is None else writer.record.pid,
             )
             children[i].session.process_id = process.record.pid
             stages[i] = process

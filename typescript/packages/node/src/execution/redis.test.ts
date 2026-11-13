@@ -272,6 +272,9 @@ describe.skipIf(REDIS_URL === '')('RedisExecutionStore', () => {
       error: null,
       ancestors: [1, 3],
       machineInstance: 'tools-1',
+      stdin: 2,
+      fd: { 63: 4 },
+      argv: [5],
     }
     a.note(lineOf(1))
     a.note(lineOf(1, 2))

@@ -492,4 +492,85 @@ describe('routing on machines', () => {
       await ws.close()
     }
   })
+
+  // A stage's one program records its own words, expanded, as bash's exec
+  // does, so each pass of a loop names what it ran.
+  it("records each loop pass's program with its expanded words", async () => {
+    const ws = workspace()
+    try {
+      const said = await ws.shell('for i in 1 2; do hostname -s$i | cat; done')
+      expect(DEC.decode(said.stdout)).toBe('a\na\n')
+      const commands = (await ws.processes()).map((p) => p.command)
+      expect(commands.filter((c) => c.startsWith('hostname'))).toEqual([
+        'hostname -s1',
+        'hostname -s2',
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // What a program reads from another names the process writing it: the stage
+  // before it as its stdin, while it reads its stage's pipe, a `<( )` by the
+  // descriptor it got, a `$( )` as its arguments.
+  it('names the processes a program reads from', async () => {
+    const ws = workspace()
+    try {
+      const read = new Map<string, unknown>()
+      for (const [line, reader] of [
+        ['hostname | hostname', 'hostname'],
+        ['hostname <(hostname); true', 'hostname /dev/fd/63'],
+        ['hostname "$(hostname)"; true', 'hostname a'],
+        ['f() { hostname "$1"; }; f <(hostname); true', 'hostname /dev/fd/63'],
+        ['hostname | { hostname; true; }', 'hostname'],
+        ['hostname | { hostname < /dev/null; true; }', 'hostname'],
+      ] as const) {
+        expect(DEC.decode((await ws.shell(line)).stdout)).toBe('a\n')
+        const ran = new Map((await ws.processes()).map((p) => [p.id.pid, p]))
+        const program = [...ran.values()]
+          .filter((p) => p.command === reader && p.runtime !== null)
+          .at(-1)
+        const named = (pid: number) => ran.get(pid)?.command
+        read.set(line, [
+          program?.stdin == null ? null : named(program.stdin),
+          Object.fromEntries(
+            Object.entries(program?.fd ?? {}).map(([fd, pid]) => [fd, named(pid)]),
+          ),
+          (program?.argv ?? []).map(named),
+        ])
+      }
+      expect(Object.fromEntries(read)).toEqual({
+        'hostname | hostname': ['hostname', {}, []],
+        'hostname <(hostname); true': [null, { 63: 'hostname' }, []],
+        'hostname "$(hostname)"; true': [null, {}, ['hostname']],
+        'f() { hostname "$1"; }; f <(hostname); true': [null, { 63: 'hostname' }, []],
+        'hostname | { hostname; true; }': ['hostname', {}, []],
+        'hostname | { hostname < /dev/null; true; }': [null, {}, []],
+      })
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // A forked shell's last program runs in the shell's place, as bash execs it
+  // there: a subshell's and a substitution's leave no shell between it and the
+  // line, a line's own stays its session's `$$`.
+  it("runs a forked shell's last program as the shell", async () => {
+    const ws = workspace()
+    try {
+      for (const line of ['(true; hostname); true', 'x=$(hostname); echo $x'])
+        expect(DEC.decode((await ws.shell(line)).stdout)).toBe('a\n')
+      const shell = Number(DEC.decode((await ws.shell('echo $$')).stdout))
+      const programs = (await ws.processes()).filter((p) => p.runtime !== null && p.line !== null)
+      expect(programs.map((p) => [p.command, p.parent])).toEqual([
+        ['hostname', shell],
+        ['hostname', shell],
+      ])
+      await ws.shell('hostname')
+      const line = (await ws.processes()).filter((p) => p.command === 'hostname').at(-1)
+      expect(line?.parent).toBe(shell)
+    } finally {
+      await ws.close()
+    }
+  })
 })

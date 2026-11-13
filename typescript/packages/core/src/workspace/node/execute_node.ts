@@ -814,6 +814,8 @@ export async function executeNode(
   const processSubs = new ProcessSubScope(context, deps.registry, deps.sink, deps.signal)
   const previous = context.frame.processSub
   context.frame.processSub = processSubs.open
+  const writers = context.frame.writers
+  context.frame.writers = writers.filter(([path]) => path !== null)
   try {
     if (!ownDiagnostics) {
       const [stdout, io, execNode] = await executeNodeBody(
@@ -892,6 +894,7 @@ export async function executeNode(
     throw err
   } finally {
     context.frame.processSub = previous
+    context.frame.writers = writers
   }
 }
 
