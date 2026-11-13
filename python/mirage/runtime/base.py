@@ -29,6 +29,7 @@ from mirage.context.session_context import (
     voice_name,
 )
 from mirage.execution.types import MachineName
+from mirage.io.async_line_iterator import SharedInput
 from mirage.io.gateway import live_egress
 from mirage.runtime.binding import WorkspaceBinding, refused_run
 from mirage.runtime.config import RuntimeConfig
@@ -288,7 +289,8 @@ class Runtime(ABC, Generic[E]):
         of the running one, in its group, on this runtime's machine. Its
         record names the processes its command's substitutions started,
         each ``<( )`` by its descriptor (``fd``), each ``$( )`` as part
-        of its arguments (``argv``). A
+        of its arguments (``argv``), and the stage writing its pipe
+        while it reads its stage's (``stdin``). A
         run the workspace reaches stays in its shell's process, as does
         one outside a process. A child stopped with its shell gets the
         signal the shell was stopped with, or the interrupt it took; one
@@ -327,10 +329,21 @@ class Runtime(ABC, Generic[E]):
         else:
             head = ctx.spec.name if ctx.spec is not None else self.name
             command = shell_join([head, *ctx.argv])
-        writers = (
-            caller.evaluation.frame.writers
-            if caller.evaluation is not None
-            else []
+        frame = (
+            caller.evaluation.frame if caller.evaluation is not None else None
+        )
+        writers = frame.writers if frame is not None else []
+        given = (
+            ctx.stdin.lines.input
+            if isinstance(ctx.stdin, SharedInput)
+            else ctx.stdin
+        )
+        stdin = (
+            shell.record.stdin
+            if frame is not None
+            and frame.stdin is not None
+            and given is frame.stdin
+            else None
         )
         fd = {
             int(path.rsplit("/", 1)[1]): pid
@@ -371,6 +384,7 @@ class Runtime(ABC, Generic[E]):
                 limit=session.processes.max,
                 machine=machine,
                 runtime=self.name,
+                stdin=stdin,
                 fd=fd,
                 argv=argv,
             )

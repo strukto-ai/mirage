@@ -13,11 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Context } from '../../commands/config.ts'
+import { currentCaller } from '../../context/session_context.ts'
 import type { MachineTable } from '../../execution/machine/table.ts'
 import type { MachineName } from '../../execution/types.ts'
 import { FIFO_PREFIX, RUN_DRAIN_SECONDS } from '../../machine/constants.ts'
 import type { MachineHandle } from '../../machine/handle.ts'
-import { FileType, type PathSpec } from '../../types.ts'
+import type { PathSpec } from '../../types.ts'
 import { shellQuote } from '../../utils/quote.ts'
 import type { Files } from '../../workspace/files.ts'
 import { Runtime } from '../base.ts'
@@ -32,21 +33,6 @@ import {
 import type { OutputFn, RunResult } from '../types.ts'
 
 /**
- * Whether a program's word names a live process substitution, the `/dev/fd/N`
- * the shell handed it. Mirrors Python's `_substitution`.
- */
-async function substitution(files: Files, text: string): Promise<boolean> {
-  if (!text.startsWith('/dev/fd/')) return false
-  try {
-    return (await files.stat(text)).type === FileType.FIFO
-  } catch (err) {
-    if ((err as { code?: string } | null)?.code !== 'ENOENT') throw err
-    console.debug(`${text}: not found`, err)
-    return false
-  }
-}
-
-/**
  * Stream a process substitution into the named pipe on the machine that
  * stands for it, while the pipe is still there. Mirrors Python's `_feed`.
  */
@@ -56,6 +42,7 @@ async function feed(
   text: string,
   fifo: string,
   env: Record<string, string>,
+  signal: AbortSignal,
 ): Promise<RunResult> {
   const quoted = shellQuote(fifo)
   return handle.execLine(
@@ -63,7 +50,42 @@ async function feed(
     await files.read(text, { stream: true }),
     env,
     '/',
+    signal,
   )
+}
+
+/**
+ * Remove the named pipes a run's substitutions fed, then stop their feeds,
+ * each given `RUN_DRAIN_SECONDS` to end, whatever the machine answers.
+ * Mirrors Python's `_unfeed`.
+ */
+async function unfeed(
+  handle: MachineHandle,
+  feeds: (readonly [string, Promise<void>])[],
+  env: Record<string, string>,
+  stop: AbortController,
+): Promise<void> {
+  try {
+    for (const [fifo] of feeds) {
+      const quoted = shellQuote(fifo)
+      try {
+        await handle.execLine(`exec 3<>${quoted}; exec 3>&-; rm -f ${quoted}`, null, env, '/')
+      } catch (err) {
+        console.debug(`${fifo}: not removed`, err)
+      }
+    }
+    if (feeds.length > 0) {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      await Promise.race([
+        Promise.all(feeds.map(([, fed]) => fed)),
+        new Promise<void>((resolve) => (timer = setTimeout(resolve, RUN_DRAIN_SECONDS * 1000))),
+      ])
+      clearTimeout(timer)
+    }
+  } finally {
+    stop.abort()
+    await Promise.all(feeds.map(([, fed]) => fed))
+  }
 }
 
 /** A machine entry's options: a runtime's, and the machine a run goes to by default. */
@@ -194,7 +216,7 @@ export class RemoteRuntime
   }
 
   /**
-   * Run one program on the machine. A process substitution it names by path
+   * Run one program on the machine. A process substitution it reads by path
    * (`node read.js <(python3 gen.py)`) becomes a named pipe on that machine,
    * which Mirage feeds while the program runs, as bash hands a program a pipe
    * it shares. Mirrors Python's `run_process`.
@@ -209,13 +231,19 @@ export class RemoteRuntime
   ): Promise<RunResult> {
     const handle = this.handle(ctx)
     const env = { ...handle.config.env }
+    const { evaluation } = currentCaller()
+    const reads = new Set(
+      (evaluation?.frame.writers ?? []).flatMap(([path]) => (path === null ? [] : [path])),
+    )
     const argv = [...texts]
-    const feeds: [string, Promise<void>][] = []
+    const feeds: (readonly [string, Promise<void>])[] = []
+    const stop = new AbortController()
     try {
       for (const [at, text] of texts.entries()) {
-        if (ctx.vfs == null || !(await substitution(ctx.vfs, text))) continue
+        if (ctx.vfs == null || !reads.has(text)) continue
+        await handle.ensureConnected(ctx.signal)
         const fifo = `${FIFO_PREFIX}${crypto.randomUUID().replaceAll('-', '')}`
-        const made = await handle.execLine(`mkfifo ${shellQuote(fifo)}`, null, env, '/')
+        const made = await handle.execLine(`mkfifo -m 600 ${shellQuote(fifo)}`, null, env, '/')
         if (made.exitCode !== 0) {
           console.debug(`${fifo}: mkfifo exited ${String(made.exitCode)}`)
           continue
@@ -223,26 +251,17 @@ export class RemoteRuntime
         argv[at] = fifo
         feeds.push([
           fifo,
-          feed(handle, ctx.vfs, text, fifo, env).then(
+          feed(handle, ctx.vfs, text, fifo, env, stop.signal).then(
             () => undefined,
             (err: unknown) => {
-              console.debug(`${fifo}: feed failed`, err)
+              if (!stop.signal.aborted) console.debug(`${fifo}: feed failed`, err)
             },
           ),
         ])
       }
       return await handle.run(argv, ctx, this.binding, output ?? null, errors ?? null)
     } finally {
-      for (const [fifo, fed] of feeds) {
-        const quoted = shellQuote(fifo)
-        await handle.execLine(`exec 3<>${quoted}; exec 3>&-; rm -f ${quoted}`, null, env, '/')
-        let timer: ReturnType<typeof setTimeout> | undefined
-        await Promise.race([
-          fed,
-          new Promise<void>((resolve) => (timer = setTimeout(resolve, RUN_DRAIN_SECONDS * 1000))),
-        ])
-        clearTimeout(timer)
-      }
+      await unfeed(handle, feeds, env, stop)
     }
   }
 

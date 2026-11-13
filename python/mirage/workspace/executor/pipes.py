@@ -163,6 +163,8 @@ async def handle_pipe(
         token = set_current_evaluation(child_evaluation)
         output = pipes[i]
         input_stream = stdin if i == 0 else pipes[i - 1].stream()
+        if i > 0:
+            child_evaluation.frame.stdin = input_stream
         io = IOResult()
         child_exec = ExecutionNode()
         stage_stack = (call_stack or CallStack()).fork(

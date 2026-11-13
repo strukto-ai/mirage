@@ -52,7 +52,7 @@ export class MicrosandboxMachine extends ProgramMachine<MicrosandboxConfig> {
   }
 
   /** Skip the connect-once latch: every exec probes the guest. */
-  protected override ensureConnected(signal?: AbortSignal): Promise<void> {
+  override ensureConnected(signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted()
     return Promise.resolve()
   }

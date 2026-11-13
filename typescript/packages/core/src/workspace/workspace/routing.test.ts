@@ -511,8 +511,8 @@ describe('routing on machines', () => {
   })
 
   // What a program reads from another names the process writing it: the stage
-  // before it as its stdin, a `<( )` by the descriptor it got, a `$( )` as its
-  // arguments.
+  // before it as its stdin, while it reads its stage's pipe, a `<( )` by the
+  // descriptor it got, a `$( )` as its arguments.
   it('names the processes a program reads from', async () => {
     const ws = workspace()
     try {
@@ -521,6 +521,8 @@ describe('routing on machines', () => {
         ['hostname | hostname', 'hostname'],
         ['hostname <(hostname); true', 'hostname /dev/fd/63'],
         ['hostname "$(hostname)"; true', 'hostname a'],
+        ['hostname | { hostname; true; }', 'hostname'],
+        ['hostname | { hostname < /dev/null; true; }', 'hostname'],
       ] as const) {
         expect(DEC.decode((await ws.shell(line)).stdout)).toBe('a\n')
         const ran = new Map((await ws.processes()).map((p) => [p.id.pid, p]))
@@ -540,6 +542,8 @@ describe('routing on machines', () => {
         'hostname | hostname': ['hostname', {}, []],
         'hostname <(hostname); true': [null, { 63: 'hostname' }, []],
         'hostname "$(hostname)"; true': [null, {}, ['hostname']],
+        'hostname | { hostname; true; }': ['hostname', {}, []],
+        'hostname | { hostname < /dev/null; true; }': [null, {}, []],
       })
     } finally {
       await ws.close()

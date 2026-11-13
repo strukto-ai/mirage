@@ -45,7 +45,7 @@ Mirage also sends each line to your tracing backend as a trace.
 | Default | On | Off until your process sets up an OpenTelemetry SDK |
 | How to read them | `history`, `/.bash_history`, `mirage workspace logs`, the logs API and `ws.history()` | Your tracing tool |
 | Output kept | The first 4096 characters of stdout and stderr | The first 16 KiB of each by default |
-| Mount calls | Every recorded call | At most 1000 a line by default |
+| Mount calls | Every recorded call | Only a call made through `ws.vfs` or a FUSE mount |
 | Jobs and processes | Only the line that started them | A `job` or `process` span for each |
 | Several machines | Each machine keeps its own | All machines send to one backend |
 

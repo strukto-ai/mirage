@@ -684,7 +684,8 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     return library === null ? {} : faketimeEnv(library, env)
   }
 
-  protected async ensureConnected(signal?: AbortSignal): Promise<void> {
+  /** Connect once; after a disconnect the next call connects again. */
+  async ensureConnected(signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted()
     this.connecting ??= this.connect().catch((err: unknown) => {
       this.connecting = null

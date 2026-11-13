@@ -41,6 +41,9 @@ export class ExecutionFrame {
   // `/dev/fd` path a `<( )` gave it, null for a `$( )`, which its program
   // reads.
   writers: (readonly [string | null, number])[] = []
+  // The pipe a pipeline stage reads, which a program the stage starts reads
+  // too while its standard input is still that pipe.
+  stdin: ByteSource | null = null
 
   fork(): ExecutionFrame {
     const child = new ExecutionFrame()

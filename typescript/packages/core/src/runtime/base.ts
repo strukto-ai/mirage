@@ -22,6 +22,7 @@ import {
 import { isAborting } from '../errors/fs.ts'
 import type { ProcessHandle } from '../execution/process/handle.ts'
 import type { MachineName } from '../execution/types.ts'
+import { SharedInput } from '../io/async_line_iterator.ts'
 import { liveEgress } from '../io/gateway.ts'
 import { FORK_FAILED, FORK_FAILED_STATUS } from '../shell/constants.ts'
 import { endsLine } from '../shell/helpers.ts'
@@ -237,8 +238,9 @@ export abstract class Runtime<E = unknown> {
    * (`endsLine`), as bash execs it in the shell's place, else a child of the
    * running one, in its group, on this runtime's machine. Its record names
    * the processes its command's substitutions started, each `<( )` by its
-   * descriptor (`fd`), each `$( )` as part of its arguments (`argv`). A run
-   * the workspace reaches stays
+   * descriptor (`fd`), each `$( )` as part of its arguments (`argv`), and the
+   * stage writing its pipe while it reads its stage's (`stdin`). A run the
+   * workspace reaches stays
    * in its shell's process, as does one outside a process. A child stopped
    * with its shell gets the signal the shell was stopped with, or the
    * interrupt it took; one stopped alone answers 128 plus its signal, and
@@ -273,6 +275,11 @@ export abstract class Runtime<E = unknown> {
     for (const [path, pid] of writers)
       if (path !== null) fd[Number(path.slice(path.lastIndexOf('/') + 1))] = pid
     const argv = writers.filter(([path]) => path === null).map(([, pid]) => pid)
+    const given = ctx.stdin instanceof SharedInput ? ctx.stdin.lines.input : ctx.stdin
+    const stdin =
+      evaluation?.frame.stdin != null && given === evaluation.frame.stdin
+        ? (shell.record.stdin ?? null)
+        : null
     const node = session.lineNode
     // A line's own process is its session's `$$`, which each of its lines
     // takes in turn, so it stays the shell; and only the shell's own input
@@ -310,6 +317,7 @@ export abstract class Runtime<E = unknown> {
         limit: session.processes.max,
         machine,
         runtime: this.name,
+        stdin,
         fd,
         argv,
       })

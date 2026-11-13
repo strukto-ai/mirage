@@ -494,8 +494,8 @@ async def test_a_loop_records_each_programs_expanded_words():
 
 
 # What a program reads from another names the process writing it: the
-# stage before it as its stdin, a `<( )` by the descriptor it got, a
-# `$( )` as its arguments.
+# stage before it as its stdin, while it reads its stage's pipe, a `<( )`
+# by the descriptor it got, a `$( )` as its arguments.
 @pytest.mark.asyncio
 async def test_a_program_names_the_processes_it_reads_from():
     ws = _workspace()
@@ -505,6 +505,8 @@ async def test_a_program_names_the_processes_it_reads_from():
             ("hostname | hostname", "hostname"),
             ("hostname <(hostname); true", "hostname /dev/fd/63"),
             ('hostname "$(hostname)"; true', "hostname a"),
+            ("hostname | { hostname; true; }", "hostname"),
+            ("hostname | { hostname < /dev/null; true; }", "hostname"),
         ):
             assert (await ws.shell(line)).stdout == b"a\n"
             ran = {p.pid: p for p in await ws.processes()}
@@ -522,6 +524,8 @@ async def test_a_program_names_the_processes_it_reads_from():
             "hostname | hostname": ("hostname", {}, []),
             "hostname <(hostname); true": (None, {63: "hostname"}, []),
             'hostname "$(hostname)"; true': (None, {}, ["hostname"]),
+            "hostname | { hostname; true; }": ("hostname", {}, []),
+            "hostname | { hostname < /dev/null; true; }": (None, {}, []),
         }
     finally:
         await ws.close()

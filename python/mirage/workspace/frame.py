@@ -39,6 +39,8 @@ class ExecutionFrame:
     (``substitution``). ``writers`` are the processes the running
     command's substitutions started, each with the ``/dev/fd`` path a
     ``<( )`` gave it, None for a ``$( )``, which its program reads.
+    ``stdin`` is the pipe a pipeline stage reads, which a program the
+    stage starts reads too while its standard input is still that pipe.
     """
 
     diagnostics: list[str | bytes] = field(default_factory=list)
@@ -54,6 +56,7 @@ class ExecutionFrame:
     shell: ProcessHandle | None = None
     substitution: bool = False
     writers: list[tuple[str | None, int]] = field(default_factory=list)
+    stdin: ByteSource | None = None
 
     def fork(self) -> ExecutionFrame:
         """A child evaluation's frame, which starts empty but for the

@@ -106,31 +106,56 @@ async def test_version_commands_reach_the_remote_environment(line):
 
 
 class FifoBox(RecordingMachine):
+    async def connect(self) -> None:
+        await super().connect()
+        self.execs.append(("connect", None, "/"))
+
     async def exec_line(self, line, stdin, env, cwd):
         data = None if stdin is None else await materialize(stdin)
+        if "rm -f" in line and self.lost:
+            raise ConnectionError("gone")
         return await super().exec_line(line, data, env, cwd)
 
+    lost = False
 
-# A process substitution a program names by path becomes a named pipe on
-# the program's machine, fed what the substitution writes, then removed.
+
+# A process substitution a program reads by path becomes a named pipe on
+# the program's machine, only its owner's, made once the machine is
+# reached, fed what the substitution writes, then removed; one it writes
+# to stays its word.
 @pytest.mark.asyncio
 async def test_a_substitution_a_program_names_is_a_pipe_on_its_machine():
     box = FifoBox(captures=("node",))
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
     try:
-        io = await ws.shell("node read.js <(echo hi) /dev/fd/9")
+        io = await ws.shell("node read.js <(echo hi) /dev/fd/9 >(cat)")
         assert io.exit_code == 0
     finally:
         await ws.close()
     lines = [line for line, _, _ in box.execs]
     [made] = [line for line in lines if line.startswith("mkfifo ")]
-    fifo = made.removeprefix("mkfifo ")
+    fifo = made.removeprefix("mkfifo -m 600 ")
     assert fifo.startswith("/tmp/.mirage-fd-")
-    ran = lines.index(f"node read.js {fifo} /dev/fd/9")
-    assert lines.index(made) < ran
+    ran = lines.index(f"node read.js {fifo} /dev/fd/9 /dev/fd/62")
+    assert lines.index("connect") < lines.index(made) < ran
     fed = [(line, data) for line, data, _ in box.execs if "exec cat" in line]
     assert fed == [(f"[ -p {fifo} ] && exec cat > {fifo}", b"hi\n")]
     assert lines.index(f"exec 3<>{fifo}; exec 3>&-; rm -f {fifo}") > ran
+
+
+# A pipe that cannot be removed, the machine gone, leaves the program's
+# output as it ran.
+@pytest.mark.asyncio
+async def test_a_pipe_left_behind_keeps_the_programs_output():
+    box = FifoBox(captures=("node",))
+    box.lost = True
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
+    try:
+        io = await ws.shell("node read.js <(echo hi)")
+        assert io.exit_code == 0
+        assert (await materialize(io.stdout)).startswith(b"ran:node read.js ")
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
