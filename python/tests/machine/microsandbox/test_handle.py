@@ -449,6 +449,20 @@ async def test_pause_pauses_a_sandbox_a_resume_under_way_at_close_reached(
 
 
 @pytest.mark.asyncio
+async def test_close_on_another_loop_leaves_this_loops_probes_running(
+    monkeypatch,
+):
+    msb = _msb(monkeypatch, "Paused")
+    msb.resumed = asyncio.Event()
+    machine = MicrosandboxMachine("box", config={"sandbox": "sb"})
+    connecting = asyncio.ensure_future(machine.connect())
+    await msb.resuming.wait()
+    await asyncio.to_thread(asyncio.run, machine.close())
+    msb.resumed.set()
+    await connecting
+
+
+@pytest.mark.asyncio
 async def test_close_never_resumes_a_sandbox_paused_meanwhile(monkeypatch):
     msb = _msb(monkeypatch)
     machine = MicrosandboxMachine("box", config={"sandbox": "sb"})

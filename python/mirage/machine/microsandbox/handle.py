@@ -82,7 +82,13 @@ class MicrosandboxMachine(ProgramMachine):
         probes never resume a sandbox paused meanwhile."""
         self._closing = True
         try:
-            await asyncio.gather(*self._probes, return_exceptions=True)
+            # A probe on another loop (``with ws:``, closing on the sync
+            # bridge) cannot be awaited here, and its loop is blocked anyway.
+            loop = asyncio.get_running_loop()
+            await asyncio.gather(
+                *(p for p in self._probes if p.get_loop() is loop),
+                return_exceptions=True,
+            )
             await super().close()
         finally:
             self._closing = False
