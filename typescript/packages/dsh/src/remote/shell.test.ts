@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { ShellExecSpec, ShellExecutor, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import { AuthMode, buildApp } from '@struktoai/mirage-server'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { MirageService } from '../service.ts'
 import type { MirageShellConfig } from '../shell.ts'
 import { MirageShellExecutor } from '../shell.ts'
@@ -155,6 +155,42 @@ describe('MirageShellExecutor on a remote workspace', () => {
     expect(quick.stdout.text).toBe('2\n')
     busy.kill()
     await busy.done
+  })
+
+  it('unsets in a fork beside a busy session the facts its snapshot drops', async () => {
+    const shell = await remoteShell(await workspace(), { sessionId: 'agent' })
+    const busy = await shell.execute(
+      shell.resolve({ command: 'sleep 5', dshEnv: { DSH_A: '1', DSH_B: 'old' } }),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    const quick = await run(shell, {
+      command: 'echo "${DSH_B-gone}" $DSH_A',
+      dshEnv: { DSH_A: '2' },
+      timeoutMs: 3000,
+    })
+    expect(quick.stdout.text).toBe('gone 2\n')
+    busy.kill()
+    await busy.done
+  })
+
+  it('forks with its snapshot when the busy line ends between preparing and launching', async () => {
+    const shell = await remoteShell(await workspace(), { sessionId: 'agent' })
+    const busy = await shell.execute(shell.resolve({ command: 'sleep 5', dshEnv: { DSH_N: '1' } }))
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    const target = shell as unknown as { prepare(spec: ShellExecSpec): Promise<unknown> }
+    const prepare = target.prepare.bind(shell)
+    vi.spyOn(target, 'prepare').mockImplementation(async (spec) => {
+      const prepared = await prepare(spec)
+      busy.kill()
+      await busy.done
+      return prepared
+    })
+    const quick = await run(shell, {
+      command: 'echo $DSH_N',
+      dshEnv: { DSH_N: '2' },
+      timeoutMs: 3000,
+    })
+    expect(quick.stdout.text).toBe('2\n')
   })
 
   it('adopts a session another client created after the listing', async () => {

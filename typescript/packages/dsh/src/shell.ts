@@ -185,6 +185,12 @@ interface Prepared {
   sessionId: string | undefined
   bound: boolean
   workdir: string
+  /**
+   * False when the call carries a managed snapshot its bound remote session
+   * did not take, because a line was running there; the command then runs on
+   * a fork that carries the snapshot itself.
+   */
+  seeded: boolean
 }
 
 /**
@@ -228,13 +234,22 @@ function shellWord(value: string): string {
  *
  * @param command the line as the caller wrote it.
  * @param env the variables for this line.
+ * @param unset the variables this line must not inherit.
  * @returns the line with its exports ahead of it.
  */
-function withEnv(command: string, env: Record<string, string> | undefined): string {
+function withEnv(
+  command: string,
+  env: Record<string, string> | undefined,
+  unset: readonly string[] = [],
+): string {
   const entries = Object.entries(env ?? {})
-  if (entries.length === 0) return command
-  const exports = entries.map(([key, value]) => `${shellName(key)}=${shellWord(value)}`).join(' ')
-  return `export ${exports}; ${command}`
+  const head: string[] = []
+  if (unset.length > 0) head.push(`unset ${unset.map(shellName).join(' ')}; `)
+  if (entries.length > 0) {
+    const exports = entries.map(([key, value]) => `${shellName(key)}=${shellWord(value)}`)
+    head.push(`export ${exports.join(' ')}; `)
+  }
+  return `${head.join('')}${command}`
 }
 
 const SHELL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u
@@ -976,6 +991,8 @@ export class MirageShellExecutor extends ShellExecutor {
     const bound = this.sessionId !== undefined
     const workdir = await this.worldWorkdir(spec)
     const managed = spec.dshEnv as Record<string, string> | undefined
+    // A newer snapshot seeded first counts as seeded, as it does locally.
+    let seeded = true
     if (bound && sessionId !== undefined) {
       const running = this.seeding.get(sessionId) ?? Promise.resolve()
       if (managed === undefined) {
@@ -987,7 +1004,12 @@ export class MirageShellExecutor extends ShellExecutor {
             // A line of this process still runs in the session, so this call
             // runs on a fork beside it and carries the snapshot itself: an
             // export sent to the session now would queue behind that line.
-            if ((runningIn(remote).get(sessionId) ?? 0) > 0) return
+            // The fork is taken even if that line ends before this one starts,
+            // since the session still holds the old snapshot.
+            if ((runningIn(remote).get(sessionId) ?? 0) > 0) {
+              seeded = false
+              return
+            }
             await this.applyRemoteManagedEnv(remote, sessionId, managed)
           } else if (ws !== null) await this.applyManagedEnv(ws, sessionId, managed)
           this.seeded.set(sessionId, ticket)
@@ -999,7 +1021,7 @@ export class MirageShellExecutor extends ShellExecutor {
         await seed
       }
     }
-    return { ws, sessionId, bound, workdir }
+    return { ws, sessionId, bound, workdir, seeded }
   }
 
   async execute(spec: ShellExecSpec): Promise<ShellExecution> {
@@ -1128,8 +1150,9 @@ export class MirageShellExecutor extends ShellExecutor {
     signal: AbortSignal,
     sink: JobConsole,
   ): Promise<ExecuteResult> {
-    const { sessionId, bound, workdir } = prepared
-    const managed = (spec.dshEnv as Record<string, string> | undefined) ?? {}
+    const { sessionId, bound, workdir, seeded } = prepared
+    const snapshot = spec.dshEnv as Record<string, string> | undefined
+    const managed = snapshot ?? {}
     const perCall = { ...(spec.env ?? {}) }
     const call = {
       signal,
@@ -1152,10 +1175,13 @@ export class MirageShellExecutor extends ShellExecutor {
     const ours = running.get(sessionId) ?? 0
     // The managed snapshot is seeded into the session and so never decides a
     // fork, or every call would fork; a fork carries it, since a busy session
-    // was not seeded for this call.
-    if (Object.keys(perCall).length > 0 || ours > 0) {
+    // was not seeded for this call. The keys the session still holds from the
+    // last snapshot it took, and this one drops, are unset in the fork.
+    if (Object.keys(perCall).length > 0 || ours > 0 || !seeded) {
       const cwd = workdir !== '' ? workdir : (await remote.session(sessionId, signal)).cwd
-      const command = withEnv(spec.command, { ...perCall, ...managed })
+      const held = snapshot !== undefined ? (this.remoteManaged.get(sessionId) ?? []) : []
+      const dropped = [...held].filter((key) => !(key in managed))
+      const command = withEnv(spec.command, { ...perCall, ...managed }, dropped)
       return remote.shell(command, { ...call, sessionId, cwd })
     }
     running.set(sessionId, ours + 1)
