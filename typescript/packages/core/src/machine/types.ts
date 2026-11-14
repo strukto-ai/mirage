@@ -32,6 +32,9 @@ export interface RunStatus {
 
 export type MountType = 'ssh' | 'fuse' | 'both'
 
+/** What a provider does to its machine when the workspace pauses. */
+export type PauseAction = 'pause'
+
 /** A command a machine runs with its stdin and stdout held open. */
 export interface MachinePipe {
   /** What the command writes. */

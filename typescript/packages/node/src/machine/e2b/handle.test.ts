@@ -20,6 +20,7 @@ import { Workspace } from '../../workspace.ts'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Limit, MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { E2BMachine } from '@struktoai/mirage-core/machine/e2b/handle'
+import type { E2BConfig } from '@struktoai/mirage-core/machine/e2b/config'
 import { ProcessTable } from '@struktoai/mirage-core/execution/process/table'
 import { runAsProcess } from '@struktoai/mirage-core/context/session_context'
 import type { E2bSdk } from '@struktoai/mirage-core/machine/e2b/sdk'
@@ -237,6 +238,8 @@ class FakeMachine {
   static connected: [string, Record<string, unknown>][] = []
   static refusal: Error | null = null
   static last: FakeMachine
+  static paused: [string, Record<string, unknown>][] = []
+  static pauseRefusal: Error | null = null
   readonly commands = new FakeCommands()
   readonly pty = new FakePty()
   static async connect(sandboxId: string, params: Record<string, unknown>): Promise<FakeMachine> {
@@ -245,6 +248,12 @@ class FakeMachine {
     if (FakeMachine.refusal) throw FakeMachine.refusal
     FakeMachine.last = new FakeMachine()
     return FakeMachine.last
+  }
+  static async pause(sandboxId: string, params: Record<string, unknown>): Promise<boolean> {
+    FakeMachine.paused.push([sandboxId, params])
+    await Promise.resolve()
+    if (FakeMachine.pauseRefusal) throw FakeMachine.pauseRefusal
+    return true
   }
 }
 
@@ -269,6 +278,8 @@ beforeEach(() => {
   FakeMachine.connected = []
   FakeMachine.refusal = null
   FakeMachine.last = new FakeMachine()
+  FakeMachine.paused = []
+  FakeMachine.pauseRefusal = null
   vi.restoreAllMocks()
 })
 
@@ -1007,4 +1018,69 @@ it('passes on a streamed tail without a newline', async () => {
     0,
     { out: ['a', 'mirage: tail\n'], err: ['b', 'mirage: etail\n'] },
   ])
+})
+
+async function reached(config: Partial<E2BConfig> = {}): Promise<FakedE2BMachine> {
+  const machine = new FakedE2BMachine('box', { sandboxId: 'sb-live', apiKey: 'k-123', ...config })
+  await machine.connect()
+  await machine.close()
+  return machine
+}
+
+/** Whether an E2B machine built with `config` asks the workspace to pause it. */
+function asksToPause(config: Partial<E2BConfig>): boolean {
+  return new E2BMachine('box', { sandboxId: 'sb', ...config }).configAsksToPause()
+}
+
+describe('E2BMachine pause', () => {
+  it('pauses the sandbox it reached whatever onPause says', async () => {
+    await (await reached()).pause()
+    expect(FakeMachine.paused).toEqual([['sb-live', { apiKey: 'k-123' }]])
+  })
+  it('asks the workspace to pause it only with onPause: pause', () => {
+    expect([asksToPause({ onPause: 'pause' }), asksToPause({})]).toEqual([true, false])
+  })
+  it('leaves alone a sandbox it never reached', async () => {
+    const machine = new FakedE2BMachine('box', { sandboxId: 'sb-live', onPause: 'pause' })
+    await machine.pause()
+    expect(FakeMachine.paused).toEqual([])
+  })
+  it('leaves alone a sandbox its connect never reached', async () => {
+    const machine = new FakedE2BMachine('box', { sandboxId: 'sb-live', onPause: 'pause' })
+    FakeMachine.refusal = new Error('refused')
+    await expect(machine.connect()).rejects.toThrow('refused')
+    await machine.pause()
+    expect(FakeMachine.paused).toEqual([])
+  })
+  it('leaves alone a sandbox only an earlier workspace reached', async () => {
+    const machine = await reached({ onPause: 'pause' })
+    await machine.close()
+    await machine.pause()
+    expect(FakeMachine.paused).toEqual([])
+  })
+  it('pauses a sandbox a connect still under way at close reached', async () => {
+    const machine = new FakedE2BMachine('box', { sandboxId: 'sb-live', onPause: 'pause' })
+    const connecting = (
+      machine as unknown as { ensureConnected(): Promise<void> }
+    ).ensureConnected()
+    await machine.close()
+    await connecting
+    await machine.pause()
+    expect(FakeMachine.paused).toEqual([['sb-live', {}]])
+  })
+  it('takes no onPause other than pause', () => {
+    expect(() => new FakedE2BMachine('box', { sandboxId: 'sb', onPause: 'stop' as never })).toThrow(
+      'e2b onPause must be one of pause, not "stop"',
+    )
+  })
+  it('counts a sandbox already gone as paused', async () => {
+    const machine = await reached({ onPause: 'pause' })
+    FakeMachine.pauseRefusal = new FakeSandboxNotFoundError('gone')
+    await expect(machine.pause()).resolves.toBeUndefined()
+  })
+  it('raises any other pause failure', async () => {
+    const machine = await reached({ onPause: 'pause' })
+    FakeMachine.pauseRefusal = new Error('node busy')
+    await expect(machine.pause()).rejects.toThrow('node busy')
+  })
 })

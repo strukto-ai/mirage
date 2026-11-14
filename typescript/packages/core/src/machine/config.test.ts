@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { requireId } from './config.ts'
+import { checkOnPause, requireId } from './config.ts'
 import { E2BMachine } from './e2b/handle.ts'
 
 describe('requireId', () => {
@@ -35,6 +35,20 @@ describe('requireId', () => {
   it('guards a provider at construction', () => {
     expect(() => new E2BMachine('box', { sandboxId: ' ' })).toThrow(
       'e2b config needs a nonblank sandboxId',
+    )
+  })
+})
+
+describe('checkOnPause', () => {
+  it('leaves an unset onPause alone', () => {
+    expect(checkOnPause('x', undefined, ['pause'])).toBeNull()
+  })
+  it('takes one of the provider’s own options', () => {
+    expect(checkOnPause('x', 'pause', ['pause'])).toBe('pause')
+  })
+  it('refuses any other value, naming the options', () => {
+    expect(() => checkOnPause('x', 'stop', ['pause'])).toThrow(
+      'x onPause must be one of pause, not "stop"',
     )
   })
 })

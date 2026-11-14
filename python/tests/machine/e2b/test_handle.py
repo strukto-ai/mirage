@@ -201,6 +201,8 @@ class FakeMachine:
     connected = []
     refusal = None
     last = None
+    paused = []
+    pause_refusal = None
 
     def __init__(self):
         self.commands = FakeCommands()
@@ -215,12 +217,22 @@ class FakeMachine:
         cls.last = cls()
         return cls.last
 
+    @classmethod
+    async def pause(cls, sandbox_id, **params):
+        cls.paused.append((sandbox_id, params))
+        await asyncio.sleep(0)
+        if cls.pause_refusal is not None:
+            raise cls.pause_refusal
+        return True
+
 
 @pytest.fixture(autouse=True)
 def fake_sdk(monkeypatch):
     FakeMachine.connected = []
     FakeMachine.refusal = None
     FakeMachine.last = None
+    FakeMachine.paused = []
+    FakeMachine.pause_refusal = None
     monkeypatch.setattr(sdk, "AsyncSandbox", FakeMachine)
 
 
@@ -922,3 +934,90 @@ async def test_a_streamed_tail_without_a_newline_still_comes_out():
         0,
         {"out": [b"a", b"mirage: tail\n"], "err": [b"b", b"mirage: etail\n"]},
     )
+
+
+async def _reached(**config) -> E2BMachine:
+    machine = E2BMachine(
+        "box", config={"sandbox_id": "sb-live", "api_key": "k-123", **config}
+    )
+    await machine.connect()
+    await machine.close()
+    return machine
+
+
+@pytest.mark.asyncio
+async def test_pause_pauses_the_sandbox_it_reached_whatever_on_pause_says():
+    await (await _reached()).pause()
+    assert FakeMachine.paused == [("sb-live", {"api_key": "k-123"})]
+
+
+def _asks(**config) -> bool:
+    return E2BMachine(
+        "box", config={"sandbox_id": "sb", **config}
+    ).config_asks_to_pause()
+
+
+def test_only_on_pause_pause_asks_the_workspace_to_pause_it():
+    assert (_asks(on_pause="pause"), _asks()) == (True, False)
+
+
+@pytest.mark.asyncio
+async def test_pause_leaves_alone_a_sandbox_it_never_reached():
+    machine = E2BMachine(
+        "box", config={"sandbox_id": "sb-live", "on_pause": "pause"}
+    )
+    await machine.pause()
+    assert FakeMachine.paused == []
+
+
+@pytest.mark.asyncio
+async def test_pause_leaves_alone_a_sandbox_its_connect_never_reached():
+    machine = E2BMachine(
+        "box", config={"sandbox_id": "sb-live", "on_pause": "pause"}
+    )
+    FakeMachine.refusal = RuntimeError("refused")
+    with pytest.raises(RuntimeError, match="refused"):
+        await machine.connect()
+    await machine.pause()
+    assert FakeMachine.paused == []
+
+
+@pytest.mark.asyncio
+async def test_pause_leaves_alone_a_sandbox_only_an_earlier_workspace_reached():
+    machine = await _reached(on_pause="pause")
+    await machine.close()
+    await machine.pause()
+    assert FakeMachine.paused == []
+
+
+@pytest.mark.asyncio
+async def test_pause_pauses_a_sandbox_a_connect_under_way_at_close_reached():
+    machine = E2BMachine(
+        "box", config={"sandbox_id": "sb-live", "on_pause": "pause"}
+    )
+    connecting = asyncio.ensure_future(machine.ensure_connected())
+    await asyncio.sleep(0)
+    await machine.close()
+    await connecting
+    await machine.pause()
+    assert FakeMachine.paused == [("sb-live", {})]
+
+
+def test_on_pause_takes_only_pause():
+    with pytest.raises(ValueError, match="e2b on_pause must be one of pause"):
+        E2BMachine("box", config={"sandbox_id": "sb", "on_pause": "stop"})
+
+
+@pytest.mark.asyncio
+async def test_a_sandbox_already_gone_counts_as_paused():
+    machine = await _reached(on_pause="pause")
+    FakeMachine.pause_refusal = sdk.SandboxNotFoundException("gone")
+    await machine.pause()
+
+
+@pytest.mark.asyncio
+async def test_any_other_pause_failure_is_raised():
+    machine = await _reached(on_pause="pause")
+    FakeMachine.pause_refusal = RuntimeError("node busy")
+    with pytest.raises(RuntimeError, match="node busy"):
+        await machine.pause()

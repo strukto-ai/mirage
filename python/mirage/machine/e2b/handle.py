@@ -142,8 +142,10 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
     it. A ``mount_type`` serves the workspace over a PTY, since E2B's
     exec decodes output as text.
 
-    The sandbox is yours: Mirage never extends or kills it. Once the SDK
-    says it is gone, connecting fails with how to replace it, and a line
+    The sandbox is yours: Mirage never kills it, and pauses it only when
+    the workspace pauses and its config says ``on_pause: pause`` or the
+    call names it. Once
+    the SDK says it is gone, connecting fails with how to replace it, and a line
     it cut short loses its connection (129) with the same advice; the
     next line connects again.
 
@@ -157,6 +159,10 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
     config: E2BConfig
 
     _sandbox: Any = None
+    # Set by a connect that reached the sandbox; close hands it to
+    # ``_pausable`` for the pause after.
+    _reached: bool = False
+    _pausable: bool = False
 
     @property
     def instance(self) -> str:
@@ -178,6 +184,40 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
             if (hint := self._gone(exc)) is None:
                 raise
             raise RuntimeError(hint) from exc
+        self._reached = True
+
+    async def close(self) -> None:
+        """Close as any machine does, so the pause after it touches only a
+        sandbox this workspace reached; a connect still under way settles
+        first."""
+        async with self._connect_lock:
+            pass
+        self._pausable = self._reached
+        self._reached = False
+        await super().close()
+
+    def config_asks_to_pause(self) -> bool:
+        """Whether the config says ``on_pause: pause``."""
+        return self.config.on_pause == "pause"
+
+    async def pause(self) -> None:
+        """Pause the sandbox when the workspace that just closed reached
+        it, keeping its disk and memory; the next connect resumes it. A
+        sandbox already gone has nothing to pause."""
+        pausable = self._pausable
+        self._pausable = False
+        if not pausable:
+            return
+        try:
+            await sdk.AsyncSandbox.pause(
+                self.config.sandbox_id, **self._api_params()
+            )
+        except sdk.SandboxNotFoundException:
+            logger.debug(
+                "%s: sandbox already gone, nothing to pause",
+                self.machine,
+                exc_info=True,
+            )
 
     def _gone(self, exc: BaseException) -> str | None:
         """How to replace the sandbox when ``exc`` says it is gone, else

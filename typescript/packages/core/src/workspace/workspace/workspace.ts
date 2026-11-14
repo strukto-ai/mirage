@@ -305,6 +305,8 @@ export class Workspace {
   private closing: Promise<void> | null = null
   private metaWrite: Promise<void> | null = null
   private stateDropped = false
+  // The machines the close that ran paused, by name (`pause`); null when it didn't pause.
+  private machinesPaused: ReadonlySet<string> | null = null
   // The stores this workspace's state lives in, whether the state store
   // built them or the caller passed one in directly: delete clears these,
   // not only what the state store would hand out.
@@ -655,7 +657,7 @@ export class Workspace {
       machines: this.machineTable,
     })
     this.closers.push(() => this.runtimeWorld.close())
-    this.closers.push(() => this.machineTable.close())
+    this.closers.push(() => this.machineTable.close(this.machinesPaused))
     this.closers.push(() => this.registry.clis.close())
     this.router = new Router(this.registry, this.runtimeWorld)
     this.registry.bindClocks()
@@ -2820,7 +2822,38 @@ export class Workspace {
     if (!this.stateDropped) throw new Error('workspace was closed before delete; its state is kept')
   }
 
-  private async runClose(dropState: boolean): Promise<void> {
+  /**
+   * Close the workspace as `close` does, then pause its machines; the
+   * others are only disconnected, and the state is kept. `machines` names
+   * the machines to pause by their `machines` names, whatever their config
+   * says; without it, those whose config asks pause (E2B's
+   * `onPause: 'pause'`). Throws, closing nothing, when `machines` names a
+   * machine the workspace lacks; throws after closing when the workspace
+   * was closed first, which left its machines running, or when an earlier
+   * pause closed it without pausing a machine this one names.
+   */
+  async pause(options: { machines?: readonly string[] } = {}): Promise<void> {
+    const table = this.machineTable
+    const names = new Set(
+      options.machines ?? table.names().filter((name) => table.get(name).configAsksToPause()),
+    )
+    for (const name of names) table.get(name)
+    this.closing ??= this.runClose(false, names)
+    await this.closing
+    const paused = this.machinesPaused
+    if (paused === null)
+      throw new Error('workspace was closed before pause; its machines are running')
+    const missed = [...names].filter((name) => !paused.has(name)).sort(compareCodePoints)
+    if (missed.length > 0) {
+      const listed = missed.map((name) => `'${name}'`).join(', ')
+      throw new Error(`workspace already paused without pausing ${listed}`)
+    }
+  }
+
+  private async runClose(
+    dropState: boolean,
+    pause: ReadonlySet<string> | null = null,
+  ): Promise<void> {
     this.diffPool.stop()
     const executions = [...this.shellExecutions]
     for (const execution of executions) execution.cancel()
@@ -2837,6 +2870,7 @@ export class Workspace {
     // state or closes the store.
     await Promise.allSettled([this.metaWrite])
     this.stateDropped = dropState
+    this.machinesPaused = pause
     try {
       await closeWorkspace({
         sessions: this.sessionManager,

@@ -242,6 +242,34 @@ processes. `{machine}` is the name `ps` shows, `provider:name` such as
 `mirage workspace list-machines -w ID` prints each machine, its id and its
 state.
 
+## Pause
+
+`workspace.pause()` closes the workspace as `close()` does, then pauses each
+machine whose config asks. What a pause does is the provider's:
+
+| Machine | `pause()` does |
+| --- | --- |
+| E2B with `on_pause: pause` | Pauses the sandbox, keeping its disk and memory; the next line resumes it |
+| E2B without `on_pause` | Nothing: the sandbox keeps running, as after `close()` |
+| Every other machine | Nothing: it is only disconnected |
+
+To choose at pause time instead, name the machines to pause, whatever their
+config says; every other machine is only disconnected:
+
+```python
+await workspace.pause(machines=["box"])
+```
+
+```typescript
+await workspace.pause({ machines: ['box'] })
+```
+
+A name the workspace has no machine for is refused before anything closes.
+
+A machine is paused after it is closed, so its mounts are unmounted while it
+still runs, and it is paused even when its close failed. A workspace closed
+with `close()` first refuses `pause()`, since its machines were left running.
+
 ## The machine image
 
 Every machine needs a POSIX shell at `/bin/sh` and `grep`. E2B and Daytona

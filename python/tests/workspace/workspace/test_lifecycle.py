@@ -35,9 +35,11 @@ from mirage.core.api.client import SessionPool
 from mirage.execution.job import JobState
 from mirage.execution.ram import RAMExecutionStore
 from mirage.io import IOResult
+from mirage.machine.handle import MachineHandle
 from mirage.runtime.base import Runtime
 from mirage.runtime.python.host.fs import HostFs
 from mirage.runtime.python.host.open import make_open
+from mirage.runtime.types import RunResult
 from mirage.shell.console import (
     Channel,
     ConsoleChunk,
@@ -1672,3 +1674,131 @@ async def test_execution_cleanup_failure_still_stops_diff_pool_and_other_resourc
     assert closed == ["cancel", "runtimes"]
     assert process is not None and process.returncode is not None
     assert not ws._diff_pool._entries
+
+
+class _Napper(MachineHandle):
+    """A machine that can pause, recording its close and pause in
+    ``log``."""
+
+    provider = "napper"
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+        self.log: list[str] = []
+
+    async def connect(self) -> None:
+        return None
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+    async def close(self) -> None:
+        await super().close()
+        self.log.append("close")
+
+    def config_asks_to_pause(self) -> bool:
+        return True
+
+    async def pause(self) -> None:
+        self.log.append("pause")
+
+
+class _Unasked(_Napper):
+    """A machine whose config doesn't ask to pause it."""
+
+    def config_asks_to_pause(self) -> bool:
+        return False
+
+
+class _Insomniac(_Napper):
+    """A machine whose pause is refused, as a busy E2B node refuses a
+    pause."""
+
+    async def pause(self) -> None:
+        self.log.append("pause")
+        raise RuntimeError("pause refused")
+
+
+@pytest.mark.asyncio
+async def test_pause_raises_a_machines_failed_pause():
+    box = _Insomniac("box")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box})
+    with pytest.raises(RuntimeError, match="pause refused"):
+        await ws.pause()
+    assert box.log == ["close", "pause"]
+
+
+@pytest.mark.asyncio
+async def test_pause_closes_the_workspace_then_pauses_its_machines():
+    box = _Napper("box")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box})
+    await ws.pause()
+    assert box.log == ["close", "pause"]
+
+
+@pytest.mark.asyncio
+async def test_pause_without_a_list_pauses_the_machines_whose_config_asks():
+    a, b = _Napper("a"), _Unasked("b")
+    ws = Workspace(
+        {"/": RAMVFS()}, mode=MountMode.EXEC, machines={"a": a, "b": b}
+    )
+    await ws.pause()
+    assert (a.log, b.log) == (["close", "pause"], ["close"])
+
+
+@pytest.mark.asyncio
+async def test_pause_pauses_exactly_the_machines_it_names():
+    a, b = _Napper("a"), _Unasked("b")
+    ws = Workspace(
+        {"/": RAMVFS()}, mode=MountMode.EXEC, machines={"a": a, "b": b}
+    )
+    await ws.pause(machines=["b"])
+    assert (a.log, b.log) == (["close"], ["close", "pause"])
+
+
+@pytest.mark.asyncio
+async def test_pause_with_an_empty_list_pauses_nothing():
+    box = _Napper("box")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box})
+    await ws.pause(machines=[])
+    assert box.log == ["close"]
+
+
+@pytest.mark.asyncio
+async def test_pause_refuses_an_unknown_machine_before_closing_anything():
+    box = _Napper("box")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box})
+    with pytest.raises(ValueError, match="unknown machine: 'bxo'"):
+        await ws.pause(machines=["bxo"])
+    assert box.log == []
+    await ws.pause(machines=["box"])
+    assert box.log == ["close", "pause"]
+
+
+@pytest.mark.asyncio
+async def test_a_later_pause_refuses_a_machine_the_first_left_unpaused():
+    box = _Napper("box")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box})
+    await ws.pause(machines=[])
+    with pytest.raises(RuntimeError, match="paused without pausing 'box'"):
+        await ws.pause(machines=["box"])
+    await ws.pause(machines=[])
+    assert box.log == ["close"]
+
+
+@pytest.mark.asyncio
+async def test_a_plain_close_leaves_machines_running():
+    box = _Napper("box")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box})
+    await ws.close()
+    assert box.log == ["close"]
+
+
+@pytest.mark.asyncio
+async def test_pause_after_close_refuses_rather_than_leave_machines_running():
+    box = _Napper("box")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box})
+    await ws.close()
+    with pytest.raises(RuntimeError, match="closed before pause"):
+        await ws.pause()
+    assert box.log == ["close"]

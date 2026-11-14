@@ -892,3 +892,155 @@ async def test_a_workspace_that_fails_to_build_holds_no_machine():
     await Workspace(
         {"/": RAMVFS()}, mode=MountMode.EXEC, machines={"a": box}
     ).close()
+
+
+class _Napper(_Box):
+    """A box that can pause, recording its close and pause in ``log``;
+    ``refused`` is why another table could not take it while it paused,
+    or None if it could."""
+
+    def __init__(
+        self,
+        name: str,
+        log: list[str],
+        fail_close: bool = False,
+        fail_pause: bool = False,
+        gate: asyncio.Event | None = None,
+    ) -> None:
+        super().__init__(name, 0)
+        self.log = log
+        self.fail_close = fail_close
+        self.fail_pause = fail_pause
+        self.gate = gate
+        self.refused: str | None = None
+
+    async def close(self) -> None:
+        await super().close()
+        self.log.append(f"close {self.name}")
+        if self.fail_close:
+            raise RuntimeError(f"close {self.name} failed")
+
+    async def pause(self) -> None:
+        self.log.append(f"pause {self.name}")
+        try:
+            MachineTable({self.name: self})
+        except ValueError as exc:
+            self.refused = str(exc)
+        if self.gate is not None:
+            await self.gate.wait()
+            self.log.append(f"paused {self.name}")
+        if self.fail_pause:
+            raise RuntimeError(f"pause {self.name} failed")
+
+
+_BOTH = frozenset({"a", "b"})
+
+
+@pytest.mark.asyncio
+async def test_a_pausing_close_closes_every_handle_then_pauses_each_it_held():
+    log: list[str] = []
+    table = MachineTable({"a": _Napper("a", log), "b": _Box("b", 0)})
+    table.hold_handles()
+    await table.close(pause=_BOTH)
+    assert log == ["close a", "pause a"]
+
+
+@pytest.mark.asyncio
+async def test_a_pausing_close_pauses_only_the_held_handles_it_names():
+    log: list[str] = []
+    table = MachineTable({"a": _Napper("a", log), "b": _Napper("b", log)})
+    table.hold_handles()
+    await table.close(pause=frozenset({"b"}))
+    assert log == ["close a", "close b", "pause b"]
+
+
+@pytest.mark.asyncio
+async def test_a_plain_close_pauses_nothing():
+    log: list[str] = []
+    table = MachineTable({"a": _Napper("a", log)})
+    table.hold_handles()
+    await table.close()
+    assert log == ["close a"]
+
+
+@pytest.mark.asyncio
+async def test_a_handle_whose_close_failed_is_still_paused():
+    log: list[str] = []
+    table = MachineTable({"a": _Napper("a", log, fail_close=True)})
+    table.hold_handles()
+    with pytest.raises(RuntimeError, match="close a failed"):
+        await table.close(pause=_BOTH)
+    assert log == ["close a", "pause a"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_close_and_a_failed_pause_are_both_raised():
+    log: list[str] = []
+    table = MachineTable(
+        {
+            "a": _Napper("a", log, fail_close=True),
+            "b": _Napper("b", log, fail_pause=True),
+        }
+    )
+    table.hold_handles()
+    with pytest.raises(BaseExceptionGroup) as raised:
+        await table.close(pause=_BOTH)
+    assert sorted(str(e) for e in raised.value.exceptions) == [
+        "close a failed",
+        "pause b failed",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_pausing_close_pauses_no_handle_another_table_took():
+    log: list[str] = []
+    a = _Napper("a", log)
+    first = MachineTable({"a": a})
+    first.hold_handles()
+    await first.close()
+    again = MachineTable({"a": a})
+    again.hold_handles()
+    await first.close(pause=_BOTH)
+    assert log == ["close a", "close a"]
+
+
+@pytest.mark.asyncio
+async def test_a_handle_is_held_until_it_has_paused():
+    a = _Napper("a", [])
+    table = MachineTable({"a": a})
+    table.hold_handles()
+    await table.close(pause=_BOTH)
+    assert a.refused == "machine 'a' is already in another workspace"
+    MachineTable({"a": a})
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_pausing_close_still_pauses_its_machines():
+    log: list[str] = []
+    gate = asyncio.Event()
+    table = MachineTable({"a": _Napper("a", log, gate=gate)})
+    table.hold_handles()
+    closing = asyncio.ensure_future(table.close(pause=_BOTH))
+    while "pause a" not in log:
+        await asyncio.sleep(0)
+    closing.cancel()
+    gate.set()
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert log == ["close a", "pause a", "paused a"]
+
+
+@pytest.mark.asyncio
+async def test_a_pausing_close_waits_for_the_signals_queued_for_its_machines():
+    log: list[str] = []
+    table = MachineTable({"a": _Napper("a", log)})
+    table.hold_handles()
+    signal = table._signaling["box:a"]
+    await signal.acquire()
+    closing = asyncio.ensure_future(table.close(pause=_BOTH))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert log == []
+    signal.release()
+    await closing
+    assert log == ["close a", "pause a"]

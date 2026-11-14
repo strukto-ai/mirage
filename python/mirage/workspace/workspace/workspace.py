@@ -24,6 +24,7 @@ from collections.abc import (
     AsyncIterator,
     Awaitable,
     Callable,
+    Iterable,
     Mapping,
     Sequence,
 )
@@ -444,6 +445,7 @@ class Workspace:
         self._closing = False
         self._async_closed = False
         self._state_dropped = False
+        self._machines_paused: frozenset[str] | None = None
         self._close_error: BaseException | None = None
         self._close_lock = asyncio.Lock()
         self._meta_lock = asyncio.Lock()
@@ -1967,10 +1969,55 @@ class Workspace:
                 "workspace was closed before delete; its state is kept"
             )
 
+    async def pause(self, machines: Iterable[str] | None = None) -> None:
+        """Close the workspace as ``close`` does, then pause its machines;
+        the others are only disconnected, and the state is kept.
+
+        Args:
+            machines (Iterable[str] | None): the machines to pause, by
+                their ``machines:`` names, whatever their config says;
+                None pauses those whose config asks (E2B's
+                ``on_pause: pause``).
+
+        Raises:
+            ValueError: ``machines`` names a machine the workspace lacks;
+                nothing is closed.
+            RuntimeError: the workspace was closed first, which left its
+                machines running, or an earlier pause closed it without
+                pausing a machine this one names.
+        """
+        table = self.machine_table
+        if machines is None:
+            names = frozenset(
+                name
+                for name in table.names()
+                if table.get(name).config_asks_to_pause()
+            )
+        else:
+            names = frozenset(machines)
+            for name in names:
+                table.get(name)
+        try:
+            await self._sync_bridge.close(
+                partial(self._close, drop_state=False, pause=names)
+            )
+        finally:
+            await self._sync_bridge.ashutdown()
+        if self._machines_paused is None:
+            raise RuntimeError(
+                "workspace was closed before pause; its machines are running"
+            )
+        if missed := names - self._machines_paused:
+            listed = ", ".join(repr(name) for name in sorted(missed))
+            raise RuntimeError(
+                f"workspace already paused without pausing {listed}"
+            )
+
     async def _close(
         self,
         drop_state: bool,
         blocked_loop: asyncio.AbstractEventLoop | None = None,
+        pause: frozenset[str] | None = None,
     ) -> None:
         """Release everything the workspace owns, exactly once
         (``close_workspace``); a later call answers as the first did.
@@ -1983,6 +2030,8 @@ class Workspace:
                 sync ``with`` block is exiting inside; its runners are
                 cancelled but not joined, and a metadata write there is
                 not waited for, since neither can run until this returns.
+            pause (frozenset[str] | None): the machines to pause once
+                closed, by name; None closes only.
         """
         # Stop lifecycle mutations before teardown yields or captures its
         # close lists. Keep _closed separate so runtime journals can still
@@ -2013,6 +2062,7 @@ class Workspace:
                     raise self._close_error
                 return
             self._state_dropped = drop_state
+            self._machines_paused = pause
             failures = [
                 result
                 for result in execution_results
@@ -2021,7 +2071,7 @@ class Workspace:
             try:
                 failures.extend(
                     await close_workspace(
-                        self._close_deps(drop_state, blocked_loop)
+                        self._close_deps(drop_state, blocked_loop, pause)
                     )
                 )
             finally:
@@ -2042,6 +2092,7 @@ class Workspace:
         self,
         drop_state: bool,
         blocked_loop: asyncio.AbstractEventLoop | None = None,
+        pause: frozenset[str] | None = None,
     ) -> CloseDeps:
         """What closing releases (``close_workspace``).
 
@@ -2049,6 +2100,8 @@ class Workspace:
             drop_state (bool): delete the workspace's state too.
             blocked_loop (asyncio.AbstractEventLoop | None): the loop a
                 sync ``with`` block is exiting inside.
+            pause (frozenset[str] | None): the machines to pause once
+                closed, by name; None closes only.
         """
         return CloseDeps(
             sessions=self._session_mgr,
@@ -2060,7 +2113,7 @@ class Workspace:
                 self._diff_pool.close,
                 self._script_policy.close,
                 self._runtimes.close,
-                self.machine_table.close,
+                partial(self.machine_table.close, pause=pause),
                 self._registry.clis.close,
             ],
             job_table=self.job_table,

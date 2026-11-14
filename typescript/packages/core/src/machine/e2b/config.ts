@@ -14,6 +14,8 @@
 
 import type { ConfigFields } from '../../runtime/config.ts'
 import { BASE_CONFIG_FIELDS, type MachineConfig } from '../config.ts'
+import type { PauseAction } from '../types.ts'
+import { ON_PAUSE } from './constants.ts'
 
 /** How to reach the user's live E2B sandbox. */
 export interface E2BConfig extends MachineConfig {
@@ -24,10 +26,13 @@ export interface E2BConfig extends MachineConfig {
   sandboxId: string
   /** E2B credential; required in browsers; Node falls back to E2B_API_KEY. */
   apiKey?: string
+  /** `pause`: pause the sandbox when the workspace pauses; unset leaves it as it is. */
+  onPause?: PauseAction
 }
 
 export const E2B_CONFIG_FIELDS: ConfigFields = {
   ...BASE_CONFIG_FIELDS,
   sandboxId: { type: 'string', required: true },
   apiKey: { type: 'string' },
+  onPause: { type: 'string', options: ON_PAUSE },
 }

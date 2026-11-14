@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ConfigFields, RuntimeConfig } from '../runtime/config.ts'
-import type { MountType } from './types.ts'
+import type { MountType, PauseAction } from './types.ts'
 import { MOUNT_TYPES } from './constants.ts'
 
 /**
@@ -57,6 +57,24 @@ export function checkMountType(runtime: string, mountType: unknown): MountType |
     )
   }
   return mountType as MountType
+}
+
+/**
+ * Fail loud on an `onPause` other than the provider's own `options`; unset
+ * leaves the machine alone. Mirrors Python's `check_on_pause`.
+ */
+export function checkOnPause(
+  runtime: string,
+  onPause: unknown,
+  options: readonly PauseAction[],
+): PauseAction | null {
+  if (onPause === undefined || onPause === null) return null
+  if (!options.includes(onPause as PauseAction)) {
+    throw new Error(
+      `${runtime} onPause must be one of ${options.join(', ')}, not ${JSON.stringify(onPause)}`,
+    )
+  }
+  return onPause as PauseAction
 }
 
 /** Whether a configured id is a string with something in it. Mirrors Python's `nonblank`. */

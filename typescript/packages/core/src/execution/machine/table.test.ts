@@ -870,3 +870,140 @@ describe('MachineTable scans', () => {
     ).close()
   })
 })
+
+/**
+ * A box that can pause, recording its close and pause in `log`; `failClose`
+ * and `failPause` make either refuse, and `refused` is why another table
+ * could not take it while it paused, or null if it could.
+ */
+class Napper extends Box {
+  refused: string | null = null
+
+  constructor(
+    name: string,
+    readonly log: string[],
+    readonly failClose = false,
+    readonly failPause = false,
+  ) {
+    super(name, 0)
+  }
+
+  override async close(): Promise<void> {
+    await super.close()
+    this.log.push(`close ${this.name}`)
+    if (this.failClose) throw new Error(`close ${this.name} failed`)
+  }
+
+  override pause(): Promise<void> {
+    this.log.push(`pause ${this.name}`)
+    try {
+      new MachineTable({ [this.name]: this })
+    } catch (error) {
+      this.refused = (error as Error).message
+    }
+    return this.failPause
+      ? Promise.reject(new Error(`pause ${this.name} failed`))
+      : Promise.resolve()
+  }
+}
+
+describe('MachineTable pause', () => {
+  const BOTH: ReadonlySet<string> = new Set(['a', 'b'])
+
+  it('closes every handle, then pauses each one it held', async () => {
+    const log: string[] = []
+    const table = new MachineTable({ a: new Napper('a', log), b: new Box('b', 0) })
+    table.holdHandles()
+    await table.close(BOTH)
+    expect(log).toEqual(['close a', 'pause a'])
+  })
+
+  it('pauses only the held handles it names', async () => {
+    const log: string[] = []
+    const table = new MachineTable({ a: new Napper('a', log), b: new Napper('b', log) })
+    table.holdHandles()
+    await table.close(new Set(['b']))
+    expect(log).toEqual(['close a', 'close b', 'pause b'])
+  })
+
+  it('pauses nothing on a plain close', async () => {
+    const log: string[] = []
+    const table = new MachineTable({ a: new Napper('a', log) })
+    table.holdHandles()
+    await table.close()
+    expect(log).toEqual(['close a'])
+  })
+
+  it('still pauses a handle whose close failed, and raises the close', async () => {
+    const log: string[] = []
+    const table = new MachineTable({ a: new Napper('a', log, true) })
+    table.holdHandles()
+    await expect(table.close(BOTH)).rejects.toThrow('close a failed')
+    expect(log).toEqual(['close a', 'pause a'])
+  })
+
+  it('raises every failure when a close and a pause both fail', async () => {
+    const log: string[] = []
+    const table = new MachineTable({
+      a: new Napper('a', log, true),
+      b: new Napper('b', log, false, true),
+    })
+    table.holdHandles()
+    const failure = await table.close(BOTH).catch((e: unknown) => e)
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect((failure as AggregateError).errors.map((e: Error) => e.message).sort()).toEqual([
+      'close a failed',
+      'pause b failed',
+    ])
+  })
+
+  it('pauses no handle another workspace has taken since it let go', async () => {
+    const log: string[] = []
+    const a = new Napper('a', log)
+    const first = new MachineTable({ a })
+    first.holdHandles()
+    await first.close()
+    new MachineTable({ a }).holdHandles()
+    await first.close(BOTH)
+    expect(log).toEqual(['close a', 'close a'])
+  })
+
+  it('lets go of its handles when a pause throws before it returns a promise', async () => {
+    const a = new Napper('a', [])
+    a.pause = () => {
+      throw new Error('pause threw')
+    }
+    const table = new MachineTable({ a })
+    table.holdHandles()
+    await expect(table.close(BOTH)).rejects.toThrow('pause threw')
+    expect(() => new MachineTable({ a })).not.toThrow()
+  })
+
+  it('waits for the signals queued for its machines before it pauses them', async () => {
+    const log: string[] = []
+    const table = new MachineTable({ a: new Napper('a', log) })
+    table.holdHandles()
+    let release = (): void => undefined
+    const queued = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    ;(table as unknown as { signaling: Map<string, Promise<void>> }).signaling.set('box:a', queued)
+    const closing = table.close(BOTH)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(log).toEqual([])
+    release()
+    await closing
+    expect(log).toEqual(['close a', 'pause a'])
+  })
+
+  it('holds a handle until it has paused, then lets another workspace take it', async () => {
+    const a = new Napper('a', [])
+    const table = new MachineTable({ a })
+    table.holdHandles()
+    await table.close(BOTH)
+    expect(a.refused).toBe("machine 'a' is already in another workspace")
+    expect(() => {
+      new MachineTable({ a }).holdHandles()
+    }).not.toThrow()
+  })
+})
