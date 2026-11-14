@@ -14,7 +14,9 @@
 
 from dataclasses import dataclass
 
-from mirage.machine.config import MachineConfig, require_id
+from mirage.machine.config import MachineConfig, check_on_pause, require_id
+from mirage.machine.smolvm.constants import ON_PAUSE
+from mirage.machine.types import PauseAction
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -29,9 +31,13 @@ class SmolvmConfig(MachineConfig):
             mount prefixes. Named explicitly rather than leaning on
             smolvm's own "default" machine, so a line never lands in
             a VM the config did not choose.
+        on_pause (PauseAction | None): ``pause`` pauses the machine when
+            the workspace pauses; None leaves it as it is.
     """
 
     machine: str
+    on_pause: PauseAction | None = None
 
     def __post_init__(self) -> None:
         require_id("smolvm", "machine", self.machine)
+        check_on_pause("smolvm", self.on_pause, ON_PAUSE)

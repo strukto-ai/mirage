@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.machine.types import PauseAction
+
 SMOLVM_HINT = (
     "the smolvm machine needs `smolvm` on PATH "
     "(https://smolmachines.com); the host also needs a "
@@ -22,8 +24,18 @@ SMOLVM_HINT = (
 # `machine status --json` reports RecordState's Display form, which is
 # lowercase. Only "running" can take a line: "frozen" is a fork base
 # whose guest agent is paused by design, and "unreachable" means the
-# VMM is alive but the guest agent stopped answering vsock pings.
+# VMM is alive but the guest agent stopped answering vsock pings. A
+# "paused" machine is resumed first.
 RUNNING_STATE = "running"
+PAUSED_STATE = "paused"
+
+# What ``on_pause`` takes for a machine: save its memory and disks durably,
+# then stop its VM (smolvm 1.18 or later, on a machine started
+# ``--branchable``).
+ON_PAUSE: tuple[PauseAction, ...] = ("pause",)
+
+# What `smolvm machine pause` says of a machine already gone.
+MACHINE_GONE = "vm not found"
 
 STATE_HINTS: dict[str, str] = {
     "unreachable": (

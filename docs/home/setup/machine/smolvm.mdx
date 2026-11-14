@@ -78,12 +78,35 @@ put `sandbox.yaml` in the machine, in its image or a directory passed with
 smolvm machine exec --name mirage-box -- mirage workspace create /tmp/sandbox.yaml
 ```
 
+## Pausing the machine
+
+To pause the machine when the workspace pauses, set `on_pause: pause` on it:
+
+```yaml
+machines:
+  box:
+    provider: smolvm
+    machine: mirage-box
+    on_pause: pause
+```
+
+`workspace.pause()` closes the workspace, then runs `smolvm machine pause`,
+which saves the machine's memory and disks to its data directory and stops
+its VM. The next line resumes it with `smolvm machine resume`, running
+processes included. This needs smolvm 1.18 or later and a machine that
+supports smolvm's portable checkpoints, such as one started with
+`smolvm machine start --branchable`; otherwise `workspace.pause()` raises
+smolvm's error and the machine keeps running. Without `on_pause`,
+`workspace.pause()` leaves the machine running unless the call names it. See
+[Pause](/home/setup/machine/overview#pause).
+
 ## Notes
 
 - Host files reach the machine only through directories passed with
   `--volume` at boot.
-- The machine must be `running`. Start a `stopped` or `created` machine,
-  or clone a `frozen` machine before using it. Mirage cannot run commands
+- The machine must be `running` or `paused`; Mirage resumes a `paused`
+  one. Start a `stopped` or `created` machine, or clone a `frozen` machine
+  before using it. Mirage cannot run commands
   while a machine is `unreachable`.
 - Lines sent to one machine share its files and processes. Give each tenant
   its own machine.

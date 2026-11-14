@@ -1976,8 +1976,8 @@ class Workspace:
         Args:
             machines (Iterable[str] | None): the machines to pause, by
                 their ``machines:`` names, whatever their config says;
-                None pauses those whose config asks (E2B's
-                ``on_pause: pause``).
+                None pauses those whose config asks
+                (``on_pause: pause``).
 
         Raises:
             ValueError: ``machines`` names a machine the workspace lacks;

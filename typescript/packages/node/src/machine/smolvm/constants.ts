@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { PauseAction } from '@struktoai/mirage-core/machine/types'
+
 export const SMOLVM_HINT =
   'the smolvm machine needs `smolvm` on PATH (https://smolmachines.com); ' +
   'the host also needs a hypervisor: /dev/kvm on Linux, Hypervisor.framework on macOS, WHP on Windows'
@@ -20,9 +22,20 @@ export const SMOLVM_HINT =
  * `machine status --json` reports RecordState's Display form, which is
  * lowercase. Only "running" can take a line: "frozen" is a fork base
  * whose guest agent is paused by design, and "unreachable" means the
- * VMM is alive but the guest agent stopped answering vsock pings.
+ * VMM is alive but the guest agent stopped answering vsock pings. A
+ * "paused" machine is resumed first.
  */
 export const RUNNING_STATE = 'running'
+export const PAUSED_STATE = 'paused'
+
+/**
+ * What `onPause` takes for a machine: save its memory and disks durably,
+ * then stop its VM (smolvm 1.18 or later, on a machine started `--branchable`).
+ */
+export const ON_PAUSE: readonly PauseAction[] = ['pause']
+
+/** What `smolvm machine pause` says of a machine already gone. */
+export const MACHINE_GONE = 'vm not found'
 
 export const STATE_HINTS: Readonly<Record<string, string>> = {
   unreachable:

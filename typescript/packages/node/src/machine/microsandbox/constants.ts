@@ -13,12 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { isRun } from '@struktoai/mirage-core/machine/constants'
+import type { PauseAction } from '@struktoai/mirage-core/machine/types'
 
 export const MICROSANDBOX_HINT =
   'the microsandbox machine needs `msb` on PATH (https://microsandbox.dev); ' +
   'start the machine before connecting'
 
 export const RUNNING_STATE = 'Running'
+export const PAUSED_STATE = 'Paused'
+
+/** What `onPause` takes for a sandbox: suspend it, keeping its memory on the host. */
+export const ON_PAUSE: readonly PauseAction[] = ['pause']
+
+/** What `msb pause` says of a sandbox already gone. */
+export const SANDBOX_GONE = 'sandbox not found'
 export const INSPECT_TIMEOUT_SECONDS = 10
 
 const RUN_PROGRAM_AT = 7

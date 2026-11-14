@@ -17,7 +17,7 @@ import sys
 
 from mirage.machine.daytona import sdk
 
-NAMES = ("AsyncDaytona", "DaytonaConfig")
+NAMES = ("AsyncDaytona", "DaytonaConfig", "DaytonaNotFoundError")
 
 
 def test_the_extra_resolves_as_a_unit():

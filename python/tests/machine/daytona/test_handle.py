@@ -54,9 +54,18 @@ class FakeFs:
 class FakeMachine:
     id = "sb-77"
 
-    def __init__(self) -> None:
+    def __init__(self, state: str) -> None:
         self.process = FakeProcess()
         self.fs = FakeFs()
+        self.state = state
+
+    async def start(self):
+        FakeClient.changes.append("start")
+
+    async def pause(self):
+        FakeClient.changes.append("pause")
+        if FakeClient.pause_refusal is not None:
+            raise FakeClient.pause_refusal
 
 
 class FakeClient:
@@ -64,13 +73,16 @@ class FakeClient:
     fetched: list[str] = []
     closed = 0
     last: "FakeMachine | None" = None
+    state = "started"
+    changes: list[str] = []
+    pause_refusal: Exception | None = None
 
     def __init__(self, config=None) -> None:
         FakeClient.configs.append(config)
 
     async def get(self, sandbox_id):
         FakeClient.fetched.append(sandbox_id)
-        FakeClient.last = FakeMachine()
+        FakeClient.last = FakeMachine(FakeClient.state)
         return FakeClient.last
 
     async def close(self):
@@ -83,6 +95,9 @@ def fake_client(monkeypatch):
     FakeClient.fetched = []
     FakeClient.closed = 0
     FakeClient.last = None
+    FakeClient.state = "started"
+    FakeClient.changes = []
+    FakeClient.pause_refusal = None
     monkeypatch.setattr(sdk, "AsyncDaytona", FakeClient)
 
 
@@ -90,7 +105,67 @@ def fake_client(monkeypatch):
 async def test_connect_gets_the_users_sandbox_by_id():
     runtime = DaytonaMachine("box", config={"sandbox_id": "sb-live"})
     await runtime.connect()
-    assert FakeClient.fetched == ["sb-live"]
+    assert (FakeClient.fetched, FakeClient.changes) == (["sb-live"], [])
+
+
+@pytest.mark.asyncio
+async def test_connect_starts_a_paused_sandbox_again():
+    FakeClient.state = "paused"
+    await DaytonaMachine("box", config={"sandbox_id": "sb-live"}).connect()
+    assert FakeClient.changes == ["start"]
+
+
+async def _reached(**config) -> DaytonaMachine:
+    machine = DaytonaMachine("box", config={"sandbox_id": "sb-live", **config})
+    await machine.connect()
+    await machine.close()
+    return machine
+
+
+@pytest.mark.asyncio
+async def test_pause_pauses_the_sandbox_it_reached_through_a_client_of_its_own():
+    machine = await _reached()
+    await machine.pause()
+    assert (FakeClient.fetched, FakeClient.changes, FakeClient.closed) == (
+        ["sb-live", "sb-live"],
+        ["pause"],
+        2,
+    )
+
+
+@pytest.mark.asyncio
+async def test_pause_leaves_alone_a_sandbox_it_never_reached():
+    await DaytonaMachine("box", config={"sandbox_id": "sb-live"}).pause()
+    assert (FakeClient.fetched, FakeClient.changes) == ([], [])
+
+
+@pytest.mark.asyncio
+async def test_a_sandbox_already_gone_counts_as_paused():
+    machine = await _reached()
+    FakeClient.pause_refusal = sdk.DaytonaNotFoundError("gone")
+    await machine.pause()
+    assert FakeClient.closed == 2
+
+
+@pytest.mark.asyncio
+async def test_any_other_pause_failure_is_raised():
+    machine = await _reached()
+    FakeClient.pause_refusal = RuntimeError("container sandboxes cannot pause")
+    with pytest.raises(RuntimeError, match="cannot pause"):
+        await machine.pause()
+    assert FakeClient.closed == 2
+
+
+def _asks(**config) -> bool:
+    return DaytonaMachine(
+        "box", config={"sandbox_id": "sb", **config}
+    ).config_asks_to_pause()
+
+
+def test_only_on_pause_pause_asks_the_workspace_to_pause_it():
+    assert (_asks(on_pause="pause"), _asks()) == (True, False)
+    with pytest.raises(ValueError, match="daytona on_pause must be one of"):
+        DaytonaMachine("box", config={"sandbox_id": "sb", "on_pause": "stop"})
 
 
 def test_sandbox_id_is_required():

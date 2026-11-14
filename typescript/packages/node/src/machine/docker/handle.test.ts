@@ -33,6 +33,8 @@ const ENC = new TextEncoder()
 
 class FakeDockerMachine extends DockerMachine {
   running = true
+  state: string | null = null
+  refusal: string | null = null
   readonly calls: [string[], Uint8Array | null][] = []
 
   protected override async execProgram(
@@ -44,10 +46,17 @@ class FakeDockerMachine extends DockerMachine {
     this.calls.push([args.slice(), stdin])
     if (args[0] === 'inspect') {
       return Promise.resolve({
-        stdout: ENC.encode(`{"Status": "${this.running ? 'running' : 'exited'}"}`),
+        stdout: ENC.encode(`{"Status": "${this.state ?? (this.running ? 'running' : 'exited')}"}`),
         stderr: new Uint8Array(),
         exitCode: 0,
       })
+    }
+    if (args[0] === 'pause' || args[0] === 'unpause') {
+      return {
+        stdout: new Uint8Array(),
+        stderr: ENC.encode(this.refusal ?? ''),
+        exitCode: this.refusal === null ? 0 : 1,
+      }
     }
     const script = args[args.length - 1] ?? ''
     const stdout = ENC.encode(`out:${script}`)
@@ -305,4 +314,57 @@ describe('DockerMachine under session restrictions', () => {
       }
     },
   )
+})
+
+async function reached(): Promise<FakeDockerMachine> {
+  const runtime = makeRuntime({ container: 'c-1' })
+  await runtime.connect()
+  await runtime.close()
+  return runtime
+}
+
+/** Whether a docker machine built with `config` asks the workspace to pause it. */
+function asksToPause(config: Partial<DockerConfig>): boolean {
+  return new DockerMachine('box', { container: 'c', ...config }).configAsksToPause()
+}
+
+describe('DockerMachine pause', () => {
+  it('unpauses a paused container on connect', async () => {
+    const runtime = makeRuntime({ container: 'c-1' })
+    runtime.state = 'paused'
+    await runtime.connect()
+    expect(runtime.calls.at(-1)).toEqual([['unpause', 'c-1'], null])
+  })
+  it('fails the connect loud when the unpause fails', async () => {
+    const runtime = makeRuntime({ container: 'c-1' })
+    runtime.state = 'paused'
+    runtime.refusal = 'Error response from daemon: cgroup busy'
+    await expect(runtime.connect()).rejects.toThrow(/docker unpause c-1 failed: .*busy/)
+  })
+  it('pauses the container it reached', async () => {
+    const runtime = await reached()
+    await runtime.pause()
+    expect(runtime.calls.at(-1)).toEqual([['pause', 'c-1'], null])
+  })
+  it('leaves alone a container it never reached', async () => {
+    const runtime = makeRuntime({ container: 'c-1' })
+    await runtime.pause()
+    expect(runtime.calls).toEqual([])
+  })
+  it('counts a container already gone as paused', async () => {
+    const runtime = await reached()
+    runtime.refusal = 'Error response from daemon: No such container: c-1'
+    await expect(runtime.pause()).resolves.toBeUndefined()
+  })
+  it('raises any other pause failure', async () => {
+    const runtime = await reached()
+    runtime.refusal = 'Error response from daemon: container is not running'
+    await expect(runtime.pause()).rejects.toThrow('docker pause c-1 failed')
+  })
+  it('asks the workspace to pause it only with onPause: pause', () => {
+    expect([asksToPause({ onPause: 'pause' }), asksToPause({})]).toEqual([true, false])
+    expect(() => new DockerMachine('box', { container: 'c', onPause: 'stop' as never })).toThrow(
+      'docker onPause must be one of pause, not "stop"',
+    )
+  })
 })

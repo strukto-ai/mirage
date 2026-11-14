@@ -12,11 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.machine.types import PauseAction
+
 DOCKER_HINT = (
     "the docker machine needs `docker` on PATH "
     "(Docker Desktop, colima, or a podman alias)"
 )
 
 # `docker inspect` reports State.Status: created, running, paused,
-# restarting, removing, exited or dead. Only "running" takes a line.
+# restarting, removing, exited or dead. Only "running" takes a line; a
+# "paused" container is unpaused first.
 RUNNING_STATE = "running"
+PAUSED_STATE = "paused"
+
+# What ``on_pause`` takes for a container: freeze its processes, which
+# frees its CPU and keeps its memory.
+ON_PAUSE: tuple[PauseAction, ...] = ("pause",)
+
+# What `docker pause` says of a container already gone.
+CONTAINER_GONE = "No such container"

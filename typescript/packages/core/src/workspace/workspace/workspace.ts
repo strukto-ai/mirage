@@ -2826,8 +2826,8 @@ export class Workspace {
    * Close the workspace as `close` does, then pause its machines; the
    * others are only disconnected, and the state is kept. `machines` names
    * the machines to pause by their `machines` names, whatever their config
-   * says; without it, those whose config asks pause (E2B's
-   * `onPause: 'pause'`). Throws, closing nothing, when `machines` names a
+   * says; without it, those whose config asks pause
+   * (`onPause: 'pause'`). Throws, closing nothing, when `machines` names a
    * machine the workspace lacks; throws after closing when the workspace
    * was closed first, which left its machines running, or when an earlier
    * pause closed it without pausing a machine this one names.

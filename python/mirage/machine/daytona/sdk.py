@@ -16,12 +16,16 @@ from typing import Any
 
 AsyncDaytona: Any
 DaytonaConfig: Any
+DaytonaNotFoundError: Any
 try:
     from daytona import AsyncDaytona as _AsyncDaytona
     from daytona import DaytonaConfig as _DaytonaConfig
+    from daytona import DaytonaNotFoundError as _DaytonaNotFoundError
 except ImportError:
     AsyncDaytona = None
     DaytonaConfig = None
+    DaytonaNotFoundError = None
 else:
     AsyncDaytona = _AsyncDaytona
     DaytonaConfig = _DaytonaConfig
+    DaytonaNotFoundError = _DaytonaNotFoundError

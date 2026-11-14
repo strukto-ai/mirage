@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.machine.constants import is_run
+from mirage.machine.types import PauseAction
 
 RUN_PROGRAM_AT = 7
 
@@ -22,6 +23,14 @@ MICROSANDBOX_HINT = (
 )
 
 RUNNING_STATE = "Running"
+PAUSED_STATE = "Paused"
+
+# What ``on_pause`` takes for a sandbox: suspend it, keeping its memory on
+# the host.
+ON_PAUSE: tuple[PauseAction, ...] = ("pause",)
+
+# What `msb pause` says of a sandbox already gone.
+SANDBOX_GONE = "sandbox not found"
 INSPECT_TIMEOUT_SECONDS = 10
 
 # msb ends the session of an exec whose client goes, and a run's exec is let
