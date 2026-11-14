@@ -30,7 +30,7 @@ npm install @struktoai/mirage-dsh @struktoai/mirage-node @deepseek-ai/cordis @de
 ```ts
 import { Outcome, Scope } from '@struktoai/mirage-core'
 
-for (const waiting of ctx.mirage.decisions.pending('agent')) {
+for (const waiting of ctx.mirage.decisions.pending()) {
   await ctx.mirage.decisions.answer(waiting.id, Outcome.ALLOW, Scope.ONCE)
 }
 ```
