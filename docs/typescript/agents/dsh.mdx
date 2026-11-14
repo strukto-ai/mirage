@@ -25,7 +25,7 @@ npm install @struktoai/mirage-dsh @struktoai/mirage-node @deepseek-ai/cordis @de
 - The agent starts in the disk mount that holds the directory dsh was launched from, or in `/`. The `working_directory` tool moves between mounts.
 - Each `bash` call is a fresh shell. Give `MirageShellExecutor` a `sessionId` to keep exports and functions between calls.
 - Mount modes and [session profiles](/home/configuration/session) apply to every tool. `DSH_PERMISSION_MODE=read-only` makes every mount read-only.
-- An [ask](/home/policy/policies#asks) rule shows in dsh's approval prompt. With no prompt, the line waits for an answer through `ctx.mirage.decisions`.
+- An [ask](/home/policy/policies#asks) rule shows in dsh's approval prompt. With no prompt, the line is refused and the question stays pending: answer it through `ctx.mirage.decisions`, then run the line again.
 
 ## Example
 
@@ -68,14 +68,14 @@ dsh plugin --profile web add @struktoai/mirage-dsh
 dsh --profile web
 ```
 
-The bundle mounts one RAM disk at `/tmp`. Set your own mounts, [Python](/typescript/runtime/python) and permissions in the profile's `cordis.patch.yml`:
+The bundle mounts one RAM disk at `/tmp`. Set your own mounts, [Python](/typescript/runtime/python) and permissions in the profile's `cordis.patch.yml`. Python runs only on an `exec` mount:
 
 ```yaml
 - id: mirage
   config:
     mounts:
-      /tmp: { vfs: ram, mode: write }
-      /project: { vfs: disk, mode: write, config: { root: . } }
+      /tmp: { vfs: ram, mode: exec }
+      /project: { vfs: disk, mode: exec, config: { root: . } }
       /slack: { vfs: slack, mode: read, config: { token: !!js process.env.SLACK_BOT_TOKEN } }
     machines:
       py: { provider: worker, captures: [python, python3] }
