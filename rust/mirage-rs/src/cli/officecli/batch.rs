@@ -1,3 +1,6 @@
+// Adapted from OfficeCLI 1.0.161.
+// https://github.com/iOfficeAI/OfficeCLI/tree/v1.0.161
+// Licensed under Apache-2.0. See licenses/third_party/officecli.txt.
 //! `batch`: a JSON array of items run against one open workbook, saved
 //! once at the end. By default a failure anywhere leaves the workbook as
 //! it was; `--best-effort` keeps what succeeded and `--stop-on-error`

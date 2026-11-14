@@ -1,3 +1,6 @@
+// Adapted from OfficeCLI 1.0.161.
+// https://github.com/iOfficeAI/OfficeCLI/tree/v1.0.161
+// Licensed under Apache-2.0. See licenses/third_party/officecli.txt.
 //! `query`: OfficeCLI 1.0.161's selectors over a workbook. An element
 //! type (`cell`, a column letter, `row`, `comment`, `sheet`), a sheet scope
 //! (`Sheet1!` or `/Sheet1/`), bracketed predicates joined by `and`, `or`
@@ -606,6 +609,10 @@ fn resolve(node: &Node, key: &str) -> (bool, String) {
     if key.eq_ignore_ascii_case("value") && node.kind == "cell" {
         return (node.text.is_some(), node.text.clone().unwrap_or_default());
     }
+    if key.eq_ignore_ascii_case("style") {
+        let style = node.style.clone().unwrap_or_default();
+        return (!style.is_empty(), style);
+    }
     (false, String::new())
 }
 
@@ -649,7 +656,7 @@ fn number(v: &str) -> Option<f64> {
 }
 
 /// A length in English Metric Units.
-fn emu(v: &str) -> Option<f64> {
+pub(super) fn emu(v: &str) -> Option<f64> {
     let t = v.trim();
     let scale = [
         ("cm", 360_000.0),
@@ -709,6 +716,14 @@ pub(super) fn text_matches(text: &str, find: &str) -> Result<bool, Fail> {
 
 fn matches_one(node: &Node, cond: &Cond) -> bool {
     let (has, actual) = resolve(node, &cond.key);
+    if matches!(cond.op, Op::Eq | Op::Ne) && cond.key.eq_ignore_ascii_case("style") {
+        let format = |k: &str| node.props().find(|(x, _)| x == k).map(|(_, v)| v.text());
+        let hit = (has && same(&actual, &cond.value))
+            || same(node.style.as_deref().unwrap_or_default(), &cond.value)
+            || format("style").is_some_and(|v| same(&v, &cond.value))
+            || format("styleName").is_some_and(|v| same(&v, &cond.value));
+        return if cond.op == Op::Eq { hit } else { !hit };
+    }
     let display = || {
         cond.key.eq_ignore_ascii_case("value")
             && node.kind == "cell"
@@ -759,7 +774,7 @@ fn all_keys(nodes: &[Node], sorted: bool) -> Vec<String> {
         }
     };
     for n in nodes {
-        for (k, _) in &n.format {
+        for (k, _) in n.props() {
             add(k);
         }
         if n.text.is_some() {
@@ -1201,95 +1216,120 @@ const ROW_PROPS: [&str; 5] = [
     "customHeight",
 ];
 
+/// A handler's own pass over a selector: the nodes of its element type,
+/// narrowed as the handler narrows them.
+pub(super) type QueryFn<'a> = dyn Fn(&str) -> Result<Vec<Node>, Fail> + 'a;
+
+/// The nodes `selector` names and the warnings its filters raise, as
+/// OfficeCLI's attribute filter finds them over a handler's `query`;
+/// `cells` reads a cell selector's short keys (`bold`, `size`) as Excel's
+/// handler does.
+pub(super) fn filter_selector(
+    selector: &str,
+    query: &QueryFn<'_>,
+    cells: bool,
+) -> Result<(Vec<Node>, Vec<Warning>), Fail> {
+    let parts = split_commas(selector);
+    if parts.len() > 1 {
+        let mut results: Vec<Node> = Vec::new();
+        let mut warnings = Vec::new();
+        for part in parts {
+            let (r, w) = filter_selector(part.trim(), query, cells)?;
+            for n in r {
+                if !results.iter().any(|x| x.path.eq_ignore_ascii_case(&n.path)) {
+                    results.push(n);
+                }
+            }
+            warnings.extend(w);
+        }
+        return Ok((results, warnings));
+    }
+    reject_garbage(selector)?;
+    if let Some((parent, child)) = filtered_combinator(selector) {
+        return combinator(&parent, &child, query, cells);
+    }
+    let mut expr = parse_expr(selector)?;
+    if cells && targets_cells(selector) {
+        if let Some(e) = expr.as_mut() {
+            resolve_keys(e);
+        }
+    }
+    let mut flat = Vec::new();
+    let flattened = expr.as_ref().is_none_or(|e| flatten(e, &mut flat));
+    let (results, mut warnings, conds) = if flattened {
+        let (r, w) = apply_flat(query(selector)?, &flat);
+        (r, w, flat)
+    } else {
+        let e = expr.as_ref().expect("an expression that does not flatten");
+        let q = if resolves_own_boolean(selector) {
+            selector.to_string()
+        } else {
+            strip_filter_brackets(selector)
+        };
+        let (r, w) = apply_expr(query(&q)?, e);
+        let mut conds = Vec::new();
+        leaves(e, &mut conds);
+        (r, w, conds)
+    };
+    if results.is_empty() && !conds.is_empty() && !resolves_own_boolean(selector) {
+        if let Ok(full) = query(&strip_filter_brackets(selector)) {
+            if !full.is_empty() {
+                warnings = diagnose(&full, &conds);
+            }
+        }
+    }
+    Ok((results, warnings))
+}
+
+fn combinator(
+    parent: &str,
+    child: &str,
+    query: &QueryFn<'_>,
+    cells: bool,
+) -> Result<(Vec<Node>, Vec<Warning>), Fail> {
+    let (scope, parent_query) = split_scope(parent);
+    let (mut parents, parent_warnings) = filter_selector(&parent_query, query, cells)?;
+    if !scope.is_empty() {
+        parents.retain(|p| {
+            starts_ci(&p.path, &scope) && p.path.as_bytes().get(scope.len()) == Some(&b'/')
+        });
+    }
+    if parents.is_empty() {
+        return Ok((Vec::new(), parent_warnings));
+    }
+    let (child, position) = child_position(child);
+    let (children, warnings) = filter_selector(
+        &format!(
+            "{} > {child}",
+            strip_filter_brackets(&parent_query).trim_end()
+        ),
+        query,
+        cells,
+    )?;
+    let mut kept: Vec<Node> = Vec::new();
+    for p in &parents {
+        let mine: Vec<&Node> = children
+            .iter()
+            .filter(|c| inside(&c.path, &p.path) && !kept.iter().any(|k| k.path == c.path))
+            .collect();
+        match position {
+            None => kept.extend(mine.into_iter().cloned()),
+            Some(usize::MAX) => {
+                if let Some(last) = mine.last() {
+                    kept.push((*last).clone());
+                }
+            }
+            Some(n) if n >= 1 && n <= mine.len() => kept.push(mine[n - 1].clone()),
+            Some(_) => {}
+        }
+    }
+    Ok((kept, warnings))
+}
+
 impl Scope<'_> {
     /// The nodes `selector` names, with the warnings its filters raise.
     pub(super) fn filter(&self, selector: &str) -> Result<(Vec<Node>, Vec<Warning>), Fail> {
-        let parts = split_commas(selector);
-        if parts.len() > 1 {
-            let mut results: Vec<Node> = Vec::new();
-            let mut warnings = Vec::new();
-            for part in parts {
-                let (r, w) = self.filter(part.trim())?;
-                for n in r {
-                    if !results.iter().any(|x| x.path.eq_ignore_ascii_case(&n.path)) {
-                        results.push(n);
-                    }
-                }
-                warnings.extend(w);
-            }
-            return Ok((results, warnings));
-        }
-        reject_garbage(selector)?;
-        if let Some((parent, child)) = filtered_combinator(selector) {
-            return self.combinator(&parent, &child);
-        }
-        let mut expr = parse_expr(selector)?;
-        if targets_cells(selector) {
-            if let Some(e) = expr.as_mut() {
-                resolve_keys(e);
-            }
-        }
-        let mut flat = Vec::new();
-        let flattened = expr.as_ref().is_none_or(|e| flatten(e, &mut flat));
-        let (results, mut warnings, conds) = if flattened {
-            let (r, w) = apply_flat(self.query(selector)?, &flat);
-            (r, w, flat)
-        } else {
-            let e = expr.as_ref().expect("an expression that does not flatten");
-            let q = if resolves_own_boolean(selector) {
-                selector.to_string()
-            } else {
-                strip_filter_brackets(selector)
-            };
-            let (r, w) = apply_expr(self.query(&q)?, e);
-            let mut conds = Vec::new();
-            leaves(e, &mut conds);
-            (r, w, conds)
-        };
-        if results.is_empty() && !conds.is_empty() && !resolves_own_boolean(selector) {
-            if let Ok(full) = self.query(&strip_filter_brackets(selector)) {
-                if !full.is_empty() {
-                    warnings = diagnose(&full, &conds);
-                }
-            }
-        }
-        Ok((results, warnings))
-    }
-
-    fn combinator(&self, parent: &str, child: &str) -> Result<(Vec<Node>, Vec<Warning>), Fail> {
-        let (scope, parent_query) = split_scope(parent);
-        let (mut parents, parent_warnings) = self.filter(&parent_query)?;
-        if !scope.is_empty() {
-            parents.retain(|p| {
-                starts_ci(&p.path, &scope) && p.path.as_bytes().get(scope.len()) == Some(&b'/')
-            });
-        }
-        if parents.is_empty() {
-            return Ok((Vec::new(), parent_warnings));
-        }
-        let (child, position) = child_position(child);
-        let (children, warnings) = self.filter(&format!(
-            "{} > {child}",
-            strip_filter_brackets(&parent_query).trim_end()
-        ))?;
-        let mut kept: Vec<Node> = Vec::new();
-        for p in &parents {
-            let mine: Vec<&Node> = children
-                .iter()
-                .filter(|c| inside(&c.path, &p.path) && !kept.iter().any(|k| k.path == c.path))
-                .collect();
-            match position {
-                None => kept.extend(mine.into_iter().cloned()),
-                Some(usize::MAX) => {
-                    if let Some(last) = mine.last() {
-                        kept.push((*last).clone());
-                    }
-                }
-                Some(n) if n >= 1 && n <= mine.len() => kept.push(mine[n - 1].clone()),
-                Some(_) => {}
-            }
-        }
-        Ok((kept, warnings))
+        filter_selector(selector, &|s| self.query(s), true)
     }
 
     /// The handler's own pass: the nodes of the selector's element type,

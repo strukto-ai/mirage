@@ -1,3 +1,6 @@
+// Adapted from OfficeCLI 1.0.161.
+// https://github.com/iOfficeAI/OfficeCLI/tree/v1.0.161
+// Licensed under Apache-2.0. See licenses/third_party/officecli.txt.
 //! A workbook's styles as `get` reports them: each cell format's font,
 //! fill, border, alignment, protection and number format, under the keys
 //! OfficeCLI 1.0.161 prints, and a number shown through its format the way

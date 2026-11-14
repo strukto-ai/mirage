@@ -2709,6 +2709,12 @@
           "path": "/scratch",
           "vfs": "ram",
           "backend": "memory"
+        },
+        {
+          "path": "/docs",
+          "vfs": "ram",
+          "backend": "memory",
+          "fixture": "office/v1"
         }
       ]
     },

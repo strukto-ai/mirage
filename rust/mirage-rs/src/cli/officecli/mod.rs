@@ -1,3 +1,6 @@
+// Adapted from OfficeCLI 1.0.161.
+// https://github.com/iOfficeAI/OfficeCLI/tree/v1.0.161
+// Licensed under Apache-2.0. See licenses/third_party/officecli.txt.
 //! officecli's workbook commands as OfficeCLI 1.0.161 (iOfficeAI,
 //! Apache-2.0) answers them: `create`, `get`, `query`, `set`, `remove` and
 //! `batch` over an .xlsx the host spools, with its paths (`/`, `/Sheet`,
@@ -7,17 +10,23 @@
 //! and copies every other part from the spool as it stands. Divergences: a
 //! formula is stored and shown without a computed value, `query` reads
 //! cells, rows, comments and sheets only, and `batch` runs `get`, `query`,
-//! `set` and `remove` items.
+//! `set` and `remove` items. A .docx or .pptx goes to `office`, which reads
+//! it as OfficeCLI's Word and PowerPoint handlers do.
 
 mod batch;
 mod book;
 mod node;
+mod office;
 mod query;
 mod read;
 mod sheet;
+mod slides;
 mod style;
 #[cfg(test)]
 mod tests;
+mod tree;
+mod units;
+mod word;
 mod xml;
 
 use serde::Deserialize;
@@ -81,7 +90,9 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
 pub(super) struct Fail {
     message: String,
     code: Option<&'static str>,
-    hint: Option<(&'static str, Option<&'static str>)>,
+    suggestion: Option<String>,
+    help: Option<String>,
+    valid: Option<Vec<String>>,
 }
 
 impl Fail {
@@ -100,7 +111,9 @@ impl Fail {
         Fail {
             message,
             code,
-            hint: None,
+            suggestion: None,
+            help: None,
+            valid: None,
         }
     }
 
@@ -108,7 +121,9 @@ impl Fail {
         Fail {
             message,
             code: Some(code),
-            hint: None,
+            suggestion: None,
+            help: None,
+            valid: None,
         }
     }
 
@@ -116,10 +131,12 @@ impl Fail {
         Fail {
             message: format!("File not found: {}", text(absolute)),
             code: Some("file_not_found"),
-            hint: Some((
-                "Check the file path. Use an absolute path or a path relative to the current directory.",
-                Some("officecli create <path> --type docx|xlsx|pptx"),
-            )),
+            suggestion: Some(
+                "Check the file path. Use an absolute path or a path relative to the current directory."
+                    .to_string(),
+            ),
+            help: Some("officecli create <path> --type docx|xlsx|pptx".to_string()),
+            valid: None,
         }
     }
 
@@ -131,11 +148,17 @@ impl Fail {
                 Json::Str(self.code.unwrap_or("internal_error").to_string()),
             ),
         ];
-        if let Some((suggestion, help)) = self.hint {
-            error.push(("suggestion", Json::Str(suggestion.to_string())));
-            if let Some(help) = help {
-                error.push(("help", Json::Str(help.to_string())));
-            }
+        if let Some(suggestion) = &self.suggestion {
+            error.push(("suggestion", Json::Str(suggestion.clone())));
+        }
+        if let Some(help) = &self.help {
+            error.push(("help", Json::Str(help.clone())));
+        }
+        if let Some(valid) = &self.valid {
+            error.push((
+                "validValues",
+                Json::Arr(valid.iter().map(|v| Json::Str(v.clone())).collect()),
+            ));
         }
         Json::obj(vec![
             ("success", Json::Bool(false)),
@@ -374,6 +397,9 @@ async fn open_book<'h>(host: &'h Host, config: &Config) -> Result<(Book<'h>, Doc
 }
 
 async fn run(host: Host, config: Config) -> i32 {
+    if let Some(kind) = office::Kind::of(&text(&config.file)) {
+        return office::run(&host, &config, kind).await;
+    }
     let out = Out {
         host: &host,
         json: config.json,
@@ -515,7 +541,7 @@ async fn create(out: &Out<'_>, config: &Config) -> i32 {
             format!("File already exists: {file}. Use --force to overwrite."),
             "file_exists",
         );
-        fail.hint = Some(("Add --force flag or remove the file first.", None));
+        fail.suggestion = Some("Add --force flag or remove the file first.".to_string());
         return out.fail(&fail);
     }
     if let Some(reply) = write_out(out.host, &config.absolute, vec![Piece::Made(blank())]).await {

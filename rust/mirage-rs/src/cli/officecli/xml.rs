@@ -1,3 +1,6 @@
+// Adapted from OfficeCLI 1.0.161.
+// https://github.com/iOfficeAI/OfficeCLI/tree/v1.0.161
+// Licensed under Apache-2.0. See licenses/third_party/officecli.txt.
 //! The little of XML a workbook's parts need: their tags in order, with
 //! where each starts and ends, so an edit replaces those bytes and copies
 //! every other byte as it stands.

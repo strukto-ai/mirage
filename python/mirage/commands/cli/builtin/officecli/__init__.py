@@ -17,7 +17,8 @@ from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import Argument, CommandSpec
 
 # Descriptions and argument help as OfficeCLI 1.0.161 (iOfficeAI,
-# Apache-2.0) prints them; mirage serves its .xlsx commands.
+# Apache-2.0) prints them; mirage serves its .xlsx commands and reads
+# .docx and .pptx files.
 FILE = Argument(
     "FILE",
     type="path",

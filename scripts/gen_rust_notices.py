@@ -17,6 +17,7 @@ ADAPTED = [
     ROOT / "licenses/third_party/gojq.txt",
     ROOT / "licenses/third_party/jq.txt",
     ROOT / "licenses/third_party/nfsserve.txt",
+    ROOT / "licenses/third_party/officecli.txt",
     ROOT / "licenses/third_party/oniguruma.txt",
     ROOT / "licenses/third_party/pcre2.txt",
     ROOT / "licenses/third_party/pflag.txt",

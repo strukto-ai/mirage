@@ -1,3 +1,6 @@
+// Adapted from OfficeCLI 1.0.161.
+// https://github.com/iOfficeAI/OfficeCLI/tree/v1.0.161
+// Licensed under Apache-2.0. See licenses/third_party/officecli.txt.
 //! A worksheet's cells: rewriting the ones a command sets, in row and
 //! column order, each replaced cell keeping its style, and reading cells,
 //! number formats and comments the way `get` reports them.

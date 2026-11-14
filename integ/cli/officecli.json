@@ -207,6 +207,110 @@
         "stdout": "",
         "stderr": "Error: No comments found in sheet\n"
       }
+    },
+    {
+      "id": "officecli_docx_get_run_json",
+      "seq": 13600016,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli get /docs/memo.docx /body/p[2]/r[2] --json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"success\": true,\n  \"data\": {\n    \"matches\": 1,\n    \"results\": [\n      {\n        \"path\": \"/body/p[2]/r[2]\",\n        \"type\": \"run\",\n        \"text\": \"twelve percent\",\n        \"childCount\": 0,\n        \"format\": {\n          \"bold\": true,\n          \"effective.size\": \"11pt\",\n          \"effective.size.src\": \"/docDefaults\",\n          \"effective.font.ascii\": \"Calibri\",\n          \"effective.font.ascii.src\": \"/docDefaults\",\n          \"effective.font.hAnsi\": \"Calibri\",\n          \"effective.font.hAnsi.src\": \"/docDefaults\"\n        },\n        \"children\": []\n      }\n    ]\n  }\n}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "officecli_docx_query_heading",
+      "seq": 13600017,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli query /docs/memo.docx 'p[style=Heading1]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/body/p[1] (paragraph) \"Quarterly memo\" children=1 style=heading 1 styleId=Heading1 styleName=heading 1 effective.size=16pt effective.size.src=/styles/Heading1 effective.font.ascii=Calibri effective.font.ascii.src=/docDefaults effective.font.hAnsi=Calibri effective.font.hAnsi.src=/docDefaults effective.bold=true effective.bold.src=/styles/Heading1 effective.color=#2F5496 effective.color.src=/styles/Heading1 effective.spaceBefore=12pt effective.spaceBefore.src=/styles/Heading1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "officecli_docx_query_hyperlink",
+      "seq": 13600018,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli query /docs/memo.docx hyperlink",
+      "expect": {
+        "exit": 0,
+        "stdout": "/body/p[3]/hyperlink[1] (hyperlink) \"Full report\" url=https://example.com/report\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "officecli_docx_path_not_found",
+      "seq": 13600019,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli get /docs/memo.docx /body/p[9]",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "Error: Path not found: /body/p[9]. Available at /body: p[1]..p[4]\n"
+      }
+    },
+    {
+      "id": "officecli_docx_style",
+      "seq": 13600020,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli get /docs/memo.docx /styles/Heading1",
+      "expect": {
+        "exit": 0,
+        "stdout": "/styles/Heading1 (style) \"heading 1\" id=Heading1 name=heading 1 type=paragraph basedOn=Normal basedOn.path=/styles/Normal next=Normal customStyle=false uiPriority=9 qFormat=true size=16pt bold=true color=#2F5496 spaceBefore=12pt outlineLvl=0 keepNext=true\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "officecli_pptx_get_slide",
+      "seq": 13600021,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli get /docs/deck.pptx /slide[1] --depth 3",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slide[1] (slide) layout=Title Only layoutType=titleOnly\n/slide[1]/shape[@id=2] (title) \"Quarterly review\" name=Title 1 phType=title noGrp=true id=2 isTitle=true effective.x=66pt effective.y=28.75pt effective.width=29.21cm effective.height=1325563emu effective.x.src=/slide[1]/layout/ph[@type=title] effective.y.src=/slide[1]/layout/ph[@type=title] effective.width.src=/slide[1]/layout/ph[@type=title] effective.height.src=/slide[1]/layout/ph[@type=title] zorder=1 effective.size=44pt effective.size.src=/master[1]/titleStyle/lvl1pPr effective.font.latin=Calibri Light effective.font.latin.src=/theme/majorFont effective.font=Calibri Light effective.font.src=/theme/majorFont effective.align=left effective.align.src=/master[1]/titleStyle/lvl1pPr\n/slide[1]/shape[@id=2]/paragraph[1] (paragraph) \"Quarterly review\" effective.align=left effective.align.src=/master[1]/titleStyle/lvl1pPr\n/slide[1]/shape[@id=2]/paragraph[1]/run[1] (run) \"Quarterly review\" lang=en-US effective.size=44pt effective.size.src=/master[1]/titleStyle/lvl1pPr effective.font.latin=Calibri Light effective.font.latin.src=/theme/majorFont effective.font=Calibri Light effective.font.src=/theme/majorFont\n/slide[1]/shape[@id=3] (textbox) \"Revenue up 12%\\nNorth leads\" name=TextBox 2 id=3 isTitle=false x=66pt y=2000000emu width=5000000emu height=2.5cm geometry=rect zorder=2 wrap=true effective.size=28pt effective.size.src=/master[1]/bodyStyle/lvl1pPr effective.font.latin=Calibri effective.font.latin.src=/theme/minorFont effective.font=Calibri effective.font.src=/theme/minorFont\n/slide[1]/shape[@id=3]/paragraph[1] (paragraph) \"Revenue up 12%\"\n/slide[1]/shape[@id=3]/paragraph[1]/run[1] (run) \"Revenue up 12%\" size=20pt bold=true lang=en-US effective.font.latin=Calibri effective.font.latin.src=/theme/minorFont effective.font=Calibri effective.font.src=/theme/minorFont\n/slide[1]/shape[@id=3]/paragraph[2] (paragraph) \"North leads\"\n/slide[1]/shape[@id=3]/paragraph[2]/run[1] (run) \"North leads\" size=16pt lang=en-US effective.font.latin=Calibri effective.font.latin.src=/theme/minorFont effective.font=Calibri effective.font.src=/theme/minorFont\n/slide[1]/table[@id=4] (table) name=Table 3 id=4 rows=2 cols=2 colWidths=8.33cm,8.33cm firstRow=true bandedRows=false x=66pt y=8.89cm width=16.67cm height=2.06cm zorder=3\n/slide[1]/table[@id=4]/tr[1] (tr) height=1.03cm\n/slide[1]/table[@id=4]/tr[1]/tc[1] (tc) \"Region\"\n/slide[1]/table[@id=4]/tr[1]/tc[2] (tc) \"Revenue\"\n/slide[1]/table[@id=4]/tr[2] (tr) height=1.03cm\n/slide[1]/table[@id=4]/tr[2]/tc[1] (tc) \"North\"\n/slide[1]/table[@id=4]/tr[2]/tc[2] (tc) \"1250\"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "officecli_pptx_query_cells",
+      "seq": 13600022,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli query /docs/deck.pptx cell",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slide[1]/table[@id=4]/tr[1]/tc[1] (tc) \"Region\"\n/slide[1]/table[@id=4]/tr[1]/tc[2] (tc) \"Revenue\"\n/slide[1]/table[@id=4]/tr[2]/tc[1] (tc) \"North\"\n/slide[1]/table[@id=4]/tr[2]/tc[2] (tc) \"1250\"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "officecli_pptx_unsupported_combinator",
+      "seq": 13600023,
+      "targets": [
+        "cli-officecli"
+      ],
+      "command": "officecli query /docs/deck.pptx 'shape + table'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "Error: Unsupported combinator '+' in selector 'shape + table'. `+` (adjacent sibling) and `~` (general sibling) are not supported.\n"
+      }
     }
   ]
 }

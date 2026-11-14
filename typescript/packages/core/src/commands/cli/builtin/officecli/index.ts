@@ -17,7 +17,8 @@ import { CLI, CLIHandler } from '../../types.ts'
 import { runCommand } from './run.ts'
 
 // Descriptions and argument help as OfficeCLI 1.0.161 (iOfficeAI,
-// Apache-2.0) prints them; mirage serves its .xlsx commands.
+// Apache-2.0) prints them; mirage serves its .xlsx commands and reads
+// .docx and .pptx files.
 export const FILE = new Argument('FILE', {
   type: 'path',
   metavar: 'file',

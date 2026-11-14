@@ -146,6 +146,27 @@ impl<'h> Book<'h> {
         self.changed.insert(key(name), data);
     }
 
+    /// Every member's name, as the archive stores them.
+    pub(super) fn names(&self) -> Vec<String> {
+        self.entries
+            .iter()
+            .filter(|e| !e.is_dir())
+            .map(|e| String::from_utf8_lossy(&e.name).into_owned())
+            .filter(|n| !self.dropped.contains(&key(n)))
+            .collect()
+    }
+
+    /// A member's uncompressed size, as last changed or as the package holds it.
+    pub(super) fn size(&self, name: &str) -> Option<u64> {
+        if self.dropped.contains(&key(name)) {
+            return None;
+        }
+        if let Some(data) = self.changed.get(&key(name)) {
+            return Some(data.len() as u64);
+        }
+        self.entry(name).map(|e| e.size)
+    }
+
     pub(super) fn drop_part(&mut self, name: &str) {
         self.dropped.insert(key(name));
     }

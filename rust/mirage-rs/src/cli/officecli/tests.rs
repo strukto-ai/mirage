@@ -138,3 +138,157 @@ fn comments_and_their_shapes() {
     let left = String::from_utf8(without_shape(vml.as_bytes(), (63, 14))).unwrap();
     assert!(!left.contains(r#"id="a""#) && left.contains(r#"id="b""#));
 }
+
+const MEMO: &[u8] = include_bytes!("../../../../../integ/fixtures/office/v1/memo.docx");
+const DECK: &[u8] = include_bytes!("../../../../../integ/fixtures/office/v1/deck.pptx");
+
+/// One officecli command on `name`, holding `bytes`: stdout, stderr, status.
+fn office(name: &str, bytes: &[u8], config: serde_json::Value) -> (String, String, i32) {
+    let mut host = crate::host::Host::default();
+    host.files.insert(name.to_string(), bytes.to_vec());
+    let mut config = config;
+    config["file"] = serde_json::json!(name);
+    config["absolute"] = serde_json::json!(name);
+    if config.get("props").is_none() {
+        config["props"] = serde_json::json!([]);
+    }
+    let mut stream = crate::open("officecli", config.to_string().as_bytes()).expect("opens");
+    let status = host.drive(stream.as_mut());
+    (
+        String::from_utf8(std::mem::take(&mut host.out)).unwrap(),
+        String::from_utf8(std::mem::take(&mut host.err)).unwrap(),
+        status,
+    )
+}
+
+#[test]
+fn a_word_run_shows_what_it_inherits() {
+    let (out, err, status) = office(
+        "memo.docx",
+        MEMO,
+        serde_json::json!({"command": "get", "path": "/body/p[2]/r[2]"}),
+    );
+    assert_eq!((err.as_str(), status), ("", 0));
+    assert_eq!(
+        out,
+        "/body/p[2]/r[2] (run) \"twelve percent\" bold=true effective.size=11pt effective.size.src=/docDefaults effective.font.ascii=Calibri effective.font.ascii.src=/docDefaults effective.font.hAnsi=Calibri effective.font.hAnsi.src=/docDefaults\n"
+    );
+}
+
+#[test]
+fn word_queries_match_styles_hyperlinks_and_misses() {
+    let (out, _, _) = office(
+        "memo.docx",
+        MEMO,
+        serde_json::json!({"command": "query", "path": "p[style=Heading1]"}),
+    );
+    assert!(out.starts_with(
+        "/body/p[1] (paragraph) \"Quarterly memo\" children=1 style=heading 1 styleId=Heading1 styleName=heading 1 "
+    ));
+    assert_eq!(out.lines().count(), 1);
+    let (out, _, _) = office(
+        "memo.docx",
+        MEMO,
+        serde_json::json!({"command": "query", "path": "hyperlink"}),
+    );
+    assert_eq!(
+        out,
+        "/body/p[3]/hyperlink[1] (hyperlink) \"Full report\" url=https://example.com/report\n"
+    );
+    let (out, err, status) = office(
+        "memo.docx",
+        MEMO,
+        serde_json::json!({"command": "get", "path": "/body/p[9]"}),
+    );
+    assert_eq!(
+        (out.as_str(), err.as_str(), status),
+        (
+            "",
+            "Error: Path not found: /body/p[9]. Available at /body: p[1]..p[4]\n",
+            1
+        )
+    );
+}
+
+#[test]
+fn a_slide_resolves_placeholders_through_its_layout() {
+    let (out, err, status) = office(
+        "deck.pptx",
+        DECK,
+        serde_json::json!({"command": "get", "path": "/slide[1]", "depth": 3}),
+    );
+    assert_eq!((err.as_str(), status), ("", 0));
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(
+        lines[0],
+        "/slide[1] (slide) layout=Title Only layoutType=titleOnly"
+    );
+    assert!(lines[1].starts_with(
+        "/slide[1]/shape[@id=2] (title) \"Quarterly review\" name=Title 1 phType=title noGrp=true id=2 isTitle=true effective.x=66pt"
+    ));
+    assert_eq!(
+        lines[3],
+        "/slide[1]/shape[@id=2]/paragraph[1]/run[1] (run) \"Quarterly review\" lang=en-US effective.size=44pt effective.size.src=/master[1]/titleStyle/lvl1pPr effective.font.latin=Calibri Light effective.font.latin.src=/theme/majorFont effective.font=Calibri Light effective.font.src=/theme/majorFont"
+    );
+    assert_eq!(lines.len(), 16);
+}
+
+#[test]
+fn deck_queries_list_cells_and_refuse_sibling_combinators() {
+    let (out, _, _) = office(
+        "deck.pptx",
+        DECK,
+        serde_json::json!({"command": "query", "path": "cell"}),
+    );
+    assert_eq!(
+        out,
+        "/slide[1]/table[@id=4]/tr[1]/tc[1] (tc) \"Region\"\n/slide[1]/table[@id=4]/tr[1]/tc[2] (tc) \"Revenue\"\n/slide[1]/table[@id=4]/tr[2]/tc[1] (tc) \"North\"\n/slide[1]/table[@id=4]/tr[2]/tc[2] (tc) \"1250\"\n"
+    );
+    let (_, err, status) = office(
+        "deck.pptx",
+        DECK,
+        serde_json::json!({"command": "query", "path": "shape + table"}),
+    );
+    assert_eq!(status, 1);
+    assert_eq!(
+        err,
+        "Error: Unsupported combinator '+' in selector 'shape + table'. `+` (adjacent sibling) and `~` (general sibling) are not supported.\n"
+    );
+}
+
+#[test]
+fn edits_to_documents_and_decks_are_refused() {
+    let (_, err, status) = office(
+        "memo.docx",
+        MEMO,
+        serde_json::json!({"command": "set", "path": "/body/p[1]", "props": ["bold=true"]}),
+    );
+    assert_eq!(
+        (err.as_str(), status),
+        ("Error: set on .docx is not available yet: /body/p[1]\n", 1)
+    );
+    let (_, err, status) = office("new.pptx", b"", serde_json::json!({"command": "create"}));
+    assert_eq!(
+        (err.as_str(), status),
+        ("Error: create on .pptx is not available yet\n", 1)
+    );
+}
+
+#[test]
+fn a_part_parses_as_the_open_xml_sdk_writes_it() {
+    let tree = super::tree::parse(
+        br#"<?xml version="1.0"?><w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:rPr><w:b/></w:rPr><w:t xml:space="preserve"> a &amp; b </w:t></w:r>"#,
+    )
+    .ok()
+    .unwrap();
+    let rpr = tree.root().child(super::tree::W, "rPr").unwrap();
+    assert_eq!(
+        super::tree::outer_xml(rpr),
+        r#"<w:rPr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:b /></w:rPr>"#
+    );
+    assert_eq!(
+        tree.root().child(super::tree::W, "t").unwrap().text(),
+        " a & b "
+    );
+    assert!(super::tree::parse(b"<!DOCTYPE x><x/>").is_err());
+}

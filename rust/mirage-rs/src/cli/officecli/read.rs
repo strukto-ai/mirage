@@ -1,3 +1,6 @@
+// Adapted from OfficeCLI 1.0.161.
+// https://github.com/iOfficeAI/OfficeCLI/tree/v1.0.161
+// Licensed under Apache-2.0. See licenses/third_party/officecli.txt.
 //! The workbook read as OfficeCLI's tree: the workbook node with its
 //! document, calculation and theme properties, each sheet with its view,
 //! print and protection settings, its rows, its cells with every style

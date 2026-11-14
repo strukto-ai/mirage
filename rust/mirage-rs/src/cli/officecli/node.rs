@@ -1,3 +1,6 @@
+// Adapted from OfficeCLI 1.0.161.
+// https://github.com/iOfficeAI/OfficeCLI/tree/v1.0.161
+// Licensed under Apache-2.0. See licenses/third_party/officecli.txt.
 //! What `get` and `query` answer with: a node of the workbook's tree, its
 //! one-line text form and its JSON form, written the way OfficeCLI's own
 //! serializer writes them (two-space indent, only quotes, backslashes and
@@ -10,6 +13,8 @@ pub(super) enum Value {
     Bool(bool),
     Int(i64),
     Num(f64),
+    List(Vec<Value>),
+    Map(Vec<(String, Value)>),
 }
 
 impl Value {
@@ -20,6 +25,18 @@ impl Value {
             Value::Bool(b) => (if *b { "true" } else { "false" }).to_string(),
             Value::Int(n) => n.to_string(),
             Value::Num(n) => number_text(*n),
+            Value::List(items) => format!(
+                "[{}]",
+                items
+                    .iter()
+                    .map(|item| match item {
+                        Value::Map(m) => format!("{{{}}}", pairs_text(m)),
+                        v => v.text(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+            Value::Map(m) => pairs_text(m),
         }
     }
 
@@ -29,8 +46,17 @@ impl Value {
             Value::Bool(b) => Json::Bool(*b),
             Value::Int(n) => Json::Int(*n),
             Value::Num(n) => Json::Num(*n),
+            Value::List(items) => Json::Arr(items.iter().map(Value::json).collect()),
+            Value::Map(m) => Json::Obj(m.iter().map(|(k, v)| (k.clone(), v.json())).collect()),
         }
     }
+}
+
+fn pairs_text(m: &[(String, Value)]) -> String {
+    m.iter()
+        .map(|(k, v)| format!("{k}={}", v.text()))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// A double as its shortest text that reads back the same.
@@ -48,6 +74,8 @@ pub(super) struct Node {
     pub(super) kind: String,
     pub(super) text: Option<String>,
     pub(super) preview: Option<String>,
+    /// A paragraph's style, which the line shows before the properties.
+    pub(super) style: Option<String>,
     pub(super) child_count: usize,
     pub(super) format: Vec<(String, Value)>,
     pub(super) children: Vec<Node>,
@@ -56,6 +84,9 @@ pub(super) struct Node {
     /// The text a `:contains` filter also searches, for a node that shows
     /// none of its own.
     pub(super) search: Option<String>,
+    /// Slots a removed key left, the most recent last: a key set next
+    /// takes the most recent, as a .NET dictionary reuses them.
+    pub(super) holes: Vec<usize>,
 }
 
 impl Node {
@@ -71,7 +102,42 @@ impl Node {
     pub(super) fn set(&mut self, key: &str, value: Value) {
         match self.format.iter_mut().find(|(k, _)| k == key) {
             Some(slot) => slot.1 = value,
-            None => self.format.push((key.to_string(), value)),
+            None => match self.holes.pop() {
+                Some(at) => self.format[at] = (key.to_string(), value),
+                None => self.format.push((key.to_string(), value)),
+            },
+        }
+    }
+
+    /// Drop `key`, leaving its slot for the next key set.
+    pub(super) fn remove(&mut self, key: &str) -> bool {
+        match self.format.iter().position(|(k, _)| k == key) {
+            Some(at) => {
+                self.format[at] = (String::new(), Value::Bool(false));
+                self.holes.push(at);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The properties in order, removed slots skipped.
+    pub(super) fn props(&self) -> impl Iterator<Item = &(String, Value)> {
+        self.format.iter().filter(|(k, _)| !k.is_empty())
+    }
+
+    /// Drop the keys OfficeCLI keeps for itself (`_`-prefixed), here and below.
+    pub(super) fn strip_internal(&mut self) {
+        let internal: Vec<String> = self
+            .props()
+            .filter(|(k, _)| k.starts_with('_'))
+            .map(|(k, _)| k.clone())
+            .collect();
+        for k in internal {
+            self.remove(&k);
+        }
+        for c in &mut self.children {
+            c.strip_internal();
         }
     }
 
@@ -84,13 +150,12 @@ impl Node {
     }
 
     pub(super) fn has(&self, key: &str) -> bool {
-        self.format.iter().any(|(k, _)| k == key)
+        !key.is_empty() && self.format.iter().any(|(k, _)| k == key)
     }
 
     /// A key's value, its name matched without case.
     pub(super) fn get(&self, key: &str) -> Option<&Value> {
-        self.format
-            .iter()
+        self.props()
             .find(|(k, _)| k.eq_ignore_ascii_case(key))
             .map(|(_, v)| v)
     }
@@ -110,7 +175,13 @@ impl Node {
         if self.child_count > 0 && self.children.is_empty() {
             out.push_str(&format!(" children={}", self.child_count));
         }
-        for (key, value) in &self.format {
+        if let Some(style) = &self.style {
+            out.push_str(&format!(" style={style}"));
+        }
+        for (key, value) in self.props() {
+            if key == "style" && self.style.is_some() {
+                continue;
+            }
             out.push_str(&format!(" {key}={}", value.text()));
         }
         out
@@ -137,15 +208,13 @@ impl Node {
         if let Some(preview) = &self.preview {
             fields.push(("preview".to_string(), Json::Str(preview.clone())));
         }
+        if let Some(style) = &self.style {
+            fields.push(("style".to_string(), Json::Str(style.clone())));
+        }
         fields.push(("childCount".to_string(), Json::Int(self.child_count as i64)));
         fields.push((
             "format".to_string(),
-            Json::Obj(
-                self.format
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.json()))
-                    .collect(),
-            ),
+            Json::Obj(self.props().map(|(k, v)| (k.clone(), v.json())).collect()),
         ));
         fields.push((
             "children".to_string(),
