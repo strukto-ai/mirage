@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
+from opentelemetry import context as otel_context
+from opentelemetry import trace
 
 from mirage.concurrency import ConcurrencyLimiter
 from mirage.concurrency.limiter import (
@@ -277,6 +279,10 @@ async def _running_loop() -> asyncio.AbstractEventLoop:
     return asyncio.get_running_loop()
 
 
+async def _current_span_context() -> trace.SpanContext:
+    return trace.get_current_span().get_span_context()
+
+
 # Work handed to another loop runs there; a caller that is cancelled
 # cancels it there and returns only once it has settled.
 @pytest.mark.asyncio
@@ -304,6 +310,33 @@ async def test_on_loop_runs_the_work_there_and_cancels_it_there():
             await call
         assert settled.is_set()
     finally:
+        other.call_soon_threadsafe(other.stop)
+        await asyncio.to_thread(thread.join, 5)
+        other.close()
+
+
+# Work handed to another loop runs under a copy of the caller's context,
+# so a span it opens there joins the caller's trace: a hosted line's
+# command span relies on it.
+@pytest.mark.asyncio
+async def test_on_loop_carries_the_callers_trace_context():
+    other = asyncio.new_event_loop()
+    thread = threading.Thread(target=other.run_forever, daemon=True)
+    thread.start()
+    caller = trace.SpanContext(
+        trace_id=0x4BF92F3577B34DA6A3CE929D0E0E4736,
+        span_id=0x00F067AA0BA902B7,
+        is_remote=True,
+        trace_flags=trace.TraceFlags(trace.TraceFlags.SAMPLED),
+    )
+
+    token = otel_context.attach(
+        trace.set_span_in_context(trace.NonRecordingSpan(caller))
+    )
+    try:
+        assert await on_loop(_current_span_context(), other) == caller
+    finally:
+        otel_context.detach(token)
         other.call_soon_threadsafe(other.stop)
         await asyncio.to_thread(thread.join, 5)
         other.close()

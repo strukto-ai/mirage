@@ -72,6 +72,7 @@ import {
   WorkspaceMissing,
 } from './errors.ts'
 import { RAW_BODIES } from './constants.ts'
+import { traceContextMiddleware } from './trace.ts'
 import { isStopped } from './routers/workspaces.ts'
 
 export interface BuildAppOptions {
@@ -283,6 +284,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   registerErrorHandlers(app, answerMissing({ registry, host }))
   lenientJson(app)
   const allowedHosts = resolveAllowedHosts(options.allowedHosts)
+  app.addHook('preHandler', traceContextMiddleware)
   app.decorateRequest('closed', null as never)
   app.addHook('onRequest', (request, reply, done) => {
     const gone = new AbortController()

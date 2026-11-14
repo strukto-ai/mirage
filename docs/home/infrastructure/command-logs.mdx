@@ -375,12 +375,55 @@ workspace runs its first line.
   </Tab>
 </Tabs>
 
+## Join an agent's trace
+
+A line goes under the span that is current where it starts, so Mirage's
+spans and your agent's land in one trace.
+
+- **In process**: a line goes under whatever span is current when you call
+  `ws.shell`.
+- **Over HTTP**: send a W3C `traceparent` header with the shell request, and
+  the line's `command` span goes under the caller's span. If an
+  instrumentation library (FastAPI's or Fastify's) already opened a span for
+  the request, the line goes under that span instead.
+
+```bash
+curl -X POST http://127.0.0.1:8765/v1/workspaces/demo/shell \
+  -H 'traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01' \
+  -H 'content-type: application/json' \
+  -d '{"command": "cat /data/a.txt"}'
+```
+
+An agent with an OpenTelemetry SDK writes the header from its current span:
+`opentelemetry.propagate.inject(headers)` in Python,
+`propagation.inject(context.active(), headers)` in TypeScript. A request
+without one starts a trace of its own, and so does a line that arrives over
+SSH.
+
+The server reads the header through the process's propagator. Python's
+follows `OTEL_PROPAGATORS`, W3C trace context by default. In TypeScript,
+`NodeSDK` registers it and the context manager that carries the trace to the
+line; a provider you build yourself needs both:
+
+```bash
+npm install @opentelemetry/context-async-hooks @opentelemetry/core
+```
+
+```typescript
+import { context, propagation } from '@opentelemetry/api'
+import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks'
+import { W3CTraceContextPropagator } from '@opentelemetry/core'
+
+context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable())
+propagation.setGlobalPropagator(new W3CTraceContextPropagator())
+```
+
 ## Spans
 
-Each trace covers one line and everything it started. A process sits under
-the process that started it, and a background job's process under its `job`
-span. Use the span and attribute names in your backend's queries, dashboards
-and alerts.
+Each line's spans form one tree: the `command` span and everything it
+started. A process sits under the process that started it, and a background
+job's process under its `job` span. Use the span and attribute names in your
+backend's queries, dashboards and alerts.
 
 | To find | Filter on |
 | --- | --- |
