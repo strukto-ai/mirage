@@ -175,6 +175,10 @@ def build_entry(
         )
         config = {**fields, **(sandbox or {})}
         runtime = cls(captures=captures, config=config or None)
+        if isinstance(runtime, WorkspaceRuntime):
+            raise ValueError(
+                f"machine {name!r}: the workspace's runtime is not a machine"
+            )
         key = id(runtime)
 
         def forget(_gone: weakref.ref[Runtime[Any]]) -> None:
@@ -215,6 +219,10 @@ def _runtime_for(
     if runtime is None:
         raise ValueError(
             f"machine {name!r}: an {IN_PROCESS} machine names its runtime"
+        )
+    if runtime == WorkspaceRuntime.name:
+        raise ValueError(
+            f"machine {name!r}: the workspace's runtime is not a machine"
         )
     if isinstance(runtime, type):
         if not issubclass(runtime, Runtime):

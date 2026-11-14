@@ -325,6 +325,8 @@ describe('buildEntry', () => {
     ['workspace', { provider: 'in_process', runtime: 'monty' }, /reserved for the workspace/],
     ['workspace', { provider: 'docker' }, /reserved for the workspace/],
     ['py', { provider: 'in_process' }, /names its runtime/],
+    ['py', { provider: 'in_process', runtime: WorkspaceRuntime }, /not a machine/],
+    ['py', { provider: 'in_process', runtime: 'workspace' }, /not a machine/],
     ['py', { provider: 'in_process', runtime: 'ghost' }, /unknown/],
     ['py', { provider: 'in_process', runtime: 'remote' }, /provider/],
     ['py', { provider: 'in_process', runtime: Object }, /not a Runtime/],

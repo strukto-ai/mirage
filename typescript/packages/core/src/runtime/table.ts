@@ -198,6 +198,8 @@ export function buildEntry(name: string, spec: MachineSpec): [MachineHandle | nu
       ...(captures === undefined ? {} : { captures: captures as string[] }),
       ...(Object.keys(config).length > 0 ? { config: config as never } : {}),
     })
+    if (runtime instanceof WorkspaceRuntime)
+      throw new Error(`machine '${name}': the workspace's runtime is not a machine`)
     BUILT_FROM.set(runtime, { ...spec })
   }
   runtime.name = name
@@ -219,6 +221,8 @@ function runtimeFor(
   }
   if (runtime === undefined)
     throw new Error(`machine '${name}': an ${IN_PROCESS} machine names its runtime`)
+  if (runtime === 'workspace')
+    throw new Error(`machine '${name}': the workspace's runtime is not a machine`)
   if (typeof runtime === 'function') {
     if (!(runtime.prototype instanceof Runtime))
       throw new Error(`machine '${name}': its runtime is not a Runtime subclass`)
